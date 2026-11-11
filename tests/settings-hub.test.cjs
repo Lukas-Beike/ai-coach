@@ -1,8 +1,6 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 const {
   CONNECTION_CHIPS,
   connectionsSummaryText,
@@ -66,13 +64,8 @@ test("Garmin names the Personal API key and the SDK login in words", () => {
 });
 
 function profileSummaries(profile) {
-  const source = fs.readFileSync(path.join(__dirname, "../public/views.js"), "utf8");
-  const start = source.indexOf("const PROFILE_SPORT_LABELS");
-  const end = source.indexOf("\nfunction renderProfileSummary(", start);
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(`${source.slice(start, end)};globalThis.summaries = profileSummaries;`, context);
-  return JSON.parse(JSON.stringify(context.summaries(profile)));
+  const context = extractFunctions("views.js", ["PROFILE_SPORT_LABELS", "profileSportsLabel", "PROFILE_TRAINING_MODEL_LABELS", "PROFILE_SUMMARY_EMPTY", "PROFILE_SUMMARY_GOALS_LENGTH", "profileGoalsLine", "profilePreferencesLine", "profileSummaries"]);
+  return JSON.parse(JSON.stringify(context.profileSummaries(profile)));
 }
 
 test("each profile section summarises itself in one line", () => {

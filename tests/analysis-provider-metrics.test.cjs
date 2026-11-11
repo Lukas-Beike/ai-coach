@@ -1,13 +1,9 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync("public/analysis.js", "utf8");
-const start = source.indexOf("function providerMetricValue(");
-const end = source.indexOf("function renderProviderMetrics(", start);
-const context = vm.createContext({});
-vm.runInContext(source.slice(start, end), context);
+const context = extractFunctions("analysis.js", ["providerMetricValue"]);
 
 test("running tolerance reads the Garmin fixture score and supported aliases", () => {
   const [record] = JSON.parse(fs.readFileSync("tests/fixtures/providers/garmin/running_tolerance.json", "utf8"));

@@ -1,21 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const start = source.indexOf("function chatEnterAction(");
-const end = source.indexOf("\nfunction setupCoachEvents(", start);
-
-function loadChatEnterAction() {
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(`${source.slice(start, end)};globalThis.chatEnterAction = chatEnterAction;`, context);
-  return context.chatEnterAction;
-}
-
-const chatEnterAction = loadChatEnterAction();
+const { chatEnterAction } = extractFunctions("coach.js", ["chatEnterAction"]);
 
 test("desktop Enter sends the draft", () => {
   assert.equal(chatEnterAction({ key: "Enter", shiftKey: false, isComposing: false, touchFirst: false }), "send");

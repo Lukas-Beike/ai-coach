@@ -1,14 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/auth.js"), "utf8").replace(/\r\n/g, "\n");
-const start = source.indexOf("function loginErrorMessage(");
-assert.ok(start >= 0, "loginErrorMessage must exist");
-const context = vm.createContext({});
-vm.runInContext(source.slice(start, source.indexOf("\n}\n", start) + 3), context);
+const context = extractFunctions("auth.js", ["loginErrorMessage"]);
 
 const failure = (status, message, retryAfter = null) => Object.assign(new Error(message), { status, retryAfter });
 

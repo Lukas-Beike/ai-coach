@@ -1,19 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-function loadPublicScript(name) {
-  const source = fs.readFileSync(path.join(__dirname, "../public", name), "utf8");
-  return source.split("\r\n").join("\n");
-}
-
-// plan-views.js keeps its helpers private, so load it into a sandbox and expose the week-total helper.
-const context = vm.createContext({});
-vm.runInContext(loadPublicScript("format.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarWeekDistance = calendarWeekDistance; globalThis.calendarWeekLoad = calendarWeekLoad; globalThis.calendarHours = calendarHours;`, context);
-const { calendarHours, calendarWeekDistance, calendarWeekLoad } = context;
+const { calendarHours, calendarWeekDistance, calendarWeekLoad } = loadPublicScript(["format.js", "plan-views.js"]);
 const calendarWeekDistanceLabel = (activities) => {
   const result = calendarWeekDistance(activities);
   return result ? [result.value, result.note].filter(Boolean).join(" · ") : "–";

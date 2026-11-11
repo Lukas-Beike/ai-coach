@@ -1,53 +1,19 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-function source(name) {
-  return fs.readFileSync(path.join(__dirname, "../public", name), "utf8").replace(/\r\n/g, "\n");
-}
-
-function element(tag) {
-  return {
-    tag,
-    children: [],
-    attributes: {},
-    style: {},
-    className: "",
-    textContent: "",
-    append(...items) {
-      this.children.push(...items);
-    },
-    setAttribute(name, value) {
-      this.attributes[name] = value;
-    },
-  };
-}
+const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 function text(node) {
   return [node.textContent, ...(node.children || []).map(text)].join(" ");
 }
 
-function slice(code, start, endMarker) {
-  const from = code.indexOf(start);
-  assert.notEqual(from, -1, `${start} must exist`);
-  return code.slice(from, code.indexOf(endMarker, from));
-}
-
 function loadDetailRenderer() {
-  const code = source("activity-details.js");
-  const context = vm.createContext({
+  return extractFunctions("activity-details.js", ["node", "STRENGTH_SOURCES", "strengthExerciseLabel", "strengthNumber", "strengthSeconds", "strengthAmount", "renderStrengthSets"], {
     AppFormat: require("../public/format.js"),
-    document: { createElement: (tag) => element(tag) },
+    document: fakeDocument(),
     makeScrollRegionFocusable: (region) => region,
-  });
-  const parts = [
-    slice(code, "  function node(", "\n  function chart("),
-    slice(code, "  const STRENGTH_SOURCES", "\n  function renderIntervalQuality("),
-  ];
-  vm.runInContext(`${parts.join("\n")};globalThis.renderStrengthSets = renderStrengthSets;`, context);
-  return context.renderStrengthSets;
+  }).renderStrengthSets;
 }
 
 const STRENGTH = {
@@ -71,7 +37,7 @@ const STRENGTH = {
 
 test("the detail view lists every executed set with reps, kg and rest", () => {
   const renderStrengthSets = loadDetailRenderer();
-  const content = element("div");
+  const content = new FakeElement("div");
   renderStrengthSets(STRENGTH, content);
   const all = text(content);
   assert.match(all, /Kraftsätze/);
@@ -87,7 +53,7 @@ test("the detail view lists every executed set with reps, kg and rest", () => {
 
 test("one exercise header spans all of its set rows", () => {
   const renderStrengthSets = loadDetailRenderer();
-  const content = element("div");
+  const content = new FakeElement("div");
   renderStrengthSets(STRENGTH, content);
   const table = content.children.find((child) => child.className === "analysis-chart-table").children[0];
   const bodies = table.children.filter((child) => child.tag === "tbody");
@@ -101,7 +67,7 @@ test("one exercise header spans all of its set rows", () => {
 
 test("one set and one omitted exercise use the singular", () => {
   const renderStrengthSets = loadDetailRenderer();
-  const content = element("div");
+  const content = new FakeElement("div");
   renderStrengthSets({ ...STRENGTH, active_sets: 1, omitted_exercises: 1 }, content);
   const all = text(content);
   assert.match(all, /1 Satz ·/);
@@ -119,16 +85,14 @@ test("every canonical exercise category has a German label", () => {
 
 test("a session without sets renders nothing", () => {
   const renderStrengthSets = loadDetailRenderer();
-  const content = element("div");
+  const content = new FakeElement("div");
   renderStrengthSets(null, content);
   renderStrengthSets({ exercises: [] }, content);
   assert.equal(content.children.length, 0);
 });
 
 test("the calendar comparison shows executed sets next to the planned structure", () => {
-  const context = vm.createContext({ AppFormat: require("../public/format.js"), document: { createElement: (tag) => element(tag) } });
-  vm.runInContext(source("performance-view.js"), context);
-  vm.runInContext(`${source("plan-views.js")};globalThis.plannedStrengthRows = plannedStrengthRows;`, context);
+  const context = loadPublicScript(["performance-view.js", "plan-views.js"], { AppFormat: require("../public/format.js"), document: fakeDocument() });
   const list = context.plannedStrengthRows({
     exercises: [
       { name: "Kniebeuge", category: "squat", status: "matched", planned_sets: 4, planned_reps: 5, planned_kg: 82.5, completed_sets: 2, reps: [5, 5, 3] },

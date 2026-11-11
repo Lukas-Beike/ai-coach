@@ -1,13 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
-const coachSource = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const apiSource = fs.readFileSync(path.join(__dirname, "../public/api.js"), "utf8");
-const start = coachSource.indexOf("function chatRequestIsCurrent");
-const end = coachSource.indexOf("async function drainChatQueue");
+const CHAT_REQUEST = ["chatRequestIsCurrent", "chatStreamResponse", "rejectChatStreamResponse", "parseChatStreamEvent", "applyStartedChatStreamEvent", "applyDeltaChatStreamEvent", "applyBackgroundChatStreamEvent", "applyCompletedChatStreamEvent", "applyChatStreamEvent", "consumeChatStreamBlock", "CHAT_STREAM_SILENCE_MS", "readChatStreamChunk", "readChatStream", "refreshCompletedChatStream", "finishChatStream", "recoverChatRequestFailure", "finishChatRequest", "requestCoachResponse"];
 
 function attachments(count) {
   return Array.from({ length: count }, (_, index) => ({ name: `route-${index}.gpx`, data: "AA==" }));
@@ -22,7 +17,6 @@ function unauthorizedResponse() {
 
 // Sends a chat message whose request is rejected with 401 and returns the observable outcome.
 async function sendChatIntoExpiredSession({ inputValue = "", beforeResponse = () => {} } = {}) {
-  assert.ok(start >= 0 && end > start);
   const draftAttachments = attachments(2);
   const input = { value: inputValue, style: {}, dispatchEvent() {}, focus() {} };
   const state = {
@@ -40,7 +34,7 @@ async function sendChatIntoExpiredSession({ inputValue = "", beforeResponse = ()
     data: null,
   };
   const counts = { showLogin: 0, renderChatAttachments: 0 };
-  const context = vm.createContext({
+  const context = loadPublicScript("api.js", {
     AbortController,
     Headers,
     Response,
@@ -70,8 +64,7 @@ async function sendChatIntoExpiredSession({ inputValue = "", beforeResponse = ()
     chatIsNearBottom: () => false,
     AppState: { secureToken: () => "turn-test" },
   });
-  vm.runInContext(apiSource, context);
-  vm.runInContext(coachSource.slice(start, end), context);
+  extractFunctions("coach.js", CHAT_REQUEST, context);
   const message = "Mein Entwurf";
   const result = await context.requestCoachResponse(message, null, draftAttachments);
   return { result, state, input, counts, draftAttachments };

@@ -1,21 +1,13 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
-const start = source.indexOf("const CALENDAR_MARKERS");
-const end = source.indexOf("\nfunction calendarActualActivity(", start);
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function helpers() {
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(
-    `${source.slice(start, end)};globalThis.helpers = { stripCalendarMarkers, calendarMarkerKeys, plannedDayStatusLabel, plannedDayNoteSpecs, plannedConflictLabels, plannedAppointmentLabel };`,
-    context,
-  );
-  return context.helpers;
+  return extractFunctions("plan-views.js", [
+    "CALENDAR_MARKERS", "MARKER_WORD_GAP", "calendarMarkerSource", "CALENDAR_MARKER_PATTERN", "PLANNED_RAIN_FLAG_MIN_PERCENT", "PLANNED_UV_FLAG_MIN",
+    "PLANNED_AQI_FLAG_MIN", "PLANNED_CAMS_POLLEN_FLAG_MIN", "PLANNED_DAY_STATUS_LABELS",
+    "stripCalendarMarkers", "calendarMarkerKeys", "plannedDayStatusLabel", "plannedDayNoteSpecs", "plannedConflictLabels", "plannedAppointmentLabel",
+  ]);
 }
 
 // vm contexts have their own Array/Object prototypes; normalise before deep comparison.

@@ -1,13 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/views.js"), "utf8");
-const start = source.indexOf("const FIRST_THRESHOLD_QUALITY_LABELS");
-const end = source.indexOf("function renderModelChoice(");
-assert.ok(start >= 0 && end > start, "estimate renderer not found");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function nodes() {
   const make = () => ({ hidden: true, textContent: "", dataset: {} });
@@ -20,9 +15,8 @@ function nodes() {
 
 function render(estimate, profile) {
   const elements = nodes();
-  const context = vm.createContext({ document: { getElementById: (id) => elements[id] } });
-  vm.runInContext(`${source.slice(start, end)};globalThis.render = renderFirstThresholdEstimate;`, context);
-  context.render(estimate, profile);
+  const context = extractFunctions("views.js", ["FIRST_THRESHOLD_QUALITY_LABELS", "firstThresholdEstimateText", "renderFirstThresholdEstimate"], { document: { getElementById: (id) => elements[id] } });
+  context.renderFirstThresholdEstimate(estimate, profile);
   return elements;
 }
 
@@ -55,14 +49,10 @@ test("the plan card labels the estimated cap source", () => {
 });
 
 function adoptContext({ dirty, other = "Ada" }) {
-  const settings = fs.readFileSync(path.join(__dirname, "../public/settings.js"), "utf8");
-  const start = settings.indexOf("function applyAdoptedFirstThreshold");
-  const end = settings.indexOf("async function adoptFirstThreshold");
-  assert.ok(start >= 0 && end > start, "adopt handler not found");
   const elements = { ...nodes(), profileForm: { elements: { first_threshold_pct: { value: "85" } } } };
   const rendered = [];
   const dirtyFlags = [];
-  const context = vm.createContext({
+  const context = extractFunctions("settings.js", ["applyAdoptedFirstThreshold"], {
     $: (selector) => elements[selector.slice(1)],
     state: {
       profileDirty: dirty,
@@ -75,14 +65,13 @@ function adoptContext({ dirty, other = "Ada" }) {
     renderFirstThresholdEstimate: (estimate, profile) => rendered.push([estimate, profile.first_threshold_pct]),
     setDirtyIndicator: (id, flag) => dirtyFlags.push([id, flag]),
   });
-  vm.runInContext(`${settings.slice(start, end)};globalThis.apply = applyAdoptedFirstThreshold;`, context);
   return { context, elements, rendered, dirtyFlags };
 }
 
 test("an adopted estimate reaches the input and the estimate block while the form holds other edits", () => {
   const { context, elements, rendered, dirtyFlags } = adoptContext({ dirty: true });
   const estimate = { percent_lthr: 90, sessions: 4, quality: "low" };
-  context.apply({ profile: { first_threshold_pct: "90", first_threshold_origin: "estimated", name: "" }, first_threshold_estimate: estimate });
+  context.applyAdoptedFirstThreshold({ profile: { first_threshold_pct: "90", first_threshold_origin: "estimated", name: "" }, first_threshold_estimate: estimate });
   assert.equal(elements.profileForm.elements.first_threshold_pct.value, "90");
   assert.equal(context.state.profileBaseline.first_threshold_pct, "90");
   assert.equal(context.state.data.profile.first_threshold_origin, "estimated");
@@ -94,7 +83,7 @@ test("an adopted estimate reaches the input and the estimate block while the for
 
 test("the form is clean again when the adopted value was its only edit", () => {
   const { context, dirtyFlags } = adoptContext({ dirty: true, other: "" });
-  context.apply({ profile: { first_threshold_pct: "90", first_threshold_origin: "estimated" }, first_threshold_estimate: null });
+  context.applyAdoptedFirstThreshold({ profile: { first_threshold_pct: "90", first_threshold_origin: "estimated" }, first_threshold_estimate: null });
   assert.equal(context.state.profileDirty, false);
   assert.deepEqual(dirtyFlags, [["profileDirtyIndicator", false]]);
 });

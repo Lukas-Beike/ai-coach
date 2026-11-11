@@ -1,25 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-function loadFunctions(file, names, globals = {}) {
-  const source = fs.readFileSync(path.join(__dirname, "../public", file), "utf8").replace(/\r\n/g, "\n");
-  const chunks = names.map((name) => {
-    const start = source.indexOf(`function ${name}(`);
-    assert.notEqual(start, -1, `${name} must exist in ${file}`);
-    const end = source.indexOf("\n}\n", start);
-    assert.notEqual(end, -1, `${name} must have a closing brace at column 0`);
-    return source.slice(start, end + 3);
-  });
-  const context = vm.createContext({ ...globals });
-  vm.runInContext(chunks.join("\n"), context);
-  return Object.fromEntries(names.map((name) => [name, context[name]]));
-}
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 test("analysis popovers stay inside the viewport on narrow screens and flip above when needed", () => {
-  const { analysisPopoverPosition } = loadFunctions("analysis.js", ["analysisPopoverPosition"]);
+  const { analysisPopoverPosition } = extractFunctions("analysis.js", ["analysisPopoverPosition"]);
   const viewport = { width: 360, height: 640 };
   const popover = { width: 340, height: 200 };
   const below = analysisPopoverPosition({ left: 300, top: 80, bottom: 100 }, popover, viewport);
@@ -37,7 +21,7 @@ test("analysis popovers stay inside the viewport on narrow screens and flip abov
 });
 
 test("ratio units such as W/bpm keep significant digits and small efficiencies are not rounded to zero", () => {
-  const { analysisValue } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
+  const { analysisValue } = extractFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
   assert.equal(analysisValue(0.0234, "(m/s)/bpm"), "0,0234 (m/s)/bpm");
   assert.equal(analysisValue(1.4237, "W/bpm"), "1,42 W/bpm");
   assert.equal(analysisValue(1.5, "W/bpm"), "1,5 W/bpm");
@@ -47,7 +31,7 @@ test("ratio units such as W/bpm keep significant digits and small efficiencies a
 });
 
 test("general maximum heart rate preserves the server provider selection", () => {
-  const { currentPerformanceValues } = loadFunctions("performance-view.js", ["currentPerformanceValues"]);
+  const { currentPerformanceValues } = extractFunctions("performance-view.js", ["currentPerformanceValues"]);
   const selected = { value: 187, source_provider: "garmin" };
   const values = currentPerformanceValues({
     running_max_hr_bpm: selected,
@@ -58,7 +42,7 @@ test("general maximum heart rate preserves the server provider selection", () =>
 });
 
 test("race prediction rows exclude body weight and empty states give a reason", () => {
-  const { racePredictionRows, racePredictionEmptyReason } = loadFunctions("performance-view.js", ["racePredictionRows", "racePredictionEmptyReason"]);
+  const { racePredictionRows, racePredictionEmptyReason } = extractFunctions("performance-view.js", ["racePredictionRows", "racePredictionEmptyReason"]);
   const rows = racePredictionRows({
     run_5k_seconds: { value: 1200, source: "Garmin Connect" },
     run_marathon_seconds: { value: null },
@@ -75,9 +59,9 @@ test("race prediction rows exclude body weight and empty states give a reason", 
 });
 
 test("current W/kg uses the preferred provider's newest point and falls back to the newest of all", () => {
-  const { isPreferredSource } = loadFunctions("shared.js", ["isPreferredSource"]);
-  const { analysisValidPoint } = loadFunctions("analysis.js", ["analysisValidPoint"]);
-  const { currentPerformanceValues } = loadFunctions("performance-view.js", ["currentPerformanceValues"], { isPreferredSource, analysisValidPoint });
+  const { isPreferredSource } = extractFunctions("shared.js", ["isPreferredSource"]);
+  const { analysisValidPoint } = extractFunctions("analysis.js", ["analysisValidPoint"]);
+  const { currentPerformanceValues } = extractFunctions("performance-view.js", ["currentPerformanceValues"], { isPreferredSource, analysisValidPoint });
   const garmin = (points) => ({ source: "Garmin Connect", source_provider: "garmin", points });
   const intervals = (points) => ({ source: "Intervals.icu eFTP", source_provider: "intervals", points });
   const history = (series, preferred) => ({ body: { preferred_providers: preferred, windows: { "12w": { metrics: { cycling_w_per_kg: series } } } } });
@@ -105,7 +89,7 @@ test("current W/kg uses the preferred provider's newest point and falls back to 
 });
 
 test("analysisHasData is true only when a series holds a valid finite point", () => {
-  const { analysisValidPoint, analysisHasData } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisHasData"]);
+  const { analysisValidPoint, analysisHasData } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisHasData"]);
   const has = (...seriesPoints) => analysisHasData(seriesPoints.map((points) => ({ points })));
   assert.equal(has(), false, "no series at all");
   assert.equal(has([]), false, "a series without points");
@@ -116,7 +100,7 @@ test("analysisHasData is true only when a series holds a valid finite point", ()
 });
 
 test("an analysis chart without data is omitted and its title is collected once as missing", () => {
-  const { analysisChart, collectAnalysisChart } = loadFunctions(
+  const { analysisChart, collectAnalysisChart } = extractFunctions(
     "analysis.js",
     ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart"],
     {
@@ -134,7 +118,7 @@ test("an analysis chart without data is omitted and its title is collected once 
 
 test("an analysis segment is empty only when every content container reports no data", () => {
   const markers = {};
-  const { analysisSegmentEmpty } = loadFunctions("analysis.js", ["analysisSegmentEmpty"], {
+  const { analysisSegmentEmpty } = extractFunctions("analysis.js", ["analysisSegmentEmpty"], {
     ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], sessions: ["list"] },
     document: { getElementById: (id) => (id in markers ? { dataset: { analysisEmpty: markers[id] } } : { dataset: {} }) },
   });
@@ -152,7 +136,7 @@ test("an analysis segment is empty only when every content container reports no 
 test("the analysis empty card offers one action that depends on the connected sources", () => {
   const reportNode = (tag, text, className) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
   const state = { data: {} };
-  const { analysisEmptyCard, analysisDataSourceConnected } = loadFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
+  const { analysisEmptyCard, analysisDataSourceConnected } = extractFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
     state, reportNode, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
     ANALYSIS_EMPTY_TITLES: { load: "Noch keine Belastungsdaten", recovery: "Noch keine Erholungsdaten" },
     createEmptyState: (title, cause, action) => ({ title, cause, action }),
@@ -173,7 +157,7 @@ test("the analysis empty card offers one action that depends on the connected so
 });
 
 test("the power profile counts only measured durations as values", () => {
-  const { cyclingPowerProfileHasValues } = loadFunctions("analysis.js", ["cyclingPowerProfilePoint", "cyclingPowerProfileHasValues"], {
+  const { cyclingPowerProfileHasValues } = extractFunctions("analysis.js", ["cyclingPowerProfilePoint", "cyclingPowerProfileHasValues"], {
     CYCLING_POWER_PROFILE_DURATIONS: [[5, "5 Sekunden"], [60, "1 Minute"]],
   });
   assert.equal(cyclingPowerProfileHasValues({}), false);
@@ -183,7 +167,7 @@ test("the power profile counts only measured durations as values", () => {
 
 test("a filled analysis chart is kept and is not listed as missing", () => {
   const chart = { title: "Gewicht" };
-  const { collectAnalysisChart } = loadFunctions("analysis.js", ["collectAnalysisChart"], {
+  const { collectAnalysisChart } = extractFunctions("analysis.js", ["collectAnalysisChart"], {
     analysisChart: (title) => (title === "Gewicht" ? chart : null),
   });
   const missing = [];
@@ -196,7 +180,7 @@ test("body overview uses profile body fat without creating a dated measurement",
   const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "18.5" } } };
-  const { bodyProfileFat, renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
+  const { bodyProfileFat, renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
     state, document: { getElementById: () => root }, reportNode: makeNode,
     isPreferredSource: () => true, analysisValidPoint: (p) => p.value != null,
     dateLabel: (v) => v, analysisValue: (v, unit) => `${v} ${unit}`,
@@ -217,7 +201,7 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
   const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "" } } };
-  const { renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
+  const { renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
     state, document: { getElementById: () => root }, reportNode: makeNode,
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
@@ -234,7 +218,7 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
 });
 
 test("performance status shows only the server's status text", () => {
-  const { performanceDataStatus } = loadFunctions("performance-view.js", ["performanceDataStatus"]);
+  const { performanceDataStatus } = extractFunctions("performance-view.js", ["performanceDataStatus"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending", status: "Daten werden vorbereitet" })), ["Daten werden vorbereitet"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: true, status: "Daten werden aktualisiert" })), ["Daten werden aktualisiert"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending" })), []);
@@ -244,7 +228,7 @@ test("performance status shows only the server's status text", () => {
 });
 
 test("session-RPE charts name the provider that rated, never a fixed provider", () => {
-  const { sessionRpeSourceLabel } = loadFunctions("analysis.js", ["sessionRpeSourceLabel"]);
+  const { sessionRpeSourceLabel } = extractFunctions("analysis.js", ["sessionRpeSourceLabel"]);
   const day = (athlete, provider, labels) => ({ rpe_sources: { athlete_feedback: athlete, provider }, rpe_provider_labels: labels });
   for (const [days, rated, expected] of [
     [[day(0, 2, ["Garmin Connect"])], 2, "Garmin Connect"],
@@ -257,7 +241,7 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 test("current performance shows the status lines below its heading", () => {
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
-  const { renderCurrentPerformance } = loadFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
+  const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
     reportNode,
     rememberAnalysisSectionState() {},
@@ -274,7 +258,7 @@ test("current performance shows the status lines below its heading", () => {
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {
-  const { analysisValidPoint, analysisWeeklyMeanPoints } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisWeeklyMeanPoints"], {
+  const { analysisValidPoint, analysisWeeklyMeanPoints } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisWeeklyMeanPoints"], {
     addDateKey: (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10),
   });
   const points = [
@@ -287,7 +271,7 @@ test("weekly daily-activity mean averages known days and keeps empty weeks as ga
 });
 
 test("12-week body charts show the latest reading of each week and draw a single week as a point", () => {
-  const { bodyWeeklyPoints, analysisPlottable } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisPlottable", "bodyWeeklyPoints"], {
+  const { bodyWeeklyPoints, analysisPlottable } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisPlottable", "bodyWeeklyPoints"], {
     addDateKey: (key, days) => new Date(Date.parse(key) + days * 86400000).toISOString().slice(0, 10),
   });
   const points = [
@@ -305,7 +289,7 @@ test("12-week body charts show the latest reading of each week and draw a single
 });
 
 test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and spread", () => {
-  const { recoveryRollingNote } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
+  const { recoveryRollingNote } = extractFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
   assert.equal(
     recoveryRollingNote({ status: "ok", mean_ms: 51.9, lower_ms: 53, upper_ms: 62.2, position: "below", cv_pct: 3, window_nights: 5 }),
     "7-Tage-Mittel 51,9 ms (5 Nächte) · unter deinem Bereich 53 ms–62,2 ms · Schwankung 3 %",
@@ -321,7 +305,7 @@ test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and sp
 });
 
 test("steps and floors carry their own per-day unit, a named basis and whole numbers", () => {
-  const fns = loadFunctions("analysis.js", ["dailyActivityMetrics", "analysisBasisCaption", "analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "analysisValidPoint", "dailyActivityTitle"], { AppFormat: require("../public/format.js") });
+  const fns = extractFunctions("analysis.js", ["dailyActivityMetrics", "analysisBasisCaption", "analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "analysisValidPoint", "dailyActivityTitle"], { AppFormat: require("../public/format.js") });
   const metrics = fns.dailyActivityMetrics();
   assert.deepEqual(Array.from(metrics, ({ key, unit }) => [key, unit]), [["steps", "Schritte/Tag"], ["floors", "Stockwerke/Tag"]]);
   assert.equal(fns.analysisBasisCaption("Schritte/Tag", true, "mean"), "Schritte/Tag · Wochenmittel");
@@ -336,7 +320,7 @@ test("steps and floors carry their own per-day unit, a named basis and whole num
 });
 
 test("zone distributions list the highest zone first", () => {
-  const { trainingFocusZoneSeconds } = loadFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
+  const { trainingFocusZoneSeconds } = extractFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
   const readings = trainingFocusZoneSeconds([{ seconds: { Z1: 60, Z3: 30 } }, { seconds: { Z2: 10, Z5: 5, Z1: 15 } }]);
   assert.deepEqual(Array.from(readings, (item) => [item.label, item.value]), [["Z5", 5], ["Z3", 30], ["Z2", 10], ["Z1", 75]]);
 });

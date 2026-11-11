@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 const publicDir = path.join(__dirname, "../public");
 const read = (name) => fs.readFileSync(path.join(publicDir, name), "utf8").replace(/\r\n/g, "\n");
@@ -106,12 +106,9 @@ test("only the kept explanations remain as helper texts", () => {
 });
 
 test("a Coach link names its host when the label does not, and escapes it", () => {
-  const views = read("views.js");
-  const end = views.indexOf("function headingFromMarkdownLine");
-  const context = vm.createContext({ URL });
-  vm.runInContext(views.slice(0, end) + ";globalThis.inline = inlineMarkdown;", context);
-  const differing = context.inline("[Mehr dazu](https://www.example.invalid/path?a=1&b=2)");
+  const context = loadPublicScript("views.js", { URL });
+  const differing = context.inlineMarkdown("[Mehr dazu](https://www.example.invalid/path?a=1&b=2)");
   assert.ok(differing.includes('<a href="https://www.example.invalid/path?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Mehr dazu</a><span class="link-host"> (example.invalid)</span>'));
-  assert.ok(!context.inline("[example.invalid/path](https://example.invalid/path)").includes("link-host"));
-  assert.ok(context.inline("[Quelle](https://example.invalid/x)").includes("(example.invalid)</span>"));
+  assert.ok(!context.inlineMarkdown("[example.invalid/path](https://example.invalid/path)").includes("link-host"));
+  assert.ok(context.inlineMarkdown("[Quelle](https://example.invalid/x)").includes("(example.invalid)</span>"));
 });

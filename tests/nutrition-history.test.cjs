@@ -1,12 +1,9 @@
-﻿const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const vm = require("node:vm");
+const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const source = fs.readFileSync("public/nutrition.js", "utf8");
-const start = source.indexOf("function nutritionChartDays(");
-const end = source.indexOf("function renderNutritionWeek(", start);
-const context = vm.createContext({});
-vm.runInContext(source.slice(start, end), context);
+const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+
+const WEEK = ["nutritionChartDays", "nutritionChartRows", "nutritionEmptyRunRow", "nutritionChartDayRow", "nutritionWeekValue", "renderNutritionWeek"];
+const context = extractFunctions("nutrition.js", WEEK);
 
 test("weekly chart averages observed days independently and preserves empty weeks", () => {
   const days = Array.from({ length: 84 }, (_, index) => ({ date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10), intake_kcal: null, expenditure_kcal: null }));
@@ -30,24 +27,14 @@ test("weekly chart averages observed days independently and preserves empty week
 });
 
 test("history displays daily balance from paired days alongside the total", () => {
-  const nodes = new Map();
-  const element = () => ({ children: [], style: {}, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; } });
-  const document = {
-    querySelector(selector) { if (!nodes.has(selector)) nodes.set(selector, element()); return nodes.get(selector); },
-    createElement: element,
-  };
-  const renderStart = source.indexOf("function renderNutritionWeek(");
-  const renderEnd = source.indexOf("  const chartDays =", renderStart);
-  const valueStart = source.indexOf("function nutritionWeekValue(");
-  const valueEnd = source.indexOf("function renderNutritionHistoryPeriod(", valueStart);
+  const document = fakeDocument();
   const markValueMissing = (node, text = "nicht erfasst") => { node.textContent = text; node.missing = true; return node; };
   const setValueWithUnit = (node, text) => { node.textContent = text; };
-  const ctx = vm.createContext({ document, markValueMissing, setValueWithUnit, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
-  vm.runInContext(source.slice(valueStart, valueEnd) + source.slice(renderStart, renderEnd) + "}\n", ctx);
+  const ctx = extractFunctions("nutrition.js", WEEK, { document, markValueMissing, setValueWithUnit, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
   for (const [count, balance, paired, expected] of [[14, -4468, 14, "-319 kcal"], [84, -600, 3, "-200 kcal"], [14, 300, 3, "+100 kcal"], [14, 3, 14, "0 kcal"], [14, -5, 14, "0 kcal"], [14, -7, 14, "-1 kcal"], [14, 0, 2, "0 kcal"], [84, null, 0, "nicht erfasst"]]) {
     const averages = Object.fromEntries(["intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "salt_g"].map((key) => [key, { value: null, days: 0 }]));
-    ctx.renderNutritionWeek({ days: Array(count).fill({}), start_date: "start", end_date: "end", balance_kcal: balance, balance_days: paired, averages });
-    const tiles = nodes.get("#nutritionWeekTotals").children;
+    ctx.renderNutritionWeek({ days: Array(count).fill({ date: "2026-01-01" }), start_date: "start", end_date: "end", balance_kcal: balance, balance_days: paired, averages });
+    const tiles = document.nodes.get("#nutritionWeekTotals").children;
     assert.equal(tiles[1].children[0].textContent, expected);
     assert.equal(tiles[1].children[1].textContent, "Ø Kalorienbilanz pro Tag");
     assert.match(tiles[1].children[2].textContent, new RegExp(`^${paired} von ${count} Tagen`));

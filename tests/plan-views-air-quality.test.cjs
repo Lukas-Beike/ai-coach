@@ -1,18 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-function loadPublicScript(name) {
-  const source = fs.readFileSync(path.join(__dirname, "../public", name), "utf8");
-  return source.split("\r\n").join("\n");
-}
-
-// plan-views.js keeps its helpers private, so load it into a sandbox and expose the pollen helper.
-const context = vm.createContext({});
-vm.runInContext(loadPublicScript("format.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.plannedPollenLabel = plannedPollenLabel;globalThis.plannedWeatherFlags = plannedWeatherFlags;`, context);
+const context = loadPublicScript(["format.js", "plan-views.js"]);
 const { plannedPollenLabel } = context;
 const plannedWeatherFlags = (weather) => Array.from(context.plannedWeatherFlags(weather));
 

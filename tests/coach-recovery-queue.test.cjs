@@ -1,17 +1,6 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-
-function slice(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, startMarker);
-  return source.slice(start, end);
-}
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function attachments(count) {
   return Array.from({ length: count }, (_, index) => ({ name: `route-${index}.gpx`, data: "AA==" }));
@@ -37,7 +26,7 @@ function coach({ busy = false, chatRequest = null, chatServerOperationId = null 
     data: { messages: [], configured: { openai: true } },
   };
   const drained = [];
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", ["MAX_QUEUED_ATTACHMENT_BYTES", "resumeQueuedChat", "finishRecoveredChatStatus", "queueChatMessage", "chatControlState", "sendMessage"], {
     state,
     document: { visibilityState: "visible" },
     $: (selector) => (selector === "#messageInput" ? input : null),
@@ -53,14 +42,6 @@ function coach({ busy = false, chatRequest = null, chatServerOperationId = null 
     loadChatHistoryFresh: async () => {},
     drainChatQueue: async (...args) => { drained.push(JSON.parse(JSON.stringify(args))); },
   });
-  vm.runInContext([
-    slice("const MAX_QUEUED_ATTACHMENT_BYTES", "\n"),
-    slice("async function resumeQueuedChat", "\nfunction chatPollStateIsCurrent"),
-    slice("async function finishRecoveredChatStatus", "\nconst CHAT_STATUS_SAFETY_POLL_MS"),
-    slice("function queueChatMessage", "\nfunction removeQueuedChatMessage"),
-    slice("function chatControlState", "\nfunction chatSendLabel"),
-    slice("async function sendMessage", "\nfunction steerCurrentChat"),
-  ].join("\n"), context);
   return { context, state, input, drained };
 }
 

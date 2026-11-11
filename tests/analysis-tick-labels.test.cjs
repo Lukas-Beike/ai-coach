@@ -1,17 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/analysis.js"), "utf8");
-const start = source.indexOf("function analysisWeekTickLabel(");
-const end = source.indexOf("\nfunction appendAnalysisDateTicks(", start);
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadTickLabels() {
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(`${source.slice(start, end)};globalThis.analysisWeekTickLabel = analysisWeekTickLabel;globalThis.analysisDayTickLabel = analysisDayTickLabel;`, context);
+  const context = extractFunctions("analysis.js", ["analysisWeekTickLabel", "analysisDayTickLabel"]);
   return { weekTickLabel: context.analysisWeekTickLabel, dayTickLabel: context.analysisDayTickLabel };
 }
 

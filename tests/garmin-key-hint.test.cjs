@@ -1,23 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-function loadGarminKeyHint() {
-  const source = fs.readFileSync(path.join(__dirname, "../public/sync-status.js"), "utf8").replace(/\r\n/g, "\n");
-  const constant = source.slice(source.indexOf("const GARMIN_KEY_RENEWAL"), source.indexOf("\n", source.indexOf("const GARMIN_KEY_RENEWAL")) + 1);
-  const helperStart = source.indexOf("function garminKeyDaysLeft(");
-  const helper = source.slice(helperStart, source.indexOf("\n}\n", helperStart) + 3);
-  const start = source.indexOf("function garminKeyHint(");
-  assert.notEqual(start, -1, "garminKeyHint must exist");
-  const end = source.indexOf("\n}\n", start);
-  const context = vm.createContext({});
-  vm.runInContext(`${constant}${helper}${source.slice(start, end + 3)}\nthis.garminKeyHint = garminKeyHint;`, context);
-  return context.garminKeyHint;
-}
-
-const garminKeyHint = loadGarminKeyHint();
+const { garminKeyHint } = extractFunctions("sync-status.js", ["GARMIN_KEY_RENEWAL", "garminKeyDaysLeft", "garminKeyHint"]);
 
 test("no Personal API key shows no hint", () => {
   assert.deepEqual({ ...garminKeyHint({ personal_api: { configured: false }, sdk_skipped: { reason: "login_failed" } }) }, { text: "", urgent: false });
