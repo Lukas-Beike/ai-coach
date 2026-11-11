@@ -1,7 +1,8 @@
 import sqlite3
 import unittest
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+
+from support import FakeManager
 
 from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
@@ -15,24 +16,15 @@ from backend.sync.refresh import (
 )
 
 
-class SQLiteDatabaseManager:
-    def __init__(self):
-        self.connection = sqlite3.connect(":memory:")
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute(
-            "CREATE TABLE provider_refresh_history (id TEXT PRIMARY KEY, provider TEXT, area TEXT, "
-            "operation_id TEXT, trigger TEXT, started_at TEXT, finished_at TEXT, phase TEXT, status TEXT, "
-            "error_code TEXT, next_retry_at TEXT)"
-        )
-
-    @contextmanager
-    def unit_of_work(self):
-        try:
-            yield self.connection
-            self.connection.commit()
-        except Exception:
-            self.connection.rollback()
-            raise
+def history_manager() -> FakeManager:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        "CREATE TABLE provider_refresh_history (id TEXT PRIMARY KEY, provider TEXT, area TEXT, "
+        "operation_id TEXT, trigger TEXT, started_at TEXT, finished_at TEXT, phase TEXT, status TEXT, "
+        "error_code TEXT, next_retry_at TEXT)"
+    )
+    return FakeManager(connection)
 
 
 class CommitCheckingEventBuffer(StateEventBuffer):
@@ -122,7 +114,7 @@ class SyncRefreshTests(unittest.TestCase):
         )
 
     def make_tracker(self, now, *, retention_days=30, max_rows=200):
-        manager = SQLiteDatabaseManager()
+        manager = history_manager()
         self.addCleanup(manager.connection.close)
         events = CommitCheckingEventBuffer(manager.connection)
         identifiers = iter(f"refresh-{index}" for index in range(10))

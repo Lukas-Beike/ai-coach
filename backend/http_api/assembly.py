@@ -661,9 +661,7 @@ class HttpApiAssembly:
             nutrition_refresh_service,
             athlete_clock.now,
         )
-        self.nutrition_put_routes = NutritionPutRoutes(
-            diary_service, meal_library_service
-        )
+        self.nutrition_put_routes = NutritionPutRoutes(meal_library_service)
         connection_checks = dependencies.domains.connection_checks
         self.provider_connection_get_routes, self.provider_connection_post_routes = (
             _provider_connection_routes(session_auth_service, connection_checks)

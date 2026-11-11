@@ -167,7 +167,7 @@ The system SHALL compose sleep, resting HR, HRV, readiness, averages and plannin
 Evidence: `backend/performance/source_policy.py:select_daily`, `backend/performance/recovery_context.py:performance_recovery_context`, `backend/performance/planning_recovery.py:planning_recovery_view`, `backend/performance/freshness.py:garmin_source_freshness`; `tests/test_source_policy.py:CurrentSelectionTests`, `tests/test_planning_canonical_recovery.py:CanonicalPlanningRecoveryTests.test_an_intervals_series_fills_no_garmin_gap`, `tests/test_performance_planning_recovery.py:test_saved_and_current_morning_body_battery`, `tests/test_performance_freshness.py:test_current_stale_partial_unknown_and_notes`, `tests/test_performance_recovery_context.py`, `tests/test_characterization_recovery.py`.
 
 ### Requirement: Personal recovery comparison and sleep goal shortfall
-The system SHALL form personal recovery distributions separately by provider and measurement method, exclude the current reading from its comparison distribution, require at least 14 prior matching nights for provisional classification and 28 for full classification, and leave stale/future evidence unclassified. RMSSD and SDNN SHALL not be pooled.
+The system SHALL form personal recovery distributions separately by provider and measurement method, exclude the current reading from its comparison distribution, require at least 14 prior matching nights for provisional classification and 28 for full classification, and leave stale/future evidence unclassified. Only Garmin's sleep duration, resting HR and RMSSD form series; SDNN nights are never classified.
 
 #### Scenario: Baseline coverage thresholds
 - **WHEN** a current reading has 13, 14, or 28 prior matching nights
@@ -179,11 +179,11 @@ The system SHALL form personal recovery distributions separately by provider and
 
 #### Scenario: Baselines read daily canonical observations
 - **WHEN** personal comparisons and the sleep goal shortfall are computed, with or without a stored snapshot
-- **THEN** each provider's daily sleep duration, resting HR, RMSSD and SDNN observations form the series, with the existing bounds and measurement labels; raw provider views are not read, and without canonical inputs no comparison is produced.
+- **THEN** Garmin's daily sleep duration, resting HR and RMSSD observations form the series, with the existing bounds and measurement labels; raw provider views are not read, and without canonical inputs no comparison is produced.
 
-#### Scenario: Provider switch or gap
-- **WHEN** the athlete's recovery data moves from one provider to another, a day is missing, or the newest value is older than yesterday
-- **THEN** each provider keeps its own series, missing days are not filled from the other provider, and stale or insufficient series report the same insufficient/stale status as before.
+#### Scenario: Gap or stale value
+- **WHEN** a day is missing or the newest value is older than yesterday
+- **THEN** missing days are not filled from another source, and stale or insufficient series report the same insufficient/stale status as before.
 
 #### Scenario: Measurement change restarts the comparison
 - **WHEN** the method, aggregation or measurement context (device model, firmware, algorithm, sensor, window, protocol) of an HRV or resting HR provider series changes inside the 42-day window, including a switch between unknown and known metadata
@@ -387,7 +387,7 @@ Sleep timing variability SHALL read canonical periods without traversing raw pro
 - **THEN** those distinctions remain explicit and the result does not claim the Sleep Regularity Index or fabricate full-day coverage.
 
 ### Requirement: Canonical retained provider performance reads
-Affected history, recovery, nutrition and Coach reads SHALL obtain retained provider status, load balance, tolerance, score details, performance history, Body Battery, stress, resting energy and subjective wellness from canonical data. Provider labels, dates and missing-value semantics SHALL survive without a snapshot dependency in these paths.
+Affected history, recovery, nutrition and Coach reads SHALL obtain retained provider status, load balance, tolerance, score details, performance history, Body Battery and resting energy from canonical data. Provider labels, dates and missing-value semantics SHALL survive without a snapshot dependency in these paths. Garmin stress and the subjective ratings are stored but no read path uses them.
 
 #### Scenario: Canonical data without snapshot
 - **WHEN** retained canonical provider data is available and provider views/snapshots are absent
@@ -568,13 +568,13 @@ They replace `restingHR`, `hrv`, `sleepScore`, `rampRate`, `rampRate_source` and
 Evidence: `backend/performance/context.py:current_performance_context`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/load_context.py:performance_load_context`; `tests/test_performance_context.py:PerformanceContextTests.test_composed_context_has_only_neutral_performance_keys`, `tests/test_characterization_coach_context.py`, `tests/test_server_performance.py`.
 
 ### Requirement: Personal recovery measurement labels name the method
-Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL label their measurement with a provider-neutral method name: `duration` for sleep duration, `resting` for resting heart rate, and `RMSSD` or `SDNN` for HRV. They SHALL NOT use a provider field name such as `lastNightAvg`, `sleepSecs`, `sleepTimeSeconds`, `restingHR` or `restingHeartRate`. Series SHALL remain separated by provider and method, and RMSSD and SDNN SHALL not be pooled.
+Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL label their measurement with a provider-neutral method name: `duration` for sleep duration, `resting` for resting heart rate, and `RMSSD` for HRV. They SHALL NOT use a provider field name such as `lastNightAvg`, `sleepSecs`, `sleepTimeSeconds`, `restingHR` or `restingHeartRate`. Series SHALL remain separated by provider and method; only Garmin series exist.
 
-#### Scenario: Garmin and Intervals.icu HRV
-- **WHEN** Garmin nightly HRV and Intervals.icu RMSSD observations both exist
-- **THEN** both baselines are labelled `RMSSD`, stay two series distinguished by their source label, and the HRV chart heading shows `RMSSD` after the source.
+#### Scenario: Garmin HRV
+- **WHEN** Garmin nightly HRV and stored Intervals.icu RMSSD observations both exist
+- **THEN** the baseline is the one Garmin series labelled `RMSSD`, the Intervals.icu rows give no baseline, and the HRV chart heading shows `RMSSD` after the source.
 
-Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:PersonalRecoveryTests`, `tests/test_characterization_recovery.py`, `tests/test_training_record_features.py`, `e2e/analysis-info.spec.js`.
+Evidence: `backend/performance/personal_recovery.py:_SERIES`, `backend/performance/personal_recovery.py:personal_recovery`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_rolling_hrv.py`, `tests/test_personal_recovery.py:PersonalRecoveryTests`, `tests/test_characterization_recovery.py`, `tests/test_training_record_features.py`, `e2e/analysis-info.spec.js`.
 
 ### Requirement: Session-RPE load is a descriptive local method
 The system SHALL compute the M1 session-RPE load (`session-rpe-load` v2) as elapsed minutes × whole-session RPE in AU for each canonical session and sum it per athlete-local day, ISO week and sport. AU SHALL never be added to or converted into TSS, provider load or TRIMP.
@@ -630,7 +630,7 @@ The system SHALL compute the M5 short- and long-term load (`smoothed-session-loa
 - **WHEN** activity records carry provider load or CTL values
 - **THEN** the curves are identical to those without them.
 
-Detailed contract: values appear 2τ days after the first session of a 168-day history window. Each result names `metric_id` `smoothed_session_load`, `method_id`, `method_version`, unit AU, status `estimate` or `insufficient_data` with reason `warmup` or `no_sessions`, period, parameters, per-state day coverage, the latest valued day, per-day `state`, `load`, `short` and `long`, method note, limits and the card `docs/performance-methods/m5-smoothed-session-load.md`. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one AU chart of both curves. The Coach SHALL name the AU basis and coverage.
+Detailed contract: values appear 2τ days after the first session of the history window, which starts 168 days before the period and never later than 251 days before today. Each result names `metric_id` `smoothed_session_load`, `method_id`, `method_version`, unit AU, status `estimate` or `insufficient_data` with reason `warmup` or `no_sessions`, period, parameters, per-state day coverage, the latest valued day, per-day `state`, `load`, `short` and `long`, method note, limits and the card `docs/performance-methods/m5-smoothed-session-load.md`. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one AU chart of both curves. The Coach SHALL name the AU basis and coverage.
 
 Evidence: `backend/performance/smoothed_load.py`, `backend/performance/training_report.py:training_report`, `backend/http_api/public_performance.py:PublicPerformanceStateService`; `tests/test_smoothed_load.py`, `tests/test_performance_coach_ui_parity.py`
 
@@ -657,16 +657,16 @@ Detailed contract:
 | Power and running best-effort curve | `mean-max-curve` v2 | `ok`, `insufficient_data`; per running point also `unknown` | observed bests only, no FTP, CP or pace estimate; an outdoor running window counts only with a net altitude change of at most 1 % of its distance | M4, released |
 | Critical Power and Critical Speed | `critical-power-speed` v2 | method `experimental`; per fit `ok`, `insufficient_data`, `withheld` | model estimate from the best 3/7/12/20-min efforts (cycling) or 3/7/12-min efforts (running) of 28 days; never FTP, threshold or zones | M4, released |
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
-| Session load and intensity factor (TSS scale) | `local-tss-load` v5 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
+| Session load and intensity factor (TSS scale) | `local-tss-load` v7 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
-| Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v3 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
+| Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v4 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
 Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.
 
 ### Requirement: Local TSS-scale session load is a labelled model estimate
-The system SHALL compute each canonical session's load with M6 `local-tss-load` v5 from its summary and the thresholds valid on its local day: power (NP/FTP, ride and run), then run pace, then heart rate (Banister TRIMP, 60 min at threshold HR = 100). A strength session SHALL take its session-RPE AU times a personal TSS-per-AU factor. It SHALL store the load, and the power IF, as derived observations owned by the session and SHALL NOT use a provider load or intensity.
+The system SHALL compute each canonical session's load with M6 `local-tss-load` v7 from its summary and the thresholds valid on its local day: power (NP/FTP, ride and run), then run pace, then heart rate (Banister TRIMP, 60 min at threshold HR = 100). A strength session SHALL take its session-RPE AU times a personal TSS-per-AU factor. It SHALL store the load, and the power IF, as derived observations owned by the session and SHALL NOT use a provider load or intensity.
 
 #### Scenario: Garmin-only session with power
 - **WHEN** a Garmin-only ride reports NP 230 W for 70 minutes and the FTP valid that day is 250 W
@@ -688,16 +688,16 @@ The system SHALL compute each canonical session's load with M6 `local-tss-load` 
 - **WHEN** a session's inputs, its dated thresholds or the method version change, or the session is gone
 - **THEN** the next stage pass rewrites only the values whose fingerprint changed and retires the values of gone sessions.
 
-Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value within 90 days, flagged. The strength factor uses the locally or Garmin-rated ride and run sessions with a local load in the 365 days up to the session day; each pair's AU uses the duration of its TSS. Yoga and alpine ski get no value, walking takes the heart-rate branch; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Garmin and Wahoo jobs, local zone changes, session corrections and their undo, a changed session RPE and its undo, a changed profile sex or time zone and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
+Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value within 90 days, flagged. The heart-rate branch takes the threshold HR of the local zone configuration of the day, else of the dated Garmin watch zone set, else the stored observation (v6); Garmin's max HR of the default zone set carries no sport and applies to all sports, a sport-specific value of the day winning (v6). The session duration is the positive moving duration, else the elapsed duration, and a strength rating counts only when local or Garmin (v7). The strength factor uses the locally or Garmin-rated ride and run sessions with a local load in the 365 days up to the session day; each pair's AU uses the duration of its TSS. Yoga and alpine ski get no value, walking takes the heart-rate branch; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Garmin and Wahoo jobs, local zone changes, session corrections and their undo, a changed session RPE and its undo, a changed profile sex or time zone and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
 
 Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`, `backend/activities/feedback.py:ActivityFeedbackService`; `tests/test_local_tss.py`, `tests/test_activity_feedback.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
 
 ### Requirement: Local session metrics are stored descriptive values
-The system SHALL compute M8 `local-session-metrics` v3 for each canonical ride and run: efficiency factor (EF), variability index (VI), mechanical work and aerobic decoupling. It SHALL store each value as a derived observation owned by the session with method version and input fingerprint, and SHALL NOT use a provider EF, VI, decoupling or work.
+The system SHALL compute M8 `local-session-metrics` v4 for each canonical ride and run: efficiency factor (EF), variability index (VI), mechanical work and aerobic decoupling. It SHALL store each value as a derived observation owned by the session with method version and input fingerprint, and SHALL NOT use a provider EF, VI, decoupling or work.
 
 #### Scenario: Definitions
 - **WHEN** a ride or run has the inputs of a metric
-- **THEN** EF is ride NP / average HR in W/bpm and run grade-adjusted, else average, speed × 60 / average HR in (m/min)/bpm; VI is ride NP / average power; work is the device work total, else the integrated full-resolution power stream with at least 85 % coverage of the moving duration; decoupling is the drift of the session analysis `aerobic_analysis`, on Minetti 2002 grade-adjusted speed for outdoor runs and none for an outdoor run without grade or altitude.
+- **THEN** EF is ride NP / average HR in W/bpm and run grade-adjusted, else average, speed × 60 / average HR in (m/min)/bpm; VI is ride NP / average power; work is the device work total, else the integrated full-resolution power stream with at least 85 % coverage of the moving duration, counting only moving samples when a moving stream exists and falling back to the elapsed duration when the moving duration is 0 (v4); decoupling is the drift of the session analysis `aerobic_analysis`, on Minetti 2002 grade-adjusted speed for outdoor runs and none for an outdoor run without grade or altitude.
 
 #### Scenario: Ride with stored streams
 - **WHEN** a Garmin ride with NP 210 W, average power 200 W and average HR 142 bpm has 50 minutes of steady full-resolution power and heart-rate streams

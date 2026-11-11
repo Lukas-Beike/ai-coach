@@ -51,6 +51,10 @@ class CoachCancellationServiceTests(unittest.TestCase):
         self.submissions.active.side_effect = lambda _session, requested=None: (
             durable if requested == operation_id else None
         )
+        # Persisted before the stream is signalled (#2134, E-013).
+        self.jobs.merge_receipt.side_effect = lambda *_: self.assertFalse(
+            event.is_set()
+        )
         try:
             self.assertEqual(
                 self.service.cancel("session"),
@@ -63,6 +67,27 @@ class CoachCancellationServiceTests(unittest.TestCase):
             self.submissions.active.assert_called_once_with("session", operation_id)
         finally:
             self.streams.unregister("session", operation_id)
+
+    def test_cancel_without_id_never_signals_a_stream_registered_in_between(self):
+        first, _ = self.streams.register("session")
+        self.submissions.active.return_value = None
+        later = {}
+        original = self.streams.cancel_attached
+
+        def replace_then_cancel(session, requested):
+            # Another turn of the session attaches after the cancel was saved.
+            self.streams.unregister(session, first)
+            later["id"], later["event"] = self.streams.register(session)
+            return original(session, requested)
+
+        self.streams.cancel_attached = replace_then_cancel
+        try:
+            with self.assertRaises(AppError) as raised:
+                self.service.cancel("session")
+            self.assertEqual(raised.exception.status, 409)
+            self.assertFalse(later["event"].is_set())
+        finally:
+            self.streams.unregister("session", later["id"])
 
     def test_background_cancel_persists_before_signalling_and_does_not_recreate_event(
         self,

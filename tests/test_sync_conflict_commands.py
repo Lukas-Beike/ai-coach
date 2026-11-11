@@ -3,25 +3,19 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import Mock
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.sync.conflict_commands import SyncConflictCommandService
 
 
 class SyncConflictCommandServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "conflicts.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.database_manager = temp_database(
+            self, "conflicts.sqlite", row_factory=sqlite3.Row
         )
-        self.addCleanup(self.database_manager.close)
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY NOT NULL)"

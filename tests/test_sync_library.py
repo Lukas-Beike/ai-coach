@@ -4,20 +4,19 @@ import copy
 import hashlib
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from remote_link_fixtures import create_remote_links_table
+from support import temp_database
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.config import Config
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
@@ -59,11 +58,8 @@ class CountingSQLite:
 
 class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "library.db",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "library.db", row_factory=row_factory
         )
         self.redactor = TestRedactor()
         self.service = WorkoutLibrarySyncStateService(
@@ -86,10 +82,6 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, external_id TEXT, "
                 "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL)"
             )
-
-    def tearDown(self):
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def _payload(value):
@@ -148,41 +140,38 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
             ).fetchone()
 
     def test_request_unit_of_work_is_reused_by_preview_and_summary(self):
-        with tempfile.TemporaryDirectory() as directory:
-            CountingSQLite.connect_calls = 0
-            manager = DatabaseManager(
-                Path(directory) / "request-scope.db",
-                CountingSQLite,
-                row_factory=row_factory,
+        CountingSQLite.connect_calls = 0
+        manager = temp_database(
+            self,
+            "request-scope.db",
+            backend=CountingSQLite,
+            row_factory=row_factory,
+        )
+        service = WorkoutLibrarySyncStateService(
+            manager,
+            self.redactor,
+            KeyValueRepository(lambda: NOW),
+            lambda: NOW,
+        )
+        with manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE workout_library (id TEXT NOT NULL, local_id TEXT PRIMARY KEY, external_id TEXT, "
+                "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
+                "sync_error TEXT, last_synced_at TEXT, updated_at TEXT NOT NULL)"
             )
-            service = WorkoutLibrarySyncStateService(
-                manager,
-                self.redactor,
-                KeyValueRepository(lambda: NOW),
-                lambda: NOW,
+            create_remote_links_table(db)
+            db.execute(
+                "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, external_id TEXT, "
+                "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL)"
             )
-            try:
-                with manager.unit_of_work() as db:
-                    db.execute(
-                        "CREATE TABLE workout_library (id TEXT NOT NULL, local_id TEXT PRIMARY KEY, external_id TEXT, "
-                        "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL, "
-                        "sync_error TEXT, last_synced_at TEXT, updated_at TEXT NOT NULL)"
-                    )
-                    create_remote_links_table(db)
-                    db.execute(
-                        "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, external_id TEXT, "
-                        "payload TEXT NOT NULL, sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL)"
-                    )
-                    db.execute(
-                        "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)"
-                    )
-                with manager.unit_of_work():
-                    connected = CountingSQLite.connect_calls
-                    service.preview()
-                    service.summary()
-                    self.assertEqual(CountingSQLite.connect_calls, connected)
-            finally:
-                manager.close()
+            db.execute(
+                "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)"
+            )
+        with manager.unit_of_work():
+            connected = CountingSQLite.connect_calls
+            service.preview()
+            service.summary()
+            self.assertEqual(CountingSQLite.connect_calls, connected)
 
     def test_load_for_sync_normalizes_uuid_and_preserves_non_object_json(self):
         self.add_library(LIBRARY_ID, payload={"name": "Strength"})
@@ -595,11 +584,8 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
 
 class WorkoutLibrarySyncServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "library.db",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "library.db", row_factory=row_factory
         )
         self.redactor = TestRedactor()
         self.state_service = WorkoutLibrarySyncStateService(
@@ -641,10 +627,6 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.client = Mock()
         self.client.local_today.return_value = date(2026, 9, 20)
         self.service = self.new_service()
-
-    def tearDown(self):
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     def new_service(
         self, *, config=None, client=None, lock=None, calendar_conflicts=None

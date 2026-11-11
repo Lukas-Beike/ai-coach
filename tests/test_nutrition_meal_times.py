@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.config import Config
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.nutrition import NutritionPostRoutes
 from backend.nutrition.contracts import nutrition_approval_item
@@ -23,14 +20,9 @@ from backend.nutrition.sync import IntervalsNutritionSyncService
 
 class NutritionMealTimeTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_dir.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temp_dir.name) / "meal_times.db", sqlite3, row_factory=sqlite3.Row
+        self.manager = temp_database(
+            self, "meal_times.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.service, _ = build_nutrition_services(
             self.manager,
             threading.Lock(),

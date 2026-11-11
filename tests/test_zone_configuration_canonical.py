@@ -9,19 +9,17 @@ database and synthetic settings only.
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import threading
 import unittest
 from dataclasses import replace
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 from canonical_domain_support import provenance, zone_configuration
 from intervals_compaction import compact_sport_settings
 from intervals_zone_stub import map_intervals_zone_configurations
+from support import temp_database
 from zone_settings_reference import (
     canonical_sport_inputs,
     canonical_zone_settings,
@@ -38,7 +36,7 @@ from backend.canonical.vocabulary import (
     ZoneConfigurationMetric,
 )
 from backend.coach.context import CoachStructuredContextService, coach_training_zones
-from backend.db import DatabaseManager, canonical_domain_store, row_factory
+from backend.db import canonical_domain_store, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
@@ -285,12 +283,7 @@ class CoachZoneTests(unittest.TestCase):
 
 class LocalZoneEditTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "zones.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "zones.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             self.refresh(db)

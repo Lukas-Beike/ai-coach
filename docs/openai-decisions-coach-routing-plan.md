@@ -1,7 +1,7 @@
 # Umsetzungsplan: OpenAI Decisions für die Coach-Kontextauswahl
 
 Stand: 18. Oktober 2026. Grundlage: [Ideendokument](openai-decisions-coach-routing-idea.md).
-Status: Plan, nicht implementiert.
+Status: Phase 0 umgesetzt, Phasen 1 und 2 nicht umgesetzt.
 
 > Status check 2026-11-08 (English, body stays German): Phase 0 is implemented,
 > Phases 1 and 2 are not. PR 0a (`coach_context_reload` log, #1269) is in

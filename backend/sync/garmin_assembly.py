@@ -291,13 +291,12 @@ class GarminAssembly:
         While the Garmin fixture is active the detail fetch counts as not
         configured, so fixture mode never reaches the real Garmin SDK.
         """
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         coordination = self._sync_coordination()
         return GarminActivityDetailService(
             database_manager=self._database_manager(),
             reader=reader,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
             guard=lambda: _non_blocking_garmin_guard(coordination),
             utc_now=self._utc_now,
             key_values=self._key_values,
@@ -306,7 +305,6 @@ class GarminAssembly:
 
     def nutrition_refresh_service(self) -> GarminNutritionRefreshService:
         """Compose bounded Garmin reads used by nutrition, without a full sync."""
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         return GarminNutritionRefreshService(
             reader=reader,
@@ -318,12 +316,11 @@ class GarminAssembly:
             payload_service=self.payload_service(),
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
         )
 
     def wellness_history_service(self) -> GarminWellnessHistoryService:
         """Compose the one-off, insert-only Garmin wellness history backfill."""
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         return GarminWellnessHistoryService(
             reader=reader,
@@ -335,12 +332,11 @@ class GarminAssembly:
             sync_state_repository=self._sync_state_repository(),
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
         )
 
     def rating_backfill_service(self) -> GarminRatingBackfillService:
         """Compose the one-off backfill of the watch ratings of past activities."""
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         return GarminRatingBackfillService(
             reader=reader,
@@ -352,13 +348,12 @@ class GarminAssembly:
             key_values=self._key_values,
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
             earliest_date=self._earliest_date,
         )
 
     def stream_backfill_service(self) -> StreamBackfillService:
         """Compose the backfill of the FIT streams of past Garmin activities."""
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         coordination = self._sync_coordination()
 
@@ -373,14 +368,13 @@ class GarminAssembly:
             key_values=self._key_values,
             guard=guard,
             utc_now=self._utc_now,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
             earliest_date=self._earliest_date,
             batch_limit=STREAM_BATCH_LIMIT,
         )
 
     def analysis_refresh_service(self) -> GarminAnalysisRefreshService:
         """Compose bounded Garmin reads used by Analyse without a full sync."""
-        fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         return GarminAnalysisRefreshService(
             reader=reader,
@@ -392,8 +386,13 @@ class GarminAssembly:
             payload_service=self.payload_service(),
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
-            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            configured=self._remote_configured(reader),
         )
+
+    def _remote_configured(self, reader: Any) -> Callable[[], bool]:
+        """Report a remote reader as configured only while no fixture is active."""
+        fixture_loader = self.fixture_loader()
+        return lambda: fixture_loader.path() is None and reader.configured()
 
     def _sync_coordination(self) -> GarminSyncCoordination:
         return GarminSyncCoordination(

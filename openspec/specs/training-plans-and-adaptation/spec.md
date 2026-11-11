@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe local plan drafts, commits, membership/metadata, optimistic edits and replacements, authenticated planning commands and separately approved adaptive changes. This documents existing behavior without authorizing a new plan, remote write or database change.
+Describe local plan drafts, commits, membership/metadata, optimistic edits and replacements, authenticated planning commands and separately approved adaptive changes. This documents existing behavior without authorizing a new plan, remote write or database change. Requirement numbers are stable ids: TP7 was retired and is not reused.
 
 ## Requirements
 
@@ -164,7 +164,7 @@ The system SHALL keep illness-pause forecasts explicitly proposed rather than di
 
 #### Scenario: Approve local illness pause
 - **WHEN** an eligible preview's illness pause is approved
-- **THEN** applicable future local units are archived/adapted, forecast-day illness check-ins preserve other saved feedback, and the pause is marked approved locally.
+- **THEN** applicable future local units are archived/adapted, only today's check-in (when today is inside the pause window) gains the illness text and the note "Krankheitspause prognostiziert ab <start>" while other saved feedback is preserved, no future check-in is written, and the pause is marked approved locally.
 
 #### Scenario: Optional named illness-event sync
 - **WHEN** the athlete explicitly names and approves Intervals.icu illness synchronization
@@ -174,4 +174,4 @@ The system SHALL keep illness-pause forecasts explicitly proposed rather than di
 - **WHEN** optional remote illness sync fails after local commit
 - **THEN** the local result remains and the error is reported safely; an already-applied preview does not silently repeat the remote sync.
 
-Evidence: `backend/planning/adaptive.py:illness_pause_forecast`, `backend/planning/adaptive.py:AdaptiveReplanApplyService._fill_illness_checkins`, `backend/planning/adaptive.py:illness_calendar_events`; `backend/sync/adaptive.py:IllnessPauseSyncService.apply`, `backend/sync/adaptive.py:IllnessPauseSyncService.sync`; `tests/test_adaptive_replan_apply_service.py:test_applies_replacement_audit_revision_and_illness_checkins_atomically`; `tests/test_sync_adaptive.py:test_apply_keeps_local_result_and_status_without_explicit_remote_approval`, `tests/test_sync_adaptive.py:test_apply_writes_remote_pause_only_when_explicitly_requested`, `tests/test_sync_adaptive.py:test_apply_redacts_remote_failure_and_keeps_local_apply_result`, `tests/test_sync_adaptive.py:test_apply_returns_already_applied_status_without_remote_sync`.
+Evidence: `backend/planning/adaptive.py:illness_pause_forecast`, `backend/planning/adaptive.py:AdaptiveReplanApplyService._fill_illness_checkin`, `backend/planning/adaptive.py:illness_calendar_events`; `backend/sync/adaptive.py:IllnessPauseSyncService.apply`, `backend/sync/adaptive.py:IllnessPauseSyncService.sync`; `tests/test_adaptive_replan_apply_service.py:test_applies_replacement_audit_revision_and_illness_checkins_atomically`; `tests/test_sync_adaptive.py:test_apply_keeps_local_result_and_status_without_explicit_remote_approval`, `tests/test_sync_adaptive.py:test_apply_writes_remote_pause_only_when_explicitly_requested`, `tests/test_sync_adaptive.py:test_apply_redacts_remote_failure_and_keeps_local_apply_result`, `tests/test_sync_adaptive.py:test_apply_returns_already_applied_status_without_remote_sync`.

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import date
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
+
+from support import temp_database
 
 from backend.coach.proposal_models import (
     coach_action_hash,
@@ -19,24 +18,14 @@ from backend.coach.proposal_models import (
     prune_expired_coach_proposals,
 )
 from backend.coach.proposal_read import CoachProposalReadService
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
+from backend.db import row_factory
 
 
 class CoachProposalReadServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "coach-proposals.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "coach-proposals.sqlite", row_factory=row_factory, schema=True
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     def _insert(
         self,

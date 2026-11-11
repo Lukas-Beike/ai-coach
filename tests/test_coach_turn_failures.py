@@ -10,13 +10,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.coach.turn_failures import (
     CoachTurnFailureDependencies,
     CoachTurnFailureService,
 )
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.db import row_factory as production_row_factory
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
@@ -26,9 +27,9 @@ class CoachTurnFailureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "failure.sqlite",
-            sqlite3,
+        self.manager = temp_database(
+            self,
+            path=Path(self.temporary.name) / "failure.sqlite",
             row_factory=sqlite3.Row,
             persist_connections=False,
         )
@@ -160,9 +161,9 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertEqual(summary["undoable"], True)
         self.assertEqual(result["message"]["coach_changes"], summary)
         # The chat reader projects dict rows, as the production database does.
-        reader = DatabaseManager(
-            Path(self.temporary.name) / "failure.sqlite",
-            sqlite3,
+        reader = temp_database(
+            self,
+            path=Path(self.temporary.name) / "failure.sqlite",
             row_factory=production_row_factory,
             persist_connections=False,
         )
@@ -354,9 +355,9 @@ class CoachTurnFailureTests(unittest.TestCase):
 
     def _reloaded_reply(self) -> dict:
         # The chat reader projects dict rows, as the production database does.
-        reader = DatabaseManager(
-            Path(self.temporary.name) / "failure.sqlite",
-            sqlite3,
+        reader = temp_database(
+            self,
+            path=Path(self.temporary.name) / "failure.sqlite",
             row_factory=production_row_factory,
             persist_connections=False,
         )

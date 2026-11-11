@@ -81,9 +81,9 @@ class DatabaseRestoreValidationService:
             except OlderSchemaError as error:
                 raise AppError(
                     400,
-                    "Das Backup stammt aus einem Release vor 1.13.41 (Schema älter "
-                    "als 21) und kann nicht mehr wiederhergestellt werden. Bitte "
-                    "das Backup zuerst mit Release 1.13.44 öffnen und neu sichern.",
+                    "Das Backup stammt aus einem Release vor 2.0.5 (Schema älter "
+                    "als 26) und kann nicht mehr wiederhergestellt werden. Bitte "
+                    "das Backup zuerst mit Release 2.0.5 öffnen und neu sichern.",
                 ) from error
             except RuntimeError as error:
                 raise AppError(

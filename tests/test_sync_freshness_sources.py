@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import sqlite3
-import tempfile
 import unittest
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -19,12 +17,11 @@ from provider_runtime_fakes import (
     acme_freshness_source,
     fake_binding,
 )
-from support import make_config
+from support import make_config, temp_database
 
 from backend.config import Config
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.providers.descriptors import (
     CALENDAR_ID,
     DEFAULT_PROVIDER_DESCRIPTORS,
@@ -190,16 +187,9 @@ def _acme_runtime(*, running: Any = None) -> ProviderRuntimeRegistry:
 
 class _DatabaseCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "freshness-sources.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.manager = temp_database(
+            self, "freshness-sources.sqlite", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW.isoformat())
 
     def set_values(self, **values: str) -> None:
@@ -418,9 +408,7 @@ class AcmeMockStatusTests(_DatabaseCase):
         jobs = Mock()
         jobs.list.return_value = []
         status = SyncPublicStateService(
-            make_config(
-                garmin_tokenstore=str(Path(self.temporary_directory.name) / "t")
-            ),
+            make_config(garmin_tokenstore=str(Path(self.manager.path).parent / "t")),
             self.manager,
             self.key_values,
             freshness,

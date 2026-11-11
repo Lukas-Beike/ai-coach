@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 import uuid
 from contextlib import contextmanager
 from datetime import date
-from pathlib import Path
 from unittest.mock import patch
 
 import remote_planned_unit_fixture
+from support import temp_database
 
 from backend import change_history
 from backend.activities.hr_cap import HR_CAP_PERCENT, hr_cap
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import PlanningStateRepository
 from backend.db.schema import initialize_schema
@@ -88,12 +86,7 @@ class StaticRowDb:
 
 class PlannedUnitServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "planned-units.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "planned-units.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(
@@ -113,10 +106,6 @@ class PlannedUnitServiceTests(unittest.TestCase):
             self.calendar_conflicts,
             lambda: self.events.append("changed"),
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def workout(**overrides):
@@ -1364,12 +1353,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
     """Time-window edits: audit, undo, and same-day collision checks."""
 
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "time-windows.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "time-windows.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(
@@ -1390,10 +1374,6 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             self.conflicts,
             lambda: None,
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     def unit(self, start, duration=60, **overrides):
         entry = self.service.create(

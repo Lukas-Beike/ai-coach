@@ -73,8 +73,8 @@ recreational marathon runners, no lab reference.
   efforts under 10-12 min enter the fit and fits with efforts of 12-20 min
   agree with the lab criterion (R50). The 3/7/12-min fit is reported as a
   sensitivity fit. Running keeps 180, 420 and 720 s (R5's 3-12 min range). Cycling is
-  fitted separately for outdoor and indoor sessions; running uses outdoor runs
-  only. Longest duration first, each pick is the best candidate from another
+  fitted separately for outdoor and indoor sessions; running uses outdoor,
+  non-trail runs only. Longest duration first, each pick is the best candidate from another
   session or at least 30 min after the end of every earlier pick of the same
   session. Test intent, sensor and calibration are reported as unknown; nothing
   is persisted and there is no schema change.
@@ -155,7 +155,7 @@ athlete's power meter or GPS.
 | Duration difference between running trials | at least 7 min | source | R5: shorter differences between trial durations failed validity criteria. Not a recovery time. |
 | Recovery between running trials | 30 min | product assumption | Lower end of the 30-60 min R5 reports in included studies; same rule as cycling. |
 | Effort window | 28 days | product assumption | Shorter analysis window of the curve, closer to one physiological state than 90 days. |
-| Running sessions | outdoor only | product assumption | Treadmill speed and distance are not reliable without calibration. |
+| Running sessions | outdoor, not trail | product assumption | Treadmill speed and distance are not reliable without calibration; a trail run's speed is not comparable. |
 | Maximum relative residual | 3 % of the observed work or distance per effort | product assumption | Fixed before real data; a larger misfit suggests a non-maximal or incompatible effort. |
 | Running net altitude change | at most 1 % of the window distance (outdoor) | product assumption | Science review 2026-11-07; a downhill window inflates speed. Outdoor windows without altitude do not count. |
 | Leave-one-out fits | every fit without one effort positive | product assumption | A non-positive parameter without one effort shows the estimate hinges on it. |
@@ -193,8 +193,8 @@ athlete's power meter or GPS.
 - No comparison with published reference or controlled validation data yet;
   the estimate stays experimental (gate G4) and never feeds FTP or zones.
 - Athlete-marked protocol tests with recorded intent, sensor and calibration
-  are not stored; adding them needs a schema migration from v21, the oldest
-  supported schema (current: v22).
+  are not stored; adding them needs a schema migration from the baseline, the
+  schema production runs (v26).
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.

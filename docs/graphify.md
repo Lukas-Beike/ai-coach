@@ -3,7 +3,10 @@
 Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
 development dependencies, the hash-locked `ruff` and `mypy` pins from
 `requirements-dev.txt` into that interpreter (`tools/quality_baseline.py` runs
-them as `python -m`), set up Graphify and generate the first graph.
+them as `python -m`), set up Graphify and generate the first graph. It then
+prints an advisory list of pinned Python (queried at pypi.org) and npm
+(`npm outdated`) packages that have a newer release; this needs network access,
+installs nothing and never changes the exit code.
 Graphify's version comes from the hash-locked `requirements-graphify.txt`.
 Run the tooling scripts with Python 3.14 or newer. Setup requires Python 3.14
 for its environment and selects it explicitly (`py -3.14` on Windows,

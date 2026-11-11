@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe the athlete-started Coach dialogue, durable background execution, local history, clarification, cancellation and attachment lifecycle observed at application revision b8c911c9dda83a7920171916ace32681c0c38ba0.
+Describe the athlete-started Coach dialogue, durable background execution, local history, clarification, cancellation and attachment lifecycle as currently implemented.
 
 ## Requirements
 
@@ -79,7 +79,7 @@ The system SHALL cancel only the session's matching operation, persist cancellat
 
 #### Scenario: Active operation cancellation
 - **WHEN** the owning session cancels its attached or durable operation
-- **THEN** the system records durable cancellation before signalling the background event, closes any provider response handle, and reports cancelling.
+- **THEN** the system records durable cancellation before signalling the attached stream or the background event, closes any provider response handle, and reports cancelling.
 
 #### Scenario: Unknown or mismatched operation
 - **WHEN** there is no active operation or the supplied operation ID conflicts with the attached operation
@@ -89,7 +89,7 @@ The system SHALL cancel only the session's matching operation, persist cancellat
 - **WHEN** a provider summary fails after a tool has committed a local effect
 - **THEN** the final failure receipt and answer retain that successful effect and any supported undo references rather than claiming that nothing changed.
 
-Evidence: `backend/coach/cancellation.py:CoachCancellationService.cancel`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_cancellation.py:test_background_cancel_persists_before_signalling_and_does_not_recreate_event`, `tests/test_coach_cancellation.py:test_attached_cancel_closes_provider_and_rejects_wrong_operation`, `tests/test_coach_cancellation.py:test_no_active_job_does_not_create_or_write_cancel_state`; `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`.
+Evidence: `backend/coach/cancellation.py:CoachCancellationService.cancel`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_cancellation.py:test_background_cancel_persists_before_signalling_and_does_not_recreate_event`, `tests/test_coach_cancellation.py:test_attached_cancel_closes_provider_and_rejects_wrong_operation`, `tests/test_coach_cancellation.py:test_attached_cancel_persists_cancel_on_the_matching_durable_job_only`, `tests/test_coach_cancellation.py:test_no_active_job_does_not_create_or_write_cancel_state`; `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`.
 
 ### Requirement: CC6 Persisted clarification and conversational continuation
 The system SHALL bind clarification to stored athlete messages, persist unresolved constraints for a relevant follow-up, and close a cancelled pending request without undoing completed effects.
@@ -151,13 +151,13 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 
 #### Scenario: Missing sleep or unconfigured Garmin
 - **WHEN** current sleep is unavailable after refresh, or Garmin is unconfigured
-- **THEN** missing sleep blocks preparation with an explicit error, while unconfigured Garmin skips that provider preparation.
+- **THEN** missing sleep requeues the turn (phase `waiting_for_data`) every 15 minutes, at most 8 times, and only then fails with 503 `garmin_sleep_not_ready`; a failed Garmin refresh is only logged. Unconfigured Garmin skips that provider preparation.
 
 #### Scenario: Completion versus pending clarification
 - **WHEN** the morning turn finishes with a message and no pending clarification
 - **THEN** its local-day ready marker and quick-action receipt are persisted; a clarification or yesterday's ready marker does not count as today's completed check-in.
 
-Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`.
+Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`, `backend/coach/job_store.py:CoachJobStore.requeue`, `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`, `tests/test_coach_job_store.py:CoachJobStoreTests.test_data_wait_requeues_with_fixed_delay_until_its_cap`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`.
 
 ### Requirement: CC9a Analysis and planning quick actions
 The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `block_review`, `plan_week`, `plan_block` and `adjust_week`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
@@ -168,7 +168,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Playbook blocks
 - **WHEN** a playbook is composed
-- **THEN** it consists of small topic blocks (evidence and labels, intensity model, plan structure, strength and legs, season phase, precedence, calendar, plan checks, adaptive changes), each with its own word budget, so a kind carries only the blocks it needs, at most 600 words in total, and the Coach request size diagnostics report `playbook_characters`.
+- **THEN** it consists of small topic blocks, each with its own word budget: evidence and labels and the intensity model for every kind; plan kinds add plan structure, strength and legs, tests, season phase, thresholds, precedence, calendar and plan checks; `adjust_week` season phase, precedence, calendar, plan checks and adaptive changes; `session_analysis` session checks, session numbers and the answer block; the review kinds the answer block. A kind carries at most 600 words in total, and the Coach request size diagnostics report `playbook_characters`.
 
 #### Scenario: Kind-specific context
 - **WHEN** a turn carries one of the analysis or planning kinds

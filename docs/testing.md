@@ -21,7 +21,12 @@ selects the tests of the module that names it. Imports reached only through
 `server.py` count only when `server.py`, `backend/http_api/`, or
 `backend/runtime/` changed. Changes under
 `backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
-dependency and build files run the full suite. CI always runs everything:
+dependency and build files run the full suite. The slow tooling modules
+`test_fixture_standard_data` and `test_ci_contracts` run under `--changed` only
+when their own inputs change (the fixture runtime under `e2e/` and the test
+fixtures, or the CI workflows, build, dependency and test-runner files), even if
+an imported backend module changed; the run prints why it skipped them. CI
+always runs everything:
 ```powershell
 python tests/run_tests.py --changed
 python tests/run_tests.py --changed --list
@@ -213,7 +218,7 @@ comparable selections and environments before claiming an improved median;
 report failed and cold-cache runs separately. Do not dispatch extra workflows
 just to populate a benchmark.
 
-The provisional goals for `accelerate-test-execution` are a GitHub validation
+The provisional goals of the archived `accelerate-test-execution` change (open measurements: #2149) are a GitHub validation
 median below six minutes and at least 30% less local wall time for each complete
 Python and browser selection against its own newly captured baseline. Report
 each goal as met, missed, or unverified. Timing goals do not change correctness

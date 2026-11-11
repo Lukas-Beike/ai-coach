@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import tempfile
+import unittest
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -14,7 +18,8 @@ from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
 from backend.config import Config
-from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.runtime import clock as runtime_clock
 from backend.sync.metric_export_runner import MetricExportRunner
@@ -35,6 +40,58 @@ GARMIN_FIXTURE_SECTIONS = (
     "daily_training_status",
     "training_load_balance",
 )
+
+
+def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
+    """Open a plain SQLite connection with rows and foreign keys like the app."""
+    db = sqlite3.connect(path)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    return db
+
+
+def temp_database(
+    test: unittest.TestCase,
+    name: str = "test.db",
+    *,
+    path: str | Path | None = None,
+    backend: Any = sqlite3,
+    schema: bool = False,
+    **options: Any,
+) -> DatabaseManager:
+    """Build a DatabaseManager on temporary storage, closed at test cleanup."""
+    if path is None:
+        path = Path(test.enterContext(tempfile.TemporaryDirectory())) / name
+    if "row_factory" not in options:
+        options["row_factory"] = backend.Row
+    manager = DatabaseManager(path, backend, **options)
+    test.addCleanup(manager.close)
+    if schema:
+        with manager.unit_of_work() as db:
+            initialize_schema(db)
+    return manager
+
+
+class FakeManager:
+    """DatabaseManager stand-in that serves one connection for every lease."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    @contextmanager
+    def reader(self) -> Iterator[sqlite3.Connection]:
+        yield self.connection
+
+    read_snapshot = reader
+
+    @contextmanager
+    def unit_of_work(self) -> Iterator[sqlite3.Connection]:
+        try:
+            yield self.connection
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
 
 
 class IntervalsRequestRecorder:

@@ -22,7 +22,7 @@ Detailed contract: The current training registry contains no direct Polar, COROS
 Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`, `tests/test_garmin_activity_mapping.py:test_manufacturer_names_the_recording_origin`.
 
 ### Requirement: Intervals server configuration and requests
-The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness or events, and remote writes SHALL enter their explicit domain use cases.
+The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness history or athlete record, and remote writes SHALL enter their explicit domain use cases.
 
 #### Scenario: Missing Intervals key
 - **WHEN** an athlete requests an Intervals.icu synchronization without configured access
@@ -35,15 +35,19 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_http_sync_registry_routes.py:test_not_configured_message_rejects_manual_and_job_routes`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
 ### Requirement: Garmin login and MFA
-The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, cancellation, or disconnect SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.
+The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, a disconnect, or the local data purge SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.
 
 #### Scenario: MFA required
 - **WHEN** Garmin requires MFA after a valid login request
 - **THEN** the PWA receives `mfa_required` and a later valid continuation stores the connection only if the same pending generation remains current.
 
-#### Scenario: Cancelled login result arrives
-- **WHEN** a slow login returns after cancellation or disconnect
+#### Scenario: Superseded login result arrives
+- **WHEN** a slow login returns after a disconnect or the local data purge
 - **THEN** its result is rejected instead of silently reconnecting the athlete.
+
+#### Scenario: Cancel in the PWA
+- **WHEN** the athlete chooses "Abbrechen" on the code step
+- **THEN** only the form returns to the login step; no route cancels the server slot, so the pending login stays until a newer login, a disconnect or the purge replaces it, or it expires after 10 minutes.
 
 Evidence: `backend/sync/garmin_login.py:GarminLoginService.login`, `backend/sync/garmin_login.py:GarminLoginService.submit_mfa`, `backend/sync/garmin_login.py:GarminLoginService.cancel`; `tests/test_garmin_login.py:test_mfa_wrong_code_keeps_slot_then_correct_code_connects`, `tests/test_garmin_login.py:test_disconnect_during_login_discards_the_result`, `tests/test_sync_garmin_service.py:test_reader_mfa_and_cancellation_keep_collection_from_running`.
 
@@ -163,6 +167,10 @@ The system SHALL export local library workouts to Wahoo only through an explicit
 - **WHEN** a selected unchanged workout already has a Wahoo link or a discoverable prior coach external identity
 - **THEN** the existing plan is updated/reused rather than creating a duplicate; its Wahoo link is persisted only after supported readback verification.
 
+#### Scenario: Explicit removal
+- **WHEN** a job entry carries `remove: true` for a library workout that is gone from the local library
+- **THEN** its linked Wahoo plan and link are deleted; an entry without a link reports `already_synced`, and one still in the library reports a conflict.
+
 #### Scenario: Stale selection or mixed results
 - **WHEN** a selected local payload hash changed or some selected entries cannot be mapped/written
 - **THEN** those entries report conflict/error, valid entries may succeed with partial overall status, and retry scope identifies failed objects rather than resending all successful objects.
@@ -175,22 +183,24 @@ The system SHALL export local library workouts to Wahoo only through an explicit
 - **WHEN** a library workout with relative steps is serialized for Wahoo
 - **THEN** its header references are the plan sport's export thresholds (local zones, else Garmin, else Wahoo, never Intervals.icu; threshold speed from the run threshold pace), read at serialization time.
 
-Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/sync/wahoo_workout_export.py:plan_references`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_mapping.py:ExportReferenceTests`, `tests/test_wahoo_plan_mapping.py:AssemblyReferenceTests`, `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
+Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/sync/wahoo_workout_export.py:plan_references`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_mapping.py:ExportReferenceTests`, `tests/test_wahoo_plan_mapping.py:AssemblyReferenceTests`, `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_a_deleted_entry_is_listed_and_its_plan_removed_on_request`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
 
 ### Requirement: Optional Yazio configuration
-The system SHALL treat Yazio as an optional read-only food source configured by server-side environment values, with account email, password and application client identifiers overridable from the PWA provider settings. Stored values SHALL take precedence, clearing them SHALL restore the environment value, and Yazio SHALL be configured only when all four values exist. Status SHALL report only presence and source, never a value.
+The system SHALL treat Yazio as an optional read-only food source configured by server-side environment values, with the account email and password overridable from the PWA provider settings; the application client pair is a built-in constant. Stored values SHALL take precedence, clearing them SHALL restore the environment value, and Yazio SHALL be configured only when both values exist. Status SHALL report only presence and source, never a value.
 
 #### Scenario: Stored override
 - **WHEN** the athlete saves Yazio credentials in the provider settings
 - **THEN** lookups use them without a restart and status reports source "db" and configured without returning any value.
 
 #### Scenario: Incomplete configuration
-- **WHEN** any of email, password, client id or client secret is missing
+- **WHEN** the email or the password is missing
 - **THEN** Yazio is reported unconfigured and is never contacted.
 
 #### Scenario: Secret handling
 - **WHEN** logs, diagnostics, exports or Coach context are produced
 - **THEN** Yazio credentials and tokens are absent from them.
+
+Evidence: `backend/config.py:Config.yazio_configured`, `backend/provider_credentials.py:CREDENTIAL_FIELDS`; `tests/test_provider_credentials.py:test_yazio_needs_email_and_password_and_never_appears_in_status`, `tests/test_yazio.py`.
 
 ### Requirement: Uniform explicit provider connection checks
 The system SHALL offer an explicit read-only connection check on the OpenAI, Intervals.icu, Garmin, Wahoo and Open-Meteo cards and present its last result in a line separate from configuration and synchronization state. A result SHALL describe the last check rather than promise current availability.
@@ -242,6 +252,8 @@ The system SHALL offer an explicit read-only connection check on the OpenAI, Int
 #### Scenario: Providers without a check
 - **WHEN** the card is the shared calendar or Open Food Facts
 - **THEN** no check action is offered because a check would equal the full feed fetch or the provider needs no credentials.
+
+Evidence: `backend/providers/connection_checks.py:ProviderConnectionChecks`, `backend/providers/connection_check_probes.py:build_probes`, `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`; `tests/test_provider_connection_checks.py`, `tests/provider-connections.test.cjs`.
 
 ### Requirement: Yazio connection status and explicit check
 The system SHALL present Yazio on the connections screen, distinguish missing configuration, an unchecked configuration, a successful check, and a safely classified failure, and provide an explicit authenticated connection check. Status SHALL describe the last check rather than promise current availability.

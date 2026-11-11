@@ -76,7 +76,11 @@ The system SHALL update or delete the identified local meal, preserve omitted co
 - **WHEN** a correction is empty, contains unsupported fields or invalid nutrient values, or names a nonexistent entry
 - **THEN** the service rejects it and retains the valid local state.
 
-Evidence: `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`; `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_rejects_empty_invalid_or_missing_target`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. Shared history/undo authorization is owned by the history and Coach contracts.
+#### Scenario: No direct entry update route
+- **WHEN** a client sends `PUT /api/nutrition/entry`
+- **THEN** no nutrition route handles it and no entry changes; an entry is corrected only through the Coach correction with its field whitelist, `manual_correction` basis and undo reference.
+
+Evidence: `backend/http_api/nutrition.py::NutritionPutRoutes.handle`, `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_put_entry_route_is_removed`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_rejects_empty_invalid_or_missing_target`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. Shared history/undo authorization is owned by the history and Coach contracts.
 
 ### Requirement: Diary changes are recorded and undoable
 The system SHALL record every diary create, correction, added product and deletion as a `nutrition_entry` change in change history, with the audit-projected fields of the entry, and SHALL let the shared undo restore the recorded state only while the entry still matches the state the change produced. A restored entry SHALL mark its date pending for a later explicit export. A Coach turn whose applied writes are all diary tools SHALL be undoable as a whole.
@@ -116,9 +120,9 @@ The system SHALL sum calories and counts for recorded meals while preserving unk
 
 #### Scenario: Range summary
 - **WHEN** the athlete requests an inclusive valid range
-- **THEN** returned days with entries preserve the same completeness rules; a reversed range is rejected rather than silently swapped.
+- **THEN** returned days with entries preserve the same completeness rules; a reversed range, or one spanning more than 366 days, is rejected with 400 rather than silently swapped or cut.
 
-Evidence: `backend/db/repositories.py::nutrition_macro_totals`, `backend/nutrition/diary.py::NutritionDiaryService.get_range_summary`; `tests/test_nutrition_meal_times.py::NutritionMealTimeTests.test_partial_macros_keep_daily_totals_unknown_but_expose_known_sums`, `tests/test_nutrition_meal_times.py::NutritionMealTimeTests.test_range_summary_matches_partial_day_totals`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_day_summary`.
+Evidence: `backend/db/repositories.py::nutrition_macro_totals`, `backend/nutrition/diary.py::NutritionDiaryService.get_range_summary`; `tests/test_nutrition_meal_times.py::NutritionMealTimeTests.test_partial_macros_keep_daily_totals_unknown_but_expose_known_sums`, `tests/test_nutrition_meal_times.py::NutritionMealTimeTests.test_range_summary_matches_partial_day_totals`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_day_summary`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_range_summary_and_unsynced_dates`.
 
 ### Requirement: Historical sugar and salt derive from consumption snapshots
 The system SHALL compute displayed sugar and salt from the quantity and nutrient data frozen with consumption, including scaled composite portions. Unknown contributions SHALL retain an incomplete total and a separate known subtotal.

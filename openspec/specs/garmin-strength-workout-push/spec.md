@@ -69,7 +69,7 @@ The calendar list SHALL show one sync action on each future, not yet completed p
 Evidence: `backend/planning/push_state.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `backend/http_api/planned_unit_focus_post.py`, `public/plan-views.js:plannedPushTargets`, `public/plan-views.js:plannedGarminBlocked`; `tests/test_planning_push_state.py`, `tests/plan-views-sync-button.test.cjs`, `tests/test_workout_export_intervals.py:test_strength_is_sent_and_read_back_as_a_note`.
 
 ### Requirement: Safe Garmin write outcomes
-A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Removal SHALL happen only for a `remove` entry, accepted for Garmin only, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
+A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Removal SHALL happen only for a `remove` entry, which the job contract accepts for Garmin and Wahoo and refuses for Intervals.icu, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
 
 #### Scenario: Garmin blanks an exercise
 - **WHEN** the read-back workout lacks a sent exercise name
@@ -87,10 +87,14 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 - **WHEN** Garmin answers a server error, throttling or authentication failure
 - **THEN** that unit fails with a fixed message and the remaining units are not attempted.
 
-Evidence: `backend/sync/garmin_strength_push.py`; `tests/test_garmin_strength_push.py`.
+Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py:_normalize_plan_push_entry`; `tests/test_garmin_strength_push.py`, `tests/test_sync_jobs.py:test_plan_push_normalizes_entries_reason_and_repair`.
 
 ### Requirement: Garmin leftovers are removed by the explicit sync
-A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted or no longer a strength unit SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and the calendar (once, on the first card offering the Garmin sync) and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
+A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted, no longer a strength unit, or no longer pushable SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and calendar and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
+
+#### Scenario: Unpushable or unreadable unit
+- **WHEN** a linked strength unit has no valid structure or an exercise without a Garmin match, or its stored payload cannot be read
+- **THEN** the first is an orphan, because it can no longer replace its pushed workout; the second is not, because a damaged unit is not a deleted one.
 
 #### Scenario: Kept link and marker
 - **WHEN** the creation of a unit is undone, or a workout is sent
@@ -108,4 +112,6 @@ A link of provider `garmin` whose planned unit is missing, tombstoned, archived,
 - **WHEN** the Garmin calendar holds a workout this app did not send
 - **THEN** no orphan removal reads, changes or deletes it.
 
-Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.
+Detailed contract: the calendar lists the orphans once, on the first card offering the Garmin sync.
+
+Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests, `test_a_linked_unit_that_became_unpushable_is_an_orphan`, `test_a_unit_with_an_unreadable_payload_is_no_orphan`), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.

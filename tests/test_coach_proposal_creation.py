@@ -5,18 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
+from support import temp_database
+
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import CompetitionRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.planning.planned_units import plan_push_payload_hash
@@ -36,18 +35,9 @@ class _LocalIds:
 
 class CoachProposalCreationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "coach-proposals.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "coach-proposals.sqlite", row_factory=row_factory, schema=True
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     def _service(self, **overrides: Any) -> CoachProposalCreationService:
         options: dict[str, Any] = {

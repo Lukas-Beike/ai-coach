@@ -8,18 +8,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.coach.authorization import coach_session_key
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.turn_opening import CoachTurnOpeningService
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository
 from backend.errors import AppError
 
 
 class CoachTurnOpeningTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory(prefix="coach-turn-opening-")
-        self.db_path = Path(self.temp_dir.name) / "coach.sqlite3"
+        temp_dir = self.enterContext(
+            tempfile.TemporaryDirectory(prefix="coach-turn-opening-")
+        )
+        self.db_path = Path(temp_dir) / "coach.sqlite3"
         db = sqlite3.connect(self.db_path)
         try:
             db.executescript(
@@ -46,9 +49,9 @@ class CoachTurnOpeningTests(unittest.TestCase):
             )
         finally:
             db.close()
-        self.manager = DatabaseManager(
-            self.db_path,
-            sqlite3,
+        self.manager = temp_database(
+            self,
+            path=self.db_path,
             row_factory=sqlite3.Row,
             persist_connections=False,
         )
@@ -65,10 +68,6 @@ class CoachTurnOpeningTests(unittest.TestCase):
             lambda: next(self.clock_values),
             lambda: SimpleNamespace(hex="fixed-command-id"),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def _open(self, **overrides):
         args = {

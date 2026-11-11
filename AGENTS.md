@@ -11,14 +11,14 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
-- Schema changes require versioned, transactional SQLCipher migrations from
-  supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.44 (schema v21, the only production instance) is the oldest
-  schema the code still opens; older schemas are refused unchanged. New schema
-  changes need upgrade evidence from v21 and each newer released schema.
-  Preserve frozen released-schema fixtures; verify populated upgrades, rollback
-  on failure, and same-build restarts. A schema PR is not release-ready without
-  this evidence.
+- Upgrades start only at the baseline: the schema production runs, confirmed
+  from its diagnostics. It is v26 (release 2.0.5, the only production
+  instance); older schemas are refused unchanged, and release 2.0.5 opens a
+  v21 to v25 database or backup first. Keep one frozen baseline fixture and one
+  versioned, transactional SQLCipher migration chain from it to current; a
+  schema that never reached production gets no fixture. Schema changes need
+  evidence from the baseline: populated upgrade, rollback on failure, and
+  same-build restart. A schema PR is not release-ready without it.
 - Fresh databases require an explicit user request; tests use temporary storage.
   Never make an empty data directory the default upgrade/development policy.
 - Keep one current Coach/API/persistence contract and the supported migrations.
@@ -82,19 +82,21 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 
 - Startup initializes the database and sync/Coach workers, then enqueues configured
   calendar, Garmin, Wahoo, and weather refreshes; Intervals.icu is an output
-  target and is not read. Preserve daily scheduling,
+  target: it reads no training data, only what an explicit export wrote.
+  Preserve daily scheduling,
   manual refreshes, and browser polling of local sync state.
 - Chat uses saved profile/competitions, performance, recent local feedback,
-  workout library, and latest provider snapshots. Preserve source labels for
-  Garmin, Wahoo, derived values, and AI estimates.
+  workout library, and the canonical provider records (Garmin, Wahoo).
+  Preserve source labels for Garmin, Wahoo, derived values, and AI estimates.
 - Confirmed local profile/competition records are authoritative; OpenAI Conversation
   state is dialogue continuity only. Durable profile, competition, check-in, and
   planning mutations come from an explicit API/UI action or from a Coach turn
   started by the athlete's own stored message, never from an unattended turn.
   Coach writes need no extra UI confirmation; guard them server-side by impact:
-  each change shows a receipt with undo, deletes/archives and bulk changes need
-  a confirmed request in their own domain, and Intervals.icu writes need the
-  athlete to name the sync.
+  each change shows a receipt, with whole-turn undo only when every applied
+  write is fully tracked; deletes/archives and bulk changes need a confirmed
+  request in their own domain, and Intervals.icu writes need the athlete to name
+  the sync (by Intervals.icu or a sync verb).
 - Explicit current-data requests refresh through existing sync before coaching
   where supported; do not refresh every chat unconditionally.
 - Preserve explicit model selection; verify options/defaults against provider code
@@ -140,6 +142,10 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Never relax a guard, test, or check to make something pass. Report behavior,
   evidence, and unrun checks. Keep temporary plans and reports out of tracked
   source.
+- Stop line growth: answer a static-analysis finding without splitting a module
+  into more files, pass-through classes, or wrapper functions; if it cannot be
+  fixed without new indirection, say so in the PR. Every PR description states
+  its line balance: production and test lines added and removed.
 - OpenSpec is optional, for larger features; see the
   [OpenSpec runbook](docs/openspec.md) and use
   `npm run openspec -- <arguments>`.

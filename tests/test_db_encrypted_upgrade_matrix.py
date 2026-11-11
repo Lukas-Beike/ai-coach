@@ -1,11 +1,11 @@
-"""SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
+"""SQLCipher open, upgrade, rollback, restart and backup/restore at the baseline.
 
-Each supported released schema (v21, releases 1.13.41 to 1.13.44, and v22, the
-2.0.0 candidate) is populated in an encrypted temporary database with the rows of the native migration tests. The upgrade keeps every original
-value, the file stays encrypted, a failing upgrade leaves the database exactly as
-it was, a restart with the same build changes nothing, a wrong key reads nothing,
-and an encrypted backup of the upgraded database restores the same rows. Runs in
-the container suite; SQLCipher has no Windows wheel.
+The baseline (schema v26, release 2.0.5, the schema production runs) is
+populated in an encrypted temporary database. It reaches the live schema with
+every original value, the file stays encrypted, a failing upgrade step leaves the
+database exactly as it was and a retry succeeds, a restart with the same build
+changes nothing, a wrong key reads nothing, and an encrypted backup restores the
+same rows. Runs in the container suite; SQLCipher has no Windows wheel.
 """
 
 from __future__ import annotations
@@ -16,21 +16,20 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Callable
-from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 import test_db_migrations as gate
-import test_db_strength_sets_migration as strength_sets
+from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
     DatabaseRestoreValidationService,
 )
-from backend.db import migrations, row_factory
+from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -38,7 +37,6 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V25
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -53,9 +51,8 @@ STAMP = "2026-10-31T08:00:00+00:00"
 SESSION = "act_feedback"
 
 
-def populated_release_database(db: Any, fixture: Any) -> None:
-    """A released database with a message, a snapshot and rated, linked feedback."""
-    db.executescript(fixture.read_text(encoding="utf-8"))
+def add_rows(db: Any) -> None:
+    """A message, a snapshot, rated and linked feedback and planning records."""
     db.execute(
         "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', ?)",
         (STAMP,),
@@ -74,49 +71,43 @@ def populated_release_database(db: Any, fixture: Any) -> None:
     db.executemany(
         "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
         "notes, session_rpe, deviation_reason, created_at, updated_at, provider, "
-        "session_id, session_rpe_rated_at) "
-        "VALUES (?, ?, '2026-10-30', ?, ?, '', ?, ?, ?, ?, ?)",
+        "session_id, session_rpe_rated_at, purpose) "
+        "VALUES (?, ?, '2026-10-30', ?, ?, '', ?, ?, ?, ?, ?, ?)",
         [
-            ("g1", "Ride", "fine", 5, STAMP, STAMP, "garmin", SESSION, STAMP),
-            ("w1", "Run", "", 0, STAMP, STAMP, None, None, None),
+            ("g1", "Ride", "fine", 5, STAMP, STAMP, "garmin", SESSION, STAMP, "race"),
+            ("w1", "Run", "", 0, STAMP, STAMP, None, None, None, None),
         ],
     )
+    db.execute(
+        "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            "matrix-unit",
+            "matrix-unit",
+            json.dumps({"planned_load": 42, "planned_intensity": 0.8}),
+            "now",
+            "now",
+        ),
+    )
+    db.executemany(
+        "INSERT INTO workout_library(id, local_id, payload, updated_at) "
+        "VALUES (?, ?, ?, 'now')",
+        [
+            (f"matrix-{i}", f"matrix-{i}", json.dumps({"planned_load": i}))
+            for i in range(130)
+        ],
+    )
+    db.commit()
 
 
-def builders() -> dict[int, Callable[[Any], None]]:
-    """The populated released databases of the native migration tests."""
-    base = {
-        21: partial(populated_release_database, fixture=gate.V21_FIXTURE),
-        22: partial(populated_release_database, fixture=gate.V22_FIXTURE),
-        23: partial(populated_release_database, fixture=gate.V23_FIXTURE),
-        24: partial(populated_release_database, fixture=gate.V24_FIXTURE),
-        25: partial(populated_release_database, fixture=gate.V25_FIXTURE),
-    }
+def populated_baseline(db: Any) -> None:
+    db.executescript(gate.BASELINE_FIXTURE.read_text(encoding="utf-8"))
+    add_rows(db)
 
-    def populated(db: Any, build: Callable[[Any], Any]) -> None:
-        build(db)
-        # Schema v22 rebuilds the detail set tables of these releases.
-        strength_sets.populate_detail_rows(db)
-        db.execute(
-            "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (
-                "matrix-unit",
-                "matrix-unit",
-                json.dumps({"planned_load": 42, "planned_intensity": 0.8}),
-                "now",
-                "now",
-            ),
-        )
-        db.executemany(
-            "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES (?, ?, ?, 'now')",
-            [
-                (f"matrix-{i}", f"matrix-{i}", json.dumps({"planned_load": i}))
-                for i in range(130)
-            ],
-        )
-        db.commit()
 
-    return {version: partial(populated, build=build) for version, build in base.items()}
+def populated_previous_shape(db: Any) -> None:
+    gate.previous_shape_database(db)
+    add_rows(db)
 
 
 def snapshot(db: Any) -> dict[str, Any]:
@@ -128,21 +119,13 @@ def snapshot(db: Any) -> dict[str, Any]:
     return released.table_rows(db, tables, released.table_columns(db, tables))
 
 
-def fixed_clock() -> Any:
-    """No supported migration depends on the wall clock."""
-    from contextlib import nullcontext
-
-    return nullcontext()
-
-
-def plain_upgrade(version: int) -> dict[str, Any]:
-    """The same populated release upgraded without encryption."""
+def plain_baseline() -> dict[str, Any]:
+    """The same populated baseline opened without encryption."""
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     try:
-        builders()[version](db)
-        with fixed_clock():
-            migrate_schema(db)
+        populated_baseline(db)
+        migrate_schema(db)
         db.commit()
         return snapshot(db)
     finally:
@@ -162,11 +145,13 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
         configure_cipher(db, password)
         return db
 
-    def released(self, version: int) -> tuple[Path, dict[str, Any]]:
-        path = self.root / f"v{version}.db"
+    def encrypted(
+        self, build: Callable[[Any], None], name: str
+    ) -> tuple[Path, dict[str, Any]]:
+        path = self.root / f"{name}.db"
         db = self.connect(path)
         try:
-            builders()[version](db)
+            build(db)
             db.commit()
             return path, snapshot(db)
         finally:
@@ -182,95 +167,84 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
     def assert_encrypted(self, path: Path) -> None:
         self.assertNotEqual(path.read_bytes()[:16], PLAINTEXT_HEADER)
 
-    def test_every_released_schema_upgrades_encrypted_like_the_plain_upgrade(
+    def test_the_encrypted_baseline_reaches_the_live_schema_like_the_plain_one(
         self,
     ) -> None:
-        # The native migration tests prove the plain upgrade keeps every row.
-        for version in builders():
-            with self.subTest(version=version):
-                path, _ = self.released(version)
-                db = self.connect(path)
-                try:
-                    with fixed_clock():
-                        migrate_schema(db)
-                    db.commit()
-                    self.assertEqual(snapshot(db), plain_upgrade(version))
-                    payload = json.loads(
-                        db.execute(
-                            "SELECT payload FROM planned_units WHERE id = 'matrix-unit'"
-                        ).fetchone()[0]
-                    )
-                    self.assertEqual(
-                        payload, {"planned_load": 42, "planned_intensity": 0.8}
-                    )
-                    migrated = db.execute(
-                        "SELECT id, payload FROM workout_library WHERE id LIKE 'matrix-%'"
-                    ).fetchall()
-                    self.assertEqual(len(migrated), 130)
-                    for unit_id, unit_payload in migrated:
-                        self.assertEqual(
-                            json.loads(unit_payload),
-                            {"planned_load": int(unit_id.removeprefix("matrix-"))},
-                        )
-                    self.assertTrue(database_schema_is_current(db))
-                    self.assertEqual(
-                        db.execute("PRAGMA user_version").fetchone()[0],
-                        CURRENT_SCHEMA_VERSION,
-                    )
-                    self.assertEqual(
-                        db.execute("PRAGMA cipher_integrity_check").fetchall(), []
-                    )
-                    self.assertEqual(
-                        db.execute("PRAGMA foreign_key_check").fetchall(), []
-                    )
-                finally:
-                    db.close()
-                self.assert_encrypted(path)
+        path, _ = self.encrypted(populated_baseline, "baseline")
+        db = self.connect(path)
+        try:
+            migrate_schema(db)
+            db.commit()
+            self.assertEqual(snapshot(db), plain_baseline())
+            payload = json.loads(
+                db.execute(
+                    "SELECT payload FROM planned_units WHERE id = 'matrix-unit'"
+                ).fetchone()[0]
+            )
+            self.assertEqual(payload, {"planned_load": 42, "planned_intensity": 0.8})
+            library = db.execute(
+                "SELECT id, payload FROM workout_library WHERE id LIKE 'matrix-%'"
+            ).fetchall()
+            self.assertEqual(len(library), 130)
+            for unit_id, unit_payload in library:
+                self.assertEqual(
+                    json.loads(unit_payload),
+                    {"planned_load": int(unit_id.removeprefix("matrix-"))},
+                )
+            self.assertTrue(database_schema_is_current(db))
+            self.assertEqual(
+                db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+            )
+            self.assertEqual(db.execute("PRAGMA cipher_integrity_check").fetchall(), [])
+            self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            db.close()
+        self.assert_encrypted(path)
 
-    def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
-        def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v25_to_v26(connection)
+    def test_a_failing_upgrade_leaves_the_encrypted_database_unchanged(self) -> None:
+        def failing_step(connection: Any) -> None:
+            gate.add_index_step(connection)
             raise RuntimeError("injected migration failure")
 
-        for version in builders():
-            with self.subTest(version=version):
-                path, before = self.released(version)
-                db = self.connect(path)
-                try:
-                    with (
-                        mock.patch.dict(
-                            migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V25: (SHAPE_CURRENT, failing_last_step)},
-                        ),
-                        self.assertRaisesRegex(RuntimeError, "injected"),
-                    ):
-                        migrate_schema(db)
-                    db.rollback()
-                finally:
-                    db.close()
-                reopened = self.connect(path)
-                try:
-                    self.assertEqual(snapshot(reopened), before)
-                    self.assertEqual(
-                        reopened.execute("PRAGMA user_version").fetchone()[0], version
-                    )
-                finally:
-                    reopened.close()
-                self.assert_encrypted(path)
+        path, before = self.encrypted(populated_previous_shape, "previous")
+        db = self.connect(path)
+        try:
+            with (
+                gate.registered_previous_shape(db, failing_step),
+                self.assertRaisesRegex(RuntimeError, "injected"),
+            ):
+                migrate_schema(db)
+            db.rollback()
+        finally:
+            db.close()
+        reopened = self.connect(path)
+        try:
+            self.assertEqual(snapshot(reopened), before)
+            self.assertEqual(
+                reopened.execute("PRAGMA user_version").fetchone()[0],
+                gate.PREVIOUS_VERSION,
+            )
+            with gate.registered_previous_shape(reopened):
+                migrate_schema(reopened)
+            reopened.commit()
+            self.assertEqual(snapshot(reopened), before)
+            self.assertTrue(database_schema_is_current(reopened))
+        finally:
+            reopened.close()
+        self.assert_encrypted(path)
 
     def manager(self, path: Path) -> DatabaseManager:
-        manager = DatabaseManager(
-            path,
-            cipher_backend,
+        return temp_database(
+            self,
+            path=path,
+            backend=cipher_backend,
             password=CIPHER_PHRASE,
             configure=configure_cipher,
             row_factory=row_factory,
         )
-        self.addCleanup(manager.close)
-        return manager
 
-    def upgraded(self, version: int) -> Path:
-        path, _ = self.released(version)
+    def opened_baseline(self) -> Path:
+        path, _ = self.encrypted(populated_baseline, "baseline")
         db = self.connect(path)
         try:
             migrate_schema(db)
@@ -279,62 +253,58 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
             db.close()
         return path
 
-    def test_an_upgraded_database_restarts_unchanged_and_needs_its_key(self) -> None:
-        for version in builders():
-            with self.subTest(version=version):
-                path = self.upgraded(version)
-                upgraded = self.rows(path)
-                manager = self.manager(path)
-                with manager.unit_of_work() as db:
-                    migrate_schema(db)
-                    self.assertTrue(database_schema_is_current(db))
-                manager.close()
-                self.assertEqual(self.rows(path), upgraded)
-                wrong = self.connect(path, "another synthetic phrase")
-                try:
-                    with self.assertRaises(cipher_backend.DatabaseError):
-                        wrong.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
-                finally:
-                    wrong.close()
+    def test_the_baseline_restarts_unchanged_and_needs_its_key(self) -> None:
+        path = self.opened_baseline()
+        opened = self.rows(path)
+        manager = self.manager(path)
+        with manager.unit_of_work() as db:
+            migrate_schema(db)
+            self.assertTrue(database_schema_is_current(db))
+        manager.close()
+        self.assertEqual(self.rows(path), opened)
+        wrong = self.connect(path, "another synthetic phrase")
+        try:
+            with self.assertRaises(cipher_backend.DatabaseError):
+                wrong.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+        finally:
+            wrong.close()
 
-    def test_an_encrypted_backup_of_an_upgrade_restores_the_same_rows(self) -> None:
-        for version in builders():
-            with self.subTest(version=version):
-                path = self.upgraded(version)
-                upgraded = self.rows(path)
-                manager = self.manager(path)
-                backup = DatabaseBackupService(
-                    manager,
-                    threading.RLock(),
-                    DatabaseBackupConfig(
-                        database_path=path,
-                        data_dir=self.root,
-                        maximum_bytes=50_000_000,
-                        minimum_free_bytes=0,
-                        time_limit_seconds=60,
-                        monotonic=lambda: 0.0,
-                        disk_usage=lambda _path: SimpleNamespace(free=10**12),
-                    ),
-                    mock.Mock(),
-                ).read_bytes()
-                self.assertNotEqual(backup[:16], PLAINTEXT_HEADER)
-                validation = DatabaseRestoreValidationService(
-                    DatabaseRestoreValidationConfig(
-                        data_dir=self.root / f"restore-{version}",
-                        maximum_bytes=50_000_000,
-                        app_password=CIPHER_PHRASE,
-                        sqlcipher_available=True,
-                        sqlite_backend=cipher_backend,
-                        configure_cipher=configure_cipher,
-                        row_factory=row_factory,
-                        schema_is_current=database_schema_is_current,
-                        startup_invariants=lambda _db: None,
-                    )
-                )
-                staged = validation.stage(backup)
-                validation.validate(staged)
-                self.assertEqual(self.rows(staged), upgraded)
-                self.assert_encrypted(staged)
+    def test_an_encrypted_backup_at_the_baseline_restores_the_same_rows(self) -> None:
+        path = self.opened_baseline()
+        opened = self.rows(path)
+        manager = self.manager(path)
+        backup = DatabaseBackupService(
+            manager,
+            threading.RLock(),
+            DatabaseBackupConfig(
+                database_path=path,
+                data_dir=self.root,
+                maximum_bytes=50_000_000,
+                minimum_free_bytes=0,
+                time_limit_seconds=60,
+                monotonic=lambda: 0.0,
+                disk_usage=lambda _path: SimpleNamespace(free=10**12),
+            ),
+            mock.Mock(),
+        ).read_bytes()
+        self.assertNotEqual(backup[:16], PLAINTEXT_HEADER)
+        validation = DatabaseRestoreValidationService(
+            DatabaseRestoreValidationConfig(
+                data_dir=self.root / "restore",
+                maximum_bytes=50_000_000,
+                app_password=CIPHER_PHRASE,
+                sqlcipher_available=True,
+                sqlite_backend=cipher_backend,
+                configure_cipher=configure_cipher,
+                row_factory=row_factory,
+                schema_is_current=database_schema_is_current,
+                startup_invariants=lambda _db: None,
+            )
+        )
+        staged = validation.stage(backup)
+        validation.validate(staged)
+        self.assertEqual(self.rows(staged), opened)
+        self.assert_encrypted(staged)
 
 
 if __name__ == "__main__":

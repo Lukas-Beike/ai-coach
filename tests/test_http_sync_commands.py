@@ -10,6 +10,7 @@ from backend.http_api.sync_commands import (
     handles_sync_path,
     needs_sync_body,
 )
+from backend.nutrition.contracts import nutrition_approval_item
 from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.provider_registry import ProviderRegistry
 
@@ -87,11 +88,36 @@ class SyncCommandEndpointTests(unittest.TestCase):
         )
         self.assertEqual((status, body["status"]), (200, "already_running"))
 
-    def test_full_resync_needs_its_confirmation_before_anything_starts(self):
+    def test_confirmation_bound_requests_start_nothing_without_it(self):
         with self.assertRaises(AppError) as raised:
             self.endpoint.execute("/api/garmin/full-resync", {})
         self.assertEqual(raised.exception.status, 400)
         self.full_resync.start.assert_not_called()
+        # Only the Coach card exports nutrition, never this route (#2137).
+        day = {"date": "2026-09-24", "total_kcal": 2000}
+        cases = [
+            ("nutrition_sync", {"date": "2026-09-24"}),
+            ("nutrition_sync", {"pending_limit": 3}),
+            ("nutrition_sync", {}),
+            ("nutrition_sync", None),
+            # A client can compute a manifest itself; it proves no approval.
+            ("nutrition_sync", {"approval_manifest": [nutrition_approval_item(day)]}),
+            # The queue normalizes the type, so the route must as well.
+            ("Nutrition_Sync", {"pending_limit": 3}),
+            (" NUTRITION_SYNC ", {"date": "2026-09-24"}),
+        ]
+        for job_type, payload in cases:
+            with (
+                self.subTest(job_type=job_type, payload=payload),
+                self.assertRaises(AppError) as raised,
+            ):
+                self.endpoint.execute(
+                    "/api/sync/jobs",
+                    {"provider": "intervals", "type": job_type}
+                    | ({} if payload is None else {"payload": payload}),
+                )
+            self.assertEqual(raised.exception.status, 400)
+        self.queue.enqueue.assert_not_called()
 
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
@@ -136,7 +162,11 @@ class SyncCommandEndpointTests(unittest.TestCase):
             operations,
             [
                 {"item_key": first, "operation": "plan_push", "payload_hash": "1" * 64},
-                {"item_key": second, "operation": "plan_push", "payload_hash": "2" * 64},
+                {
+                    "item_key": second,
+                    "operation": "plan_push",
+                    "payload_hash": "2" * 64,
+                },
             ],
         )
 

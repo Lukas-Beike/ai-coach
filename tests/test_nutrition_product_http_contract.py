@@ -30,7 +30,6 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             meal_library_service=lambda: self.meal_library,
         )
         self.put_routes = NutritionPutRoutes(
-            diary_service=lambda: self.diary,
             meal_library_service=lambda: self.meal_library,
         )
 

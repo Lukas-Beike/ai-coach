@@ -17,12 +17,12 @@ The system SHALL validate provider and job type together using the configured re
 - **WHEN** a request assigns historical backfill to Wahoo or supplies an unsupported field or non-boolean force flag
 - **THEN** validation rejects it before creating a job.
 
-Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, and rating backfill; Wahoo supports refresh and plan push; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
+Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, rating backfill, and stream backfill; Wahoo supports refresh, plan push, and stream backfill; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
 
 Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
 ### Requirement: Durable jobs and duplicate suppression
-The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active scheduler- or startup-requested refresh and backfill jobs. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. User requests are not covered by a blanket exactly-once guarantee.
+The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active refresh and backfill jobs requested by `scheduler`, `startup` or `connection`. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. Requests by `user`, `coach` or `backfill` (the continuation of a chain, which carries its own cursor) always create their own job.
 
 #### Scenario: Concurrent automatic enqueue
 - **WHEN** concurrent eligible automatic requests target the same provider and operation while one job is queued or running
@@ -101,7 +101,7 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 #### Scenario: Garmin wellness history
 - **WHEN** Garmin is configured and its `wellness_history` cursor has not reached the floor
-- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
+- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, Body Battery daily reports (an optional source: its pause or failure skips it for the chunk), and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, replaces a stored Body Battery report only when the read one differs, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
 
 #### Scenario: Garmin rating history
 - **WHEN** Garmin is configured and its `rating_history` cursor has not reached the floor
@@ -116,17 +116,21 @@ Detailed contract: Historical work SHALL yield to non-backfill jobs and active f
 Evidence: `backend/sync/executor.py:HistoricalSyncJobOwner`, `backend/sync/garmin_wellness_history.py:GarminWellnessHistoryService`, `backend/providers/garmin_wellness_history.py:collect_wellness_history`; `tests/test_garmin_wellness_history.py`, `backend/sync/garmin_rating_backfill.py:GarminRatingBackfillService`, `tests/test_garmin_rating_backfill.py`, `backend/sync/stream_backfill.py:StreamBackfillService`, `tests/test_stream_backfill.py`, `backend/sync/windows.py:split_date_windows`, `backend/sync/jobs.py:SyncJobStore.claim`; `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`, `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`, `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
 
 ### Requirement: Worker retries and restart recovery
-The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL requeue interrupted running work. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.
+The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL treat interrupted work as a lost outcome. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.
 
 #### Scenario: Temporary provider failure
 - **WHEN** a claimed job fails with a retryable class below its attempt limit
 - **THEN** it is requeued for a future eligible instant while already completed items remain complete.
 
+#### Scenario: Restart during a remote write
+- **WHEN** the process stops while a plan push, competition push or nutrition export is running, or while a job runs its last attempt
+- **THEN** after the restart that job is failed with `outcome_not_persisted` and its open items with it, never replayed, until the athlete retries it; interrupted read-only jobs are requeued.
+
 #### Scenario: Invalid manual retry
 - **WHEN** a caller retries a completed job, an unknown job, or a payload without the explicit retry action
 - **THEN** the system returns its appropriate validation, conflict, or not-found error without resetting successful work.
 
-Evidence: `backend/sync/jobs.py:SyncJobStore.claim`, `backend/sync/jobs.py:SyncJobStore.resume_interrupted`, `backend/sync/job_outcomes.py:SyncJobOutcomeService`, `backend/sync/queue.py:SyncJobQueueService.resolve`; `tests/test_sync_jobs.py:test_resume_interrupted_resets_running_records_and_claims_again`, `tests/test_sync_jobs.py:test_failure_and_requeue_never_overwrite_completed_items`, `tests/test_sync_job_outcomes.py:test_exhausted_retry_updates_and_publishes_final_failure`.
+Evidence: `backend/sync/jobs.py:SyncJobStore.claim`, `backend/sync/jobs.py:SyncJobStore.resume_interrupted`, `backend/sync/job_outcomes.py:SyncJobOutcomeService`, `backend/sync/queue.py:SyncJobQueueService.resolve`; `tests/test_sync_jobs.py:test_resume_interrupted_resets_running_records_and_claims_again`, `tests/test_sync_jobs.py:test_requeue_unowned_running_never_replays_a_job_with_remote_effects`, `tests/test_sync_jobs.py:test_requeue_unowned_running_fails_a_job_without_attempts_left`, `tests/test_sync_jobs.py:test_failure_and_requeue_never_overwrite_completed_items`, `tests/test_sync_job_outcomes.py:test_exhausted_retry_updates_and_publishes_final_failure`.
 
 ### Requirement: Explicit full resync and safe status
 The system SHALL require `confirm=FULL_RESYNC` on a full-resync route, serialize the operation with a provider reset gate, reject missing configuration before resetting, and release the gate and operation context on success or failure. A full read resync SHALL not imply remote plan or competition writes.

@@ -36,6 +36,7 @@ class StateEventTransportTests(unittest.TestCase):
                 send_headers=lambda: calls.append("headers"),
                 send_event=lambda *args: calls.append(args),
                 set_connection_timeout=lambda value: calls.append(("timeout", value)),
+                client_is_connected=lambda: True,
                 session_is_active=lambda: True,
             )
 
@@ -53,6 +54,7 @@ class StateEventTransportTests(unittest.TestCase):
                 send_headers=lambda: calls.append("headers"),
                 send_event=lambda *args: calls.append(args),
                 set_connection_timeout=lambda value: calls.append(("timeout", value)),
+                client_is_connected=lambda: True,
                 session_is_active=lambda: True,
             )
         return raised.exception, calls
@@ -70,6 +72,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=lambda *event: events.append(event),
             set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: True,
             session_is_active=lambda: False,
         )
         self.assertEqual(events[0][0], "reset")
@@ -123,6 +126,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: headers.append(True),
             send_event=send_event,
             set_connection_timeout=timeouts.append,
+            client_is_connected=lambda: True,
             session_is_active=lambda: True,
         )
 
@@ -137,7 +141,31 @@ class StateEventTransportTests(unittest.TestCase):
                 ("heartbeat", {"latest_event_id": 5}),
             ],
         )
-        self.assertEqual(buffer.wait_timeouts, [15])
+        self.assertEqual(buffer.wait_timeouts, [1])
+
+    def test_closed_client_ends_the_stream_between_heartbeats_and_frees_the_slot(self):
+        class TimingOutBuffer(FakeEventBuffer):
+            def wait(self, timeout=None):
+                self.wait_timeouts.append(timeout)
+                return False
+
+        buffer = TimingOutBuffer([{"events": [], "latest_event_id": 3, "gap": False}])
+        connected = iter([True, True, False])
+        events = []
+
+        StateEventTransport(buffer).handle(
+            "/api/state/events?since=3",
+            send_headers=lambda: None,
+            send_event=lambda *event: events.append(event),
+            set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: next(connected),
+            session_is_active=lambda: self.fail(
+                "a closed client needs no session check"
+            ),
+        )
+
+        self.assertEqual(events, [("ready", {"latest_event_id": 3}, 3)])
+        self.assertEqual(buffer.wait_timeouts, [1, 1])
 
     def test_gap_reset_and_heartbeat_preserve_cursor_sequence(self):
         buffer = FakeEventBuffer(
@@ -159,6 +187,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=send_event,
             set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: True,
             session_is_active=lambda: True,
         )
 
@@ -170,7 +199,7 @@ class StateEventTransportTests(unittest.TestCase):
                 ("heartbeat", {"latest_event_id": 9}),
             ],
         )
-        self.assertEqual(buffer.wait_timeouts, [15, 15])
+        self.assertEqual(buffer.wait_timeouts, [1, 1])
 
     def test_cursor_from_an_earlier_process_resets_and_keeps_later_events(self):
         # A tab keeps its cursor across a server restart; the new buffer is behind it.
@@ -192,6 +221,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=send_event,
             set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: True,
             session_is_active=lambda: True,
         )
 
@@ -214,6 +244,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: (_ for _ in ()).throw(ClientDisconnected()),
             send_event=lambda *_args: self.fail("no event should be sent"),
             set_connection_timeout=timeout_calls.append,
+            client_is_connected=lambda: True,
             session_is_active=lambda: True,
         )
 
@@ -242,6 +273,7 @@ class StateEventTransportTests(unittest.TestCase):
                         send_headers=lambda headers=headers: headers.append(True),
                         send_event=lambda *event, events=events: events.append(event),
                         set_connection_timeout=lambda _value: None,
+                        client_is_connected=lambda: True,
                         session_is_active=session_is_active,
                     )
 
@@ -264,6 +296,7 @@ class StateEventTransportTests(unittest.TestCase):
                 send_headers=lambda: (_ for _ in ()).throw(DatabaseBusyError("reader")),
                 send_event=lambda *_args: self.fail("no event should be sent"),
                 set_connection_timeout=lambda _value: None,
+                client_is_connected=lambda: True,
                 session_is_active=lambda: True,
             )
 
@@ -296,11 +329,12 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=lambda *event: events.append(event),
             set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: True,
             session_is_active=session_is_active,
         )
 
         self.assertEqual(events, [("ready", {"latest_event_id": 3}, 3)])
-        self.assertEqual(buffer.wait_timeouts, [15])
+        self.assertEqual(buffer.wait_timeouts, [1])
         self.assertEqual(len(session_checks), 1)
 
     def test_session_expiry_after_heartbeat_stops_further_events(self):
@@ -329,6 +363,7 @@ class StateEventTransportTests(unittest.TestCase):
             send_headers=lambda: None,
             send_event=lambda *event: events.append(event),
             set_connection_timeout=lambda _value: None,
+            client_is_connected=lambda: True,
             session_is_active=lambda: next(session_states),
         )
 
@@ -339,7 +374,7 @@ class StateEventTransportTests(unittest.TestCase):
                 ("heartbeat", {"latest_event_id": 3}),
             ],
         )
-        self.assertEqual(buffer.wait_timeouts, [15, 15])
+        self.assertEqual(buffer.wait_timeouts, [1, 1])
 
 
 if __name__ == "__main__":

@@ -312,6 +312,73 @@ class ProviderSchemaTests(unittest.TestCase):
             db.execute("SELECT details FROM activity_records").fetchone()[0], "{}"
         )
 
+    def test_closed_value_columns_accept_only_their_values(self):
+        db = self.fresh()
+        self.insert(db, "activity_records", valid_activity())
+        self.insert(
+            db,
+            "activity_detail_sets",
+            {
+                "provider": PROVIDER,
+                "provider_activity_id": "activity-1",
+                "detail_kind": "laps",
+                "mapper_version": 1,
+                "origin": "fetch",
+                "source_kind": "provider_reported",
+                "recorded_by": "manual",
+                "lap_source": "device",
+                "content_sha256": "a" * 64,
+                "fetched_at": STAMP,
+                "created_at": STAMP,
+                "updated_at": STAMP,
+            },
+        )
+        db.execute(
+            "INSERT INTO activity_feedback(activity_id, created_at, updated_at) "
+            "VALUES ('a1', ?, ?)",
+            (STAMP, STAMP),
+        )
+        for table, column, valid, invalid in (
+            (
+                "activity_feedback",
+                "purpose",
+                ("training", "race", "commute", "warmup", "cooldown", None),
+                ("party", "Race", ""),
+            ),
+            (
+                "activity_detail_sets",
+                "hr_source",
+                ("chest_strap", "optical", "unknown", None),
+                ("wrist",),
+            ),
+            (
+                "activity_detail_sets",
+                "power_source",
+                ("power_meter", "trainer", "estimated", "unknown", None),
+                ("pedal",),
+            ),
+            (
+                "activity_detail_sets",
+                "sensors",
+                ("[]", '[{"role":"power"}]', None),
+                ("{}", "not json"),
+            ),
+            (
+                "activity_detail_sets",
+                "dfa_alpha1",
+                ('{"estimate_bpm":150}', "{}", None),
+                ("[]", "not json", "12"),
+            ),
+        ):
+            for value in valid:
+                db.execute(f"UPDATE {table} SET {column} = ?", (value,))
+            for value in invalid:
+                with (
+                    self.subTest(column=column, value=value),
+                    self.assertRaises(sqlite3.IntegrityError),
+                ):
+                    db.execute(f"UPDATE {table} SET {column} = ?", (value,))
+
     def test_observation_natural_key_is_unique(self):
         db = self.fresh()
         self.insert(db, "observations", valid_observation())

@@ -7,11 +7,8 @@ account, network, real data directory or encryption key is involved.
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, date, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
@@ -20,6 +17,7 @@ from activity_row_support import (
     FixedActivityRows,
     canonical_source,
 )
+from support import temp_database
 
 from backend.activities.activity_reference import (
     ActivityReference,
@@ -37,9 +35,8 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import canonical_store, row_factory
 from backend.db.repositories import ActivityFeedbackRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
@@ -55,14 +52,9 @@ START = datetime(2026, 6, 1, 7, 0, tzinfo=UTC)
 
 class _Fixture(unittest.TestCase):
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(directory.name) / "references.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "references.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
 
     def seed(
         self, provider_activity_id: str, provider: ProviderId = ProviderId.INTERVALS

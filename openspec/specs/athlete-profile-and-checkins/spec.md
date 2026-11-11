@@ -48,22 +48,14 @@ The system SHALL preserve unsubmitted profile fields on the profile patch API an
 
 Evidence: `backend/athlete/profile.py:ProfileService.patch`; `backend/http_api/athlete_put.py:AthletePutRoutes.handle`; `backend/coach/profile_update.py:CoachProfileUpdateService.apply`; `tests/test_athlete_profile_service.py:test_patch_with_only_weight_keeps_name_and_normalizes_changed_field`; `tests/test_coach_profile_update.py:test_valid_batch_saves_only_selected_fields`, `tests/test_coach_profile_update.py:test_later_field_conflict_aborts_entire_batch`, `tests/test_coach_profile_update.py:test_authorization_precedes_profile_read_and_write`.
 
-### Requirement: AP3 Atomic complete athlete context and location invalidation
-The system SHALL distinguish complete athlete-context replacement from a profile patch, save profile and the supplied complete competition set atomically, and invalidate location-derived weather state only when the saved location changes.
-
-#### Scenario: Complete profile and competitions
-- **WHEN** the athlete submits the complete athlete context
-- **THEN** the profile and validated competition set are saved in one transaction, with omitted competitions treated as removals and existing remote identities retained as implemented.
-
-#### Scenario: Failure after earlier writes
-- **WHEN** a later competition upsert or profile validation fails
-- **THEN** profile, prior upserts, removals and tombstones from that context save roll back together.
+### Requirement: AP3 Location invalidation on profile save and undo
+The system SHALL invalidate location-derived weather state only when the saved weather location changes, within the transaction of the profile save or of the undo that restores a profile. A profile save never writes competitions; they change only through the competition service.
 
 #### Scenario: Location unchanged or restored
 - **WHEN** location stays the same
-- **THEN** its weather cache is retained; changing or restoring a different location invokes the location-change invalidation hook and the profile audit record follows the save transaction.
+- **THEN** its weather cache is retained; changing or restoring a different location invokes the location-change invalidation hook, and the profile audit record of a save is written in the same transaction.
 
-Evidence: `backend/athlete/context.py:AthleteContextService.save`; `backend/athlete/profile.py:ProfileService.save_in_transaction`, `backend/athlete/profile.py:ProfileService.restore_in_transaction`; `tests/test_athlete_context.py:test_rolls_back_profile_tombstone_and_prior_upsert_after_later_failure`, `tests/test_athlete_context.py:test_profile_only_save_keeps_unchanged_competition_sync_state`; `tests/test_athlete_profile_service.py:test_same_location_keeps_weather_cache_and_skips_unchanged_history`, `tests/test_athlete_profile_service.py:test_restore_of_location_change_invokes_location_hook_and_clears_weather`.
+Evidence: `backend/athlete/profile.py:ProfileService.save_in_transaction`, `backend/athlete/profile.py:ProfileService.restore_in_transaction`, `backend/http_api/athlete_put.py:AthletePutRoutes.handle`; `tests/test_http_athlete_put_routes.py:test_athlete_context_route_is_gone`; `tests/test_athlete_profile_service.py:test_same_location_keeps_weather_cache_and_skips_unchanged_history`, `tests/test_athlete_profile_service.py:test_restore_of_location_change_invokes_location_hook_and_clears_weather`.
 
 ### Requirement: AP4 Validated daily subjective check-ins
 The system SHALL store a check-in for an explicit nonfuture calendar date or athlete-local today, validate score/minute bounds and bounded text, and expose today's and recent athlete-entered feedback separately from providers.
@@ -132,10 +124,10 @@ The system SHALL save subjective notes, optional finite session RPE from 0 throu
 - **THEN** the save fails rather than creating a completed activity or inventing feedback.
 
 #### Scenario: Explicit removal
-- **WHEN** the authorized delete-feedback tool clears notes, RPE and deviation reason for an activity
-- **THEN** the local feedback row is removed without deleting the activity or altering provider feedback.
+- **WHEN** the authorized delete-feedback tool clears notes, RPE and deviation reason for an activity that carries no session purpose marking (see "Athlete marking of the session purpose" in activity-analysis-and-feedback)
+- **THEN** the local feedback row is removed without deleting the activity or altering provider feedback; a row that still holds a purpose marking is kept.
 
-Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`, `backend/db/canonical_store.py:live_session_id`, `backend/activities/feedback.py:ActivityFeedbackService._save`, `backend/activities/feedback.py:ActivityFeedbackService.attach_to_activities`; `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_a_live_canonical_session`, `tests/test_activity_feedback.py:test_attach_finds_feedback_older_than_the_newest_500_rows`; `tests/test_coach_tool_coverage.py:test_daily_feedback_and_activity_feedback_are_separate_from_profile`.
+Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`, `backend/db/canonical_store.py:live_session_id`, `backend/activities/feedback.py:ActivityFeedbackService._save`, `backend/activities/feedback.py:_is_cleared`, `backend/activities/feedback.py:ActivityFeedbackService.attach_to_activities`; `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_a_live_canonical_session`, `tests/test_activity_feedback.py:test_attach_finds_feedback_older_than_the_newest_500_rows`; `tests/test_coach_tool_coverage.py:test_daily_feedback_and_activity_feedback_are_separate_from_profile`.
 
 ### Requirement: AP8 Versioned local equipment records
 The system SHALL save explicitly entered main equipment/components with validated sport, parent, start date, initial usage and personal service/lifetime intervals, preserving historical references on archival and rejecting stale revisions.

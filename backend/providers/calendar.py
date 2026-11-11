@@ -612,21 +612,26 @@ def _ical_past_until(value: datetime, until: date | None) -> bool:
     return value.date() > until
 
 
-def _ical_matches_byday(value: date, bydays: list[tuple[int, int | None]]) -> bool:
+def _ical_matches_byday(
+    value: date, bydays: list[tuple[int, int | None]], *, in_year: bool = False
+) -> bool:
+    """Whether ``value`` is one of the weekdays; an ordinal counts in the month.
+
+    In a yearly rule without BYMONTH the ordinal counts in the year instead
+    (RFC 5545), so ``20MO`` is the year's twentieth Monday (#2137, K-040).
+    """
+    if in_year:
+        position = value.timetuple().tm_yday
+        length = 366 if calendar_module.isleap(value.year) else 365
+    else:
+        position = value.day
+        length = calendar_module.monthrange(value.year, value.month)[1]
     for weekday, ordinal in bydays:
         if value.weekday() != weekday:
             continue
-        if ordinal is None or (ordinal > 0 and (value.day - 1) // 7 + 1 == ordinal):
+        if ordinal is None or (ordinal > 0 and (position - 1) // 7 + 1 == ordinal):
             return True
-        if (
-            ordinal < 0
-            and -(
-                (calendar_module.monthrange(value.year, value.month)[1] - value.day)
-                // 7
-                + 1
-            )
-            == ordinal
-        ):
+        if ordinal < 0 and -((length - position) // 7 + 1) == ordinal:
             return True
     return False
 
@@ -638,7 +643,10 @@ def _ical_matches_date_filters(value: date, rule: dict[str, Any]) -> bool:
         last = calendar_module.monthrange(value.year, value.month)[1]
         if value.day not in {n if n > 0 else last + n + 1 for n in rule["bymonthday"]}:
             return False
-    return not rule["bydays"] or _ical_matches_byday(value, rule["bydays"])
+    in_year = rule["frequency"] == "YEARLY" and not rule["bymonth"]
+    return not rule["bydays"] or _ical_matches_byday(
+        value, rule["bydays"], in_year=in_year
+    )
 
 
 def _ical_period_dates(

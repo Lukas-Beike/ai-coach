@@ -35,11 +35,11 @@ Detailed contract: Missing daily/hourly object sections SHALL fail the base fetc
 Evidence: `backend/providers/weather.py:WeatherClient.fetch`, `backend/providers/weather.py:WeatherClient._fetch_icon_d2`, `backend/providers/weather_data.py:merge_weather_forecasts`, `backend/providers/weather_data.py:weather_forecast_is_complete`; `tests/test_weather_provider.py:test_german_location_merges_icon_d2_and_preserves_request_contract`, `tests/test_weather_forecast.py:test_merge_keeps_base_values_when_short_values_are_null_or_non_finite`, `tests/test_weather_provider.py:test_incomplete_ecmwf_forecast_raises_502_without_icon_request`.
 
 ### Requirement: Optional air quality and pollen provenance
-The system SHALL optionally merge timestamp-aligned CAMS/Open-Meteo air-quality and pollen data and German DWD pollen region forecasts without making those sources prerequisites for weather. DWD region lookup SHALL use longitude/latitude WKT order; accepted DWD levels SHALL take precedence over CAMS pollen for available species/dates. Daily projection SHALL retain units/categories/source labels and attribute each included source. Unknown optional data SHALL remain absent.
+The system SHALL optionally merge timestamp-aligned CAMS/Open-Meteo air-quality and pollen data and German DWD pollen region forecasts without making those sources prerequisites for weather. DWD region lookup SHALL use longitude/latitude WKT order; accepted DWD levels SHALL replace CAMS pollen on each date they cover. Daily projection SHALL retain units/categories/source labels and attribute each included source. Unknown optional data SHALL remain absent.
 
 #### Scenario: German DWD pollen coverage
 - **WHEN** coordinate lookup returns a DWD region and valid issued species levels
-- **THEN** its dated pollen labels override the corresponding CAMS projection and DWD attribution is included.
+- **THEN** each date with DWD levels carries only the DWD pollen labels, CAMS pollen remains for the other dates, and DWD attribution is included.
 
 #### Scenario: Optional overlay failure
 - **WHEN** air quality or DWD lookup fails or provides no supported region/data
@@ -103,17 +103,23 @@ Evidence: `backend/weather/history.py:remember_forecasts`, `backend/weather/hist
 The system SHALL store Open-Meteo historical-forecast weather per outdoor ride or run since 2022 as derived observations, at the first stored GPS position or else the saved weather location, labelled home. Only two-decimal coordinates SHALL be sent; none SHALL reach observations, logs, diagnostics or the Coach. Requests SHALL run outside the writer transaction; a current result SHALL not be refetched. The Coach read SHALL note heat from 25 C apparent temperature.
 
 #### Scenario: Position and fallback
-- **WHEN** a session has a stored position, or has none and a weather location is saved
+- **WHEN** a session has a stored position, or is outdoors with none and a weather location is saved
 - **THEN** the request uses the rounded position or home coordinates and the label names "Startposition" or "Wohnort".
+
+#### Scenario: Unknown environment
+- **WHEN** a session has an unknown environment and no stored position
+- **THEN** no request is made and the home location is never used for it.
 
 #### Scenario: Cache and failure
 - **WHEN** a session already has a current result, or a request fails
 - **THEN** no second request is made for the result, and a failure writes no observation and waits before a retry.
 
-Evidence: `backend/sync/activity_weather.py:ActivityWeatherStage`, `backend/providers/activity_weather.py:activity_weather_params`, `backend/weather/activity_weather.py:reduce_hourly`, `backend/weather/activity_weather.py:heat_note`; `tests/test_activity_weather.py:test_start_position_is_fetched_rounded_and_stored`, `tests/test_activity_weather.py:test_a_stored_result_is_never_fetched_again`, `tests/test_activity_weather.py:test_no_raw_coordinate_leaves_the_stored_streams`.
+Detailed contract: a session of unknown environment is included only with a stored GPS position and never uses the home location.
+
+Evidence: `backend/sync/activity_weather.py:ActivityWeatherStage`, `backend/providers/activity_weather.py:activity_weather_params`, `backend/weather/activity_weather.py:reduce_hourly`, `backend/weather/activity_weather.py:heat_note`; `tests/test_activity_weather.py:test_start_position_is_fetched_rounded_and_stored`, `tests/test_activity_weather.py:test_an_unknown_environment_needs_a_stored_start_position`, `tests/test_activity_weather.py:test_a_stored_result_is_never_fetched_again`, `tests/test_activity_weather.py:test_no_raw_coordinate_leaves_the_stored_streams`.
 
 ### Requirement: Advisory weather training windows and adaptive reasons
-The system SHALL propose supported near-term outdoor cycling/running windows from contiguous hourly forecast data, required precipitation/temperature inputs, event duration, weekday availability, and optional wind/rain/air-quality penalties. Indoor/virtual activities and inadequate hourly coverage SHALL yield no recommendation.
+The system SHALL propose supported near-term outdoor cycling/running windows from contiguous hourly forecast data, required precipitation/temperature inputs, event duration, weekday availability, and optional wind/rain/air-quality penalties. The list function SHALL skip indoor/virtual activities, and inadequate hourly coverage SHALL yield no recommendation.
 
 #### Scenario: Suitable weekday window
 - **WHEN** a supported outdoor event has sufficient contiguous usable forecast hours inside an allowed weekday/weekend window
@@ -129,4 +135,4 @@ The system SHALL propose supported near-term outdoor cycling/running windows fro
 
 Detailed contract: Separately, the adaptive reason SHALL consider outdoor cycling of at least 180 minutes only within today and the next two days, using implemented persistent rain/snow thresholds; producing a reason SHALL not apply or export a changed workout.
 
-Evidence: `backend/weather/recommendations.py:weather_recommendation`, `backend/weather/recommendations.py:weather_recommendations`, `backend/weather/adaptive.py:weather_adaptive_reason`; `tests/test_weather_recommendations.py:test_weekday_and_friday_windows_are_selected_deterministically`, `tests/test_weather_recommendations.py:test_all_measurements_missing_yield_no_recommendation`, `tests/test_weather_adaptive.py:test_forecast_window_includes_today_and_third_day_only`, `tests/test_weather_adaptive.py:test_duration_threshold_is_inclusive`.
+Evidence: `backend/weather/recommendations.py:weather_recommendation`, `backend/weather/recommendations.py:weather_recommendations` (the indoor/virtual filter), `backend/weather/adaptive.py:weather_adaptive_reason`; `tests/test_weather_recommendations.py:test_weekday_and_friday_windows_are_selected_deterministically`, `tests/test_weather_recommendations.py:test_all_measurements_missing_yield_no_recommendation`, `tests/test_weather_adaptive.py:test_forecast_window_includes_today_and_third_day_only`, `tests/test_weather_adaptive.py:test_duration_threshold_is_inclusive`.

@@ -7,14 +7,13 @@ import inspect
 import itertools
 import json
 import sqlite3
-import tempfile
 import unittest
 import uuid
 from datetime import date
-from pathlib import Path
 from unittest.mock import patch
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.db.repositories import PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import (
@@ -53,12 +52,7 @@ class CalendarConflictFake:
 
 class LibraryPlanServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "library-plan.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
+        self.manager = temp_database(self, "library-plan.db", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(
@@ -87,10 +81,6 @@ class LibraryPlanServiceTests(unittest.TestCase):
         self.service = WorkoutLibraryPlanService(
             self.manager, self.planned_service, self.calendar, publish_change
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def template(*, date_value=None, source="coach", name="Easy ride", **overrides):

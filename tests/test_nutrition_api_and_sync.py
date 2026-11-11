@@ -3,21 +3,18 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, date, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.config import Config
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import nutrition_macro_totals
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
 from backend.http_api.nutrition import (
@@ -70,7 +67,6 @@ class NutritionHttpApiTests(unittest.TestCase):
             local_now=self.local_now,
         )
         self.put_routes = NutritionPutRoutes(
-            diary_service=lambda: self.diary_service,
             meal_library_service=lambda: self.meal_library_service,
         )
 
@@ -252,11 +248,18 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
 
-    def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(self) -> None:
+    def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(
+        self,
+    ) -> None:
         self.handler.read_json.return_value = {"area": "diary", "date": "2026-09-23"}
-        self.diary_service.get_day_summary.return_value = {"date": "2026-09-23", "entries": []}
+        self.diary_service.get_day_summary.return_value = {
+            "date": "2026-09-23",
+            "entries": [],
+        }
         self.nutrition_refresh_service.refresh.return_value = {
-            "status": "ok", "source": "Garmin Connect", "records": 1
+            "status": "ok",
+            "source": "Garmin Connect",
+            "records": 1,
         }
 
         handled = self.post_routes.handle(self.handler, "/api/nutrition/refresh")
@@ -275,7 +278,9 @@ class NutritionHttpApiTests(unittest.TestCase):
                 "meal_status": "local",
                 "summary": {"date": "2026-09-23", "entries": []},
                 "expenditure_refresh": {
-                    "status": "ok", "source": "Garmin Connect", "records": 1
+                    "status": "ok",
+                    "source": "Garmin Connect",
+                    "records": 1,
                 },
             },
         )
@@ -288,7 +293,8 @@ class NutritionHttpApiTests(unittest.TestCase):
             "energy_expenditure": {"freshness": "stale"},
         }
         self.nutrition_refresh_service.refresh.return_value = {
-            "status": "partial", "reason": "provider_unavailable"
+            "status": "partial",
+            "reason": "provider_unavailable",
         }
 
         self.post_routes.handle(self.handler, "/api/nutrition/refresh")
@@ -302,7 +308,9 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_nutrition_refresh_week_uses_requested_range(self) -> None:
         self.handler.read_json.return_value = {
-            "area": "week", "days": 84, "date": "2026-09-23"
+            "area": "week",
+            "days": 84,
+            "date": "2026-09-23",
         }
         self.nutrition_refresh_service.refresh.return_value = {"status": "partial"}
 
@@ -334,7 +342,12 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.nutrition_refresh_service.refresh.assert_not_called()
         self.handler.send_json.assert_called_once_with(
             200,
-            {"ok": True, "area": "products", "status": "local", "products": [{"id": "food-1"}]},
+            {
+                "ok": True,
+                "area": "products",
+                "status": "local",
+                "products": [{"id": "food-1"}],
+            },
         )
 
     def test_nutrition_refresh_rejects_invalid_range(self) -> None:
@@ -344,45 +357,22 @@ class NutritionHttpApiTests(unittest.TestCase):
             self.post_routes.handle(self.handler, "/api/nutrition/refresh")
         self.nutrition_refresh_service.refresh.assert_not_called()
 
-    def test_put_entry_route(self) -> None:
-        self.handler.read_json.return_value = {
-            "id": "entry-123",
-            "description": "Updated meal",
-            "kcal": 500,
-        }
-        self.diary_service.update_meal.return_value = {
-            "id": "entry-123",
-            "description": "Updated meal",
-            "kcal": 500,
-        }
+    def test_put_entry_route_is_removed(self) -> None:
+        # Only the Coach correction changes an entry (#2137, F-018).
+        self.handler.read_json.return_value = {"id": "entry-123", "kcal": 500}
         handled = self.put_routes.handle(self.handler, "/api/nutrition/entry")
-        self.assertTrue(handled)
-        self.diary_service.update_meal.assert_called_once()
-        self.handler.send_json.assert_called_once_with(
-            200,
-            {
-                "ok": True,
-                "entry": {
-                    "id": "entry-123",
-                    "description": "Updated meal",
-                    "kcal": 500,
-                },
-            },
-        )
+        self.assertFalse(handled)
+        self.diary_service.update_meal.assert_not_called()
+        self.handler.send_json.assert_not_called()
 
 
 class NutritionRouteBodyTests(unittest.TestCase):
     """Routes read real JSON bodies into the real diary on temporary storage."""
 
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        manager = DatabaseManager(
-            Path(directory.name) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(manager.close)
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
         self.diary, self.library = build_nutrition_services(
             manager,
             threading.Lock(),
@@ -390,25 +380,13 @@ class NutritionRouteBodyTests(unittest.TestCase):
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
         self.post_routes = NutritionPostRoutes(lambda: self.diary, lambda: self.library)
-        self.put_routes = NutritionPutRoutes(lambda: self.diary, lambda: self.library)
-
-    def test_put_entry_applies_the_calorie_alias_to_the_stored_entry(self) -> None:
-        saved = self.diary.log_meal(
-            {"meal_date": "2026-09-24", "description": "Lunch", "kcal": 500}
-        )
-        handler = json_route_handler({"id": saved["id"], "calories": 600})
-
-        self.assertTrue(self.put_routes.handle(handler, NUTRITION_ENTRY_PATH))
-
-        status, body = handler.send_json.call_args.args
-        self.assertEqual((status, body["entry"]["kcal"]), (200, 600))
-        self.assertEqual(self.diary.get_meal(saved["id"])["kcal"], 600)
+        self.put_routes = NutritionPutRoutes(lambda: self.library)
 
     def test_non_photo_json_routes_keep_the_global_body_cap(self) -> None:
         for method, handle, path in (
             ("POST", self.post_routes.handle, NUTRITION_ENTRY_PATH),
             ("POST", self.post_routes.handle, f"{NUTRITION_PRODUCTS_PATH}/lookup"),
-            ("PUT", self.put_routes.handle, NUTRITION_ENTRY_PATH),
+            ("PUT", self.put_routes.handle, NUTRITION_PRODUCTS_PATH),
         ):
             handler = json_route_handler(
                 {"description": "Pasta", "kcal": 500}, padding=GLOBAL_BODY_BYTES

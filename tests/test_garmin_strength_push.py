@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
+
+from support import temp_database
 
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.coach.proposal_creation import (
@@ -19,7 +18,6 @@ from backend.coach.proposal_creation import (
 )
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLinkRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
@@ -451,12 +449,9 @@ def _http_error(status: int) -> Exception:
 @needs_catalogue
 class PushTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.directory.name) / "push.sqlite", sqlite3, row_factory=row_factory
+        self.database_manager = temp_database(
+            self, "push.sqlite", row_factory=row_factory, schema=True
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
         self.garmin = FakeGarmin()
         self.sessions = 0
 
@@ -473,10 +468,6 @@ class PushTests(unittest.TestCase):
             now=lambda: NOW,
             redactor=lambda text: text.replace("SECRET", "[redacted]"),
         )
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.directory.cleanup()
 
     def insert(self, local_id: str, payload: dict, *, tombstone: int = 0) -> str:
         raw = json.dumps(payload)

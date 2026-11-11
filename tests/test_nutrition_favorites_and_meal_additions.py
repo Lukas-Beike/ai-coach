@@ -3,32 +3,22 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 
 
 class FavoritesAndMealAdditionTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "favorites.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.manager = temp_database(
+            self, "favorites.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.diary, self.library = build_nutrition_services(
             self.manager,
             threading.Lock(),

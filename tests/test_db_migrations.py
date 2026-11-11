@@ -1,53 +1,79 @@
-"""Schema gate: supported released schemas upgrade, anything else stays unchanged."""
+"""Schema gate: the production baseline reaches the live schema; all else stays unchanged."""
 
 import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
+from collections.abc import Callable, Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+from support import temp_database
+
 from backend.canonical.vocabulary import ProviderId
-from backend.db import migrations
+from backend.db import migrations, schema_history
 from backend.db.bootstrap import initialize_application_database
-from backend.db.manager import DatabaseManager
 from backend.db.migrations import OlderSchemaError, migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
+    SYNC_JOBS_BACKFILL_INDEX_DDL,
     configure_cipher,
     database_schema_is_current,
     database_schema_signature,
+    execute_ddl,
     initialize_schema,
 )
 from backend.db.schema_history import (
     SHAPE_CURRENT,
-    SHAPE_SCHEMA_V21,
-    SHAPE_SCHEMA_V22,
-    SHAPE_SCHEMA_V23,
-    SHAPE_SCHEMA_V24,
-    SHAPE_SCHEMA_V25,
+    SHAPE_SCHEMA_V26,
     released_shape,
+    signature_digest,
 )
 
 INTERVALS = ProviderId.INTERVALS.value
 STAMP = "2026-10-16T08:00:00+00:00"
-OLDEST_SUPPORTED_VERSION = 21
-FIXTURES = Path(__file__).with_name("fixtures")
-# Schema v21, releases 1.13.41 to 1.13.44: the oldest supported schema.
-V21_FIXTURE = FIXTURES / "schema_v21.sql.txt"
-# Schema version 22, release 2.0.0 candidate: executed strength sets.
-V22_FIXTURE = FIXTURES / "schema_v22.sql.txt"
-# Schema version 23: the athlete's session purpose marking.
-V23_FIXTURE = FIXTURES / "schema_v23.sql.txt"
-# Schema version 24: heart rate and power source and sensors of stream sets.
-V24_FIXTURE = FIXTURES / "schema_v24.sql.txt"
-# Schema version 25: the first threshold estimate of stream sets.
-V25_FIXTURE = FIXTURES / "schema_v25.sql.txt"
-OLDEST_SUPPORTED_FIXTURE = V21_FIXTURE
-RELEASED_FIXTURES = (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE, V24_FIXTURE, V25_FIXTURE)
-CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
+# Schema v26, release 2.0.5: the schema production runs and the only baseline.
+OLDEST_SUPPORTED_VERSION = 26
+BASELINE_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v26.sql.txt"
+# No released schema precedes the baseline, so the upgrade path runs on a
+# stand-in: the live schema one index short, stored with the previous version.
+PREVIOUS_SHAPE = "synthetic-previous"
+PREVIOUS_VERSION = CURRENT_SCHEMA_VERSION - 1
+
+
+def previous_shape_database(db) -> None:
+    """Store the live schema without the backfill index as the previous version."""
+    initialize_schema(db)
+    db.execute("DROP INDEX idx_sync_jobs_backfill_end")
+    db.execute(f"PRAGMA user_version = {PREVIOUS_VERSION}")
+    db.commit()
+
+
+def add_index_step(db) -> None:
+    execute_ddl(db, SYNC_JOBS_BACKFILL_INDEX_DDL)
+
+
+@contextmanager
+def registered_previous_shape(
+    db, step: Callable[..., None] = add_index_step
+) -> Iterator[None]:
+    """Make the stand-in shape of ``db`` the baseline, one step below the live schema."""
+    digest = signature_digest(database_schema_signature(db))
+    with (
+        mock.patch.object(migrations, "OLDEST_SUPPORTED_SCHEMA_VERSION", PREVIOUS_VERSION),
+        mock.patch.dict(schema_history.RELEASED_SHAPE_DIGESTS, {PREVIOUS_SHAPE: digest}),
+        mock.patch.dict(
+            schema_history.ACCEPTED_SHAPES_BY_VERSION,
+            {PREVIOUS_VERSION: frozenset({PREVIOUS_SHAPE})},
+        ),
+        mock.patch.dict(
+            migrations.UPGRADE_STEPS, {PREVIOUS_SHAPE: (SHAPE_CURRENT, step)}
+        ),
+    ):
+        yield
+
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -88,10 +114,11 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertEqual(list(db.iterdump()), before)
         self.assertTrue(database_schema_is_current(db))
 
-    def test_oldest_supported_release_schema_upgrades_to_current(self):
-        # Release 1.13.44 is the migration baseline.
+    def test_populated_baseline_reaches_the_live_schema_with_its_rows(self):
+        # While the baseline is the live schema this is a no-op; after the next
+        # schema version it runs that version's step.
         db = self.connect()
-        db.executescript(OLDEST_SUPPORTED_FIXTURE.read_text(encoding="utf-8"))
+        db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
         db.execute(
             "INSERT INTO messages(role, content, created_at) "
             "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
@@ -102,12 +129,22 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         )
         migrate_schema(db)
         db.commit()
+        live = self.connect()
+        initialize_schema(live)
+        self.assertEqual(database_schema_signature(db), database_schema_signature(live))
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
         self.assertTrue(database_schema_is_current(db))
         self.assertEqual(
             db.execute("SELECT content FROM messages").fetchone()[0], "Hallo"
+        )
+
+    def test_frozen_baseline_fixture_is_the_recorded_production_shape(self):
+        db = self.connect()
+        db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V26
         )
 
     def test_older_or_newer_schema_version_is_rejected_without_modification(self):
@@ -119,12 +156,12 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 self.assert_rejected_unchanged(db)
 
     def test_older_database_file_is_refused_at_startup_without_changes(self):
-        # A release before 1.13.41 wrote a schema below 21: startup names the
+        # A release before 2.0.5 wrote a schema below 26: startup names the
         # release to upgrade with first and leaves every row and the version.
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "older.db"
             with closing(sqlite3.connect(path)) as db:
-                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
+                db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
                 db.execute(
                     "INSERT INTO messages(role, content, created_at) "
                     "VALUES ('user', 'Hallo', ?)",
@@ -133,10 +170,10 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 db.execute(f"PRAGMA user_version = {OLDEST_SUPPORTED_VERSION - 1}")
                 db.commit()
                 before = list(db.iterdump())
-            manager = DatabaseManager(path, sqlite3, row_factory=sqlite3.Row)
+            manager = temp_database(self, path=path)
             try:
                 with (
-                    self.assertRaisesRegex(OlderSchemaError, "Release 1.13.44"),
+                    self.assertRaisesRegex(OlderSchemaError, "Release 2.0.5"),
                     manager.unit_of_work() as db,
                 ):
                     initialize_application_database(
@@ -216,78 +253,50 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             )
         )
 
-    def test_frozen_v21_fixture_is_the_recorded_released_shape(self):
+    def test_a_previous_shape_upgrades_in_one_step_with_its_rows(self):
         db = self.connect()
-        db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V21
+        previous_shape_database(db)
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) "
+            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
         )
-
-    def test_frozen_v22_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V22_FIXTURE.read_text(encoding="utf-8"))
+        db.commit()
+        with registered_previous_shape(db):
+            migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
         self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V22
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
-
-    def test_frozen_v23_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V23_FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V23
+            db.execute("SELECT content FROM messages").fetchone()[0], "Hallo"
         )
-
-    def test_frozen_v24_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V24_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V24
-        )
-
-    def test_frozen_v25_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V25_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V25
-        )
-
-    def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):
-        frozen = self.connect()
-        frozen.executescript(CURRENT_FIXTURE.read_text(encoding="utf-8"))
-        live = self.connect()
-        initialize_schema(live)
-        expected = database_schema_signature(live)
-        self.assertEqual(database_schema_signature(frozen), expected)
-        for fixture in RELEASED_FIXTURES:
-            with self.subTest(fixture=fixture.name):
-                db = self.connect()
-                db.executescript(fixture.read_text(encoding="utf-8"))
-                migrate_schema(db)
-                db.commit()
-                self.assertEqual(database_schema_signature(db), expected)
 
     def test_lost_savepoint_does_not_mask_the_original_upgrade_error(self):
-        # The step ends the transaction or drops the savepoint, as an engine
-        # error can, before it fails; cleanup must keep the original error.
-        for statement in ("ROLLBACK", "RELEASE schema_migration"):
+        # The step fails after its change, or first ends the transaction or
+        # drops the savepoint as an engine error can; cleanup keeps the error.
+        for statement in ("", "ROLLBACK", "RELEASE schema_migration"):
             with self.subTest(statement=statement):
                 db = self.connect()
-                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
+                previous_shape_database(db)
                 before = list(db.iterdump())
 
                 def failing_step(connection, statement=statement):
-                    connection.execute("CREATE TABLE migration_probe(value TEXT)")
-                    connection.execute(statement)
+                    add_index_step(connection)
+                    if statement:
+                        connection.execute(statement)
                     raise RuntimeError("injected migration failure")
 
-                steps = {SHAPE_SCHEMA_V21: (SHAPE_CURRENT, failing_step)}
                 with (
-                    mock.patch.dict(migrations.UPGRADE_STEPS, steps),
+                    registered_previous_shape(db, failing_step),
                     self.assertRaisesRegex(RuntimeError, "injected"),
                 ):
                     migrate_schema(db)
                 db.rollback()
                 self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], PREVIOUS_VERSION
+                )
 
     def test_upgraded_database_restarts_with_the_same_build_unchanged(self):
         with tempfile.TemporaryDirectory() as root:
@@ -295,8 +304,9 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db = sqlite3.connect(path)
             db.row_factory = sqlite3.Row
             try:
-                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
-                migrate_schema(db)
+                previous_shape_database(db)
+                with registered_previous_shape(db):
+                    migrate_schema(db)
                 db.commit()
                 upgraded = list(db.iterdump())
             finally:
@@ -314,29 +324,16 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 reopened.close()
 
     def test_version_and_shape_must_belong_together(self):
-        current = self.current_database()
-        current.execute(f"PRAGMA user_version = {OLDEST_SUPPORTED_VERSION}")
-        current.commit()
-        self.assert_rejected_unchanged(current)
-        released = self.connect()
-        released.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
-        released.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
-        released.commit()
-        self.assert_rejected_unchanged(released)
-
-    def test_frozen_current_schema_fixture_matches_the_live_schema(self):
-        # When the schema changes again, move this fixture's digest into
-        # backend.db.schema_history and add an upgrade step before refreezing.
-        frozen = self.connect()
-        frozen.executescript(CURRENT_FIXTURE.read_text(encoding="utf-8"))
-        live = self.connect()
-        initialize_schema(live)
-        self.assertEqual(
-            database_schema_signature(frozen), database_schema_signature(live)
-        )
-        self.assertEqual(
-            frozen.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
+        previous = self.connect()
+        previous_shape_database(previous)
+        with registered_previous_shape(previous):
+            current = self.current_database()
+            current.execute(f"PRAGMA user_version = {PREVIOUS_VERSION}")
+            current.commit()
+            self.assert_rejected_unchanged(current)
+            previous.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+            previous.commit()
+            self.assert_rejected_unchanged(previous)
 
     @unittest.skipIf(
         cipher_backend is None, "SQLCipher requires the Docker runtime on Windows"
@@ -345,18 +342,18 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "encrypted.db"
             options = {
+                "backend": cipher_backend,
                 "password": "synthetic-migration-test-key",
                 "configure": configure_cipher,
-                "row_factory": cipher_backend.Row,
             }
-            manager = DatabaseManager(path, cipher_backend, **options)
+            manager = temp_database(self, path=path, **options)
             try:
                 with manager.unit_of_work() as db:
                     initialize_schema(db)
                     migrate_schema(db)
             finally:
                 manager.close()
-            reopened = DatabaseManager(path, cipher_backend, **options)
+            reopened = temp_database(self, path=path, **options)
             try:
                 with reopened.unit_of_work() as db:
                     migrate_schema(db)

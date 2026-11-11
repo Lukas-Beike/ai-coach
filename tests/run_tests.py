@@ -256,6 +256,7 @@ def main() -> int:
 
     save()
     modules = None
+    skipped: dict[str, str] = {}
     if args.changed:
         try:
             paths = changed_tests.changed_paths(args.base)
@@ -266,8 +267,13 @@ def main() -> int:
         modules, reason = changed_tests.select_modules(paths)
         evidence.update(changed_paths=paths, changed_selection=reason)
         print(f"Changed-test selection against {args.base}: {reason}", flush=True)
+        skipped = changed_tests.heavy_skips(paths)
+        for module in skipped:
+            (modules or {}).pop(module, None)
         for module, why in sorted((modules or {}).items()):
             print(f"  {module}: {why}", flush=True)
+        for module, why in sorted(skipped.items()):
+            print(f"  skipped {module}: {why}", flush=True)
         if modules == {}:
             evidence["status"] = "empty"
             save()
@@ -279,7 +285,11 @@ def main() -> int:
         evidence["status"] = "discovery_failed"
         save()
         raise
-    tests = select_suite(discovered, args.suite)
+    tests = [
+        test
+        for test in select_suite(discovered, args.suite)
+        if module_name(test) not in skipped
+    ]
     if args.changed and not tests:
         evidence.update(
             status="empty", discovered_ids=[test.id() for test in discovered]

@@ -9,20 +9,18 @@ explicit assignment still wins. Temporary database and synthetic rows only.
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import intervals_compaction as intervals_fixture
+from support import temp_database
 
 from backend.activities.activity_summary import activity_summaries
 from backend.athlete.equipment import EquipmentService
-from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -84,12 +82,7 @@ def garmin_activity(identifier: int) -> dict[str, Any]:
 
 class EquipmentSessionTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "gear.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "gear.db", row_factory=row_factory)
         key_values = KeyValueRepository(lambda: SYNCED)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
@@ -351,12 +344,7 @@ class CanonicalGearParityTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "gear.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "gear.db", row_factory=row_factory)
         self.rows = [intervals_row("i1"), intervals_row("i2")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
@@ -447,12 +435,7 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
     """Sessions without an Intervals.icu record count like any other session."""
 
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "sessions.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "sessions.db", row_factory=row_factory)
         self.wahoo: list[dict[str, Any]] = [wahoo_summary("w1")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)

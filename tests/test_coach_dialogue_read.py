@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import datetime
-from pathlib import Path
+
+from support import temp_database
 
 from backend.athlete.profile import ProfileService
 from backend.coach.conversation import CoachMessageService
 from backend.coach.dialogue import CoachDialogueReadService
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import (
     ChatRepository,
     KeyValueRepository,
     ProfileRepository,
 )
-from backend.db.schema import initialize_schema
 from backend.runtime.events import StateEventBuffer
 
 NOW = "2026-09-23T08:00:00+00:00"
@@ -38,15 +36,13 @@ class ReadOnlyDatabaseManager:
 
 class CoachDialogueReadServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temp_dir.name) / "coach.sqlite",
-            sqlite3,
+        self.database_manager = temp_database(
+            self,
+            "coach.sqlite",
             row_factory=row_factory,
             persist_connections=False,
+            schema=True,
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.chat_repository = ChatRepository(lambda: NOW)
         self.messages = CoachMessageService(
@@ -59,10 +55,6 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
             mutation_coordinator=threading.RLock(),
             on_location_changed=lambda *args, **kwargs: None,
         )
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temp_dir.cleanup()
 
     def service(self, clock=None) -> CoachDialogueReadService:
         return CoachDialogueReadService(

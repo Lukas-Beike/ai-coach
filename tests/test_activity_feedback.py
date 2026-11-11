@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import unittest
 from copy import deepcopy
-from pathlib import Path
 
 from canonical_detail_support import add_session_record, seed_intervals_activity
+from support import temp_database
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import (
@@ -16,7 +15,6 @@ from backend.activities.feedback import (
 )
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -196,16 +194,9 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         )
 
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temp_dir.name) / "feedback.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.manager = temp_database(
+            self, "feedback.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(self.temp_dir.cleanup)
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.feedback_repository = ActivityFeedbackRepository(
             lambda: "2026-09-20T12:00:00+00:00"
         )

@@ -6,8 +6,9 @@ import json
 import sqlite3
 import unittest
 import uuid
-from contextlib import contextmanager
 from unittest.mock import patch
+
+from support import FakeManager
 
 from backend.db import row_factory
 from backend.db.repositories import (
@@ -21,24 +22,6 @@ from backend.planning.training_plans import (
     COACH_PLAN_CONSTRAINTS_PREFIX,
     TrainingPlanService,
 )
-
-
-class _DatabaseManager:
-    def __init__(self, db):
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        try:
-            yield self.db
-            self.db.commit()
-        except Exception:
-            self.db.rollback()
-            raise
-
-    @contextmanager
-    def reader(self):
-        yield self.db
 
 
 class _Events:
@@ -75,7 +58,7 @@ class TrainingPlanServiceTests(unittest.TestCase):
         )
         self.events = _Events()
         self.service = TrainingPlanService(
-            _DatabaseManager(self.db),
+            FakeManager(self.db),
             self.repository,
             self.key_values,
             self.revisions,

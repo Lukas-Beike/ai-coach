@@ -1,6 +1,7 @@
 """Every (provider, job type) reaches its provider service through the real wiring.
 
-The user and the Coach start sync jobs over ``POST /api/sync/jobs``. This matrix
+The user and the Coach start sync jobs over ``POST /api/sync/jobs``; only the
+nutrition export is enqueued by the Coach card directly (#2137). This matrix
 drives each pair the registry declares through the real built-in runtime
 bindings, the real job queue and store, payload normalization, the real executor
 and the real outcome service, on a temporary SQLite database. Fakes stand in only
@@ -18,7 +19,6 @@ import ast
 import contextlib
 import logging
 import sqlite3
-import tempfile
 import threading
 import unittest
 from collections.abc import Iterator
@@ -28,11 +28,12 @@ from types import SimpleNamespace
 from typing import Any, Final, cast
 from unittest import mock
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.nutrition.contracts import nutrition_approval_item
 from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
@@ -69,6 +70,7 @@ JOBS = "/api/sync/jobs"
 UNIT = "11111111-1111-4111-8111-111111111111"
 ENTRIES = [{"library_workout_id": UNIT, "expected_payload_hash": "a" * 64}]
 COMPETITIONS = [{"type": "competition", "id": "race-1", "sha256": "b" * 64}]
+NUTRITION = [nutrition_approval_item({"date": "2026-11-08", "total_kcal": 2000})]
 BACKFILL_END = "2026-10-01"
 OK = {"status": "ok", "window_records": 3}
 
@@ -95,6 +97,8 @@ EXPECTED_PAIRS: Final = frozenset(
         (CALENDAR_ID, "refresh"),
     }
 )
+# Pairs only the Coach card enqueues; the job route rejects them.
+COACH_ONLY: Final = frozenset({(INTERVALS_ID, "nutrition_sync")})
 # Providers whose descriptor carries a not_configured_message.
 CONFIGURABLE: Final = frozenset({INTERVALS_ID, GARMIN_ID, WAHOO_ID})
 
@@ -105,7 +109,10 @@ CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
         {"reason": "test", "approval_manifest": COMPETITIONS},
         "intervals.competitions",
     ),
-    (INTERVALS_ID, "nutrition_sync"): ({"pending_limit": 3}, "intervals.nutrition"),
+    (INTERVALS_ID, "nutrition_sync"): (
+        {"approval_manifest": NUTRITION},
+        "intervals.nutrition",
+    ),
     (GARMIN_ID, "refresh"): ({"days": 7, "reason": "manual"}, "garmin.sync"),
     (GARMIN_ID, "historical_backfill"): (
         {"days": 30, "end_date": BACKFILL_END},
@@ -203,14 +210,9 @@ class Harness:
         garmin: bool = True,
         wahoo: bool = True,
     ) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        case.addCleanup(temporary.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary.name) / "matrix.sqlite", sqlite3, row_factory=sqlite3.Row
+        self.database = temp_database(
+            case, "matrix.sqlite", row_factory=sqlite3.Row, schema=True
         )
-        case.addCleanup(self.database.close)
-        with self.database.unit_of_work() as db:
-            initialize_schema(db)
         self.calls: list[str] = []
         self.garmin = _Connected("garmin.sync", self.calls, garmin)
         self.wahoo = _Connected("wahoo.sync", self.calls, wahoo)
@@ -329,6 +331,12 @@ class Harness:
             provider_configured=self.runtime.provider_configured,
         )
 
+    def start(self, provider: str, job_type: str, payload: dict[str, Any]) -> dict:
+        """Start a pair the way its client does: the route, or the Coach card."""
+        if (provider, job_type) in COACH_ONLY:
+            return self.queue.enqueue(provider, job_type, payload, requested_by="coach")
+        return self.post(provider, job_type, payload)
+
     def post(self, provider: str, job_type: str, payload: dict[str, Any]) -> dict:
         status, job = self.endpoint.execute(
             JOBS, {"provider": provider, "type": job_type, "payload": payload}
@@ -373,7 +381,7 @@ class ProviderJobWiringTests(unittest.TestCase):
             with self.subTest(provider=provider, type=job_type):
                 harness = Harness(self)
 
-                job = harness.post(provider, job_type, payload)
+                job = harness.start(provider, job_type, payload)
 
                 self.assertEqual(
                     (provider, job_type, "queued"),

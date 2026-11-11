@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import socket
 import unittest
 from unittest.mock import ANY, Mock
 
-from backend.http_api.state_events_get import StateEventsGetRoutes
+from backend.http_api.state_events_get import (
+    StateEventsGetRoutes,
+    client_is_connected,
+)
 
 
 class StateEventsGetRoutesTests(unittest.TestCase):
@@ -28,6 +32,7 @@ class StateEventsGetRoutesTests(unittest.TestCase):
             send_headers=self.handler.send_sse_headers,
             send_event=self.handler.send_sse_event,
             set_connection_timeout=self.handler.connection.settimeout,
+            client_is_connected=ANY,
             session_is_active=ANY,
         )
 
@@ -46,6 +51,25 @@ class StateEventsGetRoutesTests(unittest.TestCase):
         self.assertEqual(self.auth.authenticated_session.call_count, 2)
         self.auth.authenticated_session.assert_called_with(self.handler)
         self.auth.require_auth.assert_called_once_with(self.handler)
+
+    def test_client_is_connected_sees_a_closed_peer_and_keeps_pending_bytes(
+        self,
+    ) -> None:
+        server_side, client_side = socket.socketpair()
+        self.addCleanup(server_side.close)
+        self.addCleanup(client_side.close)
+        self.assertTrue(client_is_connected(server_side))
+        client_side.sendall(b"x")
+        self.assertTrue(client_is_connected(server_side))
+        self.assertEqual(server_side.recv(1), b"x")
+        client_side.close()
+        self.assertFalse(client_is_connected(server_side))
+
+    def test_client_is_connected_is_false_for_a_closed_local_socket(self) -> None:
+        server_side, client_side = socket.socketpair()
+        self.addCleanup(client_side.close)
+        server_side.close()
+        self.assertFalse(client_is_connected(server_side))
 
     def test_auth_denial_precedes_connection_and_transport_access(self) -> None:
         denied = RuntimeError("denied")

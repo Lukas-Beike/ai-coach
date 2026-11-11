@@ -1,10 +1,10 @@
 """Versioned, transactional upgrades of supported encrypted application schemas.
 
-The oldest supported schema is version 21, written by releases 1.13.41 to
-1.13.44. Older databases and backups are rejected unchanged; upgrade them with
-release 1.13.44 first. Every released schema from version 21 onward keeps its
-frozen fixture in tests/fixtures, its digest in backend.db.schema_history and an
-upgrade step here, so each supported release still reaches the current schema.
+The only supported baseline is the schema production runs: version 26, written
+by release 2.0.5. Older databases and backups are rejected unchanged; upgrade
+them with release 2.0.5 first. The baseline keeps its frozen fixture in
+tests/fixtures and its digest in backend.db.schema_history; each later schema
+adds one upgrade step here, so the baseline reaches the current schema.
 """
 
 from __future__ import annotations
@@ -15,34 +15,23 @@ from typing import Any, Final
 
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
-    FEEDBACK_PURPOSE_DDL,
-    STREAM_DFA_DDL,
-    STREAM_SENSORS_DDL,
-    SYNC_JOBS_BACKFILL_INDEX_DDL,
     database_schema_is_current,
     database_schema_signature,
-    execute_ddl,
 )
 from backend.db.schema_history import (
     ACCEPTED_SHAPES_BY_VERSION,
     OLDEST_SUPPORTED_SCHEMA_VERSION,
     SHAPE_CURRENT,
-    SHAPE_SCHEMA_V21,
-    SHAPE_SCHEMA_V22,
-    SHAPE_SCHEMA_V23,
-    SHAPE_SCHEMA_V24,
-    SHAPE_SCHEMA_V25,
     released_shape,
 )
-from backend.db.strength_sets_migration import add_strength_sets
 
 _UNSUPPORTED_SCHEMA_MESSAGE = (
     "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
     "Der Datenbestand bleibt erhalten; bitte ein kompatibles Release verwenden."
 )
 _OLDER_SCHEMA_MESSAGE = (
-    "Die Datenbank stammt aus einem Release vor 1.13.41 (Schema älter als 21) "
-    "und wird nicht mehr unterstützt. Bitte zuerst mit Release 1.13.44 öffnen; "
+    "Die Datenbank stammt aus einem Release vor 2.0.5 (Schema älter als 26) "
+    "und wird nicht mehr unterstützt. Bitte zuerst mit Release 2.0.5 öffnen; "
     "der Datenbestand bleibt unverändert."
 )
 
@@ -105,40 +94,6 @@ def _upgrade_from_shape(db: Any, shape: str) -> None:
         pending = next_shape
 
 
-def _upgrade_v21_to_v22(db: Any) -> None:
-    # Adds the strength set detail kind; every detail row stays as it was.
-    add_strength_sets(db)
-
-
-def _upgrade_v22_to_v23(db: Any) -> None:
-    # Adds the athlete's session purpose marking; every feedback row stays as it
-    # was and carries no marking (NULL).
-    execute_ddl(db, FEEDBACK_PURPOSE_DDL)
-
-
-def _upgrade_v23_to_v24(db: Any) -> None:
-    # Adds the heart rate and power source and the sensor list of stream sets;
-    # every detail row stays as it was and carries no source (NULL) until its
-    # activity is mapped again.
-    execute_ddl(db, STREAM_SENSORS_DDL)
-
-
-def _upgrade_v24_to_v25(db: Any) -> None:
-    # Adds the first threshold estimate of stream sets; every detail row stays as
-    # it was and carries no estimate (NULL) until its activity is mapped again.
-    execute_ddl(db, STREAM_DFA_DDL)
-
-
-def _upgrade_v25_to_v26(db: Any) -> None:
-    # Adds the backfill-continuation index of sync jobs; it is built over the
-    # existing rows and changes none of them.
-    execute_ddl(db, SYNC_JOBS_BACKFILL_INDEX_DDL)
-
-
-UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
-    SHAPE_SCHEMA_V21: (SHAPE_SCHEMA_V22, _upgrade_v21_to_v22),
-    SHAPE_SCHEMA_V22: (SHAPE_SCHEMA_V23, _upgrade_v22_to_v23),
-    SHAPE_SCHEMA_V23: (SHAPE_SCHEMA_V24, _upgrade_v23_to_v24),
-    SHAPE_SCHEMA_V24: (SHAPE_SCHEMA_V25, _upgrade_v24_to_v25),
-    SHAPE_SCHEMA_V25: (SHAPE_CURRENT, _upgrade_v25_to_v26),
-}
+# Baseline shape -> (next shape, step). Empty while the baseline is the live
+# schema; the next schema version adds its step from SHAPE_SCHEMA_V26 here.
+UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {}

@@ -89,13 +89,13 @@ The system SHALL build ordinary Coach context from saved Garmin, Wahoo and local
 - **WHEN** the athlete sends an ordinary Coach message
 - **THEN** context assembly reads saved data and weather with refresh disabled rather than issuing provider calls for every message.
 
-#### Scenario: No stored Intervals.icu sync
-- **WHEN** the canonical provider coverage holds no Intervals.icu sync, which is the case after the #1728 purge
-- **THEN** the recovery section requests Garmin's performance values beside the recovery records, keeps provider recovery separate and keeps unavailable evidence explicit.
+#### Scenario: No Intervals.icu input
+- **WHEN** the recovery section is built, whatever the stored provider coverage (Intervals.icu is no longer read, #1728)
+- **THEN** it requests Garmin's performance values beside the recovery records, keeps provider recovery separate and keeps unavailable evidence explicit.
 
 #### Scenario: Recovery section from canonical records
 - **WHEN** the Coach recovery section is built
-- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, the night values `avg_spo2_pct`, `lowest_spo2_pct`, `avg_respiration_brpm` and `avg_sleeping_hr_bpm`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`; the sleep record adds `night_means` with each night value's mean and night count over those 14 days), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status, read in the same read transaction as the records; the raw Garmin view is not read, and Garmin's performance values are requested only when the canonical provider coverage holds no Intervals.icu sync.
+- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, the night values `avg_spo2_pct`, `lowest_spo2_pct`, `avg_respiration_brpm` and `avg_sleeping_hr_bpm`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`; the sleep record adds `night_means` with each night value's mean and night count over those 14 days), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status, read in the same read transaction as the records; the raw Garmin view is not read, and the section always carries Garmin's performance values under `performance`.
 
 #### Scenario: Local calendar planning
 - **WHEN** context combines planned units, competitions and external calendar entries
@@ -118,11 +118,15 @@ The system SHALL route a requested provider update through the existing provider
 - **WHEN** the provider refresh is queued
 - **THEN** the tool returns a sync-job reference whose current status can be read with `get_sync_job`; queuing alone is not proof that data is current.
 
+#### Scenario: Reading a sync job
+- **WHEN** the Coach calls `get_sync_job` with a job id
+- **THEN** tool preparation grants the matching `sync_job:<id>` scope for every call, so the Coach can read any local sync job by id.
+
 #### Scenario: Refresh failure
 - **WHEN** a refresh fails or its job remains pending
 - **THEN** that tool result remains distinguishable from a successful refresh, and saved context remains saved evidence rather than a new provider measurement.
 
-Evidence: `backend/coach/sync_tools.py:CoachSyncToolService.execute`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._waits_for_completion`; `tests/test_coach_dialogue.py:test_current_refresh_runs_before_next_model_response_without_trigger_gate`, `tests/test_coach_dialogue.py:test_garmin_refresh_waits_for_completion_without_queueing`, `tests/test_coach_dialogue.py:test_queued_refresh_and_job_read_use_current_tool_results`; `tests/test_coach_tool_coverage.py:test_provider_reads_and_job_status_use_correct_provider`.
+Evidence: `backend/coach/sync_tools.py:CoachSyncToolService.execute`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._waits_for_completion`; `tests/test_coach_dialogue.py:test_current_refresh_runs_before_next_model_response_without_trigger_gate`, `tests/test_coach_dialogue.py:test_garmin_refresh_waits_for_completion_without_queueing`, `tests/test_coach_dialogue.py:test_queued_refresh_and_job_read_use_current_tool_results`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`; `tests/test_coach_tool_preparation.py:StructuredToolPreparationTests.test_get_sync_job_receives_object_scope_without_reclassification`; `tests/test_coach_tool_coverage.py:test_provider_reads_and_job_status_use_correct_provider`.
 
 ### Requirement: CP7 Bounded local reads and analysis parity
 The system SHALL provide read-only tools for exact local records and deterministic analysis without treating tool reads as permission to write.
@@ -139,8 +143,8 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** `get_training_report` selects `sleep_timing_variability`
 - **THEN** it returns the Coach context's per-series summary plus each series' last 14 nights, without the UI's 84-night chart points.
 
-#### Scenario: Weekly progress over 6 or 12 weeks
-- **WHEN** `get_training_report` requests the `progress` section alone, for `days` 7, 28, 42 or 84
+#### Scenario: Weekly progress over 4 to 12 weeks
+- **WHEN** `get_training_report` requests the `progress` section alone, for `days` 7, 28, 42, 56 or 84
 - **THEN** it receives per-ISO-week run, ride and strength buckets (sessions, duration, load, session-RPE AU, 3-zone approximation, plan compliance) with the local fitness (M7, key `ctl`) and mean-max ride power and run speed change per environment (canonical full-resolution curves); the running week and weeks without records are incomplete or unknown, never rest, and window metrics follow the sport filter.
 
 #### Scenario: Invalid report or missing owner
@@ -179,7 +183,7 @@ The system SHALL isolate provider, calendar, attachment and stored product text 
 Evidence: `backend/coach/context.py:_defanged`, `backend/coach/context.py:CoachTrainingContextService.build`, `backend/coach/context.py:CoachIntervalsContextService.project`; `backend/coach/request_payload.py:CoachRequestPayloadService`; `tests/test_coach_training_context.py:test_external_text_cannot_reproduce_the_untrusted_data_fence`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`; `tests/test_coach_context_reduction.py:test_request_keeps_tools_and_telemetry_contains_no_athlete_content`. Prompt separation is inspected; resistance to every natural-language injection is not proven by these tests.
 
 ### Requirement: CP9 Inspectable context preview
-The system SHALL expose an authenticated bounded preview of the Coach context and conversation continuity information without credentials or inline attachment file data.
+The system SHALL expose an authenticated preview of the full Coach context (not a turn's selection) and conversation continuity information without credentials or inline attachment file data.
 
 #### Scenario: Preview current evidence
 - **WHEN** the athlete opens `/api/context-preview`
@@ -187,7 +191,7 @@ The system SHALL expose an authenticated bounded preview of the Coach context an
 
 #### Scenario: Long or private input
 - **WHEN** source sections or messages exceed preview limits or contain transport-only fields
-- **THEN** the response is bounded and excludes prohibited credential/session/raw data while retaining useful source information.
+- **THEN** `context_text` (within the total character budget), `projection` and `local_training_library` are bounded; `structured_athlete_context` and `latest_activities` are the full structured context as built, without the section budgets, and the response excludes prohibited credential/session/raw data while retaining useful source information.
 
 #### Scenario: Conversation explanation
 - **WHEN** preview describes the Responses conversation chain

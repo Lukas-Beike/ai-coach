@@ -24,7 +24,7 @@ The system SHALL normalize bounded competition identity, local start/date, sport
 Evidence: `backend/planning/competitions.py:normalize_competition`, `backend/planning/competitions.py:competition_start`, `backend/planning/competitions.py:competition_distance`, `backend/planning/competitions.py:competition_stored_sport`, `backend/planning/competitions.py:competition_event_optional_payload`; `tests/test_planning_competitions.py:test_normalize_preserves_existing_contract`, `tests/test_planning_competitions.py:test_validation_rejects_missing_identity_and_invalid_bounds`, `tests/test_planning_competitions.py:test_sport_aliases_and_intervals_fallbacks`, `tests/test_planning_competitions.py:test_external_id_and_optional_payload_preserve_types_and_input`.
 
 ### Requirement: CS2 Local competition create and partial edit
-The system SHALL create or edit one local competition with stable identity, preserve omitted Coach edit fields, enforce the twenty-event creation bound, and audit the mutation in its transaction without an implicit remote push.
+The system SHALL create or edit one local competition with stable identity, preserve omitted Coach edit fields, enforce the upcoming-race bound, and audit the mutation in its transaction without an implicit remote push.
 
 #### Scenario: New local competition
 - **WHEN** an authorized `save_competition` creates a valid target event without an existing ID
@@ -34,28 +34,15 @@ The system SHALL create or edit one local competition with stable identity, pres
 - **WHEN** the Coach resolves an existing competition ID and changes selected fields
 - **THEN** the existing identity and omitted required/optional details are preserved under the implemented merge policy and the edit is audited.
 
-#### Scenario: Missing identity, capacity or history failure
-- **WHEN** an edit ID is malformed/missing in storage, a new event exceeds twenty, or audit persistence fails
+#### Scenario: Upcoming-race bound
+- **WHEN** twenty races dated today or later are stored and a save creates a race dated today or later or moves a past race into the future
+- **THEN** it fails with "Es können maximal 20 anstehende Wettkämpfe gespeichert werden."; past races never count and are never limited, and editing an upcoming race is not blocked.
+
+#### Scenario: Missing identity or history failure
+- **WHEN** an edit ID is malformed/missing in storage or audit persistence fails
 - **THEN** the request fails without creating a substitute event or committing an unaudited partial save.
 
-Evidence: `backend/planning/competition_service.py:CompetitionService.save`, `backend/planning/competition_service.py:_coach_payload`, `backend/planning/competition_service.py:_merge_update`; `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`; `tests/test_planning_competition_service.py:test_create_and_partial_update_share_one_transaction_with_history`, `tests/test_planning_competition_service.py:test_failed_history_write_rolls_back_competition`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`; `tests/test_coach_dialogue.py:test_competition_edit_uses_resolved_id_without_literal_name`.
-
-### Requirement: CS3 Complete competition-set save and unchanged round trips
-The system SHALL save a complete athlete-context competition set atomically, reject duplicate normalized IDs, preserve stored remote identities, and leave unchanged competition sync state intact.
-
-#### Scenario: Profile-only context round trip
-- **WHEN** the complete competition list is resubmitted unchanged while profile fields change
-- **THEN** competition rows retain their existing synced/conflict state rather than becoming dirty solely because of the round trip.
-
-#### Scenario: Changed or removed competition
-- **WHEN** a complete context changes an event or omits an existing event
-- **THEN** changed records become local dirty state and removed linked records retain the corresponding remote-deletion tombstones, all in the profile/context transaction.
-
-#### Scenario: Invalid complete set
-- **WHEN** the list is not an array, exceeds twenty, duplicates normalized IDs or a later write fails
-- **THEN** no partial profile, competition or tombstone changes from that context save remain.
-
-Evidence: `backend/athlete/context.py:AthleteContextService.save`, `backend/athlete/context.py:AthleteContextService._competition_unchanged`; `tests/test_athlete_context.py:test_rejects_duplicate_normalized_ids`, `tests/test_athlete_context.py:test_profile_only_save_keeps_unchanged_competition_sync_state`, `tests/test_athlete_context.py:test_changed_competition_marks_dirty_and_clears_conflict`, `tests/test_athlete_context.py:test_unchanged_round_trip_of_listed_competitions_is_not_a_change`, `tests/test_athlete_context.py:test_rolls_back_profile_tombstone_and_prior_upsert_after_later_failure`.
+Evidence: `backend/planning/competition_service.py:CompetitionService.save`, `backend/planning/competition_service.py:_coach_payload`, `backend/planning/competition_service.py:_merge_update`; `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`; `tests/test_planning_competition_service.py:test_create_and_partial_update_share_one_transaction_with_history`, `tests/test_planning_competition_service.py:test_failed_history_write_rolls_back_competition`, `tests/test_planning_competition_service.py:test_twenty_past_races_do_not_block_a_new_race`, `tests/test_planning_competition_service.py:test_twenty_upcoming_races_reject_the_next_one_and_keep_the_archive`, `tests/test_planning_competition_service.py:test_full_upcoming_cap_allows_past_race_and_blocks_move_into_future`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`; `tests/test_coach_dialogue.py:test_competition_edit_uses_resolved_id_without_literal_name`.
 
 ### Requirement: CS4 Competition removal and remote tombstone retention
 The system SHALL delete a locally selected competition under the applicable authorization, unlink any public-event candidate, and retain remote deletion intent for linked records until an authorized remote sync succeeds.
@@ -72,7 +59,7 @@ The system SHALL delete a locally selected competition under the applicable auth
 - **WHEN** a requested remote deletion fails
 - **THEN** it does not consume the local deletion intent as if remote deletion succeeded and no upsert follows.
 
-Evidence: `backend/planning/competition_service.py:CompetitionService.delete`; `backend/athlete/context.py:AthleteContextService._record_removed_competition_tombstones`; `backend/sync/competitions.py:CompetitionSyncReconciler.clear_tombstones`; `tests/test_planning_competition_service.py:test_delete_creates_remote_tombstone_and_unlinks_public_candidate`; `tests/test_sync_competitions.py:test_failed_remote_delete_does_not_clear_tombstones_or_upsert`.
+Evidence: `backend/planning/competition_service.py:CompetitionService.delete`; `backend/sync/competitions.py:CompetitionSyncReconciler.clear_tombstones`; `tests/test_planning_competition_service.py:test_delete_creates_remote_tombstone_and_unlinks_public_candidate`; `tests/test_sync_competitions.py:test_failed_remote_delete_does_not_clear_tombstones_or_upsert`.
 
 ### Requirement: CS5 Explicit competition sync and conflict recovery
 The system SHALL keep remote pushes explicit and output-only (Intervals.icu receives competitions and is never a source of them), detect unsafe remote identity/missing-record cases, validate approval freshness, and offer deliberate keep-local/adopt-remote conflict resolution.
@@ -153,6 +140,8 @@ The system SHALL present the planning segment as `Wettkämpfe`, with individuall
 - **WHEN** distance is missing, sport has only local free-text detail, or a record has an invalid date
 - **THEN** missing distance is shown as unknown rather than zero, local sport detail is preserved, and an undated record remains accessible separately without an invented date or countdown.
 
+Evidence: `public/plan-views.js:renderCompetitions`, `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionDistance`, `public/plan-views.js:competitionDate`; `tests/competition-overview.test.cjs` (distance and invalid-date tests); `e2e/competitions.spec.js` (summaries, ordering, past-only lists).
+
 ### Requirement: CS10 Saved event details and historical archive
 The system SHALL reveal saved optional event details only on expansion, omit empty optional fields, and group past events in an initially collapsed archive ordered newest first. Expansion SHALL remain keyboard accessible and render untrusted event text safely.
 
@@ -168,12 +157,16 @@ The system SHALL reveal saved optional event details only on expansion, omit emp
 - **WHEN** event text contains markup or provider-supplied instructions
 - **THEN** it is displayed as safe content and never executed or treated as authorization.
 
+Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`; `e2e/competitions.spec.js` (saved details, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
+
 ### Requirement: CS11 Overview excludes training analysis
 The competition overview SHALL exclude date-derived training phases, weekly training volume/history, preparation evidence, long-session analysis and load-scenario controls. Reading the overview SHALL remain usable without activity analyses or scenario availability.
 
 #### Scenario: Athlete checks competition dates
 - **WHEN** the competition overview is loaded or an event is expanded
 - **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, phase labels or scenario inputs.
+
+Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile-small and desktop); `e2e/training-feature-panels.spec.js`.
 
 ### Requirement: CS12 Read state and competition authority
 The overview SHALL preserve canonical local records, existing Coach editing and receipt/undo workflows, compact source/local-change indications and explicit synchronization authorization. Opening, expanding, archiving visually or refreshing the overview SHALL perform no durable mutation or provider write.
@@ -190,11 +183,9 @@ The overview SHALL preserve canonical local records, existing Coach editing and 
 - **WHEN** an authorized Coach competition edit succeeds and the overview refreshes
 - **THEN** the saved updated event appears with its stable identity and existing receipt/undo behavior, without an additional remote write.
 
-Evidence for CS9–CS12: `public/plan-views.js` renders canonical competition state supplied through `public/state-loader.js`; `public/app.js` binds local retry, and `public/shared.js` no longer requests season preparation on route entry. Bootstrap/profile reads are owned by `backend/http_api/bootstrap_state.py` and `backend/http_api/athlete_get.py`; local mutation authority remains in `backend/planning/competition_service.py`.
+Evidence: `public/state-loader.js` (canonical competition state), `public/app.js` (local retry), `backend/http_api/bootstrap_state.py` and `backend/http_api/athlete_get.py` (reads), `backend/planning/competition_service.py:CompetitionService.save` (local mutation authority); `e2e/competitions.spec.js` (no writes while reading, failed reads with retry, saved Coach edit shown).
 
-Validation: `tests/competition-overview.test.cjs` covers missing, zero and free-text distance and invalid dates. `e2e/competitions.spec.js` covers summaries, disclosure details, ordering, archives, safe text, failed reads/retry, empty lists and absence of analysis requests or writes on mobile-small and desktop. `e2e/text-reflow.spec.js`, `e2e/training-feature-panels.spec.js`, `tests/test_server_frontend.py` and `tests/test_server_runtime.py` cover the surrounding UI and asset contracts. Existing CS1–CS8 remain unchanged.
-
-Evidence limits: Coach-edit refresh is exercised using simulated canonical saved state rather than an end-to-end real-model mutation. Real-device microphone/notification permissions and keyboard-open behavior were not verified. The full Python discovery run's five obsolete UI assertions were corrected and both affected suites passed on rerun; the full discovery run was not repeated after those test-only corrections.
+Evidence limits for CS9–CS12: Coach-edit refresh is exercised using simulated canonical saved state rather than an end-to-end real-model mutation. Real-device microphone/notification permissions and keyboard-open behavior were not verified.
 
 ### Requirement: CS13 Completed races link to stored competitions
 The system SHALL link each stored competition to the completed sessions of its local date and sport when it reads activity summaries, without storing the link, so consumers see which session was the race.

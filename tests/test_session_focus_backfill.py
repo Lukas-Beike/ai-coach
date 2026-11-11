@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 import uuid
 from datetime import date
-from pathlib import Path
+
+from support import temp_database
 
 from backend.activities.workout_load import AthleteThresholds
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -43,12 +42,7 @@ class NoCalendarConflicts:
 
 class SessionFocusBackfillTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "backfill.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "backfill.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(

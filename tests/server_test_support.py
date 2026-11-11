@@ -92,7 +92,7 @@ def _garmin_metrics(snapshot):
     )
 
 
-def _current_performance_context(snapshot=None):
+def _current_performance_context(snapshot=None, today=None):
     effective_snapshot = (
         snapshot
         if snapshot is not None
@@ -108,7 +108,7 @@ def _current_performance_context(snapshot=None):
     return performance_context.current_performance_context(
         GarminSyncStatus.from_state(garmin),
         server.ATHLETE_DATA.profile().get(),
-        server.ATHLETE_CLOCK.now().date(),
+        today or server.ATHLETE_CLOCK.now().date(),
         canonical=recovery_only_inputs(
             garmin,
             wellness if isinstance(wellness, list) else None,

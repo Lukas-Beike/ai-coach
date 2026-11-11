@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import Mock
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.sync.plan_repair import PlanRepairManifestService
@@ -22,10 +21,7 @@ INTENT = {"_repair_period": PERIOD}
 
 class PlanRepairManifestServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temp.name) / "plan-repair.db", sqlite3, row_factory=row_factory
-        )
+        self.manager = temp_database(self, "plan-repair.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
@@ -38,10 +34,6 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
             db.execute("INSERT INTO planning_state(id, revision) VALUES (1, 7)")
         self.authority = Mock()
         self.service = PlanRepairManifestService(self.manager, self.authority)
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp.cleanup()
 
     def add(self, local_id: str, *, date: str = "2026-09-09", **fields: object) -> str:
         payload = {

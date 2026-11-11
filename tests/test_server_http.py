@@ -889,6 +889,7 @@ class ServerHttpTests(ServerTestCase):
                 send_headers=handler.send_sse_headers,
                 send_event=handler.send_sse_event,
                 set_connection_timeout=handler.connection.settimeout,
+                client_is_connected=ANY,
                 session_is_active=ANY,
             )
 

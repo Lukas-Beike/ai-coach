@@ -132,7 +132,8 @@ class ChangeSummaryTests(unittest.TestCase):
         summary = change_summary(
             [
                 _step("update_profile", changes=[_PROFILE_CHANGE]),
-                _step("undo_training_change", {"ok": True, "status": "applied"}),
+                # The status the tool really returns (#2134, E-501).
+                _step("undo_training_change", {"ok": True, "status": "undone"}),
             ]
         )
 

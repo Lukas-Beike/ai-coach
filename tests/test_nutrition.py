@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.athlete.clock import AthleteLocalClock
 from backend.config import Config
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition import (
     meal_type_from_hour,
@@ -367,12 +364,10 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(corrected["nutrition_basis"]["kind"], "packaging_label")
 
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "test_nutrition.db"
-        self.manager = DatabaseManager(self.db_path, sqlite3, row_factory=sqlite3.Row)
+        self.manager = temp_database(
+            self, "test_nutrition.db", row_factory=sqlite3.Row, schema=True
+        )
         self.lock = threading.Lock()
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
 
         self.fixed_now = "2026-09-24T12:00:00+00:00"
         self.service, self.library = build_nutrition_services(
@@ -381,10 +376,6 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             lambda: self.fixed_now,
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def test_templates_are_not_consumption_and_logs_are_immutable_snapshots(
         self,
@@ -821,6 +812,16 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(len(summaries), 2)
         self.assertEqual(summaries[0]["date"], "2026-09-23")
         self.assertEqual(summaries[1]["date"], "2026-09-24")
+        # A range spans at most 366 days, both ends included (#2137).
+        self.assertEqual(
+            len(self.service.get_range_summary("2025-09-24", "2026-09-24")), 2
+        )
+        with self.assertRaises(AppError) as raised:
+            self.service.get_range_summary("2025-09-23", "2026-09-24")
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "range_too_large"),
+        )
 
         unsynced = self.service.list_unsynced_dates()
         self.assertIn("2026-09-23", unsynced)

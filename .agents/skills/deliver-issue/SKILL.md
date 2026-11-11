@@ -78,7 +78,9 @@ PR body. A failing check, or an acceptance criterion with no evidence at all,
 stays open and blocks delivery. Then confirm `completedTasks` equals
 `totalTasks` in `npm run openspec -- list --json`, run
 `npm run openspec -- validate <name> --strict`, and only then
-`npm run openspec -- archive <name> --yes`, which also updates the main specs.
+`npm run openspec -- archive <name> --yes`, which also updates the main specs;
+then delete the created `openspec/changes/archive/<date>-<name>` folder in the
+same PR (git history keeps it).
 `--yes` skips the CLI's incomplete-task prompt, so never run it before that
 check, and never use `--skip-specs` or `--no-validate`. Afterwards run
 `npm run openspec -- validate --specs --strict`: a delta that passed alone can

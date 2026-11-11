@@ -5,15 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from unittest.mock import Mock
 
 from remote_link_fixtures import create_remote_links_table
+from support import temp_database
 
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.planning.planned_units import (
     plan_push_hash_matches,
@@ -95,12 +94,7 @@ def _state(store: SyncJobStore, job_id: str) -> dict:
 
 class SettledItemsTests(unittest.TestCase):
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(directory.name) / "jobs.sqlite", sqlite3, row_factory=sqlite3.Row
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "jobs.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """
@@ -200,12 +194,7 @@ class SettledItemsTests(unittest.TestCase):
 
 class PlanningRowsTests(unittest.TestCase):
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(directory.name) / "rows.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "rows.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             create_remote_links_table(db)
             db.execute(

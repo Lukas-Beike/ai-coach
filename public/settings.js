@@ -356,6 +356,15 @@ async function deleteGpsTracks() {
   } catch (error) { toast(error.message, true); }
 }
 
+// Files beside the database that the erasure could not remove.
+function privacyDeleteLeftovers(result) {
+  const copies = result.recovery_copies_failed
+    ? ` ${result.recovery_copies_failed} Wiederherstellungskopie(n) im Datenordner konnten nicht gelöscht werden.`
+    : "";
+  const logs = result.log_files_failed ? " Die Server-Protokolldateien konnten nicht gelöscht werden." : "";
+  return copies + logs;
+}
+
 async function deletePrivacyData() {
   try {
     const preview = await api("/api/privacy/delete/preview");
@@ -389,10 +398,7 @@ async function deletePrivacyData() {
     if (resultNotice) {
       const deleted = Object.entries(result.deleted_categories || {}).map(([category, count]) => `${category}: ${count}`).join(" · ");
       resultNotice.hidden = false;
-      const kept = result.recovery_copies_failed
-        ? ` ${result.recovery_copies_failed} Wiederherstellungskopie(n) im Datenordner konnten nicht gelöscht werden.`
-        : "";
-      resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.${kept}`;
+      resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.${privacyDeleteLeftovers(result)}`;
     }
     toast("Lokale Daten gelöscht");
     // Deleted records must neither stay on screen nor reach the session snapshot.

@@ -1,16 +1,14 @@
 import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, date, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import snapshot_seed
+from support import temp_database
 
 from backend.canonical import garmin_payload
 from backend.db import garmin_store
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.providers.garmin import _collect_optional_metric, _gear_inventory
@@ -420,9 +418,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
                     "end": "2026-03-31",
                     "synced_at": "2026-09-20T13:00:00",
                     "activities": [],
-                    "provider_sync": {
-                        "pagination": {"activities": {"complete": True}}
-                    },
+                    "provider_sync": {"pagination": {"activities": {"complete": True}}},
                 }
             )
         )
@@ -856,14 +852,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(empty["source_freshness"]["gear"]["freshness"], "current")
 
     def setUp(self):
-        temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary_directory.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary_directory.name) / "test.sqlite3",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.database.close)
+        self.database = temp_database(self, "test.sqlite3", row_factory=sqlite3.Row)
         self.key_values = KeyValueRepository(lambda: "2026-09-20T12:00:00")
         self.snapshots = SnapshotRepository()
         self.sync_state = SyncStateRepository(
@@ -895,8 +884,9 @@ class GarminPayloadServiceTests(unittest.TestCase):
             return garmin_store.read_view(db)
 
     def store_intervals_snapshot(self, activities):
-        snapshot_seed.save_snapshot(self.sync_state, 
-            {"synced_at": "2026-09-20T11:00:00", "recent_activities": activities}
+        snapshot_seed.save_snapshot(
+            self.sync_state,
+            {"synced_at": "2026-09-20T11:00:00", "recent_activities": activities},
         )
 
     def test_state_returns_empty_for_missing_invalid_and_non_object_json(self):

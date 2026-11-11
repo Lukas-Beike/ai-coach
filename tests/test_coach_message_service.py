@@ -9,6 +9,8 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
+from support import temp_database
+
 from backend.coach.conversation import CoachMessageService
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import ChatRepository
@@ -36,8 +38,9 @@ class FailBeforeCommitDatabaseManager:
 
 class CoachMessageServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_path = Path(self.temp_dir.name) / "coach.sqlite"
+        self.database_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory())) / "coach.sqlite"
+        )
         db = sqlite3.connect(self.database_path)
         try:
             db.row_factory = row_factory
@@ -45,9 +48,9 @@ class CoachMessageServiceTests(unittest.TestCase):
             db.commit()
         finally:
             db.close()
-        self.database_manager = DatabaseManager(
-            self.database_path,
-            sqlite3,
+        self.database_manager = temp_database(
+            self,
+            path=self.database_path,
             row_factory=row_factory,
             persist_connections=False,
         )
@@ -57,10 +60,6 @@ class CoachMessageServiceTests(unittest.TestCase):
             ChatRepository(lambda: NOW),
             self.events,
         )
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temp_dir.cleanup()
 
     def test_add_commits_before_publishing_coach_event(self) -> None:
         result = self.service.add("user", "  Hallo Coach  ")

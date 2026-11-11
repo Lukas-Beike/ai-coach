@@ -65,6 +65,7 @@ from backend.db.canonical_domain_store import (
 )
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
+from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import AppError
 from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
@@ -684,19 +685,27 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         self.assertEqual(cancelled, [True])
 
     def test_delete_clears_every_garmin_capability_pause(self):
-        for key in (
-            "garmin_capability_activities",
-            "garmin_capability_wellness_backfill_sleep",
+        for key, value in (
+            ("garmin_capability_activities", '{"count":3}'),
+            ("garmin_capability_wellness_backfill_sleep", '{"count":3}'),
+            ("gps_tracks_enabled", "0"),
         ):
             self.db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (key, '{"count":3}', "2026-11-09T08:00:00+00:00"),
+                (key, value, "2026-11-09T08:00:00+00:00"),
             )
-        self.service().delete("LOKALE DATEN LÖSCHEN")
+        service = self.service()
+        service.delete("LOKALE DATEN LÖSCHEN")
         remaining = self.db.execute(
             "SELECT key FROM kv WHERE instr(key, 'capability') > 0"
         ).fetchall()
         self.assertEqual(remaining, [])
+        # A switched-off GPS setting survives the erasure (#2137, K-002) ...
+        self.assertEqual(self.key_values.values.get("gps_tracks_enabled"), "0")
+        # ... and one that was on stays absent, which means on.
+        self.key_values.values.clear()
+        service.delete("LOKALE DATEN LÖSCHEN")
+        self.assertNotIn("gps_tracks_enabled", self.key_values.values)
 
     def connected_wahoo(self, request):
         """A real Wahoo connection service over the fixture database, already connected."""
@@ -789,34 +798,49 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         )
         for name in names:
             (self.root / name).write_bytes(b"synthetic")
+        # The server log files beside the database (#2137, G-209).
+        for name in ("intervals-coach.log", "intervals-coach.log.1"):
+            (self.root / name).write_text('{"message":"synthetic"}\n')
         return names
+
+    def log_files(self):
+        return RecentLogEntriesService(
+            self.root / "intervals-coach.log", Mock(), lambda: "2026-11-11"
+        )
 
     def test_the_preview_counts_recovery_copies_and_the_delete_erases_them(self):
         names = self.seed_recovery_files()
         keep = self.root / "unrelated.txt"
         keep.write_text("keep")
         copies = RecoveryCopies(self.root, self.database_path.name)
-        service = self.service(recovery_copies=copies)
+        service = self.service(recovery_copies=copies, log_files=self.log_files())
         counts = {
             item["id"]: item["records"] for item in service.preview()["categories"]
         }
-        self.assertEqual(counts["recovery_copies"], 3)
+        self.assertEqual((counts["recovery_copies"], counts["server_logs"]), (3, 2))
         result = service.delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["deleted_categories"]["recovery_copies"], 3)
+        self.assertEqual(result["deleted_categories"]["server_logs"], 2)
         self.assertEqual(result["recovery_copies_failed"], 0)
+        self.assertFalse(result["log_files_failed"])
         for name in names:
             self.assertFalse((self.root / name).exists())
+        self.assertFalse((self.root / "intervals-coach.log.1").exists())
+        self.assertEqual((self.root / "intervals-coach.log").read_text(), "")
         self.assertTrue(keep.exists())
         self.assertTrue(self.database_path.exists())
 
     def test_a_recovery_copy_that_cannot_be_removed_is_reported_not_raised(self):
         self.seed_recovery_files()
         service = self.service(
-            recovery_copies=RecoveryCopies(self.root, self.database_path.name)
+            recovery_copies=RecoveryCopies(self.root, self.database_path.name),
+            log_files=self.log_files(),
         )
         with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
             result = service.delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["recovery_copies_failed"], 3)
+        self.assertTrue(result["log_files_failed"])
+        self.assertNotIn("server_logs", result["deleted_categories"])
         self.assertEqual(result["deleted_categories"]["recovery_copies"], 0)
         self.assertTrue(result["local_data_deleted"])
 

@@ -1,6 +1,6 @@
 # Pacecraft behavior specifications
 
-This baseline backfills the existing application at
+This baseline backfilled the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
 The baseline's 30 capabilities contained 272 observable requirements and 759 scenarios;
 later changes extend them, and the index below is current.
@@ -44,7 +44,7 @@ are in the docs.
 | [view-refresh-and-client-state](specs/view-refresh-and-client-state/spec.md) | Device reads, session epochs, scoped refresh and background updates |
 | [voice-and-notifications](specs/voice-and-notifications/spec.md) | Optional transient audio and privacy-conscious client notifications |
 | [authentication-and-http](specs/authentication-and-http/spec.md) | Sessions, CSRF, rate/body limits and safe HTTP contracts |
-| [encrypted-storage-and-migrations](specs/encrypted-storage-and-migrations/spec.md) | SQLCipher, atomic transactions and supported v9-v13 upgrades |
+| [encrypted-storage-and-migrations](specs/encrypted-storage-and-migrations/spec.md) | SQLCipher, atomic transactions and the upgrade contract from the v26 baseline |
 | [backup-restore-and-privacy](specs/backup-restore-and-privacy/spec.md) | Consistent exports, validated restore, recovery and explicit erasure |
 | [runtime-and-configuration](specs/runtime-and-configuration/spec.md) | Secure composition/startup, maintenance, readiness/events and shutdown |
 | [diagnostics-and-observability](specs/diagnostics-and-observability/spec.md) | Redacted bounded capture, local reports, logs and safe correlation |
@@ -54,14 +54,11 @@ are in the docs.
 
 - [Coverage, executed checks and explicit gaps](COVERAGE.md)
 - [Complete Coach tool-to-requirement map](COACH_TOOLS.md)
-- [Machine-readable source/HTTP/tool ownership inventory](coverage.json)
-- The coverage ledger and inventory are snapshots of the baseline revision.
+- The coverage ledger is a snapshot of the baseline revision.
   Capabilities added later, such as `garmin-profile-body-export`, appear in the
-  index above and cite their own evidence, not in these snapshots.
-- [Completed baseline change](changes/archive/2026-10-23-backfill-application-specs/proposal.md)
-- Change artifacts live under `changes/`; completed changes move to
-  `changes/archive/` after reviewed specs are synchronized. The archived baseline
-  retains its proposal, design, task/evidence state and deltas.
+  index above and cite their own evidence, not in this snapshot.
+- Change artifacts live under `changes/`; after `archive` synchronizes the
+  reviewed specs, the archived folder is deleted and git history keeps it.
 
 The baseline is comprehensive at capability/surface level. It is not a line-by-line
 application audit, a guarantee of live provider behavior or an executed full

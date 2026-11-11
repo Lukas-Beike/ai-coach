@@ -51,8 +51,9 @@ and refuses the push when the CLI is missing or unauthenticated, so report that
 as a blocker and stop; never bypass the hook. The agentic (Vortex) part may
 return 403 on this connection; record that as a limit, not a pass. Local output
 has shown only the secrets and agentic sections, so do not claim code-quality
-rule coverage from it. Fix findings on changed lines with new commits and rerun
-the affected checks. In the PR body, record the rule key, file, and line of any
+rule coverage from it. Fix findings on changed lines with new commits, without
+new files, pass-through classes, or wrappers (root `AGENTS.md`), and rerun the
+affected checks. In the PR body, record the rule key, file, and line of any
 accepted issue; never paste matched secret text or scanner payloads.
 
 ## 2. Review
@@ -91,7 +92,9 @@ confirmation. List every unfixed finding with its reason in the PR body.
   branch) with an English Conventional Commit title and a body covering the
   change, validation, and review results, plus a merge-danger line: one-way or
   two-way door (schema migrations and remote writes are usually one-way) and
-  the blast radius. Name the issue with `Closes #N`, or `Part of #N` when more
+  the blast radius, and a line-balance line: production lines added/removed
+  (`git diff --shortstat origin/develop...HEAD -- backend server.py public`)
+  and test lines added/removed (the same for `-- tests e2e`). Name the issue with `Closes #N`, or `Part of #N` when more
   PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
 - Enable `gh pr merge <number> --auto --squash` only when the base is `develop`

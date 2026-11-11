@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
+from support import FakeManager
+
 from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
@@ -382,20 +384,6 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
 
-class _Manager:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        yield self.db
-        self.db.commit()
-
-    @contextmanager
-    def reader(self):
-        yield self.db
-
-
 class _Coordination:
     def __init__(self, free: bool = True) -> None:
         self.free = free
@@ -461,7 +449,7 @@ class ServiceTests(unittest.TestCase):
     ) -> GarminWellnessHistoryService:
         return GarminWellnessHistoryService(
             reader=_Reader(client, paused),
-            database_manager=_Manager(self.db),
+            database_manager=FakeManager(self.db),
             snapshot_writer=self.writer,
             sync_state_repository=self.cursors,
             coordination=self.coordination,

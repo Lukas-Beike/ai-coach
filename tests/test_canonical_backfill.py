@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
-import tempfile
 import threading
 import time
 import unittest
@@ -29,6 +27,7 @@ from intervals_plan_stub import (
 from intervals_wellness_stub import (
     map_intervals_athlete_thresholds,
 )
+from support import temp_database
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
@@ -146,19 +145,11 @@ class BackfillFixture(unittest.TestCase):
     def setUp(self) -> None:
         # Provider-neutral re-projection runs over Intervals.icu-shaped records too.
         self.enterContext(intervals_test_world())
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.manager = self.open_manager("backfill.db")
 
     def open_manager(self, name: str) -> DatabaseManager:
-        manager = DatabaseManager(
-            Path(self.temporary.name) / name, sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(manager.close)
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
-        return manager
+        return temp_database(self, name, row_factory=row_factory, schema=True)
 
     def make_backfill(self, batch_size: int = DEFAULT_BATCH_SIZE) -> CanonicalBackfill:
         return CanonicalBackfill(
@@ -1846,12 +1837,7 @@ class RestoredIntervalsRowsTests(unittest.TestCase):
     """Intervals.icu rows of a database restored from an older release stay inert."""
 
     def test_stored_rows_are_neither_reprojected_nor_served(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        manager = DatabaseManager(
-            Path(directory.name) / "restored.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(manager.close)
+        manager = temp_database(self, "restored.db", row_factory=row_factory)
         with manager.unit_of_work() as db:
             initialize_schema(db)
             # Stored the way the retired mappers wrote them, outside the test world.

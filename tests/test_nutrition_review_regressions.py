@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.coach.read_tools import CoachReadToolService
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 
 
@@ -223,39 +220,33 @@ class NutritionReviewRegressionTests(unittest.TestCase):
     def test_omitted_text_source_uses_bls_and_never_queries_open_food_facts(
         self,
     ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            manager = DatabaseManager(
-                Path(temporary) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
-            )
-            try:
-                with manager.unit_of_work() as db:
-                    initialize_schema(db)
-                _diary, meal_library = build_nutrition_services(
-                    manager,
-                    threading.Lock(),
-                    lambda: "2026-10-05T12:00:00+00:00",
-                    lambda: datetime(2026, 10, 5, tzinfo=UTC),
-                )
-                off_client = Mock()
-                off_client.search.return_value = [{"id": "off:1"}]
-                off_client.product.return_value = {"id": "off:1"}
-                meal_library.food_database._off = off_client
-                service = CoachReadToolService(
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    training_change_limit=366,
-                    nutrition_meal_library=Mock(return_value=meal_library),
-                )
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
+        )
+        _diary, meal_library = build_nutrition_services(
+            manager,
+            threading.Lock(),
+            lambda: "2026-10-05T12:00:00+00:00",
+            lambda: datetime(2026, 10, 5, tzinfo=UTC),
+        )
+        off_client = Mock()
+        off_client.search.return_value = [{"id": "off:1"}]
+        off_client.product.return_value = {"id": "off:1"}
+        meal_library.food_database._off = off_client
+        service = CoachReadToolService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            training_change_limit=366,
+            nutrition_meal_library=Mock(return_value=meal_library),
+        )
 
-                result = service.execute("lookup_food", {"query": "Haferflocken"})
-            finally:
-                manager.close()
+        result = service.execute("lookup_food", {"query": "Haferflocken"})
 
         assert isinstance(result, dict)
         self.assertFalse(result["local"])
@@ -265,49 +256,41 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         off_client.product.assert_not_called()
 
     def test_archived_products_cannot_be_calculated_or_logged(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            manager = DatabaseManager(
-                Path(temporary) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
-            )
-            try:
-                with manager.unit_of_work() as db:
-                    initialize_schema(db)
-                diary, meal_library = build_nutrition_services(
-                    manager,
-                    threading.Lock(),
-                    lambda: "2026-10-05T12:00:00+00:00",
-                    lambda: datetime(2026, 10, 5, tzinfo=UTC),
-                )
-                product = meal_library.save_product(
-                    {
-                        "name": "Synthetic whey",
-                        "brand": "Synthetic",
-                        "barcode": "4006381333931",
-                        "basis_amount": 100,
-                        "basis_unit": "g",
-                        "kcal": 376,
-                        "protein_g": 78,
-                        "carbs_g": 8,
-                        "fat_g": 5.5,
-                        "source": "packaging_label",
-                    }
-                )
-                meal_library.archive_product(product["id"])
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
+        )
+        diary, meal_library = build_nutrition_services(
+            manager,
+            threading.Lock(),
+            lambda: "2026-10-05T12:00:00+00:00",
+            lambda: datetime(2026, 10, 5, tzinfo=UTC),
+        )
+        product = meal_library.save_product(
+            {
+                "name": "Synthetic whey",
+                "brand": "Synthetic",
+                "barcode": "4006381333931",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 376,
+                "protein_g": 78,
+                "carbs_g": 8,
+                "fat_g": 5.5,
+                "source": "packaging_label",
+            }
+        )
+        meal_library.archive_product(product["id"])
 
-                for operation in (
-                    lambda: meal_library.calculate_product(product["id"], 50, "g"),
-                    lambda: diary.log_product(product["id"], 50, "g"),
-                ):
-                    with (
-                        self.subTest(operation=operation),
-                        self.assertRaises(AppError) as caught,
-                    ):
-                        operation()
-                    self.assertEqual(
-                        caught.exception.reason, "nutrition_product_archived"
-                    )
-            finally:
-                manager.close()
+        for operation in (
+            lambda: meal_library.calculate_product(product["id"], 50, "g"),
+            lambda: diary.log_product(product["id"], 50, "g"),
+        ):
+            with (
+                self.subTest(operation=operation),
+                self.assertRaises(AppError) as caught,
+            ):
+                operation()
+            self.assertEqual(caught.exception.reason, "nutrition_product_archived")
 
 
 if __name__ == "__main__":
