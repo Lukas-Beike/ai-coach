@@ -107,12 +107,8 @@ class CoachPlanningActionToolService:
                 ),
             }
             result = self._history_undo_service().apply(payload)
-            return {
-                "ok": True,
-                "status": "applied",
-                "change": preview.get("change"),
-                **result,
-            }
+            # The service result carries the status ("undone").
+            return {"ok": True, "change": preview.get("change"), **result}
         proposal = self._proposal_creation_service().create(
             preview.pop("proposal"), session_csrf_hash
         )

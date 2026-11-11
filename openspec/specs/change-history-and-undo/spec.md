@@ -132,6 +132,10 @@ The system SHALL summarize applied Coach record changes on receipts/answers and 
 - **WHEN** any applied write lacks history or also changes untracked state such as plan constraints, sync flags or other records
 - **THEN** its changes can be listed but whole-turn undo is false, preventing a misleading partial rollback.
 
+#### Scenario: Applied single-change undo in a turn
+- **WHEN** `undo_training_change` applied an undo in the turn (its result status is `undone`)
+- **THEN** the receipt lists "Lokale Änderung zurückgenommen" and whole-turn undo is false.
+
 #### Scenario: Plan-check notes
 - **WHEN** an applied Coach plan write has plan-check notes
 - **THEN** its receipt includes safe structured notes, and the answer shows their labels, dates, evidence strength and severity alongside the change summary.
@@ -140,7 +144,7 @@ The system SHALL summarize applied Coach record changes on receipts/answers and 
 - **WHEN** a turn only reads, fails before applying, stages/previews or waits for approval
 - **THEN** those steps do not appear as applied record changes, and model input does not receive private undo references.
 
-Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`; `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_change_receipts.py:test_a_write_with_untracked_effects_is_listed_without_turn_undo`, `tests/test_coach_change_receipts.py:test_reads_failures_proposals_and_previews_are_not_changes`, `tests/test_coach_change_receipts.py:test_the_model_never_receives_undo_references`; `tests/test_server_coach_turn_undo.py:test_turn_changes_show_on_the_answer_and_undo_together`.
+Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`; `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_change_receipts.py:test_a_write_with_untracked_effects_is_listed_without_turn_undo`, `tests/test_coach_change_receipts.py:test_an_applied_history_undo_is_listed_and_blocks_turn_undo`, `tests/test_coach_planning_action_tools.py:test_undo_applies_directly_when_apply_is_true`, `tests/test_coach_change_receipts.py:test_reads_failures_proposals_and_previews_are_not_changes`, `tests/test_coach_change_receipts.py:test_the_model_never_receives_undo_references`; `tests/test_server_coach_turn_undo.py:test_turn_changes_show_on_the_answer_and_undo_together`.
 
 ### Requirement: HU8 All-or-none whole-turn undo
 The system SHALL undo an eligible completed turn's collected local changes newest-first in one transaction and update its durable receipt once, refusing repeated or stale/ineligible turn undo.

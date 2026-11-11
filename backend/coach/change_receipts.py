@@ -13,6 +13,8 @@ from backend.planning.plan_checks import BLOCKING_CODES, FINDING_CODES
 # drafts take effect only through a later, separately approved step.
 _NOT_A_CHANGE = frozenset({"preview_adaptive_replan", "stage_training_plan"})
 _WAITING_STATUSES = frozenset({"approval_required", "cancelled"})
+# As in ``outcomes.coach_effect_label``: a card run reports "applied".
+_APPLIED_UNDO = frozenset({"applied", "undone"})
 # Tools whose every durable effect is a change-history record that undo restores.
 # Others may also write untracked state (plan constraints, tombstones, sync
 # flags), so their turns are listed without a turn undo.
@@ -45,8 +47,9 @@ def _is_change(tool: Any, result: Any) -> bool:
     if tool not in TOOL_DOMAIN or tool in _NOT_A_CHANGE or not isinstance(result, dict):
         return False
     if tool == "undo_training_change":
-        # Only an applied undo restores a record; otherwise it proposes one.
-        return result.get("status") == "applied"
+        # Only an applied undo restores a record; otherwise it proposes one. The
+        # tool passes on the undo service's "undone" (#2134, E-501).
+        return result.get("status") in _APPLIED_UNDO
     return result.get("ok") is True and result.get("status") not in _WAITING_STATUSES
 
 
