@@ -10,6 +10,11 @@ from backend.athlete.checkins import CHECKIN_TAGS
 from backend.athlete.measurements import number
 
 
+# The recovery history holds the nights of the last 84 days (``personal_recovery``);
+# a tagged day pairs with its following night, so the days are the 84 before today.
+TAG_IMPACT_DAYS = 84
+
+
 def tag_impact(
     checkins: list[dict[str, Any]],
     recovery: dict[str, Any],
@@ -46,7 +51,7 @@ def tag_impact(
     ]
     return {
         "method": "explicit-tags-next-night-v1",
-        "days": 90,
+        "days": TAG_IMPACT_DAYS,
         "timezone": timezone,
         "measurement_start": min(measured_dates) if measured_dates else None,
         "measurement_end": max(measured_dates) if measured_dates else None,
@@ -70,7 +75,7 @@ def _day_loads(
 def _tag_groups(
     checkins: list[dict], history: dict, loads: dict, tag: str, today: date
 ) -> dict[bool, list[dict[str, Any]]]:
-    cutoff = (today - timedelta(days=89)).isoformat()
+    cutoff = (today - timedelta(days=TAG_IMPACT_DAYS)).isoformat()
     groups: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
     for checkin in checkins:
         day = str(checkin.get("checkin_date") or "")

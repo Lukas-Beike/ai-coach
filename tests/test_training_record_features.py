@@ -1013,6 +1013,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 }
             )
             nights[f"2026-08-{day + 1:02d}"] = float(day)
+        # C-015: a day before the 84-day recovery window is not counted.
+        checkins.append({"checkin_date": "2026-06-08", "tag_answers": {"travel": True}})
+        nights["2026-06-09"] = 99.0
         result = tag_impact(
             checkins,
             {
@@ -1032,6 +1035,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             date(2026, 9, 1),
             activity_summaries=[],
         )
+        self.assertEqual(result["days"], 84)
         report = next(row for row in result["reports"] if row["tag"] == "travel")
         self.assertEqual(report["measurement"], "duration")
         self.assertEqual(report["status"], "observed_association")
