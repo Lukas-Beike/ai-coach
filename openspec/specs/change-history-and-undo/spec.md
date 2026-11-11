@@ -32,7 +32,7 @@ The system SHALL expose bounded newest-first history for the 180-day retention w
 
 #### Scenario: Old or excessive rows
 - **WHEN** history contains expired or excessive entries
-- **THEN** reads hide entries older than the retention cutoff and clamp limits; normal history recording performs retention cleanup.
+- **THEN** reads hide entries older than the retention cutoff and clamp limits; normal history recording performs retention cleanup and makes room for its own row first, so at most one thousand rows remain after it.
 
 #### Scenario: Atomic operation exceeds capacity
 - **WHEN** a replacement reserves more than one thousand audit rows
