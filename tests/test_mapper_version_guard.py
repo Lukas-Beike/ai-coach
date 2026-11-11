@@ -60,7 +60,7 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
         (9, 10),
-        "0de7f0df5236aff14734543193d5dc18b74db07e1ad0a9c47f360e9864bfe61b",
+        "f7fc2667529631b41c1146091f8e7566a0d287c73baecd5267f6fff7d09dba26",
     ),
     "fit_rr_mapping": (
         (9, 10),

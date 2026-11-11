@@ -75,6 +75,8 @@ from backend.sync.stream_backfill import (
     StreamCandidate,
     StreamReplay,
     StreamSelection,
+    count_fit_file,
+    fit_inventory_counts,
     select_stream_candidates,
     state_key,
     stream_backfill_counts,
@@ -468,6 +470,24 @@ class WahooBackfillTests(unittest.TestCase):
         self.assertEqual(0, again["candidates"])
         self.assertEqual([], downloads.urls)
         self.assertEqual(1, len(lister.calls))
+        # Inventory (#2220): both files counted per origin and sport; the same
+        # file read again counts once; a Zwift ride relayed by Garmin is apart.
+        count_fit_file(env.db, env.key_values, WAHOO, "11", fit_bytes())
+        seed(env, GARMIN, 13, date(2026, 11, 2), recorded_by=RecordingOrigin.ZWIFT)
+        count_fit_file(env.db, env.key_values, GARMIN, "13", fit_bytes(records=3))
+        count_fit_file(env.db, env.key_values, GARMIN, "13", b"not a fit file")
+        empty: dict[str, dict[str, int]] = {
+            "messages": {},
+            "unmapped_fields": {},
+            "developer_fields": {},
+        }
+        self.assertEqual(
+            {
+                "wahoo": {"ride": {"files": 2, **empty}},
+                "zwift": {"ride": {"files": 1, **empty}},
+            },
+            fit_inventory_counts(env.db, env.key_values),
+        )
 
     def test_downloads_are_paced_but_the_first_one_is_not_delayed(self) -> None:
         env = self.env

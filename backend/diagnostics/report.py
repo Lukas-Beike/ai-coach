@@ -61,6 +61,7 @@ from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
+from backend.sync.stream_backfill import fit_inventory_counts
 
 LOGGER = logging.getLogger("intervals_coach")
 
@@ -303,6 +304,9 @@ class DiagnosticReportService:
                     lambda: summarize_stream_backfill(
                         key_values, db, deps.config.sync_history_earliest_date
                     ),
+                ),
+                "fit_inventory": section(
+                    "fit_inventory", lambda: fit_inventory_counts(db, key_values)
                 ),
                 "session_metrics": section(
                     "session_metrics",

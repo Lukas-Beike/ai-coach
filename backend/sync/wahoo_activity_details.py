@@ -44,6 +44,7 @@ from backend.providers.fit_activity_detail_mapping import (
 )
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL, wahoo_workout_id
 from backend.providers.wahoo_fit_download import WahooFitUnavailable, wahoo_fit_url
+from backend.sync.stream_backfill import count_fit_file
 
 STATE_KEY: Final = "wahoo_activity_detail_state"
 MAX_DETAIL_ATTEMPTS: Final = 3
@@ -178,6 +179,8 @@ class WahooActivityDetailImport:
                 pending.summary_sha256, pending.attempts + 1, empty=False
             )
             return "failed", 0
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            count_fit_file(db, self._key_values, WAHOO_ID, workout_id, data)
         mapped = map_fit_activity_detail(
             data,
             provider_activity_id=workout_id,
