@@ -41,9 +41,9 @@ _INTERVALS_NOT_CONFIGURED_MESSAGE = (
     "Intervals.icu ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen "
     "hinterlegen."
 )
-_GARMIN_NOT_CONFIGURED_MESSAGE = (
-    "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
-    "Garmin-Tokenstore einrichten."
+GARMIN_NOT_CONFIGURED_MESSAGE = (
+    "Garmin ist nicht konfiguriert. Unter Mehr → Anbindungen bei Garmin anmelden "
+    "oder einen Schlüssel der Garmin Personal API hinterlegen."
 )
 WAHOO_NOT_CONFIGURED_MESSAGE = (
     "Wahoo ist nicht verbunden. Bitte Wahoo in den Einstellungen verbinden."
@@ -347,7 +347,7 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         coach_rank=2,
         # Coach waits for this refresh so a check-in never reads stale recovery data.
         coach_waits_for_completion=True,
-        not_configured_message=_GARMIN_NOT_CONFIGURED_MESSAGE,
+        not_configured_message=GARMIN_NOT_CONFIGURED_MESSAGE,
         manual_sync=ManualSyncRoute(
             path="/api/garmin/sync",
             uses_sync_period=True,

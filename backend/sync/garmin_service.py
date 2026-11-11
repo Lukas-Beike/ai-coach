@@ -19,7 +19,7 @@ from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_adapter
 from backend.providers import garmin_morning
 from backend.providers import http as provider_http
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin import (
     ExternalCall,
     GarminClientFactory,
@@ -62,7 +62,6 @@ from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
 GARMIN_AUTOMATIC_SYNC_DAYS = 2
-GARMIN_NOT_CONFIGURED_MESSAGE = "Garmin ist nicht konfiguriert."
 
 GARMIN_SYNC_LOCK = threading.Lock()
 
@@ -1427,12 +1426,11 @@ class GarminSyncService:
                 "Tests kann GARMIN_FIXTURE_PATH gesetzt werden.",
             )
         if not fixture and not self._source.configured():
-            message = (
-                "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist "
-                "nicht konfiguriert."
-            )
             self._configuration_error(
-                "not_configured", message, message, reason="not_configured"
+                "not_configured",
+                GARMIN_NOT_CONFIGURED_MESSAGE,
+                GARMIN_NOT_CONFIGURED_MESSAGE,
+                reason="not_configured",
             )
 
         self._raise_if_cancelled(cancel_event)

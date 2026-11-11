@@ -38,8 +38,8 @@ INTERVALS_MESSAGE = (
     "hinterlegen."
 )
 GARMIN_MESSAGE = (
-    "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
-    "Garmin-Tokenstore einrichten."
+    "Garmin ist nicht konfiguriert. Unter Mehr → Anbindungen bei Garmin anmelden "
+    "oder einen Schlüssel der Garmin Personal API hinterlegen."
 )
 INTERVALS_PERIOD_MESSAGE = (
     "Der Zeitraum für intervals muss -1 oder zwischen 1 und 365 Tagen liegen."

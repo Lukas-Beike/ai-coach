@@ -499,7 +499,8 @@ class GarminSyncServiceTests(unittest.TestCase):
     def test_unavailable_and_unconfigured_remote_persist_configuration_error(self):
         for remote, expected in (
             (_RemoteReader(available=False), "Bibliothek"),
-            (_RemoteReader(available=True, configured=False), "GARMIN_EMAIL"),
+            # A-043: the message names the in-app login and the Personal API key.
+            (_RemoteReader(available=True, configured=False), "Garmin Personal API"),
         ):
             with self.subTest(expected=expected):
                 service = self.make_service(remote=remote)

@@ -431,8 +431,8 @@ PREVIOUS_NOT_CONFIGURED_MESSAGES = {
         "hinterlegen."
     ),
     "garmin": (
-        "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
-        "Garmin-Tokenstore einrichten."
+        "Garmin ist nicht konfiguriert. Unter Mehr → Anbindungen bei Garmin anmelden "
+        "oder einen Schlüssel der Garmin Personal API hinterlegen."
     ),
 }
 
