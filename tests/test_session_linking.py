@@ -701,7 +701,7 @@ class ConfirmedBundleRevivalTests(LinkingCase):
         self._set_session(GARMIN_ID, state="active", merged_into_retained=None)
         with self.manager.unit_of_work() as db:
             revived = canonical_store.revive_deleted_copies(
-                db, survivor, exclude={survivor}, now=LATER
+                db, survivor, exclude={survivor}, now=LATER.isoformat()
             )
         self.assertEqual(1, revived)
         self.assertEqual(
