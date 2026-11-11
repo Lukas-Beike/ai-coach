@@ -2,13 +2,20 @@
 
 import copy
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
+from support import GOLDEN_FIRST, golden_history, payload_digest
+
+from backend.canonical.vocabulary import ProviderId
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
 )
-from backend.performance.load_context import performance_load_context
+from backend.performance.load_context import (
+    performance_load_context,
+    read_local_fitness,
+)
 
 TODAY = date(2026, 9, 30)
 
@@ -104,6 +111,46 @@ class PerformanceLoadContextTests(unittest.TestCase):
         before = copy.deepcopy((activities, loads))
         _context(activities, CanonicalPerformanceInputs(local_load_days=loads))
         self.assertEqual((activities, loads), before)
+
+    def test_golden_context_load_and_daily_planning_window(self):
+        sessions, feedback, loads = golden_history()
+        today = GOLDEN_FIRST + timedelta(days=129)
+        synced = "2026-05-05T07:00:00+00:00"
+        canonical = CanonicalPerformanceInputs(
+            activities=tuple(sessions),
+            local_load_days=loads,
+            activities_synced_at=synced,
+        )
+        context = performance_load_context(
+            sessions,
+            today,
+            canonical=canonical,
+            timezone="UTC",
+            session_feedback=feedback,
+        )
+        self.assertEqual(
+            payload_digest(context),
+            "6bfc71aaf720bb4f1a4ceeeed2ac6e0e77a366314dbbd0b475126d553aa71b21",
+        )
+        coverage = SimpleNamespace(
+            provider=ProviderId.GARMIN,
+            activities_retrieved_at=datetime.fromisoformat(synced),
+        )
+        reader = SimpleNamespace(
+            local_load_days=lambda db: loads, coverage=lambda db: [coverage]
+        )
+        window = read_local_fitness(
+            reader,
+            object(),
+            start=today - timedelta(days=27),
+            end=today,
+            today=today,
+            timezone="UTC",
+        )
+        self.assertEqual(
+            payload_digest(window),
+            "de93e1e19c30d40be80b16fffc3c47b17c2af76d2beeafb22ccab70afa35ddbb",
+        )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 """Training report coverage and historical zone contracts."""
 
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock, patch
 
-from support import dispatch_route
+from support import GOLDEN_FIRST, dispatch_route, golden_history, payload_digest
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.vocabulary import ProviderId
@@ -711,3 +711,29 @@ class TrainingReportTests(unittest.TestCase):
             dispatch_route(route, handler, "/api/analysis/refresh", method="POST")
 
         self.assertEqual(400, raised.exception.status)
+
+    def test_golden_load_curves_of_the_all_sport_report(self):
+        sessions, feedback, loads = golden_history()
+        arguments = {
+            "start": GOLDEN_FIRST + timedelta(days=102),
+            "days": 28,
+            "today": GOLDEN_FIRST + timedelta(days=129),
+            "timezone": "UTC",
+            "activity_summaries": sessions,
+            "observed_at": "2026-05-05T07:00:00+00:00",
+            "session_feedback": feedback,
+            "computed_at": "2026-05-10T08:00:00+00:00",
+            "local_load_days": loads,
+        }
+        result = training_report(**arguments)
+        curves = {
+            name: result[name]
+            for name in ("smoothed_session_load", "local_fitness_fatigue")
+        }
+        self.assertEqual(
+            payload_digest(curves),
+            "891572b34763ff85fe6c6841c656a9f93a2c832694282586908bcb807d96c3b5",
+        )
+        ride = training_report(**arguments, sport="ride")
+        self.assertIsNone(ride["smoothed_session_load"])
+        self.assertIsNone(ride["local_fitness_fatigue"])
