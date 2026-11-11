@@ -81,8 +81,10 @@ class WeatherRecommendationsTests(unittest.TestCase):
             "air_quality_maximum": None,
             "weather_codes": [],
         }
-        run_score = _weather_window_score({"type": "Run"}, windy)
+        # Runner: (40 - 20) * 0.5 wind + (50 - 30) * 0.5 gusts.
+        run_score = 20.0
         for event in (
+            {"type": "Run"},
             {"sport": "run"},
             {"sport_type": "Laufen"},
             {"name": "Dauerlauf locker"},
