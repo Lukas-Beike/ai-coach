@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import tempfile
 import threading
 import unittest
 from pathlib import Path
 
+from support import temp_database
+
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 
@@ -25,12 +25,9 @@ class RecordingSQLiteBackend:
 
 class CoachDialoguePlanScopeServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
         self.backend = RecordingSQLiteBackend()
-        self.database = DatabaseManager(
-            Path(self.temp_dir.name) / "scope.sqlite",
-            self.backend,
-            row_factory=sqlite3.Row,
+        self.database = temp_database(
+            self, "scope.sqlite", backend=self.backend, row_factory=sqlite3.Row
         )
         self.lock = threading.RLock()
         self.service = CoachDialoguePlanScopeService(self.database, self.lock)
@@ -57,10 +54,6 @@ class CoachDialoguePlanScopeServiceTests(unittest.TestCase):
                 ],
             )
         self.backend.statements.clear()
-
-    def tearDown(self) -> None:
-        self.database.close()
-        self.temp_dir.cleanup()
 
     @staticmethod
     def action(
