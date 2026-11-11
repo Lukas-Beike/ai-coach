@@ -140,6 +140,10 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Never relax a guard, test, or check to make something pass. Report behavior,
   evidence, and unrun checks. Keep temporary plans and reports out of tracked
   source.
+- Stop line growth: answer a static-analysis finding without splitting a module
+  into more files, pass-through classes, or wrapper functions; if it cannot be
+  fixed without new indirection, say so in the PR. Every PR description states
+  its line balance: production and test lines added and removed.
 - OpenSpec is optional, for larger features; see the
   [OpenSpec runbook](docs/openspec.md) and use
   `npm run openspec -- <arguments>`.
