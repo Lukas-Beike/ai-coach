@@ -1836,7 +1836,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     api(`/api/activities?limit=250${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
       const known = completedSessionIds(calendar);
       for (const row of Array.isArray(page?.activities) ? page.activities : []) {
-        if (row?.id == null || known.has(String(row.id))) continue;
+        // Only sessions before the loaded ones are new; later ones are in the loaded data already.
+        const day = String(row?.started_at_local || "").slice(0, 10);
+        if (row?.id == null || known.has(String(row.id)) || (loadedStart && day >= loadedStart)) continue;
         olderSessions.items.push({ ...row, date: String(row.started_at_local || "").slice(0, 10), is_completed_activity: true });
       }
       olderSessions.cursor = page?.next_cursor || null;

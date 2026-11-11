@@ -36,6 +36,9 @@ test("@responsive an empty install shows one empty card with one action per anal
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   // The action follows the connection state: no source leads to the connections, a source to a sync.
+  // Leistung has no period window, so a connected source offers the sync.
+  await page.evaluate(() => { location.hash = "#analysis/performance"; });
+  await expect(card).toBeVisible();
   await page.evaluate(() => { AppState.state.data.garmin = { ...AppState.state.data.garmin, configured: false }; AppState.state.data.wahoo = { ...AppState.state.data.wahoo, connected: false }; renderAnalysisSegments(AppState.state.route); });
   await expect(card.locator("span")).toHaveText("Garmin oder Wahoo ist nicht verbunden.");
   await expect(card.getByRole("link", { name: "Anbindung einrichten" })).toHaveAttribute("href", "#more/connections");
