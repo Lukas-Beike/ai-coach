@@ -46,7 +46,7 @@ class CoachFinalReceiptTests(unittest.TestCase):
         self.trace.append("message")
         return {"id": "assistant-1", "client_turn_id": client_turn_id}
 
-    def test_build_projects_outcome_and_removes_all_replay_checkpoints(self) -> None:
+    def test_build_projects_outcome_and_removes_open_tool_calls(self) -> None:
         steps = [
             {
                 "tool": "preview_adaptive_replan",
@@ -54,11 +54,8 @@ class CoachFinalReceiptTests(unittest.TestCase):
             }
         ]
         receipt = {
-            "openai_response_id": "old",
-            "pending_tool_outputs": [1],
+            "openai_reached": True,
             "pending_tool_calls": [2],
-            "response_input": [3],
-            "previous_response_id": "earlier",
             "session_key": "owner",
         }
         final = self.service.build(
@@ -78,15 +75,10 @@ class CoachFinalReceiptTests(unittest.TestCase):
         self.assertEqual(final["response_status"], "incomplete")
         self.assertEqual(final["session_key"], "owner")
         self.assertEqual(final["tool_rounds"], 2)
-        for key in (
-            "openai_response_id",
-            "pending_tool_outputs",
-            "pending_tool_calls",
-            "response_input",
-            "previous_response_id",
-        ):
-            self.assertNotIn(key, final)
-            self.assertIn(key, receipt)
+        self.assertNotIn("pending_tool_calls", final)
+        self.assertIn("pending_tool_calls", receipt)
+        # A re-requested turn keeps the attachment window anchor it had.
+        self.assertIs(final["openai_reached"], True)
 
     def test_completed_command_returns_stored_receipt_without_duplicate_effect(
         self,

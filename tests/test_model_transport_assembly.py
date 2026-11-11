@@ -8,10 +8,10 @@ from backend.providers import http as provider_http
 from backend.providers import openai_requests, openai_stream
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
-    ModelBackgroundPolicy,
     ModelEndpointSettings,
     ModelProviderDiagnostics,
     ModelProviderOwners,
+    ModelResponseLimits,
     ModelTransportAssembly,
     ModelTransportClock,
 )
@@ -49,15 +49,12 @@ class ModelTransportAssemblyTests(unittest.TestCase):
                     logger=Mock(name="logger"),
                     app_version="test-version",
                 ),
-                background=ModelBackgroundPolicy(
-                    background_poll_seconds=2,
-                    background_max_seconds=60,
+                limits=ModelResponseLimits(
                     max_response_bytes=lambda: 4096,
                 ),
                 clock=ModelTransportClock(
                     utc_now=Mock(return_value="2026-09-26T00:00:00Z"),
                     monotonic=Mock(return_value=10.0),
-                    wall_time=Mock(return_value=20.0),
                     wait=Mock(),
                 ),
             )

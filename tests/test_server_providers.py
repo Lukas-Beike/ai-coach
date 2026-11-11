@@ -274,44 +274,12 @@ class ServerProvidersTests(ServerTestCase):
             )
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
-    def test_openai_background_creation_defers_usage_recording(self):
-        response = {"id": "resp_background_usage", "status": "queued", "usage": {}}
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT.json_http_client(),
-                "request",
-                return_value=response,
-            ),
-            patch.object(
-                server.provider_state_service(), "record_usage"
-            ) as record_usage,
-        ):
-            server.MODEL_TRANSPORT.openai_responses_client().request(
-                "/responses",
-                {
-                    "model": "gpt-6-luna",
-                    "background": True,
-                    "store": True,
-                    "input": "test",
-                },
-            )
-        record_usage.assert_not_called()
-
-    def test_openai_client_composition_keeps_background_limits_and_runtime_hooks(self):
+    def test_openai_client_composition_keeps_runtime_hooks(self):
         client = server.MODEL_TRANSPORT.openai_responses_client()
 
-        self.assertEqual(
-            client.background_poll_seconds, server.OPENAI_BACKGROUND_POLL_SECONDS
-        )
-        self.assertEqual(
-            client.background_max_seconds, server.OPENAI_BACKGROUND_MAX_SECONDS
-        )
-        self.assertIs(client.monotonic, server.time.monotonic)
         self.assertIs(client.wait, server.time.sleep)
 
-    def test_attached_durable_job_uses_provider_stream_instead_of_background_polling(
-        self,
-    ):
+    def test_attached_durable_job_streams_deltas_through_the_provider_stream(self):
         csrf_hash = "csrf-attached-provider-stream"
         server.key_value_service().set(
             "openai_conversation_id", "conv-attached-provider-stream"
@@ -350,7 +318,6 @@ class ServerProvidersTests(ServerTestCase):
             )
 
         transport_factory.return_value.stream_request.assert_called_once()
-        transport_factory.return_value.background_request.assert_not_called()
         self.assertEqual(deltas, ["Heute locker."])
         self.assertEqual(result["message"]["content"], "Heute locker.")
 

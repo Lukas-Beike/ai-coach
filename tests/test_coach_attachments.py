@@ -519,7 +519,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
         captured = []
 
-        def respond(payload, **kwargs):
+        def respond(payload, *_args, **kwargs):
             captured.append(payload)
             return {
                 "id": "synthetic-response",
@@ -548,7 +548,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 ),
             ),
         ):
-            transport_factory.return_value.background_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = respond
             server.COACH_TURNS.chat_turn_service().run(
                 "Analyze",
                 client_turn_id="worker-turn",
@@ -576,7 +576,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
         endpoint.request.side_effect = create
 
-        def respond(payload, **kwargs):
+        def respond(payload, *_args, **kwargs):
             captured.append(payload)
             return {
                 "id": "synthetic-response",
@@ -597,7 +597,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.background_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = respond
             receipt = server.COACH_TURNS.chat_turn_service().run(
                 "Analyze",
                 client_turn_id=turn,
@@ -641,7 +641,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
         captured = []
 
-        def respond(payload, **kwargs):
+        def respond(payload, *_args, **kwargs):
             captured.append(payload)
             return {
                 "id": "synthetic-response",
@@ -670,7 +670,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 ),
             ),
         ):
-            transport_factory.return_value.background_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = respond
             server.COACH_TURNS.chat_turn_service().run(
                 "Analyze the route",
                 client_turn_id="route-turn",

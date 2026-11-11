@@ -307,10 +307,10 @@ from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
-    ModelBackgroundPolicy,
     ModelEndpointSettings,
     ModelProviderDiagnostics,
     ModelProviderOwners,
+    ModelResponseLimits,
     ModelTransportAssembly,
     ModelTransportClock,
 )
@@ -498,8 +498,6 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 # max_output_tokens. Keep ordinary replies bounded, but leave enough room for
 # an explicitly requested multi-week training plan.
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
-OPENAI_BACKGROUND_POLL_SECONDS = 2
-OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -1316,9 +1314,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             logger=LOGGER,
             app_version=APP_VERSION,
         ),
-        background=ModelBackgroundPolicy(
-            background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
-            background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
+        limits=ModelResponseLimits(
             max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
         ),
         clock=ModelTransportClock(

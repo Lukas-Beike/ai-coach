@@ -54,31 +54,6 @@ class CoachStructuredTurnService:
     def __init__(self, dependencies: CoachStructuredTurnDependencies) -> None:
         self._deps = dependencies
 
-    @staticmethod
-    def _resume_id(
-        receipt: dict[str, Any],
-        request_payload: dict[str, Any],
-        *,
-        background_owned: bool,
-    ) -> str:
-        resume_id = (
-            str(receipt.get("openai_response_id") or "") if background_owned else ""
-        )
-        if resume_id and receipt.get("response_input"):
-            request_payload["input"] = receipt["response_input"]
-            if receipt.get("previous_response_id") and not request_payload.get(
-                "conversation"
-            ):
-                request_payload["previous_response_id"] = receipt[
-                    "previous_response_id"
-                ]
-        if background_owned and receipt.get("pending_tool_outputs"):
-            request_payload["input"] = receipt["pending_tool_outputs"]
-            if resume_id and not request_payload.get("conversation"):
-                request_payload["previous_response_id"] = resume_id
-            resume_id = ""
-        return resume_id
-
     def _open_and_request(
         self,
         message: str,
@@ -152,14 +127,8 @@ class CoachStructuredTurnService:
             retain_openai_attachment_context=retain_openai_attachment_context,
             has_prior_openai_attachments=has_prior_openai_attachments,
             request_kind=request_kind,
-            background_owned=background_owned,
         )
         recovery_state = {"conversation_recovered": False}
-        resume_id = self._resume_id(
-            receipt,
-            request_payload,
-            background_owned=background_owned,
-        )
         response = self._deps.response.respond(
             request_payload,
             request_payload=request_payload,
@@ -172,7 +141,6 @@ class CoachStructuredTurnService:
             on_text_delta=on_text_delta,
             cancel_event=cancel_event,
             recovery_state=recovery_state,
-            resume_id=resume_id,
         )
         return {
             "receipt": receipt,

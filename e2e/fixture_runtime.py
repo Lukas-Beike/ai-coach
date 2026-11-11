@@ -381,17 +381,6 @@ class FixtureResponseTransport:
         _fixture_simulate_openai_mode()
         return fixture_coach_response(payload)
 
-    def background_request(
-        self, payload, *, response_id=None, on_response_id=None, cancel_event=None
-    ):
-        _fixture_simulate_openai_mode()
-        return fixture_coach_response(
-            payload,
-            response_id=response_id,
-            on_response_id=on_response_id,
-            cancel_event=cancel_event,
-        )
-
     def stream_request(
         self, payload, on_text_delta, cancel_event=None, on_response_id=None
     ):

@@ -290,19 +290,18 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertFalse(state.budget_exhausted)
         followup = self.response.respond.call_args.args[0]
         self.assertEqual(followup["tool_choice"], "auto")
-        self.assertEqual(followup["previous_response_id"], "response-one")
-        self.assertEqual(followup["input"][0]["call_id"], "call-one")
-        self.assertEqual(followup["input"][0]["output"], '{"ok": true}')
+        self.assertNotIn("previous_response_id", followup)
+        self.assertEqual(followup["input"][-1]["call_id"], "call-one")
+        self.assertEqual(followup["input"][-1]["output"], '{"ok": true}')
         phases = [call.args[1] for call in self.jobs.merge_receipt.call_args_list]
         self.assertEqual(phases[0]["phase"], "executing_tools")
         self.assertEqual(phases[1]["phase"], "waiting_final_response")
-        self.assertEqual(phases[-1], {"pending_tool_outputs": []})
+        self.assertFalse(any("pending_tool_outputs" in phase for phase in phases))
 
     def test_stateless_rounds_resend_items_and_never_point_at_a_response(
         self,
     ) -> None:
         state = self.state()
-        state.background_owned = False
         state.request_payload = {"input": '{"current_message":"hi"}', "store": False}
         self.service._limits = CoachStructuredToolRoundLimits(
             max_rounds=3,
@@ -356,7 +355,6 @@ class StructuredToolRoundTests(unittest.TestCase):
 
     def test_attachment_conversation_follows_up_with_outputs_only(self) -> None:
         state = self.state()
-        state.background_owned = False
         state.request_payload = {"conversation": "conv-1", "input": "text"}
 
         with patch.object(
@@ -410,10 +408,10 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertEqual(final["tool_choice"], "none")
         self.assertTrue(final["instructions"].startswith("synthetic-instructions"))
         self.assertIn("Tool step limit reached", final["instructions"])
-        self.assertEqual(final["previous_response_id"], "response-two")
+        self.assertNotIn("previous_response_id", final)
         # The call the model still wanted is answered as not executed.
-        self.assertEqual(final["input"][0]["call_id"], "call-one")
-        self.assertFalse(json.loads(final["input"][0]["output"])["executed"])
+        self.assertEqual(final["input"][-1]["call_id"], "call-one")
+        self.assertFalse(json.loads(final["input"][-1]["output"])["executed"])
         self.assertTrue(state.budget_exhausted)
         self.assertEqual(state.model_instructions, "synthetic-instructions")
         [record] = logs.records

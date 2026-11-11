@@ -120,7 +120,6 @@ class CoachRequestPayloadService:
         retain_openai_attachment_context: bool,
         has_prior_openai_attachments: bool,
         request_kind: str | None = None,
-        background_owned: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         selection = request_context_selection(
             message,
@@ -185,10 +184,9 @@ class CoachRequestPayloadService:
         # content) instead of pointing at a stored response.
         if not retain_openai_attachment_context:
             payload.pop("conversation")
-        # The attachment conversation holds its items remotely, and a background
-        # response must be stored for polling and crash recovery (the API
-        # requires store=true for it); only these requests keep stored responses.
-        stateless = not (background_owned or retain_openai_attachment_context)
+        # Only the attachment conversation holds its items remotely, so only
+        # these requests keep stored responses.
+        stateless = not retain_openai_attachment_context
         payload["store"] = not stateless
         if stateless:
             payload["include"] = [ENCRYPTED_REASONING_INCLUDE]

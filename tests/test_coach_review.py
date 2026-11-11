@@ -125,7 +125,7 @@ class CoachReviewTests(unittest.TestCase):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.background_request.side_effect = AppError(
+            transport_factory.return_value.stream_request.side_effect = AppError(
                 503, "Model unavailable"
             )
             result = server.COACH_TURNS.chat_turn_service().run(

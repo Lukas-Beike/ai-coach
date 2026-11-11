@@ -25,12 +25,9 @@ from backend.providers.openai_events import (
     request_stream_response,
 )
 from backend.providers.openai_requests import (
-    RESUMABLE_POLL_REASONS,
     OpenAIResponsesClient,
     endpoint,
-    poll_background_response,
     request_with_conversation_retry,
-    response_id,
     responses_payload,
 )
 from backend.providers.openai_responses import (
@@ -384,388 +381,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                     lambda: {"ok": True}, max_attempts=max_attempts
                 )
 
-    def test_response_id_trims_and_accepts_ascii_boundary_values(self):
-        self.assertEqual(response_id("  resp_a  "), "resp_a")
-        self.assertEqual(response_id("resp_" + "a" * 200), "resp_" + "a" * 200)
-        self.assertEqual(response_id("resp_a-b_9"), "resp_a-b_9")
-
-    def test_response_id_rejects_invalid_and_non_ascii_values(self):
-        for value in (
-            None,
-            "",
-            "resp_",
-            "resp_" + "a" * 201,
-            "resp_ä",
-            "response_a",
-            "resp_a/b",
-        ):
-            with self.subTest(value=value), self.assertRaises(AppError) as raised:
-                response_id(value)
-            self.assertEqual(raised.exception.status, 502)
-            self.assertEqual(
-                raised.exception.message,
-                "OpenAI hat keine gültige Response-ID zurückgegeben.",
-            )
-            self.assertEqual(raised.exception.reason, "invalid_response")
-
-    def test_poll_background_response_returns_terminal_initial_response(self):
-        response = {"id": " resp_initial ", "status": "completed", "output": []}
-        retrieve_calls = []
-
-        result = poll_background_response(
-            response,
-            retrieve=lambda response_id: retrieve_calls.append(response_id),
-            cancel=lambda response_id: self.fail(
-                "terminal response must not be cancelled"
-            ),
-            poll_seconds=1,
-            max_seconds=5,
-        )
-
-        self.assertIs(result, response)
-        self.assertEqual(retrieve_calls, [])
-
-    def test_poll_background_response_polls_until_terminal_with_casefold_status(self):
-        responses = iter(
-            (
-                {"status": "IN_PROGRESS"},
-                {"status": "Queued"},
-                {"status": "completed", "answer": "done"},
-            )
-        )
-        retrieved_ids = []
-        waits = []
-        clock = iter((10.0, 10.1, 10.2, 10.3))
-
-        class Event:
-            def wait(self, seconds):
-                waits.append(seconds)
-                return False
-
-        result = poll_background_response(
-            {"id": "resp_poll", "status": "queued"},
-            retrieve=lambda response_id: (
-                retrieved_ids.append(response_id),
-                next(responses),
-            )[1],
-            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
-            cancel_event=Event(),
-            poll_seconds=2,
-            max_seconds=5,
-            monotonic=lambda: next(clock),
-        )
-
-        self.assertEqual(result, {"status": "completed", "answer": "done"})
-        self.assertEqual(retrieved_ids, ["resp_poll", "resp_poll", "resp_poll"])
-        self.assertEqual(waits, [0.25, 0.5, 1.0])
-
-    def test_poll_background_response_cancels_before_wait(self):
-        class Event:
-            def wait(self, seconds):
-                waits.append(seconds)
-                return True
-
-        cancelled = []
-        waits = []
-        with self.assertRaises(AppError) as raised:
-            poll_background_response(
-                {"id": "resp_cancel", "status": "in_progress"},
-                retrieve=lambda _response_id: self.fail(
-                    "cancelled response must not be retrieved"
-                ),
-                cancel=cancelled.append,
-                cancel_event=Event(),
-                poll_seconds=3,
-                max_seconds=5,
-                monotonic=lambda: 0,
-            )
-
-        self.assertEqual(cancelled, ["resp_cancel"])
-        self.assertEqual(waits, [0.25])
-        self.assertEqual(
-            (
-                raised.exception.status,
-                raised.exception.reason,
-                raised.exception.message,
-            ),
-            (499, "chat_cancelled", "Die Coach-Anfrage wurde abgebrochen."),
-        )
-
-    def test_poll_background_response_cancels_when_event_is_set_after_wait(self):
-        class Event:
-            def __init__(self):
-                self.set = False
-
-            def wait(self, seconds):
-                waits.append(seconds)
-                self.set = True
-                return False
-
-            def is_set(self):
-                return self.set
-
-        cancelled = []
-        waits = []
-        with self.assertRaises(AppError) as raised:
-            poll_background_response(
-                {"id": "resp_cancel_after_wait", "status": "queued"},
-                retrieve=lambda _response_id: self.fail(
-                    "cancelled response must not be retrieved"
-                ),
-                cancel=cancelled.append,
-                cancel_event=Event(),
-                poll_seconds=3,
-                max_seconds=5,
-                monotonic=lambda: 0,
-            )
-
-        self.assertEqual(cancelled, ["resp_cancel_after_wait"])
-        self.assertEqual(waits, [0.25])
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-
-    def test_poll_background_response_times_out_from_function_entry(self):
-        times = iter((100.0, 101.0))
-        cancelled = []
-        sleeps = []
-
-        with (
-            mock.patch("backend.providers.openai_requests.time.sleep", sleeps.append),
-            self.assertRaises(AppError) as raised,
-        ):
-            poll_background_response(
-                {"id": "resp_timeout", "status": "queued"},
-                retrieve=lambda _response_id: self.fail(
-                    "timed out response must not be retrieved"
-                ),
-                cancel=cancelled.append,
-                poll_seconds=1,
-                max_seconds=1,
-                monotonic=lambda: next(times),
-            )
-
-        self.assertEqual(sleeps, [0.25])
-        self.assertEqual(cancelled, ["resp_timeout"])
-        self.assertEqual(
-            (
-                raised.exception.status,
-                raised.exception.reason,
-                raised.exception.message,
-            ),
-            (
-                504,
-                "background_budget_exceeded",
-                "Die Hintergrundplanung hat das Zeitlimit überschritten.",
-            ),
-        )
-
-    def test_poll_background_response_preserves_timeout_when_cancel_fails(self):
-        def cancel(_response_id):
-            raise RuntimeError("remote cancellation failed")
-
-        with (
-            mock.patch("backend.providers.openai_requests.time.sleep"),
-            self.assertRaises(AppError) as raised,
-        ):
-            poll_background_response(
-                {"id": "resp_cancel_failure", "status": "queued"},
-                retrieve=lambda _response_id: self.fail(
-                    "timed out response must not be retrieved"
-                ),
-                cancel=cancel,
-                poll_seconds=1,
-                max_seconds=0,
-                monotonic=lambda: 1,
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (504, "background_budget_exceeded"),
-        )
-
-    def test_poll_background_response_cancels_once_when_retrieve_fails(self):
-        cancelled = []
-
-        def retrieve(_response_id):
-            raise RuntimeError("provider unreachable")
-
-        with (
-            mock.patch("backend.providers.openai_requests.time.sleep"),
-            self.assertRaisesRegex(RuntimeError, "^provider unreachable$"),
-        ):
-            poll_background_response(
-                {"id": "resp_retrieve_failure", "status": "queued"},
-                retrieve=retrieve,
-                cancel=cancelled.append,
-                poll_seconds=1,
-                max_seconds=60,
-                monotonic=lambda: 0,
-            )
-
-        self.assertEqual(cancelled, ["resp_retrieve_failure"])
-
-    def test_poll_background_response_keeps_retrieve_error_when_cancel_fails(self):
-        retrieve_error = AppError(502, "Upstream failed.", reason="provider_error")
-
-        def retrieve(_response_id):
-            raise retrieve_error
-
-        def cancel(_response_id):
-            raise RuntimeError("remote cancellation failed")
-
-        with (
-            mock.patch("backend.providers.openai_requests.time.sleep"),
-            self.assertRaises(AppError) as raised,
-        ):
-            poll_background_response(
-                {"id": "resp_retrieve_cancel_failure", "status": "in_progress"},
-                retrieve=retrieve,
-                cancel=cancel,
-                poll_seconds=1,
-                max_seconds=60,
-                monotonic=lambda: 0,
-            )
-
-        self.assertIs(raised.exception, retrieve_error)
-
-    def test_background_budget_exhaustion_is_not_resumable(self):
-        self.assertNotIn("background_budget_exceeded", RESUMABLE_POLL_REASONS)
-        self.assertEqual(
-            safe_log_reason("background_budget_exceeded"), "background_budget_exceeded"
-        )
-
-    def test_poll_background_response_keeps_resumable_failures_running(self):
-        for reason in ("provider_unavailable", "provider_timeout", "invalid_response"):
-            cancelled = []
-            retrieve_error = AppError(503, "Transient.", reason=reason)
-
-            def retrieve(_response_id, error=retrieve_error):
-                raise error
-
-            with (
-                self.subTest(reason=reason),
-                mock.patch("backend.providers.openai_requests.time.sleep"),
-                self.assertRaises(AppError) as raised,
-            ):
-                poll_background_response(
-                    {"id": "resp_resumable", "status": "in_progress"},
-                    retrieve=retrieve,
-                    cancel=cancelled.append,
-                    poll_seconds=1,
-                    max_seconds=60,
-                    monotonic=lambda: 0,
-                )
-            self.assertIs(raised.exception, retrieve_error)
-            self.assertEqual(cancelled, [])
-
-    def test_poll_background_response_backs_off_up_to_configured_interval(self):
-        statuses = iter(["in_progress"] * 5 + ["completed"])
-        waits = []
-
-        result = poll_background_response(
-            {"id": "resp_backoff", "status": "queued"},
-            retrieve=lambda _response_id: {"status": next(statuses)},
-            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
-            poll_seconds=2,
-            max_seconds=60,
-            monotonic=lambda: 0,
-            wait=waits.append,
-        )
-
-        self.assertEqual(result, {"status": "completed"})
-        self.assertEqual(waits, [0.25, 0.5, 1.0, 2, 2, 2])
-
-    def test_poll_background_response_never_waits_longer_than_configured_interval(
-        self,
-    ):
-        statuses = iter(["in_progress", "in_progress", "completed"])
-        waits = []
-
-        poll_background_response(
-            {"id": "resp_short_interval", "status": "queued"},
-            retrieve=lambda _response_id: {"status": next(statuses)},
-            cancel=lambda _response_id: self.fail("polling must not be cancelled"),
-            poll_seconds=0.1,
-            max_seconds=60,
-            monotonic=lambda: 0,
-            wait=waits.append,
-        )
-
-        self.assertEqual(waits, [0.1, 0.1, 0.1])
-
-    def test_poll_background_response_cancel_is_honored_during_backoff(self):
-        waits = []
-        cancelled = []
-        retrieved = []
-
-        class Event:
-            def wait(self, seconds):
-                waits.append(seconds)
-                return len(waits) == 3
-
-        with self.assertRaises(AppError) as raised:
-            poll_background_response(
-                {"id": "resp_cancel_backoff", "status": "queued"},
-                retrieve=lambda response_id: (
-                    retrieved.append(response_id),
-                    {"status": "in_progress"},
-                )[1],
-                cancel=cancelled.append,
-                cancel_event=Event(),
-                poll_seconds=30,
-                max_seconds=60,
-                monotonic=lambda: 0,
-            )
-
-        self.assertEqual(waits, [0.25, 0.5, 1.0])
-        self.assertEqual(len(retrieved), 2)
-        self.assertEqual(cancelled, ["resp_cancel_backoff"])
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-
-    def test_poll_background_response_deadline_is_enforced_during_backoff(self):
-        clock = iter((0.0, 0.3, 0.9, 1.6))
-        waits = []
-        cancelled = []
-
-        with self.assertRaises(AppError) as raised:
-            poll_background_response(
-                {"id": "resp_deadline_backoff", "status": "queued"},
-                retrieve=lambda _response_id: {"status": "in_progress"},
-                cancel=cancelled.append,
-                poll_seconds=30,
-                max_seconds=1.5,
-                monotonic=lambda: next(clock),
-                wait=waits.append,
-            )
-
-        self.assertEqual(waits, [0.25, 0.5, 1.0])
-        self.assertEqual(cancelled, ["resp_deadline_backoff"])
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (504, "background_budget_exceeded"),
-        )
-
-    def test_poll_background_response_rejects_invalid_initial_response_id(self):
-        with self.assertRaises(AppError) as raised:
-            poll_background_response(
-                {"id": "not-a-response-id", "status": "completed"},
-                retrieve=lambda _response_id: self.fail(
-                    "invalid response must not be retrieved"
-                ),
-                cancel=lambda _response_id: self.fail(
-                    "invalid response must not be cancelled"
-                ),
-                poll_seconds=1,
-                max_seconds=5,
-            )
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (502, "invalid_response"),
-        )
-
-    def test_responses_payload_applies_speed_to_stream_and_background(self):
+    def test_responses_payload_applies_speed_to_plain_and_stream_requests(self):
         for tier in ("default", "fast", "ultrafast"):
-            for flags in ({}, {"stream": True}, {"background": True}):
+            for flags in ({}, {"stream": True}):
                 original = {"model": "gpt-6.1-sol"}
                 result = responses_payload(
                     original, thinking_level="medium", service_tier=tier, **flags
@@ -793,22 +411,13 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertIs(result["reasoning"], explicit)
         self.assertEqual(result["reasoning"], explicit)
 
-    def test_responses_payload_forces_stream_and_background_store_flags(self):
-        payload = {"stream": False, "background": False, "store": False}
+    def test_responses_payload_forces_stream_and_keeps_the_callers_store_flag(self):
+        payload = {"stream": False, "store": False}
         streamed = responses_payload(payload, thinking_level="medium", stream=True)
         self.assertTrue(streamed["stream"])
-        self.assertFalse(streamed["background"])
         self.assertFalse(streamed["store"])
-
-        background = responses_payload(
-            payload, thinking_level="medium", background=True
-        )
-        self.assertFalse(background["stream"])
-        self.assertTrue(background["background"])
-        self.assertTrue(background["store"])
-        self.assertEqual(
-            payload, {"stream": False, "background": False, "store": False}
-        )
+        self.assertNotIn("background", streamed)
+        self.assertEqual(payload, {"stream": False, "store": False})
 
     def test_endpoint_joins_base_path_and_normalizes_api_path(self):
         self.assertEqual(
@@ -1734,8 +1343,6 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             "default_base_url": "https://api.openai.com/v1",
             "responses_path": "/responses",
             "response_timeout_seconds": 17,
-            "background_poll_seconds": 2,
-            "background_max_seconds": 10,
             "thinking_level": lambda: "high",
             "http_client": http,
             "provider_state": state or _ClientState(),
@@ -1744,10 +1351,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         settings.update(overrides)
         from backend.providers.openai_requests import ResponsesClock
 
-        settings["clock"] = ResponsesClock(
-            settings.pop("monotonic", lambda: 0.0),
-            settings.pop("wait", lambda _seconds: None),
-        )
+        settings["clock"] = ResponsesClock(settings.pop("wait", lambda _seconds: None))
         return OpenAIResponsesClient(**settings)
 
     def test_responses_client_request_builds_wire_request_and_records_usage_once(self):
@@ -1838,160 +1442,6 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         )
         self.assertEqual(len(state.usage), 1)
 
-    def test_responses_client_background_lock_backoff_returns_public_cancel_error(self):
-        locked = AppError(409, "locked", reason="conversation_locked")
-        http = _ClientHTTP(locked, {"id": "resp_never_created", "status": "queued"})
-        client = self._client(http)
-
-        class Event:
-            def __init__(self):
-                self.cancelled = False
-
-            def is_set(self):
-                return self.cancelled
-
-            def wait(self, _seconds):
-                self.cancelled = True
-                return True
-
-        with self.assertRaises(AppError) as raised:
-            client.background({"input": "hello"}, cancel_event=Event())
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
-        )
-        self.assertEqual(len(http.calls), 1)
-
-    def test_responses_client_retrieve_validates_without_recording_usage(self):
-        state = _ClientState()
-        http = _ClientHTTP({"id": "resp_a", "status": "completed"})
-        client = self._client(http, state)
-
-        result = client.retrieve(" resp_a ")
-
-        self.assertEqual(result["id"], "resp_a")
-        self.assertEqual(
-            http.calls[0][0][:2],
-            ("GET", "https://api.example.test/v1/responses/resp_a"),
-        )
-        self.assertEqual(state.usage, [])
-        with self.assertRaises(AppError):
-            client.retrieve("not-a-response-id")
-
-    def test_responses_client_cancel_is_best_effort_and_logs_static_event(self):
-        logger = _ClientLogger()
-        http = _ClientHTTP(RuntimeError("provider detail must not be logged"))
-        client = self._client(http, logger=logger)
-
-        client.cancel("resp_a")
-
-        self.assertEqual(
-            logger.warnings,
-            [
-                (
-                    "OpenAI background response cancellation failed",
-                    {"event": "openai_background_cancel_failed"},
-                )
-            ],
-        )
-        self.assertNotIn("resp_a", repr(logger.warnings))
-
-    def test_responses_client_background_records_usage_after_final_retrieve_and_notifies_once(
-        self,
-    ):
-        state = _ClientState()
-        http = _ClientHTTP(
-            {"id": "resp_bg", "status": "queued"},
-            {"id": "resp_bg", "status": "completed", "output_text": "done"},
-        )
-        notified = []
-        waits = []
-        client = self._client(http, state, wait=waits.append)
-
-        result = client.background({"input": "hello"}, on_response_id=notified.append)
-
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(notified, ["resp_bg"])
-        self.assertEqual(waits, [0.25])
-        self.assertEqual([entry[2] for entry in state.usage], ["responses_background"])
-        self.assertEqual(len(state.usage), 1)
-
-    def test_responses_client_background_deadline_includes_resume_retrieve(self):
-        state = _ClientState()
-        http = _ClientHTTP(
-            {"id": "resp_bg", "status": "queued"},
-            {},
-            {"id": "resp_bg", "status": "cancelled", "usage": {"total_tokens": 7}},
-        )
-        times = iter((0.0, 11.0, 11.0, 11.0))
-        waits = []
-        client = self._client(
-            http,
-            state,
-            wait=waits.append,
-            monotonic=lambda: next(times),
-        )
-
-        with self.assertRaises(AppError) as raised:
-            client.background({}, response_id="resp_bg")
-
-        self.assertEqual(
-            (raised.exception.status, raised.exception.reason),
-            (504, "background_budget_exceeded"),
-        )
-        self.assertEqual(waits, [0.25])
-        self.assertEqual(
-            http.calls[-1][0][:2],
-            ("GET", "https://api.example.test/v1/responses/resp_bg"),
-        )
-        self.assertEqual(
-            http.calls[-2][0][:2],
-            ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"),
-        )
-        # The budget stop bills the cancelled response once, after the cancel POST.
-        self.assertEqual(
-            [(entry[1]["usage"], entry[2]) for entry in state.usage],
-            [({"total_tokens": 7}, "responses_background")],
-        )
-
-    def test_responses_client_background_cancel_records_final_usage_best_effort(self):
-        class Event:
-            def is_set(self):
-                return True
-
-            def wait(self, _seconds):
-                return True
-
-        state = _ClientState()
-        http = _ClientHTTP(
-            {"id": "resp_bg", "status": "queued"},
-            {},
-            RuntimeError("retrieve failed"),
-        )
-        client = self._client(http, state)
-
-        with self.assertRaises(AppError) as raised:
-            client.background({"input": "hello"}, cancel_event=Event())
-
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-        self.assertEqual(http.calls[-1][0][0], "GET")
-        # The lookup is bounded well below the chat reset's lock wait.
-        self.assertEqual(http.calls[-1][1]["timeout"], 5)
-        self.assertEqual(state.usage, [])
-
-        http = _ClientHTTP(
-            {"id": "resp_bg", "status": "queued"},
-            {},
-            {"id": "resp_bg", "status": "cancelled", "usage": {"total_tokens": 3}},
-        )
-        client = self._client(http, state)
-        with self.assertRaises(AppError):
-            client.background({"input": "hello"}, cancel_event=Event())
-        self.assertEqual(
-            [(entry[1]["usage"], entry[2]) for entry in state.usage],
-            [({"total_tokens": 3}, "responses_background")],
-        )
-
     def test_responses_client_failed_response_body_records_usage_before_raising(self):
         class RejectingState(_ClientState):
             def validate_openai_response(self, path, result):
@@ -2001,22 +1451,16 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         state = RejectingState()
         http = _ClientHTTP(
-            {"id": "resp_f", "status": "failed", "usage": {"total_tokens": 5}},
-            {"id": "resp_f2", "status": "failed", "usage": {"total_tokens": 6}},
+            {"id": "resp_f", "status": "failed", "usage": {"total_tokens": 5}}
         )
         client = self._client(http, state)
 
         with self.assertRaises(AppError):
             client.responses({"input": "hello"})
-        with self.assertRaises(AppError):
-            client.retrieve("resp_f2")
 
         self.assertEqual(
             [(entry[1]["usage"], entry[2]) for entry in state.usage],
-            [
-                ({"total_tokens": 5}, "responses"),
-                ({"total_tokens": 6}, "responses_background"),
-            ],
+            [({"total_tokens": 5}, "responses")],
         )
 
     def _stream_client(

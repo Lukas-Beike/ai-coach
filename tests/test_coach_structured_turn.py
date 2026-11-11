@@ -93,31 +93,12 @@ class StructuredTurnTests(unittest.TestCase):
         self.assertNotIn("ai_provider", self.final.persist.call_args.kwargs)
         self.failure.persist.assert_not_called()
 
-    def test_background_checkpoint_restores_exact_request_input_and_previous_id(
-        self,
-    ) -> None:
-        self.opening.open.return_value.update(
-            {
-                "openai_response_id": "response-one",
-                "response_input": [{"synthetic": "input"}],
-                "previous_response_id": "response-before",
-            }
-        )
-
-        self.run_turn(background_job=True)
-
-        submitted = self.response.respond.call_args.args[0]
-        self.assertEqual(submitted["input"], [{"synthetic": "input"}])
-        self.assertEqual(submitted["previous_response_id"], "response-before")
-        self.assertEqual(
-            self.response.respond.call_args.kwargs["resume_id"], "response-one"
-        )
-
-    def test_pending_tool_outputs_override_checkpoint_for_restart(self) -> None:
+    def test_receipt_written_by_an_older_release_is_requested_again(self) -> None:
         self.opening.open.return_value.update(
             {
                 "openai_response_id": "response-one",
                 "response_input": [{"synthetic": "old"}],
+                "previous_response_id": "response-before",
                 "pending_tool_outputs": [{"synthetic": "output"}],
             }
         )
@@ -125,9 +106,9 @@ class StructuredTurnTests(unittest.TestCase):
         self.run_turn(background_job=True)
 
         submitted = self.response.respond.call_args.args[0]
-        self.assertEqual(submitted["input"], [{"synthetic": "output"}])
-        self.assertEqual(submitted["previous_response_id"], "response-one")
-        self.assertEqual(self.response.respond.call_args.kwargs["resume_id"], "")
+        self.assertEqual(submitted, self.payload.build.return_value[1])
+        self.assertEqual(submitted, {"input": []})
+        self.assertNotIn("resume_id", self.response.respond.call_args.kwargs)
 
     def test_round_state_carries_deterministic_context_profile(self) -> None:
         message = "Plane die nächsten zwei Wochen neu"
@@ -248,8 +229,10 @@ class StructuredTurnTests(unittest.TestCase):
     def test_diagnostics_keep_only_installed_backend_frames_with_split_server_root(
         self,
     ) -> None:
+        self.opening.open.return_value = None
+        self.failure.persist.return_value = {}
         try:
-            self.service._resume_id(None, {}, background_owned=True)
+            self.run_turn()
         except AttributeError as exc:
             metadata = coach_error_metadata(exc, Path("different-server-root"))
         else:

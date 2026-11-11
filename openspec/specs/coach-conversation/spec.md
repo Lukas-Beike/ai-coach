@@ -41,11 +41,11 @@ The system SHALL bind command and receipt access to the creating session, return
 Evidence: `backend/coach/chat_turn.py:CoachChatTurnService._command_state`, `backend/coach/chat_turn.py:CoachChatTurnService._run`; `backend/coach/turn_opening.py:CoachTurnOpeningService._require_same_message`; `tests/test_coach_chat_turn.py:test_completed_turn_is_read_idempotently_without_second_execution`, `tests/test_coach_chat_turn.py:test_foreign_turn_is_denied_before_resume_or_provider_access`; `tests/test_coach_turn_opening.py:test_same_turn_id_with_different_text_is_rejected_without_writes`. Background enqueue text equivalence is an evidence limitation recorded separately.
 
 ### Requirement: CC3 Recoverable background progress and bounded failure
-The system SHALL retain background turn checkpoints, resume unfinished work under the stored model and conversation, and distinguish retryable contention from terminal failure.
+The system SHALL retain background turn checkpoints, request unfinished work again under the stored model and conversation, and distinguish retryable contention from terminal failure.
 
-#### Scenario: Resume after interruption
-- **WHEN** a durable turn has a provider response ID or checkpointed tool outputs after worker restart
-- **THEN** execution resumes the response or submits the checkpointed outputs, preserving completed tool effects and the original model selection.
+#### Scenario: Re-request after interruption
+- **WHEN** a durable turn is requeued after a worker or process restart, including a job that an earlier release left with a provider response ID, response input or checkpointed tool outputs
+- **THEN** the model request is built again from the turn's original input and its journaled tool results, stateless with `store: false` and without a previous response ID; journaled tool effects are replayed and not executed again, the original model selection is kept, and the earlier release's resume state is dropped on startup.
 
 #### Scenario: Queue contention
 - **WHEN** execution cannot acquire the conversation queue or times out waiting for its slot
@@ -55,7 +55,7 @@ The system SHALL retain background turn checkpoints, resume unfinished work unde
 - **WHEN** a job repeatedly fails outside handled turn processing, or belongs to a reset generation
 - **THEN** repeated failures eventually become terminal, while an invalidated job cannot restore its session or recreate deleted dialogue.
 
-Evidence: `backend/coach/background_job.py:CoachBackgroundJobRunner`; `backend/coach/job_worker.py:CoachJobWorker`; `backend/coach/job_store.py:CoachJobStore`; `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`, `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`; `tests/test_coach_dialogue.py:test_background_resumes_response_and_committed_effect_without_replaying`, `tests/test_coach_dialogue.py:test_background_replays_checkpointed_outputs_before_new_response`.
+Evidence: `backend/coach/background_job.py:CoachBackgroundJobRunner`; `backend/coach/job_worker.py:CoachJobWorker`; `backend/coach/job_store.py:CoachJobStore`; `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`, `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`, `tests/test_coach_dialogue.py:test_job_of_an_older_release_is_requested_again_without_its_resume_state`, `tests/test_coach_job_store.py:test_restart_requeues_all_background_jobs`.
 
 ### Requirement: CC4 Local history and current execution status
 The system SHALL provide authenticated bounded local history pages, chronological display within each page, pagination/search metadata and session-scoped execution status.
@@ -147,7 +147,7 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 
 #### Scenario: Configured Garmin and fresh sleep
 - **WHEN** the athlete starts the morning quick action with configured Garmin
-- **THEN** the system attempts the existing Garmin refresh, verifies today's sleep readiness, refreshes morning Body Battery and then runs the Coach.
+- **THEN** the system attempts the existing Garmin refresh, verifies today's sleep readiness, refreshes morning Body Battery and then runs the Coach; a turn that is requested again after that preparation does not repeat it.
 
 #### Scenario: Missing sleep or unconfigured Garmin
 - **WHEN** current sleep is unavailable after refresh, or Garmin is unconfigured
@@ -155,9 +155,9 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 
 #### Scenario: Completion versus pending clarification
 - **WHEN** the morning turn finishes with a message and no pending clarification
-- **THEN** its ready marker for the local day the turn was prepared for (kept in the job receipt, also across a resume) and its quick-action receipt are persisted, so a check-in completed after midnight does not mark the next day; a clarification or yesterday's ready marker does not count as today's completed check-in.
+- **THEN** its ready marker for the local day the turn was prepared for (kept in the job receipt, also when the turn is requested again) and its quick-action receipt are persisted, so a check-in completed after midnight does not mark the next day; a clarification or yesterday's ready marker does not count as today's completed check-in.
 
-Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`, `backend/coach/job_store.py:CoachJobStore.requeue`, `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`, `tests/test_coach_job_store.py:CoachJobStoreTests.test_data_wait_requeues_with_fixed_delay_until_its_cap`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`, `tests/test_coach_morning_completion.py:test_completed_command_gets_compact_unicode_receipt_in_two_transactions`, `tests/test_coach_background_job.py:test_morning_completion_requires_final_message_without_clarification`.
+Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`, `backend/coach/job_store.py:CoachJobStore.requeue`, `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`, `tests/test_coach_job_store.py:CoachJobStoreTests.test_data_wait_requeues_with_fixed_delay_until_its_cap`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`, `tests/test_coach_morning_completion.py:test_completed_command_gets_compact_unicode_receipt_in_two_transactions`, `tests/test_coach_background_job.py:test_morning_completion_requires_final_message_without_clarification`, `tests/test_coach_background_job.py:test_rerequested_morning_turn_does_not_repeat_the_sync`.
 
 ### Requirement: CC9a Analysis and planning quick actions
 The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `block_review`, `plan_week`, `plan_block` and `adjust_week`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.

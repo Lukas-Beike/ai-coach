@@ -73,13 +73,6 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self.assertIn("dialogue", json.loads(local["input"]))
         self.assertIn("Earlier image pixels are unavailable", local["instructions"])
 
-    def test_background_turn_stays_stored_for_polling_and_resume(self) -> None:
-        _, payload = self.build(background_owned=True)
-
-        self.assertIs(payload["store"], True)
-        self.assertNotIn("include", payload)
-        self.assertNotIn("conversation", payload)
-
     def _dialogue_text(self, payload: dict) -> str:
         """Dialogue JSON text of a payload whose input carries attachment parts."""
         return payload["input"][0]["content"][0]["text"]

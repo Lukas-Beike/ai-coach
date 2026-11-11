@@ -164,25 +164,10 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(model.call_count, 1)
         self.assertEqual(result["status"], "cancelled")
 
-    def test_background_recovery_retries_same_tool_output_with_same_parent(self):
+    def test_job_rate_limit_retry_resends_the_same_stateless_request(self):
         turn = "synthetic-retry-recovery"
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Bitte fortsetzen", turn, "synthetic-session"
-        )
-        outputs = [
-            {
-                "type": "function_call_output",
-                "call_id": "saved",
-                "output": '{"ok":true}',
-            }
-        ]
-        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(
-            turn,
-            {
-                "openai_response_id": "resp_waiting",
-                "response_input": outputs,
-                "previous_response_id": "resp_tool",
-            },
         )
         with patch("backend.coach.response_retry.time.sleep"):
             result, model = self.turn(
@@ -192,10 +177,11 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
                 background_job=True,
             )
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(model.call_args_list[0].kwargs["response_id"], "resp_waiting")
-        self.assertIsNone(model.call_args_list[1].kwargs["response_id"])
-        self.assertEqual(model.call_args.args[0]["input"], outputs)
-        self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_tool")
+        self.assertEqual(model.call_count, 2)
+        first, retry = (call.args[0] for call in model.call_args_list)
+        self.assertEqual(first, retry)
+        self.assertIs(retry["store"], False)
+        self.assertNotIn("previous_response_id", retry)
 
     def test_failed_answer_keeps_observed_sync_status(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])

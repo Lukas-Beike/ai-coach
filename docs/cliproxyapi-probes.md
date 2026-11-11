@@ -64,8 +64,7 @@ check rather than running bulk evaluations against subscription quota.
 
 The verified app provider clients accepted JSON Responses, streaming function
 calls, and a synthetic tool-result round trip. Full Coach compatibility failed:
-`POST /v1/conversations` returned 404, and background Responses creation returned
-400. Coach creates the remote conversation only for turns that retain attachment
+`POST /v1/conversations` returned 404. Coach creates the remote conversation only for turns that retain attachment
 context; ordinary turns run without it. Recheck
 affected capabilities after proxy/app changes; these results do not establish
 official API parity. Do not bypass conversation, persistence, approval, or

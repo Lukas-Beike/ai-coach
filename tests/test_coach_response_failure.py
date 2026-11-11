@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import test_coach_dialogue as dialogue
 
 from backend.errors import AppError
-from backend.providers import openai_requests
+from backend.providers import openai_stream
 from backend.sync import queue as sync_queue
 
 server = dialogue.server
@@ -44,7 +44,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         )
         payloads = []
 
-        def create(payload, **kwargs):
+        def create(payload, *_args, **kwargs):
             payloads.append(payload)
             if kwargs.get("on_response_id") is not None:
                 kwargs["on_response_id"](f"resp_{len(payloads)}")
@@ -80,7 +80,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 return_value="Synthetic local context",
             ),
             patch.object(
-                openai_requests.OpenAIResponsesClient, "background", side_effect=create
+                openai_stream.OpenAIStreamClient, "stream", side_effect=create
             ),
             patch.object(server.time, "sleep"),
             patch.object(
@@ -101,9 +101,15 @@ class CoachResponseFailureTests(unittest.TestCase):
             enqueue.assert_called_once()
         self.assertEqual(len(payloads), 3)
         self.assertEqual(payloads[1], payloads[2])
-        self.assertEqual(payloads[2]["previous_response_id"], "resp_sync")
-        self.assertNotIn("conversation", payloads[0])
-        self.assertNotIn("previous_response_id", payloads[0])
+        # The turn is stateless: the retry resends the sync call and its output.
+        self.assertEqual(
+            [item.get("name") or item.get("type") for item in payloads[2]["input"][1:]],
+            ["start_intervals_plan_sync", "function_call_output"],
+        )
+        for payload in payloads:
+            self.assertIs(payload["store"], False)
+            self.assertNotIn("conversation", payload)
+            self.assertNotIn("previous_response_id", payload)
         self.assertEqual(approved["status"], "queued")
 
     def test_failed_background_answer_keeps_sync_and_reports_provider_code(self):
@@ -117,7 +123,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         )
         responses = 0
 
-        def create(payload, **kwargs):
+        def create(payload, *_args, **kwargs):
             nonlocal responses
             responses += 1
             if kwargs.get("on_response_id") is not None:
@@ -135,7 +141,6 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "id": "resp_sync",
                     "status": "completed",
                 }
-            self.assertEqual(responses, 2)
             return server.provider_state_service().validate_openai_response(
                 "/responses", failed_response
             )
@@ -159,8 +164,9 @@ class CoachResponseFailureTests(unittest.TestCase):
                 return_value="Synthetic local context",
             ),
             patch.object(
-                openai_requests.OpenAIResponsesClient, "background", side_effect=create
+                openai_stream.OpenAIStreamClient, "stream", side_effect=create
             ),
+            patch.object(server.time, "sleep"),
             patch.object(
                 sync_queue.SyncJobQueueService,
                 "enqueue",
@@ -180,7 +186,9 @@ class CoachResponseFailureTests(unittest.TestCase):
                 background_job=True,
             )
             enqueue.assert_not_called()
-            self.assertEqual(responses, 2)
+            # The sync call, then the answer's three attempts: nothing is stored
+            # at the provider, so a failed answer is requested again.
+            self.assertEqual(responses, 4)
             self.assertEqual(receipt, replay)
             self.assertEqual(receipt["status"], "partial")
             self.assertEqual(receipt["pending_operations"], [])

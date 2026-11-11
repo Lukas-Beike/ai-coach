@@ -98,27 +98,25 @@ class CoachResponseRetryPolicyTests(unittest.TestCase):
             )
         )
 
-    def test_transient_failures_are_not_retried_once_the_provider_may_hold_the_turn(
+    def test_transient_failures_are_not_retried_in_a_remote_conversation(
         self,
     ) -> None:
         for reason in ("provider_timeout", "provider_unavailable", "network_error"):
             failure = self.error(reason=reason)
-            for flags in (
-                {"response_id_exists": True},
-                {"remote_conversation": True},
-            ):
-                with self.subTest(reason=reason, **flags):
-                    self.assertIsNone(
-                        self.policy.retry_delay(
-                            failure, attempt=0, request_delta_emitted=False, **flags
-                        )
+            with self.subTest(reason=reason):
+                self.assertIsNone(
+                    self.policy.retry_delay(
+                        failure,
+                        attempt=0,
+                        request_delta_emitted=False,
+                        remote_conversation=True,
                     )
+                )
 
     def test_other_failures_are_not_retried(self) -> None:
         for failure in (
             self.error(reason="response_failed"),
             self.error(reason="response_failed", provider_error_code="other"),
-            self.error(reason="background_budget_exceeded"),
             self.error(reason="authentication_or_permission"),
             self.error(reason="chat_cancelled"),
         ):

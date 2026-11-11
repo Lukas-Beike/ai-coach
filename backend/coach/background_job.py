@@ -139,7 +139,8 @@ class CoachBackgroundJobRunner:
         receipt: dict[str, Any],
         stream_attached: bool,
     ) -> Any:
-        if not stream_attached or receipt.get("openai_response_id"):
+        # A re-requested turn may have streamed its first attempt already.
+        if not stream_attached or receipt.get("openai_reached"):
             return None
 
         def publish_delta(text: str) -> None:
@@ -171,15 +172,15 @@ class CoachBackgroundJobRunner:
                 reason="session_expired",
             )
         message = self._jobs.message(job)
+        prepared = bool(receipt.get("morning_checkin_date"))
         worker_phase = {"status": "running"}
-        if not receipt.get("openai_response_id"):
+        if not receipt.get("openai_reached"):
             worker_phase["phase"] = "preparing"
         self._jobs.merge_receipt(client_turn_id, worker_phase)
-        # A resumed turn already holds its provider response; a cancel stops the
-        # blocking Garmin sync before and after it instead of running it first.
-        if receipt.get("request_kind") == "morning_checkin" and not receipt.get(
-            "openai_response_id"
-        ):
+        # The marker names a finished preparation; a re-requested turn does not
+        # run the blocking Garmin sync again, and a cancel stops it before and
+        # after it instead of running it first.
+        if receipt.get("request_kind") == "morning_checkin" and not prepared:
             raise_if_chat_cancelled(cancel_event)
             prepared_for = self._morning().prepare()
             if isinstance(prepared_for, date):
