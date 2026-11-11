@@ -99,7 +99,8 @@ def initialize_application_database(
             "COALESCE(json_extract(receipt, '$.change_summary.undoable') = 1 "
             "AND json_extract(receipt, '$.change_summary.undone_at') IS NULL, 0) "
             f"AND EXISTS ({_UNDO_REFERENCES}) "
-            f"AND NOT EXISTS ({_UNDO_REFERENCES} AND json_extract(change.value, '$.id') "
+            f"AND NOT EXISTS ({_UNDO_REFERENCES} AND CASE WHEN change.type = 'object' "
+            "THEN json_extract(change.value, '$.id') END "
             "NOT IN (SELECT id FROM change_history)) "
             "ELSE 0 END",
             (cutoff,),

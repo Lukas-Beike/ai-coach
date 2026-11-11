@@ -278,7 +278,8 @@ class DatabaseBootstrapTests(unittest.TestCase):
                     "change_summary": {"undoable": True, "undone_at": None},
                     "command_receipts": [
                         "malformed",
-                        {"tool": "update_profile", "changes": [{"id": change_id}]},
+                        # A malformed entry never aborts the purge.
+                        {"tool": "update_profile", "changes": ["x", {"id": change_id}]},
                     ],
                 }
             )
