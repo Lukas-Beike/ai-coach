@@ -75,14 +75,14 @@ The system SHALL require a successful domain-specific impact confirmation for lo
 Evidence: `backend/coach/write_gate.py:call_impact`, `backend/coach/write_gate.py:record_count`, `backend/coach/write_gate.py:check_write`; `backend/coach/turn_write_gate.py:CoachTurnWriteGate`; `tests/test_coach_write_gate.py:test_delete_confirmation_is_bound_to_its_domain`, `tests/test_coach_write_gate.py:test_whole_plan_tools_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_no_classifier_and_failures_fail_closed`; `tests/test_coach_turn_write_gate.py:test_denied_write_does_not_execute_record_or_open_a_transaction`.
 
 ### Requirement: CA5 Named remote synchronization and explicit proposals
-The system SHALL require the athlete's named sync request for the step's own provider before a remote-write step (Intervals.icu wording for Intervals.icu, Garmin or watch wording for a Garmin push), preserve a separate per-step remote target/scope, and route remote changes through the implemented explicit approval proposal.
+The system SHALL require the athlete's named sync request for the step's own provider before a remote-write step (the Intervals.icu name or a sync verb for Intervals.icu, Garmin or watch wording for a Garmin push), preserve a separate per-step remote target/scope, and route remote changes through the implemented explicit approval proposal.
 
 #### Scenario: Local save only
 - **WHEN** the athlete requests local plan, competition or meal saving without naming remote synchronization
 - **THEN** no Intervals.icu write is authorized by that request; provider refresh remains a provider read rather than a workout push.
 
 #### Scenario: Explicit named sync
-- **WHEN** the athlete names an unnegated Intervals.icu synchronization or accepts the directly preceding concrete sync offer
+- **WHEN** the athlete names an unnegated Intervals.icu synchronization, uses an unnegated sync verb (such as synchronisieren, abgleichen, hochladen or reparieren), or accepts the directly preceding concrete sync offer
 - **THEN** the step still needs the matching provider target, sync scope and remote-write declaration; its proposed effect is shown for explicit approval before dispatch.
 
 #### Scenario: Negated sync or classifier-only approval
@@ -93,7 +93,7 @@ The system SHALL require the athlete's named sync request for the step's own pro
 - **WHEN** the athlete's own message names Garmin or the watch with a transfer verb, or accepts the directly preceding Garmin offer
 - **THEN** `push_strength_to_garmin` may propose the selected strength units with target `garmin` and scope `garmin_sync`; the card binds each unit's stored payload hash, and only its approval queues the Garmin `plan_push` job. Intervals.icu wording never grants it, a Garmin push or removal request never grants an Intervals.icu write, an upload entry needs the athlete's own push wording and a removal entry the athlete's own Garmin removal wording (no classifier is asked).
 
-Evidence: `backend/coach/write_gate.py:remote_requested`, `backend/coach/write_gate.py:build_turn_authority`, `backend/coach/write_gate.py:check_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`; `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`, `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`, `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`, `tests/test_coach_write_gate.py:GarminTierTests`; `backend/coach/write_gate.py:garmin_requested`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`; `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`.
+Evidence: `backend/coach/write_gate.py:remote_requested`, `backend/coach/write_gate.py:build_turn_authority`, `backend/coach/write_gate.py:check_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`; `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`, `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`, `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`, `tests/test_coach_write_gate.py:GarminTierTests`; `backend/coach/write_gate.py:requested_providers`, `backend/coach/write_gate.py:garmin_removal_requested`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`; `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`.
 
 ### Requirement: CA6 Session-bound immutable approval contents
 The system SHALL bind a proposal to its session, bounded lifetime and stored payload identity, reject a supplied mismatching payload hash, consume its approval token once, and validate original athlete provenance and frozen remote selections before dispatch.
@@ -163,13 +163,13 @@ The system SHALL persist actual tool outcomes and confirmed change references, d
 
 #### Scenario: Mixed effect or preview only
 - **WHEN** a turn only stages/previews, awaits approval, or includes effects not fully tracked by history
-- **THEN** it does not offer a misleading whole-turn undo; supported individual undo/proposal flows remain distinct.
+- **THEN** its receipt row appears without a whole-turn undo: that undo is offered only when every applied write belongs to the fully tracked tools, which no plan write and not `delete_competition` do; supported individual undo/proposal flows remain distinct.
 
 #### Scenario: Partial failure
 - **WHEN** one effect succeeds and another unresolved step or final provider response fails
 - **THEN** receipts retain successful effects, unresolved failures and queued job identities without treating unrelated success as repair of the failed step.
 
-Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`; `backend/coach/final_receipt.py:CoachFinalReceiptService`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_final_receipt.py:test_turn_changes_are_summarized_on_the_receipt_and_the_answer`; `tests/test_coach_dialogue.py:test_success_on_other_object_does_not_hide_failed_step`, `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`; `tests/test_coach_change_receipts.py` (complete-effect undo eligibility contracts).
+Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`, `backend/coach/change_receipts.py:_FULLY_TRACKED_TOOLS`; `backend/coach/final_receipt.py:CoachFinalReceiptService`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_final_receipt.py:test_turn_changes_are_summarized_on_the_receipt_and_the_answer`; `tests/test_coach_dialogue.py:test_success_on_other_object_does_not_hide_failed_step`, `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`; `tests/test_coach_change_receipts.py` (complete-effect undo eligibility contracts).
 
 ### Requirement: CA10 Validated repair dependencies and exceptional approvals
 The system SHALL reject malformed tools without partial effects, permit repairs within original authority, prevent remote steps from overtaking unresolved local failures, and retain explicit proposals for saved meal/product definitions and the separate undo-preview flow.
@@ -182,11 +182,15 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 - **WHEN** a requested local plan has not committed successfully
 - **THEN** a dependent created/all-pending push is blocked instead of synchronizing a partial or unintended plan.
 
-#### Scenario: Meal/product definition or undo proposal
-- **WHEN** the Coach saves a reusable meal/product definition or prepares an undo that requires an approval proposal
+#### Scenario: Meal/product definition proposal
+- **WHEN** the Coach saves a reusable meal/product definition
 - **THEN** it returns approval-required and the explicit proposal path; creating the proposal does not itself execute the athlete-data effect.
 
-Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`, `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`; `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`, `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`, `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`.
+#### Scenario: Undo of a change
+- **WHEN** the Coach calls `undo_training_change`
+- **THEN** an undo of a creation, or one requested without `apply`, returns the preview with an `undo_change` proposal card (`confirmation_required` for a creation) and executes nothing; an undo of an update or delete with `apply: true` is applied at once without a card.
+
+Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`, `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`; `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`, `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`, `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`; `backend/coach/planning_action_tools.py:CoachPlanningActionToolService._undo_training_change`; `tests/test_coach_planning_action_tools.py:CoachPlanningActionToolServiceTests.test_create_undo_with_apply_is_only_offered_as_a_card`, `tests/test_coach_planning_action_tools.py:CoachUndoToolPersistenceTests.test_update_undo_with_apply_still_runs_directly`.
 
 ### Requirement: CA11 Server-side plan checks before Coach plan writes
 The system SHALL check the resulting future plan of every Coach tool write that creates or moves planned units against the plan rules, roll back a write that adds a new or riskier illness_hard finding the athlete did not accept, or a new strength_incomplete, focus_missing or hr_cap_invalid finding (which can never be accepted), and return the other new findings as notes with their evidence strength. Explicit athlete UI/API edits are not checked.
@@ -198,6 +202,10 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 #### Scenario: Blocking violation
 - **WHEN** a Coach plan write would add an unaccepted illness_hard finding, or a strength_incomplete, focus_missing or hr_cap_invalid finding
 - **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn. For `apply_adaptive_replan` the check wraps only the local apply (its preview and next-message approval rules are unchanged); a block rolls the whole apply back, nothing is applied, the optional Intervals.icu illness sync does not run and the Coach tells the athlete; new notes come back as `plan_check_notes`.
+
+#### Scenario: Missing required fields
+- **WHEN** a Coach plan write creates, moves or changes a unit and adds a strength_incomplete, focus_missing or hr_cap_invalid finding
+- **THEN** the transaction is rolled back and the tool result is a failure with the findings; `accept_plan_findings` cannot waive them. For `apply_adaptive_replan` such a gap passes only on a unit that already had it before the write.
 
 #### Scenario: Notes
 - **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, intensity_distribution, leg_strength_before_key_session, leg_strength_frequency, calendar_load or all_day_event findings
