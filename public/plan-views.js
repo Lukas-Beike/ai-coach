@@ -80,10 +80,10 @@ function stopSummaryToggle(event) {
   event.stopPropagation();
 }
 
-function plannedCoachButton(label, prompt) {
+function plannedCoachButton(label, prompt, className = "secondary-button planned-conflict-button") {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "secondary-button planned-conflict-button";
+  button.className = className;
   button.textContent = label;
   button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt); });
   return button;
@@ -250,15 +250,15 @@ function plannedAppointmentLabel(event) {
 }
 
 // Garmin names an activity "<place> - <workout>"; the calendar shows it without the place.
-// The prefix is one to three capitalised words without digits or training words before a
-// spaced dash; anything else, and the stored name, stays as it is.
-const CALENDAR_NAME_PREFIX = /^(\p{Lu}[\p{L}.'’-]*(?: \p{Lu}[\p{L}.'’-]*){0,2}) [-–—] (\S.*)$/u;
-const CALENDAR_TRAINING_WORD = /lauf|run|rad|ride|bike|fahr|schwimm|swim|walk|wander|geh|kraft|strength|yoga|interval|schwelle|tempo|training|zwift|rolle|indoor|outdoor|grundlage|locker|erhol|regener|ski|ruder|row|einheit/i;
+// Only the athlete's own place (the profile's weather location) counts as one, so a workout
+// name such as "Sweet Spot - 3 x 12 min" stays whole; the stored name never changes.
+const CALENDAR_NAME_PREFIX = /^(.+?) [-–—] (\S.*)$/u;
 
-function calendarDisplayName(name) {
+function calendarDisplayName(name, place = "") {
   const text = String(name || "").trim();
   const match = CALENDAR_NAME_PREFIX.exec(text);
-  return match && !CALENDAR_TRAINING_WORD.test(match[1]) ? match[2] : text;
+  const city = String(place || "").split(",")[0].trim().toLocaleLowerCase("de");
+  return match && city && match[1].trim().toLocaleLowerCase("de") === city ? match[2] : text;
 }
 
 function calendarActualActivity(entry) {
@@ -573,8 +573,11 @@ function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, date
   statusText.className = "planned-entry-status";
   statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
   const percentage = calendarMetricNumber(entry.compliance?.percentage);
-  if (status === "completed" && percentage != null && ["training_load", "duration", "strength_sets"].includes(entry.compliance?.basis)) {
+  const basis = { training_load: "Belastung", duration: "Dauer", strength_sets: "Sätze" }[entry.compliance?.basis];
+  if (status === "completed" && percentage != null && basis) {
     statusText.textContent += ` · ${percentage} %`;
+    statusText.title = `Anteil am Plan (${basis})`;
+    statusText.setAttribute("aria-label", `${statusText.textContent.replace(" %", " Prozent")} des Plans · ${basis}`);
   }
   cardSummary.append(statusText);
 }
@@ -691,16 +694,14 @@ function focusSelect(label, name, options, selected) {
   return { field, select };
 }
 
-function plannedSessionMetrics(entry, actual) {
-  const displayed = actual || entry;
+// A planned unit's load; a completed one shows its values in the facts.
+function plannedSessionMetrics(entry) {
+  const load = calendarMetricNumber(entry.training_load);
+  if (load == null) return null;
   const metrics = document.createElement("span");
   metrics.className = "planned-session-metrics";
-  metrics.textContent = [
-    actual ? calendarMetricNumber(actual.avg_hr, " bpm") : null,
-    actual ? calendarMetricNumber(actual.avg_power, " W") : null,
-    calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
-  ].filter(Boolean).join(" · ");
-  return metrics.textContent ? metrics : null;
+  metrics.textContent = `Belastung ${load}`;
+  return metrics;
 }
 
 function profileSegmentExtent(item, axis) {
@@ -980,7 +981,11 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     header.className = "planned-session-header";
     const icon = document.createElement("span");
     icon.className = "planned-session-icon";
-    icon.setAttribute("aria-hidden", "true");
+    // A slim row's line has no sport word, so its icon names the sport.
+    if (slim) {
+      icon.setAttribute("role", "img");
+      icon.setAttribute("aria-label", sportLabel);
+    } else icon.setAttribute("aria-hidden", "true");
     icon.textContent = CALENDAR_SPORT_ICONS[sportLabel] || "•";
     const cardTitle = document.createElement("strong");
     cardTitle.className = "planned-session-title";
@@ -1290,22 +1295,24 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   // The Coach analyses the session the athlete picked: one turn, the same as typing the request.
-  // The message names the session by date, sport, time and duration; the stored name never becomes Coach input.
-  function plannedActivityActions(actual, dateKey) {
+  // The message names the session by date, sport, time, duration and its local id; the stored name
+  // never becomes Coach input.
+  function plannedActivityActions(actual, dateKey, title) {
     const actions = document.createElement("div");
     actions.className = "planned-activity-actions";
+    const id = String(actual.activity_id || actual.id || "");
     const prompt = `Analysiere meine Einheit vom ${dateLabel(dateKey)} (${[
       activitySportLabel(calendarSportType(actual)),
       calendarStartTime(actual.started_at_local),
       plannedEntryDurationLabel(actual, actual),
+      /^[\w:.-]{1,80}$/.test(id) ? `ID ${id}` : null,
     ].filter(Boolean).join(", ")}).`;
-    const coach = plannedCoachButton("Mit dem Coach analysieren", prompt);
-    coach.className = "secondary-button";
+    const coach = plannedCoachButton("Mit dem Coach analysieren", prompt, "secondary-button");
     const details = document.createElement("button");
     details.type = "button";
     details.className = "secondary-button planned-activity-details";
     details.textContent = "Details";
-    details.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
+    details.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
     actions.append(coach, details);
     return actions;
   }
@@ -1332,7 +1339,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
-    const title = (actual?.name ? calendarDisplayName(actual.name) : entry.name) || "Trainingseinheit";
+    const title = (actual?.name ? calendarDisplayName(actual.name, state.data?.profile?.weather_location) : entry.name) || "Trainingseinheit";
     // Done and missed units are one slim row; only units still to come keep the zone bar and chips.
     const slim = ["completed", "missed", "skipped"].includes(status);
     // The sport line carries the chips and, only for a unit still to send, a compact sync button.
@@ -1356,10 +1363,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
       if (detailProfile) head.after(detailProfile);
     });
-    const metrics = actual ? null : plannedSessionMetrics(entry, null);
+    const metrics = actual ? null : plannedSessionMetrics(entry);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityActions(actual, dateKey));
+    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityActions(actual, dateKey, title));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
@@ -1425,7 +1432,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const first = entries[0];
     group.dataset.sport = activitySportLabel(calendarSportType(first));
     const summary = document.createElement("summary");
-    summary.append(plannedSessionHeader(first, first, `${entries.length}× ${calendarDisplayName(first.name) || "Trainingseinheit"}`, () => {}, true));
+    summary.append(plannedSessionHeader(first, first, `${entries.length}× ${calendarDisplayName(first.name, state.data?.profile?.weather_location) || "Trainingseinheit"}`, () => {}, true));
     const items = document.createElement("div");
     items.className = "planned-group-items";
     items.append(...entries.map((entry) => renderPlannedEntry(entry, dateKey, todayKey, dayContext, weekHasPlan)));

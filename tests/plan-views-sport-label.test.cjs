@@ -36,24 +36,21 @@ test("session summaries are labelled without an Intervals type", () => {
   assert.equal(activitySportLabel({ sport: "yoga" }), "Andere");
 });
 
-test("activity names show without a leading place, names that only look like one stay intact", () => {
+test("activity names show without the athlete's own place, other names stay intact", () => {
   for (const [stored, shown] of [
     ["Emsdetten - 3 x 10 Min Schwelle", "3 x 10 Min Schwelle"],
-    ["Münster – Grundlagenausfahrt", "Grundlagenausfahrt"],
-    ["Bad Oeynhausen — Lockerer Lauf", "Lockerer Lauf"],
-    ["Castrop-Rauxel - Radfahren", "Radfahren"],
-    ["St. Moritz - Langlauf", "Langlauf"],
+    ["Emsdetten – Grundlagenausfahrt", "Grundlagenausfahrt"],
+    ["emsdetten — Lockerer Lauf", "Lockerer Lauf"],
     ["Emsdetten - Kontrollierter Schwellenlauf – 3 x 9 Minuten", "Kontrollierter Schwellenlauf – 3 x 9 Minuten"],
-    // No spaced dash, a training word, a digit or a lower-case word: no place prefix.
+    // Another place, no spaced dash or a workout name before the dash: the name stays whole.
+    ["Münster - Radfahren", "Münster - Radfahren"],
     ["Emsdetten Laufen", "Emsdetten Laufen"],
     ["Emsdetten-Lauf", "Emsdetten-Lauf"],
+    ["Sweet Spot - 3 x 12 min", "Sweet Spot - 3 x 12 min"],
+    ["Bergläufe - 6 x 2 min", "Bergläufe - 6 x 2 min"],
     ["Lockerer Lauf – 40 Minuten", "Lockerer Lauf – 40 Minuten"],
-    ["Intervalle - 5 x 1 km", "Intervalle - 5 x 1 km"],
-    ["Zwift - Watopia", "Zwift - Watopia"],
-    ["5 km - Tempo", "5 km - Tempo"],
-    ["Z2 - Grundlage", "Z2 - Grundlage"],
-    ["morgens - locker", "morgens - locker"],
     ["Emsdetten -", "Emsdetten -"],
     ["", ""],
-  ]) assert.equal(calendarDisplayName(stored), shown, stored);
+  ]) assert.equal(calendarDisplayName(stored, "Emsdetten, Deutschland"), shown, stored);
+  assert.equal(calendarDisplayName("Emsdetten - 3 x 10 Min Schwelle", ""), "Emsdetten - 3 x 10 Min Schwelle");
 });
