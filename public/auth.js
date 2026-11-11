@@ -28,7 +28,6 @@ function showLogin() {
   state.chatQueue = [];
   state.rejectedMessages = [];
   state.coachActionProposals = [];
-  state.coachReceipts = [];
   state.voiceTranscribing = false;
   rememberChatTurn(null);
   if (state.chatStatusTimer) clearTimeout(state.chatStatusTimer);

@@ -12,9 +12,10 @@ function render(commands) {
   assert.ok(start >= 0 && end > start);
   const cards = [];
   const context = vm.createContext({
-    state: {}, renderCoachReceipts() {}, addCoachReceipt(card) { cards.push(card); },
+    state: {}, toast() {},
   });
   vm.runInContext(source.slice(start, end), context);
+  context.toastCoachReceipts = (receipts) => cards.push(...receipts);
   context.addStructuredCoachReceipts({ command_receipts: commands });
   return cards;
 }

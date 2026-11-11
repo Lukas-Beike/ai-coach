@@ -212,7 +212,7 @@ test("inline metric save sends only its key", async () => {
 });
 
 function coachContext(apiImpl) {
-  const state = { coachActionUnknownIds: new Set(), coachActionProposals: [], coachReceipts: [], route: "plan" };
+  const state = { coachActionUnknownIds: new Set(), coachActionProposals: [], route: "plan" };
   const receipts = [];
   const toasts = [];
   const apiCalls = [];

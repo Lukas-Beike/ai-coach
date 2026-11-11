@@ -1039,17 +1039,19 @@ function renderCoachOverview(data) {
   for (const item of document.querySelectorAll("[data-request-kind=morning_checkin]")) item.hidden = actions.morning_checkin === false;
 }
 
-function renderCoachReceipts() {
-  const root = $("#coachReceipts");
-  if (!root) return;
-  root.hidden = true;
-  root.replaceChildren();
-  (state.coachReceipts || []).slice(-3).reverse().forEach((receipt) => root.append(createActionReceipt(receipt)));
+// A Coach action announces itself in one toast; the change line under the message is the lasting receipt.
+// Failures name their reason and stay until dismissed; successes name what was done.
+function toastCoachReceipts(receipts) {
+  if (!receipts.length) return;
+  const errors = receipts.filter((receipt) => receipt.status === "error");
+  const text = errors.length
+    ? errors.map((receipt) => `${receipt.title}: ${receipt.message}`)
+    : receipts.map((receipt) => receipt.status === "pending" ? `${receipt.title}: ${receipt.message}` : receipt.title);
+  toast(text.join(" · "), Boolean(errors.length));
 }
 
 function addCoachReceipt(receipt) {
-  state.coachReceipts = [...(state.coachReceipts || []), { ...receipt, createdAt: Date.now() }].slice(-3);
-  renderCoachReceipts();
+  toastCoachReceipts([receipt]);
 }
 
 const HIDDEN_CHAT_RECEIPT_TOOLS = new Set([
@@ -1135,10 +1137,7 @@ function addStructuredCoachReceipts(payload) {
     || payload?.intent?.follow_up_operations?.includes("commit_training_plan")
     || commands.some((entry) => entry.tool === "commit_training_plan");
   const finalCommit = commands.findLast((entry) => entry.tool === "commit_training_plan");
-  state.coachReceipts = [];
-  renderCoachReceipts();
-  commands.filter((entry) => receiptIsVisible(entry, planCommitRequested, finalCommit))
-    .forEach((entry) => addCoachReceipt(commandReceipt(entry)));
+  toastCoachReceipts(commands.filter((entry) => receiptIsVisible(entry, planCommitRequested, finalCommit)).map(commandReceipt));
 }
 
 async function askCoach(message) {
@@ -1537,7 +1536,6 @@ async function executeCoachActionProposal(proposal, button) {
     state.coachActionProposals = (state.coachActionProposals || []).filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
     const receipt = coachActionReceipt(proposal, result);
-    addCoachReceipt(receipt);
     toast(receipt.message);
     if (state.route === originalRoute) await showCoachReceiptArea(receipt);
     await load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]);
@@ -1556,13 +1554,13 @@ async function showCoachReceiptArea(receipt) {
 // The action may have run; keep the button locked until the server state is known.
 function lockUnknownCoachActionOutcome(proposal, error) {
   state.coachActionUnknownIds.add(proposal.id);
-  addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
+  addCoachReceipt({ title: "Ausführung unklar", message: `${error.message} Die Freigabe bleibt gesperrt, bis der Status geprüft ist.`, status: "error" });
   renderCoachActionReview();
-  toast(error.message, true);
 }
 
 function rejectCoachActionProposal(proposal, button, error, confirmStage = false) {
   if (!isSessionEndedError(error)) addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
+  button.disabled = false;
   // The server refused the proposal for good; keeping the button would only repeat the refusal.
   if (error.reason === "proposal_expired" || error.reason === "proposal_payload_changed") {
     proposal.status = "expired";
@@ -1571,8 +1569,6 @@ function rejectCoachActionProposal(proposal, button, error, confirmStage = false
     proposal.status = "used";
     renderCoachActionReview();
   }
-  toast(error.message, true);
-  button.disabled = false;
 }
 
 function createPendingMessage(entry, index = 0) {
@@ -2331,7 +2327,6 @@ function applyChatGenerationChange(payload, result) {
   const currentTurnRetained = currentTurn && result.messages.some((message) => message.client_turn_id === currentTurn);
   if (generationChanged) {
     state.coachActionProposals = [];
-    state.coachReceipts = [];
     if (!currentTurnRetained) resetChatAfterGenerationChange(currentTurn);
   }
   return { previousAssistantKey, generationChanged, currentTurn, currentTurnRetained };
