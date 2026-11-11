@@ -18,8 +18,8 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 - **THEN** the save is rejected before replacing the stored profile.
 
 #### Scenario: Sex and preferred sources
-- **WHEN** the athlete saves `sex` (male, female or empty) or a preferred source for thresholds, body, HRV, resting heart rate or sleep (Garmin or empty for automatic)
-- **THEN** an explicit save rejects any other value and a non-strict read clears it; changing the sex, a preferred source or the timezone requests a recomputation of the stored local load, and an unset sex makes the heart-rate load use the male TRIMP constants and mark the value as assumed.
+- **WHEN** the athlete saves `sex` (male, female or empty) or a preferred source (Garmin or empty for automatic; only body has a control and an effect, the stored thresholds, HRV, resting heart rate and sleep fields are kept but ignored, #2084)
+- **THEN** an explicit save rejects any other value and a non-strict read clears it; changing the sex, the body source or the timezone requests a recomputation of the stored local load, and an unset sex makes the heart-rate load use the male TRIMP constants and mark the value as assumed.
 
 #### Scenario: Missing or malformed stored profile
 - **WHEN** no valid profile JSON is stored
