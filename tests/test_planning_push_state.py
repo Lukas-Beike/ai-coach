@@ -15,8 +15,8 @@ from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.planning import strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
-from backend.planning.garmin_orphans import GarminOrphan
 from backend.planning.intervals_orphans import IntervalsOrphan
+from backend.planning.leftovers import GarminOrphan
 from backend.planning.push_state import (
     attach_push_state,
     garmin_baselines,

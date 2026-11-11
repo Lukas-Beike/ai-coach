@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date
 from typing import Final
 
 # One sync job takes at most 28 entries; the rest waits for the next sync.
 MAX_CLEANUP: Final = 20
+
+
+@dataclass(frozen=True)
+class GarminOrphan:
+    """A pushed Garmin workout whose planned unit is gone or no longer pushable."""
+
+    local_id: str
+    name: str
+    date: str
 
 
 def nearest_first[T](

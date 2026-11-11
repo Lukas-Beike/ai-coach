@@ -14,25 +14,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
 from backend.planning.exercise_mappings import remembered_exercises
-from backend.planning.leftovers import MAX_CLEANUP, cap, nearest_first
+from backend.planning.leftovers import MAX_CLEANUP, GarminOrphan, cap, nearest_first
 from backend.planning.push_state import pushable_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import GarminExercise
 
 _UNKNOWN_NAME: Final = "Gelöschte Einheit"
-
-
-@dataclass(frozen=True)
-class GarminOrphan:
-    local_id: str
-    name: str
-    date: str
 
 
 def _label(payload: Any) -> tuple[str, str]:
