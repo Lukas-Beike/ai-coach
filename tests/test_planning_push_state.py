@@ -205,9 +205,15 @@ class PushStateTests(unittest.TestCase):
         self.assertEqual(
             {"intervals": False, "garmin": False}, current[0]["push_pending"]
         )
-        # An Intervals.icu sync rewrites the payload but not what Garmin holds.
+        # An Intervals.icu sync rewrites the payload (the note's id and category)
+        # but not what Garmin holds.
         synced = json.dumps(
-            {**STRENGTH, "sync_status": "synced", "remote_event_id": "e1"}
+            {
+                **STRENGTH,
+                "sync_status": "synced",
+                "remote_event_id": "e1",
+                "remote_event_category": "NOTE",
+            }
         )
         after_intervals = self.project(
             [{"local_id": "s1", "payload": synced, "sync_state": "synced"}]
