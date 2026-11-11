@@ -18,6 +18,9 @@ conflicts, CI failures, and review feedback through the merge.
   checkout, and never rebase or push `develop`, `main`, or another protected
   branch.
 - `gh` must be authenticated. Never print credentials or tokens.
+- Setup prerequisite: the SonarQube CLI is installed and authenticated
+  ([development](../../../docs/development.md#secret-checks-before-git-pushes));
+  without it the pre-push hook refuses every push.
 - Commit only this task's changes with Conventional Commit subjects; leave
   unrelated user changes alone and stop if they block the rebase.
 - Fetch `develop` and rebase onto it. Resolve conflicts by understanding both

@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / ".agents" / "skills"
+MODEL_INVOCABLE_STUBS = frozenset({"deliver-issue"})
 SCOPED_INSTRUCTIONS = (
     "backend/AGENTS.md",
     "public/AGENTS.md",
@@ -149,7 +150,12 @@ class AiDocsContractTests(unittest.TestCase):
                 content = stub.read_text(encoding="utf-8")
                 description = re.compile(r"(?m)^description:.*$")
                 self.assertIn(f"\nname: {name}\n", content)
-                self.assertIn("\ndisable-model-invocation: true\n", content)
+                # Agents deliver queued issues through deliver-issue (athlete
+                # decision 2026-11-11, #2274); every other stub stays user-only.
+                self.assertEqual(
+                    name not in MODEL_INVOCABLE_STUBS,
+                    "\ndisable-model-invocation: true\n" in content,
+                )
                 self.assertIn(f"`.agents/skills/{name}/SKILL.md`", content)
                 self.assertEqual(
                     description.findall(content),

@@ -14,7 +14,8 @@ move something, not add a rule.
 3. No emphasis (IMPORTANT, ALL CAPS, "always", "never") to make a line stick.
    If a line gets lost, the file is too long.
 4. Procedures live in skills, not `AGENTS.md`. Workflows with side effects are
-   user-invoked (`disable-model-invocation: true`).
+   user-invoked (`disable-model-invocation: true`), except `deliver-issue`,
+   which agents invoke for issues handed over for delivery (#2274).
 5. Work had a concrete check: tests, a hook, CI, or one fresh-context review.
 6. Subagents ran only for parallel work, noisy output, an independent review,
    or restricted tools, with the cheapest fitting tier. Delegating for a
