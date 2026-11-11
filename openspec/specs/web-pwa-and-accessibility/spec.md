@@ -21,7 +21,7 @@ The client SHALL provide Coach, plan, nutrition, analysis, and more navigation w
 - **WHEN** the athlete returns to Coach or opens the plan overview
 - **THEN** route-specific scroll restoration preserves Coach reading position or reveals the planned-today section according to the recorded navigation state.
 
-Evidence: `public/navigation.js::AppRouter.navigate`, `public/shared.js::restoreRouteScroll`, `public/views.js::renderPlanSegments`; `e2e/navigation.spec.js::@responsive each hash navigation renders its target once`, `e2e/coach.spec.js::login, main views, dialog and profile form state`, `e2e/contracts.spec.js::plan overview deep link focuses and reveals today after loading`.
+Evidence: `public/navigation.js::AppRouter.navigate`, `public/shared.js::restoreRouteScroll`, `public/views.js::renderPlanSegments`; `e2e/navigation.spec.js::@responsive each hash navigation renders its target once`, `e2e/coach.spec.js::login, main views, dialog and profile form state`, `e2e/settings-hub.spec.js::@responsive sports are toggle chips of at least 44 px and need no hint`, `e2e/contracts.spec.js::plan overview deep link focuses and reveals today after loading`.
 
 ### Requirement: Responsive controls remain named and keyboard reachable
 The client SHALL use semantic labels, focusable controls and scroll regions, current-route indications, and responsive layouts for the supported mobile, tablet, and desktop views. Icon actions SHALL retain accessible names and the existing touch target sizing.
