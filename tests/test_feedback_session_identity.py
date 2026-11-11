@@ -9,19 +9,17 @@ copy keeps its feedback. Temporary database and synthetic rows only.
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import intervals_compaction as intervals_fixture
+from support import temp_database
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
-from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import canonical_store, row_factory
 from backend.db.repositories import ActivityFeedbackRepository, KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
@@ -75,12 +73,7 @@ def merged_session_id(case: Any) -> str:
 
 class FeedbackSessionFixture(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "feedback.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "feedback.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             intervals_fixture.ingest_intervals_partial_snapshot(

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
+from support import temp_database
 from test_feedback_session_identity import (
     GARMIN_ID,
     INTERVALS_ID,
@@ -34,7 +35,7 @@ from backend.backup.restore_validation import (
     DatabaseRestoreValidationService,
 )
 from backend.coach.change_receipts import change_summary
-from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db import canonical_store, row_factory
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
@@ -137,8 +138,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.assertEqual(self.service.list(), [])
 
     def reopen(self, path: Path) -> None:
-        self.manager = DatabaseManager(path, sqlite3, row_factory=row_factory)
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, path=path, row_factory=row_factory)
         self.service = ActivityFeedbackService(
             self.manager,
             self.repository,
