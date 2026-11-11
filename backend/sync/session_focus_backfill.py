@@ -120,7 +120,7 @@ class SessionFocusBackfill:
                     db=db,
                 )
             except AppError:
-                # Refused before any write (calendar markers, pending refresh).
+                # Refused before any write (calendar markers).
                 counts["skipped"] += 1
                 return
             counts["focus"] += FOCUS_KEY in values
