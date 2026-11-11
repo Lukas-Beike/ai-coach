@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import tempfile
 import threading
 import time
@@ -7,17 +6,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.coach.job_store import CoachJobStore
 from backend.db import row_factory
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
 
 class CoachJobStoreTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.temp_dir.name) / "coach.db"
+        self.path = Path(self.enterContext(tempfile.TemporaryDirectory())) / "coach.db"
         self.wake = threading.Event()
         self.gate = MaintenanceGate()
         self.lock = threading.RLock()
@@ -34,12 +33,8 @@ class CoachJobStoreTests(unittest.TestCase):
             )
         self.store = self._store()
 
-    def tearDown(self):
-        self.manager.close()
-        self.temp_dir.cleanup()
-
     def _manager(self):
-        return DatabaseManager(self.path, sqlite3, row_factory=row_factory)
+        return temp_database(self, path=self.path, row_factory=row_factory)
 
     def _store(self):
         return CoachJobStore(

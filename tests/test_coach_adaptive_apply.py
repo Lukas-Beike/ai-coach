@@ -9,11 +9,12 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.activities.workout_load import AthleteThresholds
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.proposal_execution import CoachProposalExecutionService
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.plan_guard_service import PlanCheckError, PlanGuardService
 from backend.planning.planned_unit_load import estimate_planned_unit
@@ -120,9 +121,10 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
     """The approved replan is checked like any plan write, atomically."""
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="adaptive-guard-")
-        self.addCleanup(self.temporary.cleanup)
-        path = Path(self.temporary.name) / "guard.sqlite3"
+        temporary = self.enterContext(
+            tempfile.TemporaryDirectory(prefix="adaptive-guard-")
+        )
+        path = Path(temporary) / "guard.sqlite3"
         with closing(sqlite3.connect(path)) as db, db:
             db.execute("CREATE TABLE synthetic_writes (value TEXT NOT NULL)")
             db.execute(
@@ -131,10 +133,12 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
             )
             db.execute("INSERT INTO messages VALUES (10, 'assistant', NULL)")
             db.execute("INSERT INTO messages VALUES (20, 'user', 'turn-2')")
-        self.manager = DatabaseManager(
-            path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
+        self.manager = temp_database(
+            self,
+            path=path,
+            row_factory=sqlite3.Row,
+            persist_connections=False,
         )
-        self.addCleanup(self.manager.close)
         self.illness = ""
         self.units: list[dict] = []
         self.guard = PlanGuardService(

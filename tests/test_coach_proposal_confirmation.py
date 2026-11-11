@@ -5,8 +5,9 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
+from support import temp_database
+
 from backend.coach.proposal_read import CoachProposalConfirmationService
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 PROPOSAL_ID = "abc12345-6789-4abc-8def-0123456789ab"
@@ -14,10 +15,14 @@ PROPOSAL_ID = "abc12345-6789-4abc-8def-0123456789ab"
 
 class CoachProposalConfirmationTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "coach.sqlite3"
-        self.manager = DatabaseManager(
-            self.db_path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
+        self.db_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory())) / "coach.sqlite3"
+        )
+        self.manager = temp_database(
+            self,
+            path=self.db_path,
+            row_factory=sqlite3.Row,
+            persist_connections=False,
         )
         with closing(sqlite3.connect(self.db_path)) as db:
             db.execute(
@@ -29,10 +34,6 @@ class CoachProposalConfirmationTests(unittest.TestCase):
             )
             db.commit()
         self.add_proposal()
-
-    def tearDown(self):
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def add_proposal(
         self,

@@ -4,22 +4,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
+
+from support import temp_database
 
 from backend.coach.authorization import coach_session_key
 from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 
 class CoachCommandReceiptServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.directory.name) / "receipts.sqlite",
-            sqlite3,
+        self.manager = temp_database(
+            self,
+            "receipts.sqlite",
             row_factory=sqlite3.Row,
             persist_connections=False,
         )
@@ -43,10 +41,6 @@ class CoachCommandReceiptServiceTests(unittest.TestCase):
             lambda: self.manager,
             now=lambda: 100,
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.directory.cleanup()
 
     def _proposal(
         self, proposal_id: str, session: str, status: str, expires: float

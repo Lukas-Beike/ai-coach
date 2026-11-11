@@ -4,8 +4,9 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+from support import temp_database
+
 from backend.coach.context import CoachQuickActionsService, coach_quick_actions_state
-from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 
 
@@ -92,34 +93,32 @@ class CoachQuickActionsServiceTests(unittest.TestCase):
     LABEL = "Geplantes Training"
 
     def project(self, status, checkin_date, preview):
-        with tempfile.TemporaryDirectory() as directory:
-            database_path = Path(directory) / "coach.sqlite"
-            connection = sqlite3.connect(database_path)
-            connection.execute(
-                "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
-            )
-            connection.executemany(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                [
-                    ("morning_checkin_status", status, "2026-09-20T08:00:00"),
-                    ("morning_checkin_date", checkin_date, "2026-09-20T08:00:00"),
-                ],
-            )
-            connection.commit()
-            connection.close()
+        database_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory())) / "coach.sqlite"
+        )
+        connection = sqlite3.connect(database_path)
+        connection.execute(
+            "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+            [
+                ("morning_checkin_status", status, "2026-09-20T08:00:00"),
+                ("morning_checkin_date", checkin_date, "2026-09-20T08:00:00"),
+            ],
+        )
+        connection.commit()
+        connection.close()
 
-            manager = DatabaseManager(database_path, sqlite3, row_factory=sqlite3.Row)
-            service = CoachQuickActionsService(
-                manager,
-                KeyValueRepository(lambda: "2026-09-20T08:00:00"),
-                FakeAdaptivePreviewService(preview),
-                lambda: self.TODAY,
-                self.LABEL,
-            )
-            try:
-                return service.state()
-            finally:
-                manager.close()
+        manager = temp_database(self, path=database_path, row_factory=sqlite3.Row)
+        service = CoachQuickActionsService(
+            manager,
+            KeyValueRepository(lambda: "2026-09-20T08:00:00"),
+            FakeAdaptivePreviewService(preview),
+            lambda: self.TODAY,
+            self.LABEL,
+        )
+        return service.state()
 
     def test_state_reads_ready_today_but_not_yesterday(self):
         today = self.project("ready", "2026-09-20", None)
