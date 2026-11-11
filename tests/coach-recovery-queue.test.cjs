@@ -76,3 +76,27 @@ test("a message sent while the Coach answers is still queued", async () => {
   assert.equal(state.chatAttachments.length, 0);
   assert.deepEqual(drained, []);
 });
+
+// The working note names what the Coach is doing, for the visible label and the live region.
+function workingLabel(chatRequest) {
+  return extractFunctions("coach.js", ["coachWorkingLabel"], { state: { chatRequest } }).coachWorkingLabel();
+}
+
+test("the working note tells which phase a running Coach answer is in", () => {
+  assert.equal(workingLabel({ phase: "running" }), "Coach arbeitet an deiner Antwort…");
+  assert.equal(workingLabel({ phase: "recovering" }), "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…");
+  assert.equal(workingLabel({ phase: "reconciling" }), "Antwort wird sicher übernommen…");
+  assert.equal(workingLabel({ phase: "recovering", background: true }), "Der Coach arbeitet · du kannst die Seite neu laden…");
+});
+
+test("a running status of a background job marks the recovered request as background", () => {
+  const state = { busy: true, chatRequest: null, chatServerOperationId: null };
+  const context = extractFunctions("coach.js", ["showRunningChatStatus"], { state });
+  context.showRunningChatStatus({ operation_id: "op-1", mode: "background" });
+  assert.equal(state.chatRequest.phase, "recovering");
+  assert.equal(state.chatRequest.background, true);
+  assert.equal(state.chatServerOperationId, "op-1");
+  state.chatRequest = null;
+  context.showRunningChatStatus({ operation_id: "op-2", mode: "foreground" });
+  assert.equal(state.chatRequest.background, false);
+});

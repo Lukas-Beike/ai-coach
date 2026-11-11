@@ -79,6 +79,8 @@ test("scrolling away during a stream keeps the position and offers the new reply
   const jump = page.locator("#chatJumpToComposer");
   await expect(jump).toBeVisible();
   await expect(jump.locator(".chat-jump-label")).toHaveText("Neue Antwort");
+  await expect(jump).toHaveAccessibleName("Zur neuesten Antwort springen");
+  await expect(jump.locator("svg")).toBeVisible();
 });
 
 test("the jump button returns to the latest reply and moves focus only on desktop @responsive", async ({ page }, testInfo) => {
