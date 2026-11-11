@@ -734,6 +734,18 @@ function profileExtent(profile) {
   return profile.segments.reduce((sum, item) => sum + profileSegmentExtent(item, axis), 0);
 }
 
+// The open card whose body is shown: not inside a collapsed group.
+function shownPlannedEntry(root) {
+  return [...(root?.querySelectorAll(".planned-entry[open]") || [])].find((card) => !card.parentElement.closest("details:not([open])")) || null;
+}
+
+// The detail pane's status: as on the card, but always named.
+function plannedDetailStatus(entry, dateKey, todayKey, restDayLabel, weekHasPlan) {
+  if (restDayLabel) return `Entfallen (${restDayLabel})`;
+  if (entry.is_completed_activity && !weekHasPlan) return "✓ Absolviert";
+  return calendarStatusLabel(entry, dateKey, todayKey);
+}
+
 const DETAIL_DATE_FORMAT = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" });
 
 // Extra activities that look the same (title, sport, duration, distance, no profile) collapse into one row.
@@ -1348,10 +1360,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
-    let statusLabel = calendarStatusLabel(entry, dateKey, todayKey);
-    if (restDayLabel) statusLabel = `Entfallen (${restDayLabel})`;
-    else if (entry.is_completed_activity && !weekHasPlan) statusLabel = "✓ Absolviert";
-    const head = plannedDetailHead(entry, actual, title, dateKey, status, statusLabel, plannedDayWeather(dayContext, dateKey));
+    const head = plannedDetailHead(entry, actual, title, dateKey, status, plannedDetailStatus(entry, dateKey, todayKey, restDayLabel, weekHasPlan), plannedDayWeather(dayContext, dateKey));
     details.append(head);
     // The larger profile is drawn when the card first opens; most cards never do.
     card.addEventListener("toggle", () => {
@@ -1544,11 +1553,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // (styles.css); the calendar keeps room for it, and a week opens with today's or the next unit.
   const wideCalendar = globalThis.matchMedia?.("(min-width: 1100px)");
   const detailObserver = globalThis.ResizeObserver ? new ResizeObserver(() => syncPlannedDetailHeight()) : null;
-
-  // The open card whose body is shown: not inside a collapsed group.
-  function shownPlannedEntry(root) {
-    return [...(root?.querySelectorAll(".planned-entry[open]") || [])].find((card) => !card.parentElement.closest("details:not([open])")) || null;
-  }
 
   function syncPlannedDetailHeight() {
     const root = $("#plannedCalendar");
