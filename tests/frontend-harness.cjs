@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const { babelParse, traverse } = require("../node_modules/playwright/lib/transform/babelBundle.js");
 
 function readPublic(file) {
-  return fs.readFileSync(path.join(__dirname, "../public", file), "utf8").replace(/\r\n/g, "\n");
+  return fs.readFileSync(path.join(__dirname, "../public", file), "utf8").replaceAll("\r\n", "\n");
 }
 
 // `globals` is a plain object of sandbox globals (contextified in place, so a test may keep
@@ -18,7 +18,7 @@ function contextFor(globals) {
 // Runs whole public files (one name or a list, in order) and returns the context.
 function loadPublicScript(files, globals = {}) {
   const context = contextFor(globals);
-  for (const file of [].concat(files)) vm.runInContext(readPublic(file), context, { filename: file });
+  for (const file of [files].flat()) new vm.Script(readPublic(file), { filename: file }).runInContext(context);
   return context;
 }
 
@@ -38,7 +38,7 @@ function extractFunctions(file, names, globals = {}) {
   const nodes = [...new Set(found.values())].sort((a, b) => a.start - b.start);
   const code = [...nodes.map((node) => source.slice(node.start, node.end)), ...names.map((name) => `globalThis.${name} = ${name};`)];
   const context = contextFor(globals);
-  vm.runInContext(code.join("\n"), context, { filename: file });
+  new vm.Script(code.join("\n"), { filename: file }).runInContext(context);
   return context;
 }
 
@@ -51,7 +51,7 @@ class FakeElement {
   replaceChildren(...items) { this.children = items; }
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(type, handler) { this.listeners[type] = handler; }
-  focus() {}
+  focus() { this.focused = true; }
   fire(type, event = {}) { return this.listeners[type]({ preventDefault() {}, ...event }); }
 }
 
