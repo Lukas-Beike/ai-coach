@@ -132,7 +132,7 @@ With DATA_RETENTION_DAYS at 0 or below (default -1) startup SHALL delete nothing
 
 #### Scenario: Positive retention
 - **WHEN** a positive configured retention period is applied
-- **THEN** older messages, non-latest snapshots, completed `coach_commands` and non-draft `coach_plan_artifacts` that no command references are purged using the bounded period; the latest snapshot remains, a receipt whose changes can still be undone is kept, and expired `coach_action_proposals` are removed
+- **THEN** older messages, non-latest snapshots, completed `coach_commands` and non-draft `coach_plan_artifacts` that no command references are purged using the bounded period; the latest snapshot remains, a receipt whose changes can still be undone is kept only while every change-history row it names is still stored, and expired `coach_action_proposals` are removed
 
 #### Scenario: Coach receipts, drafts and proposals
 - **WHEN** a completed Coach command is older than the cutoff
