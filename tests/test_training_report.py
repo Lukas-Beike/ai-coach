@@ -4,6 +4,8 @@ import unittest
 from datetime import UTC, date, datetime
 from unittest.mock import Mock, patch
 
+from support import dispatch_route
+
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
@@ -665,9 +667,8 @@ class TrainingReportTests(unittest.TestCase):
             self._report_service(source).read({"start": "2026-09-28", "days": 7})
 
     def test_removed_analysis_routes_are_unmatched(self):
-        auth = Mock()
         reports = Mock()
-        route = AnalysisRoutes(lambda: auth, reports)
+        route = AnalysisRoutes(reports)
         handler = Mock()
         for path in (
             "/api/analysis/report",
@@ -678,38 +679,22 @@ class TrainingReportTests(unittest.TestCase):
             "/api/analysis/season",
         ):
             with self.subTest(path=path):
-                self.assertFalse(route.handle(handler, path))
+                self.assertFalse(dispatch_route(route, handler, path))
         for path in ("/api/analysis/reports", "/api/analysis/scenarios"):
             with self.subTest(path=path):
                 self.assertFalse(route.handle_post(handler, path))
-        auth.require_auth.assert_not_called()
         reports.assert_not_called()
         handler.send_json.assert_not_called()
 
-    def test_get_authentication_precedes_analysis_reads(self):
-        auth = Mock()
-        auth.require_auth.side_effect = AppError(401, "Synthetic denied")
-        reports = Mock()
-        route = AnalysisRoutes(lambda: auth, reports)
-        for path in (
-            "/api/analysis/power-profiles",
-            "/api/analysis/training-records",
-        ):
-            with self.subTest(path=path), self.assertRaises(AppError):
-                route.handle(Mock(), path)
-        reports.assert_not_called()
-
-    def test_analysis_refresh_delegates_selected_area_without_a_second_auth(self):
-        auth = Mock()
+    def test_analysis_refresh_delegates_selected_area(self):
         refresh = Mock()
         refresh.refresh.return_value = {"area": "recovery", "status": "partial"}
         handler = Mock()
         handler.read_json.return_value = {"area": "recovery"}
-        route = AnalysisRoutes(lambda: auth, Mock(), lambda: refresh)
+        route = AnalysisRoutes(Mock(), lambda: refresh)
 
         self.assertTrue(route.handle_post(handler, "/api/analysis/refresh"))
 
-        auth.require_auth.assert_not_called()
         refresh.refresh.assert_called_once_with("recovery", days=None)
         handler.send_json.assert_called_once_with(200, refresh.refresh.return_value)
 
@@ -718,7 +703,7 @@ class TrainingReportTests(unittest.TestCase):
 
         handler = Mock()
         handler.read_json.return_value = {"area": "everything"}
-        route = AnalysisRoutes(lambda: Mock(), Mock(), Mock())
+        route = AnalysisRoutes(Mock(), Mock())
 
         with self.assertRaises(AppError) as raised:
             route.handle_post(handler, "/api/analysis/refresh")

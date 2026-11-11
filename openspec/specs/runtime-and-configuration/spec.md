@@ -101,7 +101,7 @@ The public health endpoint SHALL report live process/maintenance state, while re
 - **WHEN** the initial state API is requested by an unauthenticated client
 - **THEN** authentication is required before reading athlete bootstrap state
 
-Evidence: `backend/http_api/public_get.py::PublicGetRoutes.handle`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_health_returns_live_maintenance_state`; `tests/test_http_public_get_routes.py::test_readiness_uses_ready_boolean_for_http_status_and_preserves_json`; `tests/test_http_public_get_routes.py::test_bootstrap_authenticates_before_read_and_returns_json`.
+Evidence: `backend/http_api/public_get.py::PublicGetRoutes.routes`; `backend/http_api/readiness.py::ReadinessService.state`. Tests: `tests/test_http_public_get_routes.py::test_health_returns_live_maintenance_state`; `tests/test_http_public_get_routes.py::test_readiness_uses_ready_boolean_for_http_status_and_preserves_json`; `tests/test_http_public_get_routes.py::test_bootstrap_returns_json`.
 
 ### Requirement: Bounded event stream with explicit gaps
 

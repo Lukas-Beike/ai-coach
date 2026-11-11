@@ -4,6 +4,8 @@ import unittest
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.nutrition import (
     NutritionGetRoutes,
@@ -16,11 +18,9 @@ class NutritionProductHttpContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler = Mock()
         self.handler.headers = {"Content-Length": "100"}
-        self.auth = Mock()
         self.diary = Mock()
         self.meal_library = Mock()
         self.get_routes = NutritionGetRoutes(
-            session_auth_service=lambda: self.auth,
             diary_service=lambda: self.diary,
             meal_library_service=lambda: self.meal_library,
             local_now=lambda: datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
@@ -39,9 +39,8 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             {"id": "product-1", "name": "Whey"}
         ]
 
-        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/products"))
+        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
 
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.meal_library.list_products.assert_called_once_with(
             query="Whey", favorites_first=True
         )
@@ -54,7 +53,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.handler.path = "/api/nutrition/products?source=database&q=Knoppers"
         self.meal_library.list_database_foods.return_value = [{"id": "off:1"}]
 
-        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/products"))
+        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
 
         self.meal_library.list_database_foods.assert_called_once_with("Knoppers")
         self.meal_library.list_products.assert_not_called()
@@ -85,7 +84,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "foods": [{"id": "product-1"}],
         }
 
-        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/products"))
+        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
 
         self.meal_library.lookup_product.assert_called_once_with(
             {"barcode": "4006381333931"}

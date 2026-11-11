@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.public_get import PublicGetRoutes
 
 
@@ -34,8 +36,8 @@ class PublicGetRoutesTests(unittest.TestCase):
             {"active": True},
         ]
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/health"))
-        self.assertTrue(self.routes.handle(self.handler, "/api/health"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/health"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/health"))
 
         self.assertEqual(
             self.handler.send_json.call_args_list,
@@ -63,8 +65,8 @@ class PublicGetRoutesTests(unittest.TestCase):
         }
         self.readiness.state.side_effect = [ready, not_ready]
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/readiness"))
-        self.assertTrue(self.routes.handle(self.handler, "/api/readiness"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/readiness"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/readiness"))
 
         self.assertEqual(
             self.handler.send_json.call_args_list,
@@ -83,8 +85,8 @@ class PublicGetRoutesTests(unittest.TestCase):
             {"active": True},
         ]
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/auth/status"))
-        self.assertTrue(self.routes.handle(self.handler, "/api/auth/status"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/auth/status"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/auth/status"))
 
         self.assertEqual(
             self.handler.send_json.call_args_list,
@@ -104,32 +106,14 @@ class PublicGetRoutesTests(unittest.TestCase):
         )
         self.auth.require_auth.assert_not_called()
 
-    def test_bootstrap_authenticates_before_read_and_returns_json(self) -> None:
-        events: list[str] = []
-        self.auth.require_auth.side_effect = lambda _handler: events.append("auth")
-        self.bootstrap.read.side_effect = lambda: (
-            events.append("read") or {"schema_version": 3}
-        )
+    def test_bootstrap_returns_json(self) -> None:
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/bootstrap"))
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/bootstrap"))
-
-        self.assertEqual(events, ["auth", "read"])
         self.handler.send_json.assert_called_once_with(200, {"schema_version": 3})
         self.auth.authenticated_session.assert_not_called()
 
-    def test_bootstrap_auth_error_propagates_before_bootstrap_factory(self) -> None:
-        error = RuntimeError("auth failed")
-        self.auth.require_auth.side_effect = error
-
-        with self.assertRaisesRegex(RuntimeError, "auth failed") as raised:
-            self.routes.handle(self.handler, "/api/bootstrap")
-
-        self.assertIs(raised.exception, error)
-        self.bootstrap_factory.assert_not_called()
-        self.handler.send_json.assert_not_called()
-
     def test_unknown_path_does_not_resolve_factories_or_gate(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/not-public"))
+        self.assertFalse(dispatch_route(self.routes, self.handler, "/api/not-public"))
 
         self.maintenance_gate.state.assert_not_called()
         self.readiness_factory.assert_not_called()
@@ -144,8 +128,8 @@ class PublicGetRoutesTests(unittest.TestCase):
         second_auth.authenticated_session.return_value = None
         self.auth_factory.side_effect = [first_auth, second_auth]
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/auth/status"))
-        self.assertTrue(self.routes.handle(self.handler, "/api/auth/status"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/auth/status"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/auth/status"))
 
         self.assertEqual(self.auth_factory.call_count, 2)
         first_auth.authenticated_session.assert_called_once_with(self.handler)

@@ -138,7 +138,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         post = next(
             node
             for node in handler.body
-            if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+            if isinstance(node, ast.FunctionDef) and node.name == "_post"
         )
         source = ast.unparse(post)
         ordered_calls = (

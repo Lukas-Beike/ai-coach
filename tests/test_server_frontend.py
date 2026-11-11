@@ -639,7 +639,7 @@ class ServerFrontendTests(ServerTestCase):
             index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
         )
         self.assertIn(
-            'path != "/api/state/events"',
+            'Route("GET", "/api/state/events"',
             Path(state_events_get.__file__).read_text(encoding="utf-8"),
         )
 

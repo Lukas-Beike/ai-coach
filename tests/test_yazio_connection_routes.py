@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
 from backend.http_api.nutrition import NutritionGetRoutes, NutritionPostRoutes
@@ -81,22 +83,16 @@ class YazioRouteTests(unittest.TestCase):
         handler.do_POST()
         food.check_yazio_connection.assert_called_once()
 
-    def test_status_requires_session_and_only_reads_local_state(self):
-        auth = Mock()
-        auth.require_auth.side_effect = AppError(401, "Unauthorized")
+    def test_status_only_reads_local_state(self):
         food = Mock()
         library = lambda: SimpleNamespace(food_database=food)
-        routes = NutritionGetRoutes(lambda: auth, Mock(), library, Mock())
+        routes = NutritionGetRoutes(Mock(), library, Mock())
         handler = Mock()
-        with self.assertRaises(AppError):
-            routes.handle(handler, "/api/nutrition/yazio/status")
-        food.yazio_connection_status.assert_not_called()
-        auth.require_auth.side_effect = None
         food.yazio_connection_status.return_value = {
             "status": "unchecked",
             "checked_at": None,
         }
-        self.assertTrue(routes.handle(handler, "/api/nutrition/yazio/status"))
+        self.assertTrue(dispatch_route(routes, handler, "/api/nutrition/yazio/status"))
         food.check_yazio_connection.assert_not_called()
         handler.send_json.assert_called_once_with(
             200, {"status": "unchecked", "checked_at": None}

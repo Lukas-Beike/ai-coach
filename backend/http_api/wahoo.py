@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.wahoo_connection import (
     CALLBACK_CONNECTED,
@@ -37,13 +37,12 @@ class WahooGetRoutes:
         self._wahoo_service = wahoo_service
         self._maintenance_gate = maintenance_gate
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != CALLBACK_PATH:
-            return False
-        query = parse_qs(urlparse(handler.path).query)
+    def routes(self) -> list[Route]:
+        return [Route("GET", CALLBACK_PATH, Access.PUBLIC, self._callback)]
 
+    def _callback(self, handler: Any, request: RouteRequest) -> None:
         def first(name: str) -> str | None:
-            values = query.get(name)
+            values = request.query.get(name)
             return values[0] if values else None
 
         with self._maintenance_gate.operation():
@@ -56,7 +55,6 @@ class WahooGetRoutes:
         handler.send_bytes(
             302, b"", "text/plain; charset=utf-8", {"Location": location}
         )
-        return True
 
 
 class WahooPostRoutes:

@@ -11,7 +11,7 @@ from typing import Any
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.config import Config
 from backend.db.repositories import nutrition_macro_totals
@@ -48,14 +48,12 @@ def json_route_handler(payload: Any, *, padding: int = 0) -> Any:
 class NutritionHttpApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler = Mock()
-        self.auth = Mock()
         self.diary_service = Mock()
         self.meal_library_service = Mock()
         self.nutrition_refresh_service = Mock()
         self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
         self.get_routes = NutritionGetRoutes(
-            session_auth_service=lambda: self.auth,
             diary_service=lambda: self.diary_service,
             meal_library_service=lambda: self.meal_library_service,
             local_now=self.local_now,
@@ -70,16 +68,17 @@ class NutritionHttpApiTests(unittest.TestCase):
             meal_library_service=lambda: self.meal_library_service,
         )
 
-    def test_history_period_is_forwarded_after_authentication(self) -> None:
+    def test_history_period_is_forwarded(self) -> None:
         self.diary_service.get_week_summary.return_value = {"days": []}
         for count in (7, 14, 84):
             self.handler.path = f"/api/nutrition/week?days={count}"
-            self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/week"))
-            self.auth.require_auth.assert_called_with(self.handler)
+            self.assertTrue(
+                dispatch_route(self.get_routes, self.handler, "/api/nutrition/week")
+            )
             self.diary_service.get_week_summary.assert_called_with(count)
         self.handler.path = "/api/nutrition/week?days=invalid"
         with self.assertRaises(AppError):
-            self.get_routes.handle(self.handler, "/api/nutrition/week")
+            dispatch_route(self.get_routes, self.handler, "/api/nutrition/week")
 
     def test_get_day_route(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
@@ -88,9 +87,8 @@ class NutritionHttpApiTests(unittest.TestCase):
             "total_kcal": 2000,
             "entry_count": 3,
         }
-        handled = self.get_routes.handle(self.handler, "/api/nutrition/day")
+        handled = dispatch_route(self.get_routes, self.handler, "/api/nutrition/day")
         self.assertTrue(handled)
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.diary_service.get_day_summary.assert_called_once_with("2026-09-24")
         self.handler.send_json.assert_called_once_with(
             200,
@@ -104,13 +102,12 @@ class NutritionHttpApiTests(unittest.TestCase):
             "total_kcal": 2700,
         }
         routes = NutritionGetRoutes(
-            lambda: self.auth,
             lambda: self.diary_service,
             lambda: self.meal_library_service,
             self.local_now,
             lambda day: (90, None),
         )
-        routes.handle(self.handler, "/api/nutrition/day")
+        dispatch_route(routes, self.handler, "/api/nutrition/day")
         payload = self.handler.send_json.call_args.args[1]
         self.assertEqual(payload["macro_ranges"]["carbs_g"], (270, 450))
         self.assertEqual(payload["macro_ranges"]["protein_g"], (153, 207))
@@ -121,13 +118,12 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.diary_service.get_day_summary.return_value = {"date": "2026-09-24"}
         context = Mock(return_value=(90, None))
         routes = NutritionGetRoutes(
-            lambda: self.auth,
             lambda: self.diary_service,
             lambda: self.meal_library_service,
             self.local_now,
             context,
         )
-        routes.handle(self.handler, "/api/nutrition/day")
+        dispatch_route(routes, self.handler, "/api/nutrition/day")
         context.assert_called_once_with("2026-09-24")
 
     def test_day_reference_failure_preserves_diary(self) -> None:
@@ -141,23 +137,23 @@ class NutritionHttpApiTests(unittest.TestCase):
             raise RuntimeError("unavailable")
 
         routes = NutritionGetRoutes(
-            lambda: self.auth,
             lambda: self.diary_service,
             lambda: self.meal_library_service,
             self.local_now,
             unavailable,
         )
         with self.assertLogs("intervals_coach", level="WARNING"):
-            routes.handle(self.handler, "/api/nutrition/day")
+            dispatch_route(routes, self.handler, "/api/nutrition/day")
         payload = self.handler.send_json.call_args.args[1]
         self.assertEqual(payload["macro_ranges"], {"fat_g": (60, 90)})
         self.assertEqual(payload["date"], "2026-09-24")
 
-    def test_week_route_requires_authentication(self) -> None:
+    def test_week_route_returns_the_summary(self) -> None:
         self.handler.path = "/api/nutrition/week"
         self.diary_service.get_week_summary.return_value = {"balance_days": 7}
-        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/week"))
-        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.assertTrue(
+            dispatch_route(self.get_routes, self.handler, "/api/nutrition/week")
+        )
         self.handler.send_json.assert_called_once_with(
             200, {"ok": True, "balance_days": 7}
         )
@@ -170,17 +166,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.handler.path = path
-                self.assertFalse(self.get_routes.handle(self.handler, path))
-        self.auth.require_auth.assert_not_called()
-
-    def test_week_route_rejects_unauthenticated_read_before_service_access(
-        self,
-    ) -> None:
-        self.handler.path = "/api/nutrition/week"
-        self.auth.require_auth.side_effect = AppError(401, "Authentication required")
-        with self.assertRaises(AppError):
-            self.get_routes.handle(self.handler, "/api/nutrition/week")
-        self.diary_service.get_week_summary.assert_not_called()
+                self.assertFalse(dispatch_route(self.get_routes, self.handler, path))
 
     def test_post_entry_route(self) -> None:
         self.handler.read_json.return_value = {

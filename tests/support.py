@@ -12,6 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import snapshot_seed
 from intervals_compaction import compact_snapshot
@@ -21,6 +22,7 @@ from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.http_api.route_table import RouteRequest, RouteTable
 from backend.runtime import clock as runtime_clock
 from backend.sync.metric_export_runner import MetricExportRunner
 
@@ -351,6 +353,29 @@ def create_test_session(server) -> str:
             ),
         )
     return token
+
+
+def dispatch_route(
+    owner: Any,
+    handler: Any,
+    path: str,
+    *,
+    method: str = "GET",
+    session: dict[str, Any] | None = None,
+) -> bool:
+    """Run the owner's route for ``path`` as the request handler does after its access check.
+
+    The query comes from a string ``handler.path``, else from ``path``. Returns
+    False when the owner registers no route for the method and path.
+    """
+    found = RouteTable(owner.routes()).match(method, urlparse(path).path)
+    if found is None:
+        return False
+    route, params = found
+    source = getattr(handler, "path", None)
+    query = parse_qs(urlparse(source if isinstance(source, str) else path).query)
+    route.handle(handler, RouteRequest(path, params, query, session or {}))
+    return True
 
 
 def make_config(**overrides: Any) -> Config:

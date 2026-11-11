@@ -57,6 +57,7 @@ from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import HttpResponseTransport
 from backend.http_api.route_dispatch import HttpRouteDispatcher
+from backend.http_api.route_table import RouteTable
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.state_events_transport import StateEventTransport
@@ -299,14 +300,13 @@ def _when(service: Any, route: Callable[..., Any], *args: Any) -> Any:
 
 
 def _provider_connection_routes(
-    session_auth_service: Callable[[], Any],
     checks: Callable[[], Any] | None,
 ) -> tuple[Any, Any]:
     """Build the optional provider connection routes as a GET and POST pair."""
     if checks is None:
         return None, None
     return (
-        ProviderConnectionGetRoutes(session_auth_service, checks),
+        ProviderConnectionGetRoutes(checks),
         ProviderConnectionPostRoutes(checks),
     )
 
@@ -415,7 +415,6 @@ class HttpApiAssembly:
         self._proposal_read_service = proposal_read_service
         self._chat_page_max = chat_page_max
         self.coach_get_routes = CoachGetRoutes(
-            session_auth_service,
             self.chat_history_page_service,
             coach_command_receipt_service,
             coach_job_submission_service,
@@ -427,13 +426,11 @@ class HttpApiAssembly:
             public_bootstrap_service,
         )
         self.planning_get_routes = PlanningGetRoutes(
-            session_auth_service,
             public_plan_state_service,
             public_weather_state_service,
             self.library_page_service,
         )
         self.athlete_get_routes = AthleteGetRoutes(
-            session_auth_service,
             public_performance_state_service,
             profile_service,
             competition_service,
@@ -449,7 +446,6 @@ class HttpApiAssembly:
             first_threshold_service=athlete.first_threshold,
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
-            session_auth_service,
             recent_log_entries_service,
             diagnostic_report_service,
         )
@@ -458,7 +454,6 @@ class HttpApiAssembly:
             return activity_read_service().session_rpe_load(activity_id, local_today())
 
         self.sync_get_routes = SyncGetRoutes(
-            session_auth_service,
             sync_job_queue_service,
             public_sync_state_service,
             activity_read_service,
@@ -547,7 +542,6 @@ class HttpApiAssembly:
 
         self.training_reports = training_report_services
         self.analysis_routes = AnalysisRoutes(
-            session_auth_service,
             self.training_reports,
             lambda: AnalysisRefreshService(
                 garmin_analysis_refresh_service,
@@ -590,7 +584,6 @@ class HttpApiAssembly:
             diagnostic_report_service,
         )
         self.privacy_get_routes = PrivacyGetRoutes(
-            session_auth_service,
             self.export_stream_transport,
             privacy_delete_service,
         )
@@ -626,7 +619,6 @@ class HttpApiAssembly:
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
 
         self.nutrition_get_routes = NutritionGetRoutes(
-            session_auth_service,
             diary_service,
             meal_library_service,
             athlete_clock.now,
@@ -646,7 +638,7 @@ class HttpApiAssembly:
         self.nutrition_put_routes = NutritionPutRoutes(meal_library_service)
         connection_checks = dependencies.domains.connection_checks
         self.provider_connection_get_routes, self.provider_connection_post_routes = (
-            _provider_connection_routes(session_auth_service, connection_checks)
+            _provider_connection_routes(connection_checks)
         )
         self.wahoo_get_routes = _when(
             wahoo_connection_service, WahooGetRoutes, maintenance_gate
@@ -657,8 +649,9 @@ class HttpApiAssembly:
         self.metric_export_post_routes = _when(
             metric_export_service, MetricExportPostRoutes
         )
-        self.route_dispatcher = HttpRouteDispatcher(
-            (
+        self.route_table = RouteTable(
+            route
+            for owner in (
                 self.public_get_routes,
                 self.planning_get_routes,
                 self.sync_get_routes,
@@ -669,9 +662,12 @@ class HttpApiAssembly:
                 self.privacy_get_routes,
                 self.nutrition_get_routes,
                 self.analysis_routes,
-                *((self.wahoo_get_routes,) if self.wahoo_get_routes else ()),
+                *_present(self.wahoo_get_routes),
                 *_present(self.provider_connection_get_routes),
-            ),
+            )
+            for route in owner.routes()
+        )
+        self.route_dispatcher = HttpRouteDispatcher(
             (
                 self.settings_put_routes,
                 self.athlete_put_routes,
@@ -781,6 +777,7 @@ class HttpApiAssembly:
                 app_version=handler.identity.app_version,
                 logger=handler.identity.logger,
                 session_auth_service=handler.identity.session_auth_service,
+                route_table=self.route_table,
                 route_dispatcher=self.route_dispatcher,
                 post_dispatcher=self.post_dispatcher,
                 response_transport=self.response_transport,

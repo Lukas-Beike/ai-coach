@@ -21,7 +21,7 @@ The system SHALL expose day and history reads only to an authenticated athlete a
 - **WHEN** a nutrition POST or PUT lacks the required session or CSRF proof
 - **THEN** the shared HTTP boundary rejects it before dispatching a durable nutrition mutation.
 
-Evidence: `backend/http_api/nutrition.py::NutritionGetRoutes.handle`, `backend/http_api/handler.py::RequestHandler.do_POST`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_week_route_rejects_unauthenticated_read_before_service_access`. Mutation protection also uses the shared HTTP authentication contract; these route-unit tests do not exercise a real browser session.
+Evidence: `backend/http_api/nutrition.py::NutritionGetRoutes.routes`, `backend/http_api/handler.py::RequestHandler.do_POST`; `tests/test_server_http.py::ServerHttpTests.test_every_table_route_checks_access_before_its_handler_runs`. Mutation protection also uses the shared HTTP authentication contract; these route-unit tests do not exercise a real browser session.
 
 ### Requirement: Validated local entries with trustworthy provenance
 The system SHALL validate diary entry data before persistence, retain an entry identity and source provenance, and derive nutrition provenance from the accepted input path rather than trusting a supplied provenance object.
