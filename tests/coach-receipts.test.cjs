@@ -157,3 +157,16 @@ test("approval preview renders every bound remote-write value as text", () => {
   assert.match(list.children[0].textContent, /ID: race-1/);
   assert.match(list.children[0].textContent, /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
 });
+
+test("a Coach action announces itself in one toast with its failures first", () => {
+  const toasts = [];
+  const { toastCoachReceipts } = extractFunctions("coach.js", ["toastCoachReceipts"], { toast: (text, isError) => toasts.push([text, isError]) });
+  toastCoachReceipts([
+    { title: "Profil aktualisiert", status: "success", message: "FTP 250 W" },
+    { title: "Plan", status: "error", message: "Konflikt am Montag" },
+    { title: "Profil aktualisiert", status: "success" },
+  ]);
+  toastCoachReceipts([{ title: "Nur Titel", status: "error", message: "Nur Titel" }]);
+  toastCoachReceipts([]);
+  assert.deepEqual(toasts, [["Plan: Konflikt am Montag · Profil aktualisiert", true], ["Nur Titel", true]]);
+});

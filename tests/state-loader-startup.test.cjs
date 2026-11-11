@@ -17,6 +17,7 @@ function plain(value) {
 // Loads public/state-loader.js with recorded API calls and stubbed rendering.
 function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
   const calls = [];
+  const apiOptions = new Map();
   const responses = new Map();
   const renders = [];
   const updateChecks = [];
@@ -54,8 +55,9 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     updateStatusSources() {},
     finishAppShellLoading() {},
     reloadForUpdateWhenSafe() { updateChecks.push(state.loadPromise); },
-    api(requestPath) {
+    api(requestPath, options) {
       calls.push(requestPath);
+      if (options) apiOptions.set(requestPath, options);
       const response = responses.get(requestPath) || deferred();
       responses.set(requestPath, response);
       return response.promise;
@@ -67,7 +69,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     responses.set(requestPath, response);
     response.resolve(body);
   };
-  return { context, state, shell, calls, renders, respond, storage, updateChecks };
+  return { context, state, shell, calls, apiOptions, renders, respond, storage, updateChecks };
 }
 
 test("area reads start before the bootstrap response arrives", async () => {
@@ -89,6 +91,18 @@ test("a load without arguments reads the full bootstrap and the areas of the ope
   respond("/api/chat/history?limit=100", {});
   respond("/api/bootstrap", { state_versions: {} });
   await loading;
+});
+
+test("the bootstrap read may take 90 seconds, an area read uses the standard timeout", async () => {
+  const { context, calls, apiOptions, respond } = loader();
+  const loading = context.load("/api/bootstrap?local=1", ["performance"]);
+  await Promise.resolve();
+  respond("/api/performance", { performance: {} });
+  respond("/api/bootstrap?local=1", { state_versions: {} });
+  await loading;
+  assert.equal(apiOptions.get("/api/bootstrap?local=1").timeoutMs, 90_000);
+  assert.equal(apiOptions.get("/api/performance")?.timeoutMs, undefined);
+  assert.equal(calls.length, 2);
 });
 
 test("a live area refresh reads only its areas and keeps the known versions", async () => {

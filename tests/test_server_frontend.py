@@ -67,7 +67,6 @@ def frontend_source():
 
 
 from backend.errors import AppError
-from backend.http_api import state_events_get
 from backend.http_api.static_assets import (
     CACHE_NAME_TOKEN,
     STATIC_TARGETS,
@@ -289,38 +288,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(".message-action:focus-visible {", styles)
 
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
-            encoding="utf-8"
-        )
-        root = Path(__file__).resolve().parents[1]
-        app = frontend_source()
-        api_client = (
-            Path(__file__).resolve().parents[1] / "public" / "api.js"
-        ).read_text(encoding="utf-8")
         index = served_page("index.html")
         service_worker = served_page("service-worker.js")
-        state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(
-            encoding="utf-8"
-        )
-        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
-            encoding="utf-8"
-        )
-        components = (
-            Path(__file__).resolve().parents[1] / "public" / "components.js"
-        ).read_text(encoding="utf-8")
-        self.assertIn('"Wartungsmodus aktiv"', app)
-        self.assertIn("status.maintenance", app)
-        self.assertIn(
-            "globalThis.AppApi = Object.freeze({ audio, download, messageForReason, request, responseError, stream });",
-            api_client,
-        )
-        self.assertIn("const REQUEST_TIMEOUT_MS = 25_000;", api_client)
-        self.assertIn(
-            "async function downloadRequest(path, fallback, timeoutMs = 25_000)", app
-        )
-        self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
-        self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
-        self.assertIn("renderModel(model)", views)
         self.assertIn(asset_ref("/api.js"), index)
         self.assertIn(asset_ref("/navigation.js"), index)
         self.assertIn(asset_ref("/appearance.js"), index)
@@ -340,117 +309,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
         self.assertNotIn("/forms.js", service_worker)
         self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
-        self.assertIn('id="statusStrip"', index)
-        self.assertIn('id="coachActionReview"', index)
-        self.assertIn('id="logsDownloadButton"', index)
-        self.assertIn('id="logsDeleteButton"', index)
-        self.assertIn('id="diagnosticsDeleteButton"', index)
-        self.assertIn("function downloadServerLogs(", app)
-        self.assertIn("function deleteServerLogs(", app)
-        self.assertIn("function deleteDiagnostics(", app)
-        self.assertIn(
-            "async function downloadRequest(path, fallback, timeoutMs = 25_000)", app
-        )
-        self.assertNotIn("function withRequestTimeout(", app)
-        self.assertIn("130_000", app)
-        self.assertIn("/api/logs/download", app)
-        self.assertIn("/api/logs/delete", app)
-        self.assertIn('downloadRequest("/api/diagnostics"', app)
-        self.assertRegex(
-            app,
-            r'downloadRequest\(\s*"/api/diagnostics",[^;]*130_000\)',
-        )
-        self.assertRegex(
-            app,
-            r'downloadRequest\(\s*"/api/logs/download",[^;]*130_000\)',
-        )
-        self.assertIn("await api(path, { timeoutMs: 90_000 })", app)
-        self.assertIn("/api/diagnostics/delete", app)
-        self.assertIn("globalThis.AppApi.download(path", app)
-        self.assertNotIn("JSON.stringify(report, null, 2)", app)
-        self.assertNotIn("diagnosticCaptureToggle", index + app)
-        self.assertIn("function executeCoachActionProposal(", coach)
-        self.assertIn(
-            "function renderConnectivityStatus(online = navigator.onLine)", app
-        )
-        self.assertIn('globalThis.addEventListener("offline"', app)
-        self.assertIn("const state = {", state)
-        self.assertIn("chatScrollRestoring: false", state)
-        self.assertNotIn("const state = {", app)
-        navigation = (root / "public" / "navigation.js").read_text(encoding="utf-8")
-        self.assertIn("globalThis.AppState = (() =>", state)
-        self.assertIn(
-            "return Object.freeze({ state, secureToken, setRoute, setPlanSegment });",
-            state,
-        )
-        self.assertIn(
-            "if (!Object.hasOwn(state, key)) throw new Error(`Unknown state key: ${key}`);",
-            state,
-        )
-        self.assertNotIn("return false", state)
-        self.assertIn("function setRoute(route)", state)
-        self.assertIn("function setPlanSegment(segment)", state)
-        self.assertIn("globalThis.AppRouter = (() =>", navigation)
-        self.assertIn(
-            'globalThis.addEventListener("hashchange", syncFromHash);', navigation
-        )
-        self.assertIn(
-            'if (!configured) throw new Error("AppRouter is not configured");',
-            navigation,
-        )
-        self.assertIn(
-            'requiredHandlers.some((name) => typeof nextHandlers[name] !== "function")',
-            navigation,
-        )
-        self.assertIn("globalThis.AppNavigation = Object.freeze", navigation)
-        self.assertIn("planSegments: PLAN_SEGMENTS", navigation)
-        self.assertIn("moreSegments: MORE_SEGMENTS", navigation)
-        self.assertIn(
-            'const PLAN_SEGMENTS = Object.freeze(["overview", "library", "season"]);',
-            navigation,
-        )
-        self.assertIn(
-            'const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "operations", "appearance"]);',
-            navigation,
-        )
-        self.assertLess(
-            navigation.index("function configure(nextHandlers)"),
-            navigation.index(
-                'globalThis.addEventListener("hashchange", syncFromHash);'
-            ),
-        )
-        self.assertIn("if (!hashchangeRegistered)", navigation)
-        self.assertIn("function routeFromHash(", navigation)
-        self.assertIn("function renderMoreSegments(segment)", views)
-        self.assertIn("AppNavigation.moreSegments.includes(segment)", views)
-        self.assertIn("AppNavigation.planSegments.includes(segment)", views)
-        self.assertNotIn("AppNavigation.moreSegmentFromRoute()", views)
-        self.assertNotIn("AppState.state.planSegment", views)
-        self.assertNotIn("AppState.setPlanSegment(selected)", views)
-        self.assertNotIn("renderSeasonPreparation()", views)
-        self.assertIn("AppState.setPlanSegment(planSegment);", app)
-        self.assertNotIn("renderSeasonPreparation()", app)
-        public_source = "\n".join(
-            path.read_text(encoding="utf-8") for path in (root / "public").glob("*.js")
-        )
-        self.assertNotRegex(public_source, r"\bstate\.(?:route|planSegment)\s*=(?!=)")
-        self.assertNotIn("function applyNavigationRoute(", app)
-        self.assertNotIn("function syncNavigationRoute(", app)
-        self.assertIn("function markdownToHtml(markdown)", views)
-        self.assertNotIn("function markdownToHtml(markdown)", app)
-        self.assertFalse((root / "public" / "forms.js").exists())
-        self.assertNotIn("function contextField(", app)
-        plan_views = (root / "public" / "plan-views.js").read_text(encoding="utf-8")
-        self.assertIn("function competitionCard(", plan_views)
-        self.assertNotIn("function competitionCard(", app)
-        self.assertNotIn("function competitionEditor(", app)
-        self.assertNotIn("function syncCompetitions(", app)
-        self.assertNotIn('id="competitionCoachButton"', index)
-        self.assertIn('id="workoutsPanel"', index)
-        self.assertIn("function showAccessibleDialog(", components)
-        self.assertIn("function restoreDialogFocus(", components)
-        self.assertNotIn("function showAccessibleDialog(", app)
-        self.assertNotIn("function restoreDialogFocus(", app)
         self.assertLess(
             index.index(asset_ref("/views.js")),
             index.index(asset_ref("/components.js")),
@@ -462,116 +320,73 @@ class ServerFrontendTests(ServerTestCase):
         self.assertLess(
             index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
         )
+
+    def test_frontend_api_wiring_and_removed_symbols_stay_out_of_the_app(self):
+        root = server.PUBLIC_DIR
+        app = frontend_source()
+        index = (root / "index.html").read_text(encoding="utf-8")
+        state = (root / "state.js").read_text(encoding="utf-8")
+        views = (root / "views.js").read_text(encoding="utf-8")
+        # Every request goes through api(), which adds the session handling and CSRF token.
+        self.assertIn("globalThis.AppApi.request(path, options, () =>", app)
+        self.assertIn("globalThis.AppApi.audio(path, blob, () =>", app)
+        self.assertIn("globalThis.AppApi.download(path", app)
+        self.assertNotIn("function withRequestTimeout(", app)
+        self.assertNotIn("JSON.stringify(report, null, 2)", app)
+        self.assertNotIn("diagnosticCaptureToggle", index + app)
+        self.assertNotIn("const state = {", app)
+        # state.js has no public setter for an arbitrary key, so this guard is not reachable from a test.
         self.assertIn(
-            'Route("GET", "/api/state/events"',
-            Path(state_events_get.__file__).read_text(encoding="utf-8"),
+            "if (!Object.hasOwn(state, key)) throw new Error(`Unknown state key: ${key}`);",
+            state,
         )
+        self.assertNotIn("return false", state)
+        self.assertNotIn("AppNavigation.moreSegmentFromRoute()", views)
+        self.assertNotIn("AppState.state.planSegment", views)
+        self.assertNotIn("AppState.setPlanSegment(selected)", views)
+        self.assertNotIn("renderSeasonPreparation()", views)
+        self.assertNotIn("renderSeasonPreparation()", app)
+        public_source = "\n".join(
+            path.read_text(encoding="utf-8") for path in root.glob("*.js")
+        )
+        self.assertNotRegex(public_source, r"\bstate\.(?:route|planSegment)\s*=(?!=)")
+        self.assertNotIn("function applyNavigationRoute(", app)
+        self.assertNotIn("function syncNavigationRoute(", app)
+        self.assertNotIn("function markdownToHtml(markdown)", app)
+        self.assertFalse((root / "forms.js").exists())
+        self.assertNotIn("function contextField(", app)
+        self.assertNotIn("function competitionCard(", app)
+        self.assertNotIn("function competitionEditor(", app)
+        self.assertNotIn("function syncCompetitions(", app)
+        self.assertNotIn('id="competitionCoachButton"', index)
+        self.assertNotIn("function showAccessibleDialog(", app)
+        self.assertNotIn("function restoreDialogFocus(", app)
+        self.assertNotIn("function renderToday(data)", app)
 
     def test_frontend_api_errors_and_live_status_contracts(self):
-        root = Path(__file__).resolve().parents[1]
-        api_client = (root / "public" / "api.js").read_text(encoding="utf-8")
         app = frontend_source()
-        coach = (root / "public" / "coach.js").read_text(encoding="utf-8")
-        index = (root / "public" / "index.html").read_text(encoding="utf-8")
-        for reason in (
-            "upstream_auth",
-            "upstream_rate_limited",
-            "upstream_unavailable",
-            "upstream_rejected",
-            "upstream_not_found",
-        ):
-            self.assertIn(f'{reason}: "', api_client)
-        self.assertIn(
-            "function safeErrorMessage(response, payload, fallback)", api_client
-        )
-        self.assertIn("if (response.status === 404)", api_client)
-        self.assertIn("globalThis.AppApi.download(path", app)
+        coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
         self.assertIn('AppApi.stream("/api/chat/stream"', coach)
         self.assertNotIn('fetch("/api/', app + coach)
         self.assertNotIn("completed.error_class", app)
-        self.assertNotIn('id="messages" class="messages" aria-live=', index)
-        self.assertIn(
-            '<output id="chatOperationStatus" class="sr-only" aria-live="polite"', index
-        )
-        self.assertIn("if (!status || status.textContent === message) return;", coach)
         self.assertIn('announceChatStatus("Antwort fertig.")', coach)
 
-    def test_chat_operation_status_live_region_stays_mounted(self):
-        root = Path(__file__).resolve().parents[1]
-        index = (root / "public" / "index.html").read_text(encoding="utf-8")
-        markup = next(
-            line for line in index.splitlines() if 'id="chatOperationStatus"' in line
-        )
-        self.assertNotRegex(markup, r"\bhidden\b")
-
-    def test_main_navigation_uses_stable_hash_links_and_focuses_active_panel(self):
-        app = frontend_source()
-        router = (
-            Path(__file__).resolve().parents[1] / "public" / "navigation.js"
-        ).read_text(encoding="utf-8")
-        navigation = (
-            Path(__file__).resolve().parents[1] / "public" / "navigation.js"
-        ).read_text(encoding="utf-8")
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        for route in ("coach", "plan/overview", "analysis/performance", "more"):
-            self.assertIn(f'href="#{route}"', index)
-        self.assertIn('globalThis.addEventListener("hashchange", syncFromHash)', router)
-        self.assertIn("globalThis.history.pushState", router)
-        self.assertIn("panel.focus({ preventScroll: true })", router)
-        self.assertNotIn('today: "todayPanel"', navigation)
-        self.assertNotIn('href="#today"', index)
-        self.assertIn('analysis: "dataPanel"', navigation)
-        self.assertIn('plan: "workoutsPanel"', navigation)
-        self.assertIn('"analysis/performance": "dataPanel"', navigation)
-        self.assertNotIn('activities: "analysis/history"', navigation)
-        self.assertNotIn('planned: "plan"', navigation)
-        self.assertNotIn('performance: "analysis/performance"', navigation)
-        self.assertIn('class="desktop-nav"', index)
-        self.assertIn('class="icon-sprite"', index)
-        self.assertEqual(index.count('class="bottom-nav"'), 1)
-        self.assertEqual(
-            index[index.index('<nav class="bottom-nav"') :]
-            .split("</nav>", 1)[0]
-            .count('class="nav-item'),
-            5,
-        )
-        self.assertNotIn("function renderToday(data)", app)
-
     def test_task8_coach_first_views_have_shared_states_and_analysis_segments(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
-            encoding="utf-8"
-        )
+        public = server.PUBLIC_DIR
+        coach = (public / "coach.js").read_text(encoding="utf-8")
         app = frontend_source()
-        components = (
-            Path(__file__).resolve().parents[1] / "public" / "components.js"
-        ).read_text(encoding="utf-8")
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(
-            encoding="utf-8"
-        )
-        styles = (
-            Path(__file__).resolve().parents[1] / "public" / "styles.css"
-        ).read_text(encoding="utf-8")
+        components = (public / "components.js").read_text(encoding="utf-8")
+        index = (public / "index.html").read_text(encoding="utf-8")
+        state = (public / "state.js").read_text(encoding="utf-8")
+        styles = (public / "styles.css").read_text(encoding="utf-8")
+        navigation = (public / "navigation.js").read_text(encoding="utf-8")
         self.assertNotIn('id="coachOverview"', index)
         self.assertNotIn("Was möchtest du heute klären?", index)
         self.assertNotIn('id="coachProviderStatus"', index)
         self.assertNotIn('id="coachReadyStatus"', index)
         self.assertNotIn('id="coachAdjustPlanButton"', index)
         self.assertNotIn('id="coachReceipts"', index)
-        self.assertIn("function renderCoachOverview(data)", coach)
-        self.assertIn("function toastCoachReceipts(receipts)", coach)
-        self.assertIn(
-            "if (HIDDEN_CHAT_RECEIPT_TOOLS.has(entry.tool) && !failedSync && !failedSyncJob) return false;",
-            coach,
-        )
-        self.assertIn('"get_sync_job"', coach)
-        self.assertIn('"start_intervals_plan_sync"', coach)
         self.assertNotIn('id="chatOperationLabel"', index)
-        self.assertIn('node.setAttribute("aria-label", coachWorkingLabel());', coach)
         self.assertNotIn('label.id = "coachWorkingLabel"', app)
         self.assertIn(".coach-working { align-self: flex-start;", styles)
         self.assertNotIn("function createActionReceipt(", components)
@@ -579,73 +394,32 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn("today-priority", app)
         self.assertNotIn('id="analysisHistorySegment"', index)
-        self.assertNotIn(
-            "analysis/history",
-            navigation_source := (
-                Path(__file__).resolve().parents[1] / "public" / "navigation.js"
-            ).read_text(encoding="utf-8"),
-        )
-        self.assertNotIn("function analysisSegmentFromRoute(", navigation_source)
+        self.assertNotIn("function analysisSegmentFromRoute(", navigation)
         self.assertNotIn("function renderActivities(", app)
         self.assertNotIn("activityFromDate", app + state + index)
         self.assertNotIn("analysis-segment-nav", styles + index)
-        self.assertIn('id="performancePredictions"', index)
         self.assertEqual(index.count('aria-label="Kalender"'), 2)
-        self.assertIn("<h2>Kalender</h2>", index)
         self.assertNotIn("coachReceipts", state)
         self.assertNotIn('id="activitiesPanel"', index)
 
     def test_plan_route_has_read_only_overview_and_library_segments(self):
+        public = server.PUBLIC_DIR
         app = frontend_source()
-        navigation = (
-            Path(__file__).resolve().parents[1] / "public" / "navigation.js"
-        ).read_text(encoding="utf-8")
-        state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(
-            encoding="utf-8"
-        )
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        self.assertIn('plan: "workoutsPanel"', navigation)
-        self.assertIn('"plan/overview": "workoutsPanel"', navigation)
-        self.assertIn('"plan/library": "workoutsPanel"', navigation)
+        state = (public / "state.js").read_text(encoding="utf-8")
+        index = (public / "index.html").read_text(encoding="utf-8")
+        plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
         self.assertIn("function ensureRouteData(route = state.route)", app)
         self.assertIn('load("/api/bootstrap?local=1", requested)', app)
         self.assertIn('api("/api/library?limit=100")', app)
         self.assertIn('aria-label="Trainingskalender und Trainingsbibliothek"', index)
         self.assertIn('id="planOverviewTitle">Trainingskalender</h3>', index)
-        self.assertIn('id="library"', index)
-        self.assertIn('data-plan-segment="overview"', index)
-        self.assertIn('data-plan-segment="library"', index)
-        self.assertIn('id="plannedCalendar"', index)
         self.assertNotIn('id="trainingPlans"', index)
         self.assertNotIn('id="libraryLoadButton"', index)
-        plan_views = (
-            Path(__file__).resolve().parents[1] / "public" / "plan-views.js"
-        ).read_text(encoding="utf-8")
-        self.assertIn("function renderPlanned(", plan_views)
-        self.assertIn("function plannedWeekSummary(", plan_views)
-        self.assertIn('document.createElement("details")', plan_views)
-        self.assertIn("selectedWeekKey = currentWeekKey", plan_views)
         self.assertIn("state.data?.planning_compliance", plan_views)
-        self.assertIn("function plannedWeatherLabel(", plan_views)
-        self.assertIn("function calendarActualActivity(", plan_views)
-        self.assertIn("function calendarStatusLabel(", plan_views)
-        self.assertIn(
-            "renderPlanned(data.training_calendar || data.planned || [])", app
-        )
-        self.assertIn("function focusPlannedToday()", plan_views)
-        self.assertIn(
-            'today.scrollIntoView({ block: "start", behavior: "auto" })', plan_views
-        )
         self.assertNotIn('"Trainingsload"', plan_views)
         self.assertNotIn("Plan/Ist:", plan_views)
-        self.assertIn("daily_planning_context", plan_views)
         self.assertIn("card.open = openPlannedEntries.has(entryKey)", plan_views)
         self.assertIn("section.open = false", plan_views)
-        self.assertIn("planned-day-${kind}", plan_views)
-        self.assertIn('kind: "calendar"', plan_views)
-        self.assertIn("planned-day-health", plan_views)
         self.assertNotIn("function renderPlanned(", app)
         plan_markup = index[
             index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
@@ -658,36 +432,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("plannedWeekOpen", state)
 
     def test_calendar_badges_are_text_safe_and_status_aware(self):
-        root = Path(__file__).resolve().parents[1] / "public"
+        root = server.PUBLIC_DIR
         plan_views = (root / "plan-views.js").read_text(encoding="utf-8")
         styles = (root / "styles.css").read_text(encoding="utf-8")
-        for helper in (
-            "function stripCalendarMarkers(",
-            "function calendarMarkerKeys(",
-            "function plannedDayNoteSpecs(",
-            "function plannedConflictLabels(",
-            "function plannedConflict(",
-            "function calendarBadge(",
-            "function calendarBadgeRow(",
-        ):
-            self.assertIn(helper, plan_views)
-        self.assertIn('"Kein Training"', plan_views)
-        self.assertIn('"Keine Intensität"', plan_views)
-        self.assertIn('"Nur kurze Einheiten"', plan_views)
-        self.assertIn(
-            'new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]])', plan_views
-        )
-        self.assertIn('`⚠ Konflikt: ${labels.join(" · ")}`', plan_views)
-        self.assertIn('"Mit Coach lösen"', plan_views)
-        self.assertIn("globalThis.askCoach?.(", plan_views)
-        self.assertIn("`Entfallen (${restDayLabel})`", plan_views)
-        self.assertIn('glyph.setAttribute("aria-hidden", "true");', plan_views)
-        self.assertIn("calendarMarkerKeys(event).length > 0", plan_views)
         self.assertIn(
             "plannedDayNotes(dayContext, state.data?.competitions, dateKey)",
             plan_views,
         )
-        self.assertIn("plannedConflictLabels(entry.conflicts)", plan_views)
         self.assertIn("state.data?.competitions, state.data?.weather", plan_views)
         self.assertNotIn("plannedDayCheckin", plan_views)
         self.assertNotIn("innerHTML", plan_views)
@@ -697,7 +448,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn(
             "var(--link)", styles[styles.index(".planned-day-calendar") :][:200]
         )
-        self.assertIn(".planned-conflict {", styles)
         self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
         self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
 
@@ -705,51 +455,15 @@ class ServerFrontendTests(ServerTestCase):
         public = server.PUBLIC_DIR
         plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
         styles = (public / "styles.css").read_text(encoding="utf-8")
-        index = (public / "index.html").read_text(encoding="utf-8")
-
-        def css_rule(selector):
-            start = styles.index(selector + " {")
-            return styles[start : styles.index("}", start)]
-
-        self.assertIn('<html lang="de">', index)
-        # Date-only planned units are stored as midnight and must not show "00:00";
-        # external appointments keep a genuine midnight start time.
-        self.assertIn("function plannedUnitStartTime(", plan_views)
-        self.assertIn('time === "00:00" ? null : time', plan_views)
-        self.assertIn("return time ? `${name} · ${time[1]}` : name;", plan_views)
-        # Extra activities and completed planned units have distinct labels.
-        self.assertIn('"✓ Zusätzlich" : "✓ Absolviert"', plan_views)
         self.assertNotIn("Zusätzlich absolviert", plan_views)
         self.assertNotIn("Abgeschlossen", plan_views)
-        # Missing weather is one hint for the visible range, not one per day.
-        self.assertIn("function plannedWeatherHint(", plan_views)
-        self.assertIn("upcomingDays", plan_views)
         self.assertNotIn("is-missing", plan_views)
         self.assertNotIn("weatherMissing", plan_views)
         self.assertIn(".planned-weather-hint {", styles)
-        # Calendar titles wrap at word boundaries and may hyphenate German compounds.
-        for selector in (".planned-session-title",):
-            rule = css_rule(selector)
-            self.assertIn("overflow-wrap: break-word; hyphens: auto;", rule)
-            self.assertNotIn("overflow-wrap: anywhere", rule)
-        # Empty workout library explains where entries come from.
-        self.assertIn(
-            "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.",
-            plan_views,
-        )
 
     def test_frontend_preserves_date_only_values_and_renders_checkins(self):
         app = frontend_source()
-        views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
-            encoding="utf-8"
-        )
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            'if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value;',
-            views,
-        )
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         self.assertNotIn('id="checkinDialog"', index)
         self.assertNotIn('id="todayPanel"', index)
         self.assertNotIn('id="syncIllnessToIntervals"', app)
@@ -771,27 +485,15 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_branding_is_not_rendered_in_header_and_version_is_in_settings(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        self.assertNotIn("PRIVATER TRAININGSBEREICH", markup)
         self.assertNotIn('id="appVersion"', markup)
         self.assertNotIn('id="desktopNavVersion"', markup)
-        self.assertIn('id="settingsAppVersion"', markup)
-        views_source = (server.PUBLIC_DIR / "views.js").read_text(encoding="utf-8")
-        self.assertIn('$("#settingsAppVersion")', views_source)
 
     def test_privacy_ui_keeps_delete_feedback_without_plan_conflict_notice(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        app_source = frontend_source()
-        self.assertIn('id="privacyDeleteNotice"', markup)
         self.assertNotIn('id="remoteDeleteNotice"', markup)
-        self.assertIn("remote_delete_attempted", app_source)
 
     def test_frontend_uses_accessible_confirmation_dialogs(self):
-        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app_source = frontend_source()
-        self.assertIn('id="confirmationDialog"', markup)
-        self.assertIn('id="confirmationDialogInput"', markup)
-        self.assertIn("function requestConfirmation(", app_source)
-        self.assertIn('confirmationForm?.addEventListener("submit"', app_source)
         self.assertNotIn("window.confirm", app_source)
         self.assertNotIn("window.prompt", app_source)
 

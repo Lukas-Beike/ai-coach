@@ -34,3 +34,11 @@ test("completed activities keep their recorded midnight start time", () => {
   const { calendarStartTime } = loadHelpers();
   assert.equal(calendarStartTime("2026-10-12T00:00:00"), "00:00");
 });
+
+test("a date-only value keeps its day, a moment takes the local day and an invalid value has none", () => {
+  const { localDateKey } = extractFunctions("views.js", ["localDateKey"]);
+  assert.equal(localDateKey("2026-10-12"), "2026-10-12");
+  assert.equal(localDateKey(new Date(2026, 9, 12, 23, 30)), "2026-10-12");
+  assert.equal(localDateKey("2026-10-12T23:30:00"), "2026-10-12");
+  assert.equal(localDateKey("not a date"), "");
+});

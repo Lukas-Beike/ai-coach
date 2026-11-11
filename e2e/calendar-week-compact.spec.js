@@ -152,6 +152,31 @@ test("extra activities show no Zusätzlich badge in a week without a plan", asyn
   await expect(page.locator(".planned-week-totals").first()).not.toContainText("zusätzlich");
 });
 
+test("@responsive a unit missed on a confirmed rest day is dropped, missing weather is one hint and long titles hyphenate", async ({ page, request }) => {
+  await openCalendar(page, request);
+  const missed = await page.evaluate(() => {
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const day = addDateKey(today, -1);
+    state.data.weather = null;
+    state.data.calendar_display = { past_weeks: 1, future_weeks: 1 };
+    state.data.daily_planning_context = [{ date: day, day_status: "rest" }];
+    state.data.training_calendar = [
+      { id: "rest-missed", date: day, name: "Radausfahrt mit einem sehr langen Bezeichnungswort", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
+    ];
+    renderPlanned(state.data.training_calendar);
+    return day;
+  });
+  await expect(page.locator(".planned-weather-hint")).toHaveCount(1);
+  await showCalendarDay(page, missed);
+  const entry = page.locator(`.planned-day[data-date="${missed}"] .planned-entry`);
+  await expect(entry.locator(".planned-entry-status")).toHaveText("Entfallen (Ruhetag)");
+  const title = entry.locator(".planned-session-title").first();
+  await expect(title).toHaveCSS("overflow-wrap", "break-word");
+  await expect(title).toHaveCSS("hyphens", "auto");
+  await page.evaluate(() => { state.data.library = []; renderLibrary([]); });
+  await expect(page.locator("#library .context-empty")).toHaveText("Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst.");
+});
+
 test("@responsive the Monat switch shows the month grid and the calendar returns to the week", async ({ page, request }) => {
   await openCalendar(page, request);
   const days = await renderSyntheticCalendar(page);

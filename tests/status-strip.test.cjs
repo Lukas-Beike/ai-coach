@@ -68,3 +68,18 @@ test("a stale threshold becomes one warning line that points to the profile", ()
   const many = thresholdStatusItem({ items: [{ label: "FTP Rad", value_text: "250 W", source_label: "Lokal" }, { label: "LTHR", value_text: "170 bpm", source_label: "Lokal" }] });
   assert.equal(many.detail, "2 Werte sind veraltet.");
 });
+
+test("an active maintenance mode becomes a critical notice and ends with it", () => {
+  const updates = [];
+  const { renderSyncStatus } = extractFunctions("sync-status.js", ["renderSyncStatus", "renderMaintenanceStatus"], {
+    state: { data: null },
+    updateStatusSources: (change) => updates.push(change.maintenance),
+  });
+  renderSyncStatus({ maintenance: { active: true } });
+  renderSyncStatus({ maintenance: { active: false } });
+  renderSyncStatus({});
+  assert.equal(updates[0].level, "critical");
+  assert.equal(updates[0].title, "Wartungsmodus aktiv");
+  assert.match(updates[0].detail, /Änderungen sind vorübergehend pausiert/);
+  assert.deepEqual(updates.slice(1), [null, null]);
+});
