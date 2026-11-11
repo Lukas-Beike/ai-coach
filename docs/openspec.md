@@ -50,8 +50,8 @@ OpenSpec does not replace repository review, orchestration, or validation.
 
 **Application specifications.** The [OpenSpec baseline](../openspec/README.md)
 documents the application's behavior by capability. Its
-[coverage ledger](../openspec/COVERAGE.md), [surface inventory](../openspec/coverage.json)
-and [Coach tool map](../openspec/COACH_TOOLS.md) are frozen snapshots of the
+[coverage ledger](../openspec/COVERAGE.md) and
+[Coach tool map](../openspec/COACH_TOOLS.md) are frozen snapshots of the
 baseline revision and are not maintained further. A valid document is not proof
 of runtime conformance.
 
@@ -69,4 +69,5 @@ npm.cmd run openspec -- archive add-example-capability --yes
 
 Keep it to a proposal, the spec delta, and tasks finished before merge. Archive
 it in the same branch as the implementation; `archive` also updates the main
-specs, and the `pr` workflow blocks a push while a touched change is still active.
+specs. Then delete the archived folder under `openspec/changes/archive/` in the
+same PR; git history keeps it. The `pr` workflow blocks a push while a touched change is still active.
