@@ -20,7 +20,6 @@ from backend.sync.provider_runtime import ProviderRuntimeRegistry, SynchronousRe
 class SyncCommandCore:
     database_manager: Callable[[], Any]
     queue_service: Callable[[], Any]
-    planned_unit_service: Callable[[], Any]
     competition_service: Callable[[], Any]
     workout_library_sync_state: Callable[[], Any]
     planning_revision: Any

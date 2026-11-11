@@ -582,7 +582,7 @@ class PlannedUnitService:
         against the catalogue, pair derived), so it is remembered for the same
         exercise name in other units. It keeps the Intervals.icu sync state,
         whose content it does not change. A unit changed since the browser read
-        it, or one in a sync conflict, is refused.
+        it is refused.
         """
         with self._database_manager.unit_of_work() as db:
             row = db.execute(

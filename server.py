@@ -1746,7 +1746,6 @@ SYNC_COMMANDS = SyncCommandAssembly(
     core=SyncCommandCore(
         database_manager=database_manager,
         queue_service=SYNC_JOB_QUEUE.service,
-        planned_unit_service=PLANNING_DATA.planned_unit,
         competition_service=PLANNING_DATA.competition,
         workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
         planning_revision=PLANNING_REVISION_SERVICE,
