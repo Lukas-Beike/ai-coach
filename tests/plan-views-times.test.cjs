@@ -1,27 +1,10 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
-
-function functionSource(name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.ok(start >= 0, `${name} exists`);
-  const end = source.indexOf("\n}", start);
-  assert.ok(end > start, `${name} is closed`);
-  return source.slice(start, end + 2);
-}
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadHelpers() {
   // Marker stripping is covered elsewhere; these tests only exercise the time handling.
-  const context = vm.createContext({ stripCalendarMarkers: (text) => String(text || "") });
-  vm.runInContext(
-    ["plannedAppointmentLabel", "calendarStartTime", "plannedUnitStartTime"].map(functionSource).join("\n"),
-    context,
-  );
-  return context;
+  return extractFunctions("plan-views.js", ["plannedAppointmentLabel", "calendarStartTime", "plannedUnitStartTime"], { stripCalendarMarkers: (text) => String(text || "") });
 }
 
 test("external appointments keep a genuine midnight start time", () => {

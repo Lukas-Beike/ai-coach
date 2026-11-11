@@ -1,17 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-function loadPublicScript(name) {
-  return fs.readFileSync(path.join(__dirname, "../public", name), "utf8").split("\r\n").join("\n");
-}
-
-const context = vm.createContext({});
-vm.runInContext(loadPublicScript("performance-view.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.hrCapChipSpec = hrCapChipSpec;`, context);
-const { hrCapChipSpec } = context;
+const { hrCapChipSpec } = loadPublicScript(["performance-view.js", "plan-views.js"]);
 
 // The numbers come from the entry; nothing here knows a cap table.
 test("the cap reads as percent first, then the currently resolved bpm, then the source", () => {

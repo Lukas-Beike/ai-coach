@@ -1,16 +1,19 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/state-loader.js"), "utf8");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 // Loads public/state-loader.js with the real render and stubbed area renderers.
 function loader(route) {
   const state = { data: null, route, sessionGeneration: 0, replaceDataOnLoad: false };
   const reloads = [];
-  const context = vm.createContext({
+  const stubs = [
+    "renderAppVersion", "renderCoachOverview", "renderQuickMessageTemplates", "notifyState",
+    "renderStatus", "renderMessages", "renderPlanned", "renderLibrary", "renderProfile", "renderCompetitions", "renderGarmin",
+    "renderAdaptivePlanning", "renderExternalCalendar", "renderPerformance", "renderModel", "renderThinkingLevel",
+    "renderServiceTier", "renderDiagnosticCapture", "renderSettings", "updateVoiceButton",
+  ];
+  const context = loadPublicScript("state-loader.js", {
+    ...Object.fromEntries(stubs.map((name) => [name, () => {}])),
     state,
     document: { currentScript: { src: "/state-loader.js?v=1" } },
     setTimeout,
@@ -20,13 +23,6 @@ function loader(route) {
     loadNutrition: () => reloads.push(["day", state.data?.profile?.timezone]),
     loadNutritionProducts: () => reloads.push(["products", state.data?.profile?.timezone]),
   });
-  for (const name of [
-    "renderAppVersion", "renderCoachOverview", "renderQuickMessageTemplates", "notifyState",
-    "renderStatus", "renderMessages", "renderPlanned", "renderLibrary", "renderProfile", "renderCompetitions", "renderGarmin",
-    "renderAdaptivePlanning", "renderExternalCalendar", "renderPerformance", "renderModel", "renderThinkingLevel",
-    "renderServiceTier", "renderDiagnosticCapture", "renderSettings", "updateVoiceButton",
-  ]) context[name] = () => {};
-  vm.runInContext(source, context);
   return { context, reloads };
 }
 

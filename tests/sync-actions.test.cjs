@@ -1,22 +1,15 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
-const publicDir = path.join(__dirname, "../public");
-const statusSource = fs.readFileSync(path.join(publicDir, "sync-status.js"), "utf8");
-const actionsSource = fs.readFileSync(path.join(publicDir, "sync-actions.js"), "utf8");
+const PROVIDER_ERRORS = ["NON_RETRYABLE_PROVIDER_ERRORS", "TRANSIENT_LOCAL_PROVIDER_ERRORS", "providerErrorIsNonRetryable"];
 
 // Runs the real waitForSyncJob against one terminal job DTO; non-retryable errors
 // throw before any polling delay, so the test does not wait.
 function waitForJob(job) {
-  const start = statusSource.indexOf("const NON_RETRYABLE_PROVIDER_ERRORS");
-  const end = statusSource.indexOf("function providerRequiresManualAttention");
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({ api: async () => job });
-  vm.runInContext(statusSource.slice(start, end), context);
-  vm.runInContext(actionsSource, context);
+  const context = extractFunctions("sync-status.js", PROVIDER_ERRORS, { api: async () => job });
+  loadPublicScript("sync-actions.js", context);
   return vm.runInContext("waitForSyncJob('job-1')", context);
 }
 
@@ -53,13 +46,7 @@ test("without any detail the configuration fallback is still shown", async () =>
 
 // Runs the real providerRequiresManualAttention against one freshness entry.
 function requiresManualAttention(entry) {
-  const start = statusSource.indexOf("const NON_RETRYABLE_PROVIDER_ERRORS");
-  const end = statusSource.indexOf("function renderProviderAttention");
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(statusSource.slice(start, end), context);
-  context.entry = entry;
-  return vm.runInContext("providerRequiresManualAttention(entry)", context);
+  return extractFunctions("sync-status.js", [...PROVIDER_ERRORS, "providerRequiresManualAttention"]).providerRequiresManualAttention(entry);
 }
 
 test("a busy local database never asks for manual attention", () => {
@@ -78,7 +65,7 @@ function syncHarness(jobs) {
   const posts = [];
   const toasts = [];
   const makeButton = () => ({ disabled: false, textContent: "", classList: { add() {}, remove() {} } });
-  const context = vm.createContext({
+  const context = extractFunctions("sync-status.js", [...PROVIDER_ERRORS, "providerSyncKey", "providerSyncRunning", "retryProvider"], {
     state: { localSync: {}, data: {}, route: "settings" },
     $: (selector) => (selector.startsWith("#") ? makeButton() : null),
     api: async (url, options) => {
@@ -92,14 +79,7 @@ function syncHarness(jobs) {
     providerIds: () => ({ garmin: "garmin", wahoo: "wahoo", intervals: "intervals" }),
     AppApi: { messageForReason: (_reason, fallback) => fallback },
   });
-  const start = statusSource.indexOf("const NON_RETRYABLE_PROVIDER_ERRORS");
-  const end = statusSource.indexOf("function providerRequiresManualAttention");
-  vm.runInContext(statusSource.slice(start, end), context);
-  const retryStart = statusSource.indexOf("// Garmin and Wahoo set the local sync flag");
-  const retryEnd = statusSource.length;
-  assert.ok(retryStart >= 0 && retryEnd > retryStart);
-  vm.runInContext(statusSource.slice(retryStart, retryEnd), context);
-  vm.runInContext(actionsSource, context);
+  loadPublicScript("sync-actions.js", context);
   return { context, posts, toasts };
 }
 

@@ -1,12 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/state-loader.js"), "utf8");
-const context = vm.createContext({ console, document: { scripts: [] } });
-vm.runInContext(source, context);
+const context = loadPublicScript("state-loader.js", { console, document: { scripts: [] } });
 
 test("bootstrap competitions keep the last loaded race result of the same event", () => {
   const loaded = [

@@ -1,10 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/state-loader.js"), "utf8");
 
 function deferred() {
   let resolve;
@@ -37,7 +35,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     initialStateLoaded: false,
     replaceDataOnLoad: false,
   };
-  const context = vm.createContext({
+  const context = loadPublicScript("state-loader.js", {
     state,
     document: { currentScript: { src: asset } },
     setTimeout,
@@ -63,7 +61,6 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
       return response.promise;
     },
   });
-  vm.runInContext(source, context);
   context.render = (data) => { state.data = data; renders.push(data); };
   const respond = (requestPath, body) => {
     const response = responses.get(requestPath) || deferred();

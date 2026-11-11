@@ -1,27 +1,13 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const read = (name) => fs.readFileSync(path.join(__dirname, "../public", name), "utf8").replace(/\r\n/g, "\n");
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
 function loadStrip() {
-  const context = vm.createContext({ document: { querySelector: () => null } });
-  vm.runInContext(`${read("status-strip.js")}\nthis.api = { statusStripItems, statusStandLabel, statusSources };`, context);
-  return context.api;
+  return loadPublicScript("status-strip.js", { document: { querySelector: () => null } });
 }
 
 function loadThresholdItem() {
-  const source = read("settings.js");
-  const slice = (marker) => {
-    const start = source.indexOf(marker);
-    assert.notEqual(start, -1, marker);
-    return source.slice(start, source.indexOf("\n}\n", start) + 3);
-  };
-  const context = vm.createContext({});
-  vm.runInContext(`${slice("function zoneWarningLine(")}${slice("function thresholdStatusItem(")}\nthis.thresholdStatusItem = thresholdStatusItem;`, context);
-  return context.thresholdStatusItem;
+  return extractFunctions("settings.js", ["zoneWarningLine", "thresholdStatusItem"]).thresholdStatusItem;
 }
 
 const item = (level, title) => ({ level, title });

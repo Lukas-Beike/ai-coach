@@ -1,34 +1,16 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const start = source.indexOf("// What the Coach turn changed locally");
-const end = source.indexOf("\nfunction appendChatStream", start);
-
-class FakeElement {
-  constructor(tag) {
-    this.tagName = tag.toUpperCase();
-    this.children = [];
-    this.listeners = {};
-    this.className = "";
-    this.textContent = "";
-    this.disabled = false;
-  }
-  append(...nodes) { this.children.push(...nodes); }
-  addEventListener(type, listener) { this.listeners[type] = listener; }
-}
+const TURN_RENDERERS = ["appendMessageChanges", "appendPlanNotes", "undoCoachTurn", "appendFailedTurnRetry", "resendChatText", "profileSetupButton"];
 
 function harness({ confirmed = true, apiResult, apiError } = {}) {
-  assert.ok(start >= 0 && end > start);
   const calls = { api: [], confirm: [], toasts: [], loads: [], renders: 0 };
   const state = { data: { messages: [] } };
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", TURN_RENDERERS, {
     state,
     AppFormat: require("../public/format.js"),
-    document: { createElement: (tag) => new FakeElement(tag) },
+    document: fakeDocument(),
     async requestConfirmation(message, options) {
       calls.confirm.push({ message, options });
       return confirmed;
@@ -42,7 +24,6 @@ function harness({ confirmed = true, apiResult, apiError } = {}) {
     toast(message, isError) { calls.toasts.push({ message, isError: Boolean(isError) }); },
     async load(url, areas) { calls.loads.push({ url, areas: [...areas] }); },
   });
-  vm.runInContext(source.slice(start, end), context);
   return { context, state, calls };
 }
 
@@ -163,9 +144,9 @@ function retryHarness(messages, { draft = "", attachments = [] } = {}) {
   const submitted = [];
   const input = { value: draft, dataset: { requestKind: "plan_week" }, dispatchEvent() {} };
   const state = { data: { messages }, chatAttachments: [...attachments] };
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", TURN_RENDERERS, {
     state,
-    document: { createElement: (tag) => new FakeElement(tag) },
+    document: fakeDocument(),
     messageAttachmentLabel: (names) => (names?.length ? names.join(", ") : ""),
     $: (selector) => (selector === "#messageInput" ? input : { requestSubmit() {
       submitted.push({ text: input.value, attachments: state.chatAttachments, requestKind: input.dataset.requestKind });
@@ -177,7 +158,6 @@ function retryHarness(messages, { draft = "", attachments = [] } = {}) {
     resizeChatInput() {},
     updateChatControls() {},
   });
-  vm.runInContext(source.slice(start, end), context);
   return { context, state, input, submitted };
 }
 
@@ -189,7 +169,6 @@ test("the newest failed reply sends its request again and keeps the draft", () =
   const { context, state, input, submitted } = retryHarness(messages, { draft: "Entwurf", attachments: ["a.fit"] });
   input.dataset.requestKind = "morning_checkin";
   const node = new FakeElement("div");
-  node.classList = { add(name) { node.className += ` ${name}`; } };
   context.appendFailedTurnRetry(node, messages[1], true);
   const retry = node.children[0];
   assert.equal(retry.textContent, "Erneut senden");

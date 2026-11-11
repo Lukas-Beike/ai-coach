@@ -1,24 +1,16 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/notifications.js"), "utf8");
-const start = source.indexOf("const NOTIFICATION_MAX_ATTEMPTS");
-const end = source.indexOf("\nfunction competitionCountdownText", start);
 const RETRY_DELAY_MS = 30000;
 
 function loadNotifier(showNotification, clock) {
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({
+  return extractFunctions("notifications.js", ["NOTIFICATION_MAX_ATTEMPTS", "NOTIFICATION_RETRY_DELAY_MS", "reserveNotificationAttempt", "showPwaNotification"], {
     state: { notificationKeys: new Set() },
     notificationPermission: () => "granted",
     navigator: { serviceWorker: { ready: Promise.resolve({ showNotification }) } },
     Date: { now: () => clock.now },
   });
-  vm.runInContext(source.slice(start, end), context);
-  return context;
 }
 
 test("a persistently rejecting notification is retried at most three times", async () => {

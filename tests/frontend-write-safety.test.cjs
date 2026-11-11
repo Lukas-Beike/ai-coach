@@ -1,20 +1,11 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-function readPublic(name) {
-  return fs.readFileSync(path.join(__dirname, "../public", name), "utf8");
-}
-
-function slice(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  assert.ok(start >= 0, `missing ${startMarker}`);
-  const end = endMarker ? source.indexOf(endMarker, start + startMarker.length) : source.length;
-  assert.ok(end > start, `missing ${endMarker}`);
-  return source.slice(start, end);
-}
+const PROFILE_SAVE = ["profileSaveInFlight", "profileFormValues", "PROFILE_ENTRY_FIELDS", "profileSaveConfirmed", "clearProfileEntryFields", "resetProfileEntryFields", "profileFieldText", "bodyExportMessage", "reportBodyExport", "isDefiniteProfileRejection", "retryBodyGarmin", "applyAdoptedFirstThreshold", "adoptFirstThreshold", "determineChangedProfileFields", "handleProfileSaveOutcome", "handleProfileSaveError", "saveProfile"];
+const COACH_PROPOSALS = ["isHttpClientRejection", "reconcileCoachActionProposal", "executeCoachActionProposal", "showCoachReceiptArea", "lockUnknownCoachActionOutcome", "rejectCoachActionProposal"];
+const SYNC_POLL = ["syncPollLeaseAvailable", "releaseSyncPollLease", "broadcastSyncMessage", "changedSyncAreas", "renderSyncStatus", "renderMaintenanceStatus", "handleSyncStatus", "scheduleSyncPoll", "pollSyncStatus"];
+const NOTIFICATIONS = ["NOTIFICATION_MAX_ATTEMPTS", "NOTIFICATION_RETRY_DELAY_MS", "reserveNotificationAttempt", "showPwaNotification", "competitionCountdownText", "notifyState"];
 
 // Objects created inside a vm context have their own prototypes; compare plain copies.
 function plain(value) {
@@ -41,18 +32,12 @@ function submitEvent(formEntries) {
   return { event: { preventDefault() {}, currentTarget: form, submitter: button }, button };
 }
 
-const settingsSource = readPublic("settings.js");
-const performanceSource = readPublic("performance-view.js");
-const coachSource = readPublic("coach.js");
-const syncStatusSource = readPublic("sync-status.js");
-const notificationsSource = readPublic("notifications.js");
-
 function profileContext({ server, baseline, stateProfile, exportStatus, error }) {
   const calls = [];
   const toasts = [];
   const retryButton = { hidden: true, disabled: false };
   const state = { sessionGeneration: 1, data: { profile: stateProfile }, profileBaseline: baseline, profileDirty: false };
-  const context = vm.createContext({
+  const context = extractFunctions("settings.js", PROFILE_SAVE, {
     state,
     document: { getElementById: () => retryButton },
     FormData: FormDataStub,
@@ -69,11 +54,7 @@ function profileContext({ server, baseline, stateProfile, exportStatus, error })
     invalidateContextPreview() {},
     load: async () => {},
   });
-  vm.runInContext(
-    slice(settingsSource, "// Profile values as the form presents", "\n// Rejects when the backup fails")
-      + slice(performanceSource, "async function saveInlineMetric", "\nfunction currentPerformanceValues"),
-    context,
-  );
+  extractFunctions("performance-view.js", ["saveInlineMetric"], context);
   return { context, state, calls, toasts, retryButton };
 }
 
@@ -218,7 +199,7 @@ function coachContext(apiImpl) {
   const apiCalls = [];
   const loads = [];
   let renders = 0;
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", COACH_PROPOSALS, {
     state,
     api: async (path, options = {}) => {
       apiCalls.push(path);
@@ -231,7 +212,6 @@ function coachContext(apiImpl) {
     isSessionEndedError: () => false,
     load: async (path, areas) => { loads.push({ path, areas }); },
   });
-  vm.runInContext(slice(coachSource, "function isHttpClientRejection", "\nfunction createPendingMessage"), context);
   return { context, state, receipts, toasts, apiCalls, loads, renders: () => renders };
 }
 
@@ -310,19 +290,17 @@ test("a failed reconcile keeps the unknown-outcome lock", async () => {
 });
 
 test("resetting the coach chat waits while queued messages have not been sent", async () => {
-  const source = slice(coachSource, "async function resetCoachChat", "\nconst MAX_QUEUED_ATTACHMENT_BYTES");
   const state = { chatQueue: [{ id: 1 }] };
   const toasts = [];
   const apiCalls = [];
   let confirmations = 0;
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", ["resetCoachChat"], {
     state,
     $: () => ({ disabled: false, textContent: "" }),
     requestConfirmation: async () => { confirmations += 1; return true; },
     api: async (path) => { apiCalls.push(path); return {}; },
     toast: (message, isError) => toasts.push({ message, isError: Boolean(isError) }),
   });
-  vm.runInContext(source, context);
   await context.resetCoachChat();
   assert.equal(confirmations, 0);
   assert.equal(apiCalls.length, 0);
@@ -331,9 +309,8 @@ test("resetting the coach chat waits while queued messages have not been sent", 
 });
 
 test("an in-flight sync poll does not take the poll lease", async () => {
-  const source = slice(syncStatusSource, "function syncPollLeaseAvailable", "\nfunction setupSyncStatusMonitoring");
   let leaseWrites = 0;
-  const context = vm.createContext({
+  const context = extractFunctions("sync-status.js", SYNC_POLL, {
     state: { data: {}, syncPoll: { controller: {}, leaseToken: "tab", timer: null } },
     document: { visibilityState: "visible" },
     navigator: { onLine: true },
@@ -346,15 +323,13 @@ test("an in-flight sync poll does not take the poll lease", async () => {
     api: async () => { throw new Error("no request expected"); },
     providerIds: () => ({}),
   });
-  vm.runInContext(source, context);
   await context.pollSyncStatus();
   assert.equal(leaseWrites, 0);
 });
 
 test("notification bodies omit competition names and provider error text", async () => {
-  const source = slice(notificationsSource, "const NOTIFICATION_MAX_ATTEMPTS", "\nfunction registerServiceWorker");
   const shown = [];
-  const context = vm.createContext({
+  const context = extractFunctions("notifications.js", NOTIFICATIONS, {
     state: { notificationKeys: new Set() },
     notificationPermission: () => "granted",
     navigator: {
@@ -363,7 +338,6 @@ test("notification bodies omit competition names and provider error text", async
       },
     },
   });
-  vm.runInContext(source, context);
   context.notifyState({
     planning: { season: { next_event: { id: 7, name: "Geheimer Stadtlauf", days_until: 0, event_date: "2026-10-14" } } },
     sync: { last_error: "Token tok_123 abgelehnt" },

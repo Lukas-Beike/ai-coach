@@ -1,17 +1,10 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-
-function slice(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, startMarker);
-  return source.slice(start, end);
-}
 
 // Runs the real stream reader and failure recovery with a shortened silence window.
 function coach() {
@@ -26,7 +19,9 @@ function coach() {
     chatServerOperationId: null,
   };
   const calls = { polls: [], history: 0, toasts: 0 };
-  const context = vm.createContext({
+  // The silence window is shortened to 30 ms; the production constant is pinned by the test below.
+  const context = extractFunctions("coach.js", ["readChatStreamChunk", "readChatStream", "recoverChatRequestFailure"], {
+    CHAT_STREAM_SILENCE_MS: 30,
     AbortController,
     TextDecoder,
     setTimeout,
@@ -42,10 +37,6 @@ function coach() {
     consumeChatStreamBlock() {},
     chatRequestIsCurrent: () => true,
   });
-  vm.runInContext([
-    slice("// The server sends a heartbeat", "async function refreshCompletedChatStream").replace("45_000", "30"),
-    slice("async function recoverChatRequestFailure", "\nfunction finishChatRequest"),
-  ].join("\n"), context);
   const chatContext = { chatGeneration: 0, sessionGeneration: 0, completed: false, background: false, request, stream, attachments: [], clientTurnId: "turn-1", message: "x" };
   return { context, state, calls, controller, chatContext, request };
 }

@@ -1,20 +1,15 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const start = source.indexOf("const HIDDEN_CHAT_RECEIPT_TOOLS");
-const end = source.indexOf("\nasync function askCoach", start);
+const RECEIPT_TOOLS = ["HIDDEN_CHAT_RECEIPT_TOOLS", "COACH_RECEIPT_LABELS", "SYNC_JOB_RECEIPT_LABELS", "receiptIsVisible", "syncJobReceipt", "commandReceiptTitle", "commandReceiptMessage", "commandReceiptStatus", "commandReceipt", "addStructuredCoachReceipts"];
+const EXECUTE_ACTIONS = ["coachActionReceipt", "isHttpClientRejection", "reconcileCoachActionProposal", "executeCoachActionProposal", "showCoachReceiptArea", "lockUnknownCoachActionOutcome", "rejectCoachActionProposal"];
 
 function render(commands) {
-  assert.ok(start >= 0 && end > start);
   const cards = [];
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", RECEIPT_TOOLS, {
     state: {}, toast() {},
   });
-  vm.runInContext(source.slice(start, end), context);
   context.toastCoachReceipts = (receipts) => cards.push(...receipts);
   context.addStructuredCoachReceipts({ command_receipts: commands });
   return cards;
@@ -53,16 +48,13 @@ test("synchronization progress does not create chat cards", () => {
 });
 
 test("immediate remote writes report the completed operation in their receipt", () => {
-  const receiptStart = source.indexOf("function coachActionReceipt(");
-  const receiptEnd = source.indexOf("\nasync function executeCoachActionProposal", receiptStart);
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(receiptStart, receiptEnd) + ";globalThis.readReceipt = coachActionReceipt;", context);
+  const context = extractFunctions("coach.js", ["coachActionReceipt"]);
 
-  const adaptive = context.readReceipt(
+  const adaptive = context.coachActionReceipt(
     { action_type: "remote_coach_write" },
     { ok: true, status: "completed" },
   );
-  const queued = context.readReceipt(
+  const queued = context.coachActionReceipt(
     { action_type: "remote_coach_write" },
     { ok: true, status: "queued", sync_job_id: "sync-1" },
   );
@@ -72,11 +64,7 @@ test("immediate remote writes report the completed operation in their receipt", 
 });
 
 test("an approved remote write is identified as remote in its action receipt", () => {
-  const start = source.indexOf("function coachActionReceipt(");
-  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(start, end), context);
+  const context = extractFunctions("coach.js", ["coachActionReceipt"]);
   const receipt = context.coachActionReceipt(
     { action_type: "remote_coach_write" },
     { status: "queued", sync_job_id: "sync-1" },
@@ -87,10 +75,7 @@ test("an approved remote write is identified as remote in its action receipt", (
 });
 
 test("a completed remote write receipt uses completion wording", () => {
-  const start = source.indexOf("function coachActionReceipt(");
-  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(start, end), context);
+  const context = extractFunctions("coach.js", ["coachActionReceipt"]);
   const receipt = context.coachActionReceipt(
     { action_type: "remote_coach_write" },
     { status: "deleted" },
@@ -99,10 +84,7 @@ test("a completed remote write receipt uses completion wording", () => {
 });
 
 test("an approved nutrition product write has product receipt and destination", () => {
-  const start = source.indexOf("function coachActionReceipt(");
-  const end = source.indexOf("\nasync function executeCoachActionProposal", start);
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(start, end), context);
+  const context = extractFunctions("coach.js", ["coachActionReceipt"]);
   const receipt = context.coachActionReceipt(
     { action_type: "local_coach_write", object_ids: { operation: "save_nutrition_product" } },
     { status: "applied" },
@@ -114,12 +96,10 @@ test("an approved nutrition product write has product receipt and destination", 
 });
 
 test("approved nutrition product write refreshes and opens the product catalog", async () => {
-  const start = source.indexOf("function coachActionReceipt(");
-  const end = source.indexOf("\nfunction createPendingMessage", start);
   const routes = [];
   const loads = [];
   let request = 0;
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", EXECUTE_ACTIONS, {
     state: { coachActionProposals: [{ id: "proposal-1" }] },
     api: async () => (++request === 1
       ? { action_token: "token", proposed_action: { payload_hash: "hash" } }
@@ -130,7 +110,6 @@ test("approved nutrition product write refreshes and opens the product catalog",
     load: async (...args) => { loads.push(args); },
     AppRouter: { navigate: async (...args) => { routes.push(args); } },
   });
-  vm.runInContext(source.slice(start, end), context);
   await context.executeCoachActionProposal(
     { id: "proposal-1", action_type: "local_coach_write", object_ids: { operation: "save_nutrition_product" }, status: "ready" },
     { disabled: false },
@@ -140,14 +119,12 @@ test("approved nutrition product write refreshes and opens the product catalog",
 });
 
 test("action destination precedes a slow refresh and preserves newer navigation", async () => {
-  const start = source.indexOf("function coachActionReceipt(");
-  const end = source.indexOf("\nfunction createPendingMessage", start);
   for (const navigateDuringExecution of [false, true]) {
     const routes = [];
     let releaseRefresh;
     let refreshStarted;
     const refreshing = new Promise(resolve => { refreshStarted = resolve; });
-    const context = vm.createContext({
+    const context = extractFunctions("coach.js", EXECUTE_ACTIONS, {
       state: { route: "coach", coachActionProposals: [{ id: "proposal-1" }] },
       api: async (url) => {
         if (url.endsWith("/confirm")) return { action_token: "token", proposed_action: { payload_hash: "hash" } };
@@ -158,7 +135,6 @@ test("action destination precedes a slow refresh and preserves newer navigation"
       load: () => { refreshStarted(); return new Promise(resolve => { releaseRefresh = resolve; }); },
       AppRouter: { navigate: async (route) => { routes.push(route); context.state.route = route; } },
     });
-    vm.runInContext(source.slice(start, end), context);
     const action = context.executeCoachActionProposal(
       { id: "proposal-1", action_type: "local_coach_write", status: "ready" },
       { disabled: false },
@@ -173,12 +149,7 @@ test("action destination precedes a slow refresh and preserves newer navigation"
 });
 
 test("approval preview renders every bound remote-write value as text", () => {
-  const start = source.indexOf("function coachActionDiff(");
-  const end = source.indexOf("\nfunction coachActionButtons", start);
-  const context = vm.createContext({
-    document: { createElement: () => ({ textContent: "", children: [], append(node) { this.children.push(node); } }) },
-  });
-  vm.runInContext(source.slice(start, end), context);
+  const context = extractFunctions("coach.js", ["coachActionDiff"], { document: fakeDocument() });
   const list = context.coachActionDiff({ diff: [{
     name: "Nutrition", date: "2026-09-24", id: "race-1", kcal: "450 kcal", entries: "2",
     carbs: "60 g", protein: "20 g", fat: "10 g", keep: "ride-1", delete: "ride-2",

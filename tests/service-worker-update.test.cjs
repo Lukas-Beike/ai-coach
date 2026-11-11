@@ -1,27 +1,13 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
-
-const read = (name) => fs.readFileSync(path.join(__dirname, "../public", name), "utf8").replace(/\r\n/g, "\n");
-const workerSource = read("service-worker.js");
-const notificationsSource = read("notifications.js");
-const sharedSource = read("shared.js");
-const coachSource = read("coach.js");
-
-function slice(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = endMarker ? source.indexOf(endMarker, start) : source.length;
-  assert.ok(start >= 0 && end > start, startMarker);
-  return source.slice(start, end);
-}
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
 // Runs public/service-worker.js with recorded cache and lifecycle calls.
 function worker() {
   const handlers = {};
   const calls = [];
-  const context = vm.createContext({
+  const context = loadPublicScript("service-worker.js", {
     URL,
     addEventListener: (type, handler) => { handlers[type] = handler; },
     skipWaiting: async () => { calls.push(["skipWaiting"]); },
@@ -32,7 +18,6 @@ function worker() {
       delete: async (key) => { calls.push(["delete", key]); return true; },
     },
   });
-  vm.runInContext(workerSource, context);
   const cacheName = vm.runInContext("CACHE", context);
   const run = async (type) => {
     const waits = [];
@@ -105,14 +90,9 @@ function page({ controlled = true } = {}) {
       },
     },
   });
-  vm.runInContext([
-    slice(sharedSource, "const $ =", "\n"),
-    slice(sharedSource, "function hasUnsavedChanges", "\n}\n") + "\n}\n",
-    slice(coachSource, "function chatStatusJobActive", "\nfunction chatStatusPollWanted"),
-    slice(coachSource, "function pendingChatTurn", "\nasync function pollPendingChatReceipt"),
-    slice(coachSource, "function voiceIsRecording", "\nfunction formatVoiceDuration"),
-    slice(notificationsSource, "function registerServiceWorker"),
-  ].join("\n"), context);
+  extractFunctions("shared.js", ["$", "hasUnsavedChanges"], context);
+  extractFunctions("coach.js", ["chatStatusJobActive", "pendingChatTurn", "voiceIsRecording"], context);
+  extractFunctions("notifications.js", ["registerServiceWorker", "serviceWorkerReplaced", "serviceWorkerReloaded", "pointerHeld", "trackUnsavedForms", "editedFormPending", "UPDATE_RELOAD_INPUT_FIELDS", "pageInputPending", "updateReloadIsSafe", "reloadForUpdateWhenSafe"], context);
   context.registerServiceWorker();
   return {
     context,
@@ -242,8 +222,8 @@ test("a hidden page keeps a draft instead of reloading", () => {
 
 // The chat states end with a control update; the state loads are checked in state-loader-startup.test.cjs.
 test("every chat control update checks a held update reload", () => {
-  const updateChatControls = slice(coachSource, "function updateChatControls", "\n}\n");
-  assert.match(updateChatControls, /\n {2}reloadForUpdateWhenSafe\(\);$/);
+  const { updateChatControls } = extractFunctions("coach.js", ["updateChatControls"]);
+  assert.match(updateChatControls.toString(), /\n {2}reloadForUpdateWhenSafe\(\);\n\}$/);
 });
 
 test("typing into a form marks it unsaved until a save is confirmed or the form is reset", () => {
@@ -303,7 +283,7 @@ function fetching(networkStatus, { shell = true } = {}) {
   const handlers = {};
   const stored = new Map(shell ? [["/", { shell: true, status: 200 }]] : []);
   const puts = [];
-  const context = vm.createContext({
+  const context = loadPublicScript("service-worker.js", {
     URL,
     setTimeout,
     clearTimeout,
@@ -321,7 +301,6 @@ function fetching(networkStatus, { shell = true } = {}) {
       }),
     },
   });
-  vm.runInContext(workerSource, context);
   return async (url, mode = "navigate") => {
     let answer;
     const waits = [];

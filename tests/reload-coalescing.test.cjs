@@ -1,16 +1,10 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
-const read = (name) => fs.readFileSync(path.join(__dirname, "../public", name), "utf8");
-const coachSource = read("coach.js");
 // Only the status polling of coach.js: the rest needs the whole chat interface.
-const statusPollSource = coachSource.slice(
-  coachSource.indexOf("function scheduleChatStatusPoll("),
-  coachSource.indexOf("async function loadInitialState("),
-);
+const STATUS_POLL = ["scheduleChatStatusPoll", "chatStatusJobActive", "chatStatusPollWanted", "stopChatStatusPoll", "loadChatHistoryFresh", "refreshChatProposalsInBackground", "resumeQueuedChat", "chatPollStateIsCurrent", "pendingChatTurn", "pollPendingChatReceipt", "showRunningChatStatus", "finishRecoveredChatStatus", "CHAT_STATUS_SAFETY_POLL_MS", "rescheduleChatStatusPoll", "settleChatStatusPoll", "pollChatStatus"];
 
 const BOOTSTRAP = "/api/bootstrap?local=1";
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -77,7 +71,7 @@ function frontend({ eventSource = false } = {}) {
     addEventListener(name, listener) { this.listeners[name] = listener; }
     close() { this.closed = true; }
   }
-  const context = vm.createContext({
+  const context = loadPublicScript(["state.js", "state-loader.js", "sync-status.js"], {
     crypto: { randomUUID: () => "test" },
     document: { scripts: [], currentScript: { src: "" }, visibilityState: "visible" },
     navigator: { onLine: true },
@@ -110,7 +104,7 @@ function frontend({ eventSource = false } = {}) {
     },
     ...(eventSource ? { EventSource: FakeEventSource } : {}),
   });
-  [read("state.js"), read("state-loader.js"), read("sync-status.js"), statusPollSource].forEach((source) => vm.runInContext(source, context));
+  extractFunctions("coach.js", STATUS_POLL, context);
   const state = vm.runInContext("state", context);
   context.render = (data) => { state.data = data; };
   state.data = { provider_ids: { garmin: "garmin" }, state_versions: {}, messages: [] };

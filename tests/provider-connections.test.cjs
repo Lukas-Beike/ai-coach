@@ -1,8 +1,7 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 const {
   CREDENTIAL_FORMS,
@@ -14,9 +13,6 @@ const {
   credentialSourceView,
   garminCardView,
 } = require("../public/provider-connections.js");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/provider-connections.js"), "utf8");
-const connectionStatusSource = fs.readFileSync(path.join(__dirname, "../public/connection-status.js"), "utf8");
 
 // Loads the real provider-connections.js into a vm context. Every element is created on
 // demand, so each test reads the same DOM state the renderer wrote. The API stub records
@@ -58,9 +54,7 @@ function loadProviderConnections() {
     invalidateProviderChecks: () => { providerCheckCalls.push("invalidate"); },
     loadProviderChecks: async () => { providerCheckCalls.push("load"); },
   };
-  vm.createContext(context);
-  vm.runInContext(connectionStatusSource, context);
-  vm.runInContext(source, context);
+  loadPublicScript(["connection-status.js", "provider-connections.js"], context);
   const fn = (name) => vm.runInContext(name, context);
   return {
     context,

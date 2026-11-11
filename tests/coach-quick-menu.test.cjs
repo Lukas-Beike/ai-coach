@@ -1,18 +1,13 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 const root = path.join(__dirname, "..", "public");
 const source = fs.readFileSync(path.join(root, "coach.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const start = source.indexOf("function quickMenuTarget(");
-const end = source.indexOf("\nfunction setupQuickActionMenu(", start);
-assert.ok(start >= 0 && end > start);
-const context = vm.createContext({});
-vm.runInContext(`${source.slice(start, end)};globalThis.quickMenuTarget = quickMenuTarget;`, context);
-const target = context.quickMenuTarget;
+const { quickMenuTarget: target, buildComposerPlusMenu } = extractFunctions("coach.js", ["quickMenuTarget", "buildComposerPlusMenu"]);
 
 test("arrow keys wrap and Home/End jump", () => {
   const items = [0, 1, 2];
@@ -47,7 +42,7 @@ test("composer plus menu is cloned from the quick bar and still opens the file p
   assert.match(html, /id="attachmentButton"[^>]*aria-haspopup="menu"[^>]*aria-controls="composerPlusMenu"[^>]*popovertarget="composerPlusMenu"/);
   assert.match(html, /id="composerPlusMenu"[^>]*popover="auto"[^>]*role="menu"/);
   assert.match(html, /role="menuitem" id="attachFileMenuItem">Datei anhängen</);
-  const build = source.slice(source.indexOf("function buildComposerPlusMenu("), source.indexOf("\nfunction setupQuickActionMenu("));
+  const build = buildComposerPlusMenu.toString();
   assert.ok(build.includes('$("#quickMorningCheckinButton")') && build.includes('$("#quickAnalysisMenu")'));
   assert.ok(build.includes('morningItem.setAttribute("role", "menuitem")'));
   assert.ok(build.includes("menu.append(morningItem, ...[...source.children].map(copy))"));

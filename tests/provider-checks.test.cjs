@@ -1,12 +1,10 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 const { providerCheckView } = require("../public/provider-checks.js");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/provider-checks.js"), "utf8");
 const PROVIDERS = ["alpha", "beta", "gamma"];
 
 function loadChecks(apiHandler) {
@@ -37,8 +35,7 @@ function loadChecks(apiHandler) {
     clearTimeout: () => {},
     Date,
   };
-  vm.createContext(context);
-  vm.runInContext(source, context);
+  loadPublicScript("provider-checks.js", context);
   return { toasts, calls, results, buttons, classes, run: (code) => vm.runInContext(code, context) };
 }
 

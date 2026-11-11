@@ -1,26 +1,18 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const constStart = source.indexOf("const MAX_CHAT_ATTACHMENTS");
-const start = source.indexOf("function removeQueuedChatMessage");
-const end = source.indexOf("\nfunction chatRequestIsCurrent", start);
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function attachments(count) {
   return Array.from({ length: count }, (_, index) => ({ name: `route-${index}.gpx`, data: "AA==" }));
 }
 
 function editQueue(queuedCount, draftCount) {
-  assert.ok(constStart >= 0 && start >= 0 && end > start);
   const state = {
     chatQueue: [{ id: 1, message: "Nachricht", mode: "queue", requestKind: null, attachments: attachments(queuedCount) }],
     chatAttachments: attachments(draftCount),
   };
   const toasts = [];
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", ["MAX_CHAT_ATTACHMENTS", "removeQueuedChatMessage", "queuedChatEditFitsDraft", "editQueuedChatMessage"], {
     state,
     $: () => ({ value: "", style: {}, dispatchEvent() {}, focus() {} }),
     Event: class {},
@@ -29,7 +21,6 @@ function editQueue(queuedCount, draftCount) {
     renderChatAttachments() {},
     updateChatControls() {},
   });
-  vm.runInContext(source.slice(constStart, source.indexOf("\n", constStart) + 1) + source.slice(start, end), context);
   const draft = state.chatAttachments;
   context.editQueuedChatMessage(1);
   return { state, draft, toasts };

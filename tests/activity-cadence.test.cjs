@@ -1,17 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadCadenceDisplay() {
-  const source = fs.readFileSync(path.join(__dirname, "../public/activity-details.js"), "utf8").replace(/\r\n/g, "\n");
-  const start = source.indexOf("  function cadenceDisplay(");
-  assert.notEqual(start, -1, "cadenceDisplay must exist in activity-details.js");
-  const end = source.indexOf("\n  }\n", start);
-  const context = vm.createContext({});
-  vm.runInContext(`${source.slice(start, end + 4)};globalThis.cadenceDisplay = cadenceDisplay;`, context);
-  return context.cadenceDisplay;
+  return extractFunctions("activity-details.js", ["cadenceDisplay"]).cadenceDisplay;
 }
 
 test("foot sports show step frequency of both legs, other sports per-leg cadence", () => {

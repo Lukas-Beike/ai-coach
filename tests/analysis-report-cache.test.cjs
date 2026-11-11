@@ -1,16 +1,11 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/analysis.js"), "utf8");
-const start = source.indexOf("const analysisReportCache = new Map();");
-const end = source.indexOf("\nglobalThis.matchMedia", start);
 const TRAINING_RECORDS = "/api/analysis/training-records";
 
 function createContext(calls) {
-  const context = vm.createContext({
+  return extractFunctions("analysis.js", ["analysisReportCache", "analysisReportVersionKey", "requestAnalysisReport", "invalidateAnalysisReport", "clearAnalysisReportCache"], {
     state: { data: { state_versions: { training: 1 } } },
     DATA_LOAD_TIMEOUT_MS: 15_000,
     api: async (requestPath, options) => {
@@ -20,8 +15,6 @@ function createContext(calls) {
       return { path: requestPath, call: calls.length };
     },
   });
-  vm.runInContext(source.slice(start, end), context);
-  return context;
 }
 
 test("training records are reused for the same state version until invalidated", async () => {

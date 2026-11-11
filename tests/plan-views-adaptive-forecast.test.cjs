@@ -1,19 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadAdaptiveForecastNote() {
-  const start = source.indexOf("function adaptiveForecastNote(");
-  assert.ok(start >= 0, "adaptiveForecastNote exists");
-  const end = source.indexOf("\n}", start);
-  assert.ok(end > start, "adaptiveForecastNote is closed");
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(start, end + 2), context);
-  return context.adaptiveForecastNote;
+  return extractFunctions("plan-views.js", ["adaptiveForecastNote"]).adaptiveForecastNote;
 }
 
 const formatTime = (value) => `formatted:${value}`;
