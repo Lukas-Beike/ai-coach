@@ -142,13 +142,12 @@ class BackfillChainResumerTests(SyncQueueFixtureMixin, unittest.TestCase):
             {
                 (GARMIN, "historical_backfill"),
                 (GARMIN, "wellness_backfill"),
-                (GARMIN, "rating_backfill"),
                 (GARMIN, STREAM_BACKFILL),
                 (WAHOO, STREAM_BACKFILL),
             },
             {(job["provider"], job["type"]) for job in self.jobs()},
         )
-        self.assertEqual(5, len(self.jobs()))
+        self.assertEqual(4, len(self.jobs()))
 
     def test_active_finished_unconfigured_and_blocked_chains_are_left_alone(
         self,
@@ -157,7 +156,6 @@ class BackfillChainResumerTests(SyncQueueFixtureMixin, unittest.TestCase):
             GARMIN, "wellness_backfill", {"days": CHUNK_DAYS}, requested_by="startup"
         )
         self.sync_state.cursors[(GARMIN, "historical")] = FLOOR.isoformat()
-        self.sync_state.cursors[(GARMIN, "rating_history")] = "1999-12-31"
         self.policies[WAHOO] = _Policy(configured=False)
         before = len(self.jobs())
 

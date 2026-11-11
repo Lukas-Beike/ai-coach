@@ -39,10 +39,7 @@ from backend.providers.garmin_personal import (
     GarminPersonalClient,
     GarminTransportClient,
 )
-from backend.providers.garmin_rating_history import (
-    RatingReadHooks,
-    collect_activity_ratings,
-)
+from backend.providers.garmin_rating_history import RatingReadHooks
 from backend.providers.garmin_wellness_history import (
     WellnessHistoryHooks,
     collect_wellness_history,
@@ -450,42 +447,6 @@ class GarminRemoteReader:
                 end,
                 external_call=call_external,
                 hooks=_wellness_hooks(self._state_service, needs_night),
-            )
-        finally:
-            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
-
-    def fetch_activity_ratings(
-        self,
-        activities: list[tuple[str, str]],
-        on_row: Callable[[dict[str, Any]], None],
-        on_skip: Callable[[str], None],
-        guard: Callable[[], AbstractContextManager[Any]],
-    ) -> None:
-        """Read the watch ratings of past activities for the one-off backfill (#1728).
-
-        With a Personal API key the batch reads through it alone: no SDK login and
-        no ``sdk_skipped`` record. Only a failed token exchange flags the key (the
-        client does that); the classification is the sync owner's.
-        """
-        if not self.configured():
-            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
-        call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(
-            call_external, personal_only=True
-        )
-        try:
-            collect_activity_ratings(
-                client,
-                activities,
-                on_row,
-                on_skip,
-                external_call=call_external,
-                hooks=RatingReadHooks(
-                    error_class=sync_job_error_class,
-                    skippable=_skippable_history_error,
-                    key_rejected=self._state_service.personal_key_rejected,
-                    guard=guard,
-                ),
             )
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)

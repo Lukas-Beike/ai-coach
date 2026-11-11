@@ -29,7 +29,6 @@ from backend.sync.job_outcomes import CONTENDED_STATUS, SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
-    RATING_BACKFILL,
     STREAM_BACKFILL,
     WELLNESS_BACKFILL,
     JobValidationError,
@@ -265,12 +264,10 @@ class GarminSyncJobOwner:
         all_sync_days: int,
         activity_detail_service: Any = None,
         wellness_history_service: GarminWellnessBackfill | None = None,
-        rating_backfill_service: GarminRatingBackfill | None = None,
         stream_backfill_service: StreamBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._wellness_history_service = wellness_history_service
-        self._rating_backfill_service = rating_backfill_service
         self._stream_backfill_service = stream_backfill_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
@@ -289,8 +286,6 @@ class GarminSyncJobOwner:
             return self._activity_detail_service.refresh(payload["activity_id"])
         if job_type == WELLNESS_BACKFILL:
             return self._wellness_backfill(payload)
-        if job_type == RATING_BACKFILL:
-            return self._rating_backfill(payload)
         if job_type == STREAM_BACKFILL:
             return run_stream_backfill(self._stream_backfill_service, payload)
         days, historical_end = self._historical_sync.window(
@@ -344,14 +339,6 @@ class GarminSyncJobOwner:
         )
         return result
 
-    def _rating_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Run one rating backfill batch (newest first; stored ratings only)."""
-        return run_end_date_backfill(
-            self._rating_backfill_service,
-            payload,
-            "Der Bewertungs-Backfill ist nicht verfügbar.",
-        )
-
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
         if job_type == "historical_backfill":
@@ -375,7 +362,6 @@ class EndDateBackfill(Protocol):
     def backfill(self, end: date | None) -> dict[str, Any]: ...
 
 
-GarminRatingBackfill = EndDateBackfill
 StreamBackfill = EndDateBackfill
 
 

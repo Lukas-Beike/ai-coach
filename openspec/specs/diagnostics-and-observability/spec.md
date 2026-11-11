@@ -85,11 +85,7 @@ Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `back
 
 ### Requirement: Content-free migration and method state in the report
 
-The diagnostic report SHALL include the state of the Garmin rating backfill and the local method passes as counts and state words only, and a failing read of the rating backfill state SHALL report that section as `unavailable` without failing the report.
-
-#### Scenario: Rating backfill state
-- **WHEN** the report is generated
-- **THEN** `rating_backfill` carries candidate, backfilled, skipped and already-rated counts with its cursor phase and finished flag
+The diagnostic report SHALL include the state of the local method passes as counts and state words only, and a failing read of a section SHALL report it as `unavailable` without failing the report.
 
 #### Scenario: Local method passes
 - **WHEN** the report is generated
@@ -100,10 +96,10 @@ The diagnostic report SHALL include the state of the Garmin rating backfill and 
 - **THEN** `fit_inventory` counts it once per recording origin and sport (`files`) with the files holding each unmapped message number, unread field of a mapped message and declared developer field, as numbers only; an unreadable file counts nothing, and no value, name, id, position or file hash is shown
 
 #### Scenario: Failing section
-- **WHEN** reading the rating backfill state fails
+- **WHEN** reading the local load state fails
 - **THEN** that section reports `{"status": "unavailable"}` and the rest of the report is still returned
 
-Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/rating_backfill.py::summarize_rating_backfill`; `backend/sync/local_load.py::summarize_local_load`; `backend/sync/session_metrics.py::summarize_session_metrics`; `backend/sync/session_analysis_stage.py::summarize_session_analysis`. Tests: `tests/test_garmin_rating_backfill.py::DiagnosticsTests::test_the_section_carries_counts_only`; `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`.
+Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/sync/local_load.py::summarize_local_load`; `backend/sync/session_metrics.py::summarize_session_metrics`; `backend/sync/session_analysis_stage.py::summarize_session_analysis`. Tests: `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`.
 
 ### Requirement: Sanitized log preview and download
 

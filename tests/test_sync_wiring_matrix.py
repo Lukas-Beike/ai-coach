@@ -86,7 +86,6 @@ EXPECTED_PAIRS: Final = frozenset(
         (GARMIN_ID, "refresh"),
         (GARMIN_ID, "historical_backfill"),
         (GARMIN_ID, "wellness_backfill"),
-        (GARMIN_ID, "rating_backfill"),
         (GARMIN_ID, "stream_backfill"),
         (GARMIN_ID, "activity_details"),
         (GARMIN_ID, "plan_push"),
@@ -122,7 +121,6 @@ CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
         {"days": 30, "end_date": BACKFILL_END},
         "garmin.wellness",
     ),
-    (GARMIN_ID, "rating_backfill"): ({"end_date": BACKFILL_END}, "garmin.ratings"),
     (GARMIN_ID, "stream_backfill"): ({"end_date": BACKFILL_END}, "garmin.streams"),
     (GARMIN_ID, "activity_details"): ({"activity_id": "act-1"}, "garmin.details"),
     (GARMIN_ID, "plan_push"): ({"entries": ENTRIES}, "garmin.plan"),
@@ -285,7 +283,6 @@ class Harness:
             activity_detail_service=lambda: service("garmin.details"),
             strength_push_service=lambda: service("garmin.plan"),
             wellness_history_service=lambda: service("garmin.wellness"),
-            rating_backfill_service=lambda: service("garmin.ratings"),
             stream_backfill_service=lambda: service("garmin.streams"),
         )
         calendar_weather = CalendarWeatherJobDependencies(

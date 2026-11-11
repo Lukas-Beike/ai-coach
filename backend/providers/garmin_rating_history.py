@@ -1,17 +1,11 @@
-"""Read the watch ratings of past Garmin activities for the one-off backfill (#1728).
+"""Shared error policy of the Garmin history reads (activity files).
 
-One single-activity read per activity (``get_activity``, the ``summaryDTO`` with
-``directWorkoutRpe``, ``directWorkoutFeel`` and ``minHR``), through the transport
-client the caller passes, so the Personal API is used when a key is configured
-and the SDK otherwise. The rows have the shape of the regular ``activity_ratings``
-section, so the existing mapping and storage path applies.
-
-A pause separates the calls (the Personal API rate limits are undocumented); the
-caller's guard wraps each read only, never the pause. The sync owner injects the
-error classification, like ``WellnessHistoryHooks``:
+``read_one`` reads one activity through the caller's external-call wrapper and keeps
+the original error; ``skips`` and ``stop_kind`` classify it with the hooks the sync
+owner injects, like ``WellnessHistoryHooks``:
 
 * a client error, an unreadable answer or a 403 on one activity skips only that
-  activity (``on_skip``);
+  activity;
 * a rate limit, a rejected Personal API key (a failed token exchange, which the
   client already flagged), a 401 on a data read (after the client's one renewal)
   or any other error ends the read with ``RatingReadStopped``, so the job is
@@ -20,16 +14,14 @@ error classification, like ``WellnessHistoryHooks``:
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Final
 
-from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
 from backend.providers import http as provider_http
 from backend.providers.descriptors import GARMIN_ID
-from backend.providers.garmin import ExternalCall, rating_row
+from backend.providers.garmin import ExternalCall
 
 CALL_DELAY_SECONDS: Final = 2.0
 _SDK_NOT_FOUND: Final = "GarminConnectNotFoundError"
@@ -55,7 +47,7 @@ class RatingReadStopped(RuntimeError):
 
 @dataclass(frozen=True)
 class RatingReadHooks:
-    """Policy the sync owner supplies to one rating read.
+    """Policy the sync owner supplies to one history read.
 
     ``error_class`` maps an error to the job error class (``rate_limited``,
     ``auth_required``, ...); ``skippable`` names errors that only skip one
@@ -68,44 +60,6 @@ class RatingReadHooks:
     guard: Callable[[], AbstractContextManager[Any]] = nullcontext
 
 
-def collect_activity_ratings(
-    client: Any,
-    activities: Sequence[tuple[str, str]],
-    on_row: Callable[[dict[str, Any]], None],
-    on_skip: Callable[[str], None],
-    *,
-    external_call: ExternalCall,
-    hooks: RatingReadHooks,
-    sleep: Callable[[float], None] = time.sleep,
-    delay_seconds: float = CALL_DELAY_SECONDS,
-) -> None:
-    """Hand the rating row of each ``(activity_id, start)`` to ``on_row``.
-
-    A skipped activity goes to ``on_skip``. Raises ``RatingReadStopped``.
-    """
-    fetch = getattr(client, "get_activity", None)
-    if not callable(fetch):
-        raise RatingReadStopped(FAILED, activities[0][0] if activities else "")
-    for position, (activity_id, started) in enumerate(activities):
-        if position:
-            sleep(delay_seconds)
-        try:
-            with hooks.guard():
-                value = read_one(fetch, activity_id, external_call)
-        except ReadFailed as failed:
-            if skips(failed.original, hooks):
-                on_skip(activity_id)
-                continue
-            raise RatingReadStopped(
-                stop_kind(failed.original, hooks), activity_id
-            ) from None
-        row = rating_row(value, activity_id, started)
-        if row is None:
-            on_skip(activity_id)
-            continue
-        on_row(row)
-
-
 class ReadFailed(Exception):
     def __init__(self, original: BaseException) -> None:
         super().__init__()
@@ -116,7 +70,7 @@ def read_one(
     fetch: Callable[[str], Any],
     activity_id: str,
     external_call: ExternalCall,
-    operation: str = ACTIVITY_RATINGS_SECTION,
+    operation: str,
 ) -> Any:
     """Read one activity; a failure carries the original error, not external_call's."""
     originals: list[BaseException] = []

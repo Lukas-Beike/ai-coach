@@ -43,7 +43,6 @@ PROVIDER_REJECTIONS = {
     "refresh": "Unsupported job type.",
     "historical_backfill": "Historischer Backfill ist nur für Garmin zulässig.",
     "wellness_backfill": "Der Wellness-Backfill ist nur für Garmin zulässig.",
-    "rating_backfill": "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
     "stream_backfill": "Der Stream-Backfill ist nur für Garmin und Wahoo zulässig.",
     "activity_details": "Ungültiger Aktivitätsdetailauftrag.",
     "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
@@ -307,7 +306,9 @@ class SyncJobContractTests(unittest.TestCase):
             f"EXPLAIN QUERY PLAN {BACKFILL_CONTINUATION_SQL}",
             ("garmin", "historical_backfill", "2026-10-31", stamp, ""),
         ).fetchall()
-        self.assertIn("idx_sync_jobs_backfill_end", " ".join(str(row[3]) for row in plan))
+        self.assertIn(
+            "idx_sync_jobs_backfill_end", " ".join(str(row[3]) for row in plan)
+        )
 
 
 class SyncJobRequestNormalizationTests(unittest.TestCase):

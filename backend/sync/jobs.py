@@ -33,21 +33,17 @@ JOB_TYPES = frozenset(
         "nutrition_sync",
         "historical_backfill",
         "wellness_backfill",
-        "rating_backfill",
         "stream_backfill",
     }
 )
 # Backfill chains and the sync-state cursor stream each one walks back.
 WELLNESS_BACKFILL = "wellness_backfill"
 WELLNESS_HISTORY_CURSOR = "wellness_history"
-RATING_BACKFILL = "rating_backfill"
-RATING_HISTORY_CURSOR = "rating_history"
 STREAM_BACKFILL = "stream_backfill"
 STREAM_HISTORY_CURSOR = "stream_history"
 BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     "historical_backfill": "historical",
     WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
-    RATING_BACKFILL: RATING_HISTORY_CURSOR,
     STREAM_BACKFILL: STREAM_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
@@ -58,7 +54,6 @@ REPLAYABLE_JOB_TYPES = frozenset({"refresh", "activity_details", *BACKFILL_JOB_T
 _BACKFILL_PROVIDER_MESSAGES = {
     "historical_backfill": ("Historischer Backfill ist nur für Garmin zulässig."),
     WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
-    RATING_BACKFILL: "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
     STREAM_BACKFILL: "Der Stream-Backfill ist nur für Garmin und Wahoo zulässig.",
 }
 # Built from the fixed type names above, never from request data.
