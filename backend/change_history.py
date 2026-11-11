@@ -143,6 +143,7 @@ PLANNED_UNIT_FIELDS = {
     "sync_status",
     "remote_event_id",
     "remote_event_external_id",
+    "remote_event_category",
     "local_deleted",
     *FOCUS_KEYS,
 }

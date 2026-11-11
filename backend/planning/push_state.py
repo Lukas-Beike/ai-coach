@@ -25,6 +25,10 @@ from backend.planning.leftovers import nearest_first
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.descriptors import WAHOO_ID
+from backend.providers.intervals_workouts import (
+    INTERVALS_EVENT_CATEGORY,
+    intervals_event_category,
+)
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
     GarminExercise,
@@ -43,6 +47,20 @@ if TYPE_CHECKING:
 # decision first, and "syncing" is already on its way.
 _INTERVALS_PENDING: Final = frozenset({"local", "sync_error", "remote_missing"})
 _REMOTE_LINKS = RemoteLinkRepository()
+
+
+def intervals_event_outdated(payload: Mapping[str, Any]) -> bool:
+    """Whether the unit's Intervals.icu event has another category than it gets now.
+
+    A unit sent before the category was recorded counts as a WORKOUT event, the
+    category every unit had before strength became a note (#1807): such a strength
+    event would keep reaching Garmin as an unstructured copy until it is replaced.
+    """
+    if not str(payload.get("remote_event_id") or "").strip():
+        return False
+    sport, _environment = planned_sport_environment(payload)
+    sent = str(payload.get("remote_event_category") or INTERVALS_EVENT_CATEGORY)
+    return sent != intervals_event_category(sport)
 
 
 def garmin_baselines(db: Any) -> dict[str, str | None]:
@@ -213,6 +231,7 @@ def attach_push_state(
             ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
             in _INTERVALS_PENDING
             or str(row["local_id"]) in resync
+            or intervals_event_outdated(payload)
         }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.

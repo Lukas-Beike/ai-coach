@@ -35,44 +35,39 @@ async function renderUnits(page) {
   });
 }
 
-test("@responsive the calendar week offers the sync button only for units still to send", async ({ page, request }) => {
+test("@responsive the calendar week offers one sync button only while a unit still waits", async ({ page, request }) => {
   await openCalendar(page, request);
   const date = await renderUnits(page);
-  const day = page.locator(`.planned-day[data-date="${date}"]`);
-  const card = (name) => day.locator(".planned-entry").filter({ hasText: name });
-  // A unit that is already sent shows nothing: no button, no icon, no status text.
-  await card("Bereits gesendet").scrollIntoViewIfNeeded();
-  await expect(card("Bereits gesendet").locator(".planned-sync-button")).toHaveCount(0);
-  await expect(card("Bereits gesendet").locator("summary")).not.toContainText(/synchron/i);
-  // Never sent and changed units each get one compact button in the card body.
-  for (const name of ["Nie gesendet", "Seit dem Senden geändert"]) {
-    const entry = card(name);
-    await entry.evaluate((element) => { element.open = true; });
-    const button = entry.locator(".planned-sync-button");
-    await expect(button).toHaveCount(1);
-    await expect(button).toHaveText("Synchronisieren");
-    await expect(entry.locator(".planned-entry-details > .planned-sync-button")).toHaveCount(1);
-    const [buttonBox, entryBox] = await Promise.all([button.boundingBox(), entry.boundingBox()]);
-    expect(buttonBox.height).toBeGreaterThanOrEqual(28);
-    expect(buttonBox.height).toBeLessThan(44);
-    expect(buttonBox.width).toBeLessThan(entryBox.width * 0.6);
-    // The touch target stays 44 px tall through the hit area.
-    const hit = await button.evaluate((element) => {
-      const style = getComputedStyle(element, "::before");
-      return Number.parseFloat(style.height) || 0;
-    });
-    expect(hit).toBeGreaterThanOrEqual(44);
-  }
+  const week = page.locator(".planned-week").filter({ has: page.locator(`.planned-day[data-date="${date}"]`) });
+  // No unit card carries a sync button any more; the week carries one for all of them.
+  await expect(page.locator(".planned-entry .planned-sync-button")).toHaveCount(0);
+  const button = week.locator(".planned-week-sync > .planned-week-sync-button");
+  await expect(button).toHaveCount(1);
+  await expect(button).toHaveText("Woche synchronisieren");
+  await button.scrollIntoViewIfNeeded();
+  const [buttonBox, weekBox] = await Promise.all([button.boundingBox(), week.boundingBox()]);
+  expect(buttonBox.height).toBeGreaterThanOrEqual(28);
+  expect(buttonBox.height).toBeLessThan(44);
+  expect(buttonBox.width).toBeLessThan(weekBox.width * 0.6);
+  // The touch target stays 44 px tall through the hit area.
+  const hit = await button.evaluate((element) => Number.parseFloat(getComputedStyle(element, "::before").height) || 0);
+  expect(hit).toBeGreaterThanOrEqual(44);
+  // A week whose units are all sent shows nothing.
+  await page.evaluate(() => {
+    state.data.training_calendar = state.data.training_calendar.map((unit) => ({ ...unit, push_pending: { intervals: false } }));
+    renderPlanned(state.data.training_calendar);
+  });
+  await expect(page.locator(".planned-week-sync-button")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
 
-test("@responsive the sync button is not nested inside the card summary", async ({ page, request }) => {
+test("@responsive the week sync button is not nested inside the week summary", async ({ page, request }) => {
   await openCalendar(page, request);
   await renderUnits(page);
-  await expect(page.locator(".planned-entry .planned-sync-button")).toHaveCount(2);
-  await expect(page.locator(".planned-entry summary .planned-sync-button")).toHaveCount(0);
+  await expect(page.locator(".planned-week-sync-button")).toHaveCount(1);
+  await expect(page.locator(".planned-week summary .planned-sync-button")).toHaveCount(0);
   const results = await new AxeBuilder({ page }).include("#plannedCalendar").withRules(["nested-interactive"]).analyze();
-  expect(results.violations.filter((violation) => violation.nodes.some((node) => node.target.join(" ").includes("planned-entry")))).toEqual([]);
+  expect(results.violations.filter((violation) => violation.nodes.some((node) => node.target.join(" ").includes("planned-week")))).toEqual([]);
 });
 
 test("@responsive an endurance unit shows a tall zone-coloured workout profile", async ({ page, request }, testInfo) => {

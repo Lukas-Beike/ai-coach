@@ -39,6 +39,8 @@ def _apply_remote_event(
         external_id = str(remote_event["external_id"])
         payload["remote_event_external_id"] = external_id
         payload["external_id"] = external_id
+    if remote_event.get("category") not in (None, ""):
+        payload["remote_event_category"] = str(remote_event["category"])
     if state == "synced":
         # The event is the answer to the push of the local unit. Derived metrics
         # follow it; the planned duration is the athlete's own value that was just
@@ -201,3 +203,4 @@ def _drop_remote_event_ids(*targets: dict[str, Any]) -> None:
     for target in targets:
         target.pop("remote_event_id", None)
         target.pop("remote_event_external_id", None)
+        target.pop("remote_event_category", None)

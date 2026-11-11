@@ -5,12 +5,23 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
-const start = source.indexOf("function plannedPushTargets");
+const start = source.indexOf("async function runPlanPush");
 const end = source.indexOf("const CALENDAR_MARKERS", start);
-const context = vm.createContext({});
-vm.runInContext(source.slice(start, end) + ";globalThis.targets = plannedPushTargets;", context);
+const sent = [];
+const context = vm.createContext({
+  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: "job-1" }; },
+  waitForSyncJob: async (id) => ({ id, status: "completed" }),
+  focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null,
+});
+vm.runInContext(source.slice(start, end) + `;Object.assign(globalThis, {
+  targets: plannedPushTargets, run: runPlanPush, leftover: leftoverEntry, blocked: plannedGarminBlockedText,
+  weekJobs: plannedWeekSyncJobs, leftoverWeek: plannedLeftoverWeek, summary: plannedWeekSyncSummary,
+});`, context);
 
-const unit = { local_id: "u1", payload_hash: "a".repeat(64), push_pending: { intervals: true, garmin: true, wahoo: true } };
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const hash = "a".repeat(64);
+const ids = { intervals: "intervals", garmin: "garmin", wahoo: "wahoo" };
+const unit = { local_id: "u1", payload_hash: hash, push_pending: { intervals: true, garmin: true, wahoo: true } };
 const options = { configured: { intervals: true, garmin: true, wahoo: true } };
 
 test("a future unit lists every configured provider it needs", () => {
@@ -20,7 +31,7 @@ test("a future unit lists every configured provider it needs", () => {
   assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07", garminOff)], ["intervals"]);
 });
 
-test("past, completed, synced or unhashed units show no button", () => {
+test("past, completed, synced or unhashed units need no push", () => {
   for (const [entry, day] of [
     [unit, "2026-11-06"],
     [{ ...unit, is_completed_activity: true }, "2026-11-10"],
@@ -34,41 +45,75 @@ test("past, completed, synced or unhashed units show no button", () => {
   assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07")], []);
 });
 
-const labelStart = source.indexOf("function plannedPushTargetLabel");
-const labelEnd = source.indexOf("// Providers this planned unit", labelStart);
-const labels = vm.createContext({ focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null });
-vm.runInContext(source.slice(labelStart, labelEnd) + ";globalThis.label = plannedPushTargetLabel; globalThis.blocked = plannedGarminBlockedText;", labels);
-const ids = { intervals: "intervals", garmin: "garmin" };
+test("the week's sync sends every waiting unit and removes the week's leftovers, Intervals.icu last", () => {
+  const strength = { local_id: "s1", payload_hash: hash, sport: "strength", push_pending: { garmin: true, intervals: true } };
+  const ride = { local_id: "r1", payload_hash: hash, sport: "ride", push_pending: { intervals: true } };
+  const synced = { local_id: "d1", payload_hash: hash, push_pending: { intervals: false } };
+  const past = { local_id: "p1", payload_hash: hash, push_pending: { intervals: true } };
+  const units = [
+    { entry: strength, dateKey: "2026-11-10" },
+    { entry: ride, dateKey: "2026-11-11" },
+    { entry: synced, dateKey: "2026-11-11" },
+    { entry: past, dateKey: "2026-11-06" },
+  ];
+  const leftovers = { garmin: [{ id: "old-g" }], intervals: [{ id: "old-i", hash }], wahoo: [{ id: "old-w" }] };
+  const jobs = plain(context.weekJobs(units, leftovers, "2026-11-07", options.configured, ids));
+  assert.deepEqual(jobs.map((job) => [job.provider, job.kind, job.entries.map((entry) => entry.library_workout_id)]), [
+    ["garmin", "send", ["s1"]],
+    ["garmin", "remove", ["old-g"]],
+    ["wahoo", "remove", ["old-w"]],
+    ["intervals", "send", ["s1", "r1"]],
+    ["intervals", "remove", ["old-i"]],
+  ]);
+  assert.deepEqual(jobs[0].entries[0], { library_workout_id: "s1", expected_payload_hash: hash });
+  assert.deepEqual(jobs[1].entries[0], { library_workout_id: "old-g", remove: true });
+  assert.deepEqual(jobs[4].entries[0], { library_workout_id: "old-i", expected_payload_hash: hash });
+  // A provider that is not configured gets no job; a week with nothing to do gets none at all.
+  const intervalsOnly = { intervals: true };
+  assert.deepEqual(plain(context.weekJobs(units, leftovers, "2026-11-07", intervalsOnly, ids)).map((job) => job.provider), ["intervals", "intervals"]);
+  assert.deepEqual(plain(context.weekJobs([{ entry: synced, dateKey: "2026-11-11" }], {}, "2026-11-07", options.configured, ids)), []);
+});
 
-test("the toast names what each target received", () => {
-  assert.equal(labels.label("garmin", { sport: "strength" }, ids), "Garmin: strukturiert");
+test("a large week is split into jobs of at most 28 entries", () => {
+  const many = Array.from({ length: 30 }, (_, index) => ({ entry: { local_id: `u${index}`, payload_hash: hash, push_pending: { intervals: true } }, dateKey: "2026-11-10" }));
+  const jobs = plain(context.weekJobs(many, {}, "2026-11-07", { intervals: true }, ids));
+  assert.deepEqual(jobs.map((job) => job.entries.length), [28, 2]);
+});
+
+test("each leftover belongs to its own week, an earlier or undated one to the current week", () => {
+  const weekStart = (day) => ({ "2026-11-04": "2026-11-02", "2026-11-12": "2026-11-09", "2026-11-19": "2026-11-16", "2026-12-24": "2026-12-21" })[day];
+  const week = (item) => context.leftoverWeek(item, "2026-11-09", "2026-12-07", weekStart);
+  assert.equal(week({ date: "2026-11-12" }), "2026-11-09");
+  assert.equal(week({ date: "2026-11-19" }), "2026-11-16");
+  assert.equal(week({ date: "2026-11-04" }), "2026-11-09");
+  assert.equal(week({ date: "" }), "2026-11-09");
+  // One beyond the shown weeks stays reachable from the last shown week.
+  assert.equal(week({ date: "2026-12-24" }), "2026-12-07");
+});
+
+test("the toast names what each provider received", () => {
+  const done = [
+    { provider: "garmin", kind: "send", entries: [{}], units: [{ sport: "strength" }] },
+    { provider: "garmin", kind: "remove", entries: [{}, {}], units: [] },
+    { provider: "intervals", kind: "send", entries: [{}, {}], units: [{ sport: "strength" }, { sport: "ride" }] },
+  ];
+  const label = (provider) => ({ garmin: "Garmin", intervals: "Intervals.icu" })[provider];
   // Strength reaches Intervals.icu only as a calendar note, never the watch.
-  assert.equal(labels.label("intervals", { sport: "strength" }, ids), "Intervals.icu: Notiz");
-  assert.equal(labels.label("intervals", { sport: "run" }, ids), "Intervals.icu");
+  assert.equal(context.summary(done, ids, label), "Garmin: 1 strukturiert, 2 alte entfernt · Intervals.icu: 2 gesendet, davon 1 als Notiz");
 });
 
 test("a strength unit says why it was not sent to Garmin", () => {
-  assert.equal(labels.blocked({ push_blocked: { garmin: "no_structure" } }), "Keine Kraftstruktur – nicht an Garmin gesendet");
-  assert.equal(labels.blocked({ push_blocked: { garmin: "unmapped" } }), "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet");
-  assert.equal(labels.blocked({ push_blocked: {} }), "");
-  assert.equal(labels.blocked({}), "");
+  assert.equal(context.blocked({ push_blocked: { garmin: "no_structure" } }), "Keine Kraftstruktur – nicht an Garmin gesendet");
+  assert.equal(context.blocked({ push_blocked: { garmin: "unmapped" } }), "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet");
+  assert.equal(context.blocked({ push_blocked: {} }), "");
+  assert.equal(context.blocked({}), "");
 });
-
-const pushStart = source.indexOf("async function runPlanPush");
-const pushEnd = source.indexOf("// What one successful push delivered", pushStart);
-const sent = [];
-const pushContext = vm.createContext({
-  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: "job-1" }; },
-  waitForSyncJob: async (id) => ({ id, status: "completed" }),
-});
-vm.runInContext(source.slice(pushStart, pushEnd) + ";globalThis.run = runPlanPush; globalThis.leftover = leftoverEntry;", pushContext);
 
 test("a push job carries its entries; a leftover is removed by the entry its provider understands", async () => {
-  const hash = "a".repeat(64);
-  await pushContext.run("garmin", [{ library_workout_id: "u1", expected_payload_hash: hash }]);
+  await context.run("garmin", [{ library_workout_id: "u1", expected_payload_hash: hash }]);
   assert.deepEqual(sent[0], { provider: "garmin", type: "plan_push", payload: { entries: [{ library_workout_id: "u1", expected_payload_hash: hash }] } });
-  assert.deepEqual({ ...pushContext.leftover("garmin", { id: "old-1", hash }, ids) }, { library_workout_id: "old-1", remove: true });
+  assert.deepEqual(plain(context.leftover("garmin", { id: "old-1", hash }, ids)), { library_workout_id: "old-1", remove: true });
   // A Wahoo plan of a deleted library entry is removed the same way.
-  assert.deepEqual({ ...pushContext.leftover("wahoo", { id: "old-2" }, { ...ids, wahoo: "wahoo" }) }, { library_workout_id: "old-2", remove: true });
-  assert.deepEqual({ ...pushContext.leftover("intervals", { id: "old-3", hash }, ids) }, { library_workout_id: "old-3", expected_payload_hash: hash });
+  assert.deepEqual(plain(context.leftover("wahoo", { id: "old-2" }, ids)), { library_workout_id: "old-2", remove: true });
+  assert.deepEqual(plain(context.leftover("intervals", { id: "old-3", hash }, ids)), { library_workout_id: "old-3", expected_payload_hash: hash });
 });

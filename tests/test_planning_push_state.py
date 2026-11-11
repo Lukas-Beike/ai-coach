@@ -163,6 +163,33 @@ class PushStateTests(unittest.TestCase):
         # Endurance units never offer Garmin; a synced unit needs no Intervals push.
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
+    def test_a_strength_event_not_sent_as_a_note_is_pending_again(self) -> None:
+        # A strength unit sent before #1807 is a WORKOUT event that Intervals.icu
+        # forwards to Garmin; no category was recorded then (#2185).
+        sent = {**STRENGTH, "remote_event_id": "e1"}
+        cases = [
+            (sent, True),
+            ({**sent, "remote_event_category": "WORKOUT"}, True),
+            ({**sent, "remote_event_category": "NOTE"}, False),
+            ({**RIDE, "remote_event_id": "e2"}, False),
+            ({**RIDE, "remote_event_id": "e2", "remote_event_category": "NOTE"}, True),
+            (STRENGTH, False),
+        ]
+        projected = self.project(
+            [
+                {
+                    "local_id": f"u{index}",
+                    "payload": json.dumps(payload),
+                    "sync_state": "synced",
+                }
+                for index, (payload, _pending) in enumerate(cases)
+            ]
+        )
+        self.assertEqual(
+            [pending for _payload, pending in cases],
+            [unit["push_pending"]["intervals"] for unit in projected],
+        )
+
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
         raw = json.dumps(STRENGTH)

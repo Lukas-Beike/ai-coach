@@ -25,6 +25,7 @@ from backend.errors import (
 from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.hr_cap_sync import record_sent
+from backend.planning.push_state import intervals_event_outdated
 from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.workout_export import WorkoutExportPort
@@ -303,6 +304,14 @@ class PlannedCalendarSyncService:
         self._require_open_linked_event(workout)
         run_lthr = self._run_lthr_for(workout) if stored_cap(workout) else None
         event_payload = self._event_payload(normalized_id, workout, run_lthr)
+        if intervals_event_outdated(workout):
+            # The event keeps its category on an update (a strength unit sent as a
+            # WORKOUT before #1807): replace it, so no copy reaches Garmin.
+            self._require_calendar_access()
+            self._delete_remote_event(
+                str(workout["remote_event_id"]), normalized_id, row["payload"]
+            )
+            event_payload.pop("id", None)
         event = self._remote_event(
             normalized_id, workout, event_payload, row["payload"]
         )
@@ -313,6 +322,8 @@ class PlannedCalendarSyncService:
                 **event,
                 "external_id": self._export.event_external_id(event)
                 or self._export.event_external_id(event_payload),
+                # The read-back confirmed a returned category; else the sent one stands.
+                "category": event.get("category") or event_payload.get("category"),
             },
             expected_payload=row["payload"],
         )
