@@ -3,21 +3,18 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, date, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.config import Config
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import nutrition_macro_totals
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
 from backend.http_api.nutrition import (
@@ -252,11 +249,18 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
 
-    def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(self) -> None:
+    def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(
+        self,
+    ) -> None:
         self.handler.read_json.return_value = {"area": "diary", "date": "2026-09-23"}
-        self.diary_service.get_day_summary.return_value = {"date": "2026-09-23", "entries": []}
+        self.diary_service.get_day_summary.return_value = {
+            "date": "2026-09-23",
+            "entries": [],
+        }
         self.nutrition_refresh_service.refresh.return_value = {
-            "status": "ok", "source": "Garmin Connect", "records": 1
+            "status": "ok",
+            "source": "Garmin Connect",
+            "records": 1,
         }
 
         handled = self.post_routes.handle(self.handler, "/api/nutrition/refresh")
@@ -275,7 +279,9 @@ class NutritionHttpApiTests(unittest.TestCase):
                 "meal_status": "local",
                 "summary": {"date": "2026-09-23", "entries": []},
                 "expenditure_refresh": {
-                    "status": "ok", "source": "Garmin Connect", "records": 1
+                    "status": "ok",
+                    "source": "Garmin Connect",
+                    "records": 1,
                 },
             },
         )
@@ -288,7 +294,8 @@ class NutritionHttpApiTests(unittest.TestCase):
             "energy_expenditure": {"freshness": "stale"},
         }
         self.nutrition_refresh_service.refresh.return_value = {
-            "status": "partial", "reason": "provider_unavailable"
+            "status": "partial",
+            "reason": "provider_unavailable",
         }
 
         self.post_routes.handle(self.handler, "/api/nutrition/refresh")
@@ -302,7 +309,9 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_nutrition_refresh_week_uses_requested_range(self) -> None:
         self.handler.read_json.return_value = {
-            "area": "week", "days": 84, "date": "2026-09-23"
+            "area": "week",
+            "days": 84,
+            "date": "2026-09-23",
         }
         self.nutrition_refresh_service.refresh.return_value = {"status": "partial"}
 
@@ -334,7 +343,12 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.nutrition_refresh_service.refresh.assert_not_called()
         self.handler.send_json.assert_called_once_with(
             200,
-            {"ok": True, "area": "products", "status": "local", "products": [{"id": "food-1"}]},
+            {
+                "ok": True,
+                "area": "products",
+                "status": "local",
+                "products": [{"id": "food-1"}],
+            },
         )
 
     def test_nutrition_refresh_rejects_invalid_range(self) -> None:
@@ -375,14 +389,9 @@ class NutritionRouteBodyTests(unittest.TestCase):
     """Routes read real JSON bodies into the real diary on temporary storage."""
 
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        manager = DatabaseManager(
-            Path(directory.name) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(manager.close)
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
         self.diary, self.library = build_nutrition_services(
             manager,
             threading.Lock(),

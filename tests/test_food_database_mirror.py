@@ -7,17 +7,15 @@ network, a real data directory or an encryption key.
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
+from support import temp_database
+
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import MAX_AGE, FoodDatabaseMirror
@@ -66,14 +64,9 @@ class FakeOff:
 
 class MirrorFixture(unittest.TestCase):
     def setUp(self) -> None:
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(directory.name) / "mirror.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "mirror.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.now = START
         self.mirror = FoodDatabaseMirror(
             lambda: self.manager, threading.RLock(), lambda: self.now.isoformat()

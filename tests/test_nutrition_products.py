@@ -11,10 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
@@ -26,14 +25,12 @@ class NutritionProductContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "nutrition-products.db",
-            sqlite3,
+        self.manager = temp_database(
+            self,
+            path=Path(self.temporary.name) / "nutrition-products.db",
             row_factory=sqlite3.Row,
+            schema=True,
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.lock = threading.Lock()
         self.off = Mock()
         self.food_database = Mock()

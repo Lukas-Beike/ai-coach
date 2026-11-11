@@ -6,19 +6,16 @@ Temporary database and synthetic meals only.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend import change_history
 from backend.coach.change_receipts import change_summary
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
@@ -35,24 +32,15 @@ MEAL: dict[str, Any] = {
 
 class NutritionHistoryCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temp_dir.name) / "nutrition_history.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.manager = temp_database(
+            self, "nutrition_history.db", row_factory=sqlite3.Row, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.diary, self.library = build_nutrition_services(
             self.manager,
             threading.Lock(),
             lambda: "2026-09-24T12:00:00+00:00",
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def collected(self, write: Any) -> tuple[Any, list[dict[str, str]]]:
         with change_history.collect_changes() as changes:

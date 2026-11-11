@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.db.repositories import NutritionProductRepository, NutritionRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.components import MealComponentCalculator
@@ -21,14 +19,9 @@ from backend.sync.canonical_table_reader import CanonicalTableReader
 
 class NutritionUseCaseServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "nutrition.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.lock = threading.Lock()
         self.now = "2026-09-24T12:00:00Z"
         self.repository = NutritionRepository(now=lambda: self.now)
@@ -50,10 +43,6 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
             lambda: datetime(2026, 9, 24, 12, tzinfo=UTC),
             CanonicalTableReader,
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temporary.cleanup()
 
     def test_catalog_persists_and_calculates_confirmed_product(self) -> None:
         product = self.products.save_product(

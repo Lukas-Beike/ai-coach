@@ -11,21 +11,21 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.db.manager import DatabaseManager
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 
 
 class NutritionCompositionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
         self.db_path = Path(self.temp_dir.name) / "nutrition.db"
-        self.manager = DatabaseManager(self.db_path, sqlite3, row_factory=sqlite3.Row)
+        self.manager = temp_database(
+            self, path=self.db_path, row_factory=sqlite3.Row, schema=True
+        )
         self.lock = threading.Lock()
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.fixed_now = "2026-09-24T12:00:00+00:00"
         self._make_service()
 
@@ -36,10 +36,6 @@ class NutritionCompositionTests(unittest.TestCase):
             lambda: self.fixed_now,
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def test_sugar_and_salt_follow_consumption_snapshots_and_unknowns(self):
         product = self.library.save_product(
@@ -548,7 +544,7 @@ class NutritionCompositionTests(unittest.TestCase):
         )
 
         self.manager.close()
-        self.manager = DatabaseManager(self.db_path, sqlite3, row_factory=sqlite3.Row)
+        self.manager = temp_database(self, path=self.db_path, row_factory=sqlite3.Row)
         self._make_service()
         self.assertEqual(
             self.service.get_meal(entry["id"])["nutrition_basis"], expected_entry_basis
