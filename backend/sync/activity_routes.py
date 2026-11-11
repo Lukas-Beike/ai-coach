@@ -2,9 +2,9 @@
 
 ``ActivityRoutesStage`` is a follow-up stage of the canonical backfill worker.
 Per ride or run not known to be indoor or virtual (Garmin's generic running and
-cycling types map to an unknown environment) it fingerprints the stream content hashes, the start
-and the distance before any stream is decoded; only sessions whose stored input
-hash differs are decoded, fingerprinted (``backend.activities.routes``) and
+cycling types map to an unknown environment) it fingerprints the stream content
+hashes, the start and the distance before any stream is decoded; only sessions
+whose stored input hash differs are decoded, fingerprinted (``backend.activities.routes``) and
 placed, oldest first, so a pass without changes decodes nothing. Sessions that
 are gone and routes without a session leave the index, athlete names stay on
 the routes that remain. Nothing is requested remotely.
