@@ -19,9 +19,11 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
      --restart unless-stopped `
      --read-only `
      --security-opt no-new-privileges:true `
+     --cap-drop=ALL `
      -p 8090:8090 `
      -v "${PWD}\data:/data" `
      --env-file .env `
+     -e TZ=Europe/Berlin `
      pacecraft:local
    ```
 4. Access `http://localhost:8090` in your browser. Inspect logs using `docker logs -f pacecraft`.

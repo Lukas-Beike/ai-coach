@@ -24,7 +24,7 @@ The Docker build SHALL use the pinned Python 3.14 base, hash-locked binary Pytho
 - **WHEN** the checkout contains local skills, OpenSpec state, worktrees or node_modules
 - **THEN** development artifacts are excluded from the runtime build inputs/context policy
 
-Evidence: `Dockerfile`; `requirements.in`; `requirements.txt`; `.dockerignore`. Tests: `tests/test_container_delivery.py`. See source inspection of `Dockerfile`/`.github/workflows/pages.yml`; the fixture module is related operational evidence and does not test Pages deployment. Hosted deployment was not executed.
+Evidence: `Dockerfile`; `requirements.in`; `requirements.txt`; `.dockerignore`. Tests: `tests/test_container_delivery.py::test_app_code_is_not_writable_by_the_app_user`; `tests/test_container_delivery.py::test_app_user_ids_match_the_documented_bind_mount_owner`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`. Hosted deployment was not executed.
 
 ### Requirement: Private deployment and transport prerequisites
 
@@ -64,7 +64,7 @@ Evidence: `.github/workflows/publish-container.yml`; `.github/workflows/validate
 
 ### Requirement: Immutable release source and version agreement
 
-Release publication SHALL resolve immutable tested source, require a release tag matching APP_VERSION on protected-main ancestry, and verify the source/version contract again before building the published image.
+Release publication SHALL resolve immutable tested source, require a release tag matching APP_VERSION on protected-main ancestry, and verify the source/version contract again before pushing the tested image. The published image SHALL be the image the test, browser and SBOM jobs used, never a rebuild.
 
 #### Scenario: Version or tag mismatch
 - **WHEN** a requested release tag, tested source and APP_VERSION do not identify the required release
@@ -105,9 +105,9 @@ Evidence: `.github/workflows/daily-release.yml` (`prepare-version`: `version_is_
 
 ### Requirement: Signed digest publication
 
-The publication workflow SHALL sign and verify the built image digest, attach configured provenance/SBOM, promote latest only for the current latest release, and verify release/latest tag digest parity.
+The publication workflow SHALL sign and verify the built image digest, attach the SPDX SBOM as a signed attestation (the image carries OCI source and revision labels), promote latest only for the current latest release, and verify release/latest tag digest parity.
 
-#### Scenario: Verified image built
+#### Scenario: Verified image published
 - **WHEN** all required source/tests/quality/browser conditions succeed
 - **THEN** the publication job pushes version/SHA tags, signs the resulting digest and verifies the signing identity
 
@@ -148,11 +148,11 @@ Evidence: `.github/workflows/validate-conventions.yml`; `.github/workflows/depen
 The Pages workflow SHALL publish only the checked-in site directory through its GitHub Pages environment; the public marketing artifact SHALL not be treated as the authenticated athlete application.
 
 #### Scenario: Site deployment triggered
-- **WHEN** a matching site/workflow change on develop/main or manual dispatch runs Pages
-- **THEN** the Pages artifact is built from site/ and deployed through github-pages
+- **WHEN** a push to `main` changes `site/**` or the Pages workflow, or a manual dispatch runs
+- **THEN** the Pages artifact is built from site/ and deployed through github-pages; a push to `develop` does not deploy
 
 #### Scenario: Athlete runtime compared with site
 - **WHEN** the public site is inspected alongside the private runtime
 - **THEN** the athlete API/data remains part of the private standalone runtime rather than the static Pages artifact
 
-Evidence: `.github/workflows/pages.yml`; `site/index.html`; `Dockerfile`. Tests: `tests/test_container_delivery.py`. See source inspection of `Dockerfile`/`.github/workflows/pages.yml`; the fixture module is related operational evidence and does not test Pages deployment. Hosted deployment was not executed.
+Evidence: `.github/workflows/pages.yml`; `site/index.html`; `Dockerfile`. Tests: `tests/test_ci_contracts.py::test_pages_deploy_only_from_main`. Hosted deployment was not executed.
