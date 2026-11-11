@@ -502,9 +502,14 @@ class GarminStrengthPushOwner(Protocol):
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
+    def remove_past(self) -> int: ...
+
 
 class GarminJobAdapter:
-    """Run the explicit strength-workout push or the Garmin sync owner."""
+    """Run the explicit strength-workout push or the Garmin sync owner.
+
+    A finished refresh also removes the app's Garmin workouts of past days (#2185).
+    """
 
     def __init__(
         self,
@@ -529,7 +534,10 @@ class GarminJobAdapter:
                 selected_payload["repair"] = True
             return self._plan_push.sync(selected_payload)
         _reject_plan_push(job_type)
-        return self._jobs.execute(job, payload, reason)
+        result = self._jobs.execute(job, payload, reason)
+        if job_type == "refresh" and self._plan_push is not None:
+            self._plan_push.remove_past()
+        return result
 
 
 class WahooSyncJobOwner(Protocol):

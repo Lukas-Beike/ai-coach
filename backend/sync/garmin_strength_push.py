@@ -14,6 +14,11 @@ cannot find is replaced by a new upload after the old one is unscheduled and
 deleted. Writes go through the unofficial SDK, because the Personal API is
 read-only. One remote failure other than a client error stops the remaining
 units of the run, so a Garmin outage never turns into a burst of requests.
+
+The one write without a request (athlete decision 2026-11-11, #2185): after each
+Garmin refresh, ``remove_past`` unschedules and deletes the linked workouts whose
+planned day has passed, so they do not fill the watch's workout list. It touches
+only linked ids, never a recorded activity.
 """
 
 from __future__ import annotations
@@ -63,6 +68,8 @@ SDK_REQUIRED_MESSAGE = (
 )
 # First line of every description, so a workout this app sent can be told apart.
 WORKOUT_MARKER = "Pacecraft"
+# Workouts of past days removed per refresh; the next refresh takes the rest.
+_PAST_REMOVAL_BATCH = 50
 _STOPPED = "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
 
 
@@ -158,6 +165,75 @@ class GarminStrengthPushService:
             "failed_object_ids": failed,
             "retry_scope": _RETRY_SCOPE if failed else None,
         }
+
+    def remove_past(self) -> int:
+        """Delete the linked workouts of past days; return how many went.
+
+        Runs after a Garmin refresh. A failure is logged and never fails the
+        refresh: the links stay, and the next refresh tries again.
+        """
+        try:
+            if not self._configured():
+                return 0
+            links = self._past_links()
+            if not links:
+                return 0
+            operation = (
+                self._gate.operation() if self._gate is not None else nullcontext()
+            )
+            with operation, self._lock, self._sdk_session() as client:
+                return self._remove_links(client, links)
+        except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
+            _LOGGER.warning(
+                "Garmin past workout removal failed",
+                extra={"event": "garmin_past_workout_removal_failed"},
+            )
+            return 0
+
+    def _past_links(self) -> list[RemoteLink]:
+        """Linked units dated before today, oldest first, at most one batch."""
+        today = self._today().isoformat()
+        with self._database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT l.local_id, p.payload FROM remote_links l "
+                "JOIN planned_units p ON p.local_id = l.local_id "
+                "WHERE l.provider=? AND l.entity_kind=? ORDER BY l.local_id",
+                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value),
+            ).fetchall()
+            past = sorted(
+                (day, str(row["local_id"]))
+                for row in rows
+                if (day := _payload_day(row["payload"])) and day < today
+            )
+            links = [
+                _REMOTE_LINKS.get(db, RemoteEntityKind.PLANNED_UNIT, local_id, GARMIN)
+                for _day, local_id in past[:_PAST_REMOVAL_BATCH]
+            ]
+        return [link for link in links if link is not None]
+
+    def _remove_links(self, client: Any, links: list[RemoteLink]) -> int:
+        removed = 0
+        for link in links:
+            try:
+                self._discard(client, link.remote_id, link.remote_external_id)
+            except _StopRun:
+                break
+            except AppError:
+                continue  # Garmin refused this one; the link stays for a retry
+            with self._database_manager().unit_of_work() as db:
+                _REMOTE_LINKS.delete(
+                    db, RemoteEntityKind.PLANNED_UNIT, link.local_id, GARMIN
+                )
+            removed += 1
+        if removed:
+            _LOGGER.info(
+                "Garmin past workouts removed",
+                extra={
+                    "event": "garmin_past_workouts_removed",
+                    "context": {"count": removed},
+                },
+            )
+        return removed
 
     def _run(self, requested: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
@@ -469,6 +545,21 @@ def _scheduled_on(client: Any, workout_id: str, day: str) -> str | None:
         if str(owner or "") == workout_id:
             return _schedule_id(item)
     return None
+
+
+def _payload_day(raw_payload: Any) -> str:
+    """The unit's planned day, or "" for an unreadable payload."""
+    try:
+        payload = json.loads(raw_payload or "{}")
+    except TypeError, ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    day = str(payload.get("date") or "")[:10]
+    try:
+        return date.fromisoformat(day).isoformat()
+    except ValueError:
+        return ""
 
 
 def _already_removed(local_id: str) -> dict[str, Any]:

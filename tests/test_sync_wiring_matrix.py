@@ -166,6 +166,10 @@ class _Service:
     def rearm(self) -> None:
         """The Wahoo refresh restarts the stream chain; the double has none."""
 
+    def remove_past(self) -> int:
+        """The Garmin refresh removes past pushed workouts; the double has none."""
+        return 0
+
     def sync_approved(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return {**self._hit(), "synced_dates": []}
 
