@@ -7,7 +7,8 @@ async function openFixtureActivity(page, request) {
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
   const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
-  await entry.locator("summary").click();
+  // On wide screens a unit of the week may already be open as the detail pane.
+  if (!(await entry.evaluate((element) => element.open))) await entry.locator("summary").click();
   await entry.getByRole("button", { name: "Aktivität analysieren" }).click();
   const dialog = page.getByRole("dialog", { name: "Synthetic ride <img src=x>" });
   await expect(dialog.getByRole("button", { name: "Feedback speichern" })).toBeVisible();

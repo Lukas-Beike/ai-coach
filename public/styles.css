@@ -862,23 +862,25 @@ h2 {
 .plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
 .planned-calendar { display: grid; gap: 20px; }
 .planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
-.planned-week-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 12px; padding: 16px; cursor: pointer; list-style: none; }
-.planned-week-heading::-webkit-details-marker { display: none; }
-.planned-week-heading::after { grid-column: 2; grid-row: 1 / 3; color: var(--subtle); content: "\203a"; transition: transform .15s ease; }
-.planned-week[open] > .planned-week-heading::after { transform: rotate(90deg); }
-.planned-week-heading:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -3px; }
-.planned-week-heading h4 { margin: 0; color: var(--ink); font-size: .9rem; }
+.planned-week-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); }
+.planned-week-heading h4 { margin: 0; color: var(--ink); font-size: 1.05rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.planned-week-number { margin-right: auto; color: var(--muted); font-size: .75rem; }
+.planned-week-step { font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.planned-week-step:disabled { opacity: .4; cursor: default; }
+.planned-week-heading > :is(.planned-week-summary, .planned-week-metrics, .planned-week-sync) { flex-basis: 100%; }
 .planned-week-summary { color: var(--muted); font-size: .75rem; line-height: 1.4; }
-.planned-week-days { display: grid; }
-.planned-day { display: grid; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--surface); scroll-margin-top: 16px; }
-.planned-day.is-today { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
+/* Timeline: a date column with a connecting line beside each day's units (#2189). */
+.planned-week-days { display: grid; padding: 6px 0; }
+.planned-day { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 10px; padding: 0 12px 0 8px; background: var(--surface); scroll-margin-top: 16px; }
+.planned-day-date { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0; padding-top: 4px; color: var(--muted); font-size: .72rem; font-weight: 650; }
+.planned-day-date::after { content: ""; flex: 1 1 auto; width: 2px; min-height: 8px; border-radius: 1px; background: var(--line); }
+.planned-day-date time { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; color: var(--ink); background: var(--surface-raised); font-size: .9rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.planned-day.is-today .planned-day-date time { color: var(--white); background: var(--accent); }
 .planned-day-heading { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--muted); font-size: .78rem; }
-.planned-day-heading h5 { margin: 0; color: var(--ink); font-size: .85rem; font-weight: 750; }
-.planned-day-heading time { color: var(--ink); font-size: .85rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .planned-today-label { color: var(--accent-bright); font-size: .72rem; font-weight: 750; }
 .planned-day-weather { margin-left: auto; color: var(--muted); font-size: .72rem; line-height: 1.5; }
 .planned-day-flag { max-width: 100%; color: var(--muted); font-size: .72rem; line-height: 1.5; overflow-wrap: anywhere; }
-.planned-day-content { display: grid; min-width: 0; gap: 6px; }
+.planned-day-content { display: grid; min-width: 0; align-content: start; gap: 6px; padding: 6px 0 10px; }
 .planned-weather-hint { margin: 0 0 12px; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--subtle); font-size: .72rem; line-height: 1.5; text-align: center; }
 .planned-day-observations { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 5px; color: var(--subtle); font-size: .72rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-observations p { margin: 0; }
@@ -886,11 +888,11 @@ h2 {
 .planned-day-context { margin: 0; font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .planned-day-calendar, .planned-day-competition, .planned-day-day-status { color: var(--muted); }
 .planned-day-health { padding: 10px 12px; border: 1px solid var(--orange); border-radius: 10px; color: var(--ink); background: var(--surface); text-align: center; font-weight: 650; }
-.planned-day-empty { margin: 0; color: var(--subtle); font-size: .78rem; line-height: 1.5; }
+.planned-day-empty { margin: 0; padding-top: 6px; color: var(--subtle); font-size: .78rem; line-height: 1.5; }
 .planned-entry, .planned-group { --session-color: var(--planned-session-default); --session-on-color: var(--planned-session-default-on); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
 .planned-entry > summary, .planned-group > summary { position: relative; display: grid; gap: 4px; min-height: 48px; padding: 6px 10px; cursor: pointer; list-style: none; }
 .planned-entry > summary::-webkit-details-marker, .planned-group > summary::-webkit-details-marker { display: none; }
-.planned-entry > summary:focus-visible, .planned-group > summary:focus-visible, .planned-day-toggle > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 8px; }
+.planned-entry > summary:focus-visible, .planned-group > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 8px; }
 .planned-entry[data-sport="Radfahren"], .planned-entry[data-sport="Rad indoor"], .planned-group[data-sport="Radfahren"], .planned-group[data-sport="Rad indoor"], .activity-analysis-item[data-sport-label="Radfahren"], .activity-analysis-item[data-sport-label="Rad indoor"] { --session-color: var(--planned-session-bike); --session-on-color: var(--planned-session-bike-on); }
 .planned-entry[data-sport="Laufen"], .planned-group[data-sport="Laufen"], .activity-analysis-item[data-sport-label="Laufen"] { --session-color: var(--planned-session-run); --session-on-color: var(--planned-session-run-on); }
 .planned-entry[data-sport="Schwimmen"], .planned-group[data-sport="Schwimmen"], .activity-analysis-item[data-sport-label="Schwimmen"] { --session-color: var(--planned-session-swim); --session-on-color: var(--planned-session-swim-on); }
@@ -936,27 +938,42 @@ h2 {
 .planned-week-metrics[data-columns="1"] { grid-template-columns: auto minmax(0, 1fr); }
 .planned-week-metrics small { display: block; color: var(--subtle); font-size: .72rem; font-weight: 400; }
 .planned-week-column { color: var(--subtle); font-size: .72rem; }
-.planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
+.planned-entry:is(.is-planned, .is-today, .is-skipped) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
+.planned-entry.is-missed { border: 1.5px solid var(--danger); background: var(--transparent); }
+.planned-entry.is-completed { border-color: var(--session-color); }
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
-.planned-entry .calendar-workout-profile { height: 48px; margin: 2px 0 0; }
+.planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 16px; margin: 2px 0 0; }
+.planned-detail-head { display: none; }
+.planned-detail-profile { display: grid; gap: 4px; }
+.calendar-workout-profile.is-detail { height: 96px; margin: 0; }
+.planned-detail-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+/* An open card on a narrow screen shows the larger profile of its body instead of the zone bar. */
+@media (max-width: 1099px) {
+  .planned-entry[open] > summary .calendar-workout-profile { display: none; }
+}
+/* Wide screens: the week on the left, the open card's body as the detail pane on the right. */
+@media (min-width: 1100px) {
+  .planned-calendar { --planned-week-width: 460px; position: relative; grid-template-columns: minmax(0, var(--planned-week-width)); align-content: start; }
+  .planned-entry[open] { border: 2px solid var(--accent-bright); background: var(--accent-soft); }
+  .planned-entry[open] .planned-session-header { background: var(--transparent); }
+  .planned-entry[open] > .planned-entry-details { position: absolute; top: 0; right: 0; left: calc(var(--planned-week-width) + 24px); gap: 16px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+  .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 10px; }
+  .planned-detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+  .planned-detail-title { color: var(--ink); font-size: 1.2rem; font-weight: 750; line-height: 1.3; }
+  .planned-detail-line { grid-column: 1; color: var(--muted); font-size: .8rem; }
+  .planned-detail-status { grid-column: 2; grid-row: 1 / 3; align-self: start; padding: 4px 12px; border-radius: 999px; color: var(--accent-bright); background: var(--accent-soft); font-size: .75rem; font-weight: 700; }
+  .planned-detail-status.is-missed { color: var(--danger-ink); background: var(--danger-surface); }
+  .planned-detail-status:is(.is-planned, .is-skipped) { color: var(--muted); background: var(--surface-raised); }
+  .calendar-workout-profile.is-detail { height: 150px; }
+}
 .planned-session-line .planned-badges { display: inline-flex; margin-left: 6px; vertical-align: middle; }
 .planned-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border: 1px solid var(--warning-border); border-radius: 8px; color: var(--ink); background: var(--warning-surface-soft); font-size: .75rem; font-weight: 650; }
 .planned-conflict-button { min-height: 44px; margin-left: auto; }
 .planned-garmin-exercise { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
 .planned-suggestion-chip { min-height: 36px; padding: 4px 12px; border: 1px dashed currentColor; border-radius: 999px; background: none; color: inherit; font: inherit; font-size: .75rem; cursor: pointer; }
 .planned-group-items { display: grid; gap: 6px; padding: 0 6px 6px; }
-.planned-day-toggle > summary { min-height: 44px; align-items: center; cursor: pointer; list-style: none; }
-.planned-day-toggle > summary::-webkit-details-marker { display: none; }
-.planned-day-toggle > summary::after { margin-left: auto; color: var(--subtle); content: "\203a"; transition: transform .15s ease; }
-.planned-day-toggle[open] > summary::after { transform: rotate(90deg); }
-.planned-day-toggle[open] > summary { margin-bottom: 6px; }
-.planned-day-overview { color: var(--muted); font-size: .75rem; }
 .planned-zone-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 8px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: .72rem; }
 .planned-zone-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; background: currentColor; vertical-align: -1px; }
-@media (max-width: 480px) {
-  .planned-day { padding: 8px; }
-  .planned-week-heading { padding: 14px 12px; }
-}
 
 .more-segment-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
 .more-segment-nav a { display: grid; min-height: 44px; min-width: 0; flex: 1 1 calc(33.333% - 4px); place-items: center; padding: 9px 6px; overflow-wrap: anywhere; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; }

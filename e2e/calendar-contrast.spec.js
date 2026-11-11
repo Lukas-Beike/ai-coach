@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const fs = require("node:fs/promises");
+const { showCalendarEntry } = require("./helpers/ui");
 
 test("@responsive completed calendar sports meet AA contrast in both themes", async ({ page, request }, testInfo) => {
   test.setTimeout(180_000);
@@ -8,6 +9,8 @@ test("@responsive completed calendar sports meet AA contrast in both themes", as
   await page.goto("/#plan/overview");
   await page.waitForFunction(() => state.initialStateLoaded);
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
+  // The fixture records the four sessions yesterday, which can be in the previous week.
+  await showCalendarEntry(page, "Synthetic completed");
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
     for (const sport of ["Radfahren", "Laufen", "Schwimmen", "Kraft"]) {

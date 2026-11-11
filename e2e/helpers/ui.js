@@ -63,7 +63,35 @@ function countRequests(page, pattern) {
   };
 }
 
+// Steps the calendar's week view to the week that holds dateKey.
+async function showCalendarDay(page, dateKey) {
+  for (let step = 0; step < 60; step += 1) {
+    if (await page.locator(`.planned-day[data-date="${dateKey}"]`).count()) return;
+    const shown = await page.locator(".planned-week").getAttribute("data-week-key");
+    await page.locator(`.planned-week-step[data-week-step="${dateKey < shown ? -1 : 1}"]`).click();
+  }
+  throw new Error(`calendar day ${dateKey} is outside the shown weeks`);
+}
+
+// Steps the week view to the first calendar entry that matches: a name part, a planned
+// or recorded workout profile, or a unit after today still pending for a provider.
+async function showCalendarEntry(page, match) {
+  const wanted = typeof match === "string" ? { name: match } : match;
+  const dateKey = await page.evaluate((criteria) => {
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const entry = (state.data?.training_calendar || []).find((item) => item && plannedEventDate(item)
+      && (!criteria.name || String(item.name || "").includes(criteria.name))
+      && (!criteria.profile || (criteria.profile === "planned" ? Boolean(item.workout_profile) && !item.is_completed_activity : JSON.stringify(item).includes('"source":"recorded"')))
+      && (!criteria.pending || (item.push_pending?.[criteria.pending] && plannedEventDate(item) > today)));
+    return entry ? plannedEventDate(entry) : "";
+  }, wanted);
+  if (!dateKey) throw new Error(`no calendar entry matches ${JSON.stringify(wanted)}`);
+  await showCalendarDay(page, dateKey);
+}
+
 module.exports = {
+  showCalendarDay,
+  showCalendarEntry,
   contrastRatio,
   rectOf,
   isFullyAbove,

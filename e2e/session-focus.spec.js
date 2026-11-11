@@ -1,6 +1,8 @@
 const { test, expect } = require("@playwright/test");
+const { showCalendarEntry } = require("./helpers/ui");
 
 async function openEntry(page, name) {
+  await showCalendarEntry(page, name);
   const entry = page.locator(".planned-entry").filter({ hasText: name }).first();
   await expect(entry).toHaveCount(1);
   await entry.evaluate((element) => {
