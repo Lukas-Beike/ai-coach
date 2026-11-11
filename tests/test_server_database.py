@@ -1047,7 +1047,10 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(
             {item["id"] for item in preview["categories"]},
             {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
-            | {privacy_module.RECOVERY_COPIES_CATEGORY},
+            | {
+                privacy_module.RECOVERY_COPIES_CATEGORY,
+                privacy_module.LOG_FILES_CATEGORY,
+            },
         )
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
@@ -1063,7 +1066,10 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(
             set(result["deleted_categories"]),
             {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
-            | {privacy_module.RECOVERY_COPIES_CATEGORY},
+            | {
+                privacy_module.RECOVERY_COPIES_CATEGORY,
+                privacy_module.LOG_FILES_CATEGORY,
+            },
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for table in expected_tables - {"kv"}:

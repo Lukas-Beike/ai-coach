@@ -80,6 +80,18 @@ class RecentLogEntriesService:
         paths.append(self._log_path)
         return paths
 
+    def count(self) -> int:
+        """How many log files hold entries: the rotated ones and a non-empty active one."""
+        rotated = (
+            [path for path in self._log_path.parent.glob(f"{self._log_path.name}.*")]
+            if self._log_path.parent.is_dir()
+            else []
+        )
+        files = [path for path in rotated if path.is_file()]
+        if self._log_path.is_file() and self._log_path.stat().st_size:
+            files.append(self._log_path)
+        return len(files)
+
     def clear(self) -> dict[str, Any]:
         """Clear active log file and remove rotated logs."""
         cleared = False

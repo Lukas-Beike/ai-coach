@@ -22,6 +22,7 @@ from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import activity_detail_store
 from backend.db.manager import DatabaseManager, secure_deletion
 from backend.db.repositories import KeyValueRepository
+from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import AppError
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.competition_service import CompetitionService
@@ -137,6 +138,9 @@ RECOVERY_COPIES_CATEGORY = "recovery_copies"
 RECOVERY_COPIES_LABEL = (
     "Wiederherstellungskopien der Datenbank und Bereinigungsmarkierung"
 )
+# The server log files beside the database, erased last (#2137, G-209).
+LOG_FILES_CATEGORY = "server_logs"
+LOG_FILES_LABEL = "Server-Protokolldateien"
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
     (
@@ -175,6 +179,9 @@ class PrivacyDeleteDependencies:
     recovery_copies: RecoveryCopies | None = None
     # Stops a running Coach turn so the maintenance drain does not wait for it.
     cancel_coach_turns: Callable[[], None] | None = None
+    # The server log files; erased after everything else, so no later warning
+    # of this erasure is lost.
+    log_files: RecentLogEntriesService | None = None
     utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat()
 
 
@@ -221,6 +228,14 @@ class PrivacyDeleteService:
                     "id": RECOVERY_COPIES_CATEGORY,
                     "label": RECOVERY_COPIES_LABEL,
                     "records": dependencies.recovery_copies.count(),
+                }
+            )
+        if dependencies.log_files is not None:
+            categories.append(
+                {
+                    "id": LOG_FILES_CATEGORY,
+                    "label": LOG_FILES_LABEL,
+                    "records": dependencies.log_files.count(),
                 }
             )
         return {
@@ -301,6 +316,25 @@ class PrivacyDeleteService:
                 "Deleted database pages stay in the write-ahead log",
                 extra={"event": "privacy_space_reclaim_incomplete"},
             )
+
+    def _erase_log_files(self, deleted_counts: dict[str, int]) -> bool:
+        """Erase the server log files last; report a failure, never raise it."""
+        log_files = self._dependencies.log_files
+        if log_files is None:
+            return False
+        try:
+            deleted_counts[LOG_FILES_CATEGORY] = log_files.count()
+            log_files.clear()
+        except OSError as exc:
+            self._dependencies.logger.warning(
+                "Server log files could not be deleted",
+                extra={
+                    "event": "privacy_log_files_delete_failed",
+                    "context": {"error_class": type(exc).__name__},
+                },
+            )
+            return True
+        return False
 
     def delete(self, confirm: Any) -> dict[str, Any]:
         if confirm != PRIVACY_DELETE_CONFIRMATION_TEXT:
@@ -398,11 +432,13 @@ class PrivacyDeleteService:
                     )
             if dependencies.refresh_credentials is not None:
                 dependencies.refresh_credentials()
+            log_files_failed = self._erase_log_files(deleted_counts)
             return {
                 "status": "ok",
                 "local_data_deleted": True,
                 "deleted_categories": deleted_counts,
                 "recovery_copies_failed": recovery_copies_failed,
+                "log_files_failed": log_files_failed,
                 "remote_delete_attempted": remote_delete_attempted,
                 "remote_conversation_deleted": remote_deleted,
                 "wahoo_revoke_attempted": wahoo_revoke_attempted,
@@ -446,6 +482,7 @@ class PrivacyStateDependencies:
     cancel_garmin_login: Callable[[], None] | None = None
     disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
     cancel_coach_turns: Callable[[], None] | None = None
+    log_files: Callable[[], RecentLogEntriesService] | None = None
 
 
 @dataclass(frozen=True)
@@ -493,6 +530,7 @@ class PrivacyAssembly:
         self._cancel_garmin_login = state.cancel_garmin_login
         self._disconnect_wahoo = state.disconnect_wahoo
         self._cancel_coach_turns = state.cancel_coach_turns
+        self._log_files = state.log_files
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -518,6 +556,7 @@ class PrivacyAssembly:
                 recovery_copies=RecoveryCopies(
                     self._data_dir(), self._database_path().name
                 ),
+                log_files=None if self._log_files is None else self._log_files(),
                 utc_now=self._utc_now,
             )
         )
