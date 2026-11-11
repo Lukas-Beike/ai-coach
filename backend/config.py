@@ -93,6 +93,11 @@ def local_env_defines(env_path: Path, name: str) -> bool:
     return False
 
 
+def _env_text(environ: Mapping[str, str], name: str, default: str) -> str:
+    """A trimmed value; a blank one counts as unset (#2137, I-021)."""
+    return str(environ.get(name, "")).strip() or default
+
+
 def _env_int(environ: Mapping[str, str], name: str, default: int) -> int:
     try:
         return int(environ.get(name, str(default)))
@@ -247,12 +252,14 @@ def load_config(
         openai_base_url=validated_openai_base_url(
             value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL
         ),
-        openai_model=value("OPENAI_MODEL", "gpt-6-luna"),
+        openai_model=_env_text(target, "OPENAI_MODEL", "gpt-6-luna"),
         intervals_api_key=value("INTERVALS_API_KEY", ""),
-        intervals_athlete_id=value("INTERVALS_ATHLETE_ID", "0"),
+        intervals_athlete_id=_env_text(target, "INTERVALS_ATHLETE_ID", "0"),
         garmin_email=value("GARMIN_EMAIL", ""),
         garmin_password=value("GARMIN_PASSWORD", ""),
-        garmin_tokenstore=value("GARMINTOKENS", str(data_dir / "garmin_tokens")),
+        garmin_tokenstore=_env_text(
+            target, "GARMINTOKENS", str(data_dir / "garmin_tokens")
+        ),
         garmin_fixture_path=value("GARMIN_FIXTURE_PATH", ""),
         calendar_ical_url=value("CALENDAR_ICAL_URL", ""),
         app_password=value("APP_PASSWORD", ""),
