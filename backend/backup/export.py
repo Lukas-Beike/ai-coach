@@ -80,7 +80,6 @@ TimeoutErrorFactory = Callable[[], Exception]
 PRIVACY_EXPORT_FORMAT_VERSION = 17
 
 
-
 class PrivacyArchiveExportService:
     """Create a bounded, local ZIP archive of durable athlete data."""
 
@@ -376,9 +375,7 @@ def manifest(
 RowSource = Callable[[Any], Iterable[Mapping[str, Any]]]
 
 
-def _select(
-    sql: str, row: Callable[[Any], Mapping[str, Any]] = dict
-) -> RowSource:
+def _select(sql: str, row: Callable[[Any], Mapping[str, Any]] = dict) -> RowSource:
     return lambda db: (row(item) for item in db.execute(sql))
 
 
@@ -452,7 +449,7 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
             _with_payload,
         ),
     ),
-    ("workout_library.jsonl", lambda db: iter_workout_library(db)),
+    ("workout_library.jsonl", iter_workout_library),
     (
         "planned_units.jsonl",
         _select(
