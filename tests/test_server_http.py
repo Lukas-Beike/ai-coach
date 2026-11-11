@@ -46,8 +46,8 @@ from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 # Routes that answer without a session, by design: health, readiness, login
-# state, login/logout, the password-checked restore upload and the Wahoo OAuth
-# redirect, whose single-use state is its credential.
+# state, login and the Wahoo OAuth redirect, whose single-use state is its
+# credential.
 PUBLIC_API_ROUTES = frozenset(
     {
         ("GET", "/api/health"),
@@ -55,8 +55,6 @@ PUBLIC_API_ROUTES = frozenset(
         ("GET", "/api/auth/status"),
         ("GET", "/api/wahoo/callback"),
         ("POST", "/api/login"),
-        ("POST", "/api/logout"),
-        ("POST", "/api/privacy/restore"),
     }
 )
 
