@@ -4,6 +4,7 @@ These regressions verify execution, not a language model's recognition quality.
 """
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -25,9 +26,12 @@ from backend.coach import streams as coach_streams
 from backend.coach import structured_tool_round
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.dialogue import validate_request
+from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.db.repositories import FoodDatabaseEntryRepository
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
 
@@ -1202,6 +1206,23 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         action = classify("save_coach_activity_feedback", ["activity_feedback"])
         self.assertEqual(action["authorization_scope"], ["activity_feedback"])
         self.assertEqual(action["intent"], "local_action")
+
+    def test_a_stored_database_food_is_no_product_scope_object(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        FoodDatabaseEntryRepository().upsert(
+            db, {"id": "off:4006381333931", "name": "Riegel"}, "2026-10-01"
+        )
+        with self.assertRaises(AppError) as missing:
+            CoachDialogueActionService._validate_scope_tokens(
+                db,
+                "save_nutrition_product",
+                {"nutrition_product:off:4006381333931"},
+                frozenset(),
+            )
+        self.assertEqual(missing.exception.reason, "request_object_missing")
 
     def test_coach_starts_with_tools_and_local_dialogue_without_classifier(self):
         result, model = self.turn(

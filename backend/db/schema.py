@@ -143,9 +143,9 @@ PROVIDER_TABLES_DDL = f"""
 # (the database's name, such as 'open_food_facts' or 'yazio'); ``fetched_at`` is
 # when that database delivered the values. Origins are an open vocabulary checked
 # in Python, so a further database needs no migration. An EAN belongs to at most
-# one own product; database entries may share it with each other. ``details``
-# keeps the database's further fields and which empty fields of an own product
-# were filled from where.
+# one own product; database foods may share it, and an own product's EAN lists
+# them under that product. ``details`` keeps the database's further fields and
+# which empty fields of an own product were filled from where.
 NUTRITION_PRODUCTS_DDL = """
     CREATE TABLE nutrition_products (
         id TEXT PRIMARY KEY,
@@ -178,7 +178,7 @@ NUTRITION_PRODUCTS_DDL = """
     CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
     CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
     CREATE UNIQUE INDEX idx_nutrition_products_own_barcode ON nutrition_products(barcode) WHERE origin = 'own';
-    CREATE INDEX idx_nutrition_products_origin ON nutrition_products(origin, barcode, fetched_at DESC)
+    CREATE INDEX idx_nutrition_products_database ON nutrition_products(barcode, fetched_at DESC) WHERE origin <> 'own'
 """
 
 

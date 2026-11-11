@@ -15,7 +15,11 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
-from backend.db.repositories import FoodDatabaseEntryRepository
+from backend.db.repositories import (
+    FoodDatabaseEntryRepository,
+    NutritionProductRepository,
+    fill_empty_product_fields,
+)
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     NUTRITION_PRODUCTS_DDL,
@@ -115,8 +119,10 @@ def _canonical_products(db: Any) -> None:
 
     Every own product keeps its row and id as origin 'own'. Every mirrored food
     becomes a product of its database's origin with its fetch time, id and all
-    fields. A mirrored food whose EAN an own product holds is merged into it:
-    the own product wins and only its empty fields are filled, newest food first.
+    fields. An own product with the EAN of mirrored foods wins: only its empty
+    fields are filled, newest food first, and the foods stay stored. This step
+    uses the live product DDL and repositories; a later schema that changes
+    either freezes this step's copy first.
     """
     db.execute("DROP INDEX idx_nutrition_products_name")
     db.execute("DROP INDEX idx_nutrition_products_status")
@@ -127,8 +133,8 @@ def _canonical_products(db: Any) -> None:
         f"SELECT {_V26_PRODUCT_COLUMNS} FROM nutrition_products_v26"
     )
     db.execute("DROP TABLE nutrition_products_v26")
-    entries = FoodDatabaseEntryRepository()
-    moved = merged = 0
+    entries, products = FoodDatabaseEntryRepository(), NutritionProductRepository()
+    moved = 0
     for row in db.execute(
         "SELECT food_id, barcode, payload, fetched_at, updated_at "
         "FROM food_database_entries ORDER BY fetched_at DESC, food_id"
@@ -137,13 +143,21 @@ def _canonical_products(db: Any) -> None:
         if row["barcode"]:
             food["barcode"] = row["barcode"]
         if entries.upsert(db, food, row["fetched_at"], row["updated_at"]):
-            merged += 1
-        else:
             moved += 1
+        else:
+            # An own product already holds the food's id: it wins.
+            fill_empty_product_fields(db, row["food_id"], food, row["fetched_at"])
     db.execute("DROP TABLE food_database_entries")
+    merged = sum(
+        products.fill_from_database_entries(db, own["id"], own["barcode"])
+        for own in db.execute(
+            "SELECT id, barcode FROM nutrition_products "
+            "WHERE origin = 'own' AND barcode IS NOT NULL"
+        ).fetchall()
+    )
     _LOGGER.info(
-        "Schema v27: %s database foods moved into the product table, "
-        "%s merged into own products with the same EAN.",
+        "Schema v27: %s database foods moved into the product table; "
+        "%s own products filled from foods with their EAN.",
         moved,
         merged,
     )

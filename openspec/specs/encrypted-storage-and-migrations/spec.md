@@ -40,7 +40,7 @@ The database SHALL recognize the version-and-shape pair of the baseline, the sch
 
 #### Scenario: Baseline food mirror becomes canonical products
 - **WHEN** a v26 database with own products and mirrored foods is upgraded
-- **THEN** every own product keeps its row as origin `own`, every mirrored food becomes a product of its database's origin with its fetch time and all fields, a mirrored food with an own product's EAN only fills that product's empty fields, and the mirror table is gone.
+- **THEN** every own product keeps its row as origin `own`, every mirrored food becomes a product of its database's origin with its fetch time and all fields, an own product with the EAN or id of mirrored foods wins and only its empty fields are filled, and the mirror table is gone.
 
 #### Scenario: Failing baseline upgrade
 - **WHEN** the baseline upgrade fails after moving some rows

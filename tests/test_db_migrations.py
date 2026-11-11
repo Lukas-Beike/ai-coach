@@ -82,6 +82,7 @@ def registered_previous_shape(
 
 EAN_OWN, EAN_OTHER = "4006381333931", "4000000000017"
 YAZIO_ID = "yazio:0f0f0f0f-0000-4000-8000-000000000001"
+OWN_FOOD_ID = "off:4000000000024"
 NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g")
 
 
@@ -118,11 +119,23 @@ BASELINE_MIRROR = (
         EAN_OTHER,
         "2026-10-01",
     ),
+    # A food without brand and source page keeps both absent.
     (
-        mirror_food(YAZIO_ID.replace("1", "2"), "ml", **dict.fromkeys(NUTRIENTS)),
+        {
+            **{
+                key: value
+                for key, value in mirror_food(
+                    YAZIO_ID.replace("1", "2"), "ml", **dict.fromkeys(NUTRIENTS)
+                ).items()
+                if key != "source_url"
+            },
+            "brands": None,
+        },
         "",
         "2026-10-01",
     ),
+    # An own product already holds this food's id: it wins and keeps its row.
+    (mirror_food(OWN_FOOD_ID, "g", kcal=99.0), OWN_FOOD_ID[4:], "2026-10-01"),
 )
 
 
@@ -134,6 +147,11 @@ def add_baseline_nutrition_rows(db) -> None:
         "VALUES ('prod-own', ?, 'Mein Riegel', '', 100, 'g', 500, 30, "
         "'packaging_label', ?, ?, 1)",
         (EAN_OWN, STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO nutrition_products(id, name, basis_amount, basis_unit, source, "
+        "created_at, updated_at) VALUES (?, 'Eigenes', 100, 'g', 'manual', ?, ?)",
+        (OWN_FOOD_ID, STAMP, STAMP),
     )
     db.executemany(
         "INSERT INTO food_database_entries(food_id, barcode, name, brand, payload, "
@@ -219,9 +237,10 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         migrate_schema(db)
         db.commit()
         own = db.execute(
-            "SELECT * FROM nutrition_products WHERE origin = 'own'"
+            "SELECT * FROM nutrition_products WHERE origin = 'own' ORDER BY id DESC"
         ).fetchall()
-        self.assertEqual(len(own), 1)
+        self.assertEqual([row["id"] for row in own], ["prod-own", OWN_FOOD_ID])
+        self.assertEqual((own[1]["kcal"], own[1]["name"]), (99.0, "Eigenes"))
         self.assertEqual(
             [own[0][key] for key in ("id", "barcode", "brand", "favorite", *NUTRIENTS)],
             ["prod-own", EAN_OWN, "Marke", 1, 500, 1.0, 1.0, 30, 1.0, 1.0, 1.0],
@@ -231,13 +250,21 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             {"brand", "carbs_g", "protein_g", "sugar_g", "fiber_g", "salt_g"},
         )
         entries = FoodDatabaseEntryRepository()
-        for food, _barcode, fetched in BASELINE_MIRROR[2:]:
+        # Every mirrored food stays stored with all its fields; the own
+        # product's EAN lists none of them as a separate entry.
+        for food, barcode, fetched in BASELINE_MIRROR[:-1]:
             with self.subTest(food=food["id"]):
                 stored = entries.get(db, food["id"])
                 self.assertEqual(stored.pop("fetched_at"), fetched)
-                self.assertEqual(stored, food)
-        self.assertIsNone(entries.get(db, f"off:{EAN_OWN}"))
-        self.assertIsNone(entries.get(db, YAZIO_ID))
+                expected = dict(food)
+                if barcode and food["id"].startswith("yazio:"):
+                    expected["barcode"] = barcode
+                self.assertEqual(stored, expected)
+        self.assertIsNone(entries.get(db, OWN_FOOD_ID))
+        self.assertEqual(
+            {entry["id"] for entry in entries.search(db, "")},
+            {f"off:{EAN_OTHER}", YAZIO_ID.replace("1", "2")},
+        )
         self.assertEqual(
             [
                 tuple(row)
@@ -245,7 +272,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                     "SELECT origin, COUNT(*) FROM nutrition_products GROUP BY origin"
                 )
             ],
-            [("open_food_facts", 1), ("own", 1), ("yazio", 1)],
+            [("open_food_facts", 2), ("own", 2), ("yazio", 2)],
         )
 
     def test_failing_baseline_upgrade_rolls_back_and_a_retry_succeeds(self):

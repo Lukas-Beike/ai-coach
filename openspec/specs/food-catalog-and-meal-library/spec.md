@@ -341,18 +341,22 @@ The system SHALL classify Yazio authentication and compatibility failures only a
 Evidence: `backend/providers/yazio.py::YazioClient._grant_rejected` (login 400/401/403 stays one ambiguous `food_database_auth_failed`), `backend/providers/yazio.py::YazioClient._raise_http_error` (only a bounded `version_blocked` body on a product request becomes `food_database_version_blocked`), `backend/nutrition/food_database.py::FoodDatabaseService._chain_search` (notices, fallback); `tests/test_yazio.py::YazioClientTests.test_rejected_login_pauses_further_attempts_without_leaking`, `tests/test_yazio.py::YazioClientTests.test_recognized_version_block_is_safe_and_distinct`, `tests/test_yazio.py::YazioClientTests.test_truncated_forbidden_response_is_sanitized`, `tests/test_food_lookup_chain.py::LookupChainTests.test_version_block_is_reported_while_fallback_remains_available`, `tests/test_food_lookup_chain.py::LookupChainTests.test_text_chain_names_rejected_yazio_credentials`. The incident's upstream response and actual cause stay unverified; no live account was used.
 
 ### Requirement: Own product wins for its EAN
-An EAN that an own product holds SHALL have no separate stored database food. A fetched food with that EAN SHALL fill only the own product's empty brand and nutrient fields, scaled to its basis when the unit matches and never into a product of another unit; existing values SHALL stay. Each filled field SHALL record its origin and fetch time.
+Stored database foods with an own product's EAN SHALL stay stored for lookups but SHALL NOT be listed as entries of their own. A newly created own product SHALL take only its empty brand and nutrient fields from them, newest first, scaled to its basis when the unit matches; existing values SHALL stay, each filled field SHALL record its origin and fetch time, and the fill SHALL be part of the creation's change record. A lookup SHALL never change an own product.
 
 #### Scenario: Lookup of an own product's EAN
 - **WHEN** a lookup stores a food whose EAN an own product holds
-- **THEN** no database entry is stored, the own product's empty fields of the same unit are filled with their origin and fetch time, and its existing values are unchanged.
+- **THEN** the food is stored for later lookups by its id, is not listed as a separate entry, and the own product is unchanged.
 
-#### Scenario: Own product saved with the EAN of stored foods
-- **WHEN** the athlete saves an own product with the EAN of stored database foods
-- **THEN** the product's empty fields are filled from those foods, newest first, and the foods no longer exist as separate entries.
+#### Scenario: Own product created with the EAN of stored foods
+- **WHEN** the athlete creates an own product with the EAN of stored database foods
+- **THEN** the product's empty fields are filled from those foods, newest first, with origin and fetch time, and a later edit that empties a field keeps it empty.
 
 #### Scenario: Product counted per portion
 - **WHEN** the own product's basis unit differs from the food's
 - **THEN** no nutrient value is filled; an empty brand still is.
 
-Evidence: `backend/db/repositories.py::fill_empty_product_fields`, `backend/db/repositories.py::NutritionProductRepository.save`, `backend/db/repositories.py::FoodDatabaseEntryRepository.upsert`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_own_product_with_the_ean_wins_and_takes_only_empty_fields`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_saving_an_own_product_absorbs_the_entries_of_its_ean`.
+#### Scenario: Stored food id
+- **WHEN** a new own product is submitted with the id of a stored database food
+- **THEN** it is saved under a new id and the stored food is unchanged; a Coach scope naming a stored food is no product object.
+
+Evidence: `backend/db/repositories.py::fill_empty_product_fields`, `backend/db/repositories.py::NutritionProductRepository.fill_from_database_entries`, `backend/nutrition/catalog.py::ProductCatalogService.save_product`, `backend/db/repositories.py::FoodDatabaseEntryRepository.search`, `backend/coach/dialogue_action.py`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_own_products_ean_lists_no_entry_and_a_lookup_never_changes_it`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_a_new_own_product_takes_only_empty_fields_from_its_eans_foods`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_new_product_fills_its_gaps_from_stored_foods_of_its_ean`, `tests/test_coach_dialogue.py::CoachDialogueTests.test_a_stored_database_food_is_no_product_scope_object`.

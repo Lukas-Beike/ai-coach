@@ -41,8 +41,8 @@ an index that serves the backfill-continuation lookup of sync jobs, and version 
 products one canonical table: own products and foods saved from a database
 lookup are rows of `nutrition_products` with an origin (`own` or the
 database), the database's fetch time and its further fields; the upgrade moves
-every `food_database_entries` row into it and merges a food whose EAN an own
-product holds into that product, filling only its empty fields. Release
+every `food_database_entries` row into it and fills only the empty fields of
+an own product that holds a food's EAN or id. Release
 2.0.5 upgrades a version 21 to 25 database or backup to it in place within one
 transaction, and a failed upgrade leaves it unchanged. Change-history entries
 written before version 16 still name the former fields and can no longer be

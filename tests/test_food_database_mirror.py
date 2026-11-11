@@ -167,43 +167,48 @@ class FoodMirrorTests(MirrorFixture):
             ).fetchone()
         return json.loads(row["details"]).get("filled_fields", {})
 
-    def test_an_own_product_with_the_ean_wins_and_takes_only_empty_fields(self):
-        self.own_product(kcal=500, fat_g=30)
+    def test_an_own_products_ean_lists_no_entry_and_a_lookup_never_changes_it(self):
+        self.own_product(kcal=500)
 
         self.mirror.store([food()])
 
-        self.assertIsNone(self.mirror.get(f"off:{BARCODE}"))
+        # The food stays stored for lookups by id, but is listed as the product.
+        self.assertEqual(self.mirror.get(f"off:{BARCODE}")["per_100"]["carbs_g"], 50)
         self.assertEqual(self.mirror.search(""), [])
         with self.manager.reader() as db:
             product = NutritionProductRepository().get(db, "prod-own")
+        self.assertEqual((product["kcal"], product["carbs_g"]), (500, None))
+        self.assertEqual(self.filled_fields(), {})
+
+    def test_a_new_own_product_takes_only_empty_fields_from_its_eans_foods(self):
+        self.mirror.store([food()])
+        self.own_product(kcal=520, fat_g=30, basis_amount=50)
+
+        with self.manager.unit_of_work() as db:
+            products = NutritionProductRepository()
+            self.assertTrue(
+                products.fill_from_database_entries(db, "prod-own", BARCODE)
+            )
+            saved = products.get(db, "prod-own")
         self.assertEqual(
-            [product[key] for key in ("brand", "kcal", "carbs_g", "fat_g", "salt_g")],
-            ["Knoppers", 500, 50, 30, None],
+            [saved[key] for key in ("brand", "kcal", "carbs_g", "protein_g", "fat_g")],
+            ["Knoppers", 520, 25, 4, 30],
         )
         self.assertEqual(
-            self.filled_fields(),
+            saved["filled_fields"],
             {
                 key: {"origin": "open_food_facts", "fetched_at": START.isoformat()}
                 for key in ("brand", "carbs_g", "protein_g")
             },
         )
-
-    def test_saving_an_own_product_absorbs_the_entries_of_its_ean(self):
-        self.mirror.store([food()])
-
-        saved = self.own_product(kcal=520, basis_amount=50)
-
-        self.assertEqual(self.mirror.search(""), [])
-        self.assertEqual(
-            [saved[key] for key in ("kcal", "carbs_g", "protein_g", "fat_g")],
-            [520, 25, 4, 16.5],
-        )
         # Per-100-g values never fill a product counted per portion.
-        self.own_product(basis_unit="portion", basis_amount=1)
-        self.mirror.store([food()])
-        with self.manager.reader() as db:
-            portion = NutritionProductRepository().get(db, "prod-own")
-        self.assertEqual((portion["kcal"], portion["brand"]), (None, "Knoppers"))
+        self.own_product(basis_unit="portion", basis_amount=1, brand="Eigen")
+        with self.manager.unit_of_work() as db:
+            self.assertFalse(
+                NutritionProductRepository().fill_from_database_entries(
+                    db, "prod-own", BARCODE
+                )
+            )
 
 
 class FoodDatabaseServiceMirrorTests(MirrorFixture):

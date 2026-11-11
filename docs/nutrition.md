@@ -28,10 +28,11 @@ Every Open Food Facts product that the app fetches online is automatically and
 permanently stored in the local database. Since schema v27 these entries are
 rows of the one product table (`nutrition_products`) with their origin (the
 database, for example `open_food_facts` or `yazio`, while own products have the
-origin `own`) and the database's fetch date. An EAN that an own product holds
-gets no separate entry: the own product wins, and only its empty fields
-(brand and nutrient values in the same unit) are filled from the database
-result, with the origin of each filled field recorded. Queries first read the
+origin `own`) and the database's fetch date. For an EAN that an own product holds,
+the own product wins: its stored foods stay available to lookups but are not
+listed separately, and a newly created own product takes only its empty fields
+(brand and nutrient values in the same unit) from them, with the origin of each
+filled field recorded. Lookups never change an own product. Queries first read the
 own products, then this mirror, and query Open Food Facts only if
 a match is missing or older than 90 days. If the online fetch is not
 possible, the stored version is used with its date ("Stand vom …", as of …).
