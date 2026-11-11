@@ -37,7 +37,8 @@ function plannedWeekSyncSummary(done, ids, providerLabel) {
     totals.set(job.provider, item);
   }
   const reached = [...totals].map(([provider, item]) => {
-    const sent = item.send ? `${item.send} ${provider === ids.garmin ? "strukturiert" : "gesendet"}` : "";
+    const verb = provider === ids.garmin ? "strukturiert" : "gesendet";
+    const sent = item.send ? `${item.send} ${verb}` : "";
     const notes = provider === ids.intervals && item.notes ? `davon ${item.notes} als Notiz` : "";
     const removed = item.remove ? `${item.remove} alte entfernt` : "";
     return `${providerLabel(provider)}: ${[sent, notes, removed].filter(Boolean).join(", ")}`;
@@ -165,7 +166,8 @@ function plannedLeftoverWeek(item, currentWeekKey, lastWeekKey, weekStart) {
   const day = String(item?.date || "").slice(0, 10);
   const week = day ? weekStart(day) : "";
   if (!week || week < currentWeekKey) return currentWeekKey;
-  return week > lastWeekKey ? lastWeekKey : week;
+  if (week > lastWeekKey) return lastWeekKey;
+  return week;
 }
 
 const CALENDAR_MARKERS = [
@@ -1112,24 +1114,29 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // Leftovers of every provider, deduplicated, keyed by the week whose button removes them.
   function plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey) {
-    const ids = providerIds();
-    const configured = plannedProviderConfiguration();
     const byWeek = new Map();
-    const seen = new Set();
-    for (const entry of Array.isArray(trainingCalendar) ? trainingCalendar : []) {
-      for (const [provider, items] of Object.entries(entry?.push_cleanup || {})) {
-        if (![ids.garmin, ids.intervals, ids.wahoo].includes(provider) || configured[provider] !== true || !Array.isArray(items)) continue;
-        for (const item of items) {
-          const key = provider + ":" + item?.id;
-          if (!item?.id || seen.has(key)) continue;
-          seen.add(key);
-          const week = plannedLeftoverWeek(item, currentWeekKey, lastWeekKey, planWeekStart);
-          if (!byWeek.has(week)) byWeek.set(week, {});
-          (byWeek.get(week)[provider] ||= []).push(item);
-        }
-      }
+    for (const [provider, item] of plannedLeftoverItems(trainingCalendar)) {
+      const week = plannedLeftoverWeek(item, currentWeekKey, lastWeekKey, planWeekStart);
+      const lists = byWeek.get(week) || {};
+      lists[provider] = [...(lists[provider] || []), item];
+      byWeek.set(week, lists);
     }
     return byWeek;
+  }
+
+  // Each configured provider's leftovers once, as [provider, item] pairs.
+  function plannedLeftoverItems(trainingCalendar) {
+    const ids = providerIds();
+    const configured = plannedProviderConfiguration();
+    const providers = new Set([ids.garmin, ids.intervals, ids.wahoo].filter((provider) => configured[provider] === true));
+    const found = new Map();
+    for (const entry of Array.isArray(trainingCalendar) ? trainingCalendar : []) {
+      for (const [provider, items] of Object.entries(entry?.push_cleanup || {})) {
+        if (!providers.has(provider) || !Array.isArray(items)) continue;
+        for (const item of items) if (item?.id) found.set(provider + ":" + item.id, [provider, item]);
+      }
+    }
+    return [...found.values()];
   }
 
   function plannedProviderConfiguration() {

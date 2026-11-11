@@ -225,18 +225,14 @@ def attach_push_state(
     for row, payload in pairs:
         payloads.append(payload)
         digest = plan_push_payload_hash(row["payload"])
-        # A synced run unit whose heart-rate range moved with the threshold HR
-        # (the bpm path of the cap export) is changed too.
-        pending: dict[str, bool] = {
-            ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
-            in _INTERVALS_PENDING
-            or str(row["local_id"]) in resync
-        }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.
         conflicted = str(row["sync_state"] or "") == "conflict"
-        if not conflicted and intervals_event_outdated(payload):
-            pending[ProviderId.INTERVALS.value] = True
+        pending: dict[str, bool] = {
+            ProviderId.INTERVALS.value: _intervals_pending(
+                row, payload, resync, conflicted
+            )
+        }
         fingerprint, blocked = pushable_fingerprint(payload, remembered or {})
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (
@@ -256,6 +252,22 @@ def attach_push_state(
             else []
         )
     _carry_unclaimed_cleanup(lists, payloads, today)
+
+
+def _intervals_pending(
+    row: Any, payload: dict[str, Any], resync: Iterable[str], conflicted: bool
+) -> bool:
+    """Whether Intervals.icu waits for this unit.
+
+    A synced run unit whose heart-rate range moved with the threshold HR (the bpm
+    path of the cap export) is changed too, and so is a unit whose event has
+    another category than it gets now, unless it is in a sync conflict.
+    """
+    return (
+        str(row["sync_state"] or "local") in _INTERVALS_PENDING
+        or str(row["local_id"]) in resync
+        or (not conflicted and intervals_event_outdated(payload))
+    )
 
 
 def _carry_unclaimed_cleanup(
