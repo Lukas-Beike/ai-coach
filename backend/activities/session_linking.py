@@ -85,7 +85,18 @@ def link_activity_sessions(
     bundles = bundle_sessions(records, zone=zone)
     linked = 0
     for bundle in bundles:
-        for primary_id, duplicate_id, kind in _pairs(bundle, session_of):
+        # Pairs with an athlete-deleted session go first: once a copy merged into
+        # another, that one has an alias and can no longer follow the delete.
+        pairs = sorted(
+            _pairs(bundle, session_of),
+            key=lambda pair: (
+                not (
+                    sessions.athlete_deleted(pair[0])
+                    or sessions.athlete_deleted(pair[1])
+                )
+            ),
+        )
+        for primary_id, duplicate_id, kind in pairs:
             if sessions.merge(primary_id, duplicate_id, kind, now):
                 linked += 1
     return linked
@@ -354,6 +365,15 @@ class _Sessions:
             ):
                 other["state"] = ActivitySessionState.DELETED.value
                 other["merged_into_retained"] = gone["merged_into_retained"]
+
+    def athlete_deleted(self, session_id: str) -> bool:
+        """Whether the session that stands for ``session_id`` was athlete-deleted."""
+        row = self.survivor(session_id)
+        return (
+            row is not None
+            and row["state"] == ActivitySessionState.DELETED.value
+            and canonical_store.athlete_deleted_session(self._db, row["activity_id"])
+        )
 
     def _strengthen(self, row: dict[str, Any], link_kind: str, now: str) -> None:
         if _LINK_STRENGTH[link_kind] <= _LINK_STRENGTH[row["link_kind"]]:
