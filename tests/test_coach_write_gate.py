@@ -809,6 +809,8 @@ class RemoteTierTests(unittest.TestCase):
             "Synchronisiere den Plan",
             "Ich habe den Plan geändert, synchronisiere ihn bitte.",
             "Lade die Einheit von meiner Uhr zu Intervals hoch.",
+            "Ich hätte den Plan gerne synchronisiert.",
+            "Ich würde den Plan gerne synchronisiert sehen.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(gate.remote_requested(text))

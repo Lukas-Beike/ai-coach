@@ -420,8 +420,10 @@ def _describes_past(part: str) -> bool:
         for token in tokens
         if _SYNC_VERB.match(token) or token in _SYNC_PARTICIPLES
     ]
+    # Auxiliaries on the unfolded words: "haette"/"wuerde" (a polite request)
+    # must not fold into "hatte"/"wurde".
     return (
-        bool(_PAST_AUXILIARIES.intersection(tokens))
+        bool(_PAST_AUXILIARIES.intersection(re.findall(r"[a-z]+", part)))
         and bool(verbs)
         and all(token in _SYNC_PARTICIPLES for token in verbs)
     )
