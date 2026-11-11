@@ -1784,7 +1784,7 @@ class ServerHttpTests(ServerTestCase):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
             server.key_value_service().set(
-                "last_library_sync_at", "2026-08-31T08:00:00+00:00"
+                "last_library_push_at", "2026-08-31T08:00:00+00:00"
             )
             state = server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
         self.assertEqual(state["state"], "connected")
