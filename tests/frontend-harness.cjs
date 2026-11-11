@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { babelParse, traverse } = require("../node_modules/playwright/lib/transform/babelBundle.js");
+const { babelParse, traverse } = require("../node_modules/playwright/lib/transform/babelBundle.js"); // NOSONAR: issue #2090 asks for the Babel parser Playwright bundles; no other parser is installed.
 
 function readPublic(file) {
   return fs.readFileSync(path.join(__dirname, "../public", file), "utf8").replaceAll("\r\n", "\n");
@@ -18,7 +18,7 @@ function contextFor(globals) {
 // Runs whole public files (one name or a list, in order) and returns the context.
 function loadPublicScript(files, globals = {}) {
   const context = contextFor(globals);
-  for (const file of [files].flat()) new vm.Script(readPublic(file), { filename: file }).runInContext(context);
+  for (const file of [files].flat()) new vm.Script(readPublic(file), { filename: file }).runInContext(context); // NOSONAR: test-only, runs the repository's own public/ files.
   return context;
 }
 
@@ -38,7 +38,7 @@ function extractFunctions(file, names, globals = {}) {
   const nodes = [...new Set(found.values())].sort((a, b) => a.start - b.start);
   const code = [...nodes.map((node) => source.slice(node.start, node.end)), ...names.map((name) => `globalThis.${name} = ${name};`)];
   const context = contextFor(globals);
-  new vm.Script(code.join("\n"), { filename: file }).runInContext(context);
+  new vm.Script(code.join("\n"), { filename: file }).runInContext(context); // NOSONAR: test-only, runs code cut from the repository's own public/ files.
   return context;
 }
 
