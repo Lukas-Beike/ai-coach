@@ -15,7 +15,7 @@ injury risk; no ratio of the two curves is formed.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 from zoneinfo import ZoneInfo
@@ -83,6 +83,10 @@ def complete_before(today: date, synced_at: str | None, timezone: str) -> date:
         return today
 
 
+def _round(value: float | None) -> float | None:
+    return None if value is None else round(value, 1)
+
+
 def _daily_loads(
     summaries: Sequence[ActivitySummary],
     feedback: Mapping[str, Mapping[str, Any]],
@@ -109,18 +113,12 @@ def _daily_loads(
     return days
 
 
-def _reason(valued: Sequence[Any], first: date | None) -> str | None:
+def empty_reason(
+    valued: Sequence[Any], first: date | None, no_input: str
+) -> str | None:
     if valued:
         return None
-    return "warmup" if first else "no_sessions"
-
-
-def _no_history_days(start: date, last: date) -> list[dict[str, Any]]:
-    return [
-        {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
-        | {name: None for name in TAUS}
-        for day in (start + timedelta(days=i) for i in range((last - start).days + 1))
-    ]
+    return "warmup" if first else no_input
 
 
 def _day_load(
@@ -134,40 +132,39 @@ def _day_load(
     return 0.0, STATE_REST
 
 
-def _walk(
-    loads: Mapping[str, float | None],
-    first: date,
+def ewma_walk(
+    taus: Mapping[str, int],
+    day_load: Callable[[date], tuple[float | None, str]],
+    first: date | None,
     start: date,
     end: date,
-    open_from: date,
-) -> list[dict[str, Any]]:
-    """Run both recursions from ``first`` and list the days of ``start``..``end``."""
-    state = {name: 0.0 for name in TAUS}
-    days: list[dict[str, Any]] = []
+) -> Iterator[tuple[date, str, float | None, dict[str, float | None]]]:
+    """Yield unrounded (day, state, load, values) from ``start``; ``first`` is the first load day."""
+    idle_end = end if first is None else first - timedelta(days=1)
+    for i in range((idle_end - start).days + 1):
+        yield start + timedelta(days=i), STATE_NO_HISTORY, None, dict.fromkeys(taus)
+    if first is None:
+        return
+    state = dict.fromkeys(taus, 0.0)
     for offset in range((end - first).days + 1):
         cursor = first + timedelta(days=offset)
-        load, kind = _day_load(loads, cursor, open_from)
+        load, kind = day_load(cursor)
         if load is not None:
-            for name, tau in TAUS.items():
+            for name, tau in taus.items():
                 decay = math.exp(-1 / tau)
                 state[name] = decay * state[name] + (1 - decay) * load
-        if cursor < start:
-            continue
-        values = {
-            name: None
-            if load is None or offset < WARMUP_TAUS * tau
-            else round(state[name], 1)
-            for name, tau in TAUS.items()
-        }
-        days.append(
-            {
-                "date": cursor.isoformat(),
-                "state": kind,
-                "load": None if load is None else round(load, 1),
-                **values,
-            }
-        )
-    return days
+        if cursor >= start:
+            yield (
+                cursor,
+                kind,
+                load,
+                {
+                    name: None
+                    if load is None or offset < WARMUP_TAUS * tau
+                    else state[name]
+                    for name, tau in taus.items()
+                },
+            )
 
 
 def smoothed_session_load(
@@ -191,9 +188,14 @@ def smoothed_session_load(
         summaries, feedback, history_start(start, today), end, timezone
     )
     first = date.fromisoformat(min(loads)) if loads else None
-    days = _no_history_days(start, end if first is None else first - timedelta(days=1))
-    if first is not None:
-        days += _walk(loads, first, start, end, complete_before or today)
+    open_from = complete_before or today
+    days = [
+        {"date": day.isoformat(), "state": kind, "load": _round(load)}
+        | {name: _round(value) for name, value in values.items()}
+        for day, kind, load, values in ewma_walk(
+            TAUS, lambda day: _day_load(loads, day, open_from), first, start, end
+        )
+    ]
     valued = [
         day for day in days if day["short"] is not None or day["long"] is not None
     ]
@@ -207,7 +209,7 @@ def smoothed_session_load(
         "method_version": METHOD_VERSION,
         "unit": UNIT,
         "status": "estimate" if valued else "insufficient_data",
-        "reason": _reason(valued, first),
+        "reason": empty_reason(valued, first, "no_sessions"),
         "period": {
             "start": start.isoformat(),
             "end": end.isoformat(),

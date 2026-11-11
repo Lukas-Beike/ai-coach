@@ -4,10 +4,13 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import Mock
 
+from support import GOLDEN_FIRST, golden_history
+
 import server
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.progress_report import weekly_progress
 from backend.performance.report_service import TrainingReportReadService
 from tests.test_training_report import (
     _FakeDatabaseManager,
@@ -309,6 +312,34 @@ class WeeklyProgressTests(unittest.TestCase):
     def test_report_section_keeps_its_windows(self):
         with self.assertRaises(AppError):
             self._service().read({"days": 42})
+
+    def test_golden_fitness_window_of_the_progress_report(self):
+        sessions, feedback, loads = golden_history()
+        result = weekly_progress(
+            start=GOLDEN_FIRST + timedelta(days=102),
+            weeks=4,
+            today=GOLDEN_FIRST + timedelta(days=129),
+            sport="all",
+            timezone="UTC",
+            activity_summaries=sessions,
+            session_feedback=feedback,
+            local_load_days=loads,
+            observed_at="2026-05-05T07:00:00+00:00",
+        )
+        self.assertEqual(
+            result["ctl"],
+            {
+                "status": "ok",
+                "first": {"date": "2026-04-13", "value": 46.1},
+                "last": {"date": "2026-05-09", "value": 49.0},
+                "change": 2.9,
+                "observations": 25,
+                "source": "Lokal berechnet (M7)",
+                "method_id": "local-fitness-fatigue",
+                "method_version": 1,
+            },
+        )
+        self.assertEqual(result["effective_end"], "2026-05-10")
 
 
 class ProgressToolTests(unittest.TestCase):

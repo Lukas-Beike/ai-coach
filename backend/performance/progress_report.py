@@ -22,10 +22,9 @@ from backend.activities.session_purpose import summary_is_commute
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.performance.comparable_sessions import equal_effort_trend
-from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_fatigue
+from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_window
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
-from backend.performance.smoothed_load import complete_before
 from backend.performance.training_report import metric_sum, valid_zones
 from backend.performance.zone_time_reads import LOCAL_MODEL, zone_model
 
@@ -435,14 +434,14 @@ def weekly_progress(
     # a non-empty later half.
     started_weeks = min(weeks, (effective_end - start).days // 7 + 1)
     middle = start + timedelta(weeks=started_weeks // 2)
-    fitness = local_fitness_fatigue(
-        local_load_days or {},
+    fitness = local_fitness_window(
+        local_load_days,
         in_window,
-        session_feedback or {},
+        session_feedback,
         start=start,
         end=effective_end,
         today=today,
-        complete_before=complete_before(today, observed_at, timezone),
+        synced_at=observed_at,
         timezone=timezone,
     )
     ctl = _first_last(

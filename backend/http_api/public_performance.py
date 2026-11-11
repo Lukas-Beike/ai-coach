@@ -19,7 +19,7 @@ from backend.performance.canonical_inputs import (
     with_read_status,
 )
 from backend.performance.chart_history import analysis_history
-from backend.performance.fitness_fatigue import local_fitness_fatigue
+from backend.performance.fitness_fatigue import local_fitness_window
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.session_rpe_load import (
     FeedbackLookup,
@@ -191,14 +191,14 @@ class PublicPerformanceStateService:
                 timezone=timezone,
                 computed_at=computed_at,
             ),
-            "local_fitness_fatigue": local_fitness_fatigue(
-                inputs.local_load_days or {},
+            "local_fitness_fatigue": local_fitness_window(
+                inputs.local_load_days,
                 summaries,
                 feedback,
                 start=start,
                 end=today,
                 today=today,
-                complete_before=open_from,
+                synced_at=inputs.activities_synced_at,
                 timezone=timezone,
                 computed_at=computed_at,
             ),

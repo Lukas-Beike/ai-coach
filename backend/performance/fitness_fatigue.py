@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Any, Final
 
 from backend.canonical.activity_summary import (
@@ -34,6 +34,12 @@ from backend.canonical.activity_summary import (
 from backend.performance.local_tss import METHOD_ID as LOAD_METHOD_ID
 from backend.performance.local_tss import METHOD_VERSION as LOAD_METHOD_VERSION
 from backend.performance.session_rpe_load import session_load
+from backend.performance.smoothed_load import (
+    WARMUP_TAUS,
+    complete_before,
+    empty_reason,
+    ewma_walk,
+)
 
 METRIC_ID: Final = "local_fitness_fatigue"
 METHOD_ID: Final = "local-fitness-fatigue"
@@ -44,7 +50,6 @@ EVIDENCE_CARD: Final = "docs/performance-methods/m7-local-fitness-fatigue.md"
 SOURCE_LABEL: Final = "Lokal berechnet (M7)"
 FITNESS_TAU_DAYS: Final = 42
 FATIGUE_TAU_DAYS: Final = 7
-WARMUP_TAUS: Final = 2
 METHOD_NOTE: Final = (
     "Fitness (tau 42 d), fatigue (tau 7 d) and form (fitness minus fatigue) from "
     "the local TSS-scale session load of the whole stored history. Starts at 0 "
@@ -145,51 +150,6 @@ def _row(
     return row
 
 
-def _walk(
-    loads: Mapping[str, float],
-    missing: Mapping[str, tuple[int, list[float]]],
-    first: date,
-    start: date,
-    end: date,
-    open_from: date,
-) -> list[dict[str, Any]]:
-    """Run both recursions from ``first`` and list the days of ``start``..``end``."""
-    state = {name: 0.0 for name in TAUS}
-    days: list[dict[str, Any]] = []
-    for offset in range((end - first).days + 1):
-        cursor = first + timedelta(days=offset)
-        load, kind = _day(cursor, loads, missing, open_from)
-        if load is not None:
-            for name, tau in TAUS.items():
-                decay = math.exp(-1 / tau)
-                state[name] = decay * state[name] + (1 - decay) * load
-        if cursor < start:
-            continue
-        values = {
-            name: None if load is None or offset < WARMUP_TAUS * tau else state[name]
-            for name, tau in TAUS.items()
-        }
-        days.append(_row(cursor, kind, load, values, missing.get(cursor.isoformat())))
-    return days
-
-
-def _no_history_days(
-    start: date, last: date, missing: Mapping[str, tuple[int, list[float]]]
-) -> list[dict[str, Any]]:
-    """Days before the first load day; sessions without a load still mark them."""
-    empty = {"fitness": None, "fatigue": None}
-    return [
-        _row(day, STATE_NO_HISTORY, None, empty, missing.get(day.isoformat()))
-        for day in (start + timedelta(days=i) for i in range((last - start).days + 1))
-    ]
-
-
-def _reason(valued: Sequence[Any], first: date | None) -> str | None:
-    if valued:
-        return None
-    return "warmup" if first else "no_load"
-
-
 def local_fitness_fatigue(
     loads: Mapping[str, float],
     summaries: Sequence[ActivitySummary],
@@ -212,11 +172,13 @@ def local_fitness_fatigue(
     missing = _without_load(summaries, feedback, start, end, timezone)
     loaded_days = [day for day, value in loads.items() if day <= end.isoformat()]
     first = date.fromisoformat(min(loaded_days)) if loaded_days else None
-    days = _no_history_days(
-        start, end if first is None else first - timedelta(days=1), missing
-    )
-    if first is not None:
-        days += _walk(loads, missing, first, start, end, complete_before or today)
+    open_from = complete_before or today
+    days = [
+        _row(day, kind, load, values, missing.get(day.isoformat()))
+        for day, kind, load, values in ewma_walk(
+            TAUS, lambda day: _day(day, loads, missing, open_from), first, start, end
+        )
+    ]
     valued = [
         day for day in days if day["fitness"] is not None or day["fatigue"] is not None
     ]
@@ -227,7 +189,7 @@ def local_fitness_fatigue(
         "method_version": METHOD_VERSION,
         "unit": UNIT,
         "status": "estimate" if valued else "insufficient_data",
-        "reason": _reason(valued, first),
+        "reason": empty_reason(valued, first, "no_load"),
         "period": {
             "start": start.isoformat(),
             "end": end.isoformat(),
@@ -257,3 +219,25 @@ def local_fitness_fatigue(
         "latest": valued[-1] if valued else None,
         "days": days,
     }
+
+
+def local_fitness_window(
+    load_days: Mapping[str, float] | None,
+    summaries: Sequence[ActivitySummary],
+    feedback: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    today: date,
+    synced_at: str | None,
+    timezone: str,
+    **window: Any,
+) -> dict[str, Any]:
+    """The curve of a served window; the days from the activities' sync time are open."""
+    return local_fitness_fatigue(
+        load_days or {},
+        summaries,
+        feedback or {},
+        today=today,
+        complete_before=complete_before(today, synced_at, timezone),
+        timezone=timezone,
+        **window,
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -9,6 +10,7 @@ import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -468,3 +470,91 @@ def mark_tables_serving(server) -> None:
         server.KEY_VALUE_REPOSITORY.set(
             db, BACKFILL_STATE_KEY, json.dumps({"completed_once": True})
         )
+
+
+# Synthetic 130-day history of the golden M5 and M7 tests; no real data.
+GOLDEN_FIRST = date(2026, 1, 1)
+
+
+def golden_history() -> tuple[list[Any], dict[str, Any], dict[str, float]]:
+    """Sessions, feedback by session key and local load by day.
+
+    Rides on all days from offset 4 but each 7th and a break at 126-127; 40, 41
+    and 95 are unrated; strength sessions without a load sit on 20, 52 and 90.
+    """
+    sessions: list[Any] = []
+    feedback: dict[str, Any] = {}
+    loads: dict[str, float] = {}
+
+    def add(key: str, offset: int, minutes: float, **fields: Any) -> str:
+        day = (GOLDEN_FIRST + timedelta(days=offset)).isoformat()
+        sessions.append(
+            {
+                "id": key,
+                "started_at": f"{day}T07:00:00+00:00",
+                "started_at_local": f"{day}T09:00:00",
+                "sport": "ride",
+                "name": "Synthetic ride",
+                "sources": {},
+                "record_ids": {},
+                "elapsed_duration_s": minutes * 60,
+                **fields,
+            }
+        )
+        return day
+
+    for offset in range(4, 130):
+        if offset % 7 == 3 or offset in (126, 127):
+            continue
+        load = round(35 + (offset * 13) % 50 + 0.37 * (offset % 5), 2)
+        day = add(f"s{offset}", offset, 30 + (offset * 17) % 75, training_load=load)
+        loads[day] = load
+        if offset not in (40, 41, 95):
+            feedback[f"s{offset}"] = {"session_rpe": 3 + (offset * 5) % 6}
+    for offset in (20, 52, 90):
+        add(f"g{offset}", offset, 45, sport="strength")
+    feedback["g20"] = {"session_rpe": 6}
+    feedback["g52"] = {"session_rpe": 7}
+    return sessions, feedback, loads
+
+
+def golden_window(start_offset: int) -> dict[str, Any]:
+    """Window of the golden tests; the last days without a session are open."""
+    return {
+        "start": GOLDEN_FIRST + timedelta(days=start_offset),
+        "end": GOLDEN_FIRST + timedelta(days=129),
+        "today": GOLDEN_FIRST + timedelta(days=129),
+        "complete_before": GOLDEN_FIRST + timedelta(days=125),
+        "timezone": "UTC",
+        "computed_at": "2026-05-10T08:00:00+00:00",
+    }
+
+
+def golden_lookup(feedback: dict[str, Any]) -> Any:
+    """A session-feedback lookup over the golden feedback."""
+    return lambda keys: [
+        {"activity_id": key, **feedback[key]} for key in keys if key in feedback
+    ]
+
+
+def flat(row: dict[str, Any]) -> tuple[Any, ...]:
+    """A day row's values in key order, the date as an offset from the first day."""
+    values = list(row.values())
+    values[0] = (date.fromisoformat(values[0]) - GOLDEN_FIRST).days
+    return tuple(values)
+
+
+def golden_rows(text: str) -> list[tuple[Any, ...]]:
+    """Rows ``offset,state,value,...`` separated by ``;``; ``-`` is None."""
+
+    def value(cell: str) -> Any:
+        return None if cell == "-" else float(cell) if "." in cell else int(cell)
+
+    rows = (cell.strip().split(",") for cell in text.split(";"))
+    return [(int(row[0]), row[1], *map(value, row[2:])) for row in rows if row[1:]]
+
+
+def payload_digest(value: Any) -> str:
+    """SHA-256 of a payload as canonical JSON, to pin a whole payload by value."""
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()
