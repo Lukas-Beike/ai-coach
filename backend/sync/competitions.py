@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 from urllib.error import HTTPError
 
@@ -19,6 +20,10 @@ from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.observability import Redactor
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
+from backend.providers.intervals_client import (
+    COMPETITION_DAYS_AHEAD,
+    COMPETITION_DAYS_BACK,
+)
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 from backend.runtime.events import StateEventBuffer
 from backend.sync.authority import competition_push_manifest
@@ -119,10 +124,13 @@ class CompetitionSyncReconciler:
         local_rows: list[dict[str, Any]],
         *,
         now: str,
+        fetched: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         indexes = self._remote_indexes(plan, pushed)
         with self._database_manager.unit_of_work() as db:
-            conflicts = self._synchronize_existing(db, local_rows, indexes, now)
+            conflicts = self._synchronize_existing(
+                db, local_rows, indexes, now, fetched
+            )
         return {"conflicts": conflicts, "remote_events": indexes["remote_events"]}
 
     @staticmethod
@@ -244,12 +252,21 @@ class CompetitionSyncReconciler:
         return 0
 
     def _reconcile_synced(
-        self, db: Any, row: dict[str, Any], remote: dict[str, Any] | None, now: str
+        self,
+        db: Any,
+        row: dict[str, Any],
+        remote: dict[str, Any] | None,
+        now: str,
+        fetched: tuple[str, str] | None,
     ) -> int:
         """Flag a clean linked competition whose Intervals.icu event is gone.
 
         Intervals.icu is output only, so a clean row never takes remote values.
+        A race outside the fetched calendar window is not missing, only unread.
         """
+        day = str(row.get("event_date") or "")[:10]
+        if fetched is not None and not fetched[0] <= day <= fetched[1]:
+            return 0
         if remote is None and row.get("intervals_event_id"):
             self._record_conflict(db, row, now, self._remote_missing_conflict(now))
             return 1
@@ -261,6 +278,7 @@ class CompetitionSyncReconciler:
         local_rows: list[dict[str, Any]],
         indexes: dict[str, Any],
         now: str,
+        fetched: tuple[str, str] | None,
     ) -> int:
         conflicts = 0
         for row in local_rows:
@@ -276,7 +294,7 @@ class CompetitionSyncReconciler:
                     db, row, remote, identity_remote, external_id, now
                 )
             else:
-                conflicts += self._reconcile_synced(db, row, remote, now)
+                conflicts += self._reconcile_synced(db, row, remote, now, fetched)
         return conflicts
 
     @staticmethod
@@ -382,10 +400,7 @@ class CompetitionSyncService:
             )
             now = self._now()
             reconciled = self._reconciler.reconcile(
-                plan,
-                pushed,
-                local_rows,
-                now=now,
+                plan, pushed, local_rows, now=now, fetched=self._fetched_window()
             )
             self._set_kv("last_competition_sync_at", now)
             self._set_kv("last_competition_sync_error", "")
@@ -469,6 +484,14 @@ class CompetitionSyncService:
                     _skipped_deletion(labels.get(str(row["id"])) or {}, event, reason)
                 )
         return identifiers, skipped
+
+    def _fetched_window(self) -> tuple[str, str]:
+        """Days surely inside the fetched calendar; one day spare for the time zone."""
+        today = self._competition_service.today()
+        return (
+            (today - timedelta(days=COMPETITION_DAYS_BACK - 1)).isoformat(),
+            (today + timedelta(days=COMPETITION_DAYS_AHEAD - 1)).isoformat(),
+        )
 
     @staticmethod
     def _read_event(client: Any, event_id: str) -> dict[str, Any] | None:

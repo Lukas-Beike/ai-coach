@@ -506,6 +506,18 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
     def test_authorized_sync_deletes_tombstones_and_upserts_outbound(self):
         row = self.local_competition("local-push")
         self.insert_competition(row)
+        # A synced race outside the fetched window is unread, not missing (#2135).
+        for local_id, event_date in (("old", "2024-09-01"), ("recent", "2026-05-01")):
+            self.insert_competition(
+                self.local_competition(
+                    local_id,
+                    event_date=event_date,
+                    intervals_event_id=f"remote-{local_id}",
+                    external_id=f"external-{local_id}",
+                    sync_dirty=0,
+                    sync_state="synced",
+                )
+            )
         self.insert_tombstone("tombstone", "remote-delete", None, "created")
         remote = self.remote_event(
             "remote-created",
@@ -525,6 +537,9 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(result["deleted_remote"], 1)
         self.assertEqual(self.reconciler.records()[0], [])
         self.assertEqual(self.stored_competition("local-push")["sync_state"], "synced")
+        self.assertEqual(self.stored_competition("old")["sync_state"], "synced")
+        self.assertEqual(self.stored_competition("recent")["sync_state"], "conflict")
+        self.assertEqual(result["conflicts"], 1)
 
     def test_linked_unsupported_sport_edit_stays_dirty_and_survives_refresh(self):
         row = self.local_competition(

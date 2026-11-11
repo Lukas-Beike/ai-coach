@@ -20,6 +20,11 @@ FOLDER_NAME = "Pacecraft"
 LEGACY_FOLDER_NAME = "Intervals Coach"
 
 
+# Calendar window of fetch_competition_events, in days around today.
+COMPETITION_DAYS_BACK = 365
+COMPETITION_DAYS_AHEAD = 730
+
+
 class IntervalsClient:
     def __init__(
         self,
@@ -240,8 +245,8 @@ class IntervalsClient:
         result = self.get_paged_collection(
             f"/athlete/{athlete}/events",
             {
-                "oldest": (today - timedelta(days=365)).isoformat(),
-                "newest": (today + timedelta(days=730)).isoformat(),
+                "oldest": (today - timedelta(days=COMPETITION_DAYS_BACK)).isoformat(),
+                "newest": (today + timedelta(days=COMPETITION_DAYS_AHEAD)).isoformat(),
             },
             "competition_events",
         )
