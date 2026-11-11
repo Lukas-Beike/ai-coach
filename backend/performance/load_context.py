@@ -11,9 +11,8 @@ from typing import Any, Final
 from backend.activities.sync_time import activities_synced_at
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_fatigue
+from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_window
 from backend.performance.load import SessionFeedback
-from backend.performance.smoothed_load import complete_before
 from backend.runtime.ports import LocalLoadDayReader
 
 LOCAL_LOAD_SOURCE: Final = SOURCE_LABEL
@@ -39,16 +38,14 @@ def read_local_fitness(
     """
     days = reader.local_load_days(db) if isinstance(reader, LocalLoadDayReader) else {}
     coverage = reader if callable(getattr(reader, "coverage", None)) else None
-    return local_fitness_fatigue(
+    return local_fitness_window(
         days,
         (),
-        {},
+        None,
         start=start,
         end=end,
         today=today,
-        complete_before=complete_before(
-            today, activities_synced_at(coverage, db), timezone
-        ),
+        synced_at=activities_synced_at(coverage, db),
         timezone=timezone,
     )
 
@@ -63,16 +60,14 @@ def local_fitness_curve(
     days: int = CURRENT_DAYS,
 ) -> dict[str, Any]:
     """The local fitness, fatigue and form (M7) of the last ``days`` days."""
-    return local_fitness_fatigue(
-        canonical.local_load_days or {},
+    return local_fitness_window(
+        canonical.local_load_days,
         activities,
-        session_feedback or {},
+        session_feedback,
         start=today - timedelta(days=days - 1),
         end=today,
         today=today,
-        complete_before=complete_before(
-            today, canonical.activities_synced_at, timezone
-        ),
+        synced_at=canonical.activities_synced_at,
         timezone=timezone,
     )
 

@@ -15,7 +15,7 @@ from backend.activities.activity_summary import (
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
-from backend.performance.fitness_fatigue import local_fitness_fatigue
+from backend.performance.fitness_fatigue import local_fitness_window
 from backend.performance.session_rpe_load import session_rpe_load
 from backend.performance.smoothed_load import complete_before, smoothed_session_load
 from backend.performance.zone_time_reads import (
@@ -159,7 +159,7 @@ def _load_curves(
     start: date,
     end: date,
     today: date,
-    open_from: date,
+    observed_at: str | None,
     timezone: str,
     computed_at: str | None,
 ) -> dict[str, Any]:
@@ -170,14 +170,18 @@ def _load_curves(
         "start": start,
         "end": end,
         "today": today,
-        "complete_before": open_from,
         "timezone": timezone,
         "computed_at": computed_at,
     }
     return {
-        "smoothed_session_load": smoothed_session_load(history, feedback, **window),
-        "local_fitness_fatigue": local_fitness_fatigue(
-            load_days, current, feedback, **window
+        "smoothed_session_load": smoothed_session_load(
+            history,
+            feedback,
+            complete_before=complete_before(today, observed_at, timezone),
+            **window,
+        ),
+        "local_fitness_fatigue": local_fitness_window(
+            load_days, current, feedback, synced_at=observed_at, **window
         ),
     }
 
@@ -282,7 +286,7 @@ def training_report(
             start=start,
             end=effective_end,
             today=today,
-            open_from=complete_before(today, observed_at, timezone),
+            observed_at=observed_at,
             timezone=timezone,
             computed_at=computed_at,
         ),
