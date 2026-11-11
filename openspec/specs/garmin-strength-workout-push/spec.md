@@ -52,7 +52,7 @@ The calendar list SHALL show one sync action on each future, not yet completed p
 
 #### Scenario: Pending structured strength unit
 - **WHEN** a future strength unit with a structure is neither synced to Intervals.icu nor pushed to Garmin in its current version
-- **THEN** its calendar card shows "Synchronisieren", and a click queues an Intervals.icu and a Garmin `plan_push` job for it without opening the card.
+- **THEN** its opened calendar card shows "Synchronisieren", and a click queues an Intervals.icu and a Garmin `plan_push` job for it.
 
 #### Scenario: Intervals.icu receives a note
 - **WHEN** a strength unit is pushed to Intervals.icu
