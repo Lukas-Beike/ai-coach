@@ -1,13 +1,17 @@
 """Server integration tests for http."""
 
+import ast
+import http.client
 import json
 import queue
+import re
 import tempfile
 import threading
 import unittest
 from dataclasses import replace
 from datetime import datetime as _local_datetime
 from datetime import timedelta
+from http.server import ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,9 +43,85 @@ from backend.providers import openai as openai_provider
 from backend.providers import weather as weather_provider
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+
+# Routes that answer without a session, by design: health, readiness, login
+# state, login/logout, the password-checked restore upload and the Wahoo OAuth
+# redirect, whose single-use state is its credential.
+PUBLIC_API_ROUTES = frozenset(
+    {
+        ("GET", "/api/health"),
+        ("GET", "/api/readiness"),
+        ("GET", "/api/auth/status"),
+        ("GET", "/api/wahoo/callback"),
+        ("POST", "/api/login"),
+        ("POST", "/api/logout"),
+        ("POST", "/api/privacy/restore"),
+    }
+)
+
+
+# Matches every id pattern of the routes: [^/]+ and the hex job ids.
+SAMPLE_ID = "abc-123"
+
+
+def _api_route_paths() -> set[str]:
+    """Every API path the route owners name, with a sample id for path patterns."""
+    paths = {path for path, _provider in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()}
+    for module in (Path(server.__file__).parent / "backend" / "http_api").glob("*.py"):
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
+            value = (
+                str(node.value).strip("^$") if isinstance(node, ast.Constant) else ""
+            )
+            if value.startswith("/api/"):
+                paths.add(re.sub(r"\(.*?\)", SAMPLE_ID, value).rstrip("/"))
+    paths.discard("/api")
+    return paths | {f"{path}/{SAMPLE_ID}" for path in paths}
 
 
 class ServerHttpTests(ServerTestCase):
+    def test_every_api_route_rejects_a_request_without_session(self):
+        auth = http_auth.SessionAuthService(
+            Mock(),
+            threading.RLock(),
+            replace(server.CONFIG, app_password="synthetic-password-123"),
+            True,
+            RateLimiter(),
+        )
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), server.HTTP_API.request_handler_class()
+        )
+        self.addCleanup(httpd.server_close)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        paths = _api_route_paths()
+        self.assertIn("/api/bootstrap", paths)
+        statuses = {}
+        with patch.object(server, "get_session_auth_service", return_value=auth):
+            for method in ("GET", "POST", "PUT"):
+                for path in sorted(paths):
+                    if (method, path) in PUBLIC_API_ROUTES:
+                        continue
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", httpd.server_address[1], timeout=10
+                    )
+                    connection.request(
+                        method, path, body=b"{}" if method != "GET" else None
+                    )
+                    statuses[method, path] = connection.getresponse().status
+                    connection.close()
+        self.assertEqual(401, statuses["GET", "/api/bootstrap"])
+        self.assertEqual(401, statuses["GET", f"/api/activities/{SAMPLE_ID}"])
+        self.assertEqual(
+            [],
+            [
+                f"{route}: {status}"
+                for route, status in statuses.items()
+                if status not in {401, 404}
+            ],
+            "API routes answered without a session",
+        )
+
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
         for method in ("GET", "POST", "PUT"):
             with self.subTest(method=method):
@@ -511,7 +591,8 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -520,7 +601,7 @@ class ServerHttpTests(ServerTestCase):
                 "upcoming_calendar": [
                     {"name": "Locker", "start_date_local": f"{today}T08:00:00"}
                 ],
-            }
+            },
         )
         server.ATHLETE_DATA.checkin().save({"checkin_date": today, "motivation": 8})
         state = server.PUBLIC_STATE.state_service().read(local_only=True)
@@ -686,7 +767,8 @@ class ServerHttpTests(ServerTestCase):
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -700,7 +782,7 @@ class ServerHttpTests(ServerTestCase):
                     }
                     for index in range(500)
                 ],
-            }
+            },
         )
         for index in range(500):
             server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
@@ -1082,7 +1164,8 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_provider_calendar_window(self):
         today = server.ATHLETE_CLOCK.now().date()
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -1095,7 +1178,7 @@ class ServerHttpTests(ServerTestCase):
                         "end": (today + timedelta(days=20)).isoformat(),
                     }
                 },
-            }
+            },
         )
         state = server.PUBLIC_STATE.state_service().read(local_only=True)
         self.assertEqual(
