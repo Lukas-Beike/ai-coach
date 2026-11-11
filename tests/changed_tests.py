@@ -60,6 +60,11 @@ HEAVY_MODULES = {
         "scripts/run_sqlcipher_tests.py",
         "tests/run_sqlcipher_tests.ps1",
         "tests/fixtures/quality_baseline.json",
+        # Required members of the container suite it checks.
+        "tests/test_container_delivery.py",
+        "tests/test_db_manager.py",
+        "tests/test_security_resource_limits.py",
+        "tests/test_session_auth_cache.py",
         "tests/run_tests.py",
         "tests/changed_tests.py",
         "tests/test_durations.json",
