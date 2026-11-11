@@ -164,6 +164,7 @@ from backend.diagnostics.assembly import (
     DiagnosticRuntimeDependencies,
     DiagnosticsAssembly,
 )
+from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import (
     INTERNAL_SERVER_ERROR,
     AppError,  # noqa: F401 - compatibility export for tests
@@ -885,6 +886,10 @@ def cancel_running_coach_turns() -> None:
     return COACH_CONVERSATION.reset_service().cancel_running_turns()
 
 
+def server_log_files() -> RecentLogEntriesService:
+    return DIAGNOSTICS_ASSEMBLY.recent_log_entries_service()
+
+
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
@@ -915,6 +920,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
             disconnect_wahoo=lambda: disconnect_wahoo_grant(),
             cancel_coach_turns=cancel_running_coach_turns,
+            log_files=server_log_files,
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
