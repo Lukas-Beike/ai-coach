@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+from backend.change_history import RETENTION_DAYS
 from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
@@ -16,6 +17,14 @@ from backend.db.schema import (
 )
 
 LOGGER = logging.getLogger("intervals_coach")
+
+
+# The change-history references a receipt's tool steps carry (``turn_changes``).
+_UNDO_REFERENCES = (
+    "SELECT 1 FROM json_each(receipt, '$.command_receipts') AS step, "
+    "json_each(CASE WHEN step.type = 'object' THEN step.value ELSE '{}' END, "
+    "'$.changes') AS change WHERE 1"
+)
 
 
 def apply_startup_invariants(
@@ -82,14 +91,20 @@ def initialize_application_database(
             (cutoff,),
         ).rowcount
         # Receipts hold copies of the chat; a turn whose changes can still be
-        # undone keeps its receipt, which is the only place that lists them.
+        # undone keeps its receipt, which is the only place that lists them. It
+        # can be undone only while every change-history row it names is kept
+        # and inside the history's retention window (#2134, K-003).
+        history_cutoff = (current_time - timedelta(days=RETENTION_DAYS)).isoformat()
         commands_deleted = db.execute(
             "DELETE FROM coach_commands WHERE status='completed' AND created_at < ? "
             "AND NOT CASE WHEN json_valid(receipt) THEN "
             "COALESCE(json_extract(receipt, '$.change_summary.undoable') = 1 "
             "AND json_extract(receipt, '$.change_summary.undone_at') IS NULL, 0) "
+            f"AND EXISTS ({_UNDO_REFERENCES}) "
+            f"AND NOT EXISTS ({_UNDO_REFERENCES} AND json_extract(change.value, '$.id') "
+            "NOT IN (SELECT id FROM change_history WHERE created_at >= ?)) "
             "ELSE 0 END",
-            (cutoff,),
+            (cutoff, history_cutoff),
         ).rowcount
         artifacts_deleted = db.execute(
             "DELETE FROM coach_plan_artifacts WHERE status <> 'draft' "
