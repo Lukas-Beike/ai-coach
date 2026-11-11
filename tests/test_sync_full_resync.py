@@ -17,7 +17,7 @@ from support import temp_database
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
@@ -202,15 +202,12 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(caught.exception.message, "Unbekannte Anbindung.")
 
-    def test_garmin_without_configuration_uses_existing_message(self):
+    def test_garmin_without_configuration_uses_the_shared_message(self):
         self.garmin_service.configured = lambda: False
         with self.assertRaises(AppError) as caught:
             self.service.resync("garmin")
         self.assertEqual(caught.exception.status, 503)
-        self.assertEqual(
-            caught.exception.message,
-            "Garmin ist nicht konfiguriert oder nicht verfügbar.",
-        )
+        self.assertEqual(caught.exception.message, GARMIN_NOT_CONFIGURED_MESSAGE)
         self.assertFalse(self.garmin_gate.is_resetting())
 
     def test_garmin_receives_full_days_reason_and_operation_id(self):

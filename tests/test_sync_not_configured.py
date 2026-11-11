@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
+from backend.providers.descriptors import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
@@ -23,7 +24,7 @@ except ImportError:
     from architecture_registry import BACKEND_ROOT
 
 NOT_CONFIGURED_CONSTANTS = frozenset(
-    {"INTERVALS_API_KEY_ERROR", "OPENAI_API_KEY_ERROR", "GARMIN_NOT_CONFIGURED_ERROR"}
+    {"INTERVALS_API_KEY_ERROR", "OPENAI_API_KEY_ERROR", "GARMIN_NOT_CONFIGURED_MESSAGE"}
 )
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
 
@@ -68,8 +69,8 @@ def _garmin_not_configured() -> None:
     GarminSyncService._configuration_error(
         Mock(),
         "not_configured",
-        "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.",
-        "GARMIN_EMAIL oder ein bestehender GARMINTOKENS-Tokenstore ist nicht konfiguriert.",
+        GARMIN_NOT_CONFIGURED_MESSAGE,
+        GARMIN_NOT_CONFIGURED_MESSAGE,
         reason="not_configured",
     )
 
