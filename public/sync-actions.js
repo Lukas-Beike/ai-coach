@@ -82,7 +82,7 @@ function fullResyncButtonSelector(source) {
   return `#${source}FullResyncButton`;
 }
 
-// Wahoo's full resync re-reads the last 90 days and deletes nothing; the wording must say so.
+// A full resync re-reads from the provider and deletes no local data beyond what the provider dropped.
 function fullResyncConfirmation(source, providerLabel) {
   if (source === providerIds().wahoo) {
     return {
@@ -90,10 +90,10 @@ function fullResyncConfirmation(source, providerLabel) {
       message: `Die ${providerLabel}-Einheiten der letzten 90 Tage werden erneut aus ${providerLabel} geladen. Lokal gespeicherte Einheiten werden nicht gelöscht; ${providerLabel} wird nicht verändert.`,
     };
   }
-  // The destructive branch requires the athlete to type the provider name before local data is deleted.
+  // Garmin reads its whole history, so the athlete types the provider name before it starts.
   return {
     title: `${providerLabel}-Daten vollständig neu laden?`,
-    message: `Alle lokal gespeicherten ${providerLabel}-Daten löschen und vollständig neu laden? Die Daten in ${providerLabel} bleiben unverändert.`,
+    message: `Alle ${providerLabel}-Daten werden erneut aus ${providerLabel} geladen. Lokale Daten bleiben erhalten; nur in ${providerLabel} gelöschte Einheiten werden auch hier entfernt. ${providerLabel} wird nicht verändert.`,
     expectedText: providerLabel,
   };
 }
