@@ -35,7 +35,7 @@ async function renderSyntheticCalendar(page) {
   });
 }
 
-test("@responsive compact calendar week collapses past days, groups repeats and keeps one conflict style", async ({ page, request }, testInfo) => {
+test("@responsive compact calendar week shows one week, groups repeats and keeps one conflict style", async ({ page, request }, testInfo) => {
   await openCalendar(page, request);
   const days = await renderSyntheticCalendar(page);
   // The week view shows one week: a past day keeps its units as cards; a missed unit shows its execution.
