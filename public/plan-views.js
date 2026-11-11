@@ -1347,7 +1347,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // the Coach analyses it in one athlete-started turn; "Feedback" opens the rating and session dialog.
   // The Coach message names the session by date, sport, time, duration and its local id; the stored
   // name never becomes Coach input.
-  function plannedActivityActions(actual, dateKey, title) {
+  function plannedActivityActions(actual, dateKey, title, entryKey) {
     const more = document.createElement("details");
     more.className = "planned-activity-more";
     const moreSummary = document.createElement("summary");
@@ -1355,9 +1355,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const panel = document.createElement("div");
     panel.className = "activity-analysis-panel";
     more.append(moreSummary, panel);
+    // A re-render (sync, reload) keeps an opened "Details" open and loads it again.
     more.addEventListener("toggle", () => {
+      if (entryKey) openActivityDetails[more.open ? "add" : "delete"](entryKey);
       if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual);
     });
+    more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
     const actions = document.createElement("div");
     actions.className = "planned-activity-actions";
     const id = String(actual.activity_id || actual.id || "");
@@ -1426,7 +1429,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const metrics = actual ? null : plannedSessionMetrics(entry);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title));
+    if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
@@ -1800,18 +1803,53 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   let renderedCalendar = [];
 
   // Keeps the shown week (and in the month view the selected day, which sets the week) inside the loaded weeks.
-  function keepPlannedSelection(todayKey, firstKey, lastKey) {
+  // The past has no limit: older weeks stay selectable and their sessions load on demand (#2258).
+  function keepPlannedSelection(todayKey, lastKey) {
     const currentWeekKey = planWeekStart(todayKey);
-    if (!selectedWeekKey || selectedWeekKey < firstKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
+    if (!selectedWeekKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
     if (calendarView !== "month") return;
-    if (!selectedDayKey || selectedDayKey < firstKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
+    if (!selectedDayKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
     selectedWeekKey = planWeekStart(selectedDayKey);
+  }
+
+  // Sessions older than the loaded calendar data come page by page from the session list,
+  // newest first; sessions the calendar already holds are skipped.
+  const olderSessions = { items: [], cursor: undefined, loading: false };
+  const openActivityDetails = new Set();
+
+  function completedSessionIds(calendar) {
+    return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
+  }
+
+  function withOlderSessions(calendar) {
+    const known = completedSessionIds(calendar);
+    return calendar.concat(olderSessions.items.filter((item) => !known.has(String(item.activity_id || item.id))));
+  }
+
+  // Only a week before the configured ones asks for more: the startup data covers those.
+  function loadOlderSessions(calendar, shownStartKey, configuredStartKey) {
+    if (olderSessions.loading || olderSessions.cursor === null || shownStartKey >= configuredStartKey) return;
+    const loadedStart = calendar.filter((item) => calendarActualActivity(item)).map(plannedEventDate).filter(Boolean).sort()[0];
+    if (loadedStart && shownStartKey >= loadedStart) return;
+    olderSessions.loading = true;
+    const cursor = olderSessions.cursor ? `&cursor=${encodeURIComponent(olderSessions.cursor)}` : "";
+    api(`/api/activities?limit=250${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
+      const known = completedSessionIds(calendar);
+      for (const row of Array.isArray(page?.activities) ? page.activities : []) {
+        if (row?.id == null || known.has(String(row.id))) continue;
+        olderSessions.items.push({ ...row, date: String(row.started_at_local || "").slice(0, 10), is_completed_activity: true });
+      }
+      olderSessions.cursor = page?.next_cursor || null;
+      olderSessions.loading = false;
+      renderPlanned(renderedCalendar);
+    }, () => { olderSessions.loading = false; });
   }
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
     if (!root) return;
     renderedCalendar = trainingCalendar;
+    const calendar = withOlderSessions(Array.isArray(trainingCalendar) ? trainingCalendar : []);
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
@@ -1820,8 +1858,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
     const lastWeekKey = addDateKey(currentWeekKey, 7 * futureWeeks);
     const lastDateKey = addDateKey(lastWeekKey, 6);
-    keepPlannedSelection(todayKey, firstWeekKey, lastDateKey);
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
+    keepPlannedSelection(todayKey, lastDateKey);
+    const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
@@ -1839,9 +1877,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         .filter((item) => item?.week_start)
         .map((item) => [String(item.week_start).slice(0, 10), item]),
     );
-    const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
+    const entries = calendar
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
-      .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
+      .filter((item) => plannedEventDate(item) <= lastDateKey)
       .sort((left, right) => String(left.starts_at_local || left.started_at_local || left.date || "").localeCompare(String(right.starts_at_local || right.started_at_local || right.date || "")));
     const planningContextByDate = new Map(
       (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
@@ -1862,7 +1900,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
       eventsByDate,
       dayKey: selectedDayKey,
-      firstWeekKey,
+      // No earliest week: paging back is unlimited.
+      firstWeekKey: "",
       lastDateKey,
       lastWeekKey,
       planningContextByDate,
@@ -1877,6 +1916,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     restorePlannedEntryFocus(root, focusedEntry);
     watchPlannedDetail();
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
+    loadOlderSessions(calendar, calendarView === "month" ? planWeekStart(monthStartKey(selectedDayKey)) : selectedWeekKey, firstWeekKey);
   }
 
   // Wahoo state of an exported library workout. A changed one offers the

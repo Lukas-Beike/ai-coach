@@ -28,7 +28,7 @@
     return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
   };
 
-  // List rows and the loaded document both carry the session's neutral sport.
+  // The calendar entry and the loaded document both carry the session's neutral sport.
   function sportKind(activity) {
     const sport = activity?.sport;
     if (sport === "swim") return "swim";
@@ -59,12 +59,8 @@
       cadenceChannel(activity, metrics),
       { key: "altitude_m", label: "Höhe", unit: "m", color: "elevation", format: (v) => numberText(v), elevation: true },
       { key: "temperature_c", label: "Temperatur", unit: "°C", color: "temperature", format: (v) => numberText(v, 1), average: metrics.avg_temp_c, max: metrics.max_temp_c },
-      // Running dynamics per second, beside their averages in the values (#2258).
-      { key: "ground_contact_time_ms", label: "Bodenkontaktzeit", unit: "ms", color: "dynamics", format: (v) => numberText(v), average: metrics.ground_contact_time_ms },
-      { key: "ground_contact_balance_pct", label: "Bodenkontakt-Balance (links)", unit: "%", color: "dynamics", format: (v) => numberText(v, 1), average: metrics.ground_contact_balance_pct },
-      { key: "vertical_oscillation_cm", label: "Vertikale Bewegung", unit: "cm", color: "dynamics", format: (v) => numberText(v, 1), average: metrics.vertical_oscillation_cm },
-      { key: "vertical_ratio_pct", label: "Vertikales Verhältnis", unit: "%", color: "dynamics", format: (v) => numberText(v, 1), average: metrics.vertical_ratio_pct },
-      { key: "step_length_m", label: "Schrittlänge", unit: "m", color: "dynamics", format: (v) => numberText(v, 2), average: metrics.step_length_m },
+      // Running dynamics per second, named like their averages in the values (#2258).
+      ...ActivityDetails.RUNNING_DYNAMICS.map(([key, label, unit, digits]) => ({ key, label, unit, color: "dynamics", format: (v) => numberText(v, digits), average: metrics[key] })),
     ].filter((channel) => Array.isArray(streams.channels?.[channel.key]?.values));
   }
 
@@ -221,12 +217,12 @@
     return converted == null ? null : speed.format(converted);
   }
 
-  // Before the document loads, the list row's summary values stand in under the document's metric keys.
+  // When the document cannot be read, the calendar entry's summary values stand in under the document's metric keys.
   function rowMetrics(row) {
     const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity", "efficiency_factor", "efficiency_factor_unit", "variability_index", "work_kj", "decoupling_pct", "energy_kj", "energy_kcal", "ground_contact_time_ms", "ground_contact_balance_pct", "vertical_oscillation_cm", "vertical_ratio_pct", "step_length_m"];
     const metrics = {};
     for (const key of keys) if (row?.[key] != null) metrics[key] = row[key];
-    // The list row names its load like planned units do (training_load); the document calls it load.
+    // The calendar entry names its load like planned units do (training_load); the document calls it load.
     if (row?.training_load != null) metrics.load = row.training_load;
     return metrics;
   }
@@ -324,7 +320,7 @@
 
   function renderPanel(panel, summary, payload, token) {
     panel.replaceChildren();
-    // The document's session wins; the list row stands in until it loads.
+    // The document's session wins; the calendar entry stands in until it loads.
     const session = payload?.session || summary;
     const activity = { sport: session.sport, environment: session.environment };
     const metrics = payload ? ActivityDetails.metricValues(payload) : rowMetrics(summary);

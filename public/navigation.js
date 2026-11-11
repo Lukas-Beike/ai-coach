@@ -49,14 +49,10 @@ globalThis.AppRouter = (() => {
   // Removed views whose content lives elsewhere now: the single sessions are in the calendar (#2258).
   const ROUTE_ALIASES = Object.freeze({ "analysis/sessions": "plan/overview" });
 
-  function hashRoute(hash) {
-    const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
-    return ROUTE_ALIASES[rawRoute] || rawRoute;
-  }
-
   function routeFromHash(hash = globalThis.location.hash) {
-    const rawRoute = hashRoute(hash);
-    return Object.hasOwn(routes, rawRoute) ? rawRoute : defaultRoute;
+    const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
+    const route = ROUTE_ALIASES[rawRoute] || rawRoute;
+    return Object.hasOwn(routes, route) ? route : defaultRoute;
   }
 
   function hashContainsKnownRoute(hash = globalThis.location.hash) {

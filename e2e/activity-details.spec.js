@@ -250,6 +250,34 @@ test("@responsive the calendar details open a Garmin-only indoor session; old Ei
   await expect(details.locator(".loading-state")).toHaveCount(0);
 });
 
+test("@responsive the calendar pages back past the loaded weeks and loads older sessions", async ({ page }) => {
+  // #2258 (athlete option A): paging back has no limit; older sessions come from the session list.
+  let oldDay = null;
+  let listed = 0;
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const url = new URL(route.request().url());
+    const id = url.pathname.split("/")[3];
+    if (id) return route.fulfill({ json: { session: { activity_id: id, sport: "run" }, metrics: { avg_hr: { value: 141 } }, detail_data: { providers: [] } } });
+    listed += 1;
+    const day = url.searchParams.get("cursor") ? null : oldDay;
+    return route.fulfill({ json: { activities: day ? [{ id: "act_old", name: "Alter Lauf", sport: "run", started_at_local: `${day}T07:00:00`, moving_duration_s: 1800 }] : [], snapshot_synced_at: null, next_cursor: null } });
+  });
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  oldDay = await page.evaluate(() => addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), -35));
+  const previous = page.getByRole("button", { name: "Vorherige Woche" });
+  for (let step = 0; step < 6 && !(await page.locator(".planned-entry").filter({ hasText: "Alter Lauf" }).count()); step += 1) {
+    await expect(previous).toBeEnabled();
+    await previous.click();
+    await page.waitForTimeout(200);
+  }
+  await expect(page.locator(".planned-entry").filter({ hasText: "Alter Lauf" })).toBeVisible();
+  expect(listed).toBeGreaterThan(0);
+  const details = await openSessionDetails(page, "Alter Lauf");
+  await expect(details.locator(".activity-analysis-stats")).toContainText("141 bpm");
+});
+
 test("@responsive calendar details expand Garmin-style charts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/activity");
   expect(seed.ok()).toBeTruthy();

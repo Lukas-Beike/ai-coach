@@ -119,7 +119,7 @@ test("an analysis chart without data is omitted and its title is collected once 
 test("an analysis segment is empty only when every content container reports no data", () => {
   const markers = {};
   const { analysisSegmentEmpty } = extractFunctions("analysis.js", ["analysisSegmentEmpty"], {
-    ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], sessions: ["list"] },
+    ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], recovery: ["recovery"] },
     document: { getElementById: (id) => (id in markers ? { dataset: { analysisEmpty: markers[id] } } : { dataset: {} }) },
   });
   assert.equal(analysisSegmentEmpty("load"), false, "unrendered containers are not empty");
@@ -129,8 +129,8 @@ test("an analysis segment is empty only when every content container reports no 
   assert.equal(analysisSegmentEmpty("load"), false, "a failed container shows its retry");
   markers.charts = "true";
   assert.equal(analysisSegmentEmpty("load"), true);
-  markers.list = "false";
-  assert.equal(analysisSegmentEmpty("sessions"), false);
+  markers.recovery = "false";
+  assert.equal(analysisSegmentEmpty("recovery"), false);
 });
 
 test("the analysis empty card offers one action that depends on the connected sources", () => {

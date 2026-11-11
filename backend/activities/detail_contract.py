@@ -514,11 +514,8 @@ def _coverage(sets: Sequence[StoredDetailSet]) -> dict[str, dict[str, int]]:
         if not isinstance(detail, ActivityStreamSet):
             continue
         for channel, values in detail.channels.items():
-            if (
-                channel is StreamChannel.TIME_S
-                or channel in POSITION_CHANNELS
-                or channel in RUNNING_DYNAMICS_CHANNELS
-            ):
+            # Running dynamics are charted too (#2258), so their coverage is named.
+            if channel is StreamChannel.TIME_S or channel in POSITION_CHANNELS:
                 continue
             entry = {
                 "points": len(values),
