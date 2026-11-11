@@ -87,53 +87,73 @@ class NutritionProductContractTests(unittest.TestCase):
         }
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
 
         self.assertTrue(saved["id"])
         self.assertEqual(saved["barcode"], "4006381333931")
         self.assertEqual(saved["source"], "packaging_label")
         self.assertEqual(saved["status"], "active")
-        self.assertEqual(self.library.get_product(saved["id"])["name"], saved["name"])
         self.assertEqual(
-            self.library.list_products(barcode="4006381333931")[0]["id"], saved["id"]
+            self.library.product_catalog.get_product(saved["id"])["name"], saved["name"]
+        )
+        self.assertEqual(
+            self.library.product_catalog.list_products(barcode="4006381333931")[0][
+                "id"
+            ],
+            saved["id"],
         )
 
-        updated = self.library.update_product(saved["id"], {"protein_g": 80.0})
+        updated = self.library.product_catalog.update_product(
+            saved["id"], {"protein_g": 80.0}
+        )
         self.assertEqual(updated["protein_g"], 80.0)
-        self.assertEqual(self.library.get_product(saved["id"])["protein_g"], 80.0)
-
-        archived = self.library.archive_product(saved["id"])
-        self.assertEqual(archived["status"], "archived")
-        self.assertEqual(self.library.list_products(barcode="4006381333931"), [])
         self.assertEqual(
-            self.library.list_products(barcode="4006381333931", include_archived=True)[
-                0
-            ]["status"],
+            self.library.product_catalog.get_product(saved["id"])["protein_g"], 80.0
+        )
+
+        archived = self.library.product_catalog.archive_product(saved["id"])
+        self.assertEqual(archived["status"], "archived")
+        self.assertEqual(
+            self.library.product_catalog.list_products(barcode="4006381333931"), []
+        )
+        self.assertEqual(
+            self.library.product_catalog.list_products(
+                barcode="4006381333931", include_archived=True
+            )[0]["status"],
             "archived",
         )
 
     def test_product_edit_keeps_extraction_confidence(self):
-        saved = self.library.save_product(self.product_payload(confidence=0.8))
+        saved = self.library.product_catalog.save_product(
+            self.product_payload(confidence=0.8)
+        )
         self.assertEqual(saved["extraction_confidence"], 0.8)
 
-        updated = self.library.update_product(saved["id"], {"protein_g": 80.0})
+        updated = self.library.product_catalog.update_product(
+            saved["id"], {"protein_g": 80.0}
+        )
 
         self.assertEqual(updated["extraction_confidence"], 0.8)
         self.assertEqual(
-            self.library.get_product(saved["id"])["extraction_confidence"], 0.8
+            self.library.product_catalog.get_product(saved["id"])[
+                "extraction_confidence"
+            ],
+            0.8,
         )
 
     def test_product_amount_accepts_a_comma_decimal(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
 
-        result = self.library.calculate_product(saved["id"], "12,5", "g")
+        result = self.library.product_catalog.calculate_product(
+            saved["id"], "12,5", "g"
+        )
 
         self.assertEqual(result["amount"], 12.5)
         with self.assertRaises(AppError):
-            self.library.calculate_product(saved["id"], "1,200", "g")
+            self.library.product_catalog.calculate_product(saved["id"], "1,200", "g")
 
     def test_product_for_a_past_day_has_no_invented_time(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
 
         entry = self.diary.log_product(saved["id"], 50, "g", meal_date="2026-10-01")
 
@@ -142,19 +162,21 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(entry["logged_at"], "2026-10-01T12:00:00")
 
     def test_barcode_lookup_prefers_local_product_and_never_calls_remote(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
 
-        result = self.library.lookup_product({"barcode": "4006381333931"})
+        result = self.library.product_catalog.lookup_product(
+            {"barcode": "4006381333931"}
+        )
 
         self.assertEqual(result["source"], "local")
         self.assertEqual(result["foods"][0]["id"], saved["id"])
         self.food_database.lookup.assert_not_called()
 
     def test_precise_label_values_survive_save_and_consumption_snapshot(self):
-        saved = self.library.save_product(
+        saved = self.library.product_catalog.save_product(
             self.product_payload(sugar_g=4.1234, fiber_g=0.05, salt_g=0.03)
         )
-        reloaded = self.library.get_product(saved["id"])
+        reloaded = self.library.product_catalog.get_product(saved["id"])
         self.assertEqual(reloaded["sugar_g"], 4.1234)
         self.assertEqual(reloaded["fiber_g"], 0.05)
         self.assertEqual(reloaded["salt_g"], 0.03)
@@ -162,45 +184,61 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(entry["nutrition_basis"]["product"]["salt_g"], 0.03)
 
     def test_text_lookup_matches_saved_product_by_words_in_any_order(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
 
-        result = self.library.lookup_product({"query": "rheinnatur cocoa whey"})
+        result = self.library.product_catalog.lookup_product(
+            {"query": "rheinnatur cocoa whey"}
+        )
 
         self.assertEqual(result["source"], "local")
         self.assertEqual(result["foods"][0]["id"], saved["id"])
-        self.assertEqual(self.library.list_products(query="Whey Vanilla"), [])
+        self.assertEqual(
+            self.library.product_catalog.list_products(query="Whey Vanilla"), []
+        )
         self.food_database.lookup.assert_not_called()
 
     def test_text_search_treats_wildcards_literally_and_blank_queries_match_nothing(
         self,
     ):
-        self.library.save_product(self.product_payload())
+        self.library.product_catalog.save_product(self.product_payload())
 
         for query in ("   ", "%", "_", "whey %"):
             with self.subTest(query=query):
-                self.assertEqual(self.library.list_products(query=query), [])
+                self.assertEqual(
+                    self.library.product_catalog.list_products(query=query), []
+                )
 
     def test_short_search_words_must_start_a_word(self):
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Reisnudeln mit Brokkoli")
         )
-        self.library.save_product(self.product_payload(barcode=None, name="Bio Eier"))
-        self.library.save_product(self.product_payload(barcode=None, name="Hof-Eier"))
+        self.library.product_catalog.save_product(
+            self.product_payload(barcode=None, name="Bio Eier")
+        )
+        self.library.product_catalog.save_product(
+            self.product_payload(barcode=None, name="Hof-Eier")
+        )
 
-        names = {p["name"] for p in self.library.list_products(query="Ei")}
+        names = {
+            p["name"] for p in self.library.product_catalog.list_products(query="Ei")
+        }
 
         self.assertEqual(names, {"Bio Eier", "Hof-Eier"})
-        self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
-        self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
+        self.assertEqual(
+            self.library.product_catalog.list_products(query="Ei Brokkoli"), []
+        )
+        self.assertEqual(
+            len(self.library.product_catalog.list_products(query="nudeln brokkoli")), 1
+        )
 
     def test_search_tolerates_plurals_umlauts_and_typos_but_needs_every_word(self):
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Champignon braun", brand=None)
         )
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Hüttenkäse", brand="Milsani")
         )
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Zucchini", brand=None)
         )
 
@@ -211,27 +249,29 @@ class NutritionProductContractTests(unittest.TestCase):
             ("zuccini", "Zucchini"),
         ):
             with self.subTest(query=query):
-                result = self.library.lookup_product({"query": query})
+                result = self.library.product_catalog.lookup_product({"query": query})
                 self.assertEqual(result["source"], "local")
                 self.assertEqual([p["name"] for p in result["foods"]], [name])
         self.food_database.lookup.assert_not_called()
         # A word the product lacks leaves the search to the food database.
-        self.assertEqual(self.library.list_products(query="Champignons roh"), [])
+        self.assertEqual(
+            self.library.product_catalog.list_products(query="Champignons roh"), []
+        )
         # Letters across a word boundary are no word: "Glutenfrei Salzstangen"
         # and "Erdbeer" by "Eisberg" do not contain "Reis".
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Glutenfrei Salzstangen")
         )
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Erdbeer", brand="Eisberg")
         )
-        self.assertEqual(self.library.list_products(query="Reis"), [])
+        self.assertEqual(self.library.product_catalog.list_products(query="Reis"), [])
 
     def test_search_ignores_separators_around_words(self):
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Haferflocken Banane", brand=None)
         )
-        self.library.save_product(
+        self.library.product_catalog.save_product(
             self.product_payload(barcode=None, name="Müsli", brand="Bio")
         )
 
@@ -241,12 +281,17 @@ class NutritionProductContractTests(unittest.TestCase):
             ("Banane!", "Haferflocken Banane"),
         ):
             with self.subTest(query=query):
-                names = [p["name"] for p in self.library.list_products(query=query)]
+                names = [
+                    p["name"]
+                    for p in self.library.product_catalog.list_products(query=query)
+                ]
                 self.assertEqual(names, [name])
-        self.assertEqual(self.library.list_products(query="( - )"), [])
+        self.assertEqual(self.library.product_catalog.list_products(query="( - )"), [])
 
     def test_unknown_barcode_falls_back_to_food_database_and_labels_source(self):
-        result = self.library.lookup_product({"barcode": "4006381333999"})
+        result = self.library.product_catalog.lookup_product(
+            {"barcode": "4006381333999"}
+        )
 
         self.assertEqual(result["source"], "open_food_facts")
         self.assertEqual(result["foods"][0]["id"], "off:4006381333999")
@@ -273,7 +318,7 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertTrue(candidate["requires_confirmation"])
         self.assertEqual(candidate["provenance"], "packaging_label")
         self.assertNotIn("image", candidate["candidate"])
-        self.assertEqual(self.library.list_products(), [])
+        self.assertEqual(self.library.product_catalog.list_products(), [])
 
     def test_packaging_extraction_rejects_invalid_or_estimated_values(self):
         for payload in (
@@ -289,16 +334,20 @@ class NutritionProductContractTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(AppError):
                 validate_packaging_extraction(payload)
         with self.assertRaises(AppError):
-            self.library.save_product(self.product_payload(source="coach"))
+            self.library.product_catalog.save_product(
+                self.product_payload(source="coach")
+            )
 
     def test_product_nutrients_are_snapshotted_when_consumed(self):
-        saved = self.library.save_product(self.product_payload())
+        saved = self.library.product_catalog.save_product(self.product_payload())
         entry = self.diary.log_product(saved["id"], 50, "g")
         self.assertEqual(entry["kcal"], 188)
         self.assertEqual(entry["protein_g"], 39)
         self.assertEqual(entry["nutrition_basis"]["kind"], "local_product")
 
-        self.library.update_product(saved["id"], {"kcal": 400, "protein_g": 82})
+        self.library.product_catalog.update_product(
+            saved["id"], {"kcal": 400, "protein_g": 82}
+        )
 
         fetched = self.diary.get_meal(entry["id"])
         self.assertEqual(fetched["kcal"], 188)
@@ -308,17 +357,17 @@ class NutritionProductContractTests(unittest.TestCase):
     def test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units(
         self,
     ):
-        saved = self.library.save_product(
+        saved = self.library.product_catalog.save_product(
             self.product_payload(basis_unit="ml", carbs_g=None, protein_g=None)
         )
 
-        result = self.library.calculate_product(saved["id"], 250, "ml")
+        result = self.library.product_catalog.calculate_product(saved["id"], 250, "ml")
 
         self.assertEqual(result["kcal"], 940)
         self.assertIsNone(result["carbs_g"])
         self.assertIsNone(result["protein_g"])
         with self.assertRaises(AppError):
-            self.library.calculate_product(saved["id"], 250, "g")
+            self.library.product_catalog.calculate_product(saved["id"], 250, "g")
 
     def test_photo_candidate_is_not_saved_until_explicit_save(self):
         response = {
@@ -338,15 +387,15 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertTrue(candidate["requires_confirmation"])
         self.assertEqual(candidate["provenance"], "packaging_label")
         self.assertNotIn("image_data_url", candidate)
-        self.assertEqual(self.library.list_products(), [])
+        self.assertEqual(self.library.product_catalog.list_products(), [])
         self.assertTrue(
-            self.library.save_product({**candidate["candidate"], "confirmed": True})[
-                "id"
-            ]
+            self.library.product_catalog.save_product(
+                {**candidate["candidate"], "confirmed": True}
+            )["id"]
         )
 
     def test_database_backup_contains_confirmed_products(self):
-        self.library.save_product(self.product_payload())
+        self.library.product_catalog.save_product(self.product_payload())
         config = DatabaseBackupConfig(
             database_path=self.manager.path,
             data_dir=Path(self.temporary.name),

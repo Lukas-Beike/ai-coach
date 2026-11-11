@@ -5,6 +5,7 @@ import threading
 import unittest
 from datetime import UTC, datetime
 
+from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
 from backend.db.repositories import NutritionProductRepository, NutritionRepository
@@ -12,7 +13,6 @@ from backend.errors import AppError
 from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import FoodDatabaseService
-from backend.nutrition.photo_service import PhotoExtractionService
 from backend.nutrition.sync_status import NutritionSyncStatusService
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -147,8 +147,14 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
             calculator.calculate(db, components, {})
         self.assertEqual(raised.exception.reason, "food_unit_mismatch")
 
-    def test_photo_wrapper_validates_local_candidate_without_provider(self) -> None:
-        result = PhotoExtractionService(None).extract_packaging_photo(
+    def test_photo_extraction_validates_local_candidate_without_provider(self) -> None:
+        _, library = build_nutrition_services(
+            self.manager,
+            self.lock,
+            lambda: self.now,
+            lambda: datetime(2026, 9, 24, 12, tzinfo=UTC),
+        )
+        result = library.extract_packaging_photo(
             {
                 "name": "Synthetic snack",
                 "basis_amount": 100,
@@ -159,7 +165,7 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
         self.assertTrue(result["requires_confirmation"])
         self.assertIn("extraction", result)
         with self.assertRaises(AppError):
-            PhotoExtractionService(None).extract_packaging_photo(
+            library.extract_packaging_photo(
                 {"image_data_url": "data:image/jpeg;base64,YQ=="}
             )
 

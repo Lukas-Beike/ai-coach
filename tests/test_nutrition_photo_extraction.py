@@ -5,6 +5,8 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
+from support import dispatch_route
 from test_nutrition_api_and_sync import GLOBAL_BODY_BYTES, json_route_handler
 
 from backend.errors import AppError
@@ -14,7 +16,6 @@ from backend.nutrition.photo import (
     PHOTO_REQUEST_MAX_BYTES,
     NutritionPhotoExtractionService,
 )
-from backend.nutrition.photo_service import PhotoExtractionService
 
 EXTRACT_PATH = f"{NUTRITION_PRODUCTS_PATH}/extract"
 
@@ -140,10 +141,9 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
         extractor = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna", openai_request=self.request
         )
-        library = Mock()
-        library.extract_packaging_photo = PhotoExtractionService(
-            extractor
-        ).extract_packaging_photo
+        _, library = build_nutrition_services(
+            Mock(), Mock(), Mock(), Mock(), photo_extractor=extractor
+        )
         self.routes = NutritionPostRoutes(Mock, lambda: library)
 
     def test_compressed_and_largest_valid_photos_are_extracted_once(self):
@@ -157,7 +157,9 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
                 self.assertGreater(
                     int(handler.headers["Content-Length"]), GLOBAL_BODY_BYTES
                 )
-                self.assertTrue(self.routes.handle(handler, EXTRACT_PATH))
+                self.assertTrue(
+                    dispatch_route(self.routes, handler, EXTRACT_PATH, method="POST")
+                )
                 self.assertEqual(handler.send_json.call_args.args[0], 200)
                 self.request.assert_called_once()
 
@@ -168,7 +170,7 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
         )
 
         with self.assertRaises(AppError) as raised:
-            self.routes.handle(handler, EXTRACT_PATH)
+            dispatch_route(self.routes, handler, EXTRACT_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 413)
         self.request.assert_not_called()

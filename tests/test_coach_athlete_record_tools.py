@@ -349,7 +349,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         )
 
     def test_product_scope_only_authorizes_product_save(self):
-        self.nutrition.save_product.return_value = {"id": "product-1"}
+        self.nutrition.product_catalog.save_product.return_value = {"id": "product-1"}
         result = self.service.execute(
             "save_nutrition_product",
             {"payload": {"name": "Synthetic product"}},
@@ -359,7 +359,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(result, {"ok": True, "product": {"id": "product-1"}})
-        self.nutrition.save_product.assert_called_once_with(
+        self.nutrition.product_catalog.save_product.assert_called_once_with(
             {"name": "Synthetic product"}
         )
 

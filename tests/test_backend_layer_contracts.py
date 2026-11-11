@@ -100,13 +100,13 @@ IMPORT_DEBT_BASELINE = frozenset(
 DOMAIN_EXECUTE_CALLS = {
     (
         "backend/http_api/coach_actions_post.py",
-        "CoachActionsPostRoutes.handle",
+        "CoachActionsPostRoutes._execute",
         "self._coach_proposal_execution_service().execute",
     ): 1,
     (
         "backend/http_api/sync_commands_post.py",
-        "SyncCommandPostRoute.handle",
-        "endpoint.execute",
+        "SyncCommandPostRoute._execute",
+        "self._endpoint().execute",
     ): 1,
 }
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_read import CoachProposalConfirmationService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class CoachActionsPostRoutes:
@@ -22,26 +23,47 @@ class CoachActionsPostRoutes:
         self._coach_proposal_confirmation_service = coach_proposal_confirmation_service
         self._coach_proposal_execution_service = coach_proposal_execution_service
 
-    def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
-        if path == "/api/coach/actions/confirm":
-            payload = handler.read_json()
-            result = self._coach_proposal_confirmation_service().confirm(
-                payload.get("proposal_id"), session["csrf_hash"]
-            )
-        elif path == "/api/coach/actions/cancel":
-            payload = handler.read_json()
-            result = self._coach_proposal_confirmation_service().cancel(
-                payload.get("proposal_id"), session["csrf_hash"]
-            )
-        elif path == "/api/coach/actions/execute":
-            payload = handler.read_json()
-            result = self._coach_proposal_execution_service().execute(
-                payload.get("action_token"),
-                session["csrf_hash"],
-                payload.get("payload_hash"),
-            )
-        else:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "POST", "/api/coach/actions/confirm", Access.SESSION_CSRF, self._confirm
+            ),
+            Route(
+                "POST", "/api/coach/actions/cancel", Access.SESSION_CSRF, self._cancel
+            ),
+            Route(
+                "POST", "/api/coach/actions/execute", Access.SESSION_CSRF, self._execute
+            ),
+        ]
 
-        handler.send_json(200, result)
-        return True
+    def _confirm(self, handler: Any, request: RouteRequest) -> None:
+        """Confirm a Coach proposal."""
+        payload = handler.read_json()
+        handler.send_json(
+            200,
+            self._coach_proposal_confirmation_service().confirm(
+                payload.get("proposal_id"), request.session["csrf_hash"]
+            ),
+        )
+
+    def _cancel(self, handler: Any, request: RouteRequest) -> None:
+        """Cancel a Coach proposal."""
+        payload = handler.read_json()
+        handler.send_json(
+            200,
+            self._coach_proposal_confirmation_service().cancel(
+                payload.get("proposal_id"), request.session["csrf_hash"]
+            ),
+        )
+
+    def _execute(self, handler: Any, request: RouteRequest) -> None:
+        """Execute a confirmed Coach proposal."""
+        payload = handler.read_json()
+        handler.send_json(
+            200,
+            self._coach_proposal_execution_service().execute(
+                payload.get("action_token"),
+                request.session["csrf_hash"],
+                payload.get("payload_hash"),
+            ),
+        )

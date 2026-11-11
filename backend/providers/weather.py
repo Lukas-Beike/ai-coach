@@ -24,6 +24,10 @@ def _weather_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+# ECMWF supplies every day when ICON-D2 is not merged, so no day range is named.
+ECMWF_ONLY_MODEL = "ECMWF IFS HRES"
+
+
 class WeatherClient:
     """Fetch a geocoded Open-Meteo forecast with optional overlays.
 
@@ -144,7 +148,7 @@ class WeatherClient:
         forecast: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
         if location["country_code"] != "DE":
-            return forecast, "ECMWF IFS HRES (3–14 Tage)"
+            return forecast, ECMWF_ONLY_MODEL
 
         short_params = dict(params)
         short_params["forecast_days"] = WEATHER_ICON_D2_DAYS
@@ -159,7 +163,7 @@ class WeatherClient:
             if weather_forecast.weather_forecast_is_complete(short_forecast):
                 return (
                     weather_forecast.merge_weather_forecasts(forecast, short_forecast),
-                    "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)",
+                    f"ICON-D2 (0–2 Tage) + {ECMWF_ONLY_MODEL} (3–14 Tage)",
                 )
         except Exception as exc:  # noqa: BLE001
             self._logger.warning(
@@ -169,4 +173,4 @@ class WeatherClient:
                     "context": {"error_type": type(exc).__name__},
                 },
             )
-        return forecast, "ECMWF IFS HRES (3–14 Tage)"
+        return forecast, ECMWF_ONLY_MODEL

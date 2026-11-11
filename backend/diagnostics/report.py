@@ -61,6 +61,7 @@ from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
+from backend.sync.stream_backfill import fit_inventory_counts
 
 LOGGER = logging.getLogger("intervals_coach")
 
@@ -304,6 +305,9 @@ class DiagnosticReportService:
                         key_values, db, deps.config.sync_history_earliest_date
                     ),
                 ),
+                "fit_inventory": section(
+                    "fit_inventory", lambda: fit_inventory_counts(db, key_values)
+                ),
                 "session_metrics": section(
                     "session_metrics",
                     lambda: summarize_session_metrics(key_values, db),
@@ -328,7 +332,10 @@ class DiagnosticReportService:
                     "profile_weekly_plan_removal",
                     lambda: summarize_profile_weekly_plan_removal(key_values, db),
                 ),
-                "session_rebundle": summarize_session_rebundle(deps.key_values, db),
+                "session_rebundle": section(
+                    "session_rebundle",
+                    lambda: summarize_session_rebundle(key_values, db),
+                ),
                 "logs": log_entries,
                 "debug_capture": {
                     **diagnostic_capture_status,

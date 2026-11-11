@@ -11,12 +11,13 @@ from test_coach_dialogue import DialogueHarness, server
 from backend.activities.workout_text import canonical_workout_zones, structured_steps
 from backend.coach.outcomes import coach_failure_lines
 from backend.coach.response_retry import CoachResponseRetryPolicy
+from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.sync import queue as sync_queue
 
 
 def limited(_):
-    error = server.AppError(502, "Synthetic provider error", reason="response_error")
+    error = AppError(502, "Synthetic provider error", reason="response_error")
     error.provider_error_code = "rate_limit_exceeded"
     raise error
 
@@ -133,9 +134,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_rate_limit_retry_uses_provider_delay_and_bounded_jitter(self):
-        error = server.AppError(
-            429, "Synthetic rate limit", reason="rate_limit_exceeded"
-        )
+        error = AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
         error.retry_after_seconds = 7
         with patch("backend.coach.response_retry.secrets.randbelow", return_value=250):
             delay = self.retry_policy.retry_delay(
@@ -146,9 +145,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(delay, 7.25)
 
     def test_rate_limit_retry_defers_when_provider_delay_exceeds_retry_budget(self):
-        error = server.AppError(
-            429, "Synthetic rate limit", reason="rate_limit_exceeded"
-        )
+        error = AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded")
         error.retry_after_seconds = CoachResponseRetryPolicy.MAX_RETRY_DELAY_SECONDS + 1
         self.assertIsNone(
             self.retry_policy.retry_delay(

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.config import Config
 from backend.errors import AppError
@@ -227,7 +227,9 @@ class NutritionMealTimeTests(unittest.TestCase):
             meal_library_service=lambda: Mock(),
         )
 
-        self.assertTrue(routes.handle(handler, "/api/nutrition/entry"))
+        self.assertTrue(
+            dispatch_route(routes, handler, "/api/nutrition/entry", method="POST")
+        )
 
         status, body = handler.send_json.call_args.args
         self.assertEqual(status, 200)
@@ -236,7 +238,11 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.assertTrue(body["change"]["id"] and body["change"]["after_hash"])
 
         handler.read_json.return_value = {"id": body["entry"]["id"]}
-        self.assertTrue(routes.handle(handler, "/api/nutrition/entry/delete"))
+        self.assertTrue(
+            dispatch_route(
+                routes, handler, "/api/nutrition/entry/delete", method="POST"
+            )
+        )
         status, deleted = handler.send_json.call_args.args
         self.assertEqual(deleted["change"]["action"], "delete")
 
@@ -246,7 +252,7 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.log_full_macros()
         self.log_without_macros()
 
-        summary = self.service.get_day_summary("2026-09-24")
+        summary = self.service.sync_status.get_day_summary("2026-09-24")
 
         self.assertEqual(summary["total_kcal"], 600)
         self.assertEqual(summary["entry_count"], 2)
@@ -272,7 +278,7 @@ class NutritionMealTimeTests(unittest.TestCase):
     def test_day_without_any_macros_has_no_macro_total(self) -> None:
         self.log_without_macros()
 
-        summary = self.service.get_day_summary("2026-09-24")
+        summary = self.service.sync_status.get_day_summary("2026-09-24")
 
         self.assertIsNone(summary["total_carbs_g"])
         self.assertIsNone(summary["total_protein_g"])
@@ -287,7 +293,9 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.log_full_macros()
         self.log_without_macros()
 
-        item = nutrition_approval_item(self.service.get_sync_snapshot("2026-09-24"))
+        item = nutrition_approval_item(
+            self.service.sync_status.get_sync_snapshot("2026-09-24")
+        )
 
         self.assertEqual(item["total_kcal"], 600)
         self.assertIsNone(item["total_carbs_g"])
@@ -313,7 +321,7 @@ class NutritionMealTimeTests(unittest.TestCase):
         )
         self.assertIsNone(result["synced_summary"]["carbs"])
         self.assertFalse(result["pending"])
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
     def test_complete_macros_are_written_and_day_is_synced(self) -> None:
         self.log_full_macros()

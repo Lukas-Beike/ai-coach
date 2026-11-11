@@ -3,6 +3,7 @@ import unittest
 from datetime import date, timedelta
 
 from backend.weather.recommendations import (
+    _weather_window_score,
     is_cycling_activity,
     is_outdoor_activity,
     weather_recommendation,
@@ -69,6 +70,27 @@ class WeatherRecommendationsTests(unittest.TestCase):
             {"name": "Radausfahrt"},
         ):
             self.assertTrue(is_outdoor_activity(event), event)
+        # F-011: the window score detects running the same way, so a run named
+        # only by sport, sport_type or name gets the runner's lower wind weight.
+        windy = {
+            "precipitation_average": 0,
+            "rain_total": 0,
+            "temperature_average": 15,
+            "gust_maximum": 50,
+            "wind_speed_average": 40,
+            "air_quality_maximum": None,
+            "weather_codes": [],
+        }
+        # Runner: (40 - 20) * 0.5 wind + (50 - 30) * 0.5 gusts.
+        run_score = 20.0
+        for event in (
+            {"type": "Run"},
+            {"sport": "run"},
+            {"sport_type": "Laufen"},
+            {"name": "Dauerlauf locker"},
+        ):
+            self.assertEqual(run_score, _weather_window_score(event, windy), event)
+        self.assertLess(run_score, _weather_window_score({"type": "Ride"}, windy))
         self.assertTrue(is_cycling_activity({"type": "Ride", "name": "Laufrad"}))
         self.assertFalse(is_cycling_activity({"type": "Run", "name": "Rad-Lauf"}))
 

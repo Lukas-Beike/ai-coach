@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.wahoo_connection import (
     CALLBACK_CONNECTED,
@@ -37,13 +37,14 @@ class WahooGetRoutes:
         self._wahoo_service = wahoo_service
         self._maintenance_gate = maintenance_gate
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != CALLBACK_PATH:
-            return False
-        query = parse_qs(urlparse(handler.path).query)
+    def routes(self) -> list[Route]:
+        return [Route("GET", CALLBACK_PATH, Access.PUBLIC, self._callback)]
+
+    def _callback(self, handler: Any, request: RouteRequest) -> None:
+        """Wahoo OAuth redirect target; answers 302 to the app (see below)."""
 
         def first(name: str) -> str | None:
-            values = query.get(name)
+            values = request.query.get(name)
             return values[0] if values else None
 
         with self._maintenance_gate.operation():
@@ -56,7 +57,6 @@ class WahooGetRoutes:
         handler.send_bytes(
             302, b"", "text/plain; charset=utf-8", {"Location": location}
         )
-        return True
 
 
 class WahooPostRoutes:
@@ -65,16 +65,20 @@ class WahooPostRoutes:
     def __init__(self, wahoo_service: Callable[[], WahooConnectionService]) -> None:
         self._wahoo_service = wahoo_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {CONNECT_PATH, DISCONNECT_PATH}:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("POST", path, Access.SESSION_CSRF, self._command)
+            for path in (CONNECT_PATH, DISCONNECT_PATH)
+        ]
+
+    def _command(self, handler: Any, request: RouteRequest) -> None:
+        """Start the Wahoo OAuth connection or disconnect Wahoo."""
         # Drain and validate the (empty) JSON command body like other commands.
         handler.read_json()
         service = self._wahoo_service()
         result = (
             service.start_authorization()
-            if path == CONNECT_PATH
+            if request.path == CONNECT_PATH
             else service.disconnect()
         )
         handler.send_json(200, result)
-        return True

@@ -1,6 +1,6 @@
 import unittest
 
-from backend.providers.openai import response_failure_reason, response_text
+from backend.providers.openai_responses import response_failure_reason, response_text
 
 
 class OpenAIProviderTests(unittest.TestCase):

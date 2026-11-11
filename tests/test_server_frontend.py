@@ -66,6 +66,7 @@ def frontend_source():
     )
 
 
+from backend.errors import AppError
 from backend.http_api import state_events_get
 from backend.http_api.static_assets import (
     CACHE_NAME_TOKEN,
@@ -639,7 +640,7 @@ class ServerFrontendTests(ServerTestCase):
             index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
         )
         self.assertIn(
-            'path != "/api/state/events"',
+            'Route("GET", "/api/state/events"',
             Path(state_events_get.__file__).read_text(encoding="utf-8"),
         )
 
@@ -814,9 +815,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(
             'today.scrollIntoView({ block: "start", behavior: "auto" })', plan_views
         )
-        self.assertIn('"RPE offen"', plan_views)
-        self.assertIn('"Trainingsload"', plan_views)
-        self.assertIn("Plan/Ist:", plan_views)
+        self.assertNotIn('"Trainingsload"', plan_views)
+        self.assertNotIn("Plan/Ist:", plan_views)
         self.assertIn("daily_planning_context", plan_views)
         self.assertIn("card.open = openPlannedEntries.has(entryKey)", plan_views)
         self.assertIn("section.open = false", plan_views)
@@ -1004,14 +1004,14 @@ class ServerFrontendTests(ServerTestCase):
 
         for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
             with self.subTest(path=path):
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     static_assets.render(path, path, None)
                 self.assertEqual(error.exception.status, 403)
 
     def test_static_handler_rejects_path_traversal_without_request_attributes(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
 
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.HTTP_API.request_handler_class().send_static(
                 handler, "/../server.py"
             )
@@ -1021,7 +1021,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_static_files_reject_absolute_path(self):
         static_assets = StaticAssetService(server.PUBLIC_DIR)
 
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
 
         self.assertEqual(error.exception.status, 403)

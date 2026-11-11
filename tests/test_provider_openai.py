@@ -8,35 +8,43 @@ from urllib.error import HTTPError
 
 from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 from backend.observability import DiagnosticCapture, Redactor
-from backend.providers import openai as openai_provider
+from backend.providers import http as provider_http
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
-from backend.providers.openai import (
-    OpenAIResponseFailure,
-    OpenAIResponsesClient,
-    OpenAIStreamClient,
-    OpenAIStreamConfig,
-    OpenAIStreamTelemetry,
+from backend.providers.openai_errors import (
+    error_details,
+    error_diagnostic_details,
+    rate_limit_snapshot,
+    retry_after_seconds,
+    safe_log_reason,
+)
+from backend.providers.openai_events import (
     StreamReadResult,
     StreamReadState,
     consume_sse_event,
-    endpoint,
-    error_details,
-    error_diagnostic_details,
-    poll_background_response,
-    rate_limit_snapshot,
     read_stream_response,
     request_stream_response,
+)
+from backend.providers.openai_requests import (
+    RESUMABLE_POLL_REASONS,
+    OpenAIResponsesClient,
+    endpoint,
+    poll_background_response,
     request_with_conversation_retry,
+    response_id,
+    responses_payload,
+)
+from backend.providers.openai_responses import (
+    OpenAIResponseFailure,
     response_diagnostic_details,
     response_failure_reason,
-    response_id,
     response_text,
-    responses_payload,
-    retry_after_seconds,
-    safe_log_reason,
     validate_response,
 )
-from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
+from backend.providers.openai_stream import (
+    OpenAIStreamClient,
+    OpenAIStreamConfig,
+    OpenAIStreamTelemetry,
+)
 
 
 def body(error=None):
@@ -521,7 +529,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         sleeps = []
 
         with (
-            mock.patch("backend.providers.openai.time.sleep", sleeps.append),
+            mock.patch("backend.providers.openai_requests.time.sleep", sleeps.append),
             self.assertRaises(AppError) as raised,
         ):
             poll_background_response(
@@ -555,7 +563,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             raise RuntimeError("remote cancellation failed")
 
         with (
-            mock.patch("backend.providers.openai.time.sleep"),
+            mock.patch("backend.providers.openai_requests.time.sleep"),
             self.assertRaises(AppError) as raised,
         ):
             poll_background_response(
@@ -581,7 +589,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             raise RuntimeError("provider unreachable")
 
         with (
-            mock.patch("backend.providers.openai.time.sleep"),
+            mock.patch("backend.providers.openai_requests.time.sleep"),
             self.assertRaisesRegex(RuntimeError, "^provider unreachable$"),
         ):
             poll_background_response(
@@ -605,7 +613,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             raise RuntimeError("remote cancellation failed")
 
         with (
-            mock.patch("backend.providers.openai.time.sleep"),
+            mock.patch("backend.providers.openai_requests.time.sleep"),
             self.assertRaises(AppError) as raised,
         ):
             poll_background_response(
@@ -635,7 +643,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
             with (
                 self.subTest(reason=reason),
-                mock.patch("backend.providers.openai.time.sleep"),
+                mock.patch("backend.providers.openai_requests.time.sleep"),
                 self.assertRaises(AppError) as raised,
             ):
                 poll_background_response(
@@ -2463,7 +2471,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
     def test_stream_client_records_http_failure_in_safe_order(self):
         events = []
-        original_read_error_body = openai_provider.provider_http.read_error_body
+        original_read_error_body = provider_http.read_error_body
 
         class OrderedState(_StreamStateService):
             def record_rate_limits(self, headers):
@@ -2506,7 +2514,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "backend.providers.openai.provider_http.read_error_body",
+                "backend.providers.http.read_error_body",
                 side_effect=lambda exc, max_bytes: (
                     events.append("parse") or original_read_error_body(exc, max_bytes)
                 ),

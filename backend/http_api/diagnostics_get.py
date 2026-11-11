@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.report import DiagnosticReportService
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class DiagnosticsGetRoutes:
@@ -16,38 +15,41 @@ class DiagnosticsGetRoutes:
 
     def __init__(
         self,
-        session_auth_service: Callable[[], SessionAuthService],
         recent_log_entries_service: Callable[[], RecentLogEntriesService],
         diagnostic_report_service: Callable[[], DiagnosticReportService],
     ) -> None:
-        self._session_auth_service = session_auth_service
         self._recent_log_entries_service = recent_log_entries_service
         self._diagnostic_report_service = diagnostic_report_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {"/api/logs", "/api/logs/download", "/api/diagnostics"}:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("GET", "/api/logs", Access.SESSION, self._logs),
+            Route("GET", "/api/logs/download", Access.SESSION, self._download),
+            Route("GET", "/api/diagnostics", Access.SESSION, self._report),
+        ]
 
-        self._session_auth_service().require_auth(handler)
-        if path == "/api/logs/download":
-            handler.send_bytes(
-                200,
-                self._recent_log_entries_service().download(),
-                "application/x-ndjson; charset=utf-8",
-                {
-                    "Content-Disposition": 'attachment; filename="pacecraft-server-logs.jsonl"'
-                },
-            )
-            return True
-        elif path == "/api/logs":
-            raw_limit = parse_qs(urlparse(handler.path).query).get("limit", ["200"])[0]
-            try:
-                limit = max(1, min(int(raw_limit), 500))
-            except ValueError:
-                limit = 200
-            payload = {"entries": self._recent_log_entries_service().list(limit)}
-        else:
-            payload = self._diagnostic_report_service().report()
+    def _download(self, handler: Any, _request: RouteRequest) -> None:
+        """Download the redacted server log as JSON lines."""
+        handler.send_bytes(
+            200,
+            self._recent_log_entries_service().download(),
+            "application/x-ndjson; charset=utf-8",
+            {
+                "Content-Disposition": 'attachment; filename="pacecraft-server-logs.jsonl"'
+            },
+        )
 
-        handler.send_json(200, payload)
-        return True
+    def _logs(self, handler: Any, request: RouteRequest) -> None:
+        """Recent redacted log entries."""
+        raw_limit = request.query.get("limit", ["200"])[0]
+        try:
+            limit = max(1, min(int(raw_limit), 500))
+        except ValueError:
+            limit = 200
+        handler.send_json(
+            200, {"entries": self._recent_log_entries_service().list(limit)}
+        )
+
+    def _report(self, handler: Any, _request: RouteRequest) -> None:
+        """Diagnostic report."""
+        handler.send_json(200, self._diagnostic_report_service().report())

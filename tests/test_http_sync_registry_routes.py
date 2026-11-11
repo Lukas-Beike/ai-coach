@@ -11,6 +11,8 @@ import dataclasses
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import (
     GARMIN_FULL_RESYNC_PATH,
@@ -38,8 +40,8 @@ INTERVALS_MESSAGE = (
     "hinterlegen."
 )
 GARMIN_MESSAGE = (
-    "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
-    "Garmin-Tokenstore einrichten."
+    "Garmin ist nicht konfiguriert. Unter Mehr → Anbindungen bei Garmin anmelden "
+    "oder einen Schlüssel der Garmin Personal API hinterlegen."
 )
 INTERVALS_PERIOD_MESSAGE = (
     "Der Zeitraum für intervals muss -1 oder zwischen 1 und 365 Tagen liegen."
@@ -321,8 +323,11 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
         endpoint.execute.return_value = (202, {"id": "job-9"})
         handler = Mock()
 
-        handled = SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
-            handler, ACME_PATH
+        handled = dispatch_route(
+            SyncCommandPostRoute(lambda: endpoint, registry=registry),
+            handler,
+            ACME_PATH,
+            method="POST",
         )
 
         self.assertTrue(handled)
@@ -341,8 +346,11 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
         handler = Mock()
         handler.read_json.return_value = {"days": 7}
 
-        handled = SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
-            handler, ACME_PATH
+        handled = dispatch_route(
+            SyncCommandPostRoute(lambda: endpoint, registry=registry),
+            handler,
+            ACME_PATH,
+            method="POST",
         )
 
         self.assertTrue(handled)
@@ -355,7 +363,9 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
         factory = Mock()
         handler = Mock()
 
-        handled = SyncCommandPostRoute(factory).handle(handler, ACME_PATH)
+        handled = dispatch_route(
+            SyncCommandPostRoute(factory), handler, ACME_PATH, method="POST"
+        )
 
         self.assertFalse(handled)
         factory.assert_not_called()
@@ -371,8 +381,11 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
         factory = Mock()
         handler = Mock()
 
-        handled = SyncCommandPostRoute(factory, registry=registry).handle(
-            handler, "/api/acme-mock/other"
+        handled = dispatch_route(
+            SyncCommandPostRoute(factory, registry=registry),
+            handler,
+            "/api/acme-mock/other",
+            method="POST",
         )
 
         self.assertFalse(handled)
@@ -391,8 +404,11 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
         handler.read_json.return_value = {"days": 3}
 
         self.assertTrue(
-            SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
-                handler, "/api/garmin/sync"
+            dispatch_route(
+                SyncCommandPostRoute(lambda: endpoint, registry=registry),
+                handler,
+                "/api/garmin/sync",
+                method="POST",
             )
         )
         handler.read_json.assert_called_once_with()

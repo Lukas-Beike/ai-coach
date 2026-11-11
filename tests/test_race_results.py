@@ -8,6 +8,8 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.activities.session_purpose import COMPETITION_SOURCE_LABEL
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.planning.race_results import with_race_results
@@ -44,7 +46,6 @@ def _reader(rows: dict[date, list[dict[str, Any]]]) -> Mock:
 
 def _routes(race_results: Mock, competitions: list[dict[str, Any]]) -> AthleteGetRoutes:
     return AthleteGetRoutes(
-        Mock(),
         Mock(),
         Mock(return_value=Mock(get=Mock(return_value={}))),
         Mock(return_value=Mock(list=Mock(return_value=competitions))),
@@ -122,7 +123,7 @@ class ProfileRouteTests(unittest.TestCase):
         handler = Mock()
 
         self.assertTrue(
-            _routes(race_results, competitions).handle(handler, "/api/profile")
+            dispatch_route(_routes(race_results, competitions), handler, "/api/profile")
         )
 
         race_results.assert_called_once_with(competitions)
@@ -135,7 +136,7 @@ class ProfileRouteTests(unittest.TestCase):
         failing = Mock(side_effect=RuntimeError("locked"))
 
         with self.assertLogs("intervals_coach", "WARNING") as logs:
-            _routes(failing, competitions).handle(handler, "/api/profile")
+            dispatch_route(_routes(failing, competitions), handler, "/api/profile")
 
         payload = handler.send_json.call_args.args[1]
         self.assertEqual(payload["competitions"], competitions)

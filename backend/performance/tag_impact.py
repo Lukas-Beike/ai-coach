@@ -8,6 +8,11 @@ from typing import Any
 from backend.activities.activity_summary import ActivitySummary, summary_local_date
 from backend.athlete.checkins import CHECKIN_TAGS
 from backend.athlete.measurements import number
+from backend.performance.canonical_recovery import RECOVERY_HISTORY_DAYS
+
+# A tagged day pairs with its following night of the recovery history, so the days
+# are as many as the history holds nights, ending yesterday.
+TAG_IMPACT_DAYS = RECOVERY_HISTORY_DAYS
 
 
 def tag_impact(
@@ -46,7 +51,7 @@ def tag_impact(
     ]
     return {
         "method": "explicit-tags-next-night-v1",
-        "days": 90,
+        "days": TAG_IMPACT_DAYS,
         "timezone": timezone,
         "measurement_start": min(measured_dates) if measured_dates else None,
         "measurement_end": max(measured_dates) if measured_dates else None,
@@ -70,7 +75,7 @@ def _day_loads(
 def _tag_groups(
     checkins: list[dict], history: dict, loads: dict, tag: str, today: date
 ) -> dict[bool, list[dict[str, Any]]]:
-    cutoff = (today - timedelta(days=89)).isoformat()
+    cutoff = (today - timedelta(days=TAG_IMPACT_DAYS)).isoformat()
     groups: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
     for checkin in checkins:
         day = str(checkin.get("checkin_date") or "")

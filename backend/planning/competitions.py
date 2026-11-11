@@ -53,16 +53,6 @@ def supported_competition_sport(value: Any, environment: Any = None) -> str | No
     return None if stored is None else intervals_competition_type(stored)
 
 
-def competition_canonical_sport(row: dict[str, Any]) -> Sport | None:
-    """Return the canonical sport of a stored competition, or None if unsupported.
-
-    Stored values are canonical; legacy free text (``Cycling``, ``Lauf`` ...) is
-    still resolved through the exact competition aliases, never by substring.
-    """
-    stored = resolve_competition_sport(row.get("sport"), row.get("environment"))
-    return None if stored is None else stored.sport
-
-
 def competition_stored_sport(value: dict[str, Any]) -> StoredSport:
     """Return the canonical stored sport of a competition input.
 

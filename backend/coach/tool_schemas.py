@@ -21,6 +21,17 @@ from backend.planning.session_focus import (
     STRENGTH_INTENSITIES,
 )
 
+# Unit, template and library names (#2258): the Coach writes them short.
+UNIT_NAME: dict[str, Any] = {
+    "type": "string",
+    "description": (
+        "Short: type and core numbers, no filler adjectives, for example "
+        '"Schwellenlauf 3 × 9 min" or "Lockerer Lauf 40 min", not '
+        '"Kontrollierter Schwellenlauf – 3 x 9 Minuten". Rename existing units '
+        "only when the athlete asks."
+    ),
+}
+
 ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
@@ -503,7 +514,7 @@ def build_structured_tool_schemas(
                                         "type": "string",
                                         "description": "Sport, e.g. Ride, VirtualRide, Run, Swim or WeightTraining.",
                                     },
-                                    "name": {"type": "string"},
+                                    "name": UNIT_NAME,
                                     "description": {
                                         "type": "string",
                                         "minLength": 1,
@@ -582,7 +593,7 @@ def build_structured_tool_schemas(
                                         "description": "Optional ISO-8601 local start timestamp on the workout date.",
                                     },
                                     "sport": {"type": "string"},
-                                    "name": {"type": "string"},
+                                    "name": UNIT_NAME,
                                     "description": {"type": "string", "minLength": 1},
                                     "duration_minutes": {
                                         "type": "integer",
@@ -629,7 +640,7 @@ def build_structured_tool_schemas(
                             },
                             "date": {"type": "string"},
                             "starts_at_local": {"type": "string"},
-                            "name": {"type": "string"},
+                            "name": UNIT_NAME,
                             "description": {"type": "string"},
                             "duration_minutes": {"type": "integer"},
                             "target": {"type": "string"},
@@ -678,7 +689,7 @@ def build_structured_tool_schemas(
                                 ],
                             },
                             "local_id": {"type": "string", "format": "uuid"},
-                            "name": {"type": "string"},
+                            "name": UNIT_NAME,
                             "description": {"type": "string"},
                             "sport": {
                                 "type": "string",

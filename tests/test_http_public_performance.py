@@ -1,12 +1,22 @@
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock, patch
+
+from support import (
+    GOLDEN_FIRST,
+    golden_history,
+    golden_lookup,
+    payload_digest,
+)
 
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
-from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
+from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
+    CanonicalPerformanceInputs,
+)
 from backend.performance.chart_history import analysis_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.training_focus import training_focus
@@ -155,6 +165,42 @@ class PublicPerformanceStateTests(unittest.TestCase):
             return_value={},
         ):
             service.from_inputs(None)
+
+    def test_golden_history_of_the_performance_endpoint(self):
+        sessions, feedback, loads = golden_history()
+        today = GOLDEN_FIRST + timedelta(days=129)
+        service = PublicPerformanceStateService(
+            Mock(sync_status=Mock(return_value=GarminSyncStatus())),
+            Mock(get=Mock(return_value={"timezone": "UTC"})),
+            Mock(),
+            lambda: today,
+            session_feedback=golden_lookup(feedback),
+            now=lambda: datetime(2026, 5, 10, 8, tzinfo=UTC),
+        )
+        inputs = CanonicalPerformanceInputs(
+            activities=tuple(sessions),
+            local_load_days=loads,
+            activities_synced_at="2026-05-05T07:00:00+00:00",
+        )
+
+        with patch(
+            "backend.http_api.public_performance.performance_context.current_performance_context",
+            return_value={},
+        ):
+            history = service.from_inputs(inputs)["performance"]["history"]
+
+        curves = {
+            name: history[name]
+            for name in (
+                "session_rpe_load",
+                "smoothed_session_load",
+                "local_fitness_fatigue",
+            )
+        }
+        self.assertEqual(
+            payload_digest(curves),
+            "ac2253bd254b038ee356651a728bb92c11ecfee5c869fcfc4e25348e4305ecd8",
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from backend.weather.forecast import (
+from backend.providers.weather_data import (
     merge_weather_forecasts,
     weather_forecast_is_complete,
     weather_forecast_params,

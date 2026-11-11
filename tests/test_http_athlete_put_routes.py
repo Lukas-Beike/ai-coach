@@ -4,6 +4,8 @@ import unittest
 from threading import RLock
 from unittest.mock import Mock, call
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.athlete_put import AthletePutRoutes
 
@@ -29,10 +31,16 @@ class AthletePutRoutesTests(unittest.TestCase):
             self.database_lock._is_owned()
         )
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/profile"))
+        self.assertTrue(
+            dispatch_route(self.routes, self.handler, "/api/profile", method="PUT")
+        )
 
     def test_athlete_context_route_is_gone(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/athlete-context"))
+        self.assertFalse(
+            dispatch_route(
+                self.routes, self.handler, "/api/athlete-context", method="PUT"
+            )
+        )
 
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
@@ -43,7 +51,9 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.handler.read_json.return_value = payload
         self.profile.patch.return_value = result
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/profile"))
+        self.assertTrue(
+            dispatch_route(self.routes, self.handler, "/api/profile", method="PUT")
+        )
 
         self.profile_factory.assert_called_once_with()
         self.profile.patch.assert_called_once_with(payload)
@@ -64,8 +74,12 @@ class AthletePutRoutesTests(unittest.TestCase):
             "confirmed": True,
         }
 
-        self.assertTrue(routes.handle(self.handler, "/api/zones"))
-        self.assertTrue(routes.handle(self.handler, "/api/zones/remove"))
+        self.assertTrue(
+            dispatch_route(routes, self.handler, "/api/zones", method="PUT")
+        )
+        self.assertTrue(
+            dispatch_route(routes, self.handler, "/api/zones/remove", method="PUT")
+        )
 
         zones.remove.assert_called_once_with(
             {"key": "|power|ride||", "confirmed": True}
@@ -75,11 +89,15 @@ class AthletePutRoutesTests(unittest.TestCase):
         )
 
     def test_zone_routes_are_absent_without_the_zone_service(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/zones"))
+        self.assertFalse(
+            dispatch_route(self.routes, self.handler, "/api/zones", method="PUT")
+        )
         self.handler.read_json.assert_not_called()
 
     def test_unknown_path_has_no_side_effects(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/other"))
+        self.assertFalse(
+            dispatch_route(self.routes, self.handler, "/api/other", method="PUT")
+        )
 
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
@@ -90,7 +108,7 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.profile.patch.side_effect = AppError(400, "invalid profile")
 
         with self.assertRaisesRegex(AppError, "invalid profile"):
-            self.routes.handle(self.handler, "/api/profile")
+            dispatch_route(self.routes, self.handler, "/api/profile", method="PUT")
 
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_not_called()

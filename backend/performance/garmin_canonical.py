@@ -30,6 +30,7 @@ from backend.canonical.vocabulary import (
     ProviderId,
     Sport,
 )
+from backend.performance.activity_validation import PERFORMANCE_METRIC_BOUNDS
 from backend.runtime.ports import (
     ActivityMaxHrReader,
     CategoricalObservationReader,
@@ -38,13 +39,15 @@ from backend.runtime.ports import (
 )
 
 _SLEEP_KINDS = (MetricKind.SLEEP_DURATION, MetricKind.SLEEP_SCORE)
-_PACE_SECONDS_PER_KM_RANGE = (120, 900)
+_PACE_SECONDS_PER_KM_RANGE = PERFORMANCE_METRIC_BOUNDS[
+    "run_threshold_pace_seconds_per_km"
+]
 # The legacy readers bounded the profile max heart rate and the weight tighter than
 # the canonical validation does at ingest.
 _MAX_HR_RANGE = (80, 260)
 _WEIGHT_KG_RANGE = (30, 300)
-_VO2MAX_RANGE = (20, 100)
-_RUN_THRESHOLD_POWER_RANGE = (50, 800)
+_VO2MAX_RANGE = PERFORMANCE_METRIC_BOUNDS["running_vo2max_ml_kg_min"]
+_RUN_THRESHOLD_POWER_RANGE = PERFORMANCE_METRIC_BOUNDS["run_threshold_watts"]
 # Race prediction kinds by the legacy metric key that shows them.
 RACE_PREDICTION_KEYS: Mapping[MetricKind, str] = {
     MetricKind.RACE_PREDICTION_5K: "run_5k_seconds",
@@ -691,7 +694,7 @@ def _running_vo2max(observations: Iterable[Observation]) -> float | None:
     return None if latest is None else latest.value.value
 
 
-def _bounded(value: float | None, bounds: tuple[int, int]) -> float | None:
+def _bounded(value: float | None, bounds: tuple[float, float]) -> float | None:
     return value if value is not None and bounds[0] <= value <= bounds[1] else None
 
 

@@ -138,18 +138,21 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         post = next(
             node
             for node in handler.body
-            if isinstance(node, ast.FunctionDef) and node.name == "do_POST"
+            if isinstance(node, ast.FunctionDef) and node.name == "_post"
         )
         source = ast.unparse(post)
         ordered_calls = (
-            "dependencies.post_dispatcher.handle_before_auth",
+            "dependencies.route_table.match",
             "self.auth_service.require_auth",
             "self.auth_service.require_csrf",
-            "dependencies.post_dispatcher.handle_before_maintenance",
             "dependencies.maintenance_gate.operation",
-            "dependencies.post_dispatcher.handle_authenticated",
+            "self.auth_service.authenticated_session",
+            "route.handle",
         )
-        positions = [source.index(call) for call in ordered_calls]
+        # The public and ungated branches call route.handle earlier; the last
+        # call is the one inside the maintenance gate.
+        positions = [source.index(call) for call in ordered_calls[:-1]]
+        positions.append(source.rindex(ordered_calls[-1]))
         self.assertEqual(positions, sorted(positions))
 
     def test_chat_turn_has_no_server_adapter(self) -> None:

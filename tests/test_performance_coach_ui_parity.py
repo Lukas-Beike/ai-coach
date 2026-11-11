@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from canonical_recovery_support import recovery_only_inputs
+from support import dispatch_route
 from test_session_rpe_load import provider_rpe, summary
 
 from backend.coach.activity_read_tools import CoachActivityReadToolService
@@ -328,8 +329,7 @@ class CoachUiParityTests(unittest.TestCase):
 
     def test_mean_max_curve_is_the_analysis_route_payload(self):
         handler = _Handler()
-        auth = Mock()
-        AnalysisRoutes(lambda: auth, lambda: self.reports).handle(handler, handler.path)
+        dispatch_route(AnalysisRoutes(lambda: self.reports), handler, handler.path)
         status, ui = handler.sent
         self.assertEqual(200, status)
         self.assertEqual(

@@ -33,6 +33,10 @@ class CalendarActivityPayloadTests(unittest.TestCase):
             "sport": "ride",
             "moving_duration_s": 3600,
             "distance_m": 30_000,
+            # #2258: the per-sport card values need cadence, speed and ground contact.
+            "avg_cadence": 88,
+            "avg_speed_mps": 8.3,
+            "ground_contact_time_ms": 250,
             "source": "Garmin",
             "private_note": "must not leak",
             "raw_payload": {"secret": True},
@@ -45,6 +49,14 @@ class CalendarActivityPayloadTests(unittest.TestCase):
         self.assertEqual(result["category"], "ACTIVITY")
         self.assertEqual(result["calendar_entry_type"], "completed_activity")
         self.assertTrue(result["is_completed_activity"])
+        self.assertEqual(
+            (
+                result["avg_cadence"],
+                result["avg_speed_mps"],
+                result["ground_contact_time_ms"],
+            ),
+            (88, 8.3, 250),
+        )
         self.assertNotIn("private_note", result)
         self.assertNotIn("raw_payload", result)
         self.assertEqual(

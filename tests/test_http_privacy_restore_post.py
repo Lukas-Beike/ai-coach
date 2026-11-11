@@ -6,13 +6,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
 
 
 class PrivacyRestorePostRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.auth_service = Mock()
-        self.auth_service.require_auth.return_value = {"user": "athlete"}
         self.auth_service.session_cookie_headers.return_value = [
             "cookie1=clear",
             "cookie2=clear",
@@ -31,13 +32,11 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
             send_json=Mock(),
         )
 
-    def test_success_authenticates_reads_body_restores_and_clears_cookies(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/privacy/restore")
-        self.assertTrue(handled)
-        self.auth_service.require_auth.assert_called_once_with(self.handler)
-        self.auth_service.require_csrf.assert_called_once_with(
-            self.handler, {"user": "athlete"}
+    def test_success_reads_body_restores_and_clears_cookies(self) -> None:
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/privacy/restore", method="POST"
         )
+        self.assertTrue(handled)
         self.handler.read_body_stream.assert_called_once_with(10_000)
         self.handler.read_body.assert_not_called()
         self.restore_service.restore.assert_called_once_with(self.body_chunks)
@@ -49,8 +48,7 @@ class PrivacyRestorePostRoutesTests(unittest.TestCase):
         )
 
     def test_wrong_path_returns_false_without_side_effects(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/other")
+        handled = dispatch_route(self.routes, self.handler, "/api/other", method="POST")
         self.assertFalse(handled)
-        self.auth_service.require_auth.assert_not_called()
         self.restore_service.restore.assert_not_called()
         self.handler.send_json.assert_not_called()

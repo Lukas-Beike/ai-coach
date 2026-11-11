@@ -9,6 +9,7 @@ from server_test_support import ServerTestCase, server
 
 from backend.athlete.checkins import normalize_checkin
 from backend.athlete.profile import normalize_profile
+from backend.errors import AppError
 
 
 class ServerAthleteTests(ServerTestCase):
@@ -20,7 +21,7 @@ class ServerAthleteTests(ServerTestCase):
         self.assertNotIn("admin", profile)
 
     def test_profile_timezone_is_validated_and_local_now_uses_it(self):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.ATHLETE_DATA.profile().save({"timezone": "Mars/NotAZone"})
         self.assertEqual(raised.exception.status, 400)
         profile = server.ATHLETE_DATA.profile().save({"timezone": "UTC"})
@@ -56,7 +57,7 @@ class ServerAthleteTests(ServerTestCase):
                 normalize_checkin({}, today=fixed_now.date())["checkin_date"],
                 "2026-08-31",
             )
-            with self.assertRaises(server.AppError) as raised:
+            with self.assertRaises(AppError) as raised:
                 server.ATHLETE_DATA.checkin().save({"checkin_date": "2026-09-01"})
         self.assertEqual(raised.exception.status, 400)
 

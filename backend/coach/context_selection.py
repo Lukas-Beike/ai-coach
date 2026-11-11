@@ -9,7 +9,6 @@ from datetime import date, timedelta
 from typing import Any, cast
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.vocabulary import ProviderId
 
 CONTEXT_SECTIONS = frozenset(
     {
@@ -54,17 +53,6 @@ DAILY_SECTIONS = BASE_SECTIONS | {"daily_planning_context"}
 # external sections (calendar, external calendar, weather, recovery) are loaded on
 # demand through read_coach_context instead of riding along on every "ok".
 FALLBACK_SECTIONS = DAILY_SECTIONS | {"planning", "training_plans"}
-# Provider-named section names from before the domain grouping. They stay accepted
-# on input (tool arguments, persisted selections) and resolve to one canonical name.
-SECTION_ALIASES: Mapping[str, str] = {
-    ProviderId.INTERVALS.value: "activities",
-    ProviderId.GARMIN.value: "recovery",
-}
-
-
-def canonical_section(name: str) -> str:
-    """Return the canonical section name; unknown names are returned unchanged."""
-    return SECTION_ALIASES.get(name, name)
 
 
 WEATHER_PATTERN = (
@@ -287,13 +275,6 @@ class CoachContextSelection:
     past_days: int = 2
     # Earlier planned units of this many days are read; 0 keeps today onward.
     past_planned_days: int = 0
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "sections",
-            frozenset(canonical_section(name) for name in self.sections),
-        )
 
     def project(self, context: dict[str, Any], local_date: str = "") -> dict[str, Any]:
         result = {

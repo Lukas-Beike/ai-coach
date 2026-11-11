@@ -48,13 +48,14 @@ from backend.db.canonical_store import (
 )
 from backend.errors import AppError
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin_activity_detail_mapping import (
     MAPPER_VERSION,
     map_garmin_activity_detail,
 )
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
 from backend.sync.refresh import sync_job_error_class
+from backend.sync.stream_backfill import count_fit_file
 
 _LOGGER = logging.getLogger("intervals_coach")
 ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]{1,200}")
@@ -129,9 +130,7 @@ class GarminActivityDetailService:
         provider_activity_id = str(record["provider_activity_id"])
         recorded_by = _recorded_by(record["recorded_by"])
         if not self._configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         if recorded_by == RecordingOrigin.MANUAL:
             return {
                 "status": "skipped",
@@ -157,6 +156,7 @@ class GarminActivityDetailService:
             )
             now = self._utc_now()
             mapped = _map_collected(collected, recorded_by=recorded_by, now=now)
+        self._count_fit(provider_activity_id, collected)
         # Malformed parts are dropped by the mapper, so they count like failures.
         incomplete = _incomplete(collected) or bool(mapped.issues)
         if not mapped.records:
@@ -313,6 +313,18 @@ class GarminActivityDetailService:
             # Closing the generator persists the Garmin tokens on early stop.
             details.close()
 
+    def _count_fit(self, provider_activity_id: str, collected: dict[str, Any]) -> None:
+        """Count the downloaded FIT file for the diagnostics inventory (#2220)."""
+        if self._key_values is not None and isinstance(collected.get("fit"), bytes):
+            with self._database_manager.unit_of_work() as db:
+                count_fit_file(
+                    db,
+                    self._key_values,
+                    GARMIN_ID,
+                    provider_activity_id,
+                    collected["fit"],
+                )
+
     def _store_collected(
         self,
         provider_activity_id: str,
@@ -327,6 +339,7 @@ class GarminActivityDetailService:
             recorded_by=_recorded_by(candidate["recorded_by"]),
             now=observed,
         )
+        self._count_fit(provider_activity_id, collected)
         # Malformed parts are dropped by the mapper, so they count like failures.
         failed = _failed(collected) or bool(mapped.issues)
         retry = dict(outcome.retry)

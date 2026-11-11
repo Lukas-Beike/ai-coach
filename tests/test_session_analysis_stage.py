@@ -403,6 +403,9 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(
             "Garmin-Zonen (Bezug 90 % der Max-HF)", times["sources"]["heart_rate"]
         )
+        # C-504: the calendar profile colors with the same zones as the zone times.
+        segment = row["payload"]["calendar_profile"]["segments"][0]
+        self.assertEqual(2, segment["zone"])
 
     def test_report_zone_times_use_the_local_zones_of_the_day(self) -> None:
         self._write(

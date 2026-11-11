@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, call
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.chat_post import ChatPostRoutes
 
@@ -22,7 +24,9 @@ class ChatPostRoutesTests(unittest.TestCase):
                 self.handler.read_json.return_value = body
 
                 with self.assertRaises(AppError) as caught:
-                    self.routes.handle(self.handler, "/api/chat/reset")
+                    dispatch_route(
+                        self.routes, self.handler, "/api/chat/reset", method="POST"
+                    )
 
                 self.assertEqual(caught.exception.status, 400)
                 self.assertEqual(caught.exception.reason, "confirmation_required")
@@ -34,7 +38,9 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.reset_service.reset.return_value = result
         self.handler.read_json.return_value = {"confirmed": True}
 
-        handled = self.routes.handle(self.handler, "/api/chat/reset")
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/chat/reset", method="POST"
+        )
 
         self.assertTrue(handled)
         self.handler.read_json.assert_called_once_with(12345)
@@ -44,7 +50,7 @@ class ChatPostRoutesTests(unittest.TestCase):
 
     def test_unknown_path_has_no_side_effects(self) -> None:
         # The removed submission route is no longer handled either.
-        handled = self.routes.handle(self.handler, "/api/chat")
+        handled = dispatch_route(self.routes, self.handler, "/api/chat", method="POST")
 
         self.assertFalse(handled)
         self.handler.read_json.assert_not_called()
@@ -57,7 +63,7 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.reset_service.reset.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
-            self.routes.handle(self.handler, "/api/chat/reset")
+            dispatch_route(self.routes, self.handler, "/api/chat/reset", method="POST")
 
         self.assertIs(caught.exception, error)
         self.handler.send_json.assert_not_called()
@@ -69,8 +75,8 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.reset_factory.side_effect = [first_reset, second_reset]
         self.handler.read_json.side_effect = [{"confirmed": True}, {"confirmed": True}]
 
-        self.routes.handle(self.handler, "/api/chat/reset")
-        self.routes.handle(self.handler, "/api/chat/reset")
+        dispatch_route(self.routes, self.handler, "/api/chat/reset", method="POST")
+        dispatch_route(self.routes, self.handler, "/api/chat/reset", method="POST")
 
         self.reset_factory.assert_has_calls([call(), call()])
         first_reset.reset.assert_called_once_with()

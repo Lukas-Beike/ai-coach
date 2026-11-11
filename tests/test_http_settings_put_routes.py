@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.settings_put import SettingsPutRoutes
 
@@ -17,7 +19,11 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.handler.read_json.return_value = {"model": "gpt-6-luna"}
         self.settings.save_model.return_value = {"model": "gpt-6-luna"}
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/settings/model"))
+        self.assertTrue(
+            dispatch_route(
+                self.routes, self.handler, "/api/settings/model", method="PUT"
+            )
+        )
 
         self.settings.save_model.assert_called_once_with("gpt-6-luna")
         self.handler.read_json.assert_called_once_with()
@@ -28,7 +34,9 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.settings.save_thinking_level.return_value = {"thinking_level": "high"}
 
         self.assertTrue(
-            self.routes.handle(self.handler, "/api/settings/thinking-level")
+            dispatch_route(
+                self.routes, self.handler, "/api/settings/thinking-level", method="PUT"
+            )
         )
 
         self.settings.save_thinking_level.assert_called_once_with("high")
@@ -42,16 +50,24 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.settings.save_calendar_display_settings.return_value = result
 
         self.assertTrue(
-            self.routes.handle(self.handler, "/api/settings/calendar-display")
+            dispatch_route(
+                self.routes,
+                self.handler,
+                "/api/settings/calendar-display",
+                method="PUT",
+            )
         )
 
         self.settings.save_calendar_display_settings.assert_called_once_with(payload)
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)
 
-
     def test_unknown_path_has_no_side_effects(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/settings/unknown"))
+        self.assertFalse(
+            dispatch_route(
+                self.routes, self.handler, "/api/settings/unknown", method="PUT"
+            )
+        )
 
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
@@ -67,7 +83,9 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.settings.save_model.side_effect = AppError(400, "invalid model")
 
         with self.assertRaisesRegex(AppError, "invalid model"):
-            self.routes.handle(self.handler, "/api/settings/model")
+            dispatch_route(
+                self.routes, self.handler, "/api/settings/model", method="PUT"
+            )
 
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_not_called()

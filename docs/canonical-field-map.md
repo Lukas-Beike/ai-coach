@@ -47,7 +47,7 @@ Implemented in `backend/performance/source_policy.py` (`CURRENT_RULES`, `DAILY_R
 Daily rules (`DAILY_RULES`) exist for `sleep_duration`, `sleep_score`, `hrv_rmssd`, `resting_hr` and `readiness` and reuse the order and bounds above.
 
 - **Local first.** For `ftp`, `threshold_hr`, `threshold_pace`, `max_hr` (`LOCAL_FIRST_KINDS`) the athlete's confirmed zone configuration in effect on the day precedes every provider (`local_thresholds` builds transient observations from `ZoneConfiguration`; they are not stored). `resolve_candidates` returns the winner, the other sources as alternatives and a conflict flag when an alternative differs by more than `CONFLICT_TOLERANCE` (3 % of the winner for the threshold kinds; `ABSOLUTE_CONFLICT_TOLERANCE`: 1.5 kg weight, 2.0 points body fat).
-- **Preferences.** The profile fields `preferred_source_<group>` (`thresholds`, `body`, `hrv`, `resting_hr`, `sleep`) move a preferred provider to the front of its group's order, behind a leading local value. Only providers listed in `PREFERENCE_GROUPS` count (Garmin); any other stored value is ignored.
+- **Preferences.** The profile field `preferred_source_body` makes Garmin's weight and body fat win over a newer local or Wahoo measurement. It is the only group in `PREFERENCE_GROUPS` (#2084): the stored fields `preferred_source_thresholds`, `_hrv`, `_resting_hr` and `_sleep` are kept but read nowhere, because Garmin already leads those orders. Only providers listed in `PREFERENCE_GROUPS` count (Garmin); any other stored value is ignored.
 - **Not covered here.** Profile and manual values and the activity-derived maximum heart rate stay with the caller.
 
 ## Subjective rating scales

@@ -10,6 +10,7 @@ from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.streams import ChatStreamRegistry
 from backend.errors import INTERNAL_SERVER_ERROR, AppError, ClientDisconnected
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class CoachChatStreamTransport:
@@ -35,6 +36,13 @@ class CoachChatStreamTransport:
         self._logger = logger
         self._max_request_bytes = max_request_bytes
         self._response_timeout_seconds = response_timeout_seconds
+
+    def routes(self) -> list[Route]:
+        return [Route("POST", "/api/chat/stream", Access.SESSION_CSRF, self._stream)]
+
+    def _stream(self, handler: Any, request: RouteRequest) -> None:
+        """Stream one Coach turn as server-sent events."""
+        self.handle(handler, request.session)
 
     def handle(self, handler: Any, session: dict[str, Any]) -> None:
         payload = handler.read_json(self._max_request_bytes)

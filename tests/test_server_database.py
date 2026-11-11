@@ -35,6 +35,7 @@ from backend.db.schema import (
     database_schema_is_current,
     database_table_names,
 )
+from backend.errors import AppError
 from backend.http_api import server as http_server_module
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -44,7 +45,7 @@ from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import STREAM_CHUNK_BYTES
-from backend.providers import openai as openai_provider
+from backend.providers import openai_requests
 from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import queue as sync_queue
@@ -787,7 +788,9 @@ class ServerDatabaseTests(ServerTestCase):
         finally:
             exported_files[0].unlink(missing_ok=True)
 
-    def test_privacy_download_routes_require_auth_before_streaming(self):
+    def test_privacy_download_routes_stream_through_the_transport(self):
+        from support import dispatch_route
+
         from backend.http_api.privacy_get import PrivacyGetRoutes
 
         routes = {
@@ -798,26 +801,12 @@ class ServerDatabaseTests(ServerTestCase):
             with self.subTest(path=path):
                 handler = object.__new__(server.HTTP_API.request_handler_class())
                 handler.path = path
-                auth = Mock()
                 transport = Mock()
                 transport_factory = Mock(return_value=transport)
-                route = PrivacyGetRoutes(
-                    Mock(return_value=auth), transport_factory, Mock()
-                )
-                self.assertTrue(route.handle(handler, path))
-                auth.require_auth.assert_called_once_with(handler)
+                route = PrivacyGetRoutes(transport_factory, Mock())
+                self.assertTrue(dispatch_route(route, handler, path))
                 getattr(transport, stream_method).assert_called_once_with(handler)
                 transport_factory.assert_called_once_with()
-
-                denied = server.AppError(401, "unauthorized")
-                auth.require_auth.side_effect = denied
-                transport.reset_mock()
-                transport_factory.reset_mock()
-                with self.assertRaises(server.AppError) as caught:
-                    route.handle(handler, path)
-                self.assertIs(caught.exception, denied)
-                transport_factory.assert_not_called()
-                getattr(transport, stream_method).assert_not_called()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
         service = server.PRIVACY_ASSEMBLY.archive_export_service()
@@ -831,7 +820,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
             with (
                 patch.object(service, "_config", no_space_config),
-                self.assertRaises(server.AppError) as no_space,
+                self.assertRaises(AppError) as no_space,
             ):
                 service.create_file()
             self.assertEqual(no_space.exception.status, 507)
@@ -846,7 +835,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
             with (
                 patch.object(service, "_config", too_large_config),
-                self.assertRaises(server.AppError) as too_large,
+                self.assertRaises(AppError) as too_large,
             ):
                 service.create_file()
             self.assertEqual(too_large.exception.status, 413)
@@ -863,7 +852,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
             with (
                 patch.object(service, "_config", timeout_config),
-                self.assertRaises(server.AppError) as timeout,
+                self.assertRaises(AppError) as timeout,
             ):
                 service.create_file()
             self.assertEqual(timeout.exception.status, 408)
@@ -966,9 +955,9 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_delete_reports_remote_attempt_and_failure(self):
         server.key_value_service().set("openai_conversation_id", "conv-test")
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "delete_conversation",
-            side_effect=server.AppError(503, "upstream"),
+            side_effect=AppError(503, "upstream"),
         ):
             result = server.PRIVACY_ASSEMBLY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
@@ -999,7 +988,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "delete_conversation",
             return_value=True,
         ):
@@ -1436,7 +1425,7 @@ class ServerDatabaseTests(ServerTestCase):
                     connection.commit()
                 finally:
                     connection.close()
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     server.BACKUP_ASSEMBLY.restore_service().restore(
                         incomplete_path.read_bytes()
                     )
@@ -1459,7 +1448,7 @@ class ServerDatabaseTests(ServerTestCase):
                     connection.commit()
                 finally:
                     connection.close()
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     server.BACKUP_ASSEMBLY.restore_service().restore(
                         unexpected_path.read_bytes()
                     )
@@ -1503,7 +1492,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.ATHLETE_DATA.profile().save({"name": "Ada"})
         self.assertTrue(server.HISTORY.change_history_service().list())
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "delete_conversation",
             return_value=True,
         ):

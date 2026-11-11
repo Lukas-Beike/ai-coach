@@ -584,6 +584,24 @@ class FitActivityDetailMappingTests(unittest.TestCase):
                 self.assertEqual(
                     result.issues, (_issue("fit", IssueReason.INVALID_TYPE),)
                 )
+                # The inventory counts nothing and raises nothing (#2220).
+                self.assertIsNone(mapper.fit_inventory(data))
+
+    def test_inventory_counts_only_unmapped_content_by_number(self):
+        mapped_only = _fit(records=[_record(1000, hr=100), _record(1001, hr=101)])
+        builder = fit_builder.FitBuilder()
+        builder.define(0, 20, [*RECORD_FIELDS, (57, UINT16)])
+        builder.data(0, {253: 1000, 3: 100, 57: 5})
+        builder.define(1, 21, [(0, ENUM), (1, ENUM)])
+        builder.data(1, {0: 0, 1: 4})
+        builder.define(2, 206, [(0, UINT8), (1, UINT8)])
+        builder.data(2, {0: 0, 1: 3})
+
+        self.assertEqual(frozenset(), mapper.fit_inventory(mapped_only))
+        self.assertEqual(
+            frozenset({"m21", "m206", "f20.57", "d0.3"}),
+            mapper.fit_inventory(builder.build()),
+        )
 
     def test_provenance_and_activity_id_are_carried_to_every_set(self):
         result = _map(

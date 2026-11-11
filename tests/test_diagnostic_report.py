@@ -16,6 +16,7 @@ from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
 )
+from backend.sync import session_rebundle
 
 _OTHER_TABLES = (
     "sync_jobs",
@@ -184,6 +185,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "local_load",
                 "rating_backfill",
                 "stream_backfill",
+                "fit_inventory",
                 "session_metrics",
                 "activity_weather",
                 "activity_routes",
@@ -200,6 +202,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             report["canonical_coverage"], {"status": "available", "providers": []}
         )
         self.assertEqual(report["canonical_backfill"], {"status": "unavailable"})
+        # Counts only, per recording origin and sport; empty before any file (#2220).
+        self.assertEqual(report["fit_inventory"], {})
         self.assertEqual(report["canonical_read"], {"status": "unavailable"})
         self.assertEqual(
             report["canonical_session_conflicts"],
@@ -305,8 +309,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # The stream backfill reads its state once (the read stops at the fake db).
         # The session focus backfill state and the weekly plan removal state are one more read each.
         # The Wahoo block reads the token record and the last sync time and error.
-        # The session rebundle state is one more read.
-        self.assertEqual(self.key_values.get.call_count, 18)
+        # The session rebundle state is one more read, the FIT inventory one more (#2220).
+        self.assertEqual(self.key_values.get.call_count, 19)
 
     def test_payload_sizes_count_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:
@@ -441,11 +445,14 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.service._deps.workout_library_sync_state.summary = Mock(
             side_effect=sqlite3.DatabaseError("malformed row")
         )
+        # K-009: a malformed stored rebundle state fails only its own section.
+        self.values[session_rebundle.STATE_KEY] = '{"counts": {"days": "malformed"}}'
 
         report = self.service.report()
 
         self.assertEqual(report["morning_checkin"], {"status": "unavailable"})
         self.assertEqual(report["database"], {"status": "unavailable"})
+        self.assertEqual(report["session_rebundle"], {"status": "unavailable"})
         self.assertEqual(report["app"]["version"], "1.2.3")
         self.assertEqual(report["wahoo"]["connected"], False)
 

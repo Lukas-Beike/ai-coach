@@ -45,7 +45,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store, garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin_personal import PERSONAL_KEY_REJECTED_REASON
 from backend.providers.garmin_rating_history import (
     FAILED,
@@ -283,9 +283,7 @@ class GarminRatingBackfillService:
         the failure are stored.
         """
         if not self._configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         with self._database_manager.reader() as db:
             state = _read_state(self._key_values, db)
             selection = select_rating_candidates(

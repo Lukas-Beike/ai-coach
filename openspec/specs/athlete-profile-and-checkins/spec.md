@@ -18,8 +18,8 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 - **THEN** the save is rejected before replacing the stored profile.
 
 #### Scenario: Sex and preferred sources
-- **WHEN** the athlete saves `sex` (male, female or empty) or a preferred source for thresholds, body, HRV, resting heart rate or sleep (Garmin or empty for automatic)
-- **THEN** an explicit save rejects any other value and a non-strict read clears it; changing the sex, a preferred source or the timezone requests a recomputation of the stored local load, and an unset sex makes the heart-rate load use the male TRIMP constants and mark the value as assumed.
+- **WHEN** the athlete saves `sex` (male, female or empty) or a preferred source (Garmin or empty for automatic; only body has a control and an effect, the stored thresholds, HRV, resting heart rate and sleep fields are kept but ignored, #2084)
+- **THEN** an explicit save rejects any other value and a non-strict read clears it; changing the sex, the body source or the timezone requests a recomputation of the stored local load, and an unset sex makes the heart-rate load use the male TRIMP constants and mark the value as assumed.
 
 #### Scenario: Missing or malformed stored profile
 - **WHEN** no valid profile JSON is stored
@@ -46,7 +46,7 @@ The system SHALL preserve unsubmitted profile fields on the profile patch API an
 - **WHEN** any expected value differs, a field is unknown/duplicated, or operation/scope authorization is missing
 - **THEN** the whole Coach batch is rejected without applying earlier fields.
 
-Evidence: `backend/athlete/profile.py:ProfileService.patch`; `backend/http_api/athlete_put.py:AthletePutRoutes.handle`; `backend/coach/profile_update.py:CoachProfileUpdateService.apply`; `tests/test_athlete_profile_service.py:test_patch_with_only_weight_keeps_name_and_normalizes_changed_field`; `tests/test_coach_profile_update.py:test_valid_batch_saves_only_selected_fields`, `tests/test_coach_profile_update.py:test_later_field_conflict_aborts_entire_batch`, `tests/test_coach_profile_update.py:test_authorization_precedes_profile_read_and_write`.
+Evidence: `backend/athlete/profile.py:ProfileService.patch`; `backend/http_api/athlete_put.py:AthletePutRoutes.routes`; `backend/coach/profile_update.py:CoachProfileUpdateService.apply`; `tests/test_athlete_profile_service.py:test_patch_with_only_weight_keeps_name_and_normalizes_changed_field`; `tests/test_coach_profile_update.py:test_valid_batch_saves_only_selected_fields`, `tests/test_coach_profile_update.py:test_later_field_conflict_aborts_entire_batch`, `tests/test_coach_profile_update.py:test_authorization_precedes_profile_read_and_write`.
 
 ### Requirement: AP3 Location invalidation on profile save and undo
 The system SHALL invalidate location-derived weather state only when the saved weather location changes, within the transaction of the profile save or of the undo that restores a profile. A profile save never writes competitions; they change only through the competition service.
@@ -55,7 +55,7 @@ The system SHALL invalidate location-derived weather state only when the saved w
 - **WHEN** location stays the same
 - **THEN** its weather cache is retained; changing or restoring a different location invokes the location-change invalidation hook, and the profile audit record of a save is written in the same transaction.
 
-Evidence: `backend/athlete/profile.py:ProfileService.save_in_transaction`, `backend/athlete/profile.py:ProfileService.restore_in_transaction`, `backend/http_api/athlete_put.py:AthletePutRoutes.handle`; `tests/test_http_athlete_put_routes.py:test_athlete_context_route_is_gone`; `tests/test_athlete_profile_service.py:test_same_location_keeps_weather_cache_and_skips_unchanged_history`, `tests/test_athlete_profile_service.py:test_restore_of_location_change_invokes_location_hook_and_clears_weather`.
+Evidence: `backend/athlete/profile.py:ProfileService.save_in_transaction`, `backend/athlete/profile.py:ProfileService.restore_in_transaction`, `backend/http_api/athlete_put.py:AthletePutRoutes.routes`; `tests/test_http_athlete_put_routes.py:test_athlete_context_route_is_gone`; `tests/test_athlete_profile_service.py:test_same_location_keeps_weather_cache_and_skips_unchanged_history`, `tests/test_athlete_profile_service.py:test_restore_of_location_change_invokes_location_hook_and_clears_weather`.
 
 ### Requirement: AP4 Validated daily subjective check-ins
 The system SHALL store a check-in for an explicit nonfuture calendar date or athlete-local today, validate score/minute bounds and bounded text, and expose today's and recent athlete-entered feedback separately from providers.

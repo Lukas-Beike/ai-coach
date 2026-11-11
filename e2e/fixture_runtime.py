@@ -60,7 +60,7 @@ from backend.canonical.vocabulary import (
     StreamChannel,
 )
 from backend.db import garmin_store
-from backend.errors import COACH_ABORTED_ERROR
+from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
@@ -78,7 +78,7 @@ FIXTURE_BIKE_NAME = "Fixture road bike"
 
 
 def blocked_provider(*args, **kwargs):
-    raise server.AppError(
+    raise AppError(
         503, "Synthetic provider unavailable", reason="fixture_provider_unavailable"
     )
 
@@ -122,7 +122,7 @@ SLOW_STREAM_CHUNKS = (
 def _raise_if_fixture_cancelled(cancel_event):
     """Raise the same chat-cancelled error as CoachResponseTransport."""
     if cancel_event is not None and cancel_event.is_set():
-        raise server.AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
 def _slow_stream_response(on_text_delta, cancel_event=None):
@@ -154,7 +154,7 @@ PROVIDER_FAILURE_CODES = {
 def _scripted_provider_response(current_message, on_text_delta, cancel_event=None):
     """Return provider failures and streaming scenarios triggered by fixed messages."""
     if current_message == "E2E fixture: OpenAI timeout":
-        raise server.AppError(
+        raise AppError(
             504, "Synthetic private provider detail", reason="provider_timeout"
         )
     if current_message in PROVIDER_FAILURE_CODES:
@@ -208,7 +208,7 @@ def fixture_coach_response(payload, **kwargs):
         templates = nutrition.list_templates()
         scope = ["local_nutrition"]
         if current_message == "E2E nutrition: mixed meal":
-            product = nutrition.save_product(
+            product = nutrition.product_catalog.save_product(
                 {
                     "name": "Synthetic whey <img src=x>",
                     "brand": "Fixture",
@@ -1907,7 +1907,10 @@ def _fixture_completed_sports(today, by_id):
 def _fixture_nutrition_products():
     """Local manual products show gram/ml bases and archived catalog entries."""
     service = server.NUTRITION_ASSEMBLY.meal_library_service()
-    existing = {item["id"] for item in service.list_products(include_archived=True)}
+    existing = {
+        item["id"]
+        for item in service.product_catalog.list_products(include_archived=True)
+    }
     for key, name, unit, kcal, carbs, protein, fat, status in (
         ("oats", "Synthetic oats", "g", 370, 60, 13, 7, "active"),
         ("drink", "Synthetic sports drink", "ml", 24, 6, 0, 0, "active"),
@@ -1915,7 +1918,7 @@ def _fixture_nutrition_products():
     ):
         product_id = f"fixture-product-{key}"
         if product_id not in existing:
-            service.save_product(
+            service.product_catalog.save_product(
                 {
                     "id": product_id,
                     "name": name,
@@ -2348,7 +2351,7 @@ def _fixture_seed_distance_run(today):
         try:
             server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])
             return
-        except server.AppError as error:
+        except AppError as error:
             if error.reason != "plan_date_conflict":
                 raise
 
@@ -2540,14 +2543,14 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             try:
                 self.auth_service.require_auth(self)
                 self.send_json(200, seed_preview_demo())
-            except server.AppError as error:
+            except AppError as error:
                 self.send_json(error.status, {"error": error.message})
             return
         if self.path == "/api/fixture/features":
             try:
                 self.auth_service.require_auth(self)
                 self.send_json(200, seed_training_features())
-            except server.AppError as error:
+            except AppError as error:
                 self.send_json(error.status, {"error": error.message})
             return
         if self.path == "/api/fixture/activity":

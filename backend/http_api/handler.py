@@ -11,10 +11,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from backend.errors import (
     DATABASE_BUSY_MESSAGE,
+    NOT_FOUND_ERROR,
     AppError,
     DatabaseBusyError,
     public_error_contract,
@@ -32,6 +33,7 @@ from backend.http_api.requests import (
 from backend.http_api.requests import (
     read_json as read_request_json,
 )
+from backend.http_api.route_table import Access, RouteRequest, RouteTable
 from backend.http_api.static_assets import StaticAssetService
 from backend.observability import http_access_log_level, redact_request_query
 from backend.runtime.socket_deadline import SocketDeadline
@@ -64,8 +66,7 @@ class HttpRequestHandlerDependencies:
     app_version: str
     logger: Any
     session_auth_service: Callable[[], Any]
-    route_dispatcher: Any
-    post_dispatcher: Any
+    route_table: RouteTable
     response_transport: Any
     maintenance_gate: Any
     redact_text: Callable[[str], str]
@@ -201,21 +202,31 @@ class RequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
+        self._dispatch("GET", self._get)
+
+    def do_POST(self) -> None:
+        self._dispatch("POST", self._post)
+
+    def do_PUT(self) -> None:
+        self._dispatch("PUT", self._put)
+
+    def _dispatch(self, method: str, route: Callable[[str], None]) -> None:
         self.request_id = uuid.uuid4().hex[:12]
         try:
-            path = urlparse(self.path).path
-            self.dependencies.route_dispatcher.handle_get(self, path)
+            route(urlparse(self.path).path)
         except AppError as exc:
-            self._send_app_error(exc, "GET")
+            self._send_app_error(exc, method)
         except DatabaseBusyError:
-            self._send_app_error(database_busy_error(), "GET")
+            self._send_app_error(database_busy_error(), method)
+        except ClientInputTimeout:
+            self._end_after_input_timeout(method)
         except Exception:
             self.dependencies.logger.exception(
-                "Unhandled GET error",
+                f"Unhandled {method} error",
                 extra={
                     "event": "http_unhandled_error",
                     "context": {
-                        "method": "GET",
+                        "method": method,
                         "path": redact_request_query(self.path),
                         "request_id": self.request_id,
                     },
@@ -223,49 +234,58 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             self.send_json(500, {"error": self.dependencies.internal_server_error})
 
-    def do_POST(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            path = urlparse(self.path).path
-            if self.dependencies.post_dispatcher.handle_before_auth(self, path):
-                return
+    def _request(
+        self, path: str, params: dict[str, str], session: dict[str, Any]
+    ) -> RouteRequest:
+        return RouteRequest(path, params, parse_qs(urlparse(self.path).query), session)
+
+    def _get(self, path: str) -> None:
+        found = self.dependencies.route_table.match("GET", path)
+        if found is None:
+            if path.startswith("/api/"):
+                raise AppError(404, NOT_FOUND_ERROR)
+            self.send_static(path)
+            return
+        route, params = found
+        session: dict[str, Any] = {}
+        if route.access is not Access.PUBLIC:
+            session = self.auth_service.require_auth(self)
+        route.handle(self, self._request(path, params, session))
+
+    def _post(self, path: str) -> None:
+        route, params = self.dependencies.route_table.match("POST", path) or (None, {})
+        if route is not None and route.access is Access.PUBLIC:
+            route.handle(self, self._request(path, params, {}))
+            return
+        # An unknown path gets the same checks as a registered one before its 404.
+        session = self.auth_service.require_auth(self)
+        self.auth_service.require_csrf(self, session)
+        if route is not None and not route.gated:
+            route.handle(self, self._request(path, params, session))
+            return
+        with self.dependencies.maintenance_gate.operation():
+            # A restore may complete between the first check and entering
+            # the gate and delete the session. Re-validate the session here
+            # without repeating require_auth, which would spend a second
+            # rate-limit slot for the same request.
+            current = self.auth_service.authenticated_session(self)
+            if not current:
+                raise AppError(401, "Anmeldung erforderlich.")
+            self.auth_service.require_csrf(self, current)
+            if route is None:
+                raise AppError(404, NOT_FOUND_ERROR)
+            route.handle(self, self._request(path, params, current))
+
+    def _put(self, path: str) -> None:
+        # The maintenance gate answers before authentication.
+        with self.dependencies.maintenance_gate.operation():
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
-            if self.dependencies.post_dispatcher.handle_before_maintenance(
-                self, path, session
-            ):
-                return
-            with self.dependencies.maintenance_gate.operation():
-                # A restore may complete between the first check and entering
-                # the gate and delete the session. Re-validate the session here
-                # without repeating require_auth, which would spend a second
-                # rate-limit slot for the same request.
-                current = self.auth_service.authenticated_session(self)
-                if not current:
-                    raise AppError(401, "Anmeldung erforderlich.")
-                self.auth_service.require_csrf(self, current)
-                self.dependencies.post_dispatcher.handle_authenticated(
-                    self, path, current
-                )
-        except AppError as exc:
-            self._send_app_error(exc, "POST")
-        except DatabaseBusyError:
-            self._send_app_error(database_busy_error(), "POST")
-        except ClientInputTimeout:
-            self._end_after_input_timeout("POST")
-        except Exception:
-            self.dependencies.logger.exception(
-                "Unhandled POST error",
-                extra={
-                    "event": "http_unhandled_error",
-                    "context": {
-                        "method": "POST",
-                        "path": redact_request_query(self.path),
-                        "request_id": self.request_id,
-                    },
-                },
-            )
-            self.send_json(500, {"error": self.dependencies.internal_server_error})
+            found = self.dependencies.route_table.match("PUT", path)
+            if found is None:
+                raise AppError(404, NOT_FOUND_ERROR)
+            route, params = found
+            route.handle(self, self._request(path, params, session))
 
     def send_sse_headers(self, *, persistent: bool = True) -> None:
         self.dependencies.response_transport.send_sse_headers(
@@ -278,40 +298,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.dependencies.response_transport.send_sse_event(
             self, event, payload, event_id
         )
-
-    def do_PUT(self) -> None:
-        self.request_id = uuid.uuid4().hex[:12]
-        try:
-            with self.dependencies.maintenance_gate.operation():
-                self._do_PUT()
-        except AppError as exc:
-            self._send_app_error(exc, "PUT")
-
-    def _do_PUT(self) -> None:
-        try:
-            path = urlparse(self.path).path
-            session = self.auth_service.require_auth(self)
-            self.auth_service.require_csrf(self, session)
-            self.dependencies.route_dispatcher.handle_put(self, path)
-        except AppError as exc:
-            self._send_app_error(exc, "PUT")
-        except DatabaseBusyError:
-            self._send_app_error(database_busy_error(), "PUT")
-        except ClientInputTimeout:
-            self._end_after_input_timeout("PUT")
-        except Exception:
-            self.dependencies.logger.exception(
-                "Unhandled PUT error",
-                extra={
-                    "event": "http_unhandled_error",
-                    "context": {
-                        "method": "PUT",
-                        "path": redact_request_query(self.path),
-                        "request_id": self.request_id,
-                    },
-                },
-            )
-            self.send_json(500, {"error": self.dependencies.internal_server_error})
 
     def read_body(self, max_bytes: int | None = None) -> bytes:
         if max_bytes is None:

@@ -36,6 +36,7 @@ than the one the chain last ran for.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -59,6 +60,7 @@ from backend.db.canonical_store import active_provider_record_hash, activity_rec
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.providers.fit_activity_detail_mapping import fit_inventory
 from backend.providers.garmin_fit_history import FitTransportMissing
 from backend.providers.garmin_personal import PERSONAL_KEY_REJECTED_REASON
 from backend.providers.garmin_rating_history import (
@@ -73,6 +75,11 @@ from backend.sync.jobs import STREAM_HISTORY_CURSOR
 FAILURE_LIMIT: Final = 3
 STATE_KEY_PREFIX: Final = "stream_backfill_state"
 BLOCKED_PERSONAL_API: Final = "personal_api_required"
+
+# Count-only inventory of FIT content (#2220); ``seen`` keeps file hashes so a
+# file read again (regular fetch, then replay) is counted once.
+FIT_INVENTORY_KEY: Final = "fit_inventory"
+_MAX_SEEN_FILES: Final = 5000
 
 STORED: Final = "stored"
 NO_STREAMS: Final = "no_streams"
@@ -410,6 +417,8 @@ class StreamBackfillService:
         if data is None:
             outcome.no_file.append(identifier)
             return
+        with self._guard(), self._database_manager().unit_of_work() as db:
+            count_fit_file(db, self._key_values, self._provider, identifier, data)
         try:
             result = self._store(candidate, data)
         except AppError:
@@ -629,3 +638,72 @@ def stream_backfill_counts(
         "cursor": phase,
         "finished": phase == "finished",
     }
+
+
+def count_fit_file(
+    db: Any,
+    key_values: KeyValueRepository,
+    provider: str,
+    provider_activity_id: str,
+    data: object,
+) -> None:
+    """Add one read FIT file to the inventory by recording origin and sport."""
+    keys = fit_inventory(data)
+    if keys is None or not isinstance(data, bytes):
+        return
+    digest = hashlib.sha256(data).hexdigest()[:32]
+    state = _inventory_state(key_values, db)
+    if digest in state["seen"]:
+        return
+    row = db.execute(
+        "SELECT sport, recorded_by FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ? LIMIT 1",
+        (provider, provider_activity_id),
+    ).fetchone()
+    origin = _vocabulary(row and row["recorded_by"], RecordingOrigin) or provider
+    sport = _vocabulary(row and row["sport"], Sport) or "unknown"
+    bucket = state["counts"].setdefault(origin, {}).setdefault(sport, {})
+    for key in ("files", *sorted(keys)):
+        bucket[key] = int(bucket.get(key) or 0) + 1
+    state["seen"] = [*state["seen"], digest][-_MAX_SEEN_FILES:]
+    key_values.set(db, FIT_INVENTORY_KEY, json.dumps(state, sort_keys=True))
+
+
+def fit_inventory_counts(db: Any, key_values: KeyValueRepository) -> dict[str, Any]:
+    """The inventory counts for diagnostics, without the file hashes.
+
+    Per recording origin and sport: ``files`` read, and the files holding each
+    message number, unread field of a mapped message and developer field.
+    """
+    groups = {"m": "messages", "f": "unmapped_fields", "d": "developer_fields"}
+    result: dict[str, Any] = {}
+    for origin, sports in _inventory_state(key_values, db)["counts"].items():
+        for sport, bucket in sports.items():
+            view: dict[str, Any] = {"files": bucket.get("files", 0)}
+            view.update({name: {} for name in groups.values()})
+            for key, count in bucket.items():
+                if key != "files" and key[:1] in groups:
+                    view[groups[key[:1]]][key[1:]] = count
+            result.setdefault(origin, {})[sport] = view
+    return result
+
+
+def _inventory_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
+    try:
+        stored = json.loads(key_values.get(db, FIT_INVENTORY_KEY) or "{}")
+    except ValueError:
+        stored = {}
+    stored = stored if isinstance(stored, dict) else {}
+    seen = stored.get("seen")
+    counts = stored.get("counts")
+    return {
+        "seen": [str(item) for item in seen] if isinstance(seen, list) else [],
+        "counts": counts if isinstance(counts, dict) else {},
+    }
+
+
+def _vocabulary(value: object, vocabulary: type[RecordingOrigin | Sport]) -> str:
+    try:
+        return vocabulary(str(value)).value if value else ""
+    except ValueError:
+        return ""

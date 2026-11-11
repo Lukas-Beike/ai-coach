@@ -18,7 +18,6 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRe
 from backend.sync.provider_runtime import FullResyncHandler
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
-GARMIN_NOT_CONFIGURED_ERROR = "Garmin ist nicht konfiguriert oder nicht verfügbar."
 PARTIAL_RESYNC_ERROR = "Teilweise geladen. Bitte erneut starten."
 
 RESYNC_FIELDS = ("running", "status", "last_at", "error")

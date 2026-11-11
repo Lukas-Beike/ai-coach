@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from activity_row_support import NoObservations, SnapshotActivityRows, StoredCoverage
 from canonical_detail_support import add_session_record, open_manager
+from support import dispatch_route
 
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
@@ -28,17 +29,14 @@ class FakeHandler:
 
 class SyncGetRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.auth = Mock()
         self.queue = Mock()
         self.sync_state = Mock()
         self.activities = Mock()
-        self.auth_factory = Mock(return_value=self.auth)
         self.queue_factory = Mock(return_value=self.queue)
         self.sync_state_factory = Mock(return_value=self.sync_state)
         self.activity_factory = Mock(return_value=self.activities)
         self.today = Mock(return_value=date(2026, 9, 24))
         self.routes = SyncGetRoutes(
-            self.auth_factory,
             self.queue_factory,
             self.sync_state_factory,
             self.activity_factory,
@@ -49,9 +47,8 @@ class SyncGetRoutesTests(unittest.TestCase):
 
     def test_sync_job_payload_and_exact_path_pattern(self) -> None:
         self.queue.state.return_value = {"id": "a1-b2", "state": "running"}
-        self.assertTrue(self.routes.handle(self.handler, "/api/sync/jobs/a1-b2"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/sync/jobs/a1-b2"))
         self.assertEqual(self.handler.responses, [(200, self.queue.state.return_value)])
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.queue.state.assert_called_once_with("a1-b2")
 
         for path in (
@@ -62,14 +59,9 @@ class SyncGetRoutesTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 handler = FakeHandler()
-                factories = (
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                    Mock(),
-                )
+                factories = (Mock(), Mock(), Mock())
                 route = SyncGetRoutes(*factories, lambda: date(2026, 9, 24), -1)
-                self.assertFalse(route.handle(handler, path))
+                self.assertFalse(dispatch_route(route, handler, path))
                 for factory in factories:
                     factory.assert_not_called()
                 self.assertEqual(handler.responses, [])
@@ -80,7 +72,6 @@ class SyncGetRoutesTests(unittest.TestCase):
         resync = Mock()
         resync.progress.return_value = {"running": True, "outcome": None}
         routes = SyncGetRoutes(
-            self.auth_factory,
             self.queue_factory,
             self.sync_state_factory,
             self.activity_factory,
@@ -89,22 +80,20 @@ class SyncGetRoutesTests(unittest.TestCase):
             full_resync=lambda: resync,
             full_resync_providers={"/api/garmin/full-resync": "garmin"},
         )
-        self.assertTrue(routes.handle(self.handler, "/api/garmin/full-resync"))
+        self.assertTrue(dispatch_route(routes, self.handler, "/api/garmin/full-resync"))
         self.assertEqual(
             self.handler.responses, [(200, {"running": True, "outcome": None})]
         )
         resync.progress.assert_called_once_with("garmin")
-        self.auth.require_auth.assert_called_once_with(self.handler)
 
-        self.assertFalse(routes.handle(FakeHandler(), "/api/wahoo/full-resync"))
-        self.assertFalse(self.routes.handle(FakeHandler(), "/api/garmin/full-resync"))
+        self.assertFalse(dispatch_route(routes, FakeHandler(), "/api/wahoo/full-resync"))
+        self.assertFalse(dispatch_route(self.routes, FakeHandler(), "/api/garmin/full-resync"))
 
     def test_sync_status_payload_is_forwarded_unchanged(self) -> None:
         payload = {"status": "idle", "jobs": [{"id": "fake"}]}
         self.sync_state.state.return_value = payload
-        self.assertTrue(self.routes.handle(self.handler, "/api/sync/status"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/sync/status"))
         self.assertEqual(self.handler.responses, [(200, payload)])
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.sync_state.state.assert_called_once_with()
 
     def test_activity_query_uses_first_value_and_local_today_per_request(self) -> None:
@@ -113,7 +102,7 @@ class SyncGetRoutesTests(unittest.TestCase):
             "/api/activities?cursor=first&cursor=second&limit=12&limit=24"
             "&days=7&days=30"
         )
-        self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/activities"))
         self.activities.page.assert_called_once_with(
             "first", "12", "7", today=date(2026, 9, 24)
         )
@@ -122,40 +111,19 @@ class SyncGetRoutesTests(unittest.TestCase):
         self.activities.page.reset_mock()
         self.today.return_value = date(2026, 9, 25)
         self.handler.path = "/api/activities"
-        self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/activities"))
         self.activities.page.assert_called_once_with(
             None, None, -1, today=date(2026, 9, 25)
         )
         self.assertEqual(self.today.call_count, 2)
 
-    def test_authentication_failure_precedes_data_factory_and_clock(self) -> None:
-        denied = RuntimeError("denied")
-        self.auth.require_auth.side_effect = denied
-        with self.assertRaisesRegex(RuntimeError, "denied"):
-            self.routes.handle(self.handler, "/api/activities")
-        self.queue_factory.assert_not_called()
-        self.sync_state_factory.assert_not_called()
-        self.activity_factory.assert_not_called()
-        self.today.assert_not_called()
-
-    def test_auth_factory_is_resolved_for_each_keep_alive_request(self) -> None:
-        second_auth = Mock()
-        self.auth_factory.side_effect = [self.auth, second_auth]
-        self.sync_state.state.return_value = {"status": "idle"}
-        self.routes.handle(self.handler, "/api/sync/status")
-        self.routes.handle(self.handler, "/api/sync/status")
-        self.assertEqual(self.auth_factory.call_count, 2)
-        self.auth.require_auth.assert_called_once_with(self.handler)
-        second_auth.require_auth.assert_called_once_with(self.handler)
-
     def test_unknown_path_resolves_no_factories(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/sync/other"))
-        self.auth_factory.assert_not_called()
+        self.assertFalse(dispatch_route(self.routes, self.handler, "/api/sync/other"))
         self.queue_factory.assert_not_called()
         self.sync_state_factory.assert_not_called()
         self.activity_factory.assert_not_called()
 
-    def test_activity_detail_is_authenticated_local_only_and_preserves_case(
+    def test_activity_detail_is_local_only_and_preserves_case(
         self,
     ) -> None:
         self.activities.detail.return_value = {
@@ -163,9 +131,8 @@ class SyncGetRoutesTests(unittest.TestCase):
             "activity_validation": {},
         }
         self.assertTrue(
-            self.routes.handle(self.handler, "/api/activities/CaseSensitive-1")
+            dispatch_route(self.routes, self.handler, "/api/activities/CaseSensitive-1")
         )
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.activities.detail.assert_called_once_with(
             "CaseSensitive-1",
             garmin_status=NO_GARMIN_SYNC_STATUS,
@@ -192,7 +159,7 @@ class SyncGetRoutesTests(unittest.TestCase):
             ]
         }
         self.handler.path = "/api/activities"
-        self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/activities"))
         # The v1 document already names its metrics provider-neutrally.
         document = {
             "contract": "activity_detail.v1",
@@ -200,7 +167,7 @@ class SyncGetRoutesTests(unittest.TestCase):
             "laps": {"laps": [{"metrics": {"load": 12}}]},
         }
         self.activities.detail.return_value = dict(document)
-        self.assertTrue(self.routes.handle(self.handler, "/api/activities/a1"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/activities/a1"))
 
         self.assertEqual(
             [
@@ -274,10 +241,8 @@ class ActivityDetailRouteTests(unittest.TestCase):
             lambda _activity_id: {"items": [], "assignments": []},
             refreshable_providers=lambda: ("intervals", "garmin"),
         )
-        self.auth = Mock()
         self.reads = Mock(side_effect=self.assembly.activity_read)
         self.routes = SyncGetRoutes(
-            Mock(return_value=self.auth),
             Mock(),
             Mock(),
             self.reads,
@@ -287,20 +252,11 @@ class ActivityDetailRouteTests(unittest.TestCase):
 
     def get(self, activity_id: str) -> dict:
         handler = FakeHandler()
-        self.assertTrue(self.routes.handle(handler, f"/api/activities/{activity_id}"))
+        self.assertTrue(dispatch_route(self.routes, handler, f"/api/activities/{activity_id}"))
         ((status, payload),) = handler.responses
         self.assertEqual(200, status)
         assert isinstance(payload, dict)
         return payload
-
-    def test_authentication_precedes_every_detail_read(self) -> None:
-        self.auth.require_auth.side_effect = AppError(401, "Anmeldung erforderlich.")
-        handler = FakeHandler()
-        with self.assertRaises(AppError) as denied:
-            self.routes.handle(handler, "/api/activities/act_i")
-        self.assertEqual(401, denied.exception.status)
-        self.reads.assert_not_called()
-        self.assertEqual([], handler.responses)
 
     def test_detail_body_is_the_v1_document_without_validation(self) -> None:
         for requested in ("act_i", "i1"):
@@ -334,7 +290,7 @@ class ActivityDetailRouteTests(unittest.TestCase):
     def test_unknown_session_is_not_found(self) -> None:
         for activity_id in ("act_missing", "missing"):
             with self.subTest(activity_id), self.assertRaises(AppError) as missing:
-                self.routes.handle(FakeHandler(), f"/api/activities/{activity_id}")
+                dispatch_route(self.routes, FakeHandler(), f"/api/activities/{activity_id}")
             self.assertEqual(404, missing.exception.status)
             self.assertEqual("activity_details_not_found", missing.exception.reason)
 

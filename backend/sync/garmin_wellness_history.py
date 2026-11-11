@@ -28,7 +28,7 @@ from typing import Any, Final, Protocol
 from backend.canonical.section_items import SectionItem, split_section
 from backend.db import garmin_store
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin import merge_weight_snapshots
 from backend.providers.garmin_wellness_history import (
     WellnessSourcePaused,
@@ -100,9 +100,7 @@ class GarminWellnessHistoryService:
         worker retries it later and the cursor stays where it is.
         """
         if not self._configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         start = end - timedelta(days=max(1, days) - 1)
         with self._coordination.operation():
             if not self._coordination.acquire(timeout=LOCK_WAIT_SECONDS):

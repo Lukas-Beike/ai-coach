@@ -15,6 +15,7 @@ from test_coach_dialogue import DialogueHarness, server
 from backend.activities.hr_cap import effective_caps, resolved_range
 from backend.calendar import external as calendar_external
 from backend.coach.authorization import require_coach_scope
+from backend.errors import AppError
 from backend.http_api import pagination as api_pagination
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import library as planning_library
@@ -71,7 +72,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def get(self, path):
         identity = path.rsplit("/", 1)[-1]
         if identity not in self.remote:
-            raise server.AppError(404, "Synthetic missing event")
+            raise AppError(404, "Synthetic missing event")
         return deepcopy(self.remote[identity])
 
     def upsert(self, payloads):
@@ -106,7 +107,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def delete(self, identity):
         self.mutations.append(("delete", identity))
         if self.fail_delete:
-            raise server.AppError(502, "Synthetic delete failure")
+            raise AppError(502, "Synthetic delete failure")
         self.remote.pop(identity, None)
 
     def set_planned_sync_state(self, local_id, state, remote_event=None):
@@ -511,7 +512,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             threads.append(thread)
             thread.start()
             self.assertTrue(polled.wait(2), "Provider I/O blocks database polling")
-            with self.assertRaises(server.AppError) as caught:
+            with self.assertRaises(AppError) as caught:
                 server.PLANNED_CALENDAR_SYNC.sync_service().sync_entry(local_id)
             self.assertEqual(caught.exception.reason, "planned_unit_sync_running")
             return self.upsert(payloads)
@@ -802,14 +803,14 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(len(active["planned_units"]), 366)
         self.assertFalse(active["planned_units_page"]["has_more"])
         cursor = first["planned_units_page"]["next_cursor"]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.PLANNING_WORKFLOWS.structured_training_state_service().read(
                 cursor=cursor
             )
         server.PLANNING_DATA.planned_unit().update(
             active["planned_units"][0]["local_id"], {"name": "Changed after page one"}
         )
-        with self.assertRaises(server.AppError) as caught:
+        with self.assertRaises(AppError) as caught:
             server.PLANNING_WORKFLOWS.structured_training_state_service().read(
                 include_inactive=True, cursor=cursor
             )
@@ -818,7 +819,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             "invalid",
             api_pagination.encode_page_cursor(["not-a-state-cursor"]),
         ):
-            with self.assertRaises(server.AppError):
+            with self.assertRaises(AppError):
                 server.PLANNING_WORKFLOWS.structured_training_state_service().read(
                     cursor=malformed
                 )
@@ -912,7 +913,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             "_repair_period": {"start": "2026-09-09", "end": "2026-09-09"},
             "authorization_scope": ["local_plan"],
         }
-        with self.assertRaises(server.AppError) as caught:
+        with self.assertRaises(AppError) as caught:
             service = server.SYNC_COMMANDS.repair_manifest()
             prepared = service.prepare({"expected_revision": revision - 1}, intent)
             require_coach_scope(intent, *prepared.required_scope_groups[0])

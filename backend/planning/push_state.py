@@ -39,8 +39,8 @@ from backend.providers.intervals_workouts import (
 )
 
 if TYPE_CHECKING:
-    from backend.planning.garmin_orphans import GarminOrphan
     from backend.planning.intervals_orphans import IntervalsOrphan
+    from backend.planning.leftovers import GarminOrphan
     from backend.planning.wahoo_orphans import WahooOrphan
 
 # States from which an explicit Intervals.icu push helps; a conflict needs a

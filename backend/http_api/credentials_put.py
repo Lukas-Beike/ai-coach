@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.provider_credentials import ProviderCredentialService, requires_password
 
 CREDENTIALS_PATH = "/api/settings/credentials"
@@ -30,9 +31,11 @@ class CredentialsPutRoutes:
         self._credentials = credentials
         self._session_auth_service = session_auth_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != CREDENTIALS_PATH:
-            return False
+    def routes(self) -> list[Route]:
+        return [Route("PUT", CREDENTIALS_PATH, Access.SESSION_CSRF, self._update)]
+
+    def _update(self, handler: Any, _request: RouteRequest) -> None:
+        """Save or clear provider credentials in the encrypted database (see below)."""
         values = handler.read_json()
         if isinstance(values, dict):
             # Never part of the credential submission itself.
@@ -41,4 +44,3 @@ class CredentialsPutRoutes:
                 self._session_auth_service().require_password(handler, password)
         result = self._credentials.update(values)
         handler.send_json(200, result)
-        return True

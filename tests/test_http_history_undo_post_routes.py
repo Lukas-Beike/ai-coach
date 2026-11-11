@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 
 
@@ -23,7 +25,9 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.handler.read_json.return_value = payload
         self.undo.apply.return_value = result
 
-        handled = self.routes.handle(self.handler, "/api/change-history/undo")
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/change-history/undo", method="POST"
+        )
 
         self.assertTrue(handled)
         self.undo_factory.assert_called_once_with()
@@ -41,7 +45,7 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
             "entity_type": "activity_feedback",
         }
 
-        routes.handle(self.handler, "/api/change-history/undo")
+        dispatch_route(routes, self.handler, "/api/change-history/undo", method="POST")
 
         load.assert_called_once_with("a1")
         self.handler.send_json.assert_called_once_with(
@@ -59,7 +63,7 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.handler.read_json.return_value = {"change_id": "c", "activity_id": "a1"}
         self.undo.apply.return_value = {"status": "undone", "entity_type": "profile"}
 
-        routes.handle(self.handler, "/api/change-history/undo")
+        dispatch_route(routes, self.handler, "/api/change-history/undo", method="POST")
 
         load.assert_not_called()
         self.handler.send_json.assert_called_once_with(
@@ -74,7 +78,9 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         }
         self.turn_undo.undo.return_value = result
 
-        handled = self.routes.handle(self.handler, "/api/change-history/undo-turn")
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/change-history/undo-turn", method="POST"
+        )
 
         self.assertTrue(handled)
         self.turn_undo.undo.assert_called_once_with("turn-1")
@@ -88,7 +94,9 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
             "/api/change-history/undo/preview",
             "/api/change-history/undo-focus-backfill",
         ):
-            self.assertFalse(self.routes.handle(self.handler, path))
+            self.assertFalse(
+                dispatch_route(self.routes, self.handler, path, method="POST")
+            )
 
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
@@ -99,7 +107,9 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
         self.undo.apply.side_effect = RuntimeError("synthetic apply failure")
 
         with self.assertRaisesRegex(RuntimeError, "synthetic apply failure"):
-            self.routes.handle(self.handler, "/api/change-history/undo")
+            dispatch_route(
+                self.routes, self.handler, "/api/change-history/undo", method="POST"
+            )
 
         self.handler.send_json.assert_not_called()
 

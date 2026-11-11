@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
+from backend.http_api.route_table import Access, Route, RouteRequest, RouteTable
 from backend.runtime.maintenance import MaintenanceGate
 
 SESSION = {"csrf_hash": "synthetic-csrf-hash", "expires_at": 4_102_444_800.0}
@@ -21,10 +22,7 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
         self.auth_service.require_auth.return_value = SESSION
         self.auth_service.require_csrf.return_value = None
         self.auth_service.authenticated_session.return_value = SESSION
-        self.dispatcher = Mock()
-        self.dispatcher.handle_before_auth.return_value = False
-        self.dispatcher.handle_before_maintenance.return_value = False
-        self.dispatcher.handle_authenticated.return_value = None
+        self.route, self.ungated_route = Mock(), Mock()
 
         # A bare handler stub: only the attributes do_POST reads are set.
         handler: Any = RequestHandler.__new__(RequestHandler)
@@ -33,8 +31,18 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
         handler.headers = {"X-CSRF-Token": "synthetic-token"}
         handler.dependencies = SimpleNamespace(
             session_auth_service=lambda: self.auth_service,
-            route_dispatcher=Mock(),
-            post_dispatcher=self.dispatcher,
+            route_table=RouteTable(
+                [
+                    Route("POST", "/api/synthetic", Access.SESSION_CSRF, self.route),
+                    Route(
+                        "POST",
+                        "/api/ungated",
+                        Access.SESSION_CSRF,
+                        self.ungated_route,
+                        gated=False,
+                    ),
+                ]
+            ),
             maintenance_gate=self.gate,
             logger=Mock(),
             internal_server_error="internal",
@@ -51,8 +59,8 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
         self.auth_service.require_auth.assert_called_once_with(self.handler)
         self.auth_service.authenticated_session.assert_called_once_with(self.handler)
         self.auth_service.require_csrf.assert_called_with(self.handler, SESSION)
-        self.dispatcher.handle_authenticated.assert_called_once_with(
-            self.handler, "/api/synthetic", SESSION
+        self.route.assert_called_once_with(
+            self.handler, RouteRequest("/api/synthetic", {}, {}, SESSION)
         )
         self.handler._send_app_error.assert_not_called()
 
@@ -70,7 +78,7 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
 
         self.handler.do_POST()
 
-        self.dispatcher.handle_authenticated.assert_not_called()
+        self.route.assert_not_called()
         # The pre-gate CSRF check ran with the first session; the revoked
         # session must never reach the CSRF check or the dispatcher.
         self.auth_service.require_csrf.assert_called_once_with(self.handler, SESSION)
@@ -83,15 +91,15 @@ class PostReauthenticatesInsideMaintenanceGateTests(unittest.TestCase):
     def test_pre_gate_routes_still_use_the_first_session_and_skip_the_gate(
         self,
     ) -> None:
-        self.dispatcher.handle_before_maintenance.return_value = True
+        self.handler.path = "/api/ungated"
 
         self.handler.do_POST()
 
-        self.dispatcher.handle_before_maintenance.assert_called_once_with(
-            self.handler, "/api/synthetic", SESSION
+        self.ungated_route.assert_called_once_with(
+            self.handler, RouteRequest("/api/ungated", {}, {}, SESSION)
         )
         self.auth_service.authenticated_session.assert_not_called()
-        self.dispatcher.handle_authenticated.assert_not_called()
+        self.route.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -338,12 +338,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/activity_validation.py",
-      "code": "arg-type",
-      "message_sha256": "9f15d58ebcfeea6d361abc404047086f7c68383c4d8b4778eecf645cb9c98ca4"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "a57ef2c9172860161abbecf36737eef488d5f0520f4573482b8bfd247fac670a"
@@ -686,12 +680,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_http_post_dispatch.py",
-      "code": "call-arg",
-      "message_sha256": "b104e8649068e3856026b1d61f6f36e7d08682408876da27049ccb3185ac267e"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_competitions.py",
       "code": "call-arg",
       "message_sha256": "bfb7c6cc7199c64275ff7bdb3a93e6d034ff3099ef468fe78e1dcd752c1ae1fc"
@@ -711,12 +699,6 @@
     {
       "tool": "mypy",
       "path": "tests/test_coach_manual_morning.py",
-      "code": "func-returns-value",
-      "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_http_public_get_routes.py",
       "code": "func-returns-value",
       "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
     },

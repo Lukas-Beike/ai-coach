@@ -4,21 +4,12 @@ from backend.canonical.vocabulary import ProviderId
 from backend.performance.display_sources import (
     _DISPLAY_KINDS,
     _DISPLAY_ONLY,
-    PREFERRED_PROVIDER,
     preferred_providers,
 )
 from backend.performance.source_policy import CURRENT_RULES, preferences_from_profile
 
 
 class DisplaySourcesTests(unittest.TestCase):
-    def test_payload_maps_each_policy_key_to_its_provider_id_value(self):
-        payload = preferred_providers()
-
-        self.assertEqual(set(payload), set(PREFERRED_PROVIDER))
-        for key, provider in PREFERRED_PROVIDER.items():
-            self.assertIs(type(payload[key]), str)
-            self.assertEqual(payload[key], provider.value)
-
     def test_derived_preferences_equal_the_selection_policy(self) -> None:
         payload = preferred_providers()
 
@@ -56,7 +47,6 @@ class PreferredDisplayTests(unittest.TestCase):
         payload = preferred_providers(
             preferences_from_profile(
                 {
-                    "preferred_source_hrv": "garmin",
                     "preferred_source_body": "garmin",
                     "preferred_source_resting_hr": "intervals",
                 }

@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 
 
@@ -13,9 +15,13 @@ class SyncCommandPostRouteTests(unittest.TestCase):
         factory = Mock()
         handler = Mock()
 
-        handled = SyncCommandPostRoute(factory).handle(handler, "/api/unknown")
-
-        self.assertFalse(handled)
+        for path in ("/api/unknown", "/api/sync/jobs/abc-123/resolve"):
+            with self.subTest(path=path):
+                self.assertFalse(
+                    dispatch_route(
+                        SyncCommandPostRoute(factory), handler, path, method="POST"
+                    )
+                )
         factory.assert_not_called()
         handler.read_json.assert_not_called()
         handler.send_json.assert_not_called()
@@ -25,8 +31,11 @@ class SyncCommandPostRouteTests(unittest.TestCase):
         endpoint.execute.return_value = (202, {"id": "job-3"})
         handler = Mock()
 
-        handled = SyncCommandPostRoute(lambda: endpoint).handle(
-            handler, "/api/weather/sync"
+        handled = dispatch_route(
+            SyncCommandPostRoute(lambda: endpoint),
+            handler,
+            "/api/weather/sync",
+            method="POST",
         )
 
         self.assertTrue(handled)
@@ -45,7 +54,12 @@ class SyncCommandPostRouteTests(unittest.TestCase):
             order.append("endpoint")
             return endpoint
 
-        SyncCommandPostRoute(make_endpoint).handle(handler, "/api/garmin/sync")
+        dispatch_route(
+            SyncCommandPostRoute(make_endpoint),
+            handler,
+            "/api/garmin/sync",
+            method="POST",
+        )
 
         self.assertEqual(order, ["body", "endpoint"])
         endpoint.execute.assert_called_once_with("/api/garmin/sync", {"days": 7})

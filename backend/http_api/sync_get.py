@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote
 
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
-
-SYNC_JOB_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)$")
-ACTIVITY_DETAIL_RE = re.compile(r"^/api/activities/([^/]+)$")
 
 
 class SyncGetRoutes:
@@ -23,7 +19,6 @@ class SyncGetRoutes:
 
     def __init__(
         self,
-        session_auth_service: Callable[[], SessionAuthService],
         sync_job_queue_service: Callable[[], SyncJobQueueService],
         sync_public_state_service: Callable[[], SyncPublicStateService],
         activity_read_service: Callable[[], ActivityAnalysisReadService],
@@ -33,7 +28,6 @@ class SyncGetRoutes:
         full_resync: Callable[[], Any] | None = None,
         full_resync_providers: Mapping[str, str] | None = None,
     ) -> None:
-        self._session_auth_service = session_auth_service
         self._sync_job_queue_service = sync_job_queue_service
         self._sync_public_state_service = sync_public_state_service
         self._activity_read_service = activity_read_service
@@ -44,48 +38,62 @@ class SyncGetRoutes:
         # Full-resync path to provider id; the browser polls a started resync here.
         self._full_resync_providers = dict(full_resync_providers or {})
 
-    def handle(self, handler: Any, path: str) -> bool:
-        job_match = SYNC_JOB_RE.match(path)
-        activity_match = ACTIVITY_DETAIL_RE.match(path)
-        resync_provider = self._full_resync_providers.get(path)
-        if (
-            not job_match
-            and not activity_match
-            and resync_provider is None
-            and path not in {"/api/sync/status", "/api/activities"}
-        ):
-            return False
+    def routes(self) -> list[Route]:
+        routes = [
+            Route("GET", "/api/sync/jobs/{id:[0-9a-f-]+}", Access.SESSION, self._job),
+            Route("GET", "/api/sync/status", Access.SESSION, self._status),
+            Route("GET", "/api/activities", Access.SESSION, self._activities),
+            Route("GET", "/api/activities/{id}", Access.SESSION, self._activity),
+        ]
+        if (full_resync := self._full_resync) is not None:
 
-        self._session_auth_service().require_auth(handler)
-        if resync_provider is not None and self._full_resync is not None:
-            handler.send_json(200, self._full_resync().progress(resync_provider))
-            return True
-        if activity_match:
-            payload = self._activity_read_service().detail(
-                unquote(activity_match.group(1)),
-                garmin_status=NO_GARMIN_SYNC_STATUS,
-                profile={},
-                today=self._local_today(),
+            def progress(handler: Any, request: RouteRequest) -> None:
+                """State and outcome of the full resync started in the background."""
+                provider = self._full_resync_providers[request.path]
+                handler.send_json(200, full_resync().progress(provider))
+
+            routes += [
+                Route("GET", path, Access.SESSION, progress)
+                for path in self._full_resync_providers
+            ]
+        return routes
+
+    def _activity(self, handler: Any, request: RouteRequest) -> None:
+        """The `activity_detail.v1` document of one session (local or provider id)."""
+        payload = self._activity_read_service().detail(
+            unquote(request.params["id"]),
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=self._local_today(),
+        )
+        # Performance validation belongs to the Coach's complete context.
+        payload.pop("activity_validation", None)
+        session_id = (payload.get("session") or {}).get("activity_id")
+        if self._session_corrections is not None and session_id:
+            payload["session_bundle"] = self._session_corrections().bundle(
+                str(session_id)
             )
-            # Performance validation belongs to the Coach's complete context.
-            payload.pop("activity_validation", None)
-            session_id = (payload.get("session") or {}).get("activity_id")
-            if self._session_corrections is not None and session_id:
-                payload["session_bundle"] = self._session_corrections().bundle(
-                    str(session_id)
-                )
-        elif job_match:
-            payload = self._sync_job_queue_service().state(job_match.group(1))
-        elif path == "/api/sync/status":
-            payload = self._sync_public_state_service().state()
-        else:
-            query = parse_qs(urlparse(handler.path).query)
-            payload = self._activity_read_service().page(
+        handler.send_json(200, payload)
+
+    def _job(self, handler: Any, request: RouteRequest) -> None:
+        """Result of one sync job."""
+        handler.send_json(
+            200, self._sync_job_queue_service().state(request.params["id"])
+        )
+
+    def _status(self, handler: Any, _request: RouteRequest) -> None:
+        """Synchronization status."""
+        handler.send_json(200, self._sync_public_state_service().state())
+
+    def _activities(self, handler: Any, request: RouteRequest) -> None:
+        """Activity list page; items carry the local session `id` and `record_ids`."""
+        query = request.query
+        handler.send_json(
+            200,
+            self._activity_read_service().page(
                 query.get("cursor", [None])[0],
                 query.get("limit", [None])[0],
                 query.get("days", [self._all_sync_days])[0],
                 today=self._local_today(),
-            )
-
-        handler.send_json(200, payload)
-        return True
+            ),
+        )

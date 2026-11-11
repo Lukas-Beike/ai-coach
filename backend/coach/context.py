@@ -981,7 +981,7 @@ class CoachStructuredContextService:
         if self._nutrition_meal_library is None:
             return {"truncated": False, "items": []}
         # One extra row tells whether saved products were left out.
-        products = self._nutrition_meal_library().list_products(
+        products = self._nutrition_meal_library().product_catalog.list_products(
             limit=COACH_NUTRITION_PRODUCT_LIMIT + 1
         )
         keys = ("id", "name", "brand", "basis_amount", "basis_unit", "source")

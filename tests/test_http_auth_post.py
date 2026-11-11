@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
+from support import dispatch_route
+
 from backend.http_api.auth_post import AuthPostRoutes
 
 
@@ -22,7 +24,6 @@ class AuthPostRoutesTests(unittest.TestCase):
             if kwargs.get("clear")
             else ["ic_session=token-xyz", "ic_csrf=csrf-abc"]
         )
-        self.auth_service.require_auth.return_value = {"user": "athlete"}
 
         self.maintenance_gate = MagicMock()
         self.maintenance_gate.operation.return_value.__enter__ = Mock(return_value=None)
@@ -38,7 +39,7 @@ class AuthPostRoutesTests(unittest.TestCase):
         )
 
     def test_login_success_dispatches_password_and_sets_cookies(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/login")
+        handled = dispatch_route(self.routes, self.handler, "/api/login", method="POST")
         self.assertTrue(handled)
         self.handler.read_json.assert_not_called()
         self.auth_service.login_user.assert_called_once_with(self.handler)
@@ -48,15 +49,13 @@ class AuthPostRoutesTests(unittest.TestCase):
             {"Set-Cookie": ["ic_session=token-xyz", "ic_csrf=csrf-abc"]},
         )
 
-    def test_logout_success_authenticates_operates_gate_and_clears_cookies(
+    def test_logout_success_operates_gate_and_clears_cookies(
         self,
     ) -> None:
-        handled = self.routes.handle(self.handler, "/api/logout")
-        self.assertTrue(handled)
-        self.auth_service.require_auth.assert_called_once_with(self.handler)
-        self.auth_service.require_csrf.assert_called_once_with(
-            self.handler, {"user": "athlete"}
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/logout", method="POST"
         )
+        self.assertTrue(handled)
         self.maintenance_gate.operation.assert_called_once_with()
         self.auth_service.logout_user.assert_called_once_with(self.handler)
         self.handler.send_json.assert_called_once_with(
@@ -66,7 +65,7 @@ class AuthPostRoutesTests(unittest.TestCase):
         )
 
     def test_wrong_path_returns_false_without_side_effects(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/other")
+        handled = dispatch_route(self.routes, self.handler, "/api/other", method="POST")
         self.assertFalse(handled)
         self.auth_service.login_user.assert_not_called()
         self.auth_service.logout_user.assert_not_called()

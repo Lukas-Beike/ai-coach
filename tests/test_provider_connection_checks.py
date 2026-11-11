@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.provider_connections import (
     ProviderConnectionGetRoutes,
@@ -369,23 +371,17 @@ class ProbeTests(unittest.TestCase):
 
 
 class RouteTests(unittest.TestCase):
-    def test_status_requires_auth_and_is_local(self):
-        auth = Mock()
-        auth.require_auth.side_effect = AppError(401, "no")
+    def test_status_is_local(self):
         checks = Mock()
-        routes = ProviderConnectionGetRoutes(lambda: auth, lambda: checks)
+        routes = ProviderConnectionGetRoutes(lambda: checks)
         handler = Mock()
-        with self.assertRaises(AppError):
-            routes.handle(handler, "/api/providers/connections")
-        checks.statuses.assert_not_called()
-        auth.require_auth.side_effect = None
         checks.statuses.return_value = {"openai": {"status": "unchecked"}}
-        self.assertTrue(routes.handle(handler, "/api/providers/connections"))
+        self.assertTrue(dispatch_route(routes, handler, "/api/providers/connections"))
         checks.check.assert_not_called()
         handler.send_json.assert_called_once_with(
             200, {"providers": {"openai": {"status": "unchecked"}}}
         )
-        self.assertFalse(routes.handle(handler, "/api/other"))
+        self.assertFalse(dispatch_route(routes, handler, "/api/other"))
 
     def test_check_dispatch_and_unknown_provider(self):
         checks = Mock()
@@ -393,13 +389,19 @@ class RouteTests(unittest.TestCase):
         checks.check.return_value = {"status": "success", "checked_at": "t"}
         routes = ProviderConnectionPostRoutes(lambda: checks)
         handler = Mock()
-        self.assertTrue(routes.handle(handler, "/api/providers/openai/check"))
+        self.assertTrue(
+            dispatch_route(
+                routes, handler, "/api/providers/openai/check", method="POST"
+            )
+        )
         checks.check.assert_called_once_with("openai")
         handler.read_json.reset_mock()
         with self.assertRaises(AppError):
-            routes.handle(handler, "/api/providers/nope/check")
+            dispatch_route(routes, handler, "/api/providers/nope/check", method="POST")
         handler.read_json.assert_called_once_with()
-        self.assertFalse(routes.handle(handler, "/api/nutrition/yazio/check"))
+        self.assertFalse(
+            dispatch_route(routes, handler, "/api/nutrition/yazio/check", method="POST")
+        )
 
 
 class RotationAndDeadlineTests(unittest.TestCase):

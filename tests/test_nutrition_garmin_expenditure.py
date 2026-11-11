@@ -54,7 +54,9 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             }
         )
 
-        expenditure = self.service.get_day_summary("2026-09-24")["energy_expenditure"]
+        expenditure = self.service.sync_status.get_day_summary("2026-09-24")[
+            "energy_expenditure"
+        ]
 
         self.assertEqual(expenditure["active_kcal"], 600)
         self.assertEqual(expenditure["resting_kcal"], 1500)
@@ -96,8 +98,8 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             }
         )
 
-        day = service.get_day_summary("2026-09-24")["energy_expenditure"]
-        week = service.get_week_summary()
+        day = service.sync_status.get_day_summary("2026-09-24")["energy_expenditure"]
+        week = service.sync_status.get_week_summary()
 
         self.assertEqual(
             (day["total_kcal"], day["active_kcal"], day["resting_kcal"]),
@@ -151,14 +153,14 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             observation_reader=lambda: reader,
         )
 
-        energy = service.get_day_summary("2026-09-24")["energy_expenditure"]
+        energy = service.sync_status.get_day_summary("2026-09-24")["energy_expenditure"]
 
         self.assertEqual(energy["projected_total_kcal"], 2636)
         self.assertEqual(energy["projection_resting_kcal"], 2200)
         self.assertEqual(energy["projection_reference_date"], "2026-09-23")
         self.assertEqual(energy["total_kcal"], 2095)
         self.assertEqual(energy["resting_kcal"], 1659)
-        closed = service.get_day_summary("2026-09-23")["energy_expenditure"]
+        closed = service.sync_status.get_day_summary("2026-09-23")["energy_expenditure"]
         self.assertIsNone(closed["projected_total_kcal"])
 
     def test_malformed_garmin_snapshot_leaves_local_day_summary_available(self) -> None:
@@ -168,7 +170,7 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
                 ("garmin_state", "not-json", self.fixed_now),
             )
 
-        summary = self.service.get_day_summary("2026-09-24")
+        summary = self.service.sync_status.get_day_summary("2026-09-24")
 
         self.assertEqual(summary["date"], "2026-09-24")
         self.assertEqual(summary["energy_expenditure"]["status"], "unavailable")
@@ -198,8 +200,12 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             }
         )
 
-        requested = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
-        untouched = self.service.get_day_summary("2026-09-24")["energy_expenditure"]
+        requested = self.service.sync_status.get_day_summary("2026-09-23")[
+            "energy_expenditure"
+        ]
+        untouched = self.service.sync_status.get_day_summary("2026-09-24")[
+            "energy_expenditure"
+        ]
 
         self.assertEqual(requested["freshness"], "partial")
         self.assertEqual(requested["fetched_at"], "targeted-read")
@@ -238,7 +244,7 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
                 ]
             }
         )
-        week = self.service.get_week_summary()
+        week = self.service.sync_status.get_week_summary()
         self.assertEqual(
             (week["start_date"], week["end_date"]), ("2026-09-17", "2026-09-23")
         )
@@ -259,7 +265,7 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
     def test_history_periods_keep_closed_days_and_missing_values(self) -> None:
         for count in (14, 84):
             with self.subTest(days=count):
-                summary = self.service.get_week_summary(count)
+                summary = self.service.sync_status.get_week_summary(count)
                 self.assertEqual(len(summary["days"]), count)
                 self.assertEqual(
                     summary["start_date"],
@@ -280,10 +286,10 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         invalid_periods: tuple[Any, ...] = (0, 15, 85, True, "14")
         for count in invalid_periods:
             with self.subTest(days=count), self.assertRaises(AppError):
-                self.service.get_week_summary(count)
+                self.service.sync_status.get_week_summary(count)
 
     def test_empty_week_does_not_invent_zero_intake_or_macros(self) -> None:
-        week = self.service.get_week_summary()
+        week = self.service.sync_status.get_week_summary()
         self.assertIsNone(week["balance_kcal"])
         self.assertEqual(week["balance_days"], 0)
         for metric in week["averages"].values():
@@ -318,15 +324,19 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.store_garmin(
             {"daily_stats": [{"date": "2026-09-23", "totalKilocalories": 2000}]}
         )
-        before = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        before = self.service.sync_status.get_day_summary("2026-09-23")[
+            "energy_expenditure"
+        ]
         self.assertEqual(before["total_kcal"], 2000)
 
         self.refresh_daily_stats([], "2026-09-23")
 
-        after = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        after = self.service.sync_status.get_day_summary("2026-09-23")[
+            "energy_expenditure"
+        ]
         self.assertIsNone(after["total_kcal"])
         self.assertEqual(after["status"], "unavailable")
-        week = self.service.get_week_summary(7)
+        week = self.service.sync_status.get_week_summary(7)
         (day,) = [item for item in week["days"] if item["date"] == "2026-09-23"]
         self.assertIsNone(day["expenditure_kcal"])
 
@@ -338,7 +348,9 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             [{"date": "2026-09-23", "totalKilocalories": 2200}], "2026-09-23"
         )
 
-        after = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        after = self.service.sync_status.get_day_summary("2026-09-23")[
+            "energy_expenditure"
+        ]
         self.assertEqual(after["total_kcal"], 2200)
         self.assertEqual(after["status"], "measured")
 

@@ -16,7 +16,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
-from support import FakeManager
+from support import FakeManager, dispatch_route
 
 from backend import provider_credentials as credentials_module
 from backend.backup import export
@@ -374,8 +374,12 @@ class ProviderCredentialTests(unittest.TestCase):
 
     def test_route_returns_status_only_and_delegates_to_service(self):
         route, handler, seen = self.route({"openai_api_key": "route-secret-value"})
-        self.assertFalse(route.handle(handler, "/api/settings/model"))
-        self.assertTrue(route.handle(handler, "/api/settings/credentials"))
+        self.assertFalse(
+            dispatch_route(route, handler, "/api/settings/model", method="PUT")
+        )
+        self.assertTrue(
+            dispatch_route(route, handler, "/api/settings/credentials", method="PUT")
+        )
         self.assertEqual(seen["status"], 200)
         self.assertNotIn("route-secret-value", json.dumps(seen["payload"]))
         self.assertEqual(self.holder["config"].openai_api_key, "route-secret-value")
@@ -396,7 +400,9 @@ class ProviderCredentialTests(unittest.TestCase):
                         submitted["app_password"] = password
                     route, handler, seen = self.route(submitted)
                     with self.assertRaises(AppError) as caught:
-                        route.handle(handler, "/api/settings/credentials")
+                        dispatch_route(
+                            route, handler, "/api/settings/credentials", method="PUT"
+                        )
                     self.assertEqual(caught.exception.status, 403)
                     self.assertIn("App-Passwort", caught.exception.message)
                     self.assertNotIn("payload", seen)
@@ -411,7 +417,9 @@ class ProviderCredentialTests(unittest.TestCase):
                 "app_password": ENV["APP_PASSWORD"],
             }
         )
-        self.assertTrue(route.handle(handler, "/api/settings/credentials"))
+        self.assertTrue(
+            dispatch_route(route, handler, "/api/settings/credentials", method="PUT")
+        )
         self.assertEqual(seen["status"], 200)
         config = self.holder["config"]
         self.assertEqual(config.openai_base_url, "https://proxy.example.test/v1")
@@ -432,7 +440,11 @@ class ProviderCredentialTests(unittest.TestCase):
         ):
             with self.subTest(body=body):
                 route, handler, seen = self.route(body)
-                self.assertTrue(route.handle(handler, "/api/settings/credentials"))
+                self.assertTrue(
+                    dispatch_route(
+                        route, handler, "/api/settings/credentials", method="PUT"
+                    )
+                )
                 self.assertEqual(seen["status"], 200)
         self.assertEqual(self.holder["config"].openai_api_key, "plain-key")
         self.assertEqual(self.holder["config"].intervals_athlete_id, "i7")
@@ -448,7 +460,9 @@ class ProviderCredentialTests(unittest.TestCase):
                 auth=auth,
             )
             with self.assertRaises(AppError) as caught:
-                route.handle(handler, "/api/settings/credentials")
+                dispatch_route(
+                    route, handler, "/api/settings/credentials", method="PUT"
+                )
             statuses.append(caught.exception.status)
         self.assertEqual(statuses[:10], [403] * 10)
         self.assertEqual(statuses[10], 429)

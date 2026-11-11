@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.performance.activity_validation import bounded_performance_metric
 from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
@@ -47,6 +48,7 @@ def _garmin_ftp(
         day: (float(value), day.isoformat(), synced_at)
         for day, value in history.items()
         if day <= today
+        and bounded_performance_metric("cycling_ftp_watts", value) is not None
     }
 
 

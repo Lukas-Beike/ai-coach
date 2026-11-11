@@ -13,9 +13,6 @@ import uuid
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from http.server import (
-    BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
-)
 from pathlib import Path
 
 from backend import config as app_config
@@ -165,10 +162,7 @@ from backend.diagnostics.assembly import (
     DiagnosticsAssembly,
 )
 from backend.diagnostics.logs import RecentLogEntriesService
-from backend.errors import (
-    INTERNAL_SERVER_ERROR,
-    AppError,  # noqa: F401 - compatibility export for tests
-)
+from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.assembly import (
     HistoryAssembly,
     HistoryAthleteServices,
@@ -493,7 +487,7 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000

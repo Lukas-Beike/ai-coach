@@ -4,10 +4,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
 from backend.http_api.nutrition import NutritionGetRoutes, NutritionPostRoutes
-from backend.http_api.post_dispatch import HttpPostDispatcher
+from backend.http_api.route_table import RouteTable
 from backend.runtime.maintenance import MaintenanceGate
 
 
@@ -21,45 +23,12 @@ class YazioRouteTests(unittest.TestCase):
         nutrition = NutritionPostRoutes(
             Mock(), lambda: SimpleNamespace(food_database=food)
         )
-        routes = SimpleNamespace(
-            **{
-                name: None
-                for name in (
-                    "analysis",
-                    "equipment",
-                    "wahoo",
-                    "metric_export",
-                    "garmin",
-                    "provider_connections",
-                    "planned_unit_focus",
-                    "activity_routes",
-                )
-            }
-        )
-        for name in (
-            "coach_actions",
-            "chat",
-            "transcribe",
-            "feedback",
-            "chat_stream",
-            "sync_commands",
-            "history_undo",
-            "privacy_delete",
-            "diagnostics_delete",
-            "first_threshold",
-        ):
-            setattr(routes, name, Mock(handle=Mock(return_value=False)))
-        routes.nutrition = nutrition
-        auth_routes = Mock(handle=Mock(return_value=False))
-        restore = Mock(handle=Mock(return_value=False))
-        cancel = Mock(handle=Mock(return_value=False))
-        dispatcher = HttpPostDispatcher(auth_routes, restore, cancel, routes)
         handler = RequestHandler.__new__(RequestHandler)
         handler.path = "/api/nutrition/yazio/check"
         handler.headers = {}
         handler.dependencies = SimpleNamespace(
             session_auth_service=lambda: auth,
-            post_dispatcher=dispatcher,
+            route_table=RouteTable(nutrition.routes()),
             maintenance_gate=MaintenanceGate(),
             logger=Mock(),
             internal_server_error="internal",
@@ -81,22 +50,16 @@ class YazioRouteTests(unittest.TestCase):
         handler.do_POST()
         food.check_yazio_connection.assert_called_once()
 
-    def test_status_requires_session_and_only_reads_local_state(self):
-        auth = Mock()
-        auth.require_auth.side_effect = AppError(401, "Unauthorized")
+    def test_status_only_reads_local_state(self):
         food = Mock()
         library = lambda: SimpleNamespace(food_database=food)
-        routes = NutritionGetRoutes(lambda: auth, Mock(), library, Mock())
+        routes = NutritionGetRoutes(Mock(), library, Mock())
         handler = Mock()
-        with self.assertRaises(AppError):
-            routes.handle(handler, "/api/nutrition/yazio/status")
-        food.yazio_connection_status.assert_not_called()
-        auth.require_auth.side_effect = None
         food.yazio_connection_status.return_value = {
             "status": "unchecked",
             "checked_at": None,
         }
-        self.assertTrue(routes.handle(handler, "/api/nutrition/yazio/status"))
+        self.assertTrue(dispatch_route(routes, handler, "/api/nutrition/yazio/status"))
         food.check_yazio_connection.assert_not_called()
         handler.send_json.assert_called_once_with(
             200, {"status": "unchecked", "checked_at": None}
@@ -112,7 +75,9 @@ class YazioRouteTests(unittest.TestCase):
             Mock(), lambda: SimpleNamespace(food_database=food)
         )
         handler = Mock()
-        self.assertTrue(routes.handle(handler, "/api/nutrition/yazio/check"))
+        self.assertTrue(
+            dispatch_route(routes, handler, "/api/nutrition/yazio/check", method="POST")
+        )
         food.check_yazio_connection.assert_called_once_with()
         handler.send_json.assert_called_once_with(
             200, {"status": "success", "checked_at": "time"}

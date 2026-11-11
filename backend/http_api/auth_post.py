@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.runtime.maintenance import MaintenanceGate
 
 
@@ -20,29 +21,34 @@ class AuthPostRoutes:
         self._session_auth_service = session_auth_service
         self._maintenance_gate = maintenance_gate
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path == "/api/login":
-            auth = self._session_auth_service()
-            result = auth.login_user(handler)
-            token = result.pop("session_token")
-            csrf = result["csrf"]
-            handler.send_json(
-                200,
-                result,
-                {"Set-Cookie": auth.session_cookie_headers(token, csrf)},
-            )
-            return True
-        if path == "/api/logout":
-            auth = self._session_auth_service()
-            session = auth.require_auth(handler)
-            auth.require_csrf(handler, session)
-            with self._maintenance_gate.operation():
-                auth.logout_user(handler)
-            clear_headers = auth.session_cookie_headers(clear=True)
-            handler.send_json(
-                200,
-                {"status": "ok"},
-                {"Set-Cookie": [clear_headers[0], clear_headers[1]]},
-            )
-            return True
-        return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("POST", "/api/login", Access.PUBLIC, self._login, gated=False),
+            Route(
+                "POST", "/api/logout", Access.SESSION_CSRF, self._logout, gated=False
+            ),
+        ]
+
+    def _login(self, handler: Any, _request: RouteRequest) -> None:
+        """Create a session."""
+        auth = self._session_auth_service()
+        result = auth.login_user(handler)
+        token = result.pop("session_token")
+        csrf = result["csrf"]
+        handler.send_json(
+            200,
+            result,
+            {"Set-Cookie": auth.session_cookie_headers(token, csrf)},
+        )
+
+    def _logout(self, handler: Any, _request: RouteRequest) -> None:
+        """End the current session."""
+        auth = self._session_auth_service()
+        with self._maintenance_gate.operation():
+            auth.logout_user(handler)
+        clear_headers = auth.session_cookie_headers(clear=True)
+        handler.send_json(
+            200,
+            {"status": "ok"},
+            {"Set-Cookie": [clear_headers[0], clear_headers[1]]},
+        )
