@@ -480,10 +480,15 @@ class CompetitionRepository:
     )
 
     def list(self, db: Any, limit: int | None = None) -> list[dict[str, Any]]:
-        query = f"SELECT {self._LIST_FIELDS} FROM competitions ORDER BY event_date, priority, name"
+        order = "ORDER BY event_date, priority, name"
+        query = f"SELECT {self._LIST_FIELDS} FROM competitions {order}"
         params: tuple[Any, ...] = ()
         if limit is not None:
-            query += " LIMIT ?"
+            # A limit keeps the latest races, so upcoming ones never drop out.
+            query = (
+                f"SELECT * FROM (SELECT {self._LIST_FIELDS} FROM competitions "
+                f"ORDER BY event_date DESC LIMIT ?) {order}"
+            )
             params = (limit,)
         return [dict(row) for row in db.execute(query, params).fetchall()]
 

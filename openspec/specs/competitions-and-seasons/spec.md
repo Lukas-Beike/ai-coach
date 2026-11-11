@@ -36,7 +36,7 @@ The system SHALL create or edit one local competition with stable identity, pres
 
 #### Scenario: Upcoming-race bound
 - **WHEN** twenty races dated today or later are stored and a save creates a race dated today or later or moves a past race into the future
-- **THEN** it fails with "Es können maximal 20 anstehende Wettkämpfe gespeichert werden."; past races never count and are never limited, and editing an upcoming race is not blocked.
+- **THEN** it fails with "Es können maximal 20 anstehende Wettkämpfe gespeichert werden."; past races never count and are never limited, and editing an upcoming race is not blocked. A bounded list (profile, bootstrap) keeps the latest races, so no upcoming race drops out.
 
 #### Scenario: Missing identity or history failure
 - **WHEN** an edit ID is malformed/missing in storage or audit persistence fails
