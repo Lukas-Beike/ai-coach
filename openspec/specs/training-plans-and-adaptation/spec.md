@@ -164,7 +164,7 @@ The system SHALL keep illness-pause forecasts explicitly proposed rather than di
 
 #### Scenario: Approve local illness pause
 - **WHEN** an eligible preview's illness pause is approved
-- **THEN** applicable future local units are archived/adapted, forecast-day illness check-ins preserve other saved feedback, and the pause is marked approved locally.
+- **THEN** applicable future local units are archived/adapted, only today's check-in (when today is inside the pause window) gains the illness text and the note "Krankheitspause prognostiziert ab <start>" while other saved feedback is preserved, no future check-in is written, and the pause is marked approved locally.
 
 #### Scenario: Optional named illness-event sync
 - **WHEN** the athlete explicitly names and approves Intervals.icu illness synchronization
