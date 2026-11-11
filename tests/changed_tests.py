@@ -41,6 +41,19 @@ FULL_SUITE_PATHS = (
     "Dockerfile",
     "pyproject.toml",
 )
+# Slow tooling modules run locally only when one of their own inputs changed;
+# CI runs them on every PR. Each maps to the path prefixes it guards.
+HEAVY_MODULES = {
+    "test_fixture_standard_data": ("e2e/", "tests/test_fixture_standard_data.py"),
+    "test_ci_contracts": (
+        ".github/",
+        "Dockerfile",
+        "tests/run_tests.py",
+        "tests/changed_tests.py",
+        "tests/test_durations.json",
+        "tests/test_ci_contracts.py",
+    ),
+}
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
 # Too generic to identify one file by name alone.
@@ -187,6 +200,15 @@ def full_suite_reason(paths: list[str]) -> str | None:
             if path == prefix.rstrip("/") or path.startswith(prefix):
                 return f"{path} matches full-suite path {prefix}"
     return None
+
+
+def heavy_skips(paths: list[str]) -> dict[str, str]:
+    """Return {heavy module: reason} for slow modules no changed path guards."""
+    return {
+        module: f"slow tooling module; CI runs it, none of {', '.join(inputs)} changed"
+        for module, inputs in HEAVY_MODULES.items()
+        if not any(path.startswith(prefix) for path in paths for prefix in inputs)
+    }
 
 
 def select_modules(

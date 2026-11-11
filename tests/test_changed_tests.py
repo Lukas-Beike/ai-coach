@@ -113,6 +113,19 @@ class SelectModulesTests(unittest.TestCase):
         self.assertEqual(set(self.select("tests/test_other.py")), {"test_other"})
         self.assertEqual(self.select("docs/notes.md"), {})
 
+    def test_heavy_tooling_modules_run_only_when_their_inputs_change(self):
+        skips = changed_tests.heavy_skips(["backend/sync/garmin.py"])
+        self.assertEqual(set(skips), set(changed_tests.HEAVY_MODULES))
+        self.assertIn("CI runs it", skips["test_ci_contracts"])
+        self.assertNotIn(
+            "test_ci_contracts",
+            changed_tests.heavy_skips([".github/workflows/publish-container.yml"]),
+        )
+        self.assertNotIn(
+            "test_fixture_standard_data",
+            changed_tests.heavy_skips(["e2e/fixture_runtime.py"]),
+        )
+
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
         modules, reason = changed_tests.select_modules(
             ["backend/db/migrations.py"], self.root
