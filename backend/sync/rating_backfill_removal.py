@@ -39,7 +39,7 @@ class RatingBackfillRemoval:
         self._clock = clock
 
     def run_batch(self, db: Any) -> BatchReport:
-        state = _load_state(self._key_values, db)
+        state = self._state(db)
         if state.get("version") == VERSION and state.get("status") == "complete":
             return BatchReport(items=0, done=True)
         removed = {
@@ -72,19 +72,16 @@ class RatingBackfillRemoval:
         return BatchReport(items=sum(removed.values()), done=True)
 
     def mark_failed(self, db: Any) -> None:
-        state = _load_state(self._key_values, db)
-        self._save(db, {**state, "status": "failed"})
+        self._save(db, {**self._state(db), "status": "failed"})
+
+    def _state(self, db: Any) -> dict[str, Any]:
+        try:
+            state = json.loads(self._key_values.get(db, STATE_KEY) or "{}")
+        except ValueError:
+            return {}
+        return state if isinstance(state, dict) else {}
 
     def _save(self, db: Any, state: Mapping[str, Any]) -> None:
         self._key_values.set(
             db, STATE_KEY, json.dumps(state, sort_keys=True, separators=(",", ":"))
         )
-
-
-def _load_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
-    raw = key_values.get(db, STATE_KEY)
-    try:
-        state = json.loads(raw) if raw else {}
-    except ValueError:
-        state = {}
-    return state if isinstance(state, dict) else {}
