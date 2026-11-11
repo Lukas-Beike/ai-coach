@@ -10,12 +10,14 @@ try:
         parse_python as _parse,
     )
     from .architecture_analysis import (
+        python_files as _python_files,
+    )
+    from .architecture_analysis import (
         top_level_implementations as _top_level_implementations,
     )
     from .architecture_registry import (
         BACKEND_ROOT,
         FORBIDDEN_SERVER_SYMBOLS,
-        MOVED_SYMBOLS,
         SERVER_COMPOSITION_CONTROL_FLOW,
         SERVER_PATH,
     )
@@ -24,25 +26,43 @@ except ImportError:
         parse_python as _parse,
     )
     from architecture_analysis import (
+        python_files as _python_files,
+    )
+    from architecture_analysis import (
         top_level_implementations as _top_level_implementations,
     )
     from architecture_registry import (
         BACKEND_ROOT,
         FORBIDDEN_SERVER_SYMBOLS,
-        MOVED_SYMBOLS,
         SERVER_COMPOSITION_CONTROL_FLOW,
         SERVER_PATH,
     )
 
 
 class ServerOwnershipArchitectureTests(unittest.TestCase):
-    def test_server_does_not_redefine_extracted_public_symbols(self) -> None:
-        implementations = _top_level_implementations(_parse(SERVER_PATH))
+    def test_server_does_not_redefine_backend_symbols(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        implementations = _top_level_implementations(server_tree)
+        # A module logger is a per-module convention, not a moved implementation.
+        loggers = {
+            target.id
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and ast.unparse(node.value.func) == "logging.getLogger"
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        backend_owners: dict[str, str] = {}
+        for path in _python_files(BACKEND_ROOT):
+            for symbol in _top_level_implementations(_parse(path)):
+                backend_owners.setdefault(
+                    symbol, path.relative_to(BACKEND_ROOT.parent).as_posix()
+                )
         violations = [
-            f"{module}.{symbol} is redefined in server.py:{implementations[symbol]}"
-            for module, symbols in MOVED_SYMBOLS
-            for symbol in symbols
-            if symbol in implementations
+            f"{backend_owners[symbol]} defines {symbol}, redefined in server.py:{line}"
+            for symbol, line in implementations.items()
+            if symbol in backend_owners and symbol not in loggers
         ]
         violations.extend(
             f"legacy extracted symbol {symbol} is redefined in server.py:{implementations[symbol]}"
@@ -52,8 +72,8 @@ class ServerOwnershipArchitectureTests(unittest.TestCase):
         self.assertEqual(
             [],
             violations,
-            "server.py must remain a composition root for extracted symbols:\n"
-            + "\n".join(violations),
+            "server.py must remain a composition root; import backend symbols "
+            "instead of redefining them:\n" + "\n".join(violations),
         )
 
     def test_server_definitions_are_composition_factories_or_lifecycle(self) -> None:
@@ -118,7 +138,6 @@ class ServerOwnershipArchitectureTests(unittest.TestCase):
         self.assertTrue(
             {"fetch_snapshot", "fetch_performance_snapshot"}.isdisjoint(methods)
         )
-
 
 
 if __name__ == "__main__":
