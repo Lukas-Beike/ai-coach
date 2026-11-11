@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 test("analysis popovers stay inside the viewport on narrow screens and flip above when needed", () => {
   const { analysisPopoverPosition } = extractFunctions("analysis.js", ["analysisPopoverPosition"]);
@@ -323,4 +323,44 @@ test("zone distributions list the highest zone first", () => {
   const { trainingFocusZoneSeconds } = extractFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
   const readings = trainingFocusZoneSeconds([{ seconds: { Z1: 60, Z3: 30 } }, { seconds: { Z2: 10, Z5: 5, Z1: 15 } }]);
   assert.deepEqual(Array.from(readings, (item) => [item.label, item.value]), [["Z5", 5], ["Z3", 30], ["Z2", 10], ["Z1", 75]]);
+});
+
+test("provider metrics carry German labels and the unit points where they are scores", () => {
+  const { providerMetricLabel, providerMetricUnit } = extractFunctions("analysis.js", ["providerMetricLabel", "providerMetricUnit"]);
+  assert.equal(providerMetricLabel("running_tolerance"), "Lauf-Belastbarkeit");
+  assert.equal(providerMetricLabel("endurance_score"), "Ausdauer-Score");
+  assert.equal(providerMetricLabel("unknown_metric"), "unknown_metric");
+  assert.equal(providerMetricUnit("training_readiness_history"), "Punkte");
+  assert.equal(providerMetricUnit("endurance_score"), "Punkte");
+  assert.equal(providerMetricUnit("running_tolerance"), "");
+});
+
+test("an equipment sport shows its German label, an indoor ride is named, an unknown sport stays as stored", () => {
+  const { equipmentSportLabel } = extractFunctions("analysis.js", ["SPORT_LABELS", "equipmentSportLabel"]);
+  assert.equal(equipmentSportLabel({ sport: "run" }), "Laufen");
+  assert.equal(equipmentSportLabel({ sport: "ride", environment: "outdoor" }), "Rad");
+  assert.equal(equipmentSportLabel({ sport: "ride", environment: "virtual" }), "Indoor-Rad");
+  assert.equal(equipmentSportLabel({ sport: "kitesurf" }), "kitesurf");
+});
+
+test("the coverage line counts the days or weeks that have a value", () => {
+  const { analysisCoverageText } = extractFunctions("analysis.js", ["analysisCoverageText"]);
+  assert.equal(analysisCoverageText(5, 7, "Tagen"), "Daten für 5 von 7 Tagen vorhanden.");
+  assert.equal(analysisCoverageText(3, 12, "Wochen"), "Daten für 3 von 12 Wochen vorhanden.");
+});
+
+test("the table behind a chart scrolls in a named region that the keyboard can reach", () => {
+  const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
+  const document = fakeDocument();
+  const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "reportNode", "analysisValidPoint", "analysisAxisCaption"], {
+    document,
+    makeScrollRegionFocusable,
+    dateLabel: (date) => date,
+    analysisPointValue: (_item, point) => String(point.value),
+    analysisReadingDetails: () => "",
+  });
+  const section = new FakeElement("section");
+  appendAnalysisTable(section, "Ruhepuls", [{ label: "Garmin", points: [{ date: "2026-10-10", value: 48 }] }], "bpm");
+  const region = section.children[0].children.find((child) => child.className === "analysis-chart-table");
+  assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Ruhepuls: Einzelwerte"]);
 });

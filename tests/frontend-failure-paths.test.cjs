@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 function abortError() {
   return Object.assign(new Error("Session ended"), { name: "AbortError" });
@@ -195,4 +195,52 @@ test("the session-ended abort is German, marked, and never toasted", () => {
   assert.doesNotMatch(error.message, /Session ended/);
   context.toast(error.message, true);
   assert.deepEqual(rendered, []);
+});
+
+// ---- toasts: an error stays long enough to read and can be dismissed ----
+
+function toastHarness() {
+  const document = fakeDocument();
+  const node = document.querySelector("#toast");
+  node.querySelector = (selector) => node.children.find((child) => child.className === selector.slice(1)) || null;
+  const timers = [];
+  const context = extractFunctions("shared.js", ["SESSION_ENDED_MESSAGE", "hideToast", "toast"], {
+    document,
+    $: (selector) => document.querySelector(selector),
+    setTimeout: (handler, delay) => { timers.push({ handler, delay }); return timers.length; },
+    clearTimeout() {},
+  });
+  return { context, node, timers };
+}
+
+test("an error toast is an assertive alert with a labelled close button and lasts eight seconds", () => {
+  const { context, node, timers } = toastHarness();
+  context.toast("Speichern fehlgeschlagen", true);
+  assert.equal(node.className, "toast show error");
+  assert.deepEqual([node.attributes.role, node.attributes["aria-live"]], ["alert", "assertive"]);
+  const close = node.children.find((child) => child.className === "toast-close");
+  assert.equal(close.attributes["aria-label"], "Meldung schließen");
+  assert.equal(timers.at(-1).delay, 8000);
+  close.fire("click");
+  assert.equal(node.className, "toast");
+  assert.equal(close.inert, true);
+});
+
+test("a normal toast is a polite status without a close button and lasts three seconds", () => {
+  const { context, node, timers } = toastHarness();
+  context.toast("Gespeichert");
+  assert.equal(node.className, "toast show");
+  assert.deepEqual([node.attributes.role, node.attributes["aria-live"]], ["status", "polite"]);
+  assert.equal(node.children.length, 1);
+  assert.equal(timers.at(-1).delay, 3000);
+});
+
+// ---- scroll regions: keyboard users can reach a table that scrolls sideways ----
+
+test("a horizontally scrolling table region is focusable and named", () => {
+  const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
+  const region = new FakeElement("div");
+  assert.equal(makeScrollRegionFocusable(region, "Runden dieser Einheit"), region);
+  assert.equal(region.tabIndex, 0);
+  assert.deepEqual([region.attributes.role, region.attributes["aria-label"]], ["region", "Runden dieser Einheit"]);
 });
