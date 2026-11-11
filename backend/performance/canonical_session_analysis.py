@@ -21,6 +21,7 @@ from backend.activities.detail_merge import (
     channel_sources,
 )
 from backend.activities.workout_profile import recorded_profile
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import ActivityStreamSet
 from backend.canonical.records import ActivityRecord, fingerprint_inputs
 from backend.canonical.vocabulary import (
@@ -50,8 +51,9 @@ ANALYSIS_VERSION: Final = 3
 # v5: the running form drift of long runs (#1870).
 # v6: the calendar profile uses the thresholds of the zone times (#1892).
 # v7: samples use the adaptive gap rule of the zone times (#1950).
+# v8: the calendar profile uses the session's configured zone limits (#2136).
 # The stored heart-rate histogram has its own version in the fingerprint.
-METHOD_VERSION: Final = 7
+METHOD_VERSION: Final = 8
 
 
 def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
@@ -173,22 +175,16 @@ def session_analysis(
 
 
 def calendar_profile(
-    records: Sequence[ActivityRecord],
-    merged: MergedDetail,
-    *,
-    ftp_w: float | None,
-    threshold_hr_bpm: float | None,
+    records: Sequence[ActivityRecord], merged: MergedDetail, zones: ZoneSettings
 ) -> dict[str, Any] | None:
     """The recorded workout profile of the calendar, from the merged streams.
 
-    Power segments are colored against ``ftp_w``, heart-rate segments against
-    ``threshold_hr_bpm``, both resolved locally for the session date.
+    ``zones`` are the session's thresholds and limits, resolved locally for the
+    session date, the same the zone times count with.
     """
     ordered = measured_order(records)
     adapted = analysis_input(ordered[0], merged.streams, None, members=ordered)
-    return recorded_profile(
-        adapted.activity, ftp_w=ftp_w, threshold_hr_bpm=threshold_hr_bpm
-    )
+    return recorded_profile(adapted.activity, zones)
 
 
 def session_heart_rate_histogram(
