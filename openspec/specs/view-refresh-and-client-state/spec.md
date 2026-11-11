@@ -30,6 +30,10 @@ The client SHALL retain a last loaded state snapshot, up to twenty latest persis
 - **WHEN** the device has a saved state and separately saved newer Coach messages
 - **THEN** the start view uses the newer persisted message page, with a cursor for older history, rather than restoring older snapshot messages over it.
 
+#### Scenario: Older history while cached messages sync
+- **WHEN** the start view shows cached messages and the fresh start answers are still pending
+- **THEN** reaching the top of the chat pages in no older history from the cached cursor; paging resumes once the fresh messages have replaced the cache.
+
 #### Scenario: View read and asset update
 - **WHEN** a recent view is reopened or a saved view cache belongs to other assets
 - **THEN** matching current-asset reads can display while loading; obsolete view-cache entries are not treated as current-asset responses.
@@ -38,7 +42,7 @@ The client SHALL retain a last loaded state snapshot, up to twenty latest persis
 - **WHEN** browser storage rejects writes
 - **THEN** cache failures do not block the application, lower-priority view cache gives way to message/state storage, and invalid cache JSON is ignored.
 
-Evidence: `public/state-loader.js::rememberChatCache`, `public/state-loader.js::readStateSnapshot`, `public/state-loader.js::rememberViewCache`, `public/state-loader.js::writeStateSnapshot`; `tests/state-loader-startup.test.cjs::shown messages are cached at once as the latest page and replace older snapshot messages`, `tests/state-loader-startup.test.cjs::the view cache keeps recent reads for the same assets and is cleared with the snapshot`, `tests/state-loader-startup.test.cjs::a full storage drops the view cache before the message cache`.
+Evidence: `public/state-loader.js::rememberChatCache`, `public/state-loader.js::readStateSnapshot`, `public/state-loader.js::rememberViewCache`, `public/state-loader.js::writeStateSnapshot`; `tests/state-loader-startup.test.cjs::shown messages are cached at once as the latest page and replace older snapshot messages`, `tests/state-loader-startup.test.cjs::the view cache keeps recent reads for the same assets and is cleared with the snapshot`, `tests/state-loader-startup.test.cjs::a full storage drops the view cache before the message cache`; `public/coach.js::appendHistoryPageButton`, `e2e/coach-message-cache.spec.js::cached latest messages show before the start answers and older ones page in`.
 
 ### Requirement: Startup distinguishes cached state from fresh bootstrap
 The client SHALL show compatible stored reads promptly while authentication and fresh state load, and show a noninteractive update-loading screen for a snapshot from different assets. Stored data SHALL not establish fresh server versions or trigger notifications as newly loaded state.
