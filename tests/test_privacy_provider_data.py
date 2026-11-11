@@ -396,7 +396,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 17)
+            self.assertEqual(manifest["format_version"], 18)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
