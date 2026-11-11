@@ -87,11 +87,21 @@ class SyncCommandEndpointTests(unittest.TestCase):
         )
         self.assertEqual((status, body["status"]), (200, "already_running"))
 
-    def test_full_resync_needs_its_confirmation_before_anything_starts(self):
+    def test_confirmation_bound_requests_start_nothing_without_it(self):
         with self.assertRaises(AppError) as raised:
             self.endpoint.execute("/api/garmin/full-resync", {})
         self.assertEqual(raised.exception.status, 400)
         self.full_resync.start.assert_not_called()
+        # A nutrition export needs the approval manifest of a Coach card (#2137).
+        for payload in ({"date": "2026-09-24"}, {"pending_limit": 3}, {}, None):
+            with self.subTest(payload=payload), self.assertRaises(AppError) as raised:
+                self.endpoint.execute(
+                    "/api/sync/jobs",
+                    {"provider": "intervals", "type": "nutrition_sync"}
+                    | ({} if payload is None else {"payload": payload}),
+                )
+            self.assertEqual(raised.exception.status, 400)
+        self.queue.enqueue.assert_not_called()
 
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
@@ -136,7 +146,11 @@ class SyncCommandEndpointTests(unittest.TestCase):
             operations,
             [
                 {"item_key": first, "operation": "plan_push", "payload_hash": "1" * 64},
-                {"item_key": second, "operation": "plan_push", "payload_hash": "2" * 64},
+                {
+                    "item_key": second,
+                    "operation": "plan_push",
+                    "payload_hash": "2" * 64,
+                },
             ],
         )
 

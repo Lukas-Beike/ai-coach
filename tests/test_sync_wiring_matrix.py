@@ -33,6 +33,7 @@ from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
+from backend.nutrition.contracts import nutrition_approval_item
 from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
@@ -69,6 +70,7 @@ JOBS = "/api/sync/jobs"
 UNIT = "11111111-1111-4111-8111-111111111111"
 ENTRIES = [{"library_workout_id": UNIT, "expected_payload_hash": "a" * 64}]
 COMPETITIONS = [{"type": "competition", "id": "race-1", "sha256": "b" * 64}]
+NUTRITION = [nutrition_approval_item({"date": "2026-11-08", "total_kcal": 2000})]
 BACKFILL_END = "2026-10-01"
 OK = {"status": "ok", "window_records": 3}
 
@@ -105,7 +107,10 @@ CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
         {"reason": "test", "approval_manifest": COMPETITIONS},
         "intervals.competitions",
     ),
-    (INTERVALS_ID, "nutrition_sync"): ({"pending_limit": 3}, "intervals.nutrition"),
+    (INTERVALS_ID, "nutrition_sync"): (
+        {"approval_manifest": NUTRITION},
+        "intervals.nutrition",
+    ),
     (GARMIN_ID, "refresh"): ({"days": 7, "reason": "manual"}, "garmin.sync"),
     (GARMIN_ID, "historical_backfill"): (
         {"days": 30, "end_date": BACKFILL_END},
