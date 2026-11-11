@@ -15,6 +15,10 @@
 - Helpers shared by several `TestCase` subclasses are module-level functions
   taking the case or its fixtures as arguments, not methods of a base `TestCase`
   (Sonar python:S5899 flags those as unused).
+- A regression test extends an existing table or case of the owning test
+  module; it adds no new test file, fake class, or helper when one exists.
+  Tests live with their owner: no test files or test names organised by review
+  round (such as `test_audit_remediation.py` or `task8_...`).
 - Every test must use temporary `DATA_DIR`/database state or isolated patches.
   Never read or modify the real `.env`, `/data`, production database, Garmin
   token store, or runtime logs.

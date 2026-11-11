@@ -144,6 +144,9 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   may remain there. Flag newly added responsibilities there, backend access to
   server globals, or extraction that leaves the affected orchestration behind.
   Prefer a scoped ownership correction over an unrelated architectural rewrite.
+- Report added indirection (a new assembly class, Protocol, dependency bundle,
+  pass-through, or wrapper, including a module split made to answer static
+  analysis) as a P3 finding unless the PR states why it is needed.
 - Check API/client compatibility, stale async responses, loading/error recovery,
   and receipts that refresh the affected view. For changed controls, check small
   screens, keyboard/focus access, readable states, and touch usability; report
