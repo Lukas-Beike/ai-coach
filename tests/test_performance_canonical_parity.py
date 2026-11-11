@@ -38,10 +38,6 @@ from backend.coach.context import (
     CoachStructuredContextService,
 )
 from backend.http_api.public_performance import PublicPerformanceStateService
-from backend.http_api.state_prelude import (
-    CalendarWindowRange,
-    PublicStateLocalPrelude,
-)
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
@@ -458,48 +454,6 @@ class CanonicalWiringTests(unittest.TestCase):
         performance.read_sources.assert_called_once_with()
         performance.current_performance.assert_called_once_with(inputs)
 
-    def test_public_state_prelude_reads_load_inside_its_snapshot_unit(self) -> None:
-        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
-        manager = RecordingManager()
-        reader = StubObservationReader(_observations(snapshot), events=manager.events)
-        service = _service(
-            CanonicalPerformanceSource(
-                database_manager=lambda: manager,
-                observation_reader=lambda: reader,
-                activity_summaries=lambda: NoActivityRows(),
-            ),
-        )
-        prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
-        self.assertEqual(manager.events, ["enter", *["read"] * _UNIT_READS, "exit"])
-        _assert_load_inputs(self, prelude.performance_inputs)
-        with patch(
-            "backend.http_api.public_performance.performance_context.current_performance_context",
-            return_value={},
-        ) as project:
-            service.from_inputs(prelude.performance_inputs)
-        self.assertIs(project.call_args.kwargs["canonical"], prelude.performance_inputs)
-
-    def test_public_state_prelude_without_inputs_keeps_the_legacy_read(self) -> None:
-        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
-        manager = RecordingManager()
-        self.assertIsNone(
-            _prelude(snapshot, manager, None).read(True).performance_inputs
-        )
-        self.assertIsNone(_service(None).canonical_inputs("db"))
-        with patch(
-            "backend.http_api.public_performance.performance_context.current_performance_context",
-            return_value={},
-        ) as project:
-            _service(None).from_inputs(None)
-        # Canonical reads (#1416): the Garmin sync status, no snapshot.
-        project.assert_called_once_with(
-            GarminSyncStatus(),
-            PARITY_PROFILE,
-            PARITY_TODAY,
-            canonical=EMPTY_PERFORMANCE_INPUTS,
-            session_feedback=None,
-        )
-
     def test_coach_performance_without_a_source_keeps_the_legacy_call(self) -> None:
         coach = CoachPerformanceContextReader(
             _profile_stub(), _garmin_stub(), Mock(), lambda: PARITY_TODAY
@@ -533,31 +487,6 @@ def _performance_selection() -> Mock:
 
 def _structured_service(performance: Mock) -> CoachStructuredContextService:
     return CoachStructuredContextService(Mock(), Mock(), Mock(), Mock(), performance)
-
-
-def _prelude(
-    snapshot: dict[str, Any], manager: RecordingManager, inputs: Any
-) -> PublicStateLocalPrelude:
-    state = Mock()
-    state.sync_metadata.return_value = {
-        "provider_sync": snapshot.get("provider_sync", {})
-    }
-    feedback = Mock()
-    feedback.attach_to_activities.return_value = []
-    planned = Mock()
-    planned.list.return_value = []
-    weather = Mock()
-    weather.state.return_value = {}
-    return PublicStateLocalPrelude(
-        state,
-        feedback,
-        planned,
-        weather,
-        manager,  # type: ignore[arg-type]
-        lambda: PARITY_TODAY,
-        CalendarWindowRange(35, 35),
-        inputs,
-    )
 
 
 def _profile_stub() -> Mock:

@@ -1005,9 +1005,6 @@ SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = CONFIG.sync_history_earliest_date
-# Keep enough calendar history to show whether recently planned workouts were
-# completed, while retaining the existing five-week forward planning horizon.
-PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
 SETTINGS = SettingsService(
     lambda: CONFIG,
@@ -2150,8 +2147,6 @@ PUBLIC_STATE = PublicStateAssembly(
             external_calendar_window_days=lambda: (
                 calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
             ),
-            calendar_history_days=lambda: PLANNED_CALENDAR_HISTORY_DAYS,
-            calendar_future_days=lambda: PLANNED_CALENDAR_FUTURE_DAYS,
             sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
             all_sync_days=lambda: ALL_SYNC_DAYS,
             planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
