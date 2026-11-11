@@ -113,19 +113,24 @@ def only(findings, code):
     return [item for item in findings if item["code"] == code]
 
 
+def stored_load(row: dict[str, Any]) -> load_checks.SessionLoad:
+    result = load_checks.completed_load(row)
+    if result is None:
+        raise AssertionError("no stored load")
+    return result
+
+
 class CompletedLoadTests(unittest.TestCase):
     def test_stored_m6_load_is_the_completed_load(self) -> None:
-        result = load_checks.completed_load(ride_done("2026-10-30", **m6(64.0)))
+        result = stored_load(ride_done("2026-10-30", **m6(64.0)))
         self.assertEqual(64.0, result.load)
         self.assertEqual("power", result.basis)
         self.assertTrue(result.precise)
-        pace = load_checks.completed_load(run_done("2026-10-30", **m6(62.0, "pace")))
+        pace = stored_load(run_done("2026-10-30", **m6(62.0, "pace")))
         self.assertTrue(pace.precise)
 
     def test_heart_rate_branch_is_less_precise(self) -> None:
-        result = load_checks.completed_load(
-            ride_done("2026-10-30", **m6(40.0, "heart_rate"))
-        )
+        result = stored_load(ride_done("2026-10-30", **m6(40.0, "heart_rate")))
         self.assertEqual("heart_rate", result.basis)
         self.assertFalse(result.precise)
 
