@@ -1196,6 +1196,10 @@ async function renderTrainingRecords() { // NOSONAR
   if (!state.data || !equipmentRouteActive()) return;
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
+  const gearRoot = document.getElementById("equipmentItems");
+  if (!gearRoot.childElementCount || gearRoot.querySelector(".error-state")) {
+    gearRoot.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"), createLoadingState("Ausrüstung wird geladen…"));
+  }
   try {
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
@@ -1297,7 +1301,7 @@ async function renderTrainingRecords() { // NOSONAR
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
-      for (const id of ["equipmentItems"]) document.getElementById(id).textContent=error.message;
+      gearRoot.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"), createErrorState(error?.message, () => void renderTrainingRecords()));
     }
   }
 }
