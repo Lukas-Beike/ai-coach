@@ -49,3 +49,16 @@ test("composer plus menu is cloned from the quick bar and still opens the file p
   assert.match(source, /attachFileMenuItem"\)\.addEventListener\("click"[\s\S]*?\$\("#attachmentInput"\)\.click\(\)/);
   assert.ok(source.includes('$("#composerPlusMenu").addEventListener("click", startQuickAction)'));
 });
+
+test("the morning check-in is offered unless the Coach says it is not available", () => {
+  const buttons = [{ hidden: false }, { hidden: false }];
+  const { renderCoachOverview } = extractFunctions("coach.js", ["renderCoachOverview"], {
+    document: { querySelectorAll: (selector) => (selector === "[data-request-kind=morning_checkin]" ? buttons : []) },
+  });
+  renderCoachOverview({ coach_quick_actions: { morning_checkin: false } });
+  assert.deepEqual(buttons.map((button) => button.hidden), [true, true]);
+  renderCoachOverview({ coach_quick_actions: { morning_checkin: true } });
+  assert.deepEqual(buttons.map((button) => button.hidden), [false, false]);
+  renderCoachOverview({});
+  assert.deepEqual(buttons.map((button) => button.hidden), [false, false]);
+});

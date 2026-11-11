@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement } = require("./frontend-harness.cjs");
 
 function helpers() {
   return extractFunctions("plan-views.js", [
@@ -90,4 +90,26 @@ test("tolerant marker spellings are stripped and detected like the backend", () 
     plannedAppointmentLabel({ name: "Physio (No-Intensity)", start_local: "2026-10-10T08:30:00" }),
     "Physio · 08:30",
   );
+});
+
+test("each calendar marker is named in German on the day note", () => {
+  const { plannedDayNoteSpecs } = helpers();
+  const labels = { "[NO_TRAINING]": "Kein Training", "[NO_INTENSITY]": "Keine Intensität", "[SHORT_ONLY]": "Nur kurze Einheiten" };
+  for (const [token, label] of Object.entries(labels)) {
+    const [note] = plannedDayNoteSpecs({ appointments: [{ name: `Kurs ${token}` }] }, [], "2026-10-10");
+    assert.equal(note.text, `Kurs · ${label}`, token);
+  }
+});
+
+test("a badge shows its text as text and hides its glyph from screen readers", () => {
+  const { calendarBadge, calendarBadgeRow } = extractFunctions("plan-views.js", ["calendarBadge", "calendarBadgeRow"], {
+    document: { createElement: (tag) => new FakeElement(tag), createTextNode: (text) => ({ text }) },
+  });
+  const badge = calendarBadge({ kind: "calendar", icon: "*", text: "<img src=x onerror=alert(1)>" });
+  assert.equal(badge.className, "planned-badge is-calendar");
+  assert.equal(badge.children[0].attributes["aria-hidden"], "true");
+  assert.deepEqual(badge.children[1], { text: "<img src=x onerror=alert(1)>" });
+  const row = calendarBadgeRow([{ kind: "calendar", text: "A" }, { kind: "day-status", text: "B" }]);
+  assert.equal(row.className, "planned-badges");
+  assert.deepEqual(row.children.map((child) => child.className), ["planned-badge is-calendar", "planned-badge is-day-status"]);
 });
