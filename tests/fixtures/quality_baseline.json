@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "3e9ae4e595d87c00c1ed9dac7b3de39f3ca8e3b3",
+  "base": "457b5050489cbaf285f4e3de491de2cc9b2e57c8",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -608,12 +608,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_server_http_architecture.py",
-      "code": "attr-defined",
-      "message_sha256": "48817743dc3963ca62b240b8f252a193b62d5fb0d8f8638ae1c45e9071742fbe"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/providers/state.py",
       "code": "attr-defined",
       "message_sha256": "49e175295e507496fe654c7a26e50d9783a4638ec61b41112f936d2c9b61422c"
@@ -705,24 +699,6 @@
     {
       "tool": "mypy",
       "path": "tests/test_server_composition_architecture.py",
-      "code": "attr-defined",
-      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_server_http_architecture.py",
-      "code": "attr-defined",
-      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_server_http_architecture.py",
-      "code": "attr-defined",
-      "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_server_http_architecture.py",
       "code": "attr-defined",
       "message_sha256": "f575ce189bb7634653d8ef63616401e74480f579699f4b9326d617f8fd2dd1ee"
     },
