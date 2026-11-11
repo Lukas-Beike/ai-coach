@@ -197,7 +197,7 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Checked tools and rules
 - **WHEN** `apply_training_patch`, `apply_training_changes`, `replace_training_plan`, `apply_workout_library_plan`, `commit_training_plan` or the approved `apply_adaptive_replan` writes planned units
-- **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (load = duration x intensity^2 per sport, run and ride), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard, intensity_distribution, leg_strength_before_key_session and leg_strength_frequency.
+- **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (planned load = duration x intensity^2 per sport, run and ride, against the stored M6 load of completed sessions), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard, intensity_distribution, leg_strength_before_key_session and leg_strength_frequency.
 
 #### Scenario: Blocking violation
 - **WHEN** a Coach plan write would add an unaccepted illness_hard finding, or a strength_incomplete, focus_missing or hr_cap_invalid finding
