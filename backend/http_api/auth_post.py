@@ -30,6 +30,7 @@ class AuthPostRoutes:
         ]
 
     def _login(self, handler: Any, _request: RouteRequest) -> None:
+        """Create a session."""
         auth = self._session_auth_service()
         result = auth.login_user(handler)
         token = result.pop("session_token")
@@ -41,6 +42,7 @@ class AuthPostRoutes:
         )
 
     def _logout(self, handler: Any, _request: RouteRequest) -> None:
+        """End the current session."""
         auth = self._session_auth_service()
         with self._maintenance_gate.operation():
             auth.logout_user(handler)

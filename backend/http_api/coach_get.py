@@ -32,6 +32,7 @@ class CoachGetRoutes:
         ]
 
     def _history(self, handler: Any, request: RouteRequest) -> None:
+        """Coach conversation history page, optionally searched."""
         query = request.query
         handler.send_json(
             200,
@@ -44,6 +45,7 @@ class CoachGetRoutes:
         )
 
     def _receipt(self, handler: Any, request: RouteRequest) -> None:
+        """Receipt of one Coach turn."""
         handler.send_json(
             200,
             self._coach_command_receipt_service().read(
@@ -53,6 +55,7 @@ class CoachGetRoutes:
         )
 
     def _status(self, handler: Any, request: RouteRequest) -> None:
+        """Status of this session's Coach work."""
         handler.send_json(
             200,
             self._coach_job_submission_service().stream_status(

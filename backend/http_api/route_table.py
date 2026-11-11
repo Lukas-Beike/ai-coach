@@ -10,6 +10,7 @@ session and CSRF checks a registered route would get.
 
 from __future__ import annotations
 
+import inspect
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -115,3 +116,30 @@ class RouteTable:
             if route.method == method and (found := pattern.fullmatch(path)):
                 return route, found.groupdict()
         return None
+
+
+_ACCESS_LABELS = {
+    Access.PUBLIC: "Public",
+    Access.SESSION: "Session",
+    Access.SESSION_CSRF: "Session + CSRF",
+}
+
+
+def route_reference(routes: Iterable[Route]) -> str:
+    """The Markdown table of ``routes`` that ``docs/api-routes.md`` carries.
+
+    The purpose column is the first paragraph of each handler's docstring.
+    """
+    order = {"GET": 0, "POST": 1, "PUT": 2}
+    lines = [
+        "| Method | Path | Access | Purpose |",
+        "| --- | --- | --- | --- |",
+    ]
+    for route in sorted(routes, key=lambda item: (item.path, order[item.method])):
+        path = _PARAMETER.sub(r"{\1}", route.path)
+        summary = (inspect.getdoc(route.handle) or "").split("\n\n")[0]
+        lines.append(
+            f"| {route.method} | `{path}` | {_ACCESS_LABELS[route.access]} "
+            f"| {' '.join(summary.split())} |"
+        )
+    return "\n".join(lines) + "\n"

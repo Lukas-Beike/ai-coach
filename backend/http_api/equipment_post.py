@@ -26,4 +26,5 @@ class EquipmentPostRoutes:
         ]
 
     def _maintain(self, handler: Any, _request: RouteRequest) -> None:
+        """Record equipment maintenance."""
         handler.send_json(200, self._equipment_service().maintain(handler.read_json()))

@@ -33,12 +33,15 @@ class AthletePutRoutes:
         ]
         if self._zone_service is not None:
             routes += [
-                Route("PUT", path, Access.SESSION_CSRF, self._handle_zones)
-                for path in ("/api/zones", "/api/zones/remove")
+                Route("PUT", "/api/zones", Access.SESSION_CSRF, self._save_zones),
+                Route(
+                    "PUT", "/api/zones/remove", Access.SESSION_CSRF, self._remove_zones
+                ),
             ]
         return routes
 
     def _handle_profile(self, handler: Any, _request: RouteRequest) -> None:
+        """Patch only the submitted profile fields; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export`."""
         deadline = monotonic() + 10.0
         payload = handler.read_json()
         profile = self._profile_service()
@@ -88,8 +91,15 @@ class AthletePutRoutes:
             status = "uncertain"
         return {**result, "garmin_body_export": status}
 
+    def _save_zones(self, handler: Any, request: RouteRequest) -> None:
+        """Save one local zone configuration; returns a receipt with an undo reference."""
+        self._handle_zones(handler, request)
+
+    def _remove_zones(self, handler: Any, request: RouteRequest) -> None:
+        """Remove one local zone configuration; needs `confirmed: true`."""
+        self._handle_zones(handler, request)
+
     def _handle_zones(self, handler: Any, request: RouteRequest) -> None:
-        """Save one local zone configuration or remove one after confirmation."""
         if self._zone_service is None:
             raise AppError(404, NOT_FOUND_ERROR)
         payload = handler.read_json()

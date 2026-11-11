@@ -21,6 +21,7 @@ class ActivityRoutePostRoutes:
         return [Route("POST", _PATH, Access.SESSION_CSRF, self._rename)]
 
     def _rename(self, handler: Any, _request: RouteRequest) -> None:
+        """Rename a recognised route (`route_id`, `name`: 1 to 60 characters without control characters); answers `route_id` and `label` only."""
         payload = handler.read_json()
         if not isinstance(payload, dict):
             raise AppError(400, "Die Anfrage muss ein Objekt sein.")

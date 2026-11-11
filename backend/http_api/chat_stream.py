@@ -41,6 +41,7 @@ class CoachChatStreamTransport:
         return [Route("POST", "/api/chat/stream", Access.SESSION_CSRF, self._stream)]
 
     def _stream(self, handler: Any, request: RouteRequest) -> None:
+        """Stream one Coach turn as server-sent events."""
         self.handle(handler, request.session)
 
     def handle(self, handler: Any, session: dict[str, Any]) -> None:

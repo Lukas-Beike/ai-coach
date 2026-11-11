@@ -35,6 +35,7 @@ class StateEventsGetRoutes:
         return [Route("GET", "/api/state/events", Access.SESSION, self._events)]
 
     def _events(self, handler: Any, _request: RouteRequest) -> None:
+        """Authenticated state event stream."""
         self._state_event_transport.handle(
             handler.path,
             send_headers=handler.send_sse_headers,

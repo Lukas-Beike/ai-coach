@@ -38,17 +38,20 @@ class SettingsPutRoutes:
         ]
 
     def _model(self, handler: Any, _request: RouteRequest) -> None:
+        """Select the Coach model."""
         handler.send_json(
             200, self._settings.save_model(handler.read_json().get("model"))
         )
 
     def _service_tier(self, handler: Any, _request: RouteRequest) -> None:
+        """Select the OpenAI service tier."""
         handler.send_json(
             200,
             self._settings.save_service_tier(handler.read_json().get("service_tier")),
         )
 
     def _thinking_level(self, handler: Any, _request: RouteRequest) -> None:
+        """Select the thinking level."""
         handler.send_json(
             200,
             self._settings.save_thinking_level(
@@ -57,6 +60,7 @@ class SettingsPutRoutes:
         )
 
     def _calendar(self, handler: Any, _request: RouteRequest) -> None:
+        """Update the calendar display settings."""
         handler.send_json(
             200, self._settings.save_calendar_display_settings(handler.read_json())
         )

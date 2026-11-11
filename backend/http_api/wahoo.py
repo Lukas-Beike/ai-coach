@@ -41,6 +41,8 @@ class WahooGetRoutes:
         return [Route("GET", CALLBACK_PATH, Access.PUBLIC, self._callback)]
 
     def _callback(self, handler: Any, request: RouteRequest) -> None:
+        """Wahoo OAuth redirect target; answers 302 to the app (see below)."""
+
         def first(name: str) -> str | None:
             values = request.query.get(name)
             return values[0] if values else None
@@ -70,6 +72,7 @@ class WahooPostRoutes:
         ]
 
     def _command(self, handler: Any, request: RouteRequest) -> None:
+        """Start the Wahoo OAuth connection or disconnect Wahoo."""
         # Drain and validate the (empty) JSON command body like other commands.
         handler.read_json()
         service = self._wahoo_service()

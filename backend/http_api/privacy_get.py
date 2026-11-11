@@ -30,13 +30,17 @@ class PrivacyGetRoutes:
         ]
 
     def _export(self, handler: Any, _request: RouteRequest) -> None:
+        """Download the privacy export archive."""
         self._export_stream_transport().stream_privacy_export(handler)
 
     def _preview(self, handler: Any, _request: RouteRequest) -> None:
+        """Preview of the local data deletion."""
         handler.send_json(200, self._privacy_delete_service().preview())
 
     def _gps(self, handler: Any, _request: RouteRequest) -> None:
+        """GPS-track setting and stored-track count."""
         handler.send_json(200, self._privacy_delete_service().gps_state())
 
     def _backup(self, handler: Any, _request: RouteRequest) -> None:
+        """Download the encrypted database backup."""
         self._export_stream_transport().stream_database_backup(handler)

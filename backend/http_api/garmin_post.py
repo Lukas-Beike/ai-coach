@@ -26,6 +26,7 @@ class GarminPostRoutes:
         ]
 
     def _handle(self, handler: Any, request: RouteRequest) -> None:
+        """Garmin login, MFA code or disconnect (see below)."""
         body = handler.read_json()
         service = self._garmin_login()
         if request.path == LOGIN_PATH:

@@ -26,6 +26,7 @@ class MetricExportPostRoutes:
         ]
 
     def _automatic(self, handler: Any, _request: RouteRequest) -> None:
+        """Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, a boolean `enabled`, `source: "garmin"` and `provider: "intervals"`."""
         handler.send_json(
             200, self._metric_export().configure_automatic(handler.read_json())
         )

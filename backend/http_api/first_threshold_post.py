@@ -30,6 +30,7 @@ class FirstThresholdPostRoutes:
         return [Route("POST", ADOPT_PATH, Access.SESSION_CSRF, self._adopt)]
 
     def _adopt(self, handler: Any, _request: RouteRequest) -> None:
+        """Store the shown first threshold estimate (`percent_lthr`) with origin `estimated`; `replace_measured: true` replaces a measured value."""
         payload = handler.read_json()
         with (
             self._profile_service().mutation_coordinator,

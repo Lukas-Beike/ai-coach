@@ -48,6 +48,7 @@ class SyncGetRoutes:
         if (full_resync := self._full_resync) is not None:
 
             def progress(handler: Any, request: RouteRequest) -> None:
+                """State and outcome of the full resync started in the background."""
                 provider = self._full_resync_providers[request.path]
                 handler.send_json(200, full_resync().progress(provider))
 
@@ -58,6 +59,7 @@ class SyncGetRoutes:
         return routes
 
     def _activity(self, handler: Any, request: RouteRequest) -> None:
+        """The `activity_detail.v1` document of one session (local or provider id)."""
         payload = self._activity_read_service().detail(
             unquote(request.params["id"]),
             garmin_status=NO_GARMIN_SYNC_STATUS,
@@ -74,14 +76,17 @@ class SyncGetRoutes:
         handler.send_json(200, payload)
 
     def _job(self, handler: Any, request: RouteRequest) -> None:
+        """Result of one sync job."""
         handler.send_json(
             200, self._sync_job_queue_service().state(request.params["id"])
         )
 
     def _status(self, handler: Any, _request: RouteRequest) -> None:
+        """Synchronization status."""
         handler.send_json(200, self._sync_public_state_service().state())
 
     def _activities(self, handler: Any, request: RouteRequest) -> None:
+        """Activity list page; items carry the local session `id` and `record_ids`."""
         query = request.query
         handler.send_json(
             200,

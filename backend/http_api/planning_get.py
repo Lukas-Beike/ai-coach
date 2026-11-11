@@ -32,6 +32,7 @@ class PlanningGetRoutes:
         ]
 
     def _plan(self, handler: Any, request: RouteRequest) -> None:
+        """Planning projection."""
         handler.send_json(
             200,
             self._public_plan_state_service().read_public(
@@ -40,6 +41,7 @@ class PlanningGetRoutes:
         )
 
     def _weather(self, handler: Any, request: RouteRequest) -> None:
+        """Weather projection."""
         handler.send_json(
             200,
             self._public_weather_state_service().state(
@@ -48,6 +50,7 @@ class PlanningGetRoutes:
         )
 
     def _library(self, handler: Any, request: RouteRequest) -> None:
+        """Workout library page."""
         query = request.query
         handler.send_json(
             200,

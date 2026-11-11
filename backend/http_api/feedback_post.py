@@ -46,11 +46,13 @@ class FeedbackPostRoutes:
         return routes
 
     def _session(self, handler: Any, request: RouteRequest) -> None:
+        """Confirm, split, merge or delete one session bundle."""
         handler.send_json(
             200, self._correct_session(request.params["id"], handler.read_json())
         )
 
     def _feedback(self, handler: Any, request: RouteRequest) -> None:
+        """Save activity feedback; returns a `change` undo reference."""
         if self._activity_feedback_service is None:
             raise AppError(404, "Nicht gefunden.")
         activity_id = request.params["id"]

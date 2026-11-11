@@ -29,6 +29,7 @@ class AnalysisRoutes:
         ]
 
     def _report(self, handler: Any, request: RouteRequest) -> None:
+        """Analysis projection: power profiles or training records."""
         path = request.path
         values = {key: value[0] for key, value in request.query.items()}
         reports = self._reports()
@@ -39,6 +40,7 @@ class AnalysisRoutes:
         handler.send_json(200, payload)
 
     def _refresh_area(self, handler: Any, _request: RouteRequest) -> None:
+        """Run a targeted refresh of one analysis area."""
         payload = handler.read_json()
         area = payload.get("area") if isinstance(payload, dict) else None
         if not isinstance(area, str) or area not in {

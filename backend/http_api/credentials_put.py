@@ -35,6 +35,7 @@ class CredentialsPutRoutes:
         return [Route("PUT", CREDENTIALS_PATH, Access.SESSION_CSRF, self._update)]
 
     def _update(self, handler: Any, _request: RouteRequest) -> None:
+        """Save or clear provider credentials in the encrypted database (see below)."""
         values = handler.read_json()
         if isinstance(values, dict):
             # Never part of the credential submission itself.

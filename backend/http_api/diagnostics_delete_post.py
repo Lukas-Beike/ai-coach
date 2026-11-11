@@ -34,6 +34,7 @@ class DiagnosticsDeletePostRoutes:
         ]
 
     def _delete_logs(self, handler: Any, _request: RouteRequest) -> None:
+        """Clear the server log."""
         try:
             result = self._recent_log_entries_service().clear()
         except OSError as exc:
@@ -41,6 +42,7 @@ class DiagnosticsDeletePostRoutes:
         handler.send_json(200, result)
 
     def _delete_diagnostics(self, handler: Any, _request: RouteRequest) -> None:
+        """Clear the stored diagnostics."""
         try:
             result = self._diagnostic_report_service().clear()
         except Exception as exc:
