@@ -16,6 +16,7 @@ from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
 )
+from backend.sync import session_rebundle
 
 _OTHER_TABLES = (
     "sync_jobs",
@@ -441,11 +442,14 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.service._deps.workout_library_sync_state.summary = Mock(
             side_effect=sqlite3.DatabaseError("malformed row")
         )
+        # K-009: a malformed stored rebundle state fails only its own section.
+        self.values[session_rebundle.STATE_KEY] = '{"counts": {"days": "malformed"}}'
 
         report = self.service.report()
 
         self.assertEqual(report["morning_checkin"], {"status": "unavailable"})
         self.assertEqual(report["database"], {"status": "unavailable"})
+        self.assertEqual(report["session_rebundle"], {"status": "unavailable"})
         self.assertEqual(report["app"]["version"], "1.2.3")
         self.assertEqual(report["wahoo"]["connected"], False)
 

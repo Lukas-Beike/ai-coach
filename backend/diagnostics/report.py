@@ -328,7 +328,10 @@ class DiagnosticReportService:
                     "profile_weekly_plan_removal",
                     lambda: summarize_profile_weekly_plan_removal(key_values, db),
                 ),
-                "session_rebundle": summarize_session_rebundle(deps.key_values, db),
+                "session_rebundle": section(
+                    "session_rebundle",
+                    lambda: summarize_session_rebundle(key_values, db),
+                ),
                 "logs": log_entries,
                 "debug_capture": {
                     **diagnostic_capture_status,
