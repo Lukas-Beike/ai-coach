@@ -62,7 +62,7 @@ The system SHALL store a check-in for an explicit nonfuture calendar date or ath
 
 #### Scenario: Valid local check-in
 - **WHEN** the athlete supplies daily form, illness, pain, availability, notes or scores
-- **THEN** the date defaults to local today, scores normalize to integers from 0 through 10 or unknown, available minutes to 0 through 1440 or unknown, and bounded text is saved by date.
+- **THEN** the date defaults to local today, scores are whole numbers from 0 through 10 or unknown, available minutes whole numbers from 0 through 1440 or unknown (a fraction or a boolean is rejected, never cut), and bounded text is saved by date.
 
 #### Scenario: Invalid date or values
 - **WHEN** a future/invalid date, invalid score or invalid available-minute value is supplied

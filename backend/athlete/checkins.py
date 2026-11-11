@@ -46,11 +46,20 @@ COACH_PRESERVED_FIELDS = CHECKIN_SCORE_FIELDS + (
 )
 
 
+def _whole_number(value: Any) -> int:
+    """A whole number; 7.9 and booleans are refused, not cut (#2135, D-018)."""
+    if isinstance(value, bool):
+        raise TypeError("a boolean is no number")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("not a whole number")
+    return int(value)
+
+
 def bounded_score(value: Any) -> int | None:
     if value in (None, ""):
         return None
     try:
-        number = int(value)
+        number = _whole_number(value)
     except (TypeError, ValueError) as exc:
         raise AppError(400, "Lokale Feedback-Werte müssen ganze Zahlen sein.") from exc
     if not 0 <= number <= 10:
@@ -62,7 +71,7 @@ def bounded_minutes(value: Any) -> int | None:
     if value in (None, ""):
         return None
     try:
-        number = int(value)
+        number = _whole_number(value)
     except (TypeError, ValueError) as exc:
         raise AppError(
             400, "Die verfügbare Trainingszeit muss eine ganze Zahl sein."
