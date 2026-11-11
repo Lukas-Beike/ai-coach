@@ -10,7 +10,7 @@ test("visibility, chart variants and reduced motion override component styles", 
       <video id="nutritionBarcodeVideo" hidden></video>
       <div class="auth-loading" hidden></div>
       <section id="activityAnalysis" class="activity-analysis" hidden></section>
-      <div class="coach-receipts"></div><div class="chat-queue-status"></div>
+      <div class="chat-queue-status"></div>
       <input class="nutrition-low-confidence" aria-label="Uncertain nutrition value">
       <div class="analysis-chart-card"><svg>
         <path class="analysis-form-area" data-series="2" data-color="2" d="M0 0L10 10Z" />
@@ -26,7 +26,7 @@ test("visibility, chart variants and reduced motion override component styles", 
   await page.goto("/css-cascade-fixture");
   for (const theme of ["dark", "light"]) {
     await page.locator("html").evaluate((element, theme) => { element.dataset.theme = theme; }, theme);
-    for (const selector of ["[hidden]", ".coach-receipts", ".chat-queue-status"]) {
+    for (const selector of ["[hidden]", ".chat-queue-status"]) {
       for (const element of await page.locator(selector).all()) await expect(element).toHaveCSS("display", "none");
     }
     await expect(page.locator(".analysis-form-area")).toHaveCSS("stroke", "none");

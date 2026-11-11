@@ -1040,14 +1040,12 @@ function renderCoachOverview(data) {
 }
 
 // A Coach action announces itself in one toast; the change line under the message is the lasting receipt.
-// Failures name their reason and stay until dismissed; successes name what was done.
+// Failures lead with their reason as a dismissible alert; successes name what was done, once each.
 function toastCoachReceipts(receipts) {
-  if (!receipts.length) return;
+  const line = ({ title, message, status }) => (status === "success" || !message || message === title ? title : `${title}: ${message}`);
   const errors = receipts.filter((receipt) => receipt.status === "error");
-  const text = errors.length
-    ? errors.map((receipt) => `${receipt.title}: ${receipt.message}`)
-    : receipts.map((receipt) => receipt.status === "pending" ? `${receipt.title}: ${receipt.message}` : receipt.title);
-  toast(text.join(" · "), Boolean(errors.length));
+  const text = [...new Set([...errors, ...receipts.filter((receipt) => receipt.status !== "error")].map(line))];
+  if (text.length) toast(text.join(" · "), Boolean(errors.length));
 }
 
 function addCoachReceipt(receipt) {
@@ -1137,7 +1135,11 @@ function addStructuredCoachReceipts(payload) {
     || payload?.intent?.follow_up_operations?.includes("commit_training_plan")
     || commands.some((entry) => entry.tool === "commit_training_plan");
   const finalCommit = commands.findLast((entry) => entry.tool === "commit_training_plan");
-  toastCoachReceipts(commands.filter((entry) => receiptIsVisible(entry, planCommitRequested, finalCommit)).map(commandReceipt));
+  // Read-only tools load information and change nothing, so only writes, jobs and failures are announced.
+  toastCoachReceipts(commands.filter((entry) => receiptIsVisible(entry, planCommitRequested, finalCommit))
+    .map((entry) => [entry, commandReceipt(entry)])
+    .filter(([entry, receipt]) => receipt.status !== "success" || COACH_RECEIPT_LABELS[entry.tool])
+    .map(([, receipt]) => receipt));
 }
 
 async function askCoach(message) {
@@ -1500,7 +1502,7 @@ async function reconcileCoachActionProposal(proposalId) {
     state.coachActionUnknownIds.delete(proposalId);
     state.coachActionProposals = proposals;
     if (current && ["preview", "ready"].includes(current.status)) {
-      addCoachReceipt({ title: "Nicht ausgeführt", message: "Die Aktion wurde nicht ausgeführt und kann erneut geprüft und freigegeben werden." });
+      addCoachReceipt({ title: "Nicht ausgeführt", message: "Die Aktion wurde nicht ausgeführt und kann erneut geprüft und freigegeben werden.", status: "pending" });
     } else {
       addCoachReceipt({ title: "Ausführung prüfen", message: "Die Freigabe wurde bereits verbraucht. Bitte den Ausführungsbeleg prüfen.", status: "error" });
       // A consumed approval may have run the action, so reload the areas it can change.
@@ -1540,7 +1542,7 @@ async function executeCoachActionProposal(proposal, button) {
     if (state.route === originalRoute) await showCoachReceiptArea(receipt);
     await load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]);
   } catch (error) {
-    if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
+    if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal);
     else rejectCoachActionProposal(proposal, button, error, !executeSent);
   }
 }
@@ -1552,9 +1554,9 @@ async function showCoachReceiptArea(receipt) {
 }
 
 // The action may have run; keep the button locked until the server state is known.
-function lockUnknownCoachActionOutcome(proposal, error) {
+function lockUnknownCoachActionOutcome(proposal) {
   state.coachActionUnknownIds.add(proposal.id);
-  addCoachReceipt({ title: "Ausführung unklar", message: `${error.message} Die Freigabe bleibt gesperrt, bis der Status geprüft ist.`, status: "error" });
+  addCoachReceipt({ title: "Ausführung unklar", message: "Die Antwort zur Freigabe ist nicht angekommen. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.", status: "error" });
   renderCoachActionReview();
 }
 
