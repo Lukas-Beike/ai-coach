@@ -1,4 +1,4 @@
-"""Coach context domain sections: legacy aliases, source blocks, budgets and labels."""
+"""Coach context domain sections: source blocks, budgets and labels."""
 
 import unittest
 from datetime import date
@@ -13,10 +13,7 @@ from backend.coach.context import (
 )
 from backend.coach.context_selection import (
     CONTEXT_SECTIONS,
-    CoachContextSelection,
-    canonical_section,
 )
-from backend.coach.read_tools import CoachReadToolService
 from backend.coach.tool_schemas import build_structured_tool_schemas
 from backend.providers.source_labels import SourceView, provider_label
 from tests import test_coach_structured_context as context_tests
@@ -55,14 +52,6 @@ def _populated_fixture():
     return fixture
 
 
-def _read_service(context):
-    return CoachReadToolService(
-        *(Mock() for _index in range(8)),
-        training_change_limit=366,
-        context_service=lambda: context,
-    )
-
-
 def _structured_tools():
     return build_structured_tool_schemas(
         default_profile={},
@@ -75,39 +64,6 @@ def _structured_tools():
 
 
 class CoachDomainSectionAliasTests(unittest.TestCase):
-    def test_legacy_provider_names_resolve_to_one_canonical_section(self):
-        for name, canonical in (
-            ("intervals", "activities"),
-            ("garmin", "recovery"),
-            ("activities", "activities"),
-            ("recovery", "recovery"),
-            ("current_performance", "current_performance"),
-            ("unknown_section", "unknown_section"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(canonical_section(name), canonical)
-
-    def test_selection_resolves_aliases_once(self):
-        selection = CoachContextSelection(
-            "requested_details",
-            frozenset({"intervals", "garmin", "recovery", "activities"}),
-        )
-        self.assertEqual(selection.sections, frozenset({"activities", "recovery"}))
-
-    def test_read_tool_accepts_legacy_names_and_reports_canonical_sections(self):
-        context = Mock()
-        context.build.return_value = {"activities": {}, "recovery": {}}
-        result = _read_service(context).execute(
-            "read_coach_context", {"sections": ["intervals", "garmin"]}
-        )
-        self.assertEqual(
-            context.build.call_args.kwargs["selection"].sections,
-            frozenset({"activities", "recovery"}),
-        )
-        self.assertEqual(
-            result["projection"]["requested_sections"], ["activities", "recovery"]
-        )
-
     def test_tool_enum_advertises_only_the_new_names(self):
         tools = _structured_tools()
         read_tool = next(tool for tool in tools if tool["name"] == "read_coach_context")

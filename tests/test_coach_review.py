@@ -20,6 +20,7 @@ from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     prune_expired_coach_proposals,
 )
+from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.runtime import clock as runtime_clock
 
@@ -125,8 +126,8 @@ class CoachReviewTests(unittest.TestCase):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.background_request.side_effect = (
-                server.AppError(503, "Model unavailable")
+            transport_factory.return_value.background_request.side_effect = AppError(
+                503, "Model unavailable"
             )
             result = server.COACH_TURNS.chat_turn_service().run(
                 message,
@@ -233,7 +234,7 @@ class CoachReviewTests(unittest.TestCase):
             "commit_training_plan", ["artifact:" + artifact["artifact_id"]]
         )
         intent["artifact_id"] = artifact["artifact_id"]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_TOOL_DISPATCH.service().execute(
                 "commit_training_plan",
                 {"artifact_id": artifact["artifact_id"]},
@@ -262,7 +263,7 @@ class CoachReviewTests(unittest.TestCase):
         intent = self.intent(
             "stage_training_plan", ["local_plan"], ("commit_training_plan",)
         )
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "stage_training_plan",
                 {
@@ -299,7 +300,7 @@ class CoachReviewTests(unittest.TestCase):
                     for _ in range(3)
                 ]
                 templates[position]["duration_minutes"] = "invalid"
-                with self.assertRaises(server.AppError):
+                with self.assertRaises(AppError):
                     server.COACH_TOOL_DISPATCH.service().execute(
                         "manage_training_templates",
                         {"templates": templates},
@@ -336,7 +337,7 @@ class CoachReviewTests(unittest.TestCase):
             "get_sync_job", {"job_id": job["sync_job_id"]}, **kwargs
         )
         self.assertEqual(status["job"]["id"], job["sync_job_id"])
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_TOOL_DISPATCH.service().execute(
                 "get_sync_job",
                 {"job_id": job["sync_job_id"]},
@@ -354,7 +355,7 @@ class CoachReviewTests(unittest.TestCase):
                     runtime_clock.utc_now(),
                 ),
             )
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_TURNS.structured_turn_service().run(
                 "Edit",
                 intent=self.intent("save_checkin", ["local_checkin"]),
@@ -388,7 +389,7 @@ class CoachReviewTests(unittest.TestCase):
             if row["entity_id"] == template["id"]
         )
         proposal = self.history_preview(change["id"])["proposed_action"]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.confirmation_service().confirm(
                 proposal["id"], "other-session"
             )
@@ -396,11 +397,11 @@ class CoachReviewTests(unittest.TestCase):
             proposal["id"], "review-session"
         )
         token = confirmed["action_token"]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.execution_service().execute(
                 token, "other-session", proposal["payload_hash"]
             )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.execution_service().execute(
                 token, "review-session", "0" * 64
             )
@@ -414,7 +415,7 @@ class CoachReviewTests(unittest.TestCase):
                     token, "review-session", proposal["payload_hash"]
                 )
                 return "applied"
-            except server.AppError:
+            except AppError:
                 return "rejected"
 
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -444,7 +445,7 @@ class CoachReviewTests(unittest.TestCase):
                 "time",
                 return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1,
             ),
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.COACH_PROPOSALS.execution_service().execute(
                 confirmed["action_token"], "review-session", proposal["payload_hash"]
@@ -482,7 +483,7 @@ class CoachReviewTests(unittest.TestCase):
         confirmed = server.COACH_PROPOSALS.confirmation_service().confirm(
             proposal["id"], "review-session"
         )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.execution_service().execute(
                 confirmed["action_token"], "review-session", proposal["payload_hash"]
             )
@@ -557,7 +558,7 @@ class CoachReviewTests(unittest.TestCase):
                     expired["id"], "review-session"
                 )
                 return "accepted"
-            except server.AppError:
+            except AppError:
                 return "rejected"
 
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -609,14 +610,14 @@ class CoachReviewTests(unittest.TestCase):
         second = server.COACH_PROPOSALS.confirmation_service().confirm(
             proposal["id"], "review-session"
         )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.execution_service().execute(
                 first["action_token"], "review-session", proposal["payload_hash"]
             )
         server.COACH_PROPOSALS.execution_service().execute(
             second["action_token"], "review-session", proposal["payload_hash"]
         )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_PROPOSALS.confirmation_service().confirm(
                 proposal["id"], "review-session"
             )

@@ -30,7 +30,7 @@ from server_test_support import (
 from support import dispatch_route, store_canonical_snapshot
 
 from backend.coach import streams as coach_streams
-from backend.errors import ClientDisconnected, public_error_contract
+from backend.errors import AppError, ClientDisconnected, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import readiness as readiness_module
 from backend.http_api import response_transport, responses
@@ -41,7 +41,7 @@ from backend.http_api.route_table import PUBLIC_API_ROUTES, Access, RouteTable
 from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
+from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -168,9 +168,7 @@ class ServerHttpTests(ServerTestCase):
                     redact_text=lambda value: value,
                     response_transport=transport,
                 )
-                handler._send_app_error(
-                    server.AppError(503, "synthetic failure"), method
-                )
+                handler._send_app_error(AppError(503, "synthetic failure"), method)
                 logger.error.assert_called_once()
                 event = logger.error.call_args.kwargs["extra"]
                 self.assertEqual(event["event"], "http_app_error")
@@ -193,7 +191,7 @@ class ServerHttpTests(ServerTestCase):
             response_transport=transport,
         )
         handler._send_app_error(
-            server.AppError(
+            AppError(
                 401,
                 "Provider authentication failed",
                 reason="authentication_or_permission",
@@ -214,7 +212,7 @@ class ServerHttpTests(ServerTestCase):
             response_transport=transport,
         )
 
-        handler._send_app_error(server.AppError(400, "Invalid"), "GET")
+        handler._send_app_error(AppError(400, "Invalid"), "GET")
 
         self.assertNotIn("request_id", transport.send_json.call_args.args[2])
 
@@ -228,7 +226,7 @@ class ServerHttpTests(ServerTestCase):
             redact_text=lambda value: value,
             response_transport=transport,
         )
-        handler._send_app_error(server.AppError(401, "Login required"), "POST")
+        handler._send_app_error(AppError(401, "Login required"), "POST")
         self.assertEqual(transport.send_json.call_args.args[1], 401)
         self.assertEqual(
             transport.send_json.call_args.args[3], {"WWW-Authenticate": "Session"}
@@ -364,7 +362,7 @@ class ServerHttpTests(ServerTestCase):
             "ambiguities": [],
             "authorization_scope": ["local_plan_create", f"planned_unit:{first['id']}"],
         }
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {
@@ -549,7 +547,7 @@ class ServerHttpTests(ServerTestCase):
         class MissingTokenHandler:
             headers: ClassVar = {}
 
-        with self.assertRaises(server.AppError) as missing:
+        with self.assertRaises(AppError) as missing:
             server.session_auth_service().require_csrf(
                 MissingTokenHandler(),
                 {
@@ -563,7 +561,7 @@ class ServerHttpTests(ServerTestCase):
         class Handler:
             headers: ClassVar = {"X-CSRF-Token": "foreign"}
 
-        with self.assertRaises(server.AppError) as foreign:
+        with self.assertRaises(AppError) as foreign:
             server.session_auth_service().require_csrf(
                 Handler(),
                 {
@@ -895,7 +893,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertNotIn("athlete content", json.dumps(current))
 
     def test_state_events_validate_cursor_and_publish_job_progress(self):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             runtime_events.STATE_EVENT_BUFFER.since("not-a-number")
         self.assertEqual(raised.exception.reason, "invalid_event_cursor")
         event = runtime_events.STATE_EVENT_BUFFER.publish(
@@ -1020,9 +1018,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertNotIn("import server", source)
         headers = {"Content-Length": "7"}
         self.assertEqual(
-            requests.read_body(
-                headers, BytesIO(b"payload").read, 10, error=server.AppError
-            ),
+            requests.read_body(headers, BytesIO(b"payload").read, 10, error=AppError),
             b"payload",
         )
         self.assertEqual(
@@ -1033,7 +1029,7 @@ class ServerHttpTests(ServerTestCase):
                 },
                 BytesIO(b'{"ok": true}').read,
                 100,
-                error=server.AppError,
+                error=AppError,
             ),
             {"ok": True},
         )
@@ -1044,50 +1040,50 @@ class ServerHttpTests(ServerTestCase):
                 allowed_types={"audio/webm": ".webm"},
                 normalize_type=lambda value: value.split(";", 1)[0],
                 max_bytes=10,
-                error=server.AppError,
+                error=AppError,
             ),
             b"audio",
         )
-        with self.assertRaises(server.AppError) as oversized:
+        with self.assertRaises(AppError) as oversized:
             requests.read_body(
                 {"Content-Length": "11"},
                 BytesIO(b"x" * 11).read,
                 10,
-                error=server.AppError,
+                error=AppError,
             )
         self.assertEqual(oversized.exception.status, 413)
-        with self.assertRaises(server.AppError) as malformed:
+        with self.assertRaises(AppError) as malformed:
             requests.read_json(
                 {"Content-Type": "application/json", "Content-Length": "9"},
                 BytesIO(b"not-json!").read,
                 100,
-                error=server.AppError,
+                error=AppError,
             )
         self.assertEqual(malformed.exception.status, 400)
-        with self.assertRaises(server.AppError) as wrong_type:
+        with self.assertRaises(AppError) as wrong_type:
             requests.read_json(
                 {"Content-Type": "text/plain", "Content-Length": "7"},
                 BytesIO(b'{"ok":1}').read,
                 100,
-                error=server.AppError,
+                error=AppError,
             )
         self.assertEqual(wrong_type.exception.status, 415)
-        with self.assertRaises(server.AppError) as non_object:
+        with self.assertRaises(AppError) as non_object:
             requests.read_json(
                 {"Content-Type": "application/json", "Content-Length": "2"},
                 BytesIO(b"[]").read,
                 100,
-                error=server.AppError,
+                error=AppError,
             )
         self.assertEqual(non_object.exception.status, 400)
-        with self.assertRaises(server.AppError) as incomplete:
+        with self.assertRaises(AppError) as incomplete:
             requests.read_audio_body(
                 {"Content-Type": "audio/webm", "Content-Length": "5"},
                 BytesIO(b"aud").read,
                 allowed_types={"audio/webm": ".webm"},
                 normalize_type=lambda value: value.split(";", 1)[0],
                 max_bytes=10,
-                error=server.AppError,
+                error=AppError,
             )
         self.assertEqual(incomplete.exception.status, 400)
 
@@ -1101,15 +1097,15 @@ class ServerHttpTests(ServerTestCase):
             reads.append(size)
             return source.read(size)
 
-        with self.assertRaises(server.AppError) as oversized:
+        with self.assertRaises(AppError) as oversized:
             requests.read_body_stream(
-                {"Content-Length": "11"}, read, 10, error=server.AppError
+                {"Content-Length": "11"}, read, 10, error=AppError
             )
         self.assertEqual(oversized.exception.status, 413)
         self.assertEqual(reads, [])
 
         chunks = requests.read_body_stream(
-            {"Content-Length": "10"}, read, 10, error=server.AppError, chunk_size=4
+            {"Content-Length": "10"}, read, 10, error=AppError, chunk_size=4
         )
         self.assertEqual(reads, [])
         self.assertEqual(list(chunks), [b"0123", b"4567", b"89"])
@@ -1119,10 +1115,10 @@ class ServerHttpTests(ServerTestCase):
             {"Content-Length": "10"},
             BytesIO(b"01234").read,
             10,
-            error=server.AppError,
+            error=AppError,
             chunk_size=4,
         )
-        with self.assertRaises(server.AppError) as incomplete:
+        with self.assertRaises(AppError) as incomplete:
             list(truncated)
         self.assertEqual(incomplete.exception.status, 400)
 
@@ -1188,7 +1184,7 @@ class ServerHttpTests(ServerTestCase):
         )
 
     def test_provider_authentication_errors_do_not_use_the_session_status(self):
-        provider_error = server.AppError(
+        provider_error = AppError(
             401,
             "OpenAI key invalid.",
             reason="authentication_or_permission",
@@ -1196,7 +1192,7 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertEqual(public_error_contract(provider_error), (502, "upstream_auth"))
         self.assertEqual(
-            public_error_contract(server.AppError(401, "Anmeldung erforderlich."))[0],
+            public_error_contract(AppError(401, "Anmeldung erforderlich."))[0],
             401,
         )
 
@@ -1237,7 +1233,7 @@ class ServerHttpTests(ServerTestCase):
                     {},
                     cancel_event=cancelled,
                 )
-            except server.AppError as exc:
+            except AppError as exc:
                 outcome["error"] = exc
 
         with patch.object(
@@ -1323,7 +1319,7 @@ class ServerHttpTests(ServerTestCase):
                 "opener",
                 side_effect=return_cancelled_response,
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "GET",
@@ -1376,7 +1372,7 @@ class ServerHttpTests(ServerTestCase):
                 "opener",
                 return_value=OversizedResponse(),
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
@@ -1450,9 +1446,9 @@ class ServerHttpTests(ServerTestCase):
     def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
         config = replace(server.CONFIG, openai_api_key="test-key")
         with patch.object(server, "CONFIG", config):
-            with self.assertRaises(server.AppError) as unsupported:
+            with self.assertRaises(AppError) as unsupported:
                 _transcribe_via_http_route(b"audio", "audio/flac")
-            with self.assertRaises(server.AppError) as oversized:
+            with self.assertRaises(AppError) as oversized:
                 _transcribe_via_http_route(
                     b"x" * (server.MAX_AUDIO_BODY_BYTES + 1), "audio/webm"
                 )
@@ -1551,7 +1547,7 @@ class ServerHttpTests(ServerTestCase):
         }
         payload = {"model": "gpt-6-luna", "input": "fake"}
         with patch.object(
-            openai_provider.OpenAIResponsesClient, "background", return_value=expected
+            openai_requests.OpenAIResponsesClient, "background", return_value=expected
         ) as background:
             result = server.COACH_CONVERSATION.response_transport().background_request(
                 payload, on_response_id=checkpoint
@@ -1620,7 +1616,7 @@ class ServerHttpTests(ServerTestCase):
                         operation_id=f"operation-{client_turn_id}",
                     )
                 )
-            except server.AppError as error:
+            except AppError as error:
                 errors.append(error)
 
         registry = server.coach_streams.CHAT_STREAM_REGISTRY
@@ -1642,7 +1638,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(len(results), 1)
         self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], server.AppError)
+        self.assertIsInstance(errors[0], AppError)
         self.assertEqual(errors[0].reason, "chat_already_running")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             commands = db.execute(
@@ -1759,7 +1755,7 @@ class ServerHttpTests(ServerTestCase):
                 "opener",
                 side_effect=upstream_error,
             ),
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
@@ -1977,7 +1973,7 @@ class ServerHttpTests(ServerTestCase):
             patch.object(
                 RateLimiter, "allow", autospec=True, return_value=(False, 17)
             ) as rate_limit,
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             auth.require_auth(handler)
         self.assertEqual(raised.exception.status, 429)
@@ -2025,7 +2021,7 @@ class ServerHttpTests(ServerTestCase):
     def test_responses_request_routes_openai_to_provider_client(self):
         payload = {"model": "gpt-6-luna"}
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
@@ -2040,7 +2036,7 @@ class ServerHttpTests(ServerTestCase):
         on_response_id = Mock()
 
         with patch.object(
-            openai_provider.OpenAIStreamClient,
+            openai_stream.OpenAIStreamClient,
             "stream",
             return_value={"status": "completed"},
         ) as stream:
@@ -2064,10 +2060,10 @@ class ServerHttpTests(ServerTestCase):
             session_key
         )
         try:
-            with self.assertRaises(server.AppError) as duplicate:
+            with self.assertRaises(AppError) as duplicate:
                 coach_streams.CHAT_STREAM_REGISTRY.register(session_key)
             self.assertEqual(duplicate.exception.reason, "chat_already_running")
-            with self.assertRaises(server.AppError) as raised:
+            with self.assertRaises(AppError) as raised:
                 server.COACH_BACKGROUND_JOBS.cancellation_service().cancel(
                     session_key, "other-operation"
                 )
@@ -2239,7 +2235,7 @@ class ServerHttpTests(ServerTestCase):
             def queued_operation():
                 return "completed"
 
-            with self.assertRaises(server.AppError) as raised:
+            with self.assertRaises(AppError) as raised:
                 queued_operation()
             self.assertEqual(raised.exception.reason, "chat_queue_full")
         finally:

@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from backend.providers import http, openai
+from backend.providers import http
 
 
 class ProviderRedirectTests(unittest.TestCase):
@@ -74,8 +74,7 @@ class ProviderRedirectTests(unittest.TestCase):
                         self.assertEqual(self.received, [])
 
     def test_streaming_openers_reject_redirects(self):
-        opener = openai.urlopen
-        self.assertIs(opener, http.urlopen)
+        opener = http.urlopen
         with (
             self.assertRaises(HTTPError) as caught,
             http.open_interruptibly(

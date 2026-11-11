@@ -66,6 +66,7 @@ def frontend_source():
     )
 
 
+from backend.errors import AppError
 from backend.http_api import state_events_get
 from backend.http_api.static_assets import (
     CACHE_NAME_TOKEN,
@@ -1004,14 +1005,14 @@ class ServerFrontendTests(ServerTestCase):
 
         for path in ("/../server.py", "/public/../../server.py", "/..\\server.py"):
             with self.subTest(path=path):
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     static_assets.render(path, path, None)
                 self.assertEqual(error.exception.status, 403)
 
     def test_static_handler_rejects_path_traversal_without_request_attributes(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
 
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.HTTP_API.request_handler_class().send_static(
                 handler, "/../server.py"
             )
@@ -1021,7 +1022,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_static_files_reject_absolute_path(self):
         static_assets = StaticAssetService(server.PUBLIC_DIR)
 
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             static_assets.render("/C:/Windows/win.ini", "/C:/Windows/win.ini", None)
 
         self.assertEqual(error.exception.status, 403)

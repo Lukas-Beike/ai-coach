@@ -51,9 +51,6 @@ def _derived(
     return MappingProxyType(table)
 
 
-PREFERRED_PROVIDER: Final[Mapping[str, ProviderId]] = _derived()
-
-
 def preferred_providers(
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, str]:

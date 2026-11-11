@@ -15,7 +15,6 @@ from backend.coach.context import (
 from backend.coach.context_selection import (
     CONTEXT_SECTIONS,
     CoachContextSelection,
-    canonical_section,
 )
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
@@ -74,8 +73,7 @@ class CoachReadToolService:
             not isinstance(sections, list)
             or not 1 <= len(sections) <= 15
             or any(
-                not isinstance(section, str)
-                or canonical_section(section) not in CONTEXT_SECTIONS
+                not isinstance(section, str) or section not in CONTEXT_SECTIONS
                 for section in sections
             )
         ):
@@ -86,9 +84,7 @@ class CoachReadToolService:
             )
         if self._context_service is None:
             raise AppError(503, "Coach-Kontext ist nicht verfügbar.")
-        requested = list(
-            dict.fromkeys(canonical_section(section) for section in sections)
-        )
+        requested = list(dict.fromkeys(sections))
         context = self._context_service().build(
             selection=CoachContextSelection(
                 "requested_details",

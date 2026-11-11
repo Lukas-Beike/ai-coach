@@ -19,10 +19,10 @@ from backend.activities.hr_cap import effective_caps
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
+from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
 
 
@@ -160,7 +160,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for owner, name in (
             (server.PROVIDER_TRANSPORT.json_http_client(), "request"),
             (provider_http, "urlopen"),
-            (openai_provider, "urlopen"),
         ):
             guard = patch.object(
                 owner,
@@ -1930,7 +1929,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             proposal["id"], "synthetic-session"
         )
 
-        with self.assertRaises(server.AppError) as rejected:
+        with self.assertRaises(AppError) as rejected:
             server.COACH_PROPOSALS.execution_service().execute(
                 confirmation["action_token"],
                 "synthetic-session",

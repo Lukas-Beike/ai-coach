@@ -1009,7 +1009,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             patch.object(fixture_runtime, "fixture_coach_response") as canned,
         ):
             for call in calls:
-                with self.assertRaises(server.AppError) as raised:
+                with self.assertRaises(AppError) as raised:
                     call()
                 self.assertEqual(raised.exception.status, 502)
                 self.assertEqual(raised.exception.reason, "network_error")

@@ -26,10 +26,11 @@ from backend.coach.context import (
 )
 from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.proposal_validation import validated_coach_action_preview_input
+from backend.errors import AppError
 from backend.http_api import server as http_server_module
 from backend.performance.freshness import GarminSyncStatus
 from backend.planning import competitions as planning_competitions
-from backend.providers import openai as openai_provider
+from backend.providers import openai_requests
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
 from backend.sync.authority import competition_push_manifest
@@ -71,7 +72,7 @@ class ServerCoachTests(ServerTestCase):
             "ambiguities": [],
             "authorization_scope": [f"artifact:{artifact['artifact_id']}"],
         }
-        with self.assertRaises(server.AppError) as denied:
+        with self.assertRaises(AppError) as denied:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "commit_training_plan",
                 {"artifact_id": str(uuid.uuid4())},
@@ -113,7 +114,7 @@ class ServerCoachTests(ServerTestCase):
             "_allow_artifact_rebind": True,
         }
 
-        with self.assertRaises(server.AppError) as denied:
+        with self.assertRaises(AppError) as denied:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "commit_training_plan",
                 {"artifact_id": artifact["artifact_id"]},
@@ -315,7 +316,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertTrue(validated["activity_id"].startswith("act_"))
         self.assertEqual(validated["sport"], "Laufen")
 
-        with self.assertRaises(server.AppError) as missing:
+        with self.assertRaises(AppError) as missing:
             server.ACTIVITY_READS.activity_read().detail(
                 "activity-3",
                 garmin_status=GarminSyncStatus.from_state(read_garmin()),
@@ -528,7 +529,7 @@ class ServerCoachTests(ServerTestCase):
             item["library_workout_id"]: item
             for item in server.SYNC_COMMANDS.authority().pending_plan_push_entries()
         }
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
                 {"entries": [pending[first["id"]]]},
@@ -626,7 +627,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertIn("Linkes Knie", context["activity_feedback"]["recent"][0]["notes"])
 
     def test_coach_activity_feedback_requires_a_known_snapshot_activity(self):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.ATHLETE_DATA.activity_feedback().save_coach(
                 "unknown",
                 {
@@ -727,7 +728,7 @@ class ServerCoachTests(ServerTestCase):
         self,
     ):
         receipt = {"request_kind": "morning_checkin"}
-        error = server.AppError(
+        error = AppError(
             503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready"
         )
         with (
@@ -738,7 +739,7 @@ class ServerCoachTests(ServerTestCase):
             patch("backend.coach.job_store.CoachJobStore.merge_receipt"),
             patch.object(ManualMorningCheckinService, "prepare", side_effect=error),
             patch("backend.coach.chat_turn.CoachChatTurnService.run") as chat,
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.COACH_BACKGROUND_JOBS.background_job_runner()._execute(
                 {},
@@ -753,7 +754,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait(self):
         runner = server.COACH_BACKGROUND_JOBS.background_job_runner()
-        error = server.AppError(
+        error = AppError(
             503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready"
         )
         with (
@@ -828,7 +829,7 @@ class ServerCoachTests(ServerTestCase):
         ]
         status, text, question, cancelled = (
             server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
-                server.AppError(429, "Provider limit", reason="rate_limit_exceeded"),
+                AppError(429, "Provider limit", reason="rate_limit_exceeded"),
                 commands,
                 commands,
                 [],
@@ -852,7 +853,7 @@ class ServerCoachTests(ServerTestCase):
         ]
         status, text, question, cancelled = (
             server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
-                server.AppError(502, "Provider error", reason="provider_unavailable"),
+                AppError(502, "Provider error", reason="provider_unavailable"),
                 commands,
                 commands[:1],
                 [],
@@ -875,7 +876,7 @@ class ServerCoachTests(ServerTestCase):
         ]
         status, _text, question, cancelled = (
             server.COACH_BACKGROUND_JOBS.turn_failure_service()._response(
-                server.AppError(499, "Cancelled", reason="chat_cancelled"),
+                AppError(499, "Cancelled", reason="chat_cancelled"),
                 commands,
                 commands[:1],
                 [],
@@ -1141,9 +1142,9 @@ class ServerCoachTests(ServerTestCase):
             server.SETTINGS.save_model("gpt-6-luna"), {"model": "gpt-6-luna"}
         )
         self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.SETTINGS.save_model("not-a-model")
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.SETTINGS.save_model("gpt-5.6-sol")
 
     def test_thinking_level_is_persisted_and_validated(self):
@@ -1152,7 +1153,7 @@ class ServerCoachTests(ServerTestCase):
             server.SETTINGS.save_thinking_level("high"), {"thinking_level": "high"}
         )
         self.assertEqual(server.SETTINGS.selected_thinking_level(), "high")
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.SETTINGS.save_thinking_level("extreme")
 
     def test_reset_coach_chat_discards_outstanding_plan_drafts(self):
@@ -1176,7 +1177,7 @@ class ServerCoachTests(ServerTestCase):
             "turn-before-reset",
         )
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "delete_conversation",
             return_value=True,
         ):
@@ -1223,7 +1224,7 @@ class ServerCoachTests(ServerTestCase):
         server.COACH_CONVERSATION.message_service().add("user", "Clear this message")
         service = server.COACH_CONVERSATION.reset_service()
         with patch.object(
-            openai_provider.OpenAIResponsesClient,
+            openai_requests.OpenAIResponsesClient,
             "delete_conversation",
             side_effect=RuntimeError("synthetic remote failure"),
         ) as delete_conversation:
@@ -1267,7 +1268,7 @@ class ServerCoachTests(ServerTestCase):
                 "csrf-background-idempotent",
                 operation_id="operation-background-replay",
             )
-            with self.assertRaises(server.AppError) as foreign_replay:
+            with self.assertRaises(AppError) as foreign_replay:
                 server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                     "Fremde Sitzung",
                     "turn-background-idempotent",
@@ -1543,7 +1544,7 @@ class ServerCoachTests(ServerTestCase):
         ):
             with (
                 self.subTest(invalid=invalid),
-                self.assertRaises(server.AppError) as error,
+                self.assertRaises(AppError) as error,
             ):
                 validated_coach_action_preview_input(invalid)
             self.assertEqual(error.exception.status, 400)

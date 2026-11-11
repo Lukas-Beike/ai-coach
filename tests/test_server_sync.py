@@ -10,6 +10,7 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
+from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -32,6 +33,7 @@ from support import (
     store_canonical_snapshot,
 )
 
+from backend.errors import AppError
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
 from backend.planning import adaptive as planning_adaptive
@@ -174,7 +176,7 @@ class ServerSyncTests(ServerTestCase):
         http_server_factory.assert_called_once()
         address, handler_class = http_server_factory.call_args.args
         self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
-        self.assertTrue(issubclass(handler_class, server.BaseHTTPRequestHandler))
+        self.assertTrue(issubclass(handler_class, BaseHTTPRequestHandler))
         self.assertIsInstance(handler_class.static_asset_service, StaticAssetService)
         self.assertEqual(
             handler_class.static_asset_service._targets["index.html"],
@@ -288,7 +290,7 @@ class ServerSyncTests(ServerTestCase):
         with patch.object(
             sync_executor.SyncJobExecutor,
             "execute",
-            side_effect=server.AppError(503, provider_detail, reason="network_error"),
+            side_effect=AppError(503, provider_detail, reason="network_error"),
         ):
             server.SYNC_JOB_EXECUTION.executor().run(claimed)
         state = server.SYNC_JOB_QUEUE.service().state(job["id"])
@@ -419,7 +421,7 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(PlanPushCommandService, "enqueue") as enqueue,
-            self.assertRaises(server.AppError) as error,
+            self.assertRaises(AppError) as error,
         ):
             server.COACH_TOOL_DISPATCH.service().execute(
                 "start_intervals_plan_sync",
@@ -862,7 +864,7 @@ class ServerSyncTests(ServerTestCase):
                 }
             ]
         )[0]
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.PLANNING_DATA.workout_library().update(
                 entry["id"], {"action": "delete"}
             )
@@ -1257,7 +1259,7 @@ class ServerSyncTests(ServerTestCase):
         page = [{"id": f"activity-{index}"} for index in range(500)]
         with (
             patch.object(client._api, "get", side_effect=[page, page]),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             client.get_paged_collection("/athlete/0/activities", {}, "activities")
         self.assertEqual(raised.exception.status, 502)
@@ -1270,7 +1272,7 @@ class ServerSyncTests(ServerTestCase):
         )
         self.assertEqual(job["type"], "plan_push")
         self.assertEqual(job["payload"], {"entries": [entry], "reason": "job"})
-        with self.assertRaises(server.AppError) as too_many:
+        with self.assertRaises(AppError) as too_many:
             server.SYNC_JOB_QUEUE.service().enqueue(
                 "intervals",
                 "plan_push",
@@ -1451,7 +1453,7 @@ class ServerSyncTests(ServerTestCase):
                                 {"reason": "test", "approval_manifest": []},
                             )
                         )
-                    except server.AppError as error:
+                    except AppError as error:
                         errors.append(error)
 
                 thread = threading.Thread(target=attempt_sync)
@@ -1690,7 +1692,7 @@ class ServerSyncTests(ServerTestCase):
                 "opener",
                 side_effect=upstream_error,
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "POST",
@@ -1727,7 +1729,7 @@ class ServerSyncTests(ServerTestCase):
                 "sync_entry",
                 side_effect=[
                     {"id": first["id"], "external_id": "remote-1"},
-                    server.AppError(502, "provider unavailable"),
+                    AppError(502, "provider unavailable"),
                 ],
             ) as sync_entry,
         ):
@@ -1752,7 +1754,7 @@ class ServerSyncTests(ServerTestCase):
         config = replace(
             server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
         )
-        with patch.object(server, "CONFIG", config), self.assertRaises(server.AppError):
+        with patch.object(server, "CONFIG", config), self.assertRaises(AppError):
             server.GARMIN_ASSEMBLY.sync_service().sync()
         state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])

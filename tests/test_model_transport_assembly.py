@@ -4,7 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from backend.providers import openai
+from backend.providers import http as provider_http
+from backend.providers import openai_requests, openai_stream
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelBackgroundPolicy,
@@ -67,7 +68,7 @@ class ModelTransportAssemblyTests(unittest.TestCase):
         assembly, config, settings, http, state = self.make_assembly()
         config.assert_not_called()
         with patch.object(
-            openai, "OpenAIResponsesClient", return_value="client"
+            openai_requests, "OpenAIResponsesClient", return_value="client"
         ) as factory:
             self.assertEqual(assembly.openai_responses_client(), "client")
 
@@ -84,9 +85,9 @@ class ModelTransportAssemblyTests(unittest.TestCase):
         assembly, _config, _settings, _http, _state = self.make_assembly()
         opener = Mock(name="opener")
         with (
-            patch.object(openai, "urlopen", opener),
+            patch.object(provider_http, "urlopen", opener),
             patch.object(
-                openai, "OpenAIStreamClient", return_value="openai-stream"
+                openai_stream, "OpenAIStreamClient", return_value="openai-stream"
             ) as openai_factory,
         ):
             self.assertEqual(assembly.openai_stream_client(), "openai-stream")

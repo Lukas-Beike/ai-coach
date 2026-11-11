@@ -465,7 +465,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         service = server.COACH_LOCAL.clarification_service()
         invalid_ids = (None, [], [1], [2, 3], [2, 99], [True, 2], [2] * 25)
         for ids in invalid_ids:
-            with self.subTest(ids=ids), self.assertRaises(server.AppError) as raised:
+            with self.subTest(ids=ids), self.assertRaises(AppError) as raised:
                 service.save_question(
                     {
                         "source_message_ids": ids,
@@ -484,7 +484,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
 
         assistant_current = {**context, "current_user_message_id": 3}
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             service.save_question(
                 {
                     "source_message_ids": [2, 3],
@@ -523,7 +523,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     summary_length=len(text["summary"]),
                     question_length=len(text["question"]),
                 ),
-                self.assertRaises(server.AppError) as raised,
+                self.assertRaises(AppError) as raised,
             ):
                 service.save_question({"source_message_ids": [8], **text}, context)
             self.assertEqual(
@@ -549,9 +549,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
 
         def broken(_):
-            raise server.AppError(
-                502, "Synthetic internal detail", reason="response_failed"
-            )
+            raise AppError(502, "Synthetic internal detail", reason="response_failed")
 
         result, _ = self.turn("Plane die Strecke ein", [question, broken])
         self.assertTrue(result["awaiting_clarification"])
@@ -585,7 +583,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             }
 
         def broken(_):
-            raise server.AppError(502, "Synthetic", reason="conversation_state_invalid")
+            raise AppError(502, "Synthetic", reason="conversation_state_invalid")
 
         def retry(payload):
             self.assertNotIn("previous_response_id", payload)
@@ -611,7 +609,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_repeated_invalid_state_is_bounded_and_explained_without_raw_error(self):
         def broken(_):
-            raise server.AppError(
+            raise AppError(
                 502,
                 "Synthetic private upstream detail",
                 reason="conversation_state_invalid",
@@ -1127,7 +1125,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     "clarify_coach_request",
                     "cancel_coach_request",
                 }:
-                    with self.assertRaises(server.AppError):
+                    with self.assertRaises(AppError):
                         server.COACH_LOCAL.dialogue_action_service().classify(
                             tool["name"], {}, context, allow_mutations=False
                         )
@@ -1161,12 +1159,12 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 allow_mutations=True,
             )
 
-        with self.assertRaises(server.AppError) as denied:
+        with self.assertRaises(AppError) as denied:
             service.classify(
                 "save_coach_activity_feedback", {}, context, allow_mutations=False
             )
         self.assertEqual(denied.exception.reason, "intent_scope_denied")
-        with self.assertRaises(server.AppError) as invalid:
+        with self.assertRaises(AppError) as invalid:
             foreign_request = self.request(["activity_feedback"]) | {
                 "source_message_ids": [999999]
             }
@@ -1177,7 +1175,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 allow_mutations=True,
             )
         self.assertEqual(invalid.exception.reason, "request_invalid")
-        with self.assertRaises(server.AppError) as remote:
+        with self.assertRaises(AppError) as remote:
             classify(
                 "start_intervals_plan_sync",
                 ["intervals_sync"],
@@ -1185,13 +1183,13 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 sync_scope="selected",
             )
         self.assertEqual(remote.exception.reason, "remote_scope_denied")
-        with self.assertRaises(server.AppError) as provider:
+        with self.assertRaises(AppError) as provider:
             classify("start_provider_refresh", ["garmin_refresh"], target="intervals")
         self.assertEqual(provider.exception.reason, "request_target")
-        with self.assertRaises(server.AppError) as missing:
+        with self.assertRaises(AppError) as missing:
             classify("save_coach_activity_feedback", ["planned_unit:missing"])
         self.assertEqual(missing.exception.reason, "request_object_missing")
-        with self.assertRaises(server.AppError) as repair:
+        with self.assertRaises(AppError) as repair:
             classify(
                 "start_intervals_plan_sync",
                 ["intervals_sync"],
@@ -2054,7 +2052,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
 
         def broken(_):
-            raise server.AppError(
+            raise AppError(
                 503, "Synthetic model unavailable", reason="provider_unavailable"
             )
 
@@ -2503,7 +2501,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_summary_failure_preserves_effect_and_replays_receipt(self):
         def broken(_):
-            raise server.AppError(
+            raise AppError(
                 503, "Synthetic model unavailable", reason="provider_unavailable"
             )
 
@@ -2551,7 +2549,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             [{"output_text": "Synthetic advice"}],
             turn="owned-turn",
         )
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.COACH_TURNS.chat_turn_service().run(
                 "Weiter", client_turn_id="owned-turn", session_csrf_hash="other-session"
             )

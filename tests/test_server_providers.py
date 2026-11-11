@@ -14,10 +14,10 @@ from urllib.parse import quote
 from server_test_support import ServerTestCase, server
 
 from backend.coach import streams as coach_streams
-from backend.errors import ClientDisconnected
+from backend.errors import AppError, ClientDisconnected
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
+from backend.providers.openai_responses import response_text
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import freshness as sync_freshness
 from backend.sync import garmin as garmin_sync
@@ -122,7 +122,7 @@ class ServerProvidersTests(ServerTestCase):
     def test_persisted_job_is_revalidated_before_provider_dispatch(self):
         with (
             patch.object(garmin_service.GarminSyncService, "sync") as sync,
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.SYNC_JOB_EXECUTION.executor().execute(
                 {
@@ -136,7 +136,7 @@ class ServerProvidersTests(ServerTestCase):
         sync.assert_not_called()
 
     def test_garmin_capability_breaker_pauses_repeated_same_error(self):
-        error = server.AppError(429, "provider limited", reason="rate_limited")
+        error = AppError(429, "provider limited", reason="rate_limited")
         service = server.GARMIN_ASSEMBLY.sync_state_service()
         for _ in range(garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT):
             service.record_capability_failure("body_battery", error)
@@ -156,7 +156,7 @@ class ServerProvidersTests(ServerTestCase):
                 }
             ]
         }
-        self.assertEqual(openai_provider.response_text(response), "Hello")
+        self.assertEqual(response_text(response), "Hello")
 
     def test_openai_model_selection_uses_configured_model(self):
         config = replace(
@@ -240,7 +240,7 @@ class ServerProvidersTests(ServerTestCase):
         with (
             patch.object(server, "CONFIG", config),
             patch.object(
-                openai_provider, "urlopen", return_value=FakeResponse()
+                provider_http, "urlopen", return_value=FakeResponse()
             ) as urlopen,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
@@ -409,7 +409,7 @@ class ServerProvidersTests(ServerTestCase):
             server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url
         )
         with patch.object(server, "CONFIG", config):
-            with self.assertRaises(server.AppError) as sdk_error:
+            with self.assertRaises(AppError) as sdk_error:
                 server.provider_http.external_call(
                     "garmin",
                     "login",
@@ -432,7 +432,7 @@ class ServerProvidersTests(ServerTestCase):
                     "fetch_calendar_feed",
                     side_effect=RuntimeError(f"calendar request failed for {email}"),
                 ),
-                self.assertRaises(server.AppError) as calendar_error,
+                self.assertRaises(AppError) as calendar_error,
             ):
                 server.EXTERNAL_CALENDAR.sync_service().sync("test")
             self.assertEqual(calendar_error.exception.reason, "provider_client_error")
@@ -477,7 +477,7 @@ class ServerProvidersTests(ServerTestCase):
                 "opener",
                 side_effect=upstream_error,
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "GET", "https://intervals.icu/api/v1/athlete/0", service="intervals"
@@ -574,7 +574,7 @@ class ServerProvidersTests(ServerTestCase):
                 "opener",
                 side_effect=URLError("offline"),
             ),
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "GET", "https://intervals.icu/api/v1/athlete/0"
@@ -660,7 +660,7 @@ class ServerProvidersTests(ServerTestCase):
                 "opener",
                 side_effect=upstream_error,
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "POST",
@@ -694,7 +694,7 @@ class ServerProvidersTests(ServerTestCase):
                 "opener",
                 side_effect=upstream_error,
             ),
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PROVIDER_TRANSPORT.json_http_client().request(
                 "POST",
@@ -719,8 +719,8 @@ class ServerProvidersTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with (
             patch.object(server, "CONFIG", config),
-            patch.object(openai_provider, "urlopen", side_effect=upstream_error),
-            self.assertRaises(server.AppError) as raised,
+            patch.object(provider_http, "urlopen", side_effect=upstream_error),
+            self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, lambda _: None
@@ -748,8 +748,8 @@ class ServerProvidersTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="openai-test")
         with (
             patch.object(server, "CONFIG", config),
-            patch.object(openai_provider, "urlopen", side_effect=upstream_error),
-            self.assertRaises(server.AppError) as raised,
+            patch.object(provider_http, "urlopen", side_effect=upstream_error),
+            self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, lambda _: None
@@ -805,7 +805,7 @@ class ServerProvidersTests(ServerTestCase):
 
         deltas = []
         with patch.object(
-            openai_provider, "urlopen", return_value=FakeResponse()
+            provider_http, "urlopen", return_value=FakeResponse()
         ) as urlopen:
             result = server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, deltas.append
@@ -841,8 +841,8 @@ class ServerProvidersTests(ServerTestCase):
 
         with (
             patch.object(provider_http, "MAX_EXTERNAL_RESPONSE_BYTES", 1),
-            patch.object(openai_provider, "urlopen", return_value=OversizedResponse()),
-            self.assertRaises(server.AppError) as raised,
+            patch.object(provider_http, "urlopen", return_value=OversizedResponse()),
+            self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, lambda _: None
@@ -868,8 +868,8 @@ class ServerProvidersTests(ServerTestCase):
         cancel_event = threading.Event()
         cancel_event.set()
         with (
-            patch.object(openai_provider, "urlopen") as urlopen,
-            self.assertRaises(server.AppError) as raised,
+            patch.object(provider_http, "urlopen") as urlopen,
+            self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, lambda _: None, cancel_event
@@ -896,8 +896,8 @@ class ServerProvidersTests(ServerTestCase):
                 raise TimeoutError("test timeout")
 
         with (
-            patch.object(openai_provider, "urlopen", return_value=TimeoutResponse()),
-            self.assertRaises(server.AppError) as raised,
+            patch.object(provider_http, "urlopen", return_value=TimeoutResponse()),
+            self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
                 {"model": "gpt-6-luna"}, lambda _: None
@@ -924,7 +924,7 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(
             client.config.max_bytes, provider_http.MAX_EXTERNAL_RESPONSE_BYTES
         )
-        self.assertIs(client.opener, openai_provider.urlopen)
+        self.assertIs(client.opener, provider_http.urlopen)
 
     def test_responses_stream_request_client_disconnect_records_cancelled_usage(self):
         class DisconnectResponse(BytesIO):
@@ -937,7 +937,7 @@ class ServerProvidersTests(ServerTestCase):
                 )
 
         with (
-            patch.object(openai_provider, "urlopen", return_value=DisconnectResponse()),
+            patch.object(provider_http, "urlopen", return_value=DisconnectResponse()),
             self.assertRaises(ClientDisconnected),
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
@@ -984,17 +984,17 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIsNone(registry.get_background_event("background-operation"))
 
     def test_responses_status_and_error_payloads_are_rejected(self):
-        with self.assertRaises(server.AppError) as failed:
+        with self.assertRaises(AppError) as failed:
             server.provider_state_service().validate_openai_response(
                 "/responses", {"status": "failed"}
             )
         self.assertEqual(failed.exception.reason, "response_failed")
-        with self.assertRaises(server.AppError) as unknown:
+        with self.assertRaises(AppError) as unknown:
             server.provider_state_service().validate_openai_response(
                 "/responses", {"status": "mystery"}
             )
         self.assertEqual(unknown.exception.reason, "invalid_response_status")
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.provider_state_service().validate_openai_response(
                 "/responses", {"error": {"message": "secret"}}
             )

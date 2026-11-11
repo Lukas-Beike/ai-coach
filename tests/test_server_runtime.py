@@ -14,6 +14,7 @@ from server_test_support import ServerTestCase, server
 from backend.activities import grouping as activity_grouping
 from backend.coach import streams as coach_streams
 from backend.coach.job_worker import CoachJobWorker
+from backend.errors import AppError
 from backend.performance import morning_battery as performance_morning_battery
 from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
@@ -69,7 +70,7 @@ class ServerRuntimeTests(ServerTestCase):
         restoring = threading.Thread(target=restore_operation)
         restoring.start()
         self.assertFalse(restore_entered.wait(timeout=0.05))
-        with self.assertRaises(server.AppError) as blocked, gate.operation():
+        with self.assertRaises(AppError) as blocked, gate.operation():
             pass
         self.assertEqual(blocked.exception.status, 503)
         release.set()
@@ -289,7 +290,7 @@ class ServerRuntimeTests(ServerTestCase):
         with (
             patch(
                 "backend.coach.chat_turn.CoachChatTurnService.run",
-                side_effect=server.AppError(429, "busy", reason="chat_queue_full"),
+                side_effect=AppError(429, "busy", reason="chat_queue_full"),
             ),
             patch.object(
                 auth,
