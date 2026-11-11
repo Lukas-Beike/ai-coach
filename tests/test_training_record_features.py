@@ -1013,9 +1013,13 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 }
             )
             nights[f"2026-08-{day + 1:02d}"] = float(day)
-        # C-015: a day before the 84-day recovery window is not counted.
+        # C-015: the first day of the 84-day window counts, the day before does not.
         checkins.append({"checkin_date": "2026-06-08", "tag_answers": {"travel": True}})
         nights["2026-06-09"] = 99.0
+        checkins.append(
+            {"checkin_date": "2026-06-09", "tag_answers": {"travel": False}}
+        )
+        nights["2026-06-10"] = 10.5
         result = tag_impact(
             checkins,
             {
@@ -1040,7 +1044,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(report["measurement"], "duration")
         self.assertEqual(report["status"], "observed_association")
         self.assertEqual(report["groups"]["with"]["days"], 10)
-        self.assertEqual(report["groups"]["without"]["days"], 10)
+        self.assertEqual(report["groups"]["without"]["days"], 11)
         self.assertEqual(report["groups"]["with"]["median"], 5.5)
 
     def test_equipment_requires_initial_values_and_prevents_component_cycles(self):

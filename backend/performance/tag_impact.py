@@ -8,11 +8,11 @@ from typing import Any
 from backend.activities.activity_summary import ActivitySummary, summary_local_date
 from backend.athlete.checkins import CHECKIN_TAGS
 from backend.athlete.measurements import number
+from backend.performance.canonical_recovery import RECOVERY_HISTORY_DAYS
 
-
-# The recovery history holds the nights of the last 84 days (``personal_recovery``);
-# a tagged day pairs with its following night, so the days are the 84 before today.
-TAG_IMPACT_DAYS = 84
+# A tagged day pairs with its following night of the recovery history, so the days
+# are as many as the history holds nights, ending yesterday.
+TAG_IMPACT_DAYS = RECOVERY_HISTORY_DAYS
 
 
 def tag_impact(
