@@ -33,7 +33,7 @@ The system SHALL unfold and validate bounded UTF-8 iCalendar structure, parse su
 Evidence: `backend/providers/calendar.py:parse_ical_calendar`, `backend/providers/calendar.py:unfold_ical`; `tests/test_provider_calendar.py:test_normal_all_day_duration_and_markers`, `tests/test_provider_calendar.py:test_overlapping_multiday_event_and_nested_alarm`, `tests/test_provider_calendar.py:test_malformed_structure_utf8_and_limits`.
 
 ### Requirement: Bounded recurrence and exceptions
-The system SHALL expand supported daily, weekly, monthly, and yearly recurrence rules within the requested date window, apply supported filters and week starts, and honor RDATE, EXDATE, RECURRENCE-ID overrides, and cancellation. It SHALL preserve the source timezone's recurrence clock across DST. Unsupported rules SHALL fail explicitly; expansion SHALL enforce fixed count, period, raw-event, and result limits instead of unbounded iteration.
+The system SHALL expand supported daily, weekly, monthly, and yearly recurrence rules within the requested date window, apply supported filters and week starts, and honor RDATE, EXDATE, RECURRENCE-ID overrides, and cancellation. It SHALL preserve the source timezone's recurrence clock across DST. An unsupported or invalid recurrence rule SHALL skip and count only its component; expansion SHALL enforce fixed count, period, raw-event, and result limits instead of unbounded iteration.
 
 #### Scenario: Zoned weekly recurrence across DST
 - **WHEN** a TZID-bound recurrence crosses a DST transition
@@ -47,11 +47,17 @@ The system SHALL expand supported daily, weekly, monthly, and yearly recurrence 
 - **WHEN** a yearly rule names a weekday with a position, such as `BYDAY=20MO` or `BYDAY=-1MO`
 - **THEN** without BYMONTH the position counts within the year (one date a year), and with BYMONTH within each named month.
 
-#### Scenario: Excessive recurrence
-- **WHEN** requested recurrence count exceeds 1000, iteration exceeds supported bounds, or expanded results exceed 1000 events
-- **THEN** the parser rejects the unsafe feed instead of claiming a complete truncated event set.
+#### Scenario: Unsupported component
+- **WHEN** a component has an unsupported or invalid recurrence rule or lacks UID or DTSTART
+- **THEN** only that component is dropped, the skip is counted under its reason class without event text, and the remaining events are installed.
 
-Evidence: `backend/providers/calendar.py:_ical_rrule`, `backend/providers/calendar.py:_ical_instances`, `backend/providers/calendar.py:parse_ical_calendar`; `tests/test_provider_calendar.py:test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst`, `tests/test_provider_calendar.py:test_rdate_exdate_recurrence_id_and_cancelled`, `tests/test_provider_calendar.py:test_monthly_yearly_filters_and_bounds`, `tests/test_provider_calendar.py:test_recurrence_iteration_caps_are_fixed_not_tautological`.
+#### Scenario: Excessive feed
+- **WHEN** a feed has more than 10,000 components, more than 1000 unique events in the sync window, or needs more than 1,000,000 expansion steps
+- **THEN** the parser rejects the feed instead of claiming a complete truncated event set.
+
+Detailed contract: skipped are components with `COUNT` or `INTERVAL` outside 1 to 1000, an `EXRULE` on a series whose `RRULE` reaches the sync window, an `RDATE` period, an invalid `RECURRENCE-ID`, or no UID or DTSTART.
+
+Evidence: `backend/providers/calendar.py:_ical_rrule`, `backend/providers/calendar.py:_ical_instances`, `backend/providers/calendar.py:parse_ical_calendar`; `tests/test_provider_calendar.py:test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst`, `tests/test_provider_calendar.py:test_rdate_exdate_recurrence_id_and_cancelled`, `tests/test_provider_calendar.py:test_recurrence_iteration_caps_are_fixed_not_tautological`, `tests/test_provider_calendar.py:test_unsupported_series_is_skipped_and_counted_without_event_text`.
 
 ### Requirement: Training constraints from external event data
 The system SHALL derive training constraints from recognized NO_TRAINING, NO_INTENSITY, and SHORT_ONLY markers in event title/description, tolerating supported case, whitespace, hyphen, underscore, and bracket variants. It SHALL project constraint flags while dropping free-text description from persisted external-event DTOs. Blocking markers SHALL remain visible to planning even if ordinary training relevance is false; plain nonrelevant events may be excluded from that planning projection.

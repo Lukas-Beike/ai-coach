@@ -44,8 +44,12 @@ Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.lookup`, `bac
 The system SHALL keep fetched external foods (Open Food Facts and Yazio) in their own `food_database_entries` table, separate from athlete products and diary entries. Fresh mirrored records SHALL avoid unnecessary provider reads; stale fallback SHALL remain visibly stale when a provider recheck fails.
 
 #### Scenario: Fresh cached barcode
-- **WHEN** a stored record is younger than ninety days
+- **WHEN** a usable stored record is younger than ninety days and its per-100 values include sugar, fibre and salt
 - **THEN** lookup uses the local database entry without a provider request and returns its stored-time provenance.
+
+#### Scenario: Fresh older entry without sugar, fibre and salt
+- **WHEN** a barcode lookup finds a usable record younger than ninety days that lacks those keys
+- **THEN** the providers are read once; if that fails the stored record is returned as a local hit and no new read starts for 900 seconds.
 
 #### Scenario: Stale record during outage
 - **WHEN** a stale barcode record exists and the provider recheck fails
@@ -59,7 +63,7 @@ The system SHALL keep fetched external foods (Open Food Facts and Yazio) in thei
 - **WHEN** another successful lookup stores the same external food identity
 - **THEN** its mirror record and fetched time are refreshed without creating a second food identity or consumed meal.
 
-Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`, `backend/nutrition/food_database.py::FoodDatabaseService._off_product`, `backend/nutrition/food_database.py::FoodDatabaseService.forget`, `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Mirror storage failures are suppressed so a successful lookup can still return its result.
+Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`, `backend/nutrition/food_database.py::FoodDatabaseService._off_product`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`, `backend/nutrition/food_database.py::FoodDatabaseService.forget`, `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_legacy_yazio_fallback_does_not_retry_each_scan`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Mirror storage failures are suppressed so a successful lookup can still return its result.
 
 ### Requirement: Confirmed product persistence and explicit archival
 The system SHALL require explicit confirmation at product HTTP save, update, archive, and mirror-removal boundaries. Products SHALL retain basis amount/unit, validated nutrient values, source, and provenance without retaining submitted image fields.
@@ -147,7 +151,7 @@ The system SHALL create a new diary entry when a saved meal is consumed, scale i
 Evidence: `backend/nutrition/diary.py::NutritionDiaryService.log_template`, `backend/nutrition/diary.py::NutritionDiaryService._scale_composite_basis`; `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_template_without_meal_time_stores_unknown_time_and_keeps_meal_type`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_component_replacement_metadata_and_template_portion_snapshots`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_restart_and_database_backup_keep_composite_entries_and_templates`.
 
 ### Requirement: Product UI separates review from recording consumption
-The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption or saved-meal actions. The athlete SHALL be able to mark saved products as favorites, which the product list shows first, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
+The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption. The athlete SHALL be able to mark saved products as favorites, which the product list shows first, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
 
 #### Scenario: Use a saved product
 - **WHEN** the athlete selects a product and consumed quantity
@@ -190,6 +194,8 @@ The system SHALL support explicit database source selection and bounded batched 
 - **WHEN** no text source is named, or a batch is malformed, oversized, empty, or combined with a barcode
 - **THEN** ordinary lookup retains local-first behavior, with BLS next when Yazio is not configured and the Yazio, Open Food Facts, BLS chain when it is, and invalid batches fail before unbounded lookup work.
 
+Evidence: `backend/coach/read_tools.py::CoachReadToolService._lookup_food`, `backend/coach/read_tools.py::CoachReadToolService._lookup_one_food`; `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_batched_queries_return_each_term_and_isolate_failures`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_text_source_still_returns_matching_saved_products`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_source_outage_still_returns_saved_products`.
+
 ### Requirement: Online food lookup is bounded and privacy-conscious
 The system SHALL bound Open Food Facts transport and local request rates, separate search and barcode limits, cache successful responses, and return sanitized provider failures. Provider-estimated or modified aggregate nutrient values SHALL not be treated as authoritative label values.
 
@@ -230,11 +236,11 @@ When Yazio is configured and a text or barcode lookup names no source, the syste
 - **WHEN** a lookup names Yazio without Yazio configuration
 - **THEN** it fails with a clear not-configured error and no fallback source is queried.
 
-Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._search`, `backend/nutrition/food_database.py::FoodDatabaseService._chain_search`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`; `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_answers_first_with_source_and_origin`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_mirror_hit_prevents_every_external_request`, `tests/test_food_lookup_chain.py::LookupChainTests.test_empty_or_unsuitable_yazio_falls_through_to_open_food_facts`, `tests/test_food_lookup_chain.py::LookupChainTests.test_without_yazio_the_default_stays_bls_only`, `tests/test_food_lookup_chain.py::LookupChainTests.test_explicit_yazio_without_configuration_is_a_clear_error`, `tests/test_food_lookup_chain.py::LookupChainTests.test_barcode_prefers_mirror_then_yazio_then_open_food_facts`.
-
 #### Scenario: Yazio not configured
 - **WHEN** no Yazio credentials are configured
 - **THEN** no Yazio request is made and lookup behaves as before this change.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._search`, `backend/nutrition/food_database.py::FoodDatabaseService._chain_search`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`; `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_answers_first_with_source_and_origin`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_mirror_hit_prevents_every_external_request`, `tests/test_food_lookup_chain.py::LookupChainTests.test_empty_or_unsuitable_yazio_falls_through_to_open_food_facts`, `tests/test_food_lookup_chain.py::LookupChainTests.test_without_yazio_the_default_stays_bls_only`, `tests/test_food_lookup_chain.py::LookupChainTests.test_explicit_yazio_without_configuration_is_a_clear_error`, `tests/test_food_lookup_chain.py::LookupChainTests.test_barcode_prefers_mirror_then_yazio_then_open_food_facts`.
 
 ### Requirement: Yazio foods map into the existing food contract
 The system SHALL project each Yazio result to the existing food record with a stable `yazio:` id, name, producer, source attribution, a 100-unit basis in grams or millilitres, and kcal, carbohydrate, protein and fat values. Unknown, implausible or unsupported-unit values SHALL stay unknown. Reported serving options SHALL be kept in the record. Results SHALL be untrusted data and stored in the local mirror like other online foods.
