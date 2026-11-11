@@ -90,7 +90,7 @@ The system SHALL require the athlete's named sync request for the step's own pro
 - **THEN** the remote write is denied; a local or bulk confirmation cannot grant remote permission.
 
 #### Scenario: Another provider or a past sync
-- **WHEN** a sentence part names Garmin or Wahoo but not Intervals.icu ("Sync meine Garmin-Daten"), or describes a past sync with an auxiliary and only past participles ("Ich habe gestern synchronisiert", "Der Plan wurde hochgeladen")
+- **WHEN** a sentence part names Garmin or Wahoo but not Intervals.icu ("Sync meine Garmin-Daten"), or describes a past sync with an auxiliary and only past participles ("Ich habe gestern synchronisiert", "Ich habe mit Intervals gesynct")
 - **THEN** that part names no Intervals.icu sync; generic sync verbs in a request ("Synchronisiere den Plan") still do.
 
 #### Scenario: Garmin strength push

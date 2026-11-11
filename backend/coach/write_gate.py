@@ -415,7 +415,11 @@ _SYNC_VERB = _compile(
 def _describes_past(part: str) -> bool:
     """Whether every sync verb of a part is a past participle after an auxiliary."""
     tokens = re.findall(r"[a-z]+", _loose(part))
-    verbs = [token for token in tokens if _SYNC_VERB.match(token)]
+    verbs = [
+        token
+        for token in tokens
+        if _SYNC_VERB.match(token) or token in _SYNC_PARTICIPLES
+    ]
     return (
         bool(_PAST_AUXILIARIES.intersection(tokens))
         and bool(verbs)

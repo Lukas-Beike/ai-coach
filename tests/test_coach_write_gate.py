@@ -653,7 +653,8 @@ class RemoteTierTests(unittest.TestCase):
             "Sync meine Garmin-Daten",
             "Ich habe gestern mit Wahoo synchronisiert",
             "Ich habe gestern mit Intervals synchronisiert",
-            "Der Plan wurde schon hochgeladen.",
+            "Der Plan wurde schon synchronisiert.",
+            "Ich habe gestern mit Intervals gesynct",
         ):
             with self.subTest(text=text):
                 self.assertFalse(gate.remote_requested(text))
