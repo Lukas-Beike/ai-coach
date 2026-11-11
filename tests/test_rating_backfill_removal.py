@@ -14,13 +14,13 @@ from backend.errors import AppError
 from backend.sync.executor import SyncJobExecutor
 from backend.sync.jobs import JOB_TYPES
 from backend.sync.rating_backfill_removal import (
-    RETIRED_JOB_TYPE,
     RETIRED_STATE_KEY,
     STATE_KEY,
     RatingBackfillRemoval,
 )
 
 NOW = "2026-11-11T08:00:00+00:00"
+RETIRED_JOB_TYPE = "rating_backfill"
 FINISHED = json.dumps({"finished": True, "backfilled": 12, "skipped_ids": ["7"]})
 
 
@@ -77,7 +77,7 @@ class RatingBackfillRemovalTests(SyncQueueFixtureMixin, unittest.TestCase):
         with self.manager.reader() as db:
             return [tuple(row) for row in db.execute(sql).fetchall()]
 
-    def test_only_the_backfills_own_keys_cursor_and_jobs_are_removed(self) -> None:
+    def test_only_the_backfills_own_key_and_cursor_are_removed(self) -> None:
         self.seed()
 
         report = self.run_stage()
@@ -95,22 +95,13 @@ class RatingBackfillRemovalTests(SyncQueueFixtureMixin, unittest.TestCase):
             [("stream_history",)],
             self.rows("SELECT stream FROM provider_sync_cursors"),
         )
-        self.assertEqual(
-            [
-                ("kept-stream", "stream_backfill", "queued"),
-                ("old-completed", RETIRED_JOB_TYPE, "completed"),
-                ("old-failed", RETIRED_JOB_TYPE, "failed"),
-            ],
-            self.rows("SELECT id, type, status FROM sync_jobs ORDER BY id"),
-        )
-        self.assertEqual(
-            [("item-kept-stream",), ("item-old-completed",), ("item-old-failed",)],
-            self.rows("SELECT id FROM sync_job_items ORDER BY id"),
-        )
+        # Every stored job stays; the queue settles leftovers of the removed type.
+        self.assertEqual(5, len(self.rows("SELECT id FROM sync_jobs")))
+        self.assertEqual(5, len(self.rows("SELECT id FROM sync_job_items")))
         with self.manager.reader() as db:
             state = json.loads(self.key_values.get(db, STATE_KEY) or "{}")
         self.assertEqual(
-            {"state_keys": 1, "cursors": 1, "job_items": 2, "jobs": 2},
+            {"state_keys": 1, "cursors": 1},
             state["removed"],
         )
 
@@ -159,8 +150,8 @@ class RatingBackfillRemovalTests(SyncQueueFixtureMixin, unittest.TestCase):
 
         self.assertGreater(self.run_stage().items, 0)
         self.assertEqual(
-            [("kept-stream",), ("old-completed",), ("old-failed",)],
-            self.rows("SELECT id FROM sync_jobs ORDER BY id"),
+            [],
+            self.rows("SELECT key FROM kv WHERE key = 'garmin_rating_backfill_state'"),
         )
 
 

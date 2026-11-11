@@ -109,7 +109,7 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 #### Scenario: Retired rating backfill
 - **WHEN** the canonical backfill worker reaches its `rating_backfill_removal` stage
-- **THEN** it deletes, once per version, the `garmin_rating_backfill_state` key, the `rating_history` cursor and every queued or running `sync_jobs` row of the retired `rating_backfill` type with its items, and nothing else; completed and failed rows of that type stay as job history
+- **THEN** it deletes, once per version, the `garmin_rating_backfill_state` key and the `rating_history` cursor, and nothing else; stored jobs of the retired `rating_backfill` type stay as job history and the queue settles a leftover one
 
 Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain. Each backfill chain keeps its own cursor (`historical` for activities, `wellness_history` for the Garmin wellness walk, `stream_history` for the FIT stream walk of Garmin and Wahoo).
 
