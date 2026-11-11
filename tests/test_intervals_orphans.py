@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
+
+from support import temp_database
 
 from backend.coach.proposal_creation import (
     _approved_plan_sync_arguments,
     _plan_sync_approval_details,
 )
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
+from backend.db import row_factory
 from backend.planning import library as planning_library
 from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
 from backend.planning.push_state import attach_push_state
@@ -33,16 +31,9 @@ UNIT = {
 
 class IntervalsOrphanTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.directory.name) / "orphans.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.manager = temp_database(
+            self, "orphans.sqlite", row_factory=row_factory, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
-        self.addCleanup(self.directory.cleanup)
-        self.addCleanup(self.manager.close)
 
     def insert(self, local_id: str, payload: dict, state: str = "local") -> None:
         with self.manager.unit_of_work() as db:

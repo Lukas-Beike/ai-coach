@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 
 import snapshot_seed
 from provider_runtime_fakes import ACME_ID, acme_descriptor
+from support import temp_database
 
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.state import SyncStateRepository
 
@@ -30,22 +28,17 @@ class ConnectSpy:
 
 class SyncStateRepositoryTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
         self.backend = ConnectSpy()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "sync-state.sqlite",
-            self.backend,
+        self.database_manager = temp_database(
+            self,
+            "sync-state.sqlite",
+            backend=self.backend,
             row_factory=row_factory,
+            schema=True,
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.snapshots = SnapshotRepository()
         self.repository = self.make_repository()
-
-    def tearDown(self):
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     def make_repository(self, key_values=None):
         return SyncStateRepository(

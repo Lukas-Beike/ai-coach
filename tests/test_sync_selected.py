@@ -12,7 +12,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
@@ -51,8 +53,9 @@ class CountingResyncGate(ProviderResyncGate):
 
 class SelectedWorkoutSyncServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_path = Path(self.temp_dir.name) / "selected.sqlite3"
+        self.database_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory())) / "selected.sqlite3"
+        )
         with closing(sqlite3.connect(self.database_path)) as db:
             db.execute(
                 "CREATE TABLE workout_library "
@@ -63,9 +66,9 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
                 "(local_id TEXT PRIMARY KEY, payload TEXT, sync_state TEXT)"
             )
             db.commit()
-        self.database = DatabaseManager(
-            self.database_path,
-            sqlite3,
+        self.database = temp_database(
+            self,
+            path=self.database_path,
             row_factory=row_factory,
             persist_connections=False,
         )
@@ -74,10 +77,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         self.calendar_sync = MagicMock()
         self.repair_sync = MagicMock()
         self.lock = RecordingLock()
-
-    def tearDown(self) -> None:
-        self.database.close()
-        self.temp_dir.cleanup()
 
     def _add(
         self, kind: str, payload: dict[str, object], state: str = "local"
@@ -264,7 +263,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.library_sync.sync_entry.assert_called_once_with(local_id)
 
-
     def test_hash_and_not_found_conflicts_are_aggregated(self) -> None:
         changed = self._add("library", {"name": "current"})
         changed["expected_payload_hash"] = "0" * 64
@@ -402,7 +400,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.lock.release_calls, 0)
         self.assertEqual(gate.operation_entries, 0)
         self.assertEqual(gate.operation_exits, 0)
-
 
 
 if __name__ == "__main__":

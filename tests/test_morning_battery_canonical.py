@@ -9,17 +9,15 @@ only; no account, network or real data is used.
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.db import DatabaseManager, canonical_store, garmin_store, row_factory
+from support import temp_database
+
+from backend.db import canonical_store, garmin_store, row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.performance import morning_battery
 from backend.performance.morning_battery_service import METHOD_ID, MorningBatteryStore
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -64,14 +62,9 @@ def levels(*pairs: tuple[datetime, int]) -> list[dict[str, Any]]:
 
 class MorningBatteryCanonicalTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "morning.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "morning.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         key_values = KeyValueRepository(lambda: NOW)
         writer = GarminSnapshotWriter(key_values, lambda: ZONE)
         self.store = MorningBatteryStore(

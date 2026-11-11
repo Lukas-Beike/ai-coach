@@ -23,6 +23,8 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 
+from support import FakeManager
+
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     Environment,
@@ -115,24 +117,10 @@ def no_sensor_fit() -> bytes:
     return fit_bytes(records=0, laps=1)
 
 
-class _Manager:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        yield self.db
-        self.db.commit()
-
-    @contextmanager
-    def reader(self):
-        yield self.db
-
-
 @dataclass
 class Env:
     db: sqlite3.Connection
-    manager: _Manager
+    manager: FakeManager
     key_values: KeyValueRepository
 
 
@@ -144,7 +132,7 @@ def make_env(case: unittest.TestCase) -> Env:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     db.commit()
-    return Env(db, _Manager(db), KeyValueRepository(lambda: NOW))
+    return Env(db, FakeManager(db), KeyValueRepository(lambda: NOW))
 
 
 def seed(

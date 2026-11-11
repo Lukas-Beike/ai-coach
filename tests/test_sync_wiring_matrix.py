@@ -18,7 +18,6 @@ import ast
 import contextlib
 import logging
 import sqlite3
-import tempfile
 import threading
 import unittest
 from collections.abc import Iterator
@@ -28,9 +27,9 @@ from types import SimpleNamespace
 from typing import Any, Final, cast
 from unittest import mock
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.providers.descriptors import (
@@ -203,14 +202,9 @@ class Harness:
         garmin: bool = True,
         wahoo: bool = True,
     ) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        case.addCleanup(temporary.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary.name) / "matrix.sqlite", sqlite3, row_factory=sqlite3.Row
+        self.database = temp_database(
+            case, "matrix.sqlite", row_factory=sqlite3.Row, schema=True
         )
-        case.addCleanup(self.database.close)
-        with self.database.unit_of_work() as db:
-            initialize_schema(db)
         self.calls: list[str] = []
         self.garmin = _Connected("garmin.sync", self.calls, garmin)
         self.wahoo = _Connected("wahoo.sync", self.calls, wahoo)

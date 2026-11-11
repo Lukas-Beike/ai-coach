@@ -3,16 +3,15 @@ from __future__ import annotations
 import copy
 import json
 import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from remote_link_fixtures import create_remote_links_table
+from support import temp_database
 
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import competitions as planning_competitions
@@ -110,12 +109,7 @@ class FakePublisher:
 
 class CompetitionSyncReconcilerTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        raw_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "competitions.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        raw_manager = temp_database(self, "competitions.db", row_factory=row_factory)
         self.database_manager = CountingDatabaseManager(raw_manager)
         self.reconciler = CompetitionSyncReconciler(
             self.database_manager, lambda: IMPORT_ID
@@ -144,10 +138,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             )
         self.database_manager.unit_of_work_calls = 0
         self.key_value_repository = KeyValueRepository(lambda: NOW)
-
-    def tearDown(self):
-        self.database_manager.manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def local_competition(

@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from pathlib import Path
 from urllib.error import HTTPError
 
 from remote_link_fixtures import create_remote_links_table
+from support import temp_database
 
 from backend.config import Config
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.planning import library
 from backend.planning.planned_units import planned_unit_payload_hash
@@ -96,12 +94,7 @@ class FakeIntervalsClient:
 
 class PlannedCalendarSyncTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "planned.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "planned.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE planned_units (id TEXT, local_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
@@ -116,10 +109,6 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.factory_calls = 0
         self.config = self.config_with_key("api-key")
         self.service = self.make_service()
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def config_with_key(api_key: str) -> Config:

@@ -33,12 +33,11 @@ from provider_runtime_fakes import (
     acme_descriptor,
     acme_freshness_source,
 )
-from support import make_config
+from support import make_config, temp_database
 
 from backend.coach.authorization import request_target_enum
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
@@ -177,12 +176,12 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.clock = _Clock(NOW)
-        self.database = DatabaseManager(
-            root / "acceptance.sqlite", sqlite3, row_factory=sqlite3.Row
+        self.database = temp_database(
+            self,
+            path=root / "acceptance.sqlite",
+            row_factory=sqlite3.Row,
+            schema=True,
         )
-        self.addCleanup(self.database.close)
-        with self.database.unit_of_work() as db:
-            initialize_schema(db)
         self.config = make_config(
             garmin_tokenstore=str(root / "garmin-tokenstore-not-created")
         )

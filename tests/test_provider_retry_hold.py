@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.sync.retry_hold import ProviderRetryHold
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
@@ -17,14 +16,7 @@ TOKENS = "garmin_oauth_tokens"
 
 class ProviderRetryHoldTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.directory.name) / "hold.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "hold.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """

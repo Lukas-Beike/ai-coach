@@ -7,15 +7,14 @@ clients only, no Garmin account or token.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import unittest
 from dataclasses import replace
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 
+from support import temp_database
+
 from backend.db import garmin_store
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
@@ -220,12 +219,7 @@ class CollectorTests(unittest.TestCase):
 
 class StoredReconciliationTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary.name) / "test.sqlite3", sqlite3, row_factory=sqlite3.Row
-        )
-        self.addCleanup(self.database.close)
+        self.database = temp_database(self, "test.sqlite3", row_factory=sqlite3.Row)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.today = TODAY
         sync_state = SyncStateRepository(

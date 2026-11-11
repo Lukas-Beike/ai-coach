@@ -12,8 +12,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
+from support import temp_database
 
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.providers.descriptors import GARMIN_ID
@@ -78,18 +79,17 @@ class RecordingLogger:
 
 class FullProviderResyncServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        database_path = Path(self.temporary_directory.name) / "full-resync.sqlite3"
+        database_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory()))
+            / "full-resync.sqlite3"
+        )
         with closing(sqlite3.connect(database_path)) as db:
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
             db.commit()
-        self.database = DatabaseManager(
-            database_path,
-            sqlite3,
-            row_factory=row_factory,
-            persist_connections=False,
+        self.database = temp_database(
+            self, path=database_path, row_factory=row_factory, persist_connections=False
         )
         self.key_values = KeyValueRepository(lambda: NOW)
         self.garmin_gate = RecordingResyncGate("Garmin")
@@ -104,10 +104,6 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.competition_result = {"status": "ok", "imported": 2}
         self.garmin_result = {"status": "ok", "records": 20}
         self.service = self._service()
-
-    def tearDown(self):
-        self.database.close()
-        self.temporary_directory.cleanup()
 
     def _garmin_sync(self, **kwargs):
         self.garmin_calls.append(kwargs)
@@ -475,20 +471,17 @@ class AcmeFullResyncHandler:
 
 class RegisteredOnlyProviderResyncTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
         database_path = (
-            Path(self.temporary_directory.name) / "registered-resync.sqlite3"
+            Path(self.enterContext(tempfile.TemporaryDirectory()))
+            / "registered-resync.sqlite3"
         )
         with closing(sqlite3.connect(database_path)) as db:
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
             db.commit()
-        self.database = DatabaseManager(
-            database_path,
-            sqlite3,
-            row_factory=row_factory,
-            persist_connections=False,
+        self.database = temp_database(
+            self, path=database_path, row_factory=row_factory, persist_connections=False
         )
         self.key_values = KeyValueRepository(lambda: NOW)
         self.observer = RecordingObserver()
@@ -497,10 +490,6 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
         self.handler = AcmeFullResyncHandler(
             read_status=lambda: self._stored(ACME_KEYS[1])
         )
-
-    def tearDown(self):
-        self.database.close()
-        self.temporary_directory.cleanup()
 
     def _stored(self, key):
         with self.database.reader() as db:

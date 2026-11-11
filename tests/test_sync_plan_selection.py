@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 import uuid
-from pathlib import Path
 from unittest.mock import Mock
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.sync.plan_selection import StructuredPlanSyncService
@@ -21,12 +20,7 @@ UNIT_B = "00000000-0000-0000-0000-000000000002"
 
 class StructuredPlanSyncServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "plan-selection.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "plan-selection.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
@@ -46,10 +40,6 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.service = StructuredPlanSyncService(
             self.manager, self.authority, self.queue, 366
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     def add_entry(self, local_id: str, payload: dict[str, object]) -> dict[str, str]:
         raw = json.dumps(payload, sort_keys=True)

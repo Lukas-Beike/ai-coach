@@ -62,7 +62,8 @@ def temp_database(
     """Build a DatabaseManager on temporary storage, closed at test cleanup."""
     if path is None:
         path = Path(test.enterContext(tempfile.TemporaryDirectory())) / name
-    options.setdefault("row_factory", backend.Row)
+    if "row_factory" not in options:
+        options["row_factory"] = backend.Row
     manager = DatabaseManager(path, backend, **options)
     test.addCleanup(manager.close)
     if schema:

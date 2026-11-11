@@ -9,10 +9,11 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
+
+from support import FakeManager
 
 from backend.config import load_config
 from backend.db.manager import DatabaseManager
@@ -48,28 +49,6 @@ REFRESHED_BLOB = (
 
 class GarminConnectAuthenticationError(Exception):
     """Name-matched stand-in for the SDK authentication error."""
-
-
-class FakeManager:
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        self._connection = connection
-
-    @contextmanager
-    def reader(self) -> Iterator[sqlite3.Connection]:
-        yield self._connection
-
-    @contextmanager
-    def read_snapshot(self) -> Iterator[sqlite3.Connection]:
-        yield self._connection
-
-    @contextmanager
-    def unit_of_work(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self._connection
-            self._connection.commit()
-        except BaseException:
-            self._connection.rollback()
-            raise
 
 
 class FakeSdkTokens:

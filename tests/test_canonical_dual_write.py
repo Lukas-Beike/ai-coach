@@ -7,19 +7,17 @@ replaced by small fakes. No provider account, network or real data directory is 
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from support import temp_database
+
 from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.state import SyncStateRepository
@@ -104,22 +102,13 @@ def provider_payload_text(manager: DatabaseManager) -> str:
 
 class DualWriteFixture(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.database_path = Path(self.temporary.name) / "dual.db"
-        self.manager = DatabaseManager(
-            self.database_path, sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "dual.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.close_manager)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.sync_state = SyncStateRepository(
             self.manager, self.key_values, SnapshotRepository(), lambda: NOW
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
-
-    def close_manager(self) -> None:
-        self.manager.close()
 
     def count(self, table: str) -> int:
         with self.manager.reader() as db:
@@ -128,8 +117,6 @@ class DualWriteFixture(unittest.TestCase):
     def value(self, key: str) -> str | None:
         with self.manager.reader() as db:
             return self.key_values.get(db, key)
-
-
 
 
 class GarminDualWriteTests(DualWriteFixture):

@@ -1,8 +1,6 @@
 """Synthetic Garmin export and real SQLite coordination checks."""
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import datetime
@@ -10,10 +8,11 @@ from pathlib import Path
 from time import monotonic
 from unittest.mock import Mock, patch
 
+from support import temp_database
+
 from backend.athlete.profile import ProfileService
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, ProfileRepository
-from backend.db.schema import initialize_schema
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
 from backend.sync.garmin_service import shared_garmin_sync_lock
@@ -21,12 +20,7 @@ from backend.sync.garmin_service import shared_garmin_sync_lock
 
 class BodyExportTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.db = DatabaseManager(
-            Path(self.tmp.name) / "test.db", sqlite3, row_factory=row_factory
-        )
-        with self.db.unit_of_work() as db:
-            initialize_schema(db)
+        self.db = temp_database(self, row_factory=row_factory, schema=True)
         self.kv = KeyValueRepository(lambda: "2026-10-29T00:00:00Z")
         self.profile = ProfileService(
             self.db,
@@ -58,10 +52,6 @@ class BodyExportTests(unittest.TestCase):
         self.exporter = GarminProfileBodyExport(
             self.profile, self.reader, self.fixture, self.tokens
         )
-
-    def tearDown(self):
-        self.db.close()
-        self.tmp.cleanup()
 
     def test_results_and_token_writeback(self):
         self.assertEqual(self.exporter.export(self.saved, self.revision), "success")

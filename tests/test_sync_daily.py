@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor
+from support import temp_database
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -153,10 +154,9 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
         self.service.mark("garmin", self.local_time)
         self.manager.close()
 
-        reopened_manager = DatabaseManager(
-            self.database_path, sqlite3, row_factory=sqlite3.Row
+        reopened_manager = temp_database(
+            self, path=self.database_path, row_factory=sqlite3.Row
         )
-        self.addCleanup(reopened_manager.close)
         reopened_service = DailySyncMarkerService(
             reopened_manager,
             KeyValueRepository(lambda: "2026-01-01T00:00:00+00:00"),

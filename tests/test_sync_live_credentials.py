@@ -9,7 +9,6 @@ persistence collaborators are doubles. Temporary SQLite storage, no network.
 
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 import threading
 import unittest
@@ -19,9 +18,11 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
+from support import temp_database
+
 from backend import errors
 from backend.config import Config, load_config
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -77,19 +78,16 @@ class LiveCredentialHarness:
     """A worker executor built before the first credential is saved."""
 
     def __init__(self, case: unittest.TestCase) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        case.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
+        root = Path(case.enterContext(tempfile.TemporaryDirectory()))
         env_config = load_config(
             root,
             root / "data",
             {"APP_PASSWORD": "synthetic-password-123", "INTERVALS_ATHLETE_ID": "i42"},
         )
         self.config: Config = env_config
-        self.database = DatabaseManager(
-            root / "live.sqlite", sqlite3, row_factory=row_factory
+        self.database = temp_database(
+            case, path=root / "live.sqlite", row_factory=row_factory
         )
-        case.addCleanup(self.database.close)
         with self.database.unit_of_work() as db:
             initialize_schema(db)
             db.execute(

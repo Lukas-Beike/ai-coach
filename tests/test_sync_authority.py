@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from remote_link_fixtures import create_remote_links_table
+from support import temp_database
 
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.planning.revision import PlanningRevisionService
 from backend.sync.authority import PlanningAuthorityService, competition_push_manifest
@@ -28,11 +27,8 @@ class TestRedactor:
 
 class PlanningAuthorityServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "authority.db",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "authority.db", row_factory=row_factory
         )
         self.planning_revision_service = PlanningRevisionService(
             PlanningStateRepository(), lambda: NOW
@@ -79,10 +75,6 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 "intervals_event_id TEXT, external_id TEXT, created_at TEXT NOT NULL)"
             )
             create_remote_links_table(db)
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def _payload(payload: object) -> str:

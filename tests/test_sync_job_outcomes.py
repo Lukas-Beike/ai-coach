@@ -1,12 +1,11 @@
 import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.sync import job_outcomes
@@ -18,14 +17,7 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
     def setUp(self):
         job_outcomes._CONTENDED_SINCE.clear()
         self.addCleanup(job_outcomes._CONTENDED_SINCE.clear)
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "sync-jobs.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "sync-jobs.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """
