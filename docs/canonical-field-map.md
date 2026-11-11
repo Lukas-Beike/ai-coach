@@ -1560,7 +1560,7 @@ Only `stream_zones.py` builds a canonical detail record outside the provider map
 
 `session_zones.py` emits no detail record. It resolves the `ZoneSettings` (thresholds at the session's local day, `DatedThresholds`: local, then Garmin, then Wahoo; indoor and virtual rides take the indoor FTP; limits from the effective zone configuration) that `stream_zones.py` counts with. Intervals.icu thresholds and configurations are never read.
 
-`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 6 (v3: grade-adjusted Pa:HR of outdoor runs, #1770; v4: heart rate and power source, optical heart rate warning, #1869; v5: running form drift of long runs, #1870; v6: calendar profile thresholds as the zone times', #1892); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
+`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 7 (v3: grade-adjusted Pa:HR of outdoor runs, #1770; v4: heart rate and power source, optical heart rate warning, #1869; v5: running form drift of long runs, #1870; v6: calendar profile thresholds as the zone times', #1892; v7: samples use the adaptive gap rule of the zone times, #1950); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
 
 ### Canonical fields not produced by this scope
 
@@ -2225,7 +2225,7 @@ Plan header references (`WahooPlanReferences.header`): a key is written only whe
 
 A relative target whose reference is missing or zero is rejected (`_require`), never exported against a guessed value.
 
-Step to interval (`_interval`, `_target`). The step dict from `structured_steps` carries `kind` (`power`, `hr`, `pace`), `target` (upper-cased text), `ramp` (bool) and either `duration` (seconds) or `distance` (metres; km, mi, yd converted by the parser):
+Step to interval (`_interval`, `_target`). The step dict from `structured_steps` carries `kind` (`power`, `hr`, `pace`), `target` (upper-cased text), `ramp` (bool) and either `duration` (seconds) or `distance` (metres; km, mi, yd converted by the parser, `mtr` taken as is):
 
 | Plan JSON key | Step key / target text | Unit / conversion | Notes |
 |---|---|---|---|

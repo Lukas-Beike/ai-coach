@@ -141,8 +141,8 @@ uses only the fourth. The value records which branch gave it
      constants apply and the value is marked `sex_assumed`.
    - `HRr = (HR − HR_rest) / (HR_max − HR_rest)`.
    - `TRIMP_session` (v5) sums over the session's heart-rate distribution,
-     the seconds `t_b` at each whole bpm `b` (moving samples only, gaps over
-     5 s left out, readings of 30-240 bpm; stored by the session analysis):
+     the seconds `t_b` at each whole bpm `b` (moving samples only, steps above
+     `max(30 s, 3 × median step)` left out, readings of 30-240 bpm; stored by the session analysis):
      `TRIMP_session = Σ_b (t_b / 60) × HRr_b × a × e^(b × HRr_b) × D / C`,
      with `HRr_b = (b − HR_rest) / (HR_max − HR_rest)` clamped to 0-1,
      `C = Σ t_b` the covered seconds and `D` the TSS duration. The scale
