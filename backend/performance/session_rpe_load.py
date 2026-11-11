@@ -191,10 +191,13 @@ def session_load(
 def period_load(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[str, Any]:
     known = [value for _entry, value in loads if value is not None]
     sources = {SOURCE_ATHLETE: 0, SOURCE_PROVIDER: 0}
+    provider_labels: set[str] = set()
     deviating = 0
     for entry, value in loads:
         if value is not None:
             sources[entry["rpe_source"]] += 1
+            if entry["rpe_source"] == SOURCE_PROVIDER:
+                provider_labels.add(entry["rpe_source_label"])
             deviating += entry.get("duration_flag") == DURATION_FLAG_DEVIATING
     return {
         "value": round(math.fsum(known), 1) if known else None,
@@ -202,6 +205,8 @@ def period_load(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[st
         "total_sessions": len(loads),
         "rpe_sources": sources,
         "deviating_duration_sessions": deviating,
+        # Only when a provider rated, to keep the Coach reports small.
+        **({"rpe_provider_labels": sorted(provider_labels)} if provider_labels else {}),
     }
 
 

@@ -927,7 +927,7 @@ function renderAnalysisHistory(history) { // NOSONAR
 
 function sessionRpeSourceLabel(days, rated) {
   const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
-  const providerLabel = coachProviderLabel(providerIds().intervals);
+  const providerLabel = [...new Set(days.flatMap((day) => day.rpe_provider_labels || []))].sort((a, b) => a.localeCompare(b)).join(" + ") || "Anbieter";
   if (!rated) return "Athletenfeedback";
   if (provider === rated) return providerLabel;
   return provider ? `Athletenfeedback + ${providerLabel}` : "Athletenfeedback";
@@ -954,7 +954,8 @@ function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start
   const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
   if (!days.some((day) => day.short != null || day.long != null)) { loadMissing.push("Kurz-/Langzeitbelastung"); return; }
   const weekly = analysisHistoryPeriod === "twelveWeeks";
-  const rpeDays = (rpeReport?.days || []).filter((day) => day.date >= start && day.date <= end);
+  // The curves carry load from before the window, so their label reads every reported day.
+  const rpeDays = (rpeReport?.days || []).filter((day) => day.date <= end);
   const source = sessionRpeSourceLabel(rpeDays, rpeDays.reduce((sum, day) => sum + day.rated_sessions, 0));
   const series = [["short", "Kurzzeitbelastung", 2], ["long", "Langzeitbelastung", 5]].map(([key, label, color]) => {
     const points = days.map((day) => ({ date: day.date, value: day[key] }));
