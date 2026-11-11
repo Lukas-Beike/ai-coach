@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.cancellation import CoachCancellationService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class ChatCancelPostRoutes:
@@ -17,13 +18,20 @@ class ChatCancelPostRoutes:
     ) -> None:
         self._coach_cancellation_service = coach_cancellation_service
 
-    def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
-        if path != "/api/chat/cancel":
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "POST",
+                "/api/chat/cancel",
+                Access.SESSION_CSRF,
+                self._cancel,
+                gated=False,
+            )
+        ]
 
+    def _cancel(self, handler: Any, request: RouteRequest) -> None:
         payload = handler.read_json()
         result = self._coach_cancellation_service().cancel(
-            session["csrf_hash"], payload.get("operation_id")
+            request.session["csrf_hash"], payload.get("operation_id")
         )
         handler.send_json(200, result)
-        return True

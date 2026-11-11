@@ -15,6 +15,7 @@ from unittest import mock
 from unittest.mock import Mock, patch
 
 from canonical_detail_support import add_session_record, open_manager
+from support import dispatch_route
 
 from backend.activities import route_store, routes
 from backend.canonical.activity_detail import ActivityStreamSet
@@ -639,16 +640,20 @@ class RenameTests(StageCase):
             read_json=Mock(return_value={"route_id": "r1", "name": "A", "x": 1}),
             send_json=Mock(),
         )
-        self.assertTrue(post.handle(handler, "/api/routes/rename"))
+        self.assertTrue(
+            dispatch_route(post, handler, "/api/routes/rename", method="POST")
+        )
         service.rename.assert_called_once_with("r1", "A")
         handler.send_json.assert_called_once_with(200, {"status": "ok"})
         other = SimpleNamespace(read_json=Mock(), send_json=Mock())
-        self.assertFalse(post.handle(other, "/api/other"))
+        self.assertFalse(dispatch_route(post, other, "/api/other", method="POST"))
         other.read_json.assert_not_called()
         with self.assertRaises(AppError):
-            post.handle(
+            dispatch_route(
+                post,
                 SimpleNamespace(read_json=Mock(return_value=[]), send_json=Mock()),
                 "/api/routes/rename",
+                method="POST",
             )
 
 

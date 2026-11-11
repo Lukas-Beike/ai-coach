@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.athlete.profile import ProfileService
 from backend.coach.profile_update import CoachProfileUpdateService
@@ -170,7 +170,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
 
                 def request(handler=handler, path=path, errors=errors):
                     try:
-                        routes.handle(handler, path)
+                        dispatch_route(routes, handler, path, method="PUT")
                     except Exception as exc:  # noqa: BLE001 - report thread failures
                         errors.append(exc)
 

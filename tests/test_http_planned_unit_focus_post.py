@@ -7,6 +7,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 
@@ -27,7 +29,12 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
             {"session_focus": "legs", "strength_intensity": "heavy", "name": "x"}
         )
         self.assertTrue(
-            self.routes.handle(handler, f"/api/planned-units/{LOCAL_ID}/focus")
+            dispatch_route(
+                self.routes,
+                handler,
+                f"/api/planned-units/{LOCAL_ID}/focus",
+                method="POST",
+            )
         )
         self.service.update.assert_called_once_with(
             LOCAL_ID, {"session_focus": "legs", "strength_intensity": "heavy"}
@@ -36,17 +43,26 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
 
     def test_empty_values_clear_the_focus(self) -> None:
         handler = self.handler({"session_focus": ""})
-        self.routes.handle(handler, f"/api/planned-units/{LOCAL_ID}/focus")
+        dispatch_route(
+            self.routes, handler, f"/api/planned-units/{LOCAL_ID}/focus", method="POST"
+        )
         self.service.update.assert_called_once_with(
             LOCAL_ID, {"session_focus": "", "strength_intensity": None}
         )
 
     def test_other_paths_and_bad_bodies(self) -> None:
         other = self.handler({})
-        self.assertFalse(self.routes.handle(other, "/api/other"))
+        self.assertFalse(
+            dispatch_route(self.routes, other, "/api/other", method="POST")
+        )
         other.read_json.assert_not_called()
         with self.assertRaises(AppError):
-            self.routes.handle(self.handler([]), f"/api/planned-units/{LOCAL_ID}/focus")
+            dispatch_route(
+                self.routes,
+                self.handler([]),
+                f"/api/planned-units/{LOCAL_ID}/focus",
+                method="POST",
+            )
         self.service.update.assert_not_called()
 
     def test_garmin_exercise_route_passes_the_pick_to_the_service(self) -> None:
@@ -60,8 +76,11 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
             }
         )
         self.assertTrue(
-            self.routes.handle(
-                handler, f"/api/planned-units/{LOCAL_ID}/garmin-exercise"
+            dispatch_route(
+                self.routes,
+                handler,
+                f"/api/planned-units/{LOCAL_ID}/garmin-exercise",
+                method="POST",
             )
         )
         self.service.assign_garmin_exercise.assert_called_once_with(
@@ -69,8 +88,11 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
         )
         handler.send_json.assert_called_once_with(200, {"status": "local"})
         with self.assertRaises(AppError):
-            self.routes.handle(
-                self.handler([]), f"/api/planned-units/{LOCAL_ID}/garmin-exercise"
+            dispatch_route(
+                self.routes,
+                self.handler([]),
+                f"/api/planned-units/{LOCAL_ID}/garmin-exercise",
+                method="POST",
             )
 
 

@@ -8,6 +8,7 @@ import uuid
 from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
+from support import dispatch_route
 
 from backend import change_history
 from backend.coach.change_receipts import change_summary
@@ -66,7 +67,9 @@ class CoachTurnUndoTests(ServerTestCase):
     def _undo(self, turn_id: str) -> dict:
         handler = Mock()
         handler.read_json.return_value = {"client_turn_id": turn_id}
-        handled = server.HTTP_API.history_undo_post_routes.handle(handler, _ROUTE)
+        handled = dispatch_route(
+            server.HTTP_API.history_undo_post_routes, handler, _ROUTE, method="POST"
+        )
         self.assertTrue(handled)
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 200)

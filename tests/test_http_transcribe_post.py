@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError
 from backend.http_api.transcribe_post import TranscribePostRoutes
 
@@ -22,7 +24,9 @@ class TranscribePostRoutesTests(unittest.TestCase):
         )
 
     def test_success_dispatches_audio_to_transcription_client(self) -> None:
-        self.assertTrue(self.routes.handle(self.handler, "/api/transcribe"))
+        self.assertTrue(
+            dispatch_route(self.routes, self.handler, "/api/transcribe", method="POST")
+        )
 
         self.handler.read_audio_body.assert_called_once_with()
         self.client.transcribe.assert_called_once_with(
@@ -34,7 +38,9 @@ class TranscribePostRoutesTests(unittest.TestCase):
         )
 
     def test_unknown_path_does_not_read_audio_or_create_client(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/other"))
+        self.assertFalse(
+            dispatch_route(self.routes, self.handler, "/api/other", method="POST")
+        )
 
         self.handler.read_audio_body.assert_not_called()
         self.client.transcribe.assert_not_called()
@@ -45,7 +51,7 @@ class TranscribePostRoutesTests(unittest.TestCase):
         self.client.transcribe.side_effect = error
 
         with self.assertRaises(AppError) as raised:
-            self.routes.handle(self.handler, "/api/transcribe")
+            dispatch_route(self.routes, self.handler, "/api/transcribe", method="POST")
 
         self.assertIs(raised.exception, error)
         self.handler.send_json.assert_not_called()
@@ -55,7 +61,7 @@ class TranscribePostRoutesTests(unittest.TestCase):
         self.handler.read_audio_body.side_effect = error
 
         with self.assertRaises(AppError) as raised:
-            self.routes.handle(self.handler, "/api/transcribe")
+            dispatch_route(self.routes, self.handler, "/api/transcribe", method="POST")
 
         self.assertIs(raised.exception, error)
         self.client.transcribe.assert_not_called()

@@ -682,7 +682,7 @@ class TrainingReportTests(unittest.TestCase):
                 self.assertFalse(dispatch_route(route, handler, path))
         for path in ("/api/analysis/reports", "/api/analysis/scenarios"):
             with self.subTest(path=path):
-                self.assertFalse(route.handle_post(handler, path))
+                self.assertFalse(dispatch_route(route, handler, path, method="POST"))
         reports.assert_not_called()
         handler.send_json.assert_not_called()
 
@@ -693,7 +693,9 @@ class TrainingReportTests(unittest.TestCase):
         handler.read_json.return_value = {"area": "recovery"}
         route = AnalysisRoutes(Mock(), lambda: refresh)
 
-        self.assertTrue(route.handle_post(handler, "/api/analysis/refresh"))
+        self.assertTrue(
+            dispatch_route(route, handler, "/api/analysis/refresh", method="POST")
+        )
 
         refresh.refresh.assert_called_once_with("recovery", days=None)
         handler.send_json.assert_called_once_with(200, refresh.refresh.return_value)
@@ -706,6 +708,6 @@ class TrainingReportTests(unittest.TestCase):
         route = AnalysisRoutes(Mock(), Mock())
 
         with self.assertRaises(AppError) as raised:
-            route.handle_post(handler, "/api/analysis/refresh")
+            dispatch_route(route, handler, "/api/analysis/refresh", method="POST")
 
         self.assertEqual(400, raised.exception.status)

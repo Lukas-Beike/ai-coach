@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.feedback_post import FeedbackPostRoutes
 
 
@@ -15,8 +17,10 @@ class FeedbackPostRoutesTests(unittest.TestCase):
         handler = SimpleNamespace(read_json=Mock(), send_json=Mock())
         routes = FeedbackPostRoutes()
 
-        self.assertFalse(routes.handle(handler, "/api/feedback"))
-        self.assertFalse(routes.handle(handler, "/api/other"))
+        self.assertFalse(
+            dispatch_route(routes, handler, "/api/feedback", method="POST")
+        )
+        self.assertFalse(dispatch_route(routes, handler, "/api/other", method="POST"))
         handler.read_json.assert_not_called()
         handler.send_json.assert_not_called()
 
@@ -33,7 +37,11 @@ class ActivityFeedbackPostRouteTests(unittest.TestCase):
         )
         route = FeedbackPostRoutes(lambda: service)
 
-        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        self.assertTrue(
+            dispatch_route(
+                route, handler, "/api/activities/ride-1/feedback", method="POST"
+            )
+        )
         service.save_coach.assert_called_once_with("ride-1", {"session_rpe": 6})
         handler.send_json.assert_called_once_with(
             200, {"status": "ok", "activity_feedback": {"session_rpe": 6}}
@@ -48,7 +56,11 @@ class ActivityFeedbackPostRouteTests(unittest.TestCase):
         )
         route = FeedbackPostRoutes(lambda: service, load)
 
-        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        self.assertTrue(
+            dispatch_route(
+                route, handler, "/api/activities/ride-1/feedback", method="POST"
+            )
+        )
         load.assert_called_once_with("ride-1")
         handler.send_json.assert_called_once_with(
             200, {"status": "ok", "session_rpe_load": {"value": 300}}
@@ -64,7 +76,11 @@ class ActivityFeedbackPostRouteTests(unittest.TestCase):
             lambda: service, Mock(side_effect=OSError("synthetic"))
         )
 
-        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        self.assertTrue(
+            dispatch_route(
+                route, handler, "/api/activities/ride-1/feedback", method="POST"
+            )
+        )
         handler.send_json.assert_called_once_with(200, {"status": "ok"})
 
 
@@ -75,7 +91,11 @@ class ActivityPurposePostRouteTests(unittest.TestCase):
             read_json=Mock(return_value=payload), send_json=Mock()
         )
         route = FeedbackPostRoutes(lambda: service)
-        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        self.assertTrue(
+            dispatch_route(
+                route, handler, "/api/activities/ride-1/feedback", method="POST"
+            )
+        )
         return service
 
     def test_marking_a_purpose_needs_a_live_session(self) -> None:

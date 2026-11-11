@@ -8,6 +8,8 @@ import unittest
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
+from support import dispatch_route
+
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
@@ -167,7 +169,7 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         handler = Mock()
         handler.read_json.return_value = body
         with self.assertRaises(AppError) as raised:
-            self.route.handle(handler, path)
+            dispatch_route(self.route, handler, path, method="POST")
         self.assertEqual(
             public_error_contract(raised.exception), (409, "not_configured")
         )

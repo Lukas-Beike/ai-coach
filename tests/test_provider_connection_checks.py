@@ -389,13 +389,19 @@ class RouteTests(unittest.TestCase):
         checks.check.return_value = {"status": "success", "checked_at": "t"}
         routes = ProviderConnectionPostRoutes(lambda: checks)
         handler = Mock()
-        self.assertTrue(routes.handle(handler, "/api/providers/openai/check"))
+        self.assertTrue(
+            dispatch_route(
+                routes, handler, "/api/providers/openai/check", method="POST"
+            )
+        )
         checks.check.assert_called_once_with("openai")
         handler.read_json.reset_mock()
         with self.assertRaises(AppError):
-            routes.handle(handler, "/api/providers/nope/check")
+            dispatch_route(routes, handler, "/api/providers/nope/check", method="POST")
         handler.read_json.assert_called_once_with()
-        self.assertFalse(routes.handle(handler, "/api/nutrition/yazio/check"))
+        self.assertFalse(
+            dispatch_route(routes, handler, "/api/nutrition/yazio/check", method="POST")
+        )
 
 
 class RotationAndDeadlineTests(unittest.TestCase):

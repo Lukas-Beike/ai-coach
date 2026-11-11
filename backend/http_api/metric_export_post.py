@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.sync.metric_export import MetricExportService
 
 
@@ -14,10 +15,17 @@ class MetricExportPostRoutes:
     def __init__(self, metric_export: Callable[[], MetricExportService]) -> None:
         self._metric_export = metric_export
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path == "/api/metric-export/automatic":
-            handler.send_json(
-                200, self._metric_export().configure_automatic(handler.read_json())
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "POST",
+                "/api/metric-export/automatic",
+                Access.SESSION_CSRF,
+                self._automatic,
             )
-            return True
-        return False
+        ]
+
+    def _automatic(self, handler: Any, _request: RouteRequest) -> None:
+        handler.send_json(
+            200, self._metric_export().configure_automatic(handler.read_json())
+        )

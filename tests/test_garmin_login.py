@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
-from support import FakeManager
+from support import FakeManager, dispatch_route
 
 from backend.config import load_config
 from backend.db.manager import DatabaseManager
@@ -481,12 +481,16 @@ class GarminLoginTests(unittest.TestCase):
                 sent.append((status, payload))
 
         self.next_client = FakeClient()
-        self.assertTrue(routes.handle(Handler(), LOGIN_PATH))
+        self.assertTrue(dispatch_route(routes, Handler(), LOGIN_PATH, method="POST"))
         self.assertEqual(sent[-1][0], 200)
         self.assertNotIn(PASSWORD, repr(sent[-1][1]))
-        self.assertTrue(routes.handle(Handler(), DISCONNECT_PATH))
+        self.assertTrue(
+            dispatch_route(routes, Handler(), DISCONNECT_PATH, method="POST")
+        )
         self.assertEqual(sent[-1][1]["status"], "disconnected")
-        self.assertFalse(routes.handle(Handler(), "/api/garmin/other"))
+        self.assertFalse(
+            dispatch_route(routes, Handler(), "/api/garmin/other", method="POST")
+        )
 
 
 if __name__ == "__main__":

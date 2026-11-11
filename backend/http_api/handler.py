@@ -67,8 +67,6 @@ class HttpRequestHandlerDependencies:
     logger: Any
     session_auth_service: Callable[[], Any]
     route_table: RouteTable
-    route_dispatcher: Any
-    post_dispatcher: Any
     response_transport: Any
     maintenance_gate: Any
     redact_text: Callable[[str], str]
@@ -236,6 +234,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             self.send_json(500, {"error": self.dependencies.internal_server_error})
 
+    def _request(
+        self, path: str, params: dict[str, str], session: dict[str, Any]
+    ) -> RouteRequest:
+        return RouteRequest(path, params, parse_qs(urlparse(self.path).query), session)
+
     def _get(self, path: str) -> None:
         found = self.dependencies.route_table.match("GET", path)
         if found is None:
@@ -247,17 +250,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         session: dict[str, Any] = {}
         if route.access is not Access.PUBLIC:
             session = self.auth_service.require_auth(self)
-        query = parse_qs(urlparse(self.path).query)
-        route.handle(self, RouteRequest(path, params, query, session))
+        route.handle(self, self._request(path, params, session))
 
     def _post(self, path: str) -> None:
-        if self.dependencies.post_dispatcher.handle_before_auth(self, path):
+        route, params = self.dependencies.route_table.match("POST", path) or (None, {})
+        if route is not None and route.access is Access.PUBLIC:
+            route.handle(self, self._request(path, params, {}))
             return
+        # An unknown path gets the same checks as a registered one before its 404.
         session = self.auth_service.require_auth(self)
         self.auth_service.require_csrf(self, session)
-        if self.dependencies.post_dispatcher.handle_before_maintenance(
-            self, path, session
-        ):
+        if route is not None and not route.gated:
+            route.handle(self, self._request(path, params, session))
             return
         with self.dependencies.maintenance_gate.operation():
             # A restore may complete between the first check and entering
@@ -268,14 +272,20 @@ class RequestHandler(BaseHTTPRequestHandler):
             if not current:
                 raise AppError(401, "Anmeldung erforderlich.")
             self.auth_service.require_csrf(self, current)
-            self.dependencies.post_dispatcher.handle_authenticated(self, path, current)
+            if route is None:
+                raise AppError(404, NOT_FOUND_ERROR)
+            route.handle(self, self._request(path, params, current))
 
     def _put(self, path: str) -> None:
         # The maintenance gate answers before authentication.
         with self.dependencies.maintenance_gate.operation():
             session = self.auth_service.require_auth(self)
             self.auth_service.require_csrf(self, session)
-            self.dependencies.route_dispatcher.handle_put(self, path)
+            found = self.dependencies.route_table.match("PUT", path)
+            if found is None:
+                raise AppError(404, NOT_FOUND_ERROR)
+            route, params = found
+            route.handle(self, self._request(path, params, session))
 
     def send_sse_headers(self, *, persistent: bool = True) -> None:
         self.dependencies.response_transport.send_sse_headers(

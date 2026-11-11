@@ -63,16 +63,19 @@ class WahooPostRoutes:
     def __init__(self, wahoo_service: Callable[[], WahooConnectionService]) -> None:
         self._wahoo_service = wahoo_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {CONNECT_PATH, DISCONNECT_PATH}:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("POST", path, Access.SESSION_CSRF, self._command)
+            for path in (CONNECT_PATH, DISCONNECT_PATH)
+        ]
+
+    def _command(self, handler: Any, request: RouteRequest) -> None:
         # Drain and validate the (empty) JSON command body like other commands.
         handler.read_json()
         service = self._wahoo_service()
         result = (
             service.start_authorization()
-            if path == CONNECT_PATH
+            if request.path == CONNECT_PATH
             else service.disconnect()
         )
         handler.send_json(200, result)
-        return True

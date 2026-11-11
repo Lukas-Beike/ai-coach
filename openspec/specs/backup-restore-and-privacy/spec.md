@@ -158,7 +158,7 @@ The restore endpoint SHALL require authentication and CSRF, delete sessions from
 - **WHEN** another maintenance restore already owns the gate
 - **THEN** the staged file is cleaned up without promoting it
 
-Evidence: `backend/http_api/privacy_restore_post.py::PrivacyRestorePostRoutes.handle`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService._replace`. Tests: `tests/test_http_privacy_restore_post.py::test_success_authenticates_reads_body_restores_and_clears_cookies`; `tests/test_database_restore_validation.py::test_validate_commits_session_scrubbing_after_schema_integrity_and_fk_checks`; `tests/test_database_restore_service.py::test_two_restores_keep_distinct_recovery_copies`.
+Evidence: `backend/http_api/privacy_restore_post.py::PrivacyRestorePostRoutes.routes`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService._replace`. Tests: `tests/test_http_privacy_restore_post.py::test_success_authenticates_reads_body_restores_and_clears_cookies`; `tests/test_database_restore_validation.py::test_validate_commits_session_scrubbing_after_schema_integrity_and_fk_checks`; `tests/test_database_restore_service.py::test_two_restores_keep_distinct_recovery_copies`.
 
 ### Requirement: Truthful post-restore recovery
 

@@ -8,6 +8,8 @@ from time import monotonic
 from typing import Any
 
 from backend.athlete.profile import ProfileService
+from backend.errors import NOT_FOUND_ERROR, AppError
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class AthletePutRoutes:
@@ -25,14 +27,18 @@ class AthletePutRoutes:
         self._zone_service = zone_service
         self._body_export = body_export
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path in {"/api/zones", "/api/zones/remove"}:
-            return self._handle_zones(handler, path)
-        if path == "/api/profile":
-            return self._handle_profile(handler)
-        return False
+    def routes(self) -> list[Route]:
+        routes = [
+            Route("PUT", "/api/profile", Access.SESSION_CSRF, self._handle_profile)
+        ]
+        if self._zone_service is not None:
+            routes += [
+                Route("PUT", path, Access.SESSION_CSRF, self._handle_zones)
+                for path in ("/api/zones", "/api/zones/remove")
+            ]
+        return routes
 
-    def _handle_profile(self, handler: Any) -> bool:
+    def _handle_profile(self, handler: Any, _request: RouteRequest) -> None:
         deadline = monotonic() + 10.0
         payload = handler.read_json()
         profile = self._profile_service()
@@ -58,7 +64,6 @@ class AthletePutRoutes:
             result, before, retry_export, revision, deadline
         )
         handler.send_json(200, result)
-        return True
 
     def _export_body_if_needed(
         self,
@@ -83,17 +88,16 @@ class AthletePutRoutes:
             status = "uncertain"
         return {**result, "garmin_body_export": status}
 
-    def _handle_zones(self, handler: Any, path: str) -> bool:
+    def _handle_zones(self, handler: Any, request: RouteRequest) -> None:
         """Save one local zone configuration or remove one after confirmation."""
         if self._zone_service is None:
-            return False
+            raise AppError(404, NOT_FOUND_ERROR)
         payload = handler.read_json()
         with self._database_lock or nullcontext():
             service = self._zone_service()
             result = (
                 service.save(payload)
-                if path == "/api/zones"
+                if request.path == "/api/zones"
                 else service.remove(payload)
             )
         handler.send_json(200, result)
-        return True

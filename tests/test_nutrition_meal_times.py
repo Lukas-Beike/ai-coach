@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.config import Config
 from backend.errors import AppError
@@ -227,7 +227,9 @@ class NutritionMealTimeTests(unittest.TestCase):
             meal_library_service=lambda: Mock(),
         )
 
-        self.assertTrue(routes.handle(handler, "/api/nutrition/entry"))
+        self.assertTrue(
+            dispatch_route(routes, handler, "/api/nutrition/entry", method="POST")
+        )
 
         status, body = handler.send_json.call_args.args
         self.assertEqual(status, 200)
@@ -236,7 +238,11 @@ class NutritionMealTimeTests(unittest.TestCase):
         self.assertTrue(body["change"]["id"] and body["change"]["after_hash"])
 
         handler.read_json.return_value = {"id": body["entry"]["id"]}
-        self.assertTrue(routes.handle(handler, "/api/nutrition/entry/delete"))
+        self.assertTrue(
+            dispatch_route(
+                routes, handler, "/api/nutrition/entry/delete", method="POST"
+            )
+        )
         status, deleted = handler.send_json.call_args.args
         self.assertEqual(deleted["change"]["action"], "delete")
 

@@ -43,28 +43,27 @@ REGISTERED_ELSEWHERE = {
         NUTRITION,
         'f"{NUTRITION_PRODUCTS_PATH}/database/delete"',
     ),
-    # Matched by a prefix and suffix around the provider segment.
     "/api/providers/{id}/check": (
         "provider_connections.py",
-        'CHECK_PREFIX = "/api/providers/"',
+        '"/api/providers/{provider}/check"',
     ),
-    # Matched by regular expressions or route-table patterns over the id segment.
+    # Route-table patterns over the id segment.
     "/api/activities/{id}": ("sync_get.py", '"/api/activities/{id}"'),
     "/api/activities/{id}/feedback": (
         "feedback_post.py",
-        '"/api/activities/([^/]+)/feedback"',
+        '"/api/activities/{id}/feedback"',
     ),
     "/api/activities/{id}/session": (
         "feedback_post.py",
-        '"/api/activities/([^/]+)/session"',
+        '"/api/activities/{id}/session"',
     ),
     "/api/planned-units/{id}/garmin-exercise": (
         "planned_unit_focus_post.py",
-        '"/api/planned-units/([^/]+)/garmin-exercise"',
+        '"/api/planned-units/{id}/garmin-exercise"',
     ),
     "/api/planned-units/{id}/focus": (
         "planned_unit_focus_post.py",
-        '"/api/planned-units/([^/]+)/focus"',
+        '"/api/planned-units/{id}/focus"',
     ),
     "/api/sync/jobs/{id}": ("sync_get.py", '"/api/sync/jobs/{id:[0-9a-f-]+}"'),
 }

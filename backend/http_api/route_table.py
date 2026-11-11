@@ -1,10 +1,11 @@
 """One HTTP route table: method, path pattern, access level and handler.
 
-The request handler checks the declared access level of a table route before
-its handler runs; a route cannot be registered without one, and a public API
-route must be listed in ``PUBLIC_API_ROUTES``. A GET path that is not in the
-table is served as a static asset when it is outside ``/api/``. GET routes use
-the table now; POST and PUT move into it in the next step of #2071.
+The request handler checks the declared access level of every route before its
+handler runs; a route cannot be registered without one, and a public API route
+must be listed in ``PUBLIC_API_ROUTES``. Anything not in the table is rejected:
+an unknown GET path outside ``/api/`` is served as a static asset, an unknown
+API GET answers 404, and an unknown POST or PUT path answers 404 only after the
+session and CSRF checks a registered route would get.
 """
 
 from __future__ import annotations
@@ -64,6 +65,9 @@ class Route:
     path: str
     access: Access
     handle: Callable[[Any, RouteRequest], None]
+    # POST only: run inside the maintenance operation gate after re-checking the
+    # session. Login, logout, restore and chat cancellation run outside it.
+    gated: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.access, Access):

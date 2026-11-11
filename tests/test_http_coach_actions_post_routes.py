@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, call
 
+from support import dispatch_route
+
 from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 
 
@@ -23,8 +25,12 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.handler.read_json.return_value = {"proposal_id": "synthetic-proposal-id"}
         self.confirmation_service.confirm.return_value = result
 
-        handled = self.routes.handle(
-            self.handler, "/api/coach/actions/confirm", self.session
+        handled = dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/confirm",
+            method="POST",
+            session=self.session,
         )
 
         self.assertTrue(handled)
@@ -44,8 +50,12 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         }
         self.execution_service.execute.return_value = result
 
-        handled = self.routes.handle(
-            self.handler, "/api/coach/actions/execute", self.session
+        handled = dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/execute",
+            method="POST",
+            session=self.session,
         )
 
         self.assertTrue(handled)
@@ -60,7 +70,13 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.handler.send_json.assert_called_once_with(200, result)
 
     def test_unknown_path_has_no_side_effects(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/coach/other", self.session)
+        handled = dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/other",
+            method="POST",
+            session=self.session,
+        )
 
         self.assertFalse(handled)
         self.handler.read_json.assert_not_called()
@@ -74,7 +90,13 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.confirmation_service.confirm.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
-            self.routes.handle(self.handler, "/api/coach/actions/confirm", self.session)
+            dispatch_route(
+                self.routes,
+                self.handler,
+                "/api/coach/actions/confirm",
+                method="POST",
+                session=self.session,
+            )
 
         self.assertIs(caught.exception, error)
         self.handler.read_json.assert_called_once_with()
@@ -91,7 +113,13 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
         self.execution_service.execute.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
-            self.routes.handle(self.handler, "/api/coach/actions/execute", self.session)
+            dispatch_route(
+                self.routes,
+                self.handler,
+                "/api/coach/actions/execute",
+                method="POST",
+                session=self.session,
+            )
 
         self.assertIs(caught.exception, error)
         self.handler.read_json.assert_called_once_with()
@@ -118,10 +146,34 @@ class CoachActionsPostRoutesTests(unittest.TestCase):
             {"action_token": "second-token", "payload_hash": "second-hash"},
         ]
 
-        self.routes.handle(self.handler, "/api/coach/actions/confirm", self.session)
-        self.routes.handle(self.handler, "/api/coach/actions/confirm", self.session)
-        self.routes.handle(self.handler, "/api/coach/actions/execute", self.session)
-        self.routes.handle(self.handler, "/api/coach/actions/execute", self.session)
+        dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/confirm",
+            method="POST",
+            session=self.session,
+        )
+        dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/confirm",
+            method="POST",
+            session=self.session,
+        )
+        dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/execute",
+            method="POST",
+            session=self.session,
+        )
+        dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/coach/actions/execute",
+            method="POST",
+            session=self.session,
+        )
 
         self.confirmation_factory.assert_has_calls([call(), call()])
         self.execution_factory.assert_has_calls([call(), call()])

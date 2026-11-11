@@ -487,7 +487,7 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
         handler = Mock()
         handler.read_json.return_value = {"days": 7}
         handler.path = MANUAL_PATH
-        self.post_route.handle(handler, MANUAL_PATH)
+        dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
         self.clock.advance(30)
         drain(self)
 
@@ -514,7 +514,9 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         handler = Mock()
         handler.read_json.return_value = {"days": 7}
 
-        self.assertTrue(self.post_route.handle(handler, MANUAL_PATH))
+        self.assertTrue(
+            dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
+        )
 
         status_code, body = handler.send_json.call_args.args
         self.assertEqual(status_code, 202)
@@ -531,7 +533,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         handler.read_json.return_value = {"days": 99}
 
         with self.assertRaises(AppError) as raised:
-            self.post_route.handle(handler, MANUAL_PATH)
+            dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(str(raised.exception), PERIOD_MESSAGE)
@@ -543,7 +545,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         handler.read_json.return_value = {"days": 7}
 
         with self.assertRaises(AppError) as raised:
-            self.post_route.handle(handler, MANUAL_PATH)
+            dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "not_configured")
@@ -557,7 +559,11 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
     def test_route_for_an_undeclared_acme_path_is_not_handled(self) -> None:
         handler = Mock()
 
-        self.assertFalse(self.post_route.handle(handler, "/api/acme-mock/other"))
+        self.assertFalse(
+            dispatch_route(
+                self.post_route, handler, "/api/acme-mock/other", method="POST"
+            )
+        )
         handler.send_json.assert_not_called()
 
 
