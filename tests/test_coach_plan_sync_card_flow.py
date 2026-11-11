@@ -13,17 +13,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 from unittest import mock
 
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.proposal_creation import CoachProposalCreationService
@@ -92,12 +90,7 @@ class CardFlow:
 
 def wire_card_flow(case: unittest.TestCase) -> CardFlow:
     """Build the real Coach card chain on a temporary database for one case."""
-    temporary = tempfile.TemporaryDirectory()
-    case.addCleanup(temporary.cleanup)
-    database = DatabaseManager(
-        Path(temporary.name) / "coach.sqlite", sqlite3, row_factory=row_factory
-    )
-    case.addCleanup(database.close)
+    database = temp_database(case, "coach.sqlite", row_factory=row_factory)
     # A refresh the descriptor makes the Coach wait for runs inline, not queued.
     inline_refreshes = {
         descriptor.provider_id: mock.Mock(

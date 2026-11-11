@@ -1,16 +1,15 @@
 """Provider-fake tests for Coach conversation ID provisioning."""
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 import uuid
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import Mock, patch
 
+from support import temp_database
+
 from backend.coach.conversation import CoachConversationProvisionService
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 
@@ -28,14 +27,11 @@ class _TrackingLock:
 
 class CoachConversationProvisionTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "coach.sqlite3",
-            sqlite3,
+        self.database_manager = temp_database(
+            self,
+            "coach.sqlite3",
             row_factory=lambda cursor, row: sqlite3.Row(cursor, row),
         )
-        self.addCleanup(self.database_manager.close)
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"

@@ -7,15 +7,18 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from support import temp_database
+
 from backend.coach.conversation import CoachAttachmentContextService
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.schema import initialize_schema
 
 
 class CoachAttachmentContextServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.database_path = Path(self.temp_dir.name) / "coach.sqlite"
+        self.database_path = (
+            Path(self.enterContext(tempfile.TemporaryDirectory())) / "coach.sqlite"
+        )
         db = sqlite3.connect(self.database_path)
         try:
             db.row_factory = row_factory
@@ -23,17 +26,13 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             db.commit()
         finally:
             db.close()
-        self.database_manager = DatabaseManager(
-            self.database_path,
-            sqlite3,
+        self.database_manager = temp_database(
+            self,
+            path=self.database_path,
             row_factory=row_factory,
             persist_connections=False,
         )
         self.service = CoachAttachmentContextService(self.database_manager)
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self.temp_dir.cleanup()
 
     def _message(self, message_id: int, attachments: list[dict[str, Any]]) -> None:
         with self.database_manager.unit_of_work() as db:

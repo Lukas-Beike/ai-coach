@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import threading
 import unittest
 import uuid
 from datetime import date
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
+
+from support import temp_database
 
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_read import CoachProposalConfirmationService
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -392,12 +391,7 @@ class CoachUndoToolPersistenceTests(unittest.TestCase):
     """The undo tool against real history, planning and proposal owners."""
 
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "undo.sqlite", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "undo.sqlite", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(

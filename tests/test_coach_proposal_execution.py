@@ -4,33 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from unittest.mock import Mock
+
+from support import temp_database
 
 from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_models import coach_action_hash
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
 
 class CoachProposalExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "proposals.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.manager = temp_database(
+            self, "proposals.sqlite", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.undo_service = Mock()
         self.undo_service.apply.return_value = {"status": "undone"}
         self.client = Mock()

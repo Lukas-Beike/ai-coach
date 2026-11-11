@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-import tempfile
 import unittest
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
+
+from support import temp_database
 
 from backend.coach.morning import (
     GarminSleepObservations,
     ManualMorningCheckinService,
     MorningCheckinStateService,
 )
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS
 
@@ -124,17 +122,10 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
 
 class MorningCheckinStateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary_directory.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary_directory.name) / "test.sqlite3",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.database = temp_database(
+            self, "test.sqlite3", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(self.database.close)
         self.key_values = KeyValueRepository(lambda: "2026-09-23T12:00:00")
-        with self.database.unit_of_work() as db:
-            initialize_schema(db)
         self.service = MorningCheckinStateService(
             self.database, self.key_values, lambda: TODAY
         )

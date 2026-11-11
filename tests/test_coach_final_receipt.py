@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
+from support import temp_database
+
 from backend.coach.final_receipt import CoachFinalReceiptService
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.runtime.events import StateEventBuffer
 
@@ -313,50 +312,48 @@ class CoachFinalReceiptTests(unittest.TestCase):
     def test_real_sqlite_unit_of_work_rolls_back_message_when_provider_state_fails(
         self,
     ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            manager = DatabaseManager(
-                Path(temporary) / "coach.sqlite3",
-                sqlite3,
-                row_factory=sqlite3.Row,
-                persist_connections=False,
+        manager = temp_database(
+            self,
+            "coach.sqlite3",
+            row_factory=sqlite3.Row,
+            persist_connections=False,
+        )
+        with manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, status TEXT, receipt TEXT, updated_at TEXT)"
             )
-            with manager.unit_of_work() as db:
-                db.execute(
-                    "CREATE TABLE coach_commands (client_turn_id TEXT PRIMARY KEY, status TEXT, receipt TEXT, updated_at TEXT)"
-                )
-                db.execute(
-                    "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)"
-                )
-                db.execute(
-                    "INSERT INTO coach_commands VALUES ('turn-1', 'running', '{}', '')"
-                )
-            keys = Mock(spec=KeyValueRepository)
-            keys.set.side_effect = ValueError("synthetic KV failure")
-            events = StateEventBuffer()
-            service = CoachFinalReceiptService(
-                manager,
-                threading.RLock(),
-                ChatRepository(lambda: "now"),
-                keys,
-                events,
-                lambda: "now",
+            db.execute(
+                "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT, client_turn_id TEXT, created_at TEXT)"
             )
-            with self.assertRaisesRegex(ValueError, "synthetic KV failure"):
-                service.persist(
-                    {"text": "Fertig"},
-                    client_turn_id="turn-1",
-                    command_receipts=[],
-                )
-            with manager.unit_of_work() as db:
-                self.assertEqual(
-                    db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0
-                )
-                self.assertEqual(
-                    db.execute("SELECT status FROM coach_commands").fetchone()[0],
-                    "running",
-                )
-            self.assertEqual(events.since()["events"], [])
-            manager.close()
+            db.execute(
+                "INSERT INTO coach_commands VALUES ('turn-1', 'running', '{}', '')"
+            )
+        keys = Mock(spec=KeyValueRepository)
+        keys.set.side_effect = ValueError("synthetic KV failure")
+        events = StateEventBuffer()
+        service = CoachFinalReceiptService(
+            manager,
+            threading.RLock(),
+            ChatRepository(lambda: "now"),
+            keys,
+            events,
+            lambda: "now",
+        )
+        with self.assertRaisesRegex(ValueError, "synthetic KV failure"):
+            service.persist(
+                {"text": "Fertig"},
+                client_turn_id="turn-1",
+                command_receipts=[],
+            )
+        with manager.unit_of_work() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0
+            )
+            self.assertEqual(
+                db.execute("SELECT status FROM coach_commands").fetchone()[0],
+                "running",
+            )
+        self.assertEqual(events.since()["events"], [])
 
 
 if __name__ == "__main__":
