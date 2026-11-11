@@ -130,7 +130,8 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Work in a dedicated task worktree; leave the primary checkout unchanged. Check
   the branch and existing diff before editing and preserve prior work; keep
   runtime files and worktrees out of commits.
-  `python scripts/prepare_worktree.py` installs Node dependencies and Graphify;
+  `python scripts/prepare_worktree.py` installs Node dependencies, Graphify and the
+  hash-locked Ruff and mypy, then reports newer versions (advisory, online);
   the SessionStart hook keeps the graph current. For symbol, caller, or
   dependency lookups, query Graphify (`python scripts/graphify_local.py query`)
   before Grep. Verify graph results in source.
