@@ -116,7 +116,9 @@ def _daily_loads(
 def empty_reason(
     valued: Sequence[Any], first: date | None, no_input: str
 ) -> str | None:
-    return None if valued else "warmup" if first else no_input
+    if valued:
+        return None
+    return "warmup" if first else no_input
 
 
 def _day_load(
