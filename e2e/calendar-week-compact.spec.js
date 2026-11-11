@@ -49,7 +49,7 @@ test("@responsive compact calendar week shows one week, groups repeats and keeps
   await showCalendarDay(page, days.past);
   await expect(page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`)).toHaveCount(2);
   await showCalendarDay(page, days.missed);
-  await expect(page.locator(`.planned-day[data-date="${days.missed}"] .planned-execution`)).toBeVisible();
+  await expect(page.locator(`.planned-day[data-date="${days.missed}"] .planned-entry-status`)).toHaveText("✕ Nicht absolviert");
   // A planned session is outlined apart from completed ones and needs no status word.
   await showCalendarDay(page, days.next);
   const planned = page.locator(`.planned-day[data-date="${days.next}"] .planned-entry`);

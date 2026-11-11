@@ -249,6 +249,18 @@ function plannedAppointmentLabel(event) {
   return time ? `${name} · ${time[1]}` : name;
 }
 
+// Garmin names an activity "<place> - <workout>"; the calendar shows it without the place.
+// The prefix is one to three capitalised words without digits or training words before a
+// spaced dash; anything else, and the stored name, stays as it is.
+const CALENDAR_NAME_PREFIX = /^(\p{Lu}[\p{L}.'’-]*(?: \p{Lu}[\p{L}.'’-]*){0,2}) [-–—] (\S.*)$/u;
+const CALENDAR_TRAINING_WORD = /lauf|run|rad|ride|bike|fahr|schwimm|swim|walk|wander|geh|kraft|strength|yoga|interval|schwelle|tempo|training|zwift|rolle|indoor|outdoor|grundlage|locker|erhol|regener|ski|ruder|row|einheit/i;
+
+function calendarDisplayName(name) {
+  const text = String(name || "").trim();
+  const match = CALENDAR_NAME_PREFIX.exec(text);
+  return match && !CALENDAR_TRAINING_WORD.test(match[1]) ? match[2] : text;
+}
+
 function calendarActualActivity(entry) {
   if (!entry || typeof entry !== "object") return null;
   if (entry.is_completed_activity) return entry;
@@ -457,7 +469,7 @@ function calendarEntryStatus(entry, dateKey, todayKey) {
 function calendarStatusLabel(entry, dateKey, todayKey) {
   const status = calendarEntryStatus(entry, dateKey, todayKey);
   if (status === "completed") return entry.is_completed_activity ? "✓ Zusätzlich" : "✓ Absolviert";
-  if (status === "missed") return "Nicht absolviert";
+  if (status === "missed") return "✕ Nicht absolviert";
   return status === "today" ? "Heute geplant" : "Geplant";
 }
 
@@ -465,33 +477,6 @@ function calendarRpeLabel(value) {
   if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 && number <= 10 ? calendarMetricNumber(number) : null;
-}
-
-function appendPlannedExecution(cardSummary, entry, status) {
-  if (status === "skipped") return;
-  const percentage = calendarMetricNumber(entry.compliance?.percentage);
-  const measurable = percentage != null && ["training_load", "duration", "strength_sets"].includes(entry.compliance?.basis);
-  if (status !== "missed" && !measurable) return;
-  const execution = document.createElement("span");
-  const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
-  let executionState = "is-on-target";
-  if (value < 80 || value > 120) executionState = "is-deviation";
-  if (value === 0) executionState = "is-zero";
-  execution.className = `planned-execution ${executionState}`;
-  execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
-  const basis = { training_load: "Belastung", duration: "Dauer", strength_sets: "Sätze" }[entry.compliance?.basis];
-  execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
-  execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
-  cardSummary.append(execution);
-  if (status !== "missed") {
-    const meter = document.createElement("span");
-    meter.className = "planned-execution-track";
-    meter.setAttribute("aria-hidden", "true");
-    const fill = document.createElement("span");
-    fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
-    meter.append(fill);
-    cardSummary.append(meter);
-  }
 }
 
 function plannedDayNotes(dayContext, competitions, dateKey) {
@@ -572,18 +557,8 @@ function appendPlannedCalendarComparison(details, entry, actual) {
     AppFormat.duration(plannedDuration),
     entry.training_load != null ? `Belastung ${calendarMetricNumber(entry.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
-  const actualLine = document.createElement("p");
-  actualLine.textContent = `Ist: ${[
-    AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s),
-    actual.training_load != null ? `Belastung ${calendarMetricNumber(actual.training_load)}` : null,
-  ].filter(Boolean).join(" · ")}`;
-  comparison.append(planLine, actualLine);
-  if (entry.compliance?.percentage != null) {
-    const ratio = document.createElement("p");
-    const ratioLabel = { training_load: "Belastung", strength_sets: "Sätze" }[entry.compliance.basis] || "Umfang";
-    ratio.textContent = `${ratioLabel} Plan/Ist: ${entry.compliance.percentage} %`;
-    comparison.append(ratio);
-  }
+  // The actual values and the share of the plan are shown once, above and in the status.
+  comparison.append(planLine);
   const strengthRows = plannedStrengthRows(entry.compliance?.strength_sets);
   if (strengthRows) comparison.append(strengthRows);
   details.append(comparison);
@@ -597,16 +572,11 @@ function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, date
   const statusText = document.createElement("span");
   statusText.className = "planned-entry-status";
   statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
+  const percentage = calendarMetricNumber(entry.compliance?.percentage);
+  if (status === "completed" && percentage != null && ["training_load", "duration", "strength_sets"].includes(entry.compliance?.basis)) {
+    statusText.textContent += ` · ${percentage} %`;
+  }
   cardSummary.append(statusText);
-}
-
-function appendPlannedTarget(cardSummary, entry) {
-  const target = document.createElement("span");
-  target.className = "planned-session-target";
-  const targetParts = [entry.name || "Training", plannedEntryDurationLabel(null, entry)];
-  if (entry.training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.training_load)}`);
-  target.textContent = `Plan: ${targetParts.join(" · ")}`;
-  cardSummary.append(target);
 }
 
 function adaptiveForecastNote(forecast, formatTime) {
@@ -986,29 +956,24 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return true;
   }
 
+  // Each value once; duration and distance stay in the card's row.
   function appendActualCalendarDetails(details, actual) {
     if (!actual) return;
-    const primaryMetrics = document.createElement("span");
-    primaryMetrics.className = "planned-actual-summary";
-    const load = calendarMetricNumber(actual.training_load);
     const rpe = calendarRpeLabel(actual.rpe);
-    primaryMetrics.textContent = [load != null ? `Belastung ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
-    appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s));
-    appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance_m));
-    appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.training_load));
+    appendCalendarFact(facts, "Belastung", calendarMetricNumber(actual.training_load));
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
     appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.intensity));
     appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.avg_hr, " bpm"));
     appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.avg_power, " W"));
     appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
-    appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.elevation_gain_m, " hm"));
-    details.append(primaryMetrics, facts);
+    appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.elevation_gain_m, " m"));
+    details.append(facts);
   }
 
   // One compact row: sport icon, title, sport/time/status line, duration and distance.
-  function plannedSessionHeader(entry, actual, title, appendStatus) {
+  function plannedSessionHeader(entry, actual, title, appendStatus, slim = false) {
     const displayed = actual || entry;
     const sportLabel = activitySportLabel(calendarSportType(displayed));
     const header = document.createElement("span");
@@ -1022,7 +987,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     cardTitle.textContent = title;
     const line = document.createElement("span");
     line.className = "planned-session-line";
-    line.textContent = [sportLabel, actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
+    // A done or missed unit's icon names the sport; its line keeps the time and the status.
+    line.textContent = [slim ? null : sportLabel, actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
     appendStatus(line);
     const value = document.createElement("span");
     value.className = "planned-session-value";
@@ -1323,13 +1289,25 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
-  function plannedActivityButton(actual) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary-button";
-    button.textContent = "Aktivität analysieren";
-    button.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
-    return button;
+  // The Coach analyses the session the athlete picked: one turn, the same as typing the request.
+  // The message names the session by date, sport, time and duration; the stored name never becomes Coach input.
+  function plannedActivityActions(actual, dateKey) {
+    const actions = document.createElement("div");
+    actions.className = "planned-activity-actions";
+    const prompt = `Analysiere meine Einheit vom ${dateLabel(dateKey)} (${[
+      activitySportLabel(calendarSportType(actual)),
+      calendarStartTime(actual.started_at_local),
+      plannedEntryDurationLabel(actual, actual),
+    ].filter(Boolean).join(", ")}).`;
+    const coach = plannedCoachButton("Mit dem Coach analysieren", prompt);
+    coach.className = "secondary-button";
+    const details = document.createElement("button");
+    details.type = "button";
+    details.className = "secondary-button planned-activity-details";
+    details.textContent = "Details";
+    details.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
+    actions.append(coach, details);
+    return actions;
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
@@ -1354,20 +1332,20 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
-    const title = actual?.name || entry.name || "Trainingseinheit";
+    const title = (actual?.name ? calendarDisplayName(actual.name) : entry.name) || "Trainingseinheit";
+    // Done and missed units are one slim row; only units still to come keep the zone bar and chips.
+    const slim = ["completed", "missed", "skipped"].includes(status);
     // The sport line carries the chips and, only for a unit still to send, a compact sync button.
     cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
       appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
-      appendFocusChip(line, entry);
-    }), meta);
-    appendPlannedExecution(cardSummary, entry, status);
-    const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
+      if (!slim) appendFocusChip(line, entry);
+    }, slim), meta);
+    const profile = slim ? null : calendarWorkoutProfile(entry.workout_profile);
     if (profile) cardSummary.append(profile);
     const conflict = plannedConflict(entry, dateKey);
     if (conflict) cardSummary.append(conflict);
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
-    if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     const head = plannedDetailHead(entry, actual, title, dateKey, status, plannedDetailStatus(entry, dateKey, todayKey, restDayLabel, weekHasPlan), plannedDayWeather(dayContext, dateKey));
@@ -1378,10 +1356,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
       if (detailProfile) head.after(detailProfile);
     });
-    const metrics = plannedSessionMetrics(entry, actual);
+    const metrics = actual ? null : plannedSessionMetrics(entry, null);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityButton(actual));
+    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityActions(actual, dateKey));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
@@ -1447,7 +1425,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const first = entries[0];
     group.dataset.sport = activitySportLabel(calendarSportType(first));
     const summary = document.createElement("summary");
-    summary.append(plannedSessionHeader(first, first, `${entries.length}× ${first.name || "Trainingseinheit"}`, () => {}));
+    summary.append(plannedSessionHeader(first, first, `${entries.length}× ${calendarDisplayName(first.name) || "Trainingseinheit"}`, () => {}, true));
     const items = document.createElement("div");
     items.className = "planned-group-items";
     items.append(...entries.map((entry) => renderPlannedEntry(entry, dateKey, todayKey, dayContext, weekHasPlan)));

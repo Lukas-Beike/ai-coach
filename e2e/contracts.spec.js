@@ -635,19 +635,17 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(previous.locator(".planned-day-weather")).toHaveAttribute("title", /Gespeicherte Wettervorhersage\n75 % Regen \(max\. 14:00 Uhr\) · 21,1 km\/h Wind/);
   await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, -2), today));
   const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
-  await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
-  await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
-  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 min · Belastung 25");
-  await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
+  // #2258 mockup A: a done unit is one slim row; status and share of the plan in one, no bars.
+  await expect(matched.locator(".planned-entry-status")).toHaveText("✓ Absolviert · 136 %");
+  await expect(matched.locator("summary .calendar-workout-profile, .planned-execution, .planned-session-target")).toHaveCount(0);
+  await expect(matched.locator(".planned-session-line")).not.toContainText("Laufen");
   await matched.screenshot({ path: testInfo.outputPath("planned-execution.png") });
   await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, -3), today));
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
+  await expect(page.locator(".planned-entry.is-missed .planned-entry-status")).toHaveText("✕ Nicht absolviert");
+  await expect(page.locator(".planned-entry.is-missed summary .calendar-workout-profile")).toHaveCount(0);
   await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, 1), today));
-  await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
   const completed = page.locator(".planned-entry.is-completed").filter({ hasText: "Grundlagenausfahrt" });
-  await expect(completed.locator(".planned-session-header")).toContainText("Radfahren · 07:15");
+  await expect(completed.locator(".planned-session-line")).toContainText("07:15");
   await expect(completed.locator(".planned-entry-status")).toBeVisible();
   if (!(await completed.evaluate((element) => element.open))) await expect(completed.locator(".planned-actual-facts")).toBeHidden();
   const completedHeaders = page.locator(".planned-entry.is-completed .planned-session-header");
@@ -662,7 +660,21 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
   if (!(await completed.evaluate((element) => element.open))) await completed.locator("summary").click();
-  await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
+  // Every value once with German labels; the Coach button names the session, never its stored name.
+  const facts = completed.locator(".planned-actual-facts");
+  await expect(facts).toContainText("Belastung 42");
+  await expect(facts).not.toContainText("Trainingsload");
+  await expect(completed.locator(".planned-entry-details")).not.toContainText(/Belastung 42.*Belastung 42/);
+  const analyse = completed.getByRole("button", { name: "Mit dem Coach analysieren" });
+  const sent = await analyse.evaluate((button) => {
+    let text = null;
+    const original = globalThis.askCoach;
+    globalThis.askCoach = (message) => { text = message; };
+    button.click();
+    globalThis.askCoach = original;
+    return text;
+  });
+  expect(sent).toMatch(/^Analysiere meine Einheit vom .+ \(Radfahren, 07:15, .+\)\.$/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

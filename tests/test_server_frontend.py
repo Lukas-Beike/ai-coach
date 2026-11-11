@@ -815,9 +815,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(
             'today.scrollIntoView({ block: "start", behavior: "auto" })', plan_views
         )
-        self.assertIn('"RPE offen"', plan_views)
-        self.assertIn('"Trainingsload"', plan_views)
-        self.assertIn("Plan/Ist:", plan_views)
+        self.assertNotIn('"Trainingsload"', plan_views)
+        self.assertNotIn("Plan/Ist:", plan_views)
         self.assertIn("daily_planning_context", plan_views)
         self.assertIn("card.open = openPlannedEntries.has(entryKey)", plan_views)
         self.assertIn("section.open = false", plan_views)

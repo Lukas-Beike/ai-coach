@@ -48,6 +48,22 @@ def _nested_objects(node, path=""):
 
 
 class CoachToolSchemaTests(unittest.TestCase):
+    def test_unit_names_carry_the_short_naming_rule(self):
+        # #2258: every tool that writes a unit, template or library name says how to name it.
+        for tool, path in (
+            ("stage_training_plan", ("payload", "workouts")),
+            ("replace_training_plan", ("payload", "workouts")),
+            ("apply_training_changes", ("changes",)),
+            ("manage_training_templates", ("templates",)),
+        ):
+            node = _tools()[tool]["parameters"]
+            for key in path:
+                node = node["properties"][key]
+            description = node["items"]["properties"]["name"]["description"]
+            with self.subTest(tool=tool):
+                self.assertIn("Schwellenlauf 3 × 9 min", description)
+                self.assertIn("only when the athlete asks", description)
+
     def test_plan_tools_require_the_session_focus_enum(self):
         for name in ("stage_training_plan", "replace_training_plan"):
             item = _tools()[name]["parameters"]["properties"]["payload"]["properties"][

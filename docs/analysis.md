@@ -14,8 +14,8 @@ Charts preserve provider provenance and observation dates. Numeric labels are re
 
 ## Activity details
 
-On **Geplant → Übersicht** (Planned → Overview), "Aktivität analysieren" (analyze activity) opens a completed
-session with its locally stored measurement series and intervals. The app loads a
+On **Geplant → Übersicht** (Planned → Overview), "Details" opens a completed
+session with its locally stored measurement series and intervals; "Mit dem Coach analysieren" opens the Coach and asks it to analyse that session (one turn started by the athlete, named by date, sport, time and duration). The app loads a
 session's details from the provider read-only and stores them permanently in the
 canonical data model; "Detaildaten laden" (load detail data) explicitly starts a background job that
 makes read-only requests only. The action appears when Garmin Connect is set up.

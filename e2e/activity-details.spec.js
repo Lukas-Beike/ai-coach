@@ -9,7 +9,7 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
   // On wide screens a unit of the week may already be open as the detail pane.
   if (!(await entry.evaluate((element) => element.open))) await entry.locator("summary").click();
-  const open = entry.getByRole("button", { name: "Aktivität analysieren" });
+  const open = entry.getByRole("button", { name: "Details" });
   await open.click();
   const dialog = page.getByRole("dialog", { name: "Synthetic ride <img src=x>" });
   await expect(dialog).toBeVisible();
