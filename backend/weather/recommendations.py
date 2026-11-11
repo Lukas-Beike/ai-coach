@@ -176,7 +176,8 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
     severe_weather = sum(25 for code in summary["weather_codes"] if code >= 95) + sum(
         8 for code in summary["weather_codes"] if 61 <= code <= 86
     )
-    running = "run" in str(event.get("type") or "").casefold()
+    # The sport resolution of the eligibility check: sport, type, sport_type, name.
+    running = _event_sport(event)[0] is Sport.RUN
     wind_speed = summary["wind_speed_average"] or 0
     gust_maximum = summary["gust_maximum"] or 0
     rain_total = summary["rain_total"] or 0
