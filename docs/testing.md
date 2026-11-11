@@ -252,7 +252,12 @@ planned load next to a 20-minute swim at 11:00 and a fitting 30-minute swim at
 18:00 on the same day (activity matching ambiguity), a
 `[NO_INTENSITY]` camp day with a hard planned unit, a weekly `[SHORT_ONLY]`
 series with a 90-minute ride. Upgrades from v5 add these records once; repeated
-seeds and restarts keep the counts stable. The default seed does not add a long
+seeds and restarts keep the counts stable. Version 7 completes the synthetic
+Garmin history (race predictions, thresholds, readiness, sleep and body battery),
+adds manual nutrition products on gram and millilitre bases (one archived) and
+reusable library templates for Ride, VirtualRide and Run. Version 8 adds one
+distance-based run, "Tempolauf nach Distanz", on the first free day from day 4 on.
+The default seed does not add a long
 chat history; longer conversations are added on demand for specific scenarios.
 
 `FIXTURE_OPENAI_MODE` controls the simulated OpenAI path. The default
