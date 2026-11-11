@@ -37,8 +37,11 @@ class CoachCancellationService:
             )
             if job:
                 self._persist_cancel(job)
+        # Without an id, signal only the stream whose cancel was just saved: one
+        # registered in between answers 409 instead of being cancelled unsaved.
         result, response = self._streams.cancel_attached(
-            session_csrf_hash, operation_id
+            session_csrf_hash,
+            operation_id or (attached["operation_id"] if attached else None),
         )
         if result is not None:
             self._close_response(response)
