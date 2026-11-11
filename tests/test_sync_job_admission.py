@@ -9,18 +9,17 @@ No network, no real ``.env``, no data directory and no provider account.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from support import temp_database
+
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.providers.descriptors import (
@@ -92,16 +91,9 @@ def build_endpoint(
     garmin_configured: bool,
 ) -> tuple[SyncCommandEndpoint, DatabaseManager]:
     """Wire the real runtime bindings, queue and a temporary database for a case."""
-    temporary = tempfile.TemporaryDirectory()
-    case.addCleanup(temporary.cleanup)
-    database = DatabaseManager(
-        Path(temporary.name) / "admission.sqlite",
-        sqlite3,
-        row_factory=sqlite3.Row,
+    database = temp_database(
+        case, "admission.sqlite", row_factory=sqlite3.Row, schema=True
     )
-    case.addCleanup(database.close)
-    with database.unit_of_work() as db:
-        initialize_schema(db)
     identifiers = iter(f"job-{index}" for index in range(1, 100))
     store = SyncJobStore(database, NOW.isoformat, lambda: next(identifiers))
     queue = SyncJobQueueService(

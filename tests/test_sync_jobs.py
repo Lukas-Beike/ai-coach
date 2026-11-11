@@ -1,16 +1,14 @@
 import hashlib
 import json
 import sqlite3
-import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from unittest.mock import patch
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor
+from support import temp_database
 
-from backend.db.manager import DatabaseManager
 from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.jobs import (
     ALLOWED_JOB_TRANSITIONS,
@@ -595,14 +593,7 @@ class SyncJobStoreTests(unittest.TestCase):
     now = "2026-09-20T12:00:00+00:00"
 
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "sync-jobs.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "sync-jobs.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """
@@ -689,13 +680,12 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
-        manager = DatabaseManager(
-            self.manager.path,
-            sqlite3,
+        manager = temp_database(
+            self,
+            path=self.manager.path,
             row_factory=sqlite3.Row,
             persist_connections=False,
         )
-        self.addCleanup(manager.close)
         store = SyncJobStore(manager, lambda: self.current_now, lambda: "unused")
         with (
             patch.object(sqlite3, "connect", wraps=sqlite3.connect) as connect,

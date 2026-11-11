@@ -23,6 +23,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from support import FakeManager
+
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     Environment,
@@ -96,20 +98,6 @@ def _hooks(rejected: bool = False, guard: Any = None) -> RatingReadHooks:
         key_rejected=lambda: rejected,
         **extra,
     )
-
-
-class _Manager:
-    def __init__(self, db: sqlite3.Connection) -> None:
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        yield self.db
-        self.db.commit()
-
-    @contextmanager
-    def reader(self):
-        yield self.db
 
 
 class _Coordination:
@@ -292,7 +280,7 @@ def make_service(
     reader.coordination = env.coordination
     service = GarminRatingBackfillService(
         reader=reader,
-        database_manager=_Manager(env.db),
+        database_manager=FakeManager(env.db),
         snapshot_writer=env.writer,
         key_values=env.key_values,
         coordination=env.coordination,
@@ -971,7 +959,7 @@ class StopErrorTests(unittest.TestCase):
                 reader.fetch_activity_ratings.side_effect = RatingReadStopped(kind, "1")
                 service = GarminRatingBackfillService(
                     reader=reader,
-                    database_manager=_Manager(env.db),
+                    database_manager=FakeManager(env.db),
                     snapshot_writer=env.writer,
                     key_values=env.key_values,
                     coordination=env.coordination,

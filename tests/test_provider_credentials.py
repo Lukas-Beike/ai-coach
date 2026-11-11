@@ -16,6 +16,8 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
+from support import FakeManager
+
 from backend import provider_credentials as credentials_module
 from backend.backup import export
 from backend.config import load_config
@@ -47,24 +49,6 @@ ENV = {
     "INTERVALS_ATHLETE_ID": "i42",
     "GARMIN_EMAIL": "env@example.test",
 }
-
-
-class FakeManager:
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        self._connection = connection
-
-    @contextmanager
-    def reader(self) -> Iterator[sqlite3.Connection]:
-        yield self._connection
-
-    @contextmanager
-    def unit_of_work(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self._connection
-            self._connection.commit()
-        except BaseException:
-            self._connection.rollback()
-            raise
 
 
 class ProviderCredentialTests(unittest.TestCase):

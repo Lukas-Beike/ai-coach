@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
@@ -300,14 +299,7 @@ class LostOutcomeTests(unittest.TestCase):
     """A job whose outcome cannot be stored must not stay running."""
 
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.directory.name) / "jobs.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "jobs.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """

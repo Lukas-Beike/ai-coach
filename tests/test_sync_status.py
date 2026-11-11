@@ -7,9 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.status import SyncOperationStateWriter, SyncPublicStateService
 
@@ -18,14 +19,9 @@ NOW = "2026-09-20T12:00:00+00:00"
 
 class SyncOperationStateWriterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "status.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.manager = temp_database(
+            self, "status.sqlite", row_factory=row_factory, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.events = Mock()
         self.writer = SyncOperationStateWriter(
@@ -34,10 +30,6 @@ class SyncOperationStateWriterTests(unittest.TestCase):
             self.events,
             lambda value: value.replace("SECRET", "[redacted]"),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     def get_value(self, key: str) -> str | None:
         with self.manager.unit_of_work() as db:
@@ -130,13 +122,13 @@ class SyncOperationStateWriterTests(unittest.TestCase):
 class SyncPublicStateServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "public-status.sqlite",
-            sqlite3,
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.manager = temp_database(
+            self,
+            path=Path(self.temporary_directory.name) / "public-status.sqlite",
             row_factory=row_factory,
+            schema=True,
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.profile = Mock()
         self.profile.get.return_value = {"name": "Athlete"}
@@ -164,10 +156,6 @@ class SyncPublicStateServiceTests(unittest.TestCase):
             self.jobs,
             self.versions,
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     def set_values(self, **values: str) -> None:
         with self.manager.unit_of_work() as db:

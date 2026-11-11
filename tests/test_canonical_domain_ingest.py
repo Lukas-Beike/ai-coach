@@ -19,6 +19,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from canonical_domain_support import gear_item, provenance, status
+from support import temp_database
 
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
@@ -180,19 +181,11 @@ def mapped_versions(manager: Any) -> set[int]:
 
 class BackfillFixture(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.manager = self.open_manager("backfill.db")
 
     def open_manager(self, name: str) -> DatabaseManager:
-        manager = DatabaseManager(
-            Path(self.temporary.name) / name, sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(manager.close)
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
-        return manager
+        return temp_database(self, name, row_factory=row_factory, schema=True)
 
     def backfill(self, batch_size: int = 200) -> CanonicalBackfill:
         return CanonicalBackfill(

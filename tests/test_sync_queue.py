@@ -2,15 +2,13 @@
 
 import dataclasses
 import sqlite3
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 from unittest.mock import Mock
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor
+from support import temp_database
 
-from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.runtime.events import StateEventBuffer
@@ -32,14 +30,7 @@ class SyncQueueFixtureMixin:
     now = "2026-09-20T12:00:00+00:00"
 
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary_directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "sync-queue.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
+        self.manager = temp_database(self, "sync-queue.sqlite", row_factory=sqlite3.Row)
         with self.manager.unit_of_work() as db:
             db.executescript(
                 """

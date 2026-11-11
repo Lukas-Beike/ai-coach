@@ -9,11 +9,11 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from support import temp_database
+
 from backend.config import Config
 from backend.db import garmin_store
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.providers.garmin_capability import WELLNESS_BACKFILL_PREFIX
@@ -360,15 +360,10 @@ class GarminMergeTests(unittest.TestCase):
 
 class GarminSyncStateServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temp_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_directory.cleanup)
-        self.database_path = Path(self.temp_directory.name) / "garmin-state.db"
-        self.manager = DatabaseManager(
-            self.database_path, sqlite3, row_factory=sqlite3.Row
+        self.manager = temp_database(
+            self, "garmin-state.db", row_factory=sqlite3.Row, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
+        self.database_path = self.manager.path
         self.now = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
         self.local_now = datetime(
             2026, 9, 20, 12, 30, tzinfo=timezone(timedelta(hours=2))

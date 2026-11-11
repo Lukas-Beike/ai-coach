@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from support import temp_database
+
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import row_factory
-from backend.db.manager import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import configure_cipher, initialize_schema
 from backend.planning import library as planning_library
@@ -87,14 +88,14 @@ class WahooPlanPushEndToEndTests(unittest.TestCase):
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
         self.path = Path(root.name) / "encrypted.db"
-        self.manager = DatabaseManager(
-            self.path,
-            cipher_backend,
+        self.manager = temp_database(
+            self,
+            path=self.path,
+            backend=cipher_backend,
             password="synthetic-e2e-test-key",
             configure=configure_cipher,
             row_factory=row_factory,
         )
-        self.addCleanup(self.manager.close)
         raw = json.dumps(WORKOUT)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
