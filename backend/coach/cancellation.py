@@ -25,17 +25,25 @@ class CoachCancellationService:
     def cancel(
         self, session_csrf_hash: str, operation_id: Any = None
     ) -> dict[str, Any]:
-        result, response = self._streams.cancel_attached(
-            session_csrf_hash, operation_id
-        )
-        if result is not None:
+        attached = self._streams.attached_status(session_csrf_hash)
+        if attached is not None and (
+            not operation_id or str(operation_id) == attached["operation_id"]
+        ):
             # An attached stream may be the live face of a queued durable job with
-            # the same operation; persist its cancel so a restart cannot resume it.
+            # the same operation; persist its cancel before signalling, so a stop
+            # in between cannot resume it after a restart (#2134, E-013).
             job = self._submissions.active(
-                session_csrf_hash, str(result["operation_id"] or "") or None
+                session_csrf_hash, attached["operation_id"] or None
             )
             if job:
                 self._persist_cancel(job)
+        # Without an id, signal only the stream whose cancel was just saved: one
+        # registered in between answers 409 instead of being cancelled unsaved.
+        result, response = self._streams.cancel_attached(
+            session_csrf_hash,
+            operation_id or (attached["operation_id"] if attached else None),
+        )
+        if result is not None:
             self._close_response(response)
             return result
 
