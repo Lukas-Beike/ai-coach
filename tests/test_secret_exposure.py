@@ -31,6 +31,8 @@ try:
 except ImportError:
     sqlcipher3 = None
 
+from support import FakeManager
+
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.export import (
     PrivacyArchiveExportConfig,
@@ -116,22 +118,6 @@ def make_config() -> Config:
     return Config(**values)  # type: ignore[arg-type]
 
 
-class _Manager:
-    def __init__(self, db):
-        self.db = db
-
-    @contextmanager
-    def reader(self):
-        yield self.db
-
-    read_snapshot = reader
-
-    @contextmanager
-    def unit_of_work(self):
-        yield self.db
-        self.db.commit()
-
-
 class _Lock:
     def __enter__(self):
         return self
@@ -199,7 +185,7 @@ class SecretFixture(unittest.TestCase):
 
         ProviderCredentialService(
             env_config=env,
-            database_manager=lambda: cast(Any, _Manager(self.db)),
+            database_manager=lambda: cast(Any, FakeManager(self.db)),
             database_lock=lambda: _Lock(),
             key_values=self.key_values,
             apply_config=apply,
@@ -328,7 +314,7 @@ class PrivacyExportSecretTests(SecretFixture):
             disk_usage=lambda _path: SimpleNamespace(free=10**12),
         )
         service = PrivacyArchiveExportService(
-            cast(Any, _Manager(self.db)),
+            cast(Any, FakeManager(self.db)),
             self.key_values,
             cast(Any, _Profile()),
             cast(Any, _Competitions()),
