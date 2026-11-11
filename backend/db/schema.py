@@ -19,7 +19,7 @@ from backend.canonical.vocabulary import (
     ProviderRecordState,
 )
 
-CURRENT_SCHEMA_VERSION = 26
+CURRENT_SCHEMA_VERSION = 27
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -138,14 +138,22 @@ PROVIDER_TABLES_DDL = f"""
     CREATE INDEX idx_observations_metric_date ON observations(metric, observed_on);
 """
 
+# Schema version 27: one canonical product table. ``origin`` tells an athlete's
+# own product ('own') from a food saved automatically from a database lookup
+# (the database's name, such as 'open_food_facts' or 'yazio'); ``fetched_at`` is
+# when that database delivered the values. Origins are an open vocabulary checked
+# in Python, so a further database needs no migration. An EAN belongs to at most
+# one own product; database entries may share it with each other. ``details``
+# keeps the database's further fields and which empty fields of an own product
+# were filled from where.
 NUTRITION_PRODUCTS_DDL = """
     CREATE TABLE nutrition_products (
         id TEXT PRIMARY KEY,
-        barcode TEXT UNIQUE,
+        barcode TEXT,
         name TEXT NOT NULL,
         brand TEXT NOT NULL DEFAULT '',
         basis_amount REAL NOT NULL CHECK (basis_amount > 0),
-        basis_unit TEXT NOT NULL CHECK (basis_unit IN ('g', 'ml', 'portion')),
+        basis_unit TEXT CHECK (basis_unit IN ('g', 'ml', 'portion')),
         kcal REAL,
         carbs_g REAL,
         protein_g REAL,
@@ -160,10 +168,17 @@ NUTRITION_PRODUCTS_DDL = """
         extraction_confidence REAL,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
+        origin TEXT NOT NULL DEFAULT 'own' CHECK (origin GLOB '[a-z]*' AND length(origin) <= 32),
+        fetched_at TEXT,
+        details TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        CHECK (origin <> 'own' OR basis_unit IS NOT NULL)
     );
     CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
     CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
+    CREATE UNIQUE INDEX idx_nutrition_products_own_barcode ON nutrition_products(barcode) WHERE origin = 'own';
+    CREATE INDEX idx_nutrition_products_origin ON nutrition_products(origin, barcode, fetched_at DESC)
 """
 
 
@@ -375,23 +390,6 @@ ACTIVITY_DETAIL_DDL = f"""
 """
 
 
-# Local mirror of external food database hits (schema version 11, Yazio ids
-# since 14). The payload is the projected, validated food record; name and
-# brand are searchable copies.
-FOOD_DATABASE_DDL = """
-    CREATE TABLE food_database_entries (
-        food_id TEXT PRIMARY KEY CHECK (food_id GLOB 'off:*' OR food_id GLOB 'yazio:*'),
-        barcode TEXT NOT NULL,
-        name TEXT NOT NULL,
-        brand TEXT NOT NULL DEFAULT '',
-        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
-        fetched_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
-    CREATE INDEX idx_food_database_entries_name ON food_database_entries(name COLLATE NOCASE);
-"""
-
-
 # Canonical model extensions (schema version 15). initialize_schema and the
 # schema-version-15 migration execute this same text, ALTER statements included,
 # so new and upgraded databases store identical definitions. Rows keep their
@@ -568,13 +566,6 @@ POWER_CURVE_DDL = f"""
 # Rows written before keep NULL: their rating time stays unknown.
 FEEDBACK_RATING_TIME_DDL = """
     ALTER TABLE activity_feedback ADD COLUMN session_rpe_rated_at TEXT
-"""
-
-
-# Schema version 20: the athlete's favorite products, listed first. Existing
-# products stay no favorite (0).
-PRODUCT_FAVORITE_DDL = """
-    ALTER TABLE nutrition_products ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1))
 """
 
 
@@ -939,9 +930,7 @@ def _create_schema_statements(db: Any) -> None:
     );
         """
     )
-    for statement in NUTRITION_PRODUCTS_DDL.split(";"):
-        if statement.strip():
-            db.execute(statement)
+    execute_ddl(db, NUTRITION_PRODUCTS_DDL)
     db.execute(
         "CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL"
     )
@@ -958,11 +947,9 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, PROVIDER_TABLES_DDL)
     execute_ddl(db, REMOTE_LINKS_DDL)
     execute_ddl(db, ACTIVITY_DETAIL_DDL)
-    execute_ddl(db, FOOD_DATABASE_DDL)
     execute_ddl(db, CANONICAL_EXTENSIONS_DDL)
     execute_ddl(db, POWER_CURVE_DDL)
     execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
-    execute_ddl(db, PRODUCT_FAVORITE_DDL)
     execute_ddl(db, OBSERVATION_LIFECYCLE_DDL)
     execute_ddl(db, FEEDBACK_PURPOSE_DDL)
     execute_ddl(db, STREAM_SENSORS_DDL)

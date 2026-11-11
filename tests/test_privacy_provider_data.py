@@ -386,7 +386,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
     def test_format_version_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 17)
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 18)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,

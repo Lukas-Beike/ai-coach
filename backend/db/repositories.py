@@ -49,8 +49,81 @@ class NutritionTemplateRepository:
         )
 
 
+# Nutrient columns of a canonical product, relative to its basis amount and unit.
+NUTRIENT_COLUMNS = (
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "sugar_g",
+    "fiber_g",
+    "salt_g",
+)
+_DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
+
+
+def _database_origin(food_id: str) -> str:
+    return _DATABASE_ORIGINS[food_id.split(":", 1)[0]]
+
+
+def fill_empty_product_fields(
+    db: Any, product_id: str, food: Mapping[str, Any], fetched_at: str
+) -> None:
+    """Fill the empty brand and nutrient fields of an own product from a database food.
+
+    Existing values always win. Values per basis are scaled to the product's
+    basis when both use the same unit; a product of another unit (a portion)
+    takes no nutrient values. ``details.filled_fields`` names each field's origin.
+    """
+    row = db.execute(
+        "SELECT brand, basis_amount, basis_unit, details, "
+        + ", ".join(NUTRIENT_COLUMNS)
+        + " FROM nutrition_products WHERE id=?",
+        (product_id,),
+    ).fetchone()
+    per_100 = food.get("per_100")
+    per_100 = per_100 if isinstance(per_100, dict) else {}
+    updates: dict[str, Any] = {}
+    if not row["brand"] and food.get("brands"):
+        updates["brand"] = str(food["brands"])
+    basis = food.get("basis_amount") or 100
+    if (
+        food.get("basis_unit") is not None
+        and food.get("basis_unit") == row["basis_unit"]
+    ):
+        for key in NUTRIENT_COLUMNS:
+            value = per_100.get(key)
+            if (
+                row[key] is None
+                and isinstance(value, int | float)
+                and not isinstance(value, bool)
+            ):
+                updates[key] = (
+                    value
+                    if row["basis_amount"] == basis
+                    else round(value * row["basis_amount"] / basis, 3)
+                )
+    if not updates:
+        return
+    details = json.loads(row["details"])
+    origin = _database_origin(str(food["id"]))
+    details.setdefault("filled_fields", {}).update(
+        {key: {"origin": origin, "fetched_at": fetched_at} for key in updates}
+    )
+    db.execute(
+        "UPDATE nutrition_products SET "
+        + ", ".join(f"{key}=?" for key in updates)
+        + ", details=? WHERE id=?",
+        (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
+    )
+
+
 class NutritionProductRepository:
-    """Persist athlete-confirmed food products independently from meal logs."""
+    """Persist athlete-confirmed food products independently from meal logs.
+
+    Own products are the canonical products of origin ``own``; foods saved from
+    a database lookup belong to FoodDatabaseEntryRepository.
+    """
 
     _SELECT = (
         "SELECT id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
@@ -77,7 +150,7 @@ class NutritionProductRepository:
         limit: int = 50,
         favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
+        clauses: list[str] = ["origin = 'own'"]
         params: list[Any] = []
         if not include_archived:
             clauses.append("status = 'active'")
@@ -125,7 +198,9 @@ class NutritionProductRepository:
         return [self._row(row) for row in rows]
 
     def get(self, db: Any, product_id: str) -> dict[str, Any] | None:
-        row = db.execute(self._SELECT + " WHERE id = ?", (product_id,)).fetchone()
+        row = db.execute(
+            self._SELECT + " WHERE id = ? AND origin = 'own'", (product_id,)
+        ).fetchone()
         return self._row(row) if row else None
 
     def save(self, db: Any, product: dict[str, Any]) -> dict[str, Any]:
@@ -173,13 +248,29 @@ class NutritionProductRepository:
                 for column in columns
             ),
         )
+        if product.get("barcode"):
+            self._absorb_database_entries(db, str(product["id"]), product["barcode"])
         return self.get(db, str(product["id"])) or product
+
+    @staticmethod
+    def _absorb_database_entries(db: Any, product_id: str, barcode: str) -> None:
+        """An own product's EAN has no database entry: the own product wins.
+
+        Empty fields of the product are filled from the entries, newest first;
+        the entries are then removed, as the product now stands for that EAN.
+        """
+        for entry in FoodDatabaseEntryRepository().by_barcode(db, barcode):
+            fill_empty_product_fields(db, product_id, entry, entry["fetched_at"])
+        db.execute(
+            "DELETE FROM nutrition_products WHERE origin <> 'own' AND barcode=?",
+            (barcode,),
+        )
 
     def set_favorite(self, db: Any, product_id: str, favorite: bool) -> bool:
         # Only the flag changes: saving a product again never resets it.
         return (
             db.execute(
-                "UPDATE nutrition_products SET favorite=? WHERE id=?",
+                "UPDATE nutrition_products SET favorite=? WHERE id=? AND origin = 'own'",
                 (int(favorite), product_id),
             ).rowcount
             > 0
@@ -188,7 +279,8 @@ class NutritionProductRepository:
     def delete(self, db: Any, product_id: str) -> bool:
         return (
             db.execute(
-                "DELETE FROM nutrition_products WHERE id=?", (product_id,)
+                "DELETE FROM nutrition_products WHERE id=? AND origin = 'own'",
+                (product_id,),
             ).rowcount
             > 0
         )
@@ -196,7 +288,8 @@ class NutritionProductRepository:
     def archive(self, db: Any, product_id: str, updated_at: str) -> bool:
         return (
             db.execute(
-                "UPDATE nutrition_products SET status='archived', updated_at=? WHERE id=? AND status='active'",
+                "UPDATE nutrition_products SET status='archived', updated_at=? "
+                "WHERE id=? AND status='active' AND origin = 'own'",
                 (updated_at, product_id),
             ).rowcount
             > 0
@@ -204,16 +297,56 @@ class NutritionProductRepository:
 
 
 class FoodDatabaseEntryRepository:
-    """Persist projected external food records as a searchable local mirror."""
+    """Persist foods saved automatically from database lookups as canonical products.
 
-    _SELECT = "SELECT payload, fetched_at FROM food_database_entries"
+    An entry is a nutrition_products row whose origin names its database and
+    whose id is the database's food id. The fields the product columns do not
+    hold stay in ``details``, so an entry reads back as the food it stored. An
+    EAN of an own product gets no entry: the own product wins and only its empty
+    fields are filled.
+    """
+
+    _SELECT = (
+        "SELECT id, barcode, name, brand, basis_amount, basis_unit, "
+        + ", ".join(NUTRIENT_COLUMNS)
+        + ", source_url, details, fetched_at FROM nutrition_products "
+        "WHERE origin <> 'own'"
+    )
+    _COLUMN_FIELDS = frozenset(
+        {
+            "id",
+            "name",
+            "brands",
+            "basis_amount",
+            "basis_unit",
+            "per_100",
+            "source_url",
+            "barcode",
+        }
+    )
 
     @staticmethod
     def _entry(row: Any) -> dict[str, Any]:
-        return {**json.loads(row["payload"]), "fetched_at": row["fetched_at"]}
+        details = json.loads(row["details"])
+        # Foods stored before sugar, fibre and salt were read lack those keys.
+        absent = set(details.pop("absent_nutrients", ()))
+        entry = {
+            **details,
+            "id": row["id"],
+            "name": row["name"],
+            "brands": row["brand"],
+            "basis_amount": row["basis_amount"],
+            "basis_unit": row["basis_unit"],
+            "per_100": {key: row[key] for key in NUTRIENT_COLUMNS if key not in absent},
+            "source_url": row["source_url"],
+            "fetched_at": row["fetched_at"],
+        }
+        if row["barcode"] and str(row["id"]).startswith("yazio:"):
+            entry["barcode"] = row["barcode"]
+        return entry
 
     def get(self, db: Any, food_id: str) -> dict[str, Any] | None:
-        row = db.execute(self._SELECT + " WHERE food_id=?", (food_id,)).fetchone()
+        row = db.execute(self._SELECT + " AND id=?", (food_id,)).fetchone()
         return self._entry(row) if row else None
 
     def by_barcode(self, db: Any, barcode: str) -> list[dict[str, Any]]:
@@ -221,7 +354,7 @@ class FoodDatabaseEntryRepository:
         if not barcode:
             return []
         rows = db.execute(
-            self._SELECT + " WHERE barcode=? ORDER BY fetched_at DESC LIMIT 5",
+            self._SELECT + " AND barcode=? ORDER BY fetched_at DESC LIMIT 5",
             (barcode,),
         ).fetchall()
         return [self._entry(row) for row in rows]
@@ -252,7 +385,7 @@ class FoodDatabaseEntryRepository:
         clauses = []
         params: list[Any] = []
         if prefix:
-            clauses.append("food_id GLOB ?")
+            clauses.append("id GLOB ?")
             params.append(
                 prefix.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]") + "*"
             )
@@ -263,42 +396,84 @@ class FoodDatabaseEntryRepository:
                 "OR brand LIKE ? ESCAPE '\\' COLLATE NOCASE)"
             )
             params.extend((f"%{escaped}%", f"%{escaped}%"))
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
             self._SELECT
-            + where
-            + " ORDER BY fetched_at DESC, food_id LIMIT ? OFFSET ?",
+            + "".join(f" AND {clause}" for clause in clauses)
+            + " ORDER BY fetched_at DESC, id LIMIT ? OFFSET ?",
             (*params, max(1, min(int(limit), 100)), max(0, int(offset))),
         ).fetchall()
         return [self._entry(row) for row in rows]
 
-    def upsert(self, db: Any, food: dict[str, Any], now: str) -> None:
+    def upsert(
+        self, db: Any, food: dict[str, Any], fetched_at: str, updated_at: str = ""
+    ) -> bool:
+        """Store a fetched food; return whether an own product took it instead."""
         payload = {key: value for key, value in food.items() if key != "fetched_at"}
-        db.execute(
-            "INSERT INTO food_database_entries("
-            "food_id, barcode, name, brand, payload, fetched_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(food_id) DO UPDATE SET "
-            "barcode=CASE WHEN excluded.barcode = '' THEN barcode ELSE excluded.barcode END, "
-            "name=excluded.name, brand=excluded.brand, "
-            "payload=excluded.payload, fetched_at=excluded.fetched_at, "
-            "updated_at=excluded.updated_at",
-            (
-                payload["id"],
-                str(payload.get("barcode") or "")
-                if str(payload["id"]).startswith("yazio:")
-                else str(payload["id"]).removeprefix("off:"),
-                payload["name"],
-                payload.get("brands") or "",
-                json.dumps(payload, ensure_ascii=False),
-                now,
-                now,
-            ),
+        food_id = str(payload["id"])
+        origin = _database_origin(food_id)
+        barcode = (
+            str(payload.get("barcode") or "")
+            if origin == "yazio"
+            else food_id.removeprefix("off:")
+        ) or None
+        own = (
+            barcode
+            and db.execute(
+                "SELECT id FROM nutrition_products WHERE origin = 'own' AND barcode=?",
+                (barcode,),
+            ).fetchone()
         )
+        if own:
+            fill_empty_product_fields(db, own["id"], payload, fetched_at)
+            return True
+        per_100 = payload.get("per_100")
+        per_100 = per_100 if isinstance(per_100, dict) else {}
+        details = {
+            key: value
+            for key, value in payload.items()
+            if key not in self._COLUMN_FIELDS
+        }
+        if absent := [key for key in NUTRIENT_COLUMNS if key not in per_100]:
+            details["absent_nutrients"] = absent
+        # A refetch replaces the stored values; origin and identity stay.
+        refreshed = {
+            "name": payload["name"],
+            "brand": payload.get("brands") or "",
+            "basis_amount": payload.get("basis_amount") or 100,
+            "basis_unit": payload.get("basis_unit"),
+            **{key: per_100.get(key) for key in NUTRIENT_COLUMNS},
+            "source_url": payload.get("source_url") or "",
+            "details": json.dumps(details, ensure_ascii=False),
+            "fetched_at": fetched_at,
+            "updated_at": updated_at or fetched_at,
+        }
+        values = {
+            "id": food_id,
+            "barcode": barcode,
+            **refreshed,
+            "source": origin,
+            "external_id": food_id,
+            "provenance": json.dumps({"kind": origin}),
+            "origin": origin,
+            "created_at": updated_at or fetched_at,
+        }
+        db.execute(
+            "INSERT INTO nutrition_products("
+            + ", ".join(values)
+            + ") VALUES ("
+            + ", ".join("?" for _ in values)
+            + ") ON CONFLICT(id) DO UPDATE SET "
+            "barcode=COALESCE(excluded.barcode, barcode), "
+            + ", ".join(f"{column}=excluded.{column}" for column in refreshed),
+            tuple(values.values()),
+        )
+        return False
 
     def delete(self, db: Any, food_id: str) -> bool:
         return (
             db.execute(
-                "DELETE FROM food_database_entries WHERE food_id=?", (food_id,)
+                "DELETE FROM nutrition_products WHERE id=? AND origin <> 'own'",
+                (food_id,),
             ).rowcount
             > 0
         )
