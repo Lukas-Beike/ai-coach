@@ -21,7 +21,8 @@ startup scheduler resumes below it after a restart.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from datetime import date, timedelta
 from typing import Any, Final, Protocol
 
@@ -50,11 +51,29 @@ class WellnessHistoryReader(Protocol):
 
 
 class SyncCoordination(Protocol):
-    def operation(self) -> Any: ...
+    def operation(self) -> AbstractContextManager[Any]: ...
 
     def acquire(self, *, timeout: float | None = None) -> bool: ...
 
     def release(self) -> None: ...
+
+
+@contextmanager
+def coordinated_guard(coordination: SyncCoordination) -> Iterator[None]:
+    """Hold the Garmin coordination lock, waiting ``LOCK_WAIT_SECONDS`` for a sync.
+
+    The wellness chunk holds it across its read and write; the stream backfill
+    holds it per read and per write.
+    """
+    with coordination.operation():
+        if not coordination.acquire(timeout=LOCK_WAIT_SECONDS):
+            raise AppError(
+                503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
+            )
+        try:
+            yield
+        finally:
+            coordination.release()
 
 
 class CursorWriter(Protocol):
@@ -102,25 +121,19 @@ class GarminWellnessHistoryService:
         if not self._configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         start = end - timedelta(days=max(1, days) - 1)
-        with self._coordination.operation():
-            if not self._coordination.acquire(timeout=LOCK_WAIT_SECONDS):
-                raise AppError(
-                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
-                )
-            try:
+        try:
+            with coordinated_guard(self._coordination):
                 payload = self._reader.fetch_wellness_history(
                     start, end, needs_night=self._needs_night
                 )
                 fetched_at = self._utc_now()
                 written = self._write(payload, fetched_at)
-            except WellnessSourcePaused as paused:
-                raise AppError(
-                    429,
-                    "Garmin pausiert nach wiederholten Fehlern.",
-                    reason="rate_limited",
-                ) from paused
-            finally:
-                self._coordination.release()
+        except WellnessSourcePaused as paused:
+            raise AppError(
+                429,
+                "Garmin pausiert nach wiederholten Fehlern.",
+                reason="rate_limited",
+            ) from paused
         self._sync_state.update_cursor(
             GARMIN_ID, WELLNESS_HISTORY_CURSOR, start.isoformat(), fetched_at
         )

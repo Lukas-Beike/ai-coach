@@ -435,6 +435,7 @@ from backend.sync.queue_assembly import (
     SyncQueuePolicy,
     SyncQueueWorker,
 )
+from backend.sync.rating_backfill_removal import RatingBackfillRemoval
 from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_assembly import (
     DailySyncLoopSettings,
@@ -1664,7 +1665,6 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
-        rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
         stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
@@ -2206,6 +2206,10 @@ PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
     key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
 )
 
+RATING_BACKFILL_REMOVAL = RatingBackfillRemoval(
+    key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
+)
+
 SESSION_REBUNDLE = SessionRebundle(
     key_values=KEY_VALUE_REPOSITORY,
     clock=runtime_clock.utc_now,
@@ -2233,6 +2237,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The one-time focus backfill of future units (#1849) runs after all stages.
     extra_followups=(
         PROFILE_WEEKLY_PLAN_REMOVAL,
+        RATING_BACKFILL_REMOVAL,
         SESSION_REBUNDLE,
         SESSION_FOCUS_BACKFILL,
     ),
