@@ -36,10 +36,15 @@ filled field recorded. Lookups never change an own product. Queries first read t
 own products, then this mirror, and query Open Food Facts only if
 a match is missing or older than 90 days. If the online fetch is not
 possible, the stored version is used with its date ("Stand vom …", as of …).
+A re-check takes every value the fresh result has and keeps a stored value
+where it has none, so it fills gaps such as salt or fibre and never empties a
+known field; stored entries name their missing core fields (`missing_fields`).
 For the Coach, matches carry the origin `data_origin` (`live`,
 `local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
 section lists the stored entries; "Lokal speichern" (save locally) takes over an
-entry as an own product after review, "Aus Datenbank entfernen" (remove from database) deletes only
+entry as an own product after review, "Aktualisieren" (refresh) re-checks one
+entry online now with the same gap-filling rule and leaves it unchanged if the
+database cannot be reached, "Aus Datenbank entfernen" (remove from database) deletes only
 the mirror entry. The mirror is part of backup, export and data deletion. The upgrade to
 schema v27 moves every former mirror row into the product table without loss.
 

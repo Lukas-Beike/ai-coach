@@ -332,6 +332,42 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
         self.service.forget(f"off:{BARCODE}")
         self.assertEqual(self.service.stored_foods(), [])
 
+    def test_a_re_check_fills_gaps_and_keeps_known_values(self):
+        stored = food()
+        stored["per_100"]["fiber_g"] = 3.0
+        self.mirror.store([stored])
+        self.assertEqual(
+            self.service.stored_foods()[0]["missing_fields"], ["sugar_g", "salt_g"]
+        )
+        fresh = food()
+        fresh["per_100"]["salt_g"] = 0.4
+        self.off.product = lambda barcode: fresh
+        self.now += timedelta(days=1)
+
+        refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+
+        self.assertEqual(
+            (refreshed["per_100"]["fiber_g"], refreshed["per_100"]["salt_g"]),
+            (3.0, 0.4),
+        )
+        self.assertEqual(refreshed["missing_fields"], ["sugar_g"])
+        self.assertEqual(refreshed["stored_at"], self.now.isoformat())
+
+    def test_a_failed_or_unknown_re_check_changes_nothing(self):
+        self.mirror.store([food()])
+        before = self.mirror.get(f"off:{BARCODE}")
+        self.off.offline = True
+        self.now += timedelta(days=1)
+
+        with self.assertRaises(AppError):
+            self.service.refresh_stored(f"off:{BARCODE}")
+        self.assertEqual(self.mirror.get(f"off:{BARCODE}"), before)
+        for food_id in ("off:4000000000017", None):
+            with self.subTest(food_id=food_id), self.assertRaises(AppError) as raised:
+                self.service.refresh_stored(food_id)
+            self.assertEqual(raised.exception.reason, "food_not_found")
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
+
     def test_service_without_a_mirror_keeps_working_online_only(self):
         service = FoodDatabaseService(cast(Any, self.off))
 

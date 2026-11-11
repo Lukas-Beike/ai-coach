@@ -26,6 +26,8 @@ from backend.providers.open_food_facts import OpenFoodFactsClient
 from backend.providers.yazio import YazioClient
 
 NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g")
+# The values a stored food is complete with; a missing one is a gap to fill.
+CORE_FIELDS = (*NUTRIENTS, "sugar_g", "fiber_g", "salt_g")
 
 # Where a returned food came from; shown to the Coach as `data_origin`.
 LIVE = "live"
@@ -504,11 +506,44 @@ class FoodDatabaseService:
         ]
 
     def stored_foods(self, query: str | None = None) -> list[dict[str, Any]]:
-        """List mirrored foods (newest first without a query) for the athlete."""
+        """List mirrored foods (newest first without a query) for the athlete.
+
+        Each names its missing core fields, which a re-check may fill.
+        """
         if self._mirror is None:
             return []
         found = self._mirror.search((query or "").strip(), limit=50)
-        return self._labelled(found, LOCAL_DATABASE)
+        return [self._stored_food(food) for food in found]
+
+    def _stored_food(self, food: dict[str, Any]) -> dict[str, Any]:
+        labelled = self._labelled([food], LOCAL_DATABASE)[0]
+        return {
+            **labelled,
+            "missing_fields": [
+                key for key in CORE_FIELDS if labelled["per_100"].get(key) is None
+            ],
+        }
+
+    def refresh_stored(self, food_id: Any) -> dict[str, Any]:
+        """Re-check one stored food online now; gaps fill, known values stay.
+
+        A failed fetch raises and leaves the stored food unchanged.
+        """
+        stored = (
+            self._mirror.get(food_id)
+            if self._mirror is not None and isinstance(food_id, str)
+            else None
+        )
+        if stored is None or self._mirror is None:
+            raise AppError(
+                404, "Datenbankeintrag nicht gefunden.", reason="food_not_found"
+            )
+        if food_id.startswith("off:"):
+            food = self._off.product(food_id[4:])
+        else:
+            food = self._require_yazio().product(food_id[6:])
+        self._mirror.store([food])
+        return self._stored_food(self._mirror.get(food_id) or stored)
 
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):

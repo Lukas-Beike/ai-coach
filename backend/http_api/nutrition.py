@@ -138,6 +138,10 @@ class NutritionPostRoutes:
                     f"{NUTRITION_PRODUCTS_PATH}/database/delete",
                     self._forget_database_food,
                 ),
+                (
+                    f"{NUTRITION_PRODUCTS_PATH}/database/refresh",
+                    self._refresh_database_food,
+                ),
             )
         ]
 
@@ -278,15 +282,19 @@ class NutritionPostRoutes:
             200, self._meal_library_service().extract_packaging_photo(payload)
         )
 
+    def _refresh_database_food(self, handler: Any, _request: RouteRequest) -> None:
+        """Re-check one food database entry online now; gaps fill."""
+        payload = _confirmed_object(handler, "Das Aktualisieren")
+        handler.send_json(
+            200,
+            self._meal_library_service().refresh_database_food(
+                str(payload.get("id") or "")
+            ),
+        )
+
     def _forget_database_food(self, handler: Any, _request: RouteRequest) -> None:
         """Forget a food database entry."""
-        payload = _read_object(handler)
-        if payload.get("confirmed") is not True:
-            raise AppError(
-                400,
-                "Das Entfernen muss ausdrücklich bestätigt werden.",
-                reason="confirmation_required",
-            )
+        payload = _confirmed_object(handler, "Das Entfernen")
         handler.send_json(
             200,
             self._meal_library_service().forget_database_food(
@@ -371,6 +379,18 @@ def _change(
     """The undo reference of the last change of one entity type, as ``{"change": ...}``."""
     matching = [item for item in changes if item["entity_type"] == entity_type]
     return {"change": matching[-1]} if matching else {}
+
+
+def _confirmed_object(handler: Any, action: str) -> dict[str, Any]:
+    """Read a request body whose action the athlete explicitly confirmed."""
+    payload = _read_object(handler)
+    if payload.get("confirmed") is not True:
+        raise AppError(
+            400,
+            f"{action} muss ausdrücklich bestätigt werden.",
+            reason="confirmation_required",
+        )
+    return payload
 
 
 def _read_object(handler: Any, max_bytes: int | None = None) -> dict[str, Any]:

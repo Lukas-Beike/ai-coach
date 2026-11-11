@@ -443,10 +443,26 @@ class FoodDatabaseEntryRepository:
     ) -> bool:
         """Store or refresh a fetched food; return whether it was stored.
 
-        An own product that holds the food's id keeps its row unchanged.
+        A refresh takes every value the fresh food has and keeps a stored
+        value where it has none. An own product that holds the food's id keeps
+        its row unchanged.
         """
         payload = {key: value for key, value in food.items() if key != "fetched_at"}
         food_id = str(payload["id"])
+        if stored := self.get(db, food_id):
+            fresh = payload.get("per_100")
+            fresh = fresh if isinstance(fresh, dict) else {}
+            payload["per_100"] = {
+                **fresh,
+                **{
+                    key: value
+                    for key, value in stored["per_100"].items()
+                    if value is not None and fresh.get(key) is None
+                },
+            }
+            for field in ("brands", "basis_unit", "source_url"):
+                if not payload.get(field) and stored.get(field):
+                    payload[field] = stored[field]
         origin = _database_origin(food_id)
         barcode = (
             str(payload.get("barcode") or "")

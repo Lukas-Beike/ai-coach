@@ -913,7 +913,17 @@ async function loadNutritionDatabase(query = "") {
         try { await api("/api/nutrition/products/database/delete", { method: "POST", body: JSON.stringify({ id: food.id, confirmed: true }) }); await loadNutritionDatabase(query); }
         catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Eintrag konnte nicht entfernt werden: ${error.message}`; }
       });
-      card.append(remove);
+      const refresh = document.createElement("button"); refresh.type = "button"; refresh.className = "secondary-button"; refresh.textContent = "Aktualisieren";
+      refresh.addEventListener("click", async () => {
+        refresh.disabled = true;
+        const status = document.querySelector("#nutritionProductStatus");
+        try {
+          await api("/api/nutrition/products/database/refresh", { method: "POST", body: JSON.stringify({ id: food.id, confirmed: true }) });
+          status.textContent = `„${food.name}“ aktualisiert.`;
+          await loadNutritionDatabase(query);
+        } catch (error) { refresh.disabled = false; status.textContent = `Eintrag konnte nicht aktualisiert werden: ${error.message}`; }
+      });
+      card.append(refresh, remove);
     });
   } catch (error) { if (generation === state.sessionGeneration) target.textContent = `Datenbank konnte nicht geladen werden: ${error.message}`; }
 }

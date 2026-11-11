@@ -65,28 +65,23 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             200, {"ok": True, "foods": [{"id": "off:1"}]}
         )
 
-    def test_database_entry_removal_requires_confirmation(self):
-        self.handler.read_json.return_value = {"id": "off:1"}
+    def test_database_entry_removal_and_refresh_require_confirmation(self):
+        for action, method in (
+            ("delete", self.meal_library.forget_database_food),
+            ("refresh", self.meal_library.refresh_database_food),
+        ):
+            with self.subTest(action=action):
+                path = f"/api/nutrition/products/database/{action}"
+                self.handler.read_json.return_value = {"id": "off:1"}
+                with self.assertRaises(AppError) as raised:
+                    dispatch_route(self.post_routes, self.handler, path, method="POST")
+                self.assertEqual(raised.exception.reason, "confirmation_required")
+                method.assert_not_called()
 
-        with self.assertRaises(AppError) as raised:
-            dispatch_route(
-                self.post_routes,
-                self.handler,
-                "/api/nutrition/products/database/delete",
-                method="POST",
-            )
-        self.assertEqual(raised.exception.reason, "confirmation_required")
-        self.meal_library.forget_database_food.assert_not_called()
-
-        self.handler.read_json.return_value = {"id": "off:1", "confirmed": True}
-        self.meal_library.forget_database_food.return_value = {"ok": True}
-        dispatch_route(
-            self.post_routes,
-            self.handler,
-            "/api/nutrition/products/database/delete",
-            method="POST",
-        )
-        self.meal_library.forget_database_food.assert_called_once_with("off:1")
+                self.handler.read_json.return_value = {"id": "off:1", "confirmed": True}
+                method.return_value = {"ok": True}
+                dispatch_route(self.post_routes, self.handler, path, method="POST")
+                method.assert_called_once_with("off:1")
 
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
         self.handler.path = "/api/nutrition/products?barcode=4006381333931"
