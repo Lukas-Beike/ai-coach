@@ -62,7 +62,7 @@ function loadSyncActions(route) {
     providerIds: () => ({ intervals: "intervals", garmin: "garmin", wahoo: "wahoo" }),
     coachProviderLabel: (provider) => ({ intervals: "Intervals.icu", garmin: "Garmin", wahoo: "Wahoo" })[provider] || "Provider",
     requestConfirmation: async (message, options) => {
-      confirmations.push({ message, title: options?.title });
+      confirmations.push({ message, title: options?.title, expectedText: options?.expectedText });
       return true;
     },
     providerErrorIsNonRetryable: () => false,
@@ -236,13 +236,15 @@ test("Wahoo full resync posts the confirmed request with CSRF and a confirmation
   assert.equal(harness.context.state.localSync.wahooFull, false);
 });
 
-test("Garmin full resync keeps its route, control and deletion wording", async () => {
+test("Garmin full resync keeps its route and control and says it deletes nothing", async () => {
   const harness = loadSyncActions(fullResyncRoute({ provider: "garmin" }));
   await vm.runInContext("fullResync('garmin')", harness.context);
   assert.deepEqual(harness.calls.map((call) => call.path), ["/api/garmin/full-resync", "/api/garmin/full-resync"]);
   assert.deepEqual(harness.calls.map((call) => call.method), ["POST", "GET"]);
   assert.ok(harness.selectors.includes("#garminFullResyncButton"));
-  assert.match(harness.confirmations[0].message, /löschen/);
+  // A-022: the server keeps local data, so the text must not announce a deletion.
+  assert.equal(harness.confirmations[0].message, "Alle Garmin-Daten werden erneut aus Garmin geladen. Lokale Daten bleiben erhalten; nur in Garmin gelöschte Einheiten werden auch hier entfernt. Garmin wird nicht verändert.");
+  assert.equal(harness.confirmations[0].expectedText, "Garmin");
 });
 
 for (const provider of ["garmin", "wahoo"]) {
