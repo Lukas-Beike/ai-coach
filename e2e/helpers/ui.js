@@ -73,13 +73,20 @@ async function showCalendarDay(page, dateKey) {
   throw new Error(`calendar day ${dateKey} is outside the shown weeks`);
 }
 
-// Steps the week view to the first calendar entry with this name.
-async function showCalendarEntry(page, name) {
-  const dateKey = await page.evaluate((wanted) => {
-    const entry = (state.data?.training_calendar || []).find((item) => item?.name === wanted);
+// Steps the week view to the first calendar entry that matches: a name part, a planned
+// or recorded workout profile, or a unit after today still pending for a provider.
+async function showCalendarEntry(page, match) {
+  const wanted = typeof match === "string" ? { name: match } : match;
+  const dateKey = await page.evaluate((criteria) => {
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const entry = (state.data?.training_calendar || []).find((item) => item && plannedEventDate(item)
+      && (!criteria.name || String(item.name || "").includes(criteria.name))
+      && (!criteria.profile || (criteria.profile === "planned" ? Boolean(item.workout_profile) && !item.is_completed_activity : JSON.stringify(item).includes('"source":"recorded"')))
+      && (!criteria.pending || (item.push_pending?.[criteria.pending] && plannedEventDate(item) > today)));
     return entry ? plannedEventDate(entry) : "";
-  }, name);
-  if (dateKey) await showCalendarDay(page, dateKey);
+  }, wanted);
+  if (!dateKey) throw new Error(`no calendar entry matches ${JSON.stringify(wanted)}`);
+  await showCalendarDay(page, dateKey);
 }
 
 module.exports = {

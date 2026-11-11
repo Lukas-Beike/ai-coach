@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { showCalendarDay } = require("./helpers/ui");
 
 test("@responsive a strength unit says why it does not reach Garmin and offers the fix", async ({ page, request }) => {
   test.setTimeout(180_000);
@@ -6,6 +7,7 @@ test("@responsive a strength unit says why it does not reach Garmin and offers t
   // The demo has no future strength unit; mark the first future one as a
   // free-text and the second as an unmatched strength unit in the response.
   let marked = [];
+  let markedDates = [];
   const changes = [
     { sport: "strength", push_blocked: { garmin: "no_structure" }, push_unmapped: [] },
     { sport: "strength", push_blocked: { garmin: "unmapped" }, push_unmapped: [{ index: 0, name: "Kabelrudern eng", suggestions: ["V-grip Cable Row", "Seated Cable Row"] }] },
@@ -24,7 +26,9 @@ test("@responsive a strength unit says why it does not reach Garmin and offers t
     const body = await response.json();
     if (!marked.length) {
       const today = new Date().toISOString().slice(0, 10);
-      marked = (body.planned || []).filter((unit) => unit.local_id && unit.push_pending && String(unit.date || "") > today).slice(0, 2).map((unit) => unit.local_id);
+      const units = (body.planned || []).filter((unit) => unit.local_id && unit.push_pending && String(unit.date || "") > today).slice(0, 2);
+      marked = units.map((unit) => unit.local_id);
+      markedDates = units.map((unit) => String(unit.date).slice(0, 10));
     }
     mark(body, marked);
     await route.fulfill({ status: response.status(), contentType: "application/json", body: JSON.stringify(body) });
@@ -37,6 +41,8 @@ test("@responsive a strength unit says why it does not reach Garmin and offers t
   await page.goto("/#plan/overview");
   await page.waitForFunction(() => state.initialStateLoaded);
   expect(marked).toHaveLength(2);
+  // The two marked units can sit in different weeks of the week view.
+  await showCalendarDay(page, markedDates[0]);
   const blocked = page.locator(".planned-garmin-blocked").filter({ hasText: "Keine Kraftstruktur – nicht an Garmin gesendet" }).first();
   await blocked.evaluate((element) => {
     for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS" && !node.classList.contains("planned-entry")) node.open = true;
@@ -46,16 +52,18 @@ test("@responsive a strength unit says why it does not reach Garmin and offers t
   const coach = blocked.getByRole("button", { name: "Mit Coach strukturieren" });
   await expect(coach).toBeVisible();
   expect((await coach.boundingBox()).height).toBeGreaterThanOrEqual(32);
+  await showCalendarDay(page, markedDates[1]);
   const unmapped = page.locator(".planned-garmin-blocked").filter({ hasText: "Keine Garmin-Übung: Kabelrudern eng" }).first();
   await unmapped.scrollIntoViewIfNeeded();
   await expect(unmapped.getByRole("button", { name: "Andere…" })).toBeVisible();
   const card = unmapped.locator("xpath=ancestor::details[contains(@class,'planned-entry')]");
+  const wasOpen = await card.evaluate((element) => element.open);
   await unmapped.getByRole("button", { name: "V-grip Cable Row" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toMatchObject({ exercise_index: 0, garmin_exercise: "V-grip Cable Row" });
   expect(posted[0].expected_payload_hash).toBeTruthy();
   // A chip in the card summary must not toggle the card.
-  expect(await card.evaluate((element) => element.open)).toBe(false);
+  expect(await card.evaluate((element) => element.open)).toBe(wasOpen);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });

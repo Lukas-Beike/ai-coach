@@ -734,6 +734,8 @@ function profileExtent(profile) {
   return profile.segments.reduce((sum, item) => sum + profileSegmentExtent(item, axis), 0);
 }
 
+const DETAIL_DATE_FORMAT = new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" });
+
 // Extra activities that look the same (title, sport, duration, distance, no profile) collapse into one row.
 function plannedEntryGroups(dayEntries) {
   const groups = [];
@@ -1081,7 +1083,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const line = document.createElement("span");
     line.className = "planned-detail-line";
     line.textContent = [
-      new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" }).format(dateFromKey(dateKey)),
+      DETAIL_DATE_FORMAT.format(dateFromKey(dateKey)),
       actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       activitySportLabel(calendarSportType(actual || entry)),
       plannedWeatherLabel(weather),
@@ -1321,8 +1323,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (entryKey) card.dataset.entryKey = entryKey;
     card.open = openPlannedEntries.has(entryKey);
     const cardSummary = document.createElement("summary");
-    // The detail pane stays filled: a click on the shown unit does not close it.
-    cardSummary.addEventListener("click", (event) => { if (card.open && wideCalendar?.matches) event.preventDefault(); });
     const meta = document.createElement("span");
     meta.className = "planned-meta";
     const displayed = actual || entry;
@@ -1351,9 +1351,14 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     let statusLabel = calendarStatusLabel(entry, dateKey, todayKey);
     if (restDayLabel) statusLabel = `Entfallen (${restDayLabel})`;
     else if (entry.is_completed_activity && !weekHasPlan) statusLabel = "✓ Absolviert";
-    details.append(plannedDetailHead(entry, actual, title, dateKey, status, statusLabel, plannedDayWeather(dayContext, dateKey)));
-    const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
-    if (detailProfile) details.append(detailProfile);
+    const head = plannedDetailHead(entry, actual, title, dateKey, status, statusLabel, plannedDayWeather(dayContext, dateKey));
+    details.append(head);
+    // The larger profile is drawn when the card first opens; most cards never do.
+    card.addEventListener("toggle", () => {
+      if (!card.open || details.querySelector(".planned-detail-profile")) return;
+      const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
+      if (detailProfile) head.after(detailProfile);
+    });
     const metrics = plannedSessionMetrics(entry, actual);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
@@ -1535,29 +1540,49 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return week;
   }
 
-  // Wide screens show the open card's body as the detail pane beside the week (styles.css); the
-  // calendar keeps at least the pane's height, and a week opens with today's or the next unit.
+  // Wide screens show the open card's body as the detail pane beside the week, level with its card
+  // (styles.css); the calendar keeps room for it, and a week opens with today's or the next unit.
   const wideCalendar = globalThis.matchMedia?.("(min-width: 1100px)");
   const detailObserver = globalThis.ResizeObserver ? new ResizeObserver(() => syncPlannedDetailHeight()) : null;
 
-  function syncPlannedDetailHeight() {
-    const root = $("#plannedCalendar");
-    const body = wideCalendar?.matches ? root?.querySelector(".planned-entry[open] > .planned-entry-details") : null;
-    if (root) root.style.minHeight = body ? `${body.offsetHeight}px` : "";
+  // The open card whose body is shown: not inside a collapsed group.
+  function shownPlannedEntry(root) {
+    return [...(root?.querySelectorAll(".planned-entry[open]") || [])].find((card) => !card.parentElement.closest("details:not([open])")) || null;
   }
 
-  function watchPlannedDetail() {
+  function syncPlannedDetailHeight() {
+    const root = $("#plannedCalendar");
+    if (!root) return;
+    const card = wideCalendar?.matches ? shownPlannedEntry(root) : null;
+    const body = card?.querySelector(":scope > .planned-entry-details");
+    if (!body) {
+      root.style.minHeight = "";
+      return;
+    }
+    const top = Math.max(0, card.getBoundingClientRect().top - root.getBoundingClientRect().top);
+    body.style.top = `${top}px`;
+    root.style.minHeight = `${top + body.offsetHeight}px`;
+  }
+
+  // A closed card leaves the pane empty; a collapsed group or a switch to a wide screen opens the default.
+  function watchPlannedDetail(event) {
+    const root = $("#plannedCalendar");
+    if (!event?.target?.classList?.contains("planned-entry")) openDefaultPlannedEntry(root?.querySelector(".planned-week"));
     detailObserver?.disconnect();
-    const body = $("#plannedCalendar")?.querySelector(".planned-entry[open] > .planned-entry-details");
+    const body = shownPlannedEntry(root)?.querySelector(":scope > .planned-entry-details");
     if (body) detailObserver?.observe(body);
     syncPlannedDetailHeight();
   }
 
-  function openDefaultPlannedEntry(week, todayKey) {
-    if (!wideCalendar?.matches || week.querySelector(".planned-entry[open]")) return;
-    const cards = [...week.querySelectorAll(".planned-day-content > .planned-entry")];
-    const card = cards.find((item) => item.closest(".planned-day").dataset.date >= todayKey) || cards.at(-1);
-    if (card) card.open = true;
+  function openDefaultPlannedEntry(week) {
+    if (!wideCalendar?.matches || !week || shownPlannedEntry(week)) return;
+    const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const upcoming = (cards) => cards.find((item) => item.closest(".planned-day").dataset.date >= todayKey) || cards.at(-1);
+    const single = upcoming([...week.querySelectorAll(".planned-day-content > .planned-entry")]);
+    const card = single || upcoming([...week.querySelectorAll(".planned-group-items > .planned-entry")]);
+    if (!card) return;
+    if (!single) card.closest(".planned-group").open = true;
+    card.open = true;
   }
 
   let plannedRenderSnapshot = null;
@@ -1566,7 +1591,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
-    const summary = $("#plannedSummary");
     if (!root) return;
     renderedCalendar = trainingCalendar;
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
@@ -1600,7 +1624,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
       .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
       .sort((left, right) => String(left.starts_at_local || left.started_at_local || left.date || "").localeCompare(String(right.starts_at_local || right.started_at_local || right.date || "")));
-    if (summary) summary.textContent = calendarCountLabel(entries, todayKey) || "Keine Einheiten im Zeitraum";
     const planningContextByDate = new Map(
       (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
         .filter((item) => item?.date)
@@ -1627,7 +1650,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weeklyCompliance,
     };
     const week = renderPlannedWeek(view);
-    openDefaultPlannedEntry(week, todayKey);
+    openDefaultPlannedEntry(week);
     root.append(week);
     restorePlannedEntryFocus(root, focusedEntry);
     watchPlannedDetail();

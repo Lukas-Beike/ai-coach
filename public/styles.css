@@ -954,10 +954,10 @@ h2 {
 }
 /* Wide screens: the week on the left, the open card's body as the detail pane on the right. */
 @media (min-width: 1100px) {
-  .planned-calendar { position: relative; grid-template-columns: minmax(0, 460px); align-content: start; }
+  .planned-calendar { --planned-week-width: 460px; position: relative; grid-template-columns: minmax(0, var(--planned-week-width)); align-content: start; }
   .planned-entry[open] { border: 2px solid var(--accent-bright); background: var(--accent-soft); }
   .planned-entry[open] .planned-session-header { background: var(--transparent); }
-  .planned-entry[open] > .planned-entry-details { position: absolute; top: 0; right: 0; left: 484px; gap: 16px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+  .planned-entry[open] > .planned-entry-details { position: absolute; top: 0; right: 0; left: calc(var(--planned-week-width) + 24px); gap: 16px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
   .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 10px; }
   .planned-detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
   .planned-detail-title { color: var(--ink); font-size: 1.2rem; font-weight: 750; line-height: 1.3; }

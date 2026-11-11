@@ -97,8 +97,16 @@ test("@responsive opening a single calendar entry and a grouped row shows their 
   await openCalendar(page, request);
   const entry = page.locator(".planned-day.is-today .planned-entry, .planned-day.is-today .planned-group").first();
   await entry.scrollIntoViewIfNeeded();
+  // On wide screens a unit of the week is already open as the detail pane.
+  if (await entry.evaluate((element) => element.open)) await entry.locator(":scope > summary").click();
+  await expect(entry).not.toHaveAttribute("open", "");
   await entry.locator(":scope > summary").click();
   await expect(entry).toHaveAttribute("open", "");
+  // The detail pane sits level with its card, not at the top of the calendar.
+  if (page.viewportSize().width >= 1100 && await entry.evaluate((element) => element.classList.contains("planned-entry"))) {
+    const [card, pane] = [await entry.boundingBox(), await entry.locator(":scope > .planned-entry-details").boundingBox()];
+    expect(Math.abs(pane.y - card.y)).toBeLessThan(2);
+  }
   const group = page.locator(".planned-group").first();
   if (await group.count()) {
     await expect(group.locator(":scope > summary .planned-session-title")).toHaveText(/^\d+× /);

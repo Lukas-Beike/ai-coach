@@ -188,11 +188,13 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.getByRole("button", { name: /Pers.nliche Erholung/ })).toHaveCount(0);
   await expect(page.locator(".planned-insights-title").filter({ hasText: "Check-in & Erholung" })).toHaveCount(0);
   // The fixture's Garmin FTP colors absolute watt targets, so the label may name estimated zones.
+  await showCalendarEntry(page, { profile: "planned" });
   const plannedProfile = page.locator("summary .calendar-workout-profile[aria-label^='Geplantes Intervallprofil']").first();
   await plannedProfile.evaluate((profile) => {
     for (let section = profile.closest("details"); section; section = section.parentElement.closest("details")) if (!section.classList.contains("planned-entry")) section.open = true;
   });
   await expect(plannedProfile).toBeVisible();
+  await showCalendarEntry(page, { profile: "recorded" });
   await expect(page.locator(".calendar-workout-profile[aria-label='Aufgezeichnetes Belastungsprofil']").first()).toBeAttached();
 
   await page.evaluate(async () => { await AppRouter.navigate("more/equipment", { historyMode: "replace" }); });

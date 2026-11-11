@@ -590,7 +590,6 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     return date;
   });
   // The week view opens on today's week; on wide screens a unit of it is already open as the detail pane.
-  const wide = page.viewportSize().width >= 1100;
   const day = page.locator(`.planned-day[data-date="${today}"]`);
   await expect(day.locator("time")).toHaveAttribute("datetime", today);
   await expect(day.locator(".planned-today-label")).toHaveText("Heute");
@@ -617,7 +616,8 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await page.keyboard.press("Enter");
   await expect(workout.locator(".planned-description")).toBeVisible();
   await expect(workout.locator("img")).toHaveCount(0);
-  if (!wide) await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await expect(workout.locator(".planned-description")).toBeHidden();
   expect(await day.evaluate((element) => {
     const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
     const firstUnit = element.querySelector(".planned-entry").getBoundingClientRect();
@@ -661,7 +661,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
-  await completed.locator("summary").click();
+  if (!(await completed.evaluate((element) => element.open))) await completed.locator("summary").click();
   await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
