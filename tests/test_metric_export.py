@@ -10,7 +10,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import Mock, patch
 
 from server_test_support import ServerTestCase, create_test_session, server
@@ -310,26 +310,6 @@ class MetricExportServiceTests(unittest.TestCase):
     def add(self, *items: Observation) -> None:
         self.reader.items.extend(items)
 
-    def items(self, **payload):
-        return {item["key"]: item for item in self.service.preview(payload)["items"]}
-
-    def confirm(self, preview_items, **extra):
-        payload = {
-            "confirmed": True,
-            "provider": "intervals",
-            "metrics": [
-                {
-                    "key": item["key"],
-                    "observed_on": item["observed_on"],
-                    "value": item["value"],
-                    "current_remote_value": item["current_remote_value"],
-                }
-                for item in preview_items
-            ],
-        }
-        payload.update(extra)
-        return self.service.export(payload)
-
     def link(self, observation):
         return RemoteLinkRepository().get(
             self.database.db,
@@ -599,16 +579,6 @@ class MetricExportServiceTests(unittest.TestCase):
             json.loads(row["diff"])["fields"]["ftp"], {"before": 260, "after": 250}
         )
 
-    def test_manual_export_resolves_an_automatic_conflict(self):
-        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
-        self.service.sync_automatic()
-        self.wellness[TODAY.isoformat()] = {"weight": 72}
-        self.reader.items = [obs(MetricKind.WEIGHT, 71, TODAY, ProviderId.GARMIN)]
-        self.assertEqual(self.service.sync_automatic()["conflicts"], 1)
-        self.confirm(list(self.items().values()))
-        self.wellness[TODAY.isoformat()]["weight"] = 71
-        self.assertEqual(self.service.sync_automatic()["conflicts"], 0)
-
     def history(self):
         return [
             dict(row)
@@ -656,7 +626,6 @@ class MetricExportServiceTests(unittest.TestCase):
         self.client.update_sport_settings.assert_called_once_with(
             "Ride", {"ftp": 300}, recalc_hr_zones=False
         )
-        self.assertEqual(self.items()["ftp|ride"]["source_provider"], None)
 
     def test_an_automatic_run_reads_only_consented_records(self):
         self.configure(enabled=True, fields=["threshold_hr"])
@@ -702,8 +671,17 @@ class MetricExportServiceTests(unittest.TestCase):
             change_history.public_view(row)["diff"]["fields"],
             {"ftp": {"changed": True}},
         )
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        self.confirm([self.items()["weight|"]])
+        # An earlier release recorded manual exports; they stay listed, not undoable.
+        with self.database.unit_of_work() as db:
+            change_history.record_change(
+                db,
+                change_history.METRIC_EXPORT_ENTITY,
+                "intervals:wellness/2026-10-10",
+                "update",
+                {"weight": 72.0},
+                {"weight": 70.4},
+                source="manual",
+            )
         self.assertEqual(
             [(item["entity_id"], item["source"]) for item in self.history()][1],
             ("intervals:wellness/2026-10-10", "manual"),
@@ -722,105 +700,22 @@ class MetricExportServiceTests(unittest.TestCase):
             undo.preview(row["id"])
         self.assertEqual(caught.exception.status, 400)
 
-    def test_preview_lists_source_target_and_live_remote_value(self) -> None:
-        # The cached target value is stale; the preview shows the live one.
-        self.wellness["2026-10-10"] = {"weight": 71.2, "bodyFat": 15.0}
-        self.add(
-            obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN),
-            obs(MetricKind.WEIGHT, 72.0, date(2026, 10, 10), ProviderId.INTERVALS),
-            obs(
-                MetricKind.MAX_HR,
-                191,
-                date(2026, 10, 1),
-                ProviderId.GARMIN,
-                sport=Sport.RUN,
-            ),
-            obs(MetricKind.FTP, 260, date(2026, 10, 2), ProviderId.WAHOO),
-        )
-        preview = self.service.preview({})
-        self.assertEqual(preview["provider"], "intervals")
-        self.assertEqual(preview["provider_label"], "Intervals.icu")
-        self.assertTrue(preview["recalc_hr_zones_available"])
-        items = {item["key"]: item for item in preview["items"]}
-        weight = items["weight|"]
-        self.assertEqual(weight["value"], 70.4)
-        self.assertEqual(weight["unit"], "kg")
-        self.assertEqual(weight["observed_on"], "2026-10-10")
-        self.assertEqual(weight["source_provider"], "garmin")
-        self.assertTrue(weight["source_label"])
-        self.assertEqual(weight["target_field"], "weight")
-        self.assertEqual(weight["target_label"], "Wellness · weight")
-        self.assertEqual(weight["remote_record"], "wellness/2026-10-10")
-        self.assertEqual(weight["current_remote_value"], 71.2)
-        self.assertNotIn("current_remote_observed_on", weight)
-        self.assertEqual(weight["status"], "ready")
-        self.assertTrue(weight["selectable"])
-        self.assertFalse(weight["zone_recalc"])
-        self.assertEqual(items["max_hr|run"]["target_field"], "max_hr")
-        self.assertEqual(items["max_hr|run"]["remote_record"], "sport-settings/Run")
-        self.assertIsNone(items["max_hr|run"]["current_remote_value"])
-        self.assertTrue(items["max_hr|run"]["zone_recalc"])
-        self.assertEqual(items["ftp|ride"]["remote_record"], "sport-settings/Ride")
-        # Each offered record is read once; nothing is written by a preview.
-        self.client.get_wellness.assert_called_once_with("2026-10-10")
-        self.assertEqual(self.client.get_sport_settings.call_count, 2)
-        self.client.update_wellness.assert_not_called()
-        self.client.update_sport_settings.assert_not_called()
-
-    def test_values_from_the_target_or_without_provider_are_never_offered(
-        self,
-    ) -> None:
+    def test_values_the_target_reported_are_never_sent_back(self) -> None:
         self.add(
             obs(MetricKind.WEIGHT, 70.0, date(2026, 10, 10), ProviderId.INTERVALS),
-            provider_less(MetricKind.FTP, 280, date(2026, 10, 10)),
+            obs(MetricKind.FTP, 280, TODAY, ProviderId.INTERVALS),
         )
-        self.assertEqual(self.service.preview({})["items"], [])
-        self.client_factory.assert_not_called()
-
-    def test_live_equal_values_are_not_selectable(self) -> None:
-        self.wellness["2026-10-10"] = {"weight": 70.0}
-        self.settings["Ride"] = {"ftp": 250}
-        self.add(
-            obs(MetricKind.WEIGHT, 70.0, date(2026, 10, 10), ProviderId.GARMIN),
-            obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN),
+        self.assertEqual(
+            self.service.sync_automatic(), {"exported": 0, "failed": 0, "conflicts": 0}
         )
-        items = self.items()
-        self.assertEqual(items["weight|"]["status"], "unchanged")
-        self.assertEqual(items["ftp|ride"]["status"], "unchanged")
-        self.assertFalse(any(item["selectable"] for item in items.values()))
-        with self.assertRaises(AppError) as caught:
-            self.confirm(items.values())
-        self.assertEqual(caught.exception.reason, "metric_export_changed")
         self.client.update_wellness.assert_not_called()
         self.client.update_sport_settings.assert_not_called()
 
-    def test_a_setting_stays_selectable_when_only_the_target_fetch_is_newer(
-        self,
-    ) -> None:
-        # The fetch day of a cached target setting says nothing about when the
-        # setting changed, so an older local threshold is still offered.
-        self.settings["Ride"] = {"ftp": 255}
-        self.add(
-            obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN),
-            obs(MetricKind.FTP, 255, date(2026, 10, 1), ProviderId.INTERVALS),
+    def test_values_outside_the_lookback_are_not_exported(self) -> None:
+        self.add(obs(MetricKind.WEIGHT, 70.0, date(2026, 6, 1), ProviderId.GARMIN))
+        self.assertEqual(
+            self.service.sync_automatic(), {"exported": 0, "failed": 0, "conflicts": 0}
         )
-        ftp = self.items()["ftp|ride"]
-        self.assertEqual(ftp["status"], "ready")
-        self.assertEqual(ftp["current_remote_value"], 255)
-        self.confirm([ftp])
-        self.client.update_sport_settings.assert_called_once_with(
-            "Ride", {"ftp": 250}, recalc_hr_zones=False
-        )
-
-    def test_a_target_value_changed_since_the_preview_sends_nothing(self) -> None:
-        self.wellness["2026-10-10"] = {"weight": 71.2}
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        preview = list(self.items().values())
-        self.wellness["2026-10-10"] = {"weight": 72.5}
-        with self.assertRaises(AppError) as caught:
-            self.confirm(preview)
-        self.assertEqual(caught.exception.status, 409)
-        self.assertEqual(caught.exception.reason, "metric_export_changed")
         self.client.update_wellness.assert_not_called()
 
     def test_an_unreadable_target_fails_safely_before_any_write(self) -> None:
@@ -828,137 +723,19 @@ class MetricExportServiceTests(unittest.TestCase):
         self.client.get_sport_settings.side_effect = AppError(
             502, RAW, reason="upstream_rejected", upstream_status=500
         )
-        for call in (
-            lambda: self.service.preview({}),
-            lambda: self.service.export(
-                {
-                    "confirmed": True,
-                    "provider": "intervals",
-                    "metrics": [
-                        {
-                            "key": "ftp|ride",
-                            "observed_on": "2026-09-01",
-                            "value": 250,
-                            "current_remote_value": None,
-                        }
-                    ],
-                }
-            ),
+        with (
+            self.assertLogs("intervals_coach", "WARNING") as logs,
+            self.assertRaises(AppError) as caught,
         ):
-            with (
-                self.assertLogs("intervals_coach", "WARNING") as logs,
-                self.assertRaises(AppError) as caught,
-            ):
-                call()
-            self.assertEqual(caught.exception.status, 502)
-            self.assertEqual(
-                caught.exception.reason, "metric_export_remote_unavailable"
-            )
-            self.assertNotIn("RAW-UPSTREAM", str(caught.exception))
-            self.assertNotIn("RAW-UPSTREAM", "\n".join(logs.output))
+            self.service.sync_automatic()
+        self.assertEqual(caught.exception.status, 502)
+        self.assertEqual(caught.exception.reason, "metric_export_remote_unavailable")
+        self.assertNotIn("RAW-UPSTREAM", str(caught.exception))
+        self.assertNotIn("RAW-UPSTREAM", "\n".join(logs.output))
         self.client.update_sport_settings.assert_not_called()
 
-    def test_values_outside_the_lookback_are_not_offered(self) -> None:
-        self.add(obs(MetricKind.WEIGHT, 70.0, date(2026, 6, 1), ProviderId.GARMIN))
-        self.assertEqual(self.service.preview({})["items"], [])
-
-    def test_execute_requires_confirmation_and_a_named_provider(self) -> None:
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        metrics = [
-            {
-                "key": "weight|",
-                "observed_on": "2026-10-10",
-                "value": 70.4,
-                "current_remote_value": None,
-            }
-        ]
-        cases = (
-            ({"provider": "intervals", "metrics": metrics}, "confirmation_required"),
-            (
-                {"confirmed": "yes", "provider": "intervals", "metrics": metrics},
-                "confirmation_required",
-            ),
-            ({"confirmed": True, "metrics": metrics}, "provider_required"),
-            (
-                {"confirmed": True, "provider": "garmin", "metrics": metrics},
-                "unsupported_provider",
-            ),
-        )
-        for payload, reason in cases:
-            with self.subTest(reason=reason, payload=payload):
-                with self.assertRaises(AppError) as caught:
-                    self.service.export(payload)
-                self.assertEqual(caught.exception.status, 400)
-                self.assertEqual(caught.exception.reason, reason)
-        with self.assertRaises(AppError) as caught:
-            self.service.preview({"provider": "garmin"})
-        self.assertEqual(caught.exception.reason, "unsupported_provider")
-        self.client_factory.assert_not_called()
-
-    def test_invalid_or_changed_selections_send_nothing(self) -> None:
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        entry = {
-            "key": "weight|",
-            "observed_on": "2026-10-10",
-            "value": 70.4,
-            "current_remote_value": None,
-        }
-        without_remote = {key: entry[key] for key in ("key", "observed_on", "value")}
-        invalid: tuple[Any, ...] = (
-            [],
-            [without_remote],
-            [{**entry, "current_remote_value": "71"}],
-            [{**entry, "current_remote_value": float("inf")}],
-            "weight|",
-            [{**entry, "value": True}],
-            [{**entry, "value": float("nan")}],
-            [{**entry, "value": "70.4"}],
-            [{**entry, "observed_on": None}],
-            [entry, entry],
-            [entry] * 33,
-        )
-        for metrics in invalid:
-            with self.subTest(metrics=metrics):
-                with self.assertRaises(AppError) as caught:
-                    self.service.export(
-                        {"confirmed": True, "provider": "intervals", "metrics": metrics}
-                    )
-                self.assertEqual(caught.exception.reason, "invalid_metric_export")
-        with self.assertRaises(AppError) as caught:
-            self.service.export(
-                {
-                    "confirmed": True,
-                    "provider": "intervals",
-                    "metrics": [entry],
-                    "recalc_hr_zones": "true",
-                }
-            )
-        self.assertEqual(caught.exception.reason, "invalid_metric_export")
-        changed = (
-            {**entry, "value": 69.0},
-            {**entry, "observed_on": "2026-10-09"},
-            {**entry, "key": "ftp|ride"},
-            {**entry, "current_remote_value": 71.2},
-        )
-        for metric in changed:
-            with self.subTest(metric=metric):
-                with self.assertRaises(AppError) as caught:
-                    self.service.export(
-                        {
-                            "confirmed": True,
-                            "provider": "intervals",
-                            "metrics": [metric],
-                        }
-                    )
-                self.assertEqual(caught.exception.status, 409)
-                self.assertEqual(caught.exception.reason, "metric_export_changed")
-        self.client.update_wellness.assert_not_called()
-
-    def test_confirmed_export_writes_records_and_reports_previous_value(
-        self,
-    ) -> None:
+    def test_an_export_records_the_link_of_each_sent_field(self) -> None:
         weight = obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN)
-        body_fat = obs(MetricKind.BODY_FAT, 14.5, date(2026, 10, 10), ProviderId.GARMIN)
         max_hr = obs(
             MetricKind.MAX_HR,
             191,
@@ -966,76 +743,23 @@ class MetricExportServiceTests(unittest.TestCase):
             ProviderId.GARMIN,
             sport=Sport.RUN,
         )
-        self.wellness["2026-10-10"] = {"weight": 71.2}
-        self.add(weight, body_fat, max_hr)
-        receipt = self.confirm(self.items().values())
+        self.add(weight, max_hr)
+        receipt = self.service.sync_automatic()
 
-        self.assertTrue(receipt["ok"])
-        self.assertEqual(receipt["exported"], 3)
-        self.assertEqual(receipt["failed"], 0)
-        self.assertFalse(receipt["recalc_hr_zones"])
-        by_key = {item["key"]: item for item in receipt["items"]}
-        self.assertEqual(by_key["weight|"]["previous_remote_value"], 71.2)
-        self.assertIsNone(by_key["max_hr|run"]["previous_remote_value"])
-        self.assertEqual({item["status"] for item in receipt["items"]}, {"exported"})
-        # Same-day wellness fields share one request; settings use their own.
-        self.client.update_wellness.assert_called_once_with(
-            "2026-10-10", {"weight": 70.4, "bodyFat": 14.5}
-        )
-        self.client.update_sport_settings.assert_called_once_with(
-            "Run", {"max_hr": 191}, recalc_hr_zones=False
-        )
-
+        self.assertEqual(receipt, {"exported": 2, "failed": 0, "conflicts": 0})
         link = self.link(weight)
         self.assertEqual(link.sync_state, RemoteLinkState.SYNCED)
         self.assertEqual(link.remote_id, "wellness/2026-10-10/weight")
         self.assertEqual(link.last_synced_at, NOW.isoformat())
         self.assertEqual(self.link(max_hr).remote_id, "sport-settings/Run/max_hr")
-        self.assertEqual(
-            {item["status"] for item in self.items().values()}, {"already_exported"}
-        )
-
-    def test_recalc_is_passed_only_when_confirmed(self) -> None:
-        self.add(
-            obs(
-                MetricKind.THRESHOLD_HR,
-                170,
-                date(2026, 10, 1),
-                ProviderId.GARMIN,
-                sport=Sport.RUN,
-            )
-        )
-        self.confirm(self.items().values(), recalc_hr_zones=True)
-        self.client.update_sport_settings.assert_called_once_with(
-            "Run", {"lthr": 170}, recalc_hr_zones=True
-        )
-
-    def test_recalc_applies_only_to_threshold_settings(self) -> None:
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
-        wellness_only = list(self.items().values())
-        with self.assertRaises(AppError) as caught:
-            self.confirm(wellness_only, recalc_hr_zones=True)
-        self.assertEqual(caught.exception.status, 400)
-        self.assertEqual(caught.exception.reason, "invalid_metric_export")
-        self.client.update_wellness.assert_not_called()
-
-        self.add(obs(MetricKind.FTP, 250, date(2026, 9, 1), ProviderId.GARMIN))
-        self.confirm(self.items().values(), recalc_hr_zones=True)
-        self.client.update_wellness.assert_called_once_with(
-            "2026-10-10", {"weight": 70.4}
-        )
-        self.client.update_sport_settings.assert_called_once_with(
-            "Ride", {"ftp": 250}, recalc_hr_zones=True
-        )
 
     def test_a_newer_export_takes_over_the_field_link(self) -> None:
         old = obs(MetricKind.FTP, 250, date(2026, 10, 1), ProviderId.GARMIN)
         self.add(old)
-        self.confirm(self.items().values())
+        self.service.sync_automatic()
         new = obs(MetricKind.FTP, 262, date(2026, 10, 5), ProviderId.WAHOO)
         self.add(new)
-        self.assertEqual(self.items()["ftp|ride"]["status"], "ready")
-        self.confirm(self.items().values())
+        self.service.sync_automatic()
         self.assertIsNone(self.link(old))
         self.assertEqual(self.link(new).remote_id, "sport-settings/Ride/ftp")
 
@@ -1049,32 +773,24 @@ class MetricExportServiceTests(unittest.TestCase):
         )
         self.client.update_sport_settings.side_effect = RuntimeError(RAW)
         with self.assertLogs("intervals_coach", "WARNING") as logs:
-            receipt = self.confirm(self.items().values())
+            receipt = self.service.sync_automatic()
 
-        self.assertFalse(receipt["ok"])
-        self.assertEqual((receipt["exported"], receipt["failed"]), (0, 2))
-        by_key = {item["key"]: item for item in receipt["items"]}
-        self.assertEqual(by_key["weight|"]["reason"], "upstream_unavailable")
-        self.assertEqual(by_key["ftp|ride"]["reason"], "request_failed")
-        self.assertEqual(
-            by_key["weight|"]["error"], "Senden an Intervals.icu fehlgeschlagen."
-        )
-        self.assertNotIn("RAW-UPSTREAM", json.dumps(receipt))
+        self.assertEqual(receipt, {"exported": 0, "failed": 2, "conflicts": 0})
         self.assertNotIn("RAW-UPSTREAM", "\n".join(logs.output))
         self.assertNotIn("secret", "\n".join(logs.output))
         self.assertEqual(
             self.database.db.execute("SELECT COUNT(*) FROM remote_links").fetchone()[0],
             0,
         )
-        self.assertEqual({item["status"] for item in self.items().values()}, {"ready"})
 
     def test_unconfirmed_reply_counts_as_failure(self) -> None:
-        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
+        weight = obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN)
+        self.add(weight)
         self.client.update_wellness.return_value = None
         with self.assertLogs("intervals_coach", "WARNING"):
-            receipt = self.confirm(self.items().values())
-        self.assertEqual(receipt["items"][0]["reason"], "upstream_invalid_response")
-        self.assertIsNone(self.link(self.reader.items[0]))
+            receipt = self.service.sync_automatic()
+        self.assertEqual(receipt, {"exported": 0, "failed": 1, "conflicts": 0})
+        self.assertIsNone(self.link(weight))
 
 
 class MetricExportHttpTests(ServerTestCase):

@@ -2204,9 +2204,6 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     ),
     bump_planning_revision=PLANNING_REVISION_SERVICE.bump,
     database_manager=database_manager,
-    history_undo=HISTORY.undo_service,
-    database_lock=DB_LOCK,
-    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
         "coach", {"status": "changed"}
     ),

@@ -79,7 +79,7 @@ from backend.performance.report_service import (
 )
 from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.race_results import with_race_results
-from backend.planning.season_preparation import load_scenarios, season_preparation
+from backend.planning.season_preparation import season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -513,8 +513,6 @@ class HttpApiAssembly:
                 read_checkins=report_checkins,
                 read_feedback=report_feedback,
                 today=local_today,
-                load_scenarios=load_scenarios,
-                season_source=public.season_source(),
                 canonical=canonical,
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,

@@ -272,22 +272,14 @@ The system SHALL retain dated weight/body-fat histories and daily energy/count m
 
 Evidence: `backend/performance/body.py:body_history`, `backend/performance/canonical_body.py:read_body_inputs`, `backend/performance/daily_health.py:read_daily_health_by_date`; `tests/test_performance_canonical_body_history.py:test_snapshot_garmin_values_are_ignored_without_canonical_values`, `tests/test_performance_body.py:test_ftp_sources_and_weight_age_limit`, `tests/test_performance_body.py:test_manual_profile_values_are_not_historical_and_invalid_garmin_values_drop`, `tests/test_performance_daily_health.py:CanonicalDailyHealthParityTests.test_metrics_window_ignores_the_snapshot_daily_stats`.
 
-### Requirement: Observed season preparation and read-only load scenarios
-The system SHALL separate observed competition preparation from calendar phase, expose supported 12-week sport-specific training/long-session evidence and nullable target context, and keep absent evidence unknown. Explicit load scenarios SHALL use dated CTL/ATL basis, labeled planned-load estimates, and fixed completed-today load, produce deterministic local curves with input identity, and leave local and remote plans unchanged.
+### Requirement: Observed season preparation
+The system SHALL separate observed competition preparation from calendar phase, expose supported 12-week sport-specific training/long-session evidence and nullable target context, and keep absent evidence unknown.
 
 #### Scenario: Past competition evidence
 - **WHEN** preparation for a past competition is read
 - **THEN** the evidence window ends at that competition's date rather than borrowing later training; future competitions retain current evidence through today without claiming race readiness or a race-time prediction.
 
-#### Scenario: Alternative load simulation
-- **WHEN** valid scenario inputs and yesterday's CTL/ATL are available
-- **THEN** current/alternative curves use the declared local 42-/7-day constants, apply requested scale/taper to eligible planned loads, preserve today's completed load without scaling/double counting, and label estimates and model assumptions.
-
-#### Scenario: Missing scenario basis
-- **WHEN** CTL/ATL or a necessary planned/completed load is unavailable and no supported estimate exists
-- **THEN** the simulation reports insufficient data and missing units instead of filling necessary evidence with zero; applying a changed plan remains a separate preview/approval flow.
-
-Evidence: `backend/performance/report_service.py:TrainingSeasonReadService.season`, `backend/planning/season_preparation.py:season_preparation`, `backend/planning/season_preparation.py:load_scenarios`; `tests/test_season_preparation.py:test_past_competition_window_is_anchored_at_event_date`, `tests/test_season_preparation.py:test_scenarios_are_deterministic_nonmutating_and_taper_changes_load`, `tests/test_season_preparation.py:test_missing_basis_or_planned_load_is_not_zero_filled`, `tests/test_season_preparation.py:test_completed_today_load_is_fixed_and_not_double_counted_or_scaled`.
+Evidence: `backend/performance/report_service.py:TrainingSeasonReadService.season`, `backend/planning/season_preparation.py:season_preparation`; `tests/test_season_preparation.py:test_past_competition_window_is_anchored_at_event_date`.
 
 ### Requirement: Versioned method evidence cards
 Every local performance or recovery method with a planned or offered physiological interpretation SHALL have a versioned evidence card in `docs/performance-methods/`. Each card SHALL record construct, formula, sources, population, protocol, exclusion and stop rules, deviations, classification, claim list and review state. Every numeric rule SHALL be tagged `source` or `product assumption` with a rationale. No numeric evidence confidence SHALL be invented.

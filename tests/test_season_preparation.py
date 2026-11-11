@@ -1,27 +1,10 @@
 import unittest
-from copy import deepcopy
 from datetime import date
 
-from backend.errors import AppError
-from backend.performance.season_inputs import SeasonLoadInputs
-from backend.planning.season_preparation import (
-    PLANNED_LOAD_ESTIMATE_SOURCE,
-    load_scenarios,
-    season_preparation,
-)
+from backend.planning.season_preparation import season_preparation
 
 TODAY = date(2026, 10, 2)
 BASIS_DAY = date(2026, 10, 1)
-
-
-def _inputs(ctl=50, atl=60, completed=()):
-    """Season load inputs as the reader returns them: yesterday's local M7 values."""
-    return SeasonLoadInputs(
-        basis_day=BASIS_DAY,
-        ctl=ctl,
-        atl=atl,
-        completed_today=tuple(completed),
-    )
 
 
 def _season(rows, events, today, observations=None):
@@ -32,15 +15,6 @@ def _season(rows, events, today, observations=None):
         "UTC",
         observations,
         activity_summaries=lambda start, end: rows,
-    )
-
-
-def _scenarios(plan, values, inputs=None):
-    return load_scenarios(
-        plan,
-        TODAY,
-        values,
-        inputs=_inputs() if inputs is None else inputs,
     )
 
 
@@ -121,105 +95,6 @@ class SeasonPreparationTests(unittest.TestCase):
         self.assertEqual("act_1", preparation["long_sessions"][0]["activity_id"])
         self.assertEqual({"status": "ok"}, preparation["long_sessions"][0]["aerobic"])
         self.assertEqual(1, preparation["source_counts"]["cached activity analyses"])
-
-    def test_scenarios_are_deterministic_nonmutating_and_taper_changes_load(self):
-        plan = {
-            "training_calendar": [
-                {
-                    "id": "local",
-                    "starts_at_local": "2026-10-03",
-                    "planned_load": 100,
-                }
-            ]
-        }
-        values = {"end": "2026-10-04", "load_scale": 0.8, "taper_days": 2}
-        original = deepcopy((plan, values))
-        result = _scenarios(plan, values)
-        self.assertEqual(result, _scenarios(plan, values))
-        self.assertEqual(original, (plan, values))
-        self.assertEqual(100, result["curves"][0]["points"][1]["load"])
-        self.assertEqual(40, result["curves"][1]["points"][1]["load"])
-        changed = _scenarios({"training_calendar": []}, values)
-        self.assertNotEqual(result["input_sha256"], changed["input_sha256"])
-
-    def test_basis_comes_from_the_inputs_and_names_its_source(self):
-        result = _scenarios({}, {"end": "2026-10-04"}, _inputs(ctl=50, atl=60))
-        self.assertEqual(
-            {
-                "as_of": "2026-10-01",
-                "ctl": 50.0,
-                "atl": 60.0,
-                "source": "Lokal berechnet (M7)",
-            },
-            result["basis"],
-        )
-
-    def test_missing_basis_or_planned_load_is_not_zero_filled(self):
-        values = {"end": "2026-10-04"}
-        for missing in (
-            _inputs(ctl=None),
-            _inputs(atl=None),
-            _inputs(ctl=None, atl=None),
-        ):
-            with self.subTest(missing=missing):
-                self.assertEqual(
-                    "insufficient_data", _scenarios({}, values, missing)["status"]
-                )
-        self.assertEqual(
-            "insufficient_data",
-            _scenarios({"training_calendar": [{"date": "2026-10-03"}]}, values)[
-                "status"
-            ],
-        )
-        for invalid in (
-            {"end": "2027-10-02"},
-            {"end": "2026-10-04", "load_scale": "nan"},
-        ):
-            with self.assertRaises(AppError):
-                _scenarios({}, invalid)
-
-    def test_completed_today_load_is_fixed_and_not_double_counted_or_scaled(self):
-        activity = {
-            "id": "done",
-            "started_at_local": "2026-10-02T08:00:00",
-            "training_load": 60,
-        }
-        plan = {
-            "training_calendar": [
-                {
-                    "date": "2026-10-02",
-                    "planned_load": 50,
-                    "compliance": {"actual_activity": activity},
-                }
-            ]
-        }
-        values = {"end": "2026-10-03", "load_scale": 0.5, "taper_days": 2}
-        result = _scenarios(plan, values, _inputs(completed=[activity]))
-        self.assertEqual(
-            [curve["points"][0]["load"] for curve in result["curves"]], [60, 60]
-        )
-        changed = _scenarios(
-            plan,
-            values,
-            _inputs(completed=[{**activity, "training_load": 70}]),
-        )
-        self.assertNotEqual(result["input_sha256"], changed["input_sha256"])
-
-    def test_completed_today_without_load_runs_with_a_note(self):
-        loaded = {
-            "id": "ride",
-            "started_at_local": "2026-10-02T08:00:00",
-            "training_load": 60,
-        }
-        yoga = {"id": "yoga", "started_at_local": "2026-10-02T18:00:00"}
-        values = {"end": "2026-10-03"}
-        result = _scenarios({}, values, _inputs(completed=[loaded, yoga]))
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["completed_today_without_load"], 1)
-        self.assertIn("ohne bekannte Belastung", result["note"])
-        self.assertEqual(result["curves"][0]["points"][0]["load"], 60)
-        clean = _scenarios({}, values, _inputs(completed=[loaded]))
-        self.assertNotIn("completed_today_without_load", clean)
 
     def test_race_context_requires_confirmed_units_and_reports_known_dimensions(self):
         event = {
@@ -396,112 +271,6 @@ class SeasonPreparationTests(unittest.TestCase):
         self.assertEqual("2026-10-02", preparation["window_end"])
         self.assertEqual(1, preparation["sessions_84_days"])
         self.assertEqual("observations", preparation["status"])
-
-    def test_planned_load_is_estimated_from_duration_and_intensity(self):
-        plan = {
-            "training_calendar": [
-                {
-                    "id": "tempo",
-                    "name": "Tempo",
-                    "starts_at_local": "2026-10-03T08:00:00",
-                    "planned_duration_s": 3600,
-                    "planned_intensity": 0.85,
-                }
-            ]
-        }
-        result = _scenarios(plan, {"end": "2026-10-04"})
-        self.assertEqual("ok", result["status"])
-        self.assertTrue(result["planned_load_estimated"])
-        self.assertEqual(
-            [
-                {
-                    "date": "2026-10-03",
-                    "name": "Tempo",
-                    "load": 72.25,
-                    "source": PLANNED_LOAD_ESTIMATE_SOURCE,
-                }
-            ],
-            result["estimated_planned_units"],
-        )
-        self.assertEqual(72.25, result["curves"][0]["points"][1]["load"])
-
-    def test_planned_intensity_in_percent_is_read_as_intensity_factor(self):
-        plan = {
-            "training_calendar": [
-                {
-                    "starts_at_local": "2026-10-03T08:00:00",
-                    "planned_duration_s": 3600,
-                    "planned_intensity": 85,
-                }
-            ]
-        }
-        result = _scenarios(plan, {"end": "2026-10-04"})
-        self.assertEqual(72.25, result["estimated_planned_units"][0]["load"])
-
-    def test_recorded_planned_load_wins_over_estimate(self):
-        plan = {
-            "training_calendar": [
-                {
-                    "starts_at_local": "2026-10-03T08:00:00",
-                    "planned_duration_s": 3600,
-                    "planned_intensity": 0.85,
-                    "planned_load": 50,
-                }
-            ]
-        }
-        result = _scenarios(plan, {"end": "2026-10-04"})
-        self.assertFalse(result["planned_load_estimated"])
-        self.assertEqual([], result["estimated_planned_units"])
-        self.assertEqual(50, result["curves"][0]["points"][1]["load"])
-
-    def test_units_without_any_load_are_listed_by_name_and_date(self):
-        plan = {
-            "training_calendar": [
-                {"date": "2026-10-03", "name": "Intervals"},
-                {
-                    "date": "2026-10-04",
-                    "name": "Bad intensity",
-                    "planned_duration_s": 3600,
-                    "planned_intensity": 250,
-                },
-                {
-                    "date": "2026-10-04",
-                    "name": "Estimable",
-                    "planned_duration_s": 1800,
-                    "planned_intensity": 0.7,
-                },
-            ]
-        }
-        result = _scenarios(plan, {"end": "2026-10-04"})
-        self.assertEqual("insufficient_data", result["status"])
-        self.assertEqual(
-            [
-                {"date": "2026-10-03", "name": "Intervals"},
-                {"date": "2026-10-04", "name": "Bad intensity"},
-            ],
-            result["units_without_load"],
-        )
-        self.assertEqual(
-            ["Estimable"], [unit["name"] for unit in result["estimated_planned_units"]]
-        )
-
-    def test_load_scale_accepts_german_decimal_comma(self):
-        plan = {
-            "training_calendar": [
-                {
-                    "id": "local",
-                    "starts_at_local": "2026-10-03",
-                    "planned_load": 100,
-                }
-            ]
-        }
-        result = _scenarios(plan, {"end": "2026-10-04", "load_scale": "0,85"})
-        self.assertEqual("ok", result["status"])
-        self.assertEqual(0.85, result["alternative"]["load_scale"])
-        self.assertEqual(85, result["curves"][1]["points"][1]["load"])
-        for invalid in ("0,4", "1,6", "nan", "abc"):
-            with self.assertRaises(AppError):
-                _scenarios(plan, {"end": "2026-10-04", "load_scale": invalid})
 
 
 if __name__ == "__main__":

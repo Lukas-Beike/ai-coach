@@ -408,56 +408,6 @@ class EquipmentService:
             "change": change,
         }
 
-    def assign_sensor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Link a recorded sensor to the athlete's equipment, or unlink it (None)."""
-        if not isinstance(payload, dict) or set(payload) != {
-            "sensor_id",
-            "equipment_id",
-        }:
-            raise AppError(400, "Sensor und Ausrüstung sind erforderlich.")
-        sensor_id = str(payload["sensor_id"])
-        with self._manager.unit_of_work() as db:
-            keys = {
-                sensor.key
-                for use in activity_detail_store.sensor_uses(db)
-                for sensor in use.sensors
-                if sensor_registry.sensor_id(sensor.key) == sensor_id
-            }
-            if len(keys) != 1:
-                raise AppError(404, "Sensor nicht gefunden.")
-            key = keys.pop()
-            equipment_id = payload["equipment_id"]
-            if equipment_id is None:
-                db.execute(
-                    "DELETE FROM kv WHERE key = ?", (SENSOR_EQUIPMENT_PREFIX + key,)
-                )
-                return {"ok": True, "stored_locally": True, "sensor_id": sensor_id}
-            item = db.execute(
-                SELECT_VALUE, (EQUIPMENT_PREFIX + str(equipment_id),)
-            ).fetchone()
-            equipment = json.loads(item["value"]) if item else None
-            if (
-                not equipment
-                or equipment.get("status") != "active"
-                or equipment.get("parent_id")
-            ):
-                raise AppError(400, "Aktive Hauptausrüstung erforderlich.")
-            now = self._utc_now()
-            db.execute(
-                UPSERT_KV,
-                (
-                    SENSOR_EQUIPMENT_PREFIX + key,
-                    json.dumps({"equipment_id": equipment["id"], "observed_at": now}),
-                    now,
-                ),
-            )
-        return {
-            "ok": True,
-            "stored_locally": True,
-            "sensor_id": sensor_id,
-            "equipment_id": equipment["id"],
-        }
-
     def maintain(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict) or set(payload) - {
             "equipment_id",

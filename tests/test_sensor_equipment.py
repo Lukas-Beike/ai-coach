@@ -1,4 +1,4 @@
-"""Linking a recorded sensor to equipment (#1869)."""
+"""Reading the equipment link of a recorded sensor (#1869)."""
 
 import json
 import sqlite3
@@ -24,7 +24,6 @@ from backend.canonical.vocabulary import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.activity_detail_store import replace_detail_set
 from backend.db.schema import initialize_schema
-from backend.errors import AppError
 
 STAMP = "2026-11-09T08:00:00+00:00"
 KEY = "ab" * 32
@@ -150,39 +149,28 @@ class SensorEquipmentTests(unittest.TestCase):
         self.assertIsNone(sensor["equipment_id"])
         self.assertEqual(sensor["sessions"], 1)
 
-    def test_a_sensor_is_linked_to_active_main_equipment_and_unlinked(self):
-        self.service.assign_sensor({"sensor_id": KEY[:16], "equipment_id": self.bike})
-        self.assertEqual(self.sensors()[0]["equipment_id"], self.bike)
-        self.service.assign_sensor({"sensor_id": KEY[:16], "equipment_id": None})
-        self.assertIsNone(self.sensors()[0]["equipment_id"])
-
-    def test_unknown_sensors_and_unfit_equipment_are_rejected(self):
-        for payload, status in (
-            ({"sensor_id": "0" * 16, "equipment_id": self.bike}, 404),
-            ({"sensor_id": KEY[:16], "equipment_id": self.old}, 400),
-            ({"sensor_id": KEY[:16], "equipment_id": self.wheel}, 400),
-            ({"sensor_id": KEY[:16], "equipment_id": "missing"}, 400),
-            ({"sensor_id": KEY[:16]}, 400),
-        ):
-            with self.subTest(payload=payload), self.assertRaises(AppError) as caught:
-                self.service.assign_sensor(payload)
-            self.assertEqual(caught.exception.status, status)
-        self.assertIsNone(self.sensors()[0]["equipment_id"])
-
-    def test_a_link_to_unknown_equipment_is_not_reported(self):
+    def link_sensor(self, equipment_id):
+        """Store a link as an earlier release wrote it."""
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
                 (
                     f"sensor_equipment:{KEY}",
-                    json.dumps({"equipment_id": "gone"}),
+                    json.dumps({"equipment_id": equipment_id, "observed_at": STAMP}),
                     STAMP,
                 ),
             )
+
+    def test_a_stored_link_to_active_main_equipment_is_reported(self):
+        self.link_sensor(self.bike)
+        self.assertEqual(self.sensors()[0]["equipment_id"], self.bike)
+
+    def test_a_link_to_unknown_equipment_is_not_reported(self):
+        self.link_sensor("gone")
         self.assertIsNone(self.sensors()[0]["equipment_id"])
 
     def test_the_read_never_carries_a_serial_number(self):
-        self.service.assign_sensor({"sensor_id": KEY[:16], "equipment_id": self.bike})
+        self.link_sensor(self.bike)
         self.assertNotIn(SERIAL, json.dumps(self.service.read()))
 
 

@@ -9,15 +9,13 @@ equals what the calendar chip already shows as a derived suggestion.
 
 Each write is a focus-only edit: it keeps the sync state, is recorded in the
 change history and never reaches a provider. The stage keeps the references of
-its changes in its state row, so ``undo`` restores all of them in one
-transaction (or none, when one unit was edited since). The state holds counts
-and change references only, never names or dates.
+its changes in its state row. The state holds counts and change references
+only, never names or dates.
 """
 
 from __future__ import annotations
 
 import json
-import threading
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
@@ -26,14 +24,12 @@ from backend.activities.workout_load import WorkoutEstimate
 from backend.canonical.vocabulary import Sport
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.history.undo_service import HistoryUndoService
 from backend.planning.session_focus import (
     FOCUS_KEY,
     allowed_foci,
     unambiguous_values,
 )
 from backend.planning.sport import planned_sport_environment
-from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import BatchReport
 
 STAGE: Final = "session_focus_backfill"
@@ -61,9 +57,6 @@ class SessionFocusBackfill:
         update_unit: Callable[..., Any],
         bump_planning_revision: Callable[[Any], None],
         database_manager: Callable[[], Any],
-        history_undo: Callable[[], HistoryUndoService],
-        database_lock: threading.RLock,
-        maintenance_gate: MaintenanceGate,
         publish_change: Callable[[], object],
     ) -> None:
         self._key_values = key_values
@@ -73,9 +66,6 @@ class SessionFocusBackfill:
         self._update_unit = update_unit
         self._bump = bump_planning_revision
         self._database_manager = database_manager
-        self._history_undo = history_undo
-        self._database_lock = database_lock
-        self._maintenance_gate = maintenance_gate
         self._publish_change = publish_change
 
     def run_batch(self, db: Any) -> BatchReport:
@@ -146,30 +136,6 @@ class SessionFocusBackfill:
         """Content-free status and counts, for diagnostics."""
         state = _load_state(self._key_values, db)
         return summarize_state(state)
-
-    def undo(self) -> dict[str, Any]:
-        """Restore every unit the backfill changed, or none of them."""
-        history_undo = self._history_undo()
-        with (
-            self._maintenance_gate.operation(),
-            history_undo.profile_mutation_coordinator,
-            self._database_lock,
-            self._database_manager().unit_of_work() as db,
-        ):
-            state = _load_state(self._key_values, db)
-            changes = state.get("changes")
-            if state.get("status") != "complete" or not changes:
-                raise AppError(409, "Der Backfill hat nichts geändert.")
-            if state.get("undone_at"):
-                raise AppError(409, "Der Backfill wurde bereits zurückgenommen.")
-            history_undo.apply_many(db, changes)
-            self._save(db, {**state, "undone_at": self._clock()})
-            self._database_manager().after_commit(self._publish_change)
-        return {
-            "status": "undone",
-            "restored": len(changes),
-            "remote_untouched": True,
-        }
 
     def _save(self, db: Any, state: Mapping[str, Any]) -> None:
         self._key_values.set(

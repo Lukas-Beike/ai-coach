@@ -19,7 +19,7 @@ from backend.performance.report_service import (
 from backend.performance.season_inputs import SeasonSource
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import training_report
-from backend.planning.season_preparation import load_scenarios, season_preparation
+from backend.planning.season_preparation import season_preparation
 
 
 class _EmptyReader:
@@ -486,8 +486,6 @@ class TrainingReportTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=_canonical(),
         )
         result = service.read({}, "Europe/Berlin")
@@ -525,8 +523,6 @@ class TrainingReportTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=canonical,
         )
 

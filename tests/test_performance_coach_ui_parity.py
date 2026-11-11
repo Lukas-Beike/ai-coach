@@ -168,8 +168,6 @@ class CoachUiParityTests(unittest.TestCase):
                 read_checkins=list,
                 read_feedback=lambda keys: [],
                 today=lambda: TODAY,
-                load_scenarios=Mock(),
-                season_source=Mock(),
                 canonical=Mock(),
                 session_feedback=_feedback,
             ),

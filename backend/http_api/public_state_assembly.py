@@ -54,7 +54,7 @@ class PublicStateCoreInputs:
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
     canonical_serving: Callable[[], CanonicalReadStatus] | None = None
-    # When set, season preparation, load scenarios, the performance readers and
+    # When set, season preparation, the performance readers and
     # the state and plan endpoints read activity rows from it.
     activity_summary_reader: Callable[[], ActivityRowAndSummaryReader] | None = None
     # When set, the activities' sync time comes from the canonical provider coverage.
