@@ -192,7 +192,7 @@ Cooldown
 ```
 
 ## Strict Validation Rules
-1. **Executable Steps Required**: Endurance workouts (Ride, Run, Swim, Row) require explicit step durations (`m`, `s`) or distances (`km`, `m`) paired with an intensity target.
+1. **Executable Steps Required**: Endurance workouts (Ride, Run, Swim, Row) require explicit step durations (`m`, `s`) or distances (`km`, `mtr`) paired with an intensity target.
 2. **Relative Targets Preferred**: Use percentage FTP (`88-92%`) or zones (`Z2 HR`). Do not hardcode absolute wattages into steps, as they conflict with dynamic FTP adjustments.
 3. **Repeat Block Formatting**: Multi-interval blocks must begin with a repeat line (e.g., `3x`) and must be surrounded by blank lines. All steps within the block repeat equally.
 4. **Non-Endurance Activities**: Strength training, yoga, and mobility workouts use free-text prose instructions and bypass step validation.
