@@ -4,7 +4,7 @@
 
 Keep what reaches the shared repository safe and architecturally sound: nothing secret leaves the clone, the Ruff and mypy debt cannot grow, the coverage floor cannot fall, the Python test suite is partitioned completely and selected honestly, the backend keeps its import directions and composition root, and documented versions follow the code.
 
-This capability covers only the gates that protect the repository and its releases. Graphify, worktree preparation and pruning, agent guard hooks, browser and SQLCipher runners (see `isolated-test-execution`) and CI workflow policy (see `build-release-and-deployment`) are outside it. Each requirement states the protection; the tests cited as evidence are today's way of enforcing it and may be reshaped without changing the requirement. Inspected at `develop` 3cb05c53f (version 2.0.7, schema v26).
+This capability covers only the gates that protect the repository and its releases. Graphify, worktree preparation and pruning, agent guard hooks, browser and SQLCipher runners (see `isolated-test-execution`) and CI workflow policy (see `build-release-and-deployment`) are outside it. Each requirement states the protection; the tests cited as evidence are today's way of enforcing it and may be reshaped without changing the requirement. Inspected at `develop` 3cb05c53f.
 
 ## Requirements
 
