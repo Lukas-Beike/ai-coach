@@ -13,7 +13,6 @@ from backend.coach.authorization import authorized_operations
 from backend.coach.change_receipts import change_summary
 from backend.coach.context_selection import infer_coach_domain
 from backend.coach.outcomes import (
-    COACH_ACTION_LABELS,
     coach_effect_label,
     coach_failure_lines,
     coach_observed_sync_lines,
@@ -21,6 +20,7 @@ from backend.coach.outcomes import (
 )
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
+from backend.coach.tool_specs import ACTION_LABELS
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
@@ -299,8 +299,7 @@ class CoachTurnFailureService:
             text += (
                 "\nNoch offen: "
                 + ", ".join(
-                    COACH_ACTION_LABELS.get(name, "Angeforderter Schritt")
-                    for name in pending
+                    ACTION_LABELS.get(name, "Angeforderter Schritt") for name in pending
                 )
                 + "."
             )

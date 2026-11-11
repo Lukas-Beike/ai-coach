@@ -3,84 +3,7 @@
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
-
-COACH_OPERATION_LABELS = {
-    "save_nutrition_template": "Mahlzeitvorlage gespeichert",
-    "save_nutrition_product": "Produkt lokal gespeichert",
-    "delete_nutrition_template": "Mahlzeitvorlage entfernt",
-    "log_nutrition_template": "Verzehr gespeichert",
-    "update_profile": "Profil aktualisiert",
-    "apply_training_patch": "Geplante Einheiten angepasst",
-    "stage_training_plan": "Planentwurf gespeichert",
-    "commit_training_plan": "Trainingsplan gespeichert",
-    "replace_training_plan": "Trainingsplan ersetzt",
-    "manage_training_templates": "Trainingsvorlagen bearbeitet",
-    "apply_training_changes": "Geplante Einheiten bearbeitet",
-    "save_checkin": "Tages-Check-in gespeichert",
-    "save_activity_feedback": "Aktivitätsfeedback gespeichert",
-    "save_equipment": "Ausrüstung lokal gespeichert",
-    "assign_activity_equipment": "Ausrüstung zugeordnet",
-    "confirm_activity_session": "Aufzeichnungen bestätigt",
-    "split_activity_session": "Aufzeichnung getrennt",
-    "merge_activity_sessions": "Aktivitäten zusammengeführt",
-    "log_equipment_maintenance": "Wartung lokal erfasst",
-    "delete_activity_feedback": "Aktivitätsfeedback entfernt",
-    "save_competition": "Wettkampf gespeichert",
-    "delete_competition": "Wettkampf entfernt",
-    "start_provider_refresh": "Datenabruf beauftragt",
-    "start_intervals_plan_sync": "Plansynchronisierung beauftragt",
-    "push_strength_to_garmin": "Garmin-Krafteinheiten beauftragt",
-    "sync_competitions": "Wettkampfsynchronisierung beauftragt",
-    "undo_training_change": "Rückgängig-Vorschau vorbereitet",
-    "apply_adaptive_replan": "Freigegebene Plananpassung angewendet",
-    "preview_adaptive_replan": "Plananpassung vorgeschlagen",
-    "update_training_plan": "Planinformationen bearbeitet",
-    "apply_workout_library_plan": "Vorlagen eingeplant",
-    "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeitet",
-    "save_nutrition_entry": "Ernährungseintrag gespeichert",
-    "delete_nutrition_entry": "Ernährungseintrag entfernt",
-    "update_nutrition_entry": "Ernährungseintrag korrigiert",
-    "sync_nutrition": "Ernährungssynchronisierung beauftragt",
-}
-
-COACH_ACTION_LABELS = {
-    "save_nutrition_template": "Mahlzeitvorlage speichern",
-    "save_nutrition_product": "Produkt lokal speichern",
-    "delete_nutrition_template": "Mahlzeitvorlage entfernen",
-    "log_nutrition_template": "Verzehr erfassen",
-    "update_profile": "Profil aktualisieren",
-    "apply_training_patch": "Geplante Einheiten anpassen",
-    "stage_training_plan": "Planentwurf erstellen",
-    "commit_training_plan": "Trainingsplan speichern",
-    "replace_training_plan": "Trainingsplan vollständig ersetzen",
-    "manage_training_templates": "Trainingsvorlagen bearbeiten",
-    "apply_training_changes": "Geplante Einheiten bearbeiten",
-    "save_checkin": "Tages-Check-in speichern",
-    "save_activity_feedback": "Aktivitätsfeedback speichern",
-    "save_equipment": "Ausrüstung speichern",
-    "assign_activity_equipment": "Ausrüstung zuordnen",
-    "confirm_activity_session": "Aufzeichnungen bestätigen",
-    "split_activity_session": "Aufzeichnung trennen",
-    "merge_activity_sessions": "Aktivitäten zusammenführen",
-    "log_equipment_maintenance": "Wartung erfassen",
-    "delete_activity_feedback": "Aktivitätsfeedback entfernen",
-    "save_competition": "Wettkampf speichern",
-    "delete_competition": "Wettkampf entfernen",
-    "start_provider_refresh": "Datenabruf starten",
-    "start_intervals_plan_sync": "Plan synchronisieren",
-    "push_strength_to_garmin": "Krafteinheiten an Garmin senden",
-    "sync_competitions": "Wettkämpfe synchronisieren",
-    "undo_training_change": "Rückgängig-Vorschau erstellen",
-    "apply_adaptive_replan": "Freigegebene Plananpassung anwenden",
-    "preview_adaptive_replan": "Plananpassung vorschlagen",
-    "update_training_plan": "Planinformationen bearbeiten",
-    "apply_workout_library_plan": "Vorlagen einplanen",
-    "resolve_training_sync_conflict": "Synchronisierungskonflikt bearbeiten",
-    "save_nutrition_entry": "Ernährungseintrag speichern",
-    "delete_nutrition_entry": "Ernährungseintrag entfernen",
-    "update_nutrition_entry": "Ernährungseintrag korrigieren",
-    "sync_nutrition": "Ernährung synchronisieren",
-}
+from backend.coach.tool_specs import ACTION_LABELS, OPERATION_LABELS
 
 
 def coach_failure_lines(
@@ -92,9 +15,7 @@ def coach_failure_lines(
         result = item.get("result") or {}
         if result.get("ok") or item.get("tool") not in pending_operations:
             continue
-        label = COACH_ACTION_LABELS.get(
-            str(item.get("tool") or ""), "Angeforderter Schritt"
-        )
+        label = ACTION_LABELS.get(str(item.get("tool") or ""), "Angeforderter Schritt")
         detail = " ".join(
             str(
                 result.get("error") or "Die Aktion konnte nicht ausgeführt werden."
@@ -138,7 +59,7 @@ def coach_effect_label(item: dict[str, Any]) -> str:
         "undone",
     }:
         return "Lokale Änderung zurückgenommen"
-    label = COACH_OPERATION_LABELS.get(str(item.get("tool") or ""), "Lokale Aktion")
+    label = OPERATION_LABELS.get(str(item.get("tool") or ""), "Lokale Aktion")
     if (
         item.get("tool") == "start_provider_refresh"
         and result.get("status") == "completed"

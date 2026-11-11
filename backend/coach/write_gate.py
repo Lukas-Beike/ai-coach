@@ -24,7 +24,8 @@ Only the athlete's typed text, the directly preceding assistant text and the
 original request of a retried pending request are ever read here. Tool output,
 attachments, provider data and model summaries must not be passed in. Inputs
 are plain values and dependencies are injected; the module imports nothing
-from ``server.py`` or other backend packages except the stdlib-only vocabulary.
+from ``server.py`` or other backend packages except the stdlib-only vocabulary
+and the stdlib-only tool specs (``backend/coach/tool_specs.py``).
 """
 
 from __future__ import annotations
@@ -37,15 +38,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
+from backend.coach.tool_specs import (
+    APPROVAL_TOOLS,
+    CHECKIN,
+    COMPETITION,
+    DELETE_TOOLS,
+    NO_RECORD_TOOLS,
+    NUTRITION,
+    PLANNING,
+    PROFILE,
+    RECORD_LISTS,
+    REMOTE_GARMIN,
+    REMOTE_INTERVALS,
+    TOOL_DOMAIN,
+    UNDO,
+    UNGATED_TOOLS,
+    WHOLE_PLAN_TOOLS,
+)
 
-PLANNING = "planning"
-PROFILE = "profile"
-COMPETITION = "competition"
-CHECKIN = "checkin"
-NUTRITION = "nutrition"
-UNDO = "undo"
-REMOTE_INTERVALS = "remote_intervals"
-REMOTE_GARMIN = "remote_garmin"
 REMOTE_WAHOO = "remote_wahoo"
 REMOTE_DOMAINS = frozenset({REMOTE_INTERVALS, REMOTE_GARMIN, REMOTE_WAHOO})
 
@@ -77,92 +87,10 @@ BULK_THRESHOLD = 7
 _HISTORY_TAIL = 1200
 _CLASSIFIER_TEXT_LIMIT = 2000
 
-TOOL_DOMAIN: dict[str, str] = {
-    # Planned units, plans, library and local adaptive replanning.
-    "stage_training_plan": PLANNING,
-    "commit_training_plan": PLANNING,
-    "replace_training_plan": PLANNING,
-    "update_training_plan": PLANNING,
-    "manage_training_templates": PLANNING,
-    "apply_workout_library_plan": PLANNING,
-    "apply_training_changes": PLANNING,
-    "apply_training_patch": PLANNING,
-    "preview_adaptive_replan": PLANNING,
-    # Applying is local; the sync_illness_to_intervals flag adds
-    # remote_intervals (see _remote_effect).
-    "apply_adaptive_replan": PLANNING,
-    # Athlete profile and equipment.
-    "update_profile": PROFILE,
-    "save_equipment": PROFILE,
-    "assign_activity_equipment": PROFILE,
-    "confirm_activity_session": PROFILE,
-    "split_activity_session": PROFILE,
-    "merge_activity_sessions": PROFILE,
-    "log_equipment_maintenance": PROFILE,
-    "save_competition": COMPETITION,
-    "delete_competition": COMPETITION,
-    # Subjective reports about the athlete's state.
-    "save_checkin": CHECKIN,
-    "save_activity_feedback": CHECKIN,
-    "delete_activity_feedback": CHECKIN,
-    "save_nutrition_entry": NUTRITION,
-    "update_nutrition_entry": NUTRITION,
-    "delete_nutrition_entry": NUTRITION,
-    "save_nutrition_template": NUTRITION,
-    "delete_nutrition_template": NUTRITION,
-    "log_nutrition_template": NUTRITION,
-    "save_nutrition_product": NUTRITION,
-    "undo_training_change": UNDO,
-    # Every tool that writes to Intervals.icu (or resolves a sync conflict). A
-    # retry of a Garmin or Wahoo job is classified by that job (_check_job_retry).
-    "start_intervals_plan_sync": REMOTE_INTERVALS,
-    "sync_competitions": REMOTE_INTERVALS,
-    "sync_nutrition": REMOTE_INTERVALS,
-    "resolve_training_sync_conflict": REMOTE_INTERVALS,
-    "push_strength_to_garmin": REMOTE_GARMIN,
-}
-
-# Registry-classified non-read tools that are not athlete-data writes:
-# - the clarification and cancel tools only manage the pending request;
-# - the refresh tools pull provider data into local read caches. They change
-#   no athlete-authored record, and AGENTS.md has explicit current-data
-#   requests ("wie war mein Schlaf?") refresh before coaching.
-UNGATED_TOOLS = frozenset(
-    {
-        "clarify_coach_request",
-        "cancel_coach_request",
-        "start_provider_refresh",
-    }
-)
-
-_DELETE_TOOLS = frozenset(
-    {
-        "delete_competition",
-        "delete_activity_feedback",
-        "delete_nutrition_entry",
-        "delete_nutrition_template",
-    }
-)
-# They create, replace or archive a whole plan's sessions at once.
-_WHOLE_PLAN_TOOLS = frozenset({"replace_training_plan", "commit_training_plan"})
-# A draft or a preview changes no record; adaptive apply has its own approval.
-_NO_RECORD_TOOLS = frozenset(
-    {"stage_training_plan", "preview_adaptive_replan", "apply_adaptive_replan"}
-)
-# Argument lists whose items are one record each.
-_RECORD_LISTS: dict[str, tuple[str, ...]] = {
-    "apply_training_changes": ("changes",),
-    "apply_training_patch": ("changes", "workouts"),
-    "manage_training_templates": ("templates",),
-    "apply_workout_library_plan": ("entries",),
-}
 _REMOVING_ACTIONS = frozenset({"archive", "delete"})
 # Plan status spellings that archive: "archived" and the German alias that
 # backend/planning/training_plans.py maps to it (TRAINING_PLAN_STATUS_ALIASES).
 _ARCHIVED_STATUSES = frozenset({"archived", "archiviert"})
-# Applying a preview needs the classifier to confirm the athlete asked for it.
-_APPROVAL_TOOLS = frozenset({"apply_adaptive_replan"})
-
 # A plan write may override the blocking illness finding only on request.
 ILLNESS_CODE = "illness_hard"
 
@@ -635,9 +563,9 @@ def _items(arguments: Mapping[str, Any], key: str) -> list[Any]:
 
 def record_count(tool_name: str, arguments: Mapping[str, Any] | None) -> int:
     """Records a call touches, judged from its arguments before it runs."""
-    if tool_name in _NO_RECORD_TOOLS:
+    if tool_name in NO_RECORD_TOOLS:
         return 0
-    keys = _RECORD_LISTS.get(tool_name)
+    keys = RECORD_LISTS.get(tool_name)
     if keys is None or not isinstance(arguments, Mapping):
         return 1
     return max(1, sum(len(_items(arguments, key)) for key in keys))
@@ -649,7 +577,7 @@ def _canonical(value: Any) -> str:
 
 
 def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> bool:
-    if tool_name in _DELETE_TOOLS:
+    if tool_name in DELETE_TOOLS:
         return True
     if not isinstance(arguments, Mapping):
         return False
@@ -662,7 +590,7 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
     return any(
         isinstance(item, Mapping)
         and _canonical(item.get("action")) in _REMOVING_ACTIONS
-        for key in _RECORD_LISTS.get(tool_name, ())
+        for key in RECORD_LISTS.get(tool_name, ())
         for item in _items(arguments, key)
     )
 
@@ -675,7 +603,7 @@ def call_impact(
     if _removes_records(tool_name, arguments):
         impact.add(DELETE)
     records = record_count(tool_name, arguments)
-    if tool_name in _WHOLE_PLAN_TOOLS or (
+    if tool_name in WHOLE_PLAN_TOOLS or (
         records and records_so_far + records > BULK_THRESHOLD
     ):
         impact.add(BULK)
@@ -717,7 +645,7 @@ def _classifier_denial(
     classified: tuple[TurnGateState, ImpactClassifier | None, TurnAuthority, str, str],
 ) -> str | None:
     """Return the denial reason when a classifier-confirmed call is unconfirmed."""
-    approval = tool_name in _APPROVAL_TOOLS
+    approval = tool_name in APPROVAL_TOOLS
     if not (impact or approval):
         return None
     state, classifier, authority, current_text, previous_text = classified

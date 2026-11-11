@@ -17,18 +17,6 @@ from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.queue import SyncJobQueueService
 
-COACH_SYNC_TOOL_NAMES = frozenset(
-    {
-        "start_intervals_plan_sync",
-        "push_strength_to_garmin",
-        "get_sync_job",
-        "sync_competitions",
-        "sync_nutrition",
-        "resolve_training_sync_conflict",
-        "start_provider_refresh",
-    }
-)
-
 
 class CoachSyncToolService:
     """Own authorization and effects for the Coach sync commands."""

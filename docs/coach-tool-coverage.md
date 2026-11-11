@@ -125,7 +125,7 @@ reusing it does not duplicate the dialogue tests.
 
 - `tests/test_coach_tool_coverage.py` runs 43 tests (`python -m unittest
   tests.test_coach_tool_coverage` passes), including declared successful tool
-  variants for every tool in `OWNER_TOOLS`, invalid-argument/reference cases and
+  variants for every tool in `TOOL_SPECS`, invalid-argument/reference cases and
   missing-provenance checks for every write tool carrying `_request`.
 - These are execution and conversation tests, not live language-model
   evaluations.

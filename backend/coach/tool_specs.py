@@ -1,6 +1,6 @@
 """One description per Coach tool; the tool tables are derived from it.
 
-A ``ToolSpec`` names the service that executes the tool's effect, the effect
+A ``ToolSpec`` names the Coach tool service the dispatch calls, the effect
 class, the write-gate domain and gate facts, the plan and transaction traits,
 and the German receipt and action labels. The schema sent to the model stays in
 ``backend/coach/tool_schemas.py``.
@@ -29,7 +29,7 @@ UNDO = "undo"
 REMOTE_INTERVALS = "remote_intervals"
 REMOTE_GARMIN = "remote_garmin"
 
-# The services that execute a tool's effect.
+# The Coach tool service the dispatch calls (it may delegate further).
 READS = "CoachReadToolService"
 PROFILE_UPDATE = "CoachProfileUpdateService"
 ATHLETE_RECORDS = "CoachAthleteRecordToolService"
@@ -406,7 +406,3 @@ EXTERNAL_FOOD_LOOKUP_TOOLS = _names(lambda spec: spec.external_food_lookup)
 SYNC_TOOL_NAMES = _names(lambda spec: spec.owner == SYNC)
 OPERATION_LABELS = {spec.name: spec.done for spec in TOOL_SPECS if spec.done}
 ACTION_LABELS = {spec.name: spec.action for spec in TOOL_SPECS if spec.action}
-OWNER_TOOLS: dict[str, frozenset[str]] = {
-    owner: frozenset(spec.name for spec in TOOL_SPECS if spec.owner == owner)
-    for owner in dict.fromkeys(spec.owner for spec in TOOL_SPECS)
-}

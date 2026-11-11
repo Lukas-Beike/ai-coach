@@ -13,7 +13,8 @@ from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.planning_change_tools import CoachPlanningChangeToolService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.read_tools import CoachReadToolService
-from backend.coach.sync_tools import COACH_SYNC_TOOL_NAMES, CoachSyncToolService
+from backend.coach.sync_tools import CoachSyncToolService
+from backend.coach.tool_specs import SYNC_TOOL_NAMES
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.errors import AppError
 
@@ -77,7 +78,7 @@ class CoachToolDispatchService:
             return self._training_templates.execute(arguments, intent)
         if name == "apply_workout_library_plan":
             return self._library_plans().execute(arguments, intent)
-        if name in COACH_SYNC_TOOL_NAMES:
+        if name in SYNC_TOOL_NAMES:
             sync_result = self._sync_tools().execute(
                 name,
                 arguments,

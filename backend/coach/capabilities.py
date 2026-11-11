@@ -1,136 +1,58 @@
-"""Stable Coach tool metadata derived from the executable schemas."""
+"""Stable Coach tool metadata derived from the executable schemas and tool specs."""
 
 from __future__ import annotations
 
 from typing import Any
 
-OWNER_TOOLS = {
-    "CoachReadToolService": {
-        "read_coach_context",
-        "read_profile",
-        "read_training_state",
-        "list_recent_activities",
-        "get_activity_details",
-        "get_training_report",
-        "read_training_records",
-        "list_workout_library",
-        "list_planned_workouts",
-        "list_change_history",
-        "list_competitions",
-        "list_training_plans",
-        "get_sync_job",
-        "read_nutrition",
-        "lookup_food",
-        "calculate_food_nutrition",
-    },
-    "CoachProfileUpdateService": {"update_profile"},
-    "CoachAthleteRecordToolService": {
-        "save_checkin",
-        "save_activity_feedback",
-        "delete_activity_feedback",
-        "save_competition",
-        "delete_competition",
-        "save_nutrition_template",
-        "save_nutrition_product",
-        "delete_nutrition_template",
-        "log_nutrition_template",
-        "save_nutrition_entry",
-        "update_nutrition_entry",
-        "delete_nutrition_entry",
-        "save_equipment",
-        "assign_activity_equipment",
-        "confirm_activity_session",
-        "split_activity_session",
-        "merge_activity_sessions",
-        "log_equipment_maintenance",
-    },
-    "CoachPlanArtifactToolService": {"stage_training_plan", "commit_training_plan"},
-    "CoachPlanningChangeService": {
-        "replace_training_plan",
-        "apply_training_patch",
-        "apply_training_changes",
-    },
-    "TrainingTemplateToolService": {"manage_training_templates"},
-    "CoachLibraryPlanToolService": {"apply_workout_library_plan"},
-    "CoachSyncToolService": {
-        "start_provider_refresh",
-        "start_intervals_plan_sync",
-        "push_strength_to_garmin",
-        "sync_competitions",
-        "resolve_training_sync_conflict",
-        "sync_nutrition",
-    },
-    "CoachPlanningActionToolService": {
-        "preview_adaptive_replan",
-        "apply_adaptive_replan",
-        "update_training_plan",
-        "undo_training_change",
-    },
-    "CoachDialogueActionService": {"clarify_coach_request", "cancel_coach_request"},
-}
+from backend.coach.tool_specs import (
+    CONDITIONAL_REMOTE_WRITE,
+    CONTROL,
+    OPERATION_LABELS,
+    PROVIDER_READ_JOB,
+    READ,
+    REMOTE_WRITE,
+    SPECS,
+)
 
-REMOTE_WRITE_TOOLS = frozenset(
-    {
-        "start_intervals_plan_sync",
-        "push_strength_to_garmin",
-        "sync_competitions",
-        "sync_nutrition",
-    }
-)
-CONDITIONAL_REMOTE_WRITE_TOOLS = frozenset(
-    {"resolve_training_sync_conflict", "apply_adaptive_replan"}
-)
-PROVIDER_READ_JOB_TOOLS = frozenset(
-    {"start_provider_refresh"}
-)
-CONTROL_TOOLS = frozenset({"clarify_coach_request", "cancel_coach_request"})
+# Authorization and receipt class per effect class.
+_EFFECT_POLICY = {
+    READ: ("none", "read_only"),
+    CONTROL: ("pending_request", "turn_state"),
+    PROVIDER_READ_JOB: ("request_scope", "durable_effect"),
+    REMOTE_WRITE: ("request_scope+athlete_approval", "durable_effect"),
+    CONDITIONAL_REMOTE_WRITE: (
+        "request_scope+athlete_approval_when_remote",
+        "durable_effect",
+    ),
+}
+_LOCAL_WRITE_POLICY = ("request_scope", "durable_effect")
 
 
 def build_capability_catalog(
     structured_tools: list[dict[str, Any]],
     dialogue_tools: list[dict[str, Any]],
-    read_only_tools: set[str],
-    effect_labels: dict[str, str],
 ) -> dict[str, dict[str, Any]]:
-    owners = {name: owner for owner, names in OWNER_TOOLS.items() for name in names}
     canonical_schemas = {tool["name"]: tool for tool in structured_tools}
     dialogue_schemas = {tool["name"]: tool for tool in dialogue_tools}
     schemas = {**canonical_schemas, **dialogue_schemas}
     catalog = {}
     for name, schema in schemas.items():
-        if name not in owners:
+        spec = SPECS.get(name)
+        if spec is None:
             raise ValueError(f"Coach tool has no capability owner: {name}")
-        effect, authorization, receipt = _tool_effect(name, read_only_tools)
-        if receipt == "durable_effect" and name not in effect_labels:
+        authorization, receipt = _EFFECT_POLICY.get(spec.effect, _LOCAL_WRITE_POLICY)
+        if receipt == "durable_effect" and name not in OPERATION_LABELS:
             raise ValueError(f"Coach mutation has no receipt label: {name}")
         catalog[name] = {
             "name": name,
             "schema": schema,
-            "owner": owners[name],
-            "effect": effect,
+            "owner": spec.owner,
+            "effect": spec.effect,
             "authorization": authorization,
             "receipt": receipt,
             "surface": _tool_surface(name, canonical_schemas, dialogue_schemas),
         }
     return catalog
-
-
-def _tool_effect(name: str, read_only_tools: set[str]) -> tuple[str, str, str]:
-    if name in read_only_tools:
-        return "read", "none", "read_only"
-    if name in CONTROL_TOOLS:
-        return "control", "pending_request", "turn_state"
-    if name in PROVIDER_READ_JOB_TOOLS:
-        return "provider_read_job", "request_scope", "durable_effect"
-    if name in REMOTE_WRITE_TOOLS:
-        return "remote_write", "request_scope+athlete_approval", "durable_effect"
-    if name in CONDITIONAL_REMOTE_WRITE_TOOLS:
-        return (
-            "conditional_remote_write",
-            "request_scope+athlete_approval_when_remote",
-            "durable_effect",
-        )
-    return "local_write", "request_scope", "durable_effect"
 
 
 def _tool_surface(
