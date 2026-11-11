@@ -1730,8 +1730,9 @@ function appendHistoryPageButton(root, area) {
   });
   if (chat && "IntersectionObserver" in globalThis) {
     const observer = new IntersectionObserver((entries) => {
-      // Wait until the initial jump to the latest message has settled; the next intersection re-arms loading.
-      if (!entries.some((entry) => entry.isIntersecting) || state.chatInitialScrollPending || state.chatScrollRestoring) return;
+      // Wait until the initial jump to the latest message has settled and the start answers
+      // replaced the cached messages, whose cursor may be stale; the next intersection re-arms loading.
+      if (!entries.some((entry) => entry.isIntersecting) || state.chatInitialScrollPending || state.chatScrollRestoring || state.chatCacheSyncing) return;
       observer.disconnect();
       if (button.disabled) return;
       autoLoad = true;

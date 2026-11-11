@@ -105,6 +105,17 @@ test("cached latest messages show before the start answers and older ones page i
   await expect(page.getByRole("status").filter({ hasText: "Nachrichten werden synchronisiert…" })).toBeVisible();
   await expect(page.locator("#chatJumpToComposer")).toBeHidden();
   await expect.poll(newestInView).toBe(true);
+  // Scrolling up during the sync must not page in from the cached cursor: the
+  // older-history button stays idle until the start answers have replaced the cache.
+  const historyButton = page.locator('#messages [data-page-area="chat"]');
+  await page.mouse.wheel(0, -100_000);
+  await expect(historyButton).toBeInViewport();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(historyButton).toBeEnabled();
+  // A request would be recorded outside the page; give a wrongly started one time to arrive.
+  await page.waitForTimeout(300);
+  expect(requestedCursors).toEqual([]);
+  await expect(cached).toHaveCount(CACHE_LIMIT);
   // Leaving and returning to the Coach during the sync starts at the newest message again.
   await page.evaluate(() => { location.hash = "#plan"; });
   await expect(page.locator("#chatPanel")).not.toHaveClass(/active/);
