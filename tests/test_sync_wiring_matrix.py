@@ -1,6 +1,7 @@
 """Every (provider, job type) reaches its provider service through the real wiring.
 
-The user and the Coach start sync jobs over ``POST /api/sync/jobs``. This matrix
+The user and the Coach start sync jobs over ``POST /api/sync/jobs``; only the
+nutrition export is enqueued by the Coach card directly (#2137). This matrix
 drives each pair the registry declares through the real built-in runtime
 bindings, the real job queue and store, payload normalization, the real executor
 and the real outcome service, on a temporary SQLite database. Fakes stand in only
@@ -97,6 +98,8 @@ EXPECTED_PAIRS: Final = frozenset(
         (CALENDAR_ID, "refresh"),
     }
 )
+# Pairs only the Coach card enqueues; the job route rejects them.
+COACH_ONLY: Final = frozenset({(INTERVALS_ID, "nutrition_sync")})
 # Providers whose descriptor carries a not_configured_message.
 CONFIGURABLE: Final = frozenset({INTERVALS_ID, GARMIN_ID, WAHOO_ID})
 
@@ -334,6 +337,12 @@ class Harness:
             provider_configured=self.runtime.provider_configured,
         )
 
+    def start(self, provider: str, job_type: str, payload: dict[str, Any]) -> dict:
+        """Start a pair the way its client does: the route, or the Coach card."""
+        if (provider, job_type) in COACH_ONLY:
+            return self.queue.enqueue(provider, job_type, payload, requested_by="coach")
+        return self.post(provider, job_type, payload)
+
     def post(self, provider: str, job_type: str, payload: dict[str, Any]) -> dict:
         status, job = self.endpoint.execute(
             JOBS, {"provider": provider, "type": job_type, "payload": payload}
@@ -378,7 +387,7 @@ class ProviderJobWiringTests(unittest.TestCase):
             with self.subTest(provider=provider, type=job_type):
                 harness = Harness(self)
 
-                job = harness.post(provider, job_type, payload)
+                job = harness.start(provider, job_type, payload)
 
                 self.assertEqual(
                     (provider, job_type, "queued"),

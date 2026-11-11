@@ -13,9 +13,9 @@ The system SHALL start a nutrition export only from a sync the athlete names, ap
 - **WHEN** a client posts to `/api/nutrition/sync`
 - **THEN** the nutrition routes do not handle it and no nutrition-export job is enqueued.
 
-#### Scenario: Unapproved export on the job route
-- **WHEN** a client posts a `nutrition_sync` job for Intervals.icu to `/api/sync/jobs` without an `approval_manifest`, with a `date`, a `pending_limit` or nothing
-- **THEN** the route answers 400 and no nutrition-export job is enqueued.
+#### Scenario: Export on the job route
+- **WHEN** a client posts a `nutrition_sync` job for Intervals.icu to `/api/sync/jobs`, with a `date`, a `pending_limit`, a client-built `approval_manifest` or nothing
+- **THEN** the route answers 400 and no nutrition-export job is enqueued; only the approved Coach card enqueues the export, directly through the queue.
 
 #### Scenario: Export pending dates
 - **WHEN** the approved Coach action covers pending dates
