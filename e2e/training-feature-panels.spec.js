@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { showCalendarEntry } = require("./helpers/ui");
 
 test("@responsive Garmin metric export sits in Anbindungen and shows its receipt", async ({ page }) => {
   await page.goto("/#more/connections");
@@ -182,14 +183,14 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#seasonPreparation svg, #seasonPreparation form")).toHaveCount(0);
 
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
-  await expect(page.locator(".planned-week[open] .planned-day").first()).toBeVisible();
+  await expect(page.locator(".planned-week .planned-day").first()).toBeVisible();
   await expect(page.locator(".planned-day-metrics, .planned-day-form")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Pers.nliche Erholung/ })).toHaveCount(0);
   await expect(page.locator(".planned-insights-title").filter({ hasText: "Check-in & Erholung" })).toHaveCount(0);
   // The fixture's Garmin FTP colors absolute watt targets, so the label may name estimated zones.
-  const plannedProfile = page.locator(".calendar-workout-profile[aria-label^='Geplantes Intervallprofil']").first();
+  const plannedProfile = page.locator("summary .calendar-workout-profile[aria-label^='Geplantes Intervallprofil']").first();
   await plannedProfile.evaluate((profile) => {
-    for (let section = profile.closest("details"); section; section = section.parentElement.closest("details")) section.open = true;
+    for (let section = profile.closest("details"); section; section = section.parentElement.closest("details")) if (!section.classList.contains("planned-entry")) section.open = true;
   });
   await expect(plannedProfile).toBeVisible();
   await expect(page.locator(".calendar-workout-profile[aria-label='Aufgezeichnetes Belastungsprofil']").first()).toBeAttached();
@@ -223,12 +224,14 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
 test("@responsive run workouts get zone profiles on the time and the distance axis", async ({ page, request }) => {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
   await page.goto("/#plan/overview");
-  await expect(page.locator(".planned-week[open] .planned-day").first()).toBeVisible();
+  await expect(page.locator(".planned-week .planned-day").first()).toBeVisible();
   const profileOf = async (name) => {
-    const profile = page.locator(".planned-entry").filter({ hasText: name }).locator(".calendar-workout-profile[aria-label='Geplantes Intervallprofil']");
+    await showCalendarEntry(page, name);
+    // The card's zone bar; an open card's detail repeats it larger.
+    const profile = page.locator(".planned-entry").filter({ hasText: name }).locator("summary .calendar-workout-profile[aria-label='Geplantes Intervallprofil']");
     await expect(profile).toHaveCount(1);
     await profile.evaluate((node) => {
-      for (let section = node.closest("details"); section; section = section.parentElement.closest("details")) section.open = true;
+      for (let section = node.closest("details"); section; section = section.parentElement.closest("details")) if (!section.classList.contains("planned-entry")) section.open = true;
     });
     await expect(profile).toBeVisible();
     return profile;

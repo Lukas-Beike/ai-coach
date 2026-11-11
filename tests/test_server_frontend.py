@@ -802,9 +802,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("function renderPlanned(", plan_views)
         self.assertIn("function plannedWeekSummary(", plan_views)
         self.assertIn('document.createElement("details")', plan_views)
-        self.assertIn(
-            "weekKey === currentWeekKey || weekKey === nextWeekKey", plan_views
-        )
+        self.assertIn("selectedWeekKey = currentWeekKey", plan_views)
         self.assertIn("state.data?.planning_compliance", plan_views)
         self.assertIn("function plannedWeatherLabel(", plan_views)
         self.assertIn("function calendarActualActivity(", plan_views)

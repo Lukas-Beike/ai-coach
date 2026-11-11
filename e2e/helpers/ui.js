@@ -63,7 +63,28 @@ function countRequests(page, pattern) {
   };
 }
 
+// Steps the calendar's week view to the week that holds dateKey.
+async function showCalendarDay(page, dateKey) {
+  for (let step = 0; step < 60; step += 1) {
+    if (await page.locator(`.planned-day[data-date="${dateKey}"]`).count()) return;
+    const shown = await page.locator(".planned-week").getAttribute("data-week-key");
+    await page.locator(`.planned-week-step[data-week-step="${dateKey < shown ? -1 : 1}"]`).click();
+  }
+  throw new Error(`calendar day ${dateKey} is outside the shown weeks`);
+}
+
+// Steps the week view to the first calendar entry with this name.
+async function showCalendarEntry(page, name) {
+  const dateKey = await page.evaluate((wanted) => {
+    const entry = (state.data?.training_calendar || []).find((item) => item?.name === wanted);
+    return entry ? plannedEventDate(entry) : "";
+  }, name);
+  if (dateKey) await showCalendarDay(page, dateKey);
+}
+
 module.exports = {
+  showCalendarDay,
+  showCalendarEntry,
   contrastRatio,
   rectOf,
   isFullyAbove,

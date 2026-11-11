@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
+const { showCalendarDay } = require("./helpers/ui");
 
 async function openCalendar(page, request) {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
@@ -30,9 +31,8 @@ async function renderUnits(page) {
       unit("changed-unit", "Seit dem Senden geändert", { intervals: true }),
     ];
     renderPlanned(state.data.training_calendar);
-    document.querySelectorAll(".planned-week").forEach((week) => { week.open = true; });
     return date;
-  });
+  }).then(async (date) => { await showCalendarDay(page, date); return date; });
 }
 
 test("@responsive the calendar week offers one sync button only while a unit still waits", async ({ page, request }) => {
@@ -70,14 +70,14 @@ test("@responsive the week sync button is not nested inside the week summary", a
   expect(results.violations.filter((violation) => violation.nodes.some((node) => node.target.join(" ").includes("planned-week")))).toEqual([]);
 });
 
-test("@responsive an endurance unit shows a tall zone-coloured workout profile", async ({ page, request }, testInfo) => {
+test("@responsive an endurance unit shows a zone-coloured workout bar", async ({ page, request }, testInfo) => {
   await openCalendar(page, request);
   const date = await renderUnits(page);
-  const profile = page.locator(`.planned-day[data-date="${date}"] .planned-entry`).first().locator(".calendar-workout-profile");
+  const profile = page.locator(`.planned-day[data-date="${date}"] .planned-entry`).first().locator("summary .calendar-workout-profile");
   await profile.scrollIntoViewIfNeeded();
+  // The card's zone bar is 16 px on narrow screens (#2189) and 10 px beside the detail pane.
   const box = await profile.boundingBox();
-  expect(box.height).toBeGreaterThanOrEqual(44);
-  expect(box.height).toBeLessThanOrEqual(52);
+  expect(box.height).toBe(page.viewportSize().width >= 1100 ? 10 : 16);
   // Bars differ in height by intensity, zones differ in colour, intervals stay separate shapes.
   const shapes = await profile.locator("polygon").evaluateAll((nodes) => nodes.map((node) => ({
     zone: node.getAttribute("data-zone"),
