@@ -164,8 +164,8 @@ class PlannedUnitService:
     ) -> dict[str, Any] | None:
         """Restore one audited local state inside the caller-owned transaction."""
         if target is None:
-            if self._hide_intervals_linked(db, entity_id, current):
-                return None
+            if hidden := self._hide_intervals_linked(db, entity_id, current):
+                return hidden
             db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
             # A pushed Garmin workout stays removable by its link.
             _REMOTE_LINKS.delete_for_entity(
@@ -187,7 +187,7 @@ class PlannedUnitService:
 
     def _hide_intervals_linked(
         self, db: Any, entity_id: str, current: dict[str, Any] | None
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         """Hide an undone creation that already has an Intervals.icu event.
 
         The hidden unit keeps its links, so the leftover listing and the next
@@ -196,7 +196,7 @@ class PlannedUnitService:
         try:
             payload = json.loads((current or {}).get("payload") or "{}")
         except TypeError, ValueError:
-            return False
+            return None
         remote_id = _REMOTE_LINKS.resolve_remote_id(
             db,
             RemoteEntityKind.PLANNED_UNIT,
@@ -204,7 +204,7 @@ class PlannedUnitService:
             payload.get("remote_event_id") if isinstance(payload, dict) else None,
         )
         if not isinstance(payload, dict) or not remote_id:
-            return False
+            return None
         hidden = {
             **payload,
             "remote_event_id": remote_id,
@@ -217,7 +217,7 @@ class PlannedUnitService:
             "sync_conflict='', updated_at=? WHERE local_id = ?",
             (json.dumps(hidden, ensure_ascii=False), self._now(), entity_id),
         )
-        return True
+        return hidden
 
     def _restore_existing_in_transaction(
         self,

@@ -1252,11 +1252,9 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(self.state(), ([], [], 0))
 
     def test_undoing_a_creation_keeps_the_links_of_a_pushed_workout(self):
-        entity_id = str(self.id)
-        entry = planned_units.normalize_planned_unit(self.workout(), local_id=entity_id)
+        entity_id = str(self.service.create(self.workout())["id"])
         repository = RemoteLinkRepository()
         with self.manager.unit_of_work() as db:
-            self.service.insert(db, entry)
             for provider in ("intervals", "garmin"):
                 repository.upsert(
                     db,
@@ -1268,12 +1266,25 @@ class PlannedUnitServiceTests(unittest.TestCase):
                         remote_id=f"{provider}-1",
                     ),
                 )
-            current = dict(
-                db.execute(
-                    "SELECT * FROM planned_units WHERE local_id=?", (entity_id,)
-                ).fetchone()
-            )
-            self.service.restore_in_transaction(db, entity_id, current, None, "create")
+        undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, None),
+            None,
+            None,
+            None,
+            self.service,
+            None,
+            PlanningRevisionService(PlanningStateRepository(), lambda: NOW),
+            profile_mutation_coordinator=threading.RLock(),
+        )
+        with self.manager.reader() as db:
+            create_id = db.execute(
+                "SELECT id FROM change_history WHERE action='create'"
+            ).fetchone()["id"]
+
+        result = undo.apply(undo.preview(create_id)["proposal"]["payload"])
+
+        with self.manager.reader() as db:
             kept = [
                 link.provider
                 for link in repository.list_for_entity(
@@ -1281,12 +1292,29 @@ class PlannedUnitServiceTests(unittest.TestCase):
                 )
             ]
             orphans, _count = find_intervals_orphans(db, date(2026, 9, 20))
-        # The Intervals.icu event stays reachable as a hidden leftover (#2135).
+        # The Intervals.icu event stays reachable as a hidden leftover (#2135):
+        # hidden exactly like a deleted unit, and nothing remote happens now.
+        self.assertTrue(result["remote_untouched"])
         self.assertEqual(["garmin", "intervals"], sorted(kept))
         self.assertEqual([entity_id], [orphan.local_id for orphan in orphans])
-        hidden = json.loads(self.state()[0][0]["payload"])
-        self.assertTrue(hidden["local_deleted"])
-        self.assertEqual("intervals-1", hidden["remote_event_id"])
+        row = self.state()[0][0]
+        hidden = json.loads(row["payload"])
+        self.assertEqual(
+            (True, True, "local", "local", 1, "intervals-1"),
+            (
+                hidden["local_deleted"],
+                hidden["archived"],
+                hidden["sync_status"],
+                row["sync_state"],
+                row["sync_dirty"],
+                hidden["remote_event_id"],
+            ),
+        )
+        # A second undo of the same creation neither revives nor duplicates it.
+        with self.assertRaises(AppError) as again:
+            undo.preview(create_id)
+        self.assertEqual(409, again.exception.status)
+        self.assertEqual(1, len(self.state()[0]))
 
     def test_restore_in_transaction_rejects_conflict_and_corrupt_payload(self):
         entity_id = str(self.id)
