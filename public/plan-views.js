@@ -687,6 +687,10 @@ function plannedEntryKey(entry, dateKey) {
 let openPlannedEntries = new Set();
 // Calendar cards whose "Details" are open, so a re-render keeps them open (#2258).
 const openActivityDetails = new Set();
+
+function completedSessionIds(calendar) {
+  return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
+}
 const plannedFocusStatuses = new Map();
 
 // The summary chip follows the saved focus without waiting for the next reload.
@@ -1359,7 +1363,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     more.append(moreSummary, panel);
     // A re-render (sync, reload) keeps an opened "Details" open and loads it again.
     more.addEventListener("toggle", () => {
-      if (entryKey) openActivityDetails[more.open ? "add" : "delete"](entryKey);
+      if (entryKey && more.open) openActivityDetails.add(entryKey);
+      else if (entryKey) openActivityDetails.delete(entryKey);
       if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual);
     });
     more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
@@ -1822,10 +1827,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // split or edited session is read again; an answer for the dropped pages is ignored.
   function resetOlderSessions() {
     Object.assign(olderSessions, { items: [], cursor: undefined, loading: false, generation: olderSessions.generation + 1 });
-  }
-
-  function completedSessionIds(calendar) {
-    return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
   }
 
   function withOlderSessions(calendar) {
