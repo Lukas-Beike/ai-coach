@@ -126,11 +126,11 @@ server {
 
 ## Provider credentials in the app
 
-Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbindungen > Zugangsdaten** instead of in `.env`:
+Intervals.icu, OpenAI, Garmin Personal API key (with its expiry date), Wahoo and Yazio credentials can be entered under **Mehr > Anbindungen > Zugangsdaten** instead of in `.env`:
 
 - **Where values live:** a value saved in the app is stored in the encrypted database and takes precedence. The matching environment variable is a read-only fallback that applies again after the stored value is removed.
 - **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
-- **Secrets:** API keys and client secrets are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID) are shown as the current value.
+- **Secrets:** API keys, client secrets and passwords are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID, Garmin key expiry date) are shown as the current value.
 - **Timing:** changes apply without a container restart.
 - **Password re-entry:** setting the OpenAI base URL or the Wahoo client ID or secret asks for the `APP_PASSWORD` again, on top of the session, because these values decide where the OpenAI key is sent and which Wahoo app is used. A wrong or missing password changes nothing. Removing a stored value needs no password.
 - **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin or Intervals.icu accounts or the Wahoo account itself, but it revokes this app's Wahoo grant at Wahoo first (best effort, like "Wahoo trennen"); a failed revoke is reported after the purge, which completes either way.
@@ -143,7 +143,7 @@ Each provider card under **Mehr > Anbindungen** shows a text chip (Verbunden, Ni
 | --- | --- | --- |
 | OpenAI | `GET {OPENAI_BASE_URL}/models` | Compatible endpoints without a model listing (404, 405, 501) report "not supported"; 401 and 403 count as rejected. |
 | Intervals.icu | `GET /athlete/{id}` | Confirms key and athlete ID, not data freshness. |
-| Garmin | Login with the stored tokens only | Needs a connection made in the app; `GARMIN_EMAIL` without tokens or a preserved token file shows "nicht konfiguriert". Never falls back to e-mail and password, and waits for no running sync (reports "busy"). The SDK does not distinguish causes, so any failure (including an outage) asks to retry or sign in again, and a success may only show that the tokens are accepted locally. A reconnect or any other change of the stored login drops the earlier result. Fixture mode (`GARMIN_FIXTURE_PATH`) reports not supported. The check is skipped while a Garmin sync runs.  |
+| Garmin | Personal API key exchange when a key is set, then login with the stored tokens when connected | A key alone is checkable; otherwise it needs a connection made in the app, and `GARMIN_EMAIL` without tokens or a preserved token file shows "nicht konfiguriert". Never falls back to e-mail and password, and waits for no running sync (reports "busy"). The SDK does not distinguish causes, so any failure (including an outage) asks to retry or sign in again, and a success may only show that the tokens are accepted locally. A reconnect or any other change of the stored login drops the earlier result. Fixture mode (`GARMIN_FIXTURE_PATH`) reports not supported. The check is skipped while a Garmin sync runs.  |
 | Wahoo | `GET /v1/user` with the stored token | Needs a completed Wahoo connection with the `user_read` scope; without it the card asks to reconnect Wahoo. Uses the same client as the sync, so it may refresh the token, and a rejected refresh disconnects Wahoo as it does for a sync. |
 | Open-Meteo | Forecast for fixed public coordinates | Needs no key; never sends the profile location. |
 | Yazio | Authentication only | See below. |
