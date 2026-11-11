@@ -91,10 +91,8 @@ IMPORT_DEBT_BASELINE = frozenset(
         ("backend/http_api/bootstrap_state.py", "backend.db.manager"),
         ("backend/http_api/library_page.py", "backend.db"),
         ("backend/http_api/public_plan.py", "backend.db.manager"),
-        ("backend/http_api/public_state.py", "backend.db.manager"),
         ("backend/http_api/readiness.py", "backend.db.manager"),
         ("backend/http_api/readiness.py", "backend.db.schema"),
-        ("backend/http_api/state_prelude.py", "backend.db.manager"),
         ("backend/http_api/state_versions.py", "backend.db"),
     }
 )

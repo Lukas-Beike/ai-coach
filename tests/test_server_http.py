@@ -390,9 +390,10 @@ class ServerHttpTests(ServerTestCase):
             "fetch",
             side_effect=AssertionError("weather must stay local"),
         ):
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)
-        self.assertTrue(state["configured"]["weather"])
-        self.assertTrue(state["weather"]["loading"])
+            configured = server.PUBLIC_STATE.bootstrap_service().read()["configured"]
+            weather = server.PUBLIC_STATE.weather_state_service().state(local_only=True)
+        self.assertTrue(configured["weather"])
+        self.assertTrue(weather["loading"])
 
     def test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility(
         self,
@@ -572,7 +573,7 @@ class ServerHttpTests(ServerTestCase):
         server.ATHLETE_DATA.checkin().save(
             {"checkin_date": "2026-08-30", "motivation": 8}
         )
-        state = server.PUBLIC_STATE.state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.feedback_state_service().feedback_state()
         self.assertEqual(state["checkins"][0]["checkin_date"], "2026-08-30")
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
@@ -580,12 +581,10 @@ class ServerHttpTests(ServerTestCase):
         config = replace(server.CONFIG, openai_api_key="")
         with patch.object(server, "CONFIG", config):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)
 
-        for result in (bootstrap, state):
-            self.assertEqual(result["usage"]["requests"], 0)
-            self.assertEqual(result["usage"]["status"], {})
-            self.assertEqual(result["usage"]["rate_limits"], {})
+        self.assertEqual(bootstrap["usage"]["requests"], 0)
+        self.assertEqual(bootstrap["usage"]["status"], {})
+        self.assertEqual(bootstrap["usage"]["rate_limits"], {})
 
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
@@ -602,7 +601,7 @@ class ServerHttpTests(ServerTestCase):
             },
         )
         server.ATHLETE_DATA.checkin().save({"checkin_date": today, "motivation": 8})
-        state = server.PUBLIC_STATE.state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
         self.assertEqual(state["daily_planning_context"][0]["date"], today)
         self.assertEqual(state["daily_planning_context"][0]["checkin"]["motivation"], 8)
 
@@ -788,23 +787,17 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(
             list(bootstrap),
             [
-                "schema_version",
                 "state_versions",
-                "plan_revision",
                 "app",
-                "skeleton",
                 "messages",
                 "messages_next_cursor",
-                "plans",
                 "library",
                 "activities",
                 "planned",
                 "training_calendar",
                 "calendar",
-                "planning_view",
                 "planning_compliance",
                 "weather",
-                "parallel_cycling",
                 "profile",
                 "competitions",
                 "checkins",
@@ -818,17 +811,14 @@ class ServerHttpTests(ServerTestCase):
                 "diagnostic_capture",
                 "intervals",
                 "provider_freshness",
-                "provider_states",
                 "provider_ids",
                 "provider_labels",
                 "garmin_sync",
                 "provider_resync",
                 "sync",
-                "running_jobs",
                 "library_sync",
                 "sync_settings",
                 "calendar_display",
-                "competition_sync",
                 "morning_checkin",
                 "coach_quick_actions",
                 "model",
@@ -841,13 +831,8 @@ class ServerHttpTests(ServerTestCase):
                 "threshold_warnings",
             ],
         )
-        self.assertEqual(bootstrap["schema_version"], 3)
         self.assertEqual(len(bootstrap["messages"]), 100)
         self.assertEqual(bootstrap["activities"], [])
-        self.assertTrue(all(bootstrap["skeleton"].values()))
-        self.assertIn("plan_revision", bootstrap)
-        self.assertIn("provider_states", bootstrap)
-        self.assertIn("running_jobs", bootstrap)
         self.assertIn("activities", bootstrap["state_versions"])
         self.assertIn("garmin", bootstrap["state_versions"])
         self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 21_000)
@@ -866,11 +851,6 @@ class ServerHttpTests(ServerTestCase):
             ),
         ):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
-        self.assertEqual(bootstrap["schema_version"], 3)
-        self.assertIn(
-            bootstrap["provider_states"]["intervals"]["status"],
-            {"not_configured", "loading", "ready", "stale", "degraded", "error"},
-        )
         self.assertEqual(bootstrap["provider_labels"]["intervals"], "Intervals.icu")
         self.assertEqual(bootstrap["provider_labels"]["garmin"], "Garmin")
         self.assertEqual(
@@ -1178,7 +1158,7 @@ class ServerHttpTests(ServerTestCase):
                 },
             },
         )
-        state = server.PUBLIC_STATE.state_service().read(local_only=True)
+        state = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
         self.assertEqual(
             state["planning_view"]["provider_window"]["end"],
             (today + timedelta(days=20)).isoformat(),
@@ -1719,7 +1699,10 @@ class ServerHttpTests(ServerTestCase):
             "upcoming_calendar": [],
         }
         store_canonical_snapshot(server, snapshot)
-        state = server.PUBLIC_STATE.state_service().read()
+        state = server.PUBLIC_STATE.bootstrap_service().read()
+        state["activities"] = server.ACTIVITY_READS.activity_read().page(
+            today=server.ATHLETE_CLOCK.now().date()
+        )["activities"]
         self.assertEqual(state["app"]["name"], "Pacecraft · AI Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
@@ -1803,9 +1786,7 @@ class ServerHttpTests(ServerTestCase):
             server.key_value_service().set(
                 "last_library_sync_at", "2026-08-31T08:00:00+00:00"
             )
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)[
-                "intervals"
-            ]
+            state = server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
         self.assertEqual(state["state"], "connected")
         self.assertNotIn("last_sync_at", state)
         self.assertEqual(
@@ -1820,9 +1801,7 @@ class ServerHttpTests(ServerTestCase):
                 "last_library_sync_error",
                 "Intervals.icu weist die Anfrage zurück (422): Invalid workout type",
             )
-            state = server.PUBLIC_STATE.state_service().read(local_only=True)[
-                "intervals"
-            ]
+            state = server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
         self.assertEqual(state["state"], "error")
         self.assertIn("422", state["last_error"])
 
@@ -2298,10 +2277,7 @@ class ServerHttpTests(ServerTestCase):
             def __exit__(self, *args):
                 self.lock.release()
 
-        for state_reader in (
-            lambda: server.PUBLIC_STATE.bootstrap_service().read(),
-            lambda: server.PUBLIC_STATE.state_service().read(),
-        ):
+        for state_reader in (lambda: server.PUBLIC_STATE.bootstrap_service().read(),):
             for update in (False, True):
                 with self.subTest(state=state_reader.__name__, update=update):
                     database_lock = ObservedDatabaseLock()

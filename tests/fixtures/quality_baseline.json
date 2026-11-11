@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "457b5050489cbaf285f4e3de491de2cc9b2e57c8",
+  "base": "2a015e5bb5aa2805bfae2e99b087dc1c1644e26c",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -116,21 +116,9 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/bootstrap_calendar.py",
-      "code": "arg-type",
-      "message_sha256": "1f0507db8f39955b7380d5ccd6ca09cdc2a0398a644e3e54cd387a5169d01c1a"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/http_api/handler.py",
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "arg-type",
-      "message_sha256": "240a573fdcc52ae76164e0da7fc0d9440c16e03cfc998f305fcaa9894ae389f7"
     },
     {
       "tool": "mypy",
@@ -230,12 +218,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "arg-type",
-      "message_sha256": "543e8ca43935d83c5d5f0cbcc6c151f0c62dcb762d86da4b81b11a3f88c52d29"
-    },
-    {
-      "tool": "mypy",
       "path": "server.py",
       "code": "arg-type",
       "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
@@ -257,12 +239,6 @@
       "path": "tests/test_planning_competitions.py",
       "code": "arg-type",
       "message_sha256": "58d592c134edf11bf3a0db0fa23ae26a324dc3e91f3a320194d8b515bba84651"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "arg-type",
-      "message_sha256": "5c719a46ad432ff2f7afe88314482d998da69c8574238521331cf1685bae3043"
     },
     {
       "tool": "mypy",
@@ -347,12 +323,6 @@
       "path": "backend/coach/background_job.py",
       "code": "arg-type",
       "message_sha256": "84e2af6fbcb3d2e67bf1b5cdc091ce429b10927169aa5e828c1d703cf79f07a3"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "arg-type",
-      "message_sha256": "8c7c0fe5ffadfce2251158cb8c8e0b47db8adab9b0cb227033a3bbaac0c8f65c"
     },
     {
       "tool": "mypy",
@@ -497,12 +467,6 @@
       "path": "tests/test_coach_turn_failures.py",
       "code": "arg-type",
       "message_sha256": "ef0f58bc633fe6a5d59efb94e2db2afed6709ff4c2d6788144a847ef64a487f7"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "arg-type",
-      "message_sha256": "f0e012ab268bd0fb513e0a057eed395cd5ed57a20bb1825e08b9f4e884eca6fd"
     },
     {
       "tool": "mypy",
@@ -956,12 +920,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_plan_selection.py",
       "code": "index",
       "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
@@ -1226,12 +1184,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "return-value",
-      "message_sha256": "2553b6187dc2afbd2ac643e581202533bab396c6e515c5be418513823cdbc81f"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_job_status.py",
       "code": "return-value",
       "message_sha256": "cb0e57b7e90918e46aae4aeb9e8c7f1b5d670835f0147ce092724938cf4b2eb2"
@@ -1343,12 +1295,6 @@
       "path": "e2e/fixture_runtime.py",
       "code": "var-annotated",
       "message_sha256": "0bb96ea92df5309b23828a6df8207d75bdaaa062ec5c639bae3e1a91216449c2"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_public_state_calendar_projection.py",
-      "code": "var-annotated",
-      "message_sha256": "0be057125dc15cfb9a7c89e80a99f013f80793a3ee42f391dc33ba827dea508e"
     },
     {
       "tool": "mypy",

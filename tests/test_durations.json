@@ -670,8 +670,6 @@
  "test_public_event_calendar.PublicEventCalendarTests": 0.02,
  "test_public_plan.PublicPlanStateServiceTests": 0.047,
  "test_public_state_assembly.PublicStateAssemblyTests": 0.017,
- "test_public_state_calendar_projection.PublicStateCalendarProjectionTests": 0.001,
- "test_public_state_prelude.PublicStatePreludeTests": 0.002,
  "test_quality_baseline.QualityBaselineTests": 0.066,
  "test_read_path_writer_independence.ReadPathWriterIndependenceTests": 0.896,
  "test_release_events.ReleaseEventTests": 0.003,

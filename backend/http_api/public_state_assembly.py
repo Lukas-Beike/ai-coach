@@ -6,7 +6,6 @@ from functools import partial
 from typing import Any
 
 from backend.canonical.records import Observation
-from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
     PublicBootstrapService,
@@ -16,13 +15,7 @@ from backend.http_api.public_performance import (
     PublicPerformanceStateService,
 )
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
-from backend.http_api.public_state import PublicStateDependencies, PublicStateService
 from backend.http_api.public_weather import PublicWeatherStateService
-from backend.http_api.state_prelude import (
-    CalendarWindowRange,
-    PublicStateLocalPrelude,
-    PublicStateWeatherPrelude,
-)
 from backend.http_api.state_versions import StateVersionService
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import (
@@ -107,8 +100,6 @@ class PublicStateCalendarSettings:
     local_date: Callable[[], Any]
     local_now: Callable[[], Any]
     external_calendar_window_days: Callable[[], int]
-    calendar_history_days: Callable[[], int]
-    calendar_future_days: Callable[[], int]
     sync_period_defaults: Callable[[], Any]
     all_sync_days: Callable[[], int]
     planned_workout_label: Callable[[], str]
@@ -179,8 +170,6 @@ class PublicStateAssembly:
         self._local_date = calendar.local_date
         self._local_now = calendar.local_now
         self._external_calendar_window_days = calendar.external_calendar_window_days
-        self._calendar_history_days = calendar.calendar_history_days
-        self._calendar_future_days = calendar.calendar_future_days
         self._sync_period_defaults = calendar.sync_period_defaults
         self._all_sync_days = calendar.all_sync_days
         self._planned_workout_label = calendar.planned_workout_label
@@ -312,7 +301,6 @@ class PublicStateAssembly:
                 sync_job_queue_service=self._sync_job_queue().service,
                 state_version_service=self.state_version_service,
                 coach_message_service=conversation.message_service,
-                training_plan_service=planning.training_plan,
                 local_calendar_events=self._calendar_local().local_calendar_events,
                 planning_state=self._planning_season().planning_state,
                 adaptive_replan_preview_service=self._adaptive_replan_preview_service,
@@ -369,86 +357,3 @@ class PublicStateAssembly:
                 sport_thresholds=self._plan_zone_thresholds,
             )
         )
-
-    def local_prelude_service(self) -> PublicStateLocalPrelude:
-        return PublicStateLocalPrelude(
-            self._sync_persistence().state_repository(),
-            self._athlete_data().activity_feedback(),
-            self._planning_data().planned_unit(),
-            self._weather().service(),
-            self._database_manager(),
-            self._local_date,
-            CalendarWindowRange(
-                self._calendar_history_days(), self._calendar_future_days()
-            ),
-            self.performance_state_service().canonical_inputs,
-            self.activity_summary_source(),
-        )
-
-    def weather_prelude_service(self) -> PublicStateWeatherPrelude:
-        return PublicStateWeatherPrelude(
-            self._weather().service(), self._adaptive_preview_followup_service()
-        )
-
-    def calendar_projection_service(self) -> PublicStateCalendarProjection:
-        config = self._config()
-        planning = self._planning_data()
-        athlete = self._athlete_data()
-        calendar = self._external_calendar()
-        return PublicStateCalendarProjection(
-            athlete.checkin(),
-            planning.competition(),
-            calendar.reader(),
-            calendar.sync_service(),
-            self._daily_planning_context_service(),
-            external_calendar_configured=bool(config.calendar_ical_url),
-            external_calendar_window_days=self._external_calendar_window_days(),
-            default_workout_name=self._planned_workout_label(),
-            today=self._local_date,
-            zone_configurations=athlete.zones().configurations,
-        )
-
-    def state_service(self) -> PublicStateService:
-        database_lock = self._database_lock()
-        with database_lock:
-            config = self._config()
-            planning = self._planning_data()
-            athlete = self._athlete_data()
-            sync = self._sync_persistence()
-            garmin = self._garmin()
-            provider = self._provider_sync()
-            return PublicStateService(
-                PublicStateDependencies(
-                    local_prelude=self.local_prelude_service(),
-                    weather_prelude=self.weather_prelude_service(),
-                    calendar_projection=self.calendar_projection_service(),
-                    database_manager=self._database_manager,
-                    key_values=self._key_value_service(),
-                    app_name=self._app_name,
-                    app_version=self._app_version,
-                    config=config,
-                    settings=self._settings(),
-                    coach_messages=self._coach_conversation().message_service(),
-                    training_plans=planning.training_plan(),
-                    workout_library=planning.workout_library(),
-                    profile=athlete.profile(),
-                    public_feedback=self.feedback_state_service(),
-                    public_performance=self.performance_state_service(),
-                    sync_state=sync.state_repository(),
-                    provider_freshness=provider.freshness_service(),
-                    garmin_sync_state=garmin.sync_state_service(),
-                    sync_public_state=self.sync_public_state_service(),
-                    workout_library_sync_running=self._workout_library_sync_running(),
-                    workout_library_sync_state=self._workout_library_sync().sync_state_service(),
-                    garmin_sync=garmin.sync_service(),
-                    provider_resync=self._provider_resync().full_resync_service(),
-                    planning_preview=self._adaptive_replan_preview_service(),
-                    morning_checkin=self._morning_checkin_state_service(),
-                    coach_quick_actions=self._coach_quick_actions_service(),
-                    provider_state=self._provider_state_service(),
-                    sync_period_defaults=self._sync_period_defaults(),
-                    all_sync_days=self._all_sync_days(),
-                    local_now=self._local_now(),
-                    provider_credentials=self._provider_credentials,
-                )
-            )

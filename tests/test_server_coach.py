@@ -651,9 +651,9 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             result["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich"
         )
-        activity = server.PUBLIC_STATE.state_service().read(local_only=True)[
-            "activities"
-        ][0]
+        activity = server.ACTIVITY_READS.activity_read().page(
+            today=server.ATHLETE_CLOCK.now().date()
+        )["activities"][0]
         self.assertEqual(activity["activity_feedback"]["activity_id"], activity["id"])
         self.assertTrue(activity["id"].startswith("act_"))
         self.assertEqual(

@@ -354,7 +354,6 @@ class TrainingProfileSelectionService:
             "source": source,
             "cache_coverage": {
                 "records": len(eligible),
-                "cached_records": len(eligible),
                 "usable_records": len(usable),
                 "unknown_records": len(eligible) - len(usable),
                 # Rides only: the power bests cannot come from runs.
