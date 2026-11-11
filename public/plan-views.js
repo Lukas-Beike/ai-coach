@@ -1593,7 +1593,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     title.id = "plannedMonthTitle";
     title.textContent = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(dateFromKey(monthKey));
     // A month step selects today when it lies in that month, else the month's first loaded day.
-    const stepTo = (key) => (todayKey.startsWith(key.slice(0, 7)) ? todayKey : [key, firstWeekKey].sort().at(-1));
+    const stepTo = (key) => (todayKey.startsWith(key.slice(0, 7)) ? todayKey : [key, firstWeekKey].sort((left, right) => left.localeCompare(right)).at(-1));
     heading.append(title,
       plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(monthStartKey(monthKey, -1))) : null, "month"),
       plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
