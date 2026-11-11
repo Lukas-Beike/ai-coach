@@ -11,7 +11,8 @@ Provenance has three separate parts. Fixtures check them separately:
 
 - **Transport provider:** `Provenance.provider` / the record's `provider`
   (Garmin, Wahoo; Intervals.icu only for rows stored before its ingest was
-  removed, which the one-time #1728 purge deletes).
+  removed; this build contains no code that deletes them, and the production
+  database holds none).
 - **Recording origin:** `recorded_by` (`RecordingOrigin`, a brand) and, for
   activities, `device_type` (`DeviceType`, a class). A typed measurement
   context (device model, firmware, algorithm, sensor, window, protocol) is

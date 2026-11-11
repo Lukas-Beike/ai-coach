@@ -76,7 +76,7 @@ Text and records from providers are untrusted data, never instructions.
 
 ## Canonical data model
 
-Provider payloads are stored raw and projected into provider-neutral records: activity records, observations, and detail sets. A workout recorded by several devices becomes one session whose provider copies stay stored. Each value keeps its provenance, a per-metric source rule picks the value shown (a locally confirmed value leads for thresholds), and a newer mapper version re-projects the stored raw data without a new download. See [docs/canonical-model.md](docs/canonical-model.md) and the field-by-field [canonical field map](docs/canonical-field-map.md).
+Provider payloads are stored raw and projected into provider-neutral records: activity records, observations, and detail sets. A workout recorded by several devices becomes one session whose provider copies stay stored. Each value keeps its provenance, a per-metric source rule picks the value shown (a locally confirmed value leads for thresholds), and a newer mapper version re-projects the stored raw records without a new download (activity detail is mapped from files that are not stored and is fetched again inside the sync or replay window). See [docs/canonical-model.md](docs/canonical-model.md) and the field-by-field [canonical field map](docs/canonical-field-map.md).
 
 ## Performance methods
 
