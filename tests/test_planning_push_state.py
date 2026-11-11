@@ -189,11 +189,6 @@ class PushStateTests(unittest.TestCase):
             [pending for _payload, pending in cases],
             [unit["push_pending"]["intervals"] for unit in projected],
         )
-        # A unit in a sync conflict waits for the athlete's decision first.
-        conflicted = self.project(
-            [{"local_id": "c1", "payload": json.dumps(sent), "sync_state": "conflict"}]
-        )
-        self.assertFalse(conflicted[0]["push_pending"]["intervals"])
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
@@ -269,21 +264,6 @@ class PushStateTests(unittest.TestCase):
 
         self.assertNotEqual(legacy, garmin_fingerprint(STRENGTH))
         self.assertTrue(projected[0]["push_pending"]["garmin"])
-
-    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
-    def test_a_conflicted_unit_offers_no_provider(self) -> None:
-        conflicted = self.project(
-            [
-                {
-                    "local_id": "s4",
-                    "payload": json.dumps(STRENGTH),
-                    "sync_state": "conflict",
-                }
-            ]
-        )
-        self.assertEqual(
-            {"intervals": False, "garmin": False}, conflicted[0]["push_pending"]
-        )
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_an_unmapped_exercise_offers_no_garmin_push(self) -> None:

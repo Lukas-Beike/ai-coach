@@ -467,6 +467,9 @@ def replace_source_rows(
                 for link in gear_links
             ],
         ),
+        # No mapper emits power curves any more; re-ingest still retires old rows.
+        (_POWER_CURVE, []),
+        (_POWER_CURVE_FETCH, []),
     )
     results = [
         _replace(

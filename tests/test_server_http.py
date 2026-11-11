@@ -91,9 +91,9 @@ class ServerHttpTests(ServerTestCase):
                     connection = http.client.HTTPConnection(
                         "127.0.0.1", httpd.server_address[1], timeout=10
                     )
-                    connection.request(
-                        method, path, body=b"{}" if method != "GET" else None
-                    )
+                    # No body: the server rejects before reading one, and an unread
+                    # body can make Windows abort the connection.
+                    connection.request(method, path)
                     statuses[method, path] = connection.getresponse().status
                     connection.close()
         self.assertEqual(401, statuses["GET", "/api/bootstrap"])

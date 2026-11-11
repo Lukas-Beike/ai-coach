@@ -1302,8 +1302,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // the catalogue suggestions or goes to the Coach.
   function plannedGarminBlocked(entry, dateKey, todayKey, actual) {
     const reason = entry.push_blocked?.[providerIds().garmin];
-    // A unit in a sync conflict shows only its conflict; that decision comes first.
-    if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity || entry.sync_status === "conflict") return null;
+    if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity) return null;
     const block = document.createElement("span");
     block.className = "planned-conflict planned-garmin-blocked";
     const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
