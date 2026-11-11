@@ -1196,13 +1196,17 @@ async function renderTrainingRecords() { // NOSONAR
   if (!state.data || !equipmentRouteActive()) return;
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
+  const gear = document.getElementById("equipmentItems");
+  const heading = () => reportNode("h3", "Ausrüstung und Wartung");
+  // Only a section without a rendered list shows loading and failure; a failed refresh keeps the list.
+  const rendered = () => Boolean(gear.querySelector(".equipment-tabs"));
+  if (!rendered()) gear.replaceChildren(heading(), createLoadingState("Ausrüstung wird geladen…"));
   try {
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
-    const gear = document.getElementById("equipmentItems");
     const openDetails = new Set([...gear.querySelectorAll("details[open]")]
       .map((details) => `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`));
-    gear.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"));
+    gear.replaceChildren(heading());
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
@@ -1297,7 +1301,7 @@ async function renderTrainingRecords() { // NOSONAR
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
-      for (const id of ["equipmentItems"]) document.getElementById(id).textContent=error.message;
+      if (!rendered()) gear.replaceChildren(heading(), createErrorState(error?.message, () => void renderTrainingRecords()));
     }
   }
 }
