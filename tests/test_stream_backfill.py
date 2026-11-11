@@ -476,7 +476,11 @@ class WahooBackfillTests(unittest.TestCase):
         seed(env, GARMIN, 13, date(2026, 11, 2), recorded_by=RecordingOrigin.ZWIFT)
         count_fit_file(env.db, env.key_values, GARMIN, "13", fit_bytes(records=3))
         count_fit_file(env.db, env.key_values, GARMIN, "13", b"not a fit file")
-        empty = {"messages": {}, "unmapped_fields": {}, "developer_fields": {}}
+        empty: dict[str, dict[str, int]] = {
+            "messages": {},
+            "unmapped_fields": {},
+            "developer_fields": {},
+        }
         self.assertEqual(
             {
                 "wahoo": {"ride": {"files": 2, **empty}},

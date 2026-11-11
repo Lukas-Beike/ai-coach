@@ -315,7 +315,7 @@ class GarminActivityDetailService:
 
     def _count_fit(self, provider_activity_id: str, collected: dict[str, Any]) -> None:
         """Count the downloaded FIT file for the diagnostics inventory (#2220)."""
-        if isinstance(collected.get("fit"), bytes):
+        if self._key_values is not None and isinstance(collected.get("fit"), bytes):
             with self._database_manager.unit_of_work() as db:
                 count_fit_file(
                     db,
