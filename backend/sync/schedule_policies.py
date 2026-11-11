@@ -12,7 +12,7 @@ is consulted only by the daily run: startup never waited on a running sync or a
 resync reset, and the protocol carries no trigger to say otherwise.
 
 Provider identifiers come from the descriptor constants. Nothing here compares
-provider names, so the coupling ratchet records no entries for this module.
+provider names, so the coupling guard finds nothing in this module.
 """
 
 from __future__ import annotations
