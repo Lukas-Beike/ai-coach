@@ -198,6 +198,26 @@ class PlannedCalendarSyncService:
             self._delete_remote_event(remote_id, normalized_id, row["payload"])
         self._mark_removed(normalized_id, row["payload"])
 
+    def _replace_outdated_event(
+        self, normalized_id: str, original_payload: str, workout: dict[str, Any]
+    ) -> bool:
+        """Delete an event that keeps the wrong category on an update.
+
+        A strength unit sent as a WORKOUT before #1807 stays one on an update and
+        keeps reaching Garmin. Only a free future event is deleted; a paired or
+        past one is updated in place as before. Returns whether it was deleted.
+        """
+        self._require_calendar_access()
+        try:
+            self._delete_remote_event(
+                str(workout["remote_event_id"]), normalized_id, original_payload
+            )
+        except AppError as exc:
+            if exc.reason != "intervals_workout_identity_conflict":
+                raise
+            return False
+        return True
+
     def _require_calendar_access(self) -> None:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
@@ -304,14 +324,12 @@ class PlannedCalendarSyncService:
         self._require_open_linked_event(workout)
         run_lthr = self._run_lthr_for(workout) if stored_cap(workout) else None
         event_payload = self._event_payload(normalized_id, workout, run_lthr)
-        if intervals_event_outdated(workout):
-            # The event keeps its category on an update (a strength unit sent as a
-            # WORKOUT before #1807): replace it, so no copy reaches Garmin.
-            self._require_calendar_access()
-            self._delete_remote_event(
-                str(workout["remote_event_id"]), normalized_id, row["payload"]
-            )
+        if intervals_event_outdated(workout) and self._replace_outdated_event(
+            normalized_id, row["payload"], workout
+        ):
+            # A new event under this unit's own identity, so it stays removable.
             event_payload.pop("id", None)
+            event_payload["external_id"] = self._export.external_id_for(normalized_id)
         event = self._remote_event(
             normalized_id, workout, event_payload, row["payload"]
         )

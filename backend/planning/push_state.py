@@ -25,10 +25,6 @@ from backend.planning.leftovers import nearest_first
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.descriptors import WAHOO_ID
-from backend.providers.intervals_workouts import (
-    INTERVALS_EVENT_CATEGORY,
-    intervals_event_category,
-)
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
     GarminExercise,
@@ -36,6 +32,10 @@ from backend.providers.garmin_strength_workout import (
     resolve_exercise,
     resolved_exercises,
     suggestions,
+)
+from backend.providers.intervals_workouts import (
+    INTERVALS_EVENT_CATEGORY,
+    intervals_event_category,
 )
 
 if TYPE_CHECKING:
@@ -185,8 +185,8 @@ def _unit_cleanup(
 ) -> dict[str, list[dict[str, str]]]:
     """The leftovers each provider removes with the sync of this upcoming unit.
 
-    Every unit a provider waits for carries them; the calendar shows them once,
-    on the first card that really offers that provider's sync button.
+    Every unit a provider waits for carries them; the calendar collects them
+    once and gives each to the week sync button of its own day's week.
     """
     if str(payload.get("date") or "")[:10] < today.isoformat():
         return {}
@@ -231,11 +231,12 @@ def attach_push_state(
             ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
             in _INTERVALS_PENDING
             or str(row["local_id"]) in resync
-            or intervals_event_outdated(payload)
         }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.
         conflicted = str(row["sync_state"] or "") == "conflict"
+        if not conflicted and intervals_event_outdated(payload):
+            pending[ProviderId.INTERVALS.value] = True
         fingerprint, blocked = pushable_fingerprint(payload, remembered or {})
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (

@@ -36,12 +36,15 @@ function plannedWeekSyncSummary(done, ids, providerLabel) {
     }
     totals.set(job.provider, item);
   }
-  return [...totals].map(([provider, item]) => {
+  const reached = [...totals].map(([provider, item]) => {
     const sent = item.send ? `${item.send} ${provider === ids.garmin ? "strukturiert" : "gesendet"}` : "";
     const notes = provider === ids.intervals && item.notes ? `davon ${item.notes} als Notiz` : "";
     const removed = item.remove ? `${item.remove} alte entfernt` : "";
     return `${providerLabel(provider)}: ${[sent, notes, removed].filter(Boolean).join(", ")}`;
-  }).join(" · ");
+  });
+  // A strength unit that reached Intervals.icu only as a note says why the watch did not get it.
+  const blocked = new Set(done.flatMap((job) => job.units).map(plannedGarminBlockedText).filter(Boolean));
+  return [...reached, ...blocked].join(" · ");
 }
 
 // Controls sit in the card summary; a click must not toggle the card.
@@ -112,15 +115,19 @@ function plannedWeekSyncJobs(units, leftovers, todayKey, configured, ids) {
     if (!provider || configured[provider] !== true) continue;
     const sends = units
       .filter(({ entry, dateKey, completed }) => plannedPushTargets(entry, dateKey, todayKey, { configured, completed }).includes(provider))
-      .map(({ entry }) => entry);
-    for (let index = 0; index < sends.length; index += PLAN_PUSH_MAX_ENTRIES) {
-      const chunk = sends.slice(index, index + PLAN_PUSH_MAX_ENTRIES);
-      const entries = chunk.map((entry) => ({ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }));
-      jobs.push({ provider, kind: "send", entries, units: chunk });
-    }
-    const removals = (leftovers[provider] || []).map((item) => leftoverEntry(provider, item, ids));
-    for (let index = 0; index < removals.length; index += PLAN_PUSH_MAX_ENTRIES) {
-      jobs.push({ provider, kind: "remove", entries: removals.slice(index, index + PLAN_PUSH_MAX_ENTRIES), units: [] });
+      .map(({ entry }) => ({ unit: entry, entry: { library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash } }));
+    const removals = (leftovers[provider] || []).map((item) => ({ item, entry: leftoverEntry(provider, item, ids) }));
+    for (const [kind, parts] of [["send", sends], ["remove", removals]]) {
+      for (let index = 0; index < parts.length; index += PLAN_PUSH_MAX_ENTRIES) {
+        const chunk = parts.slice(index, index + PLAN_PUSH_MAX_ENTRIES);
+        jobs.push({
+          provider,
+          kind,
+          entries: chunk.map((part) => part.entry),
+          units: chunk.map((part) => part.unit).filter(Boolean),
+          items: chunk.map((part) => part.item).filter(Boolean),
+        });
+      }
     }
   }
   return jobs;
@@ -135,8 +142,15 @@ async function runPlannedWeekSync(jobs, ids, providerLabel) {
     const name = providerLabel(job.provider);
     try {
       const outcome = await runPlanPush(job.provider, job.entries);
-      if (outcome.status === "completed") done.push(job);
-      else failures.push(`${name}: ${job.kind === "remove" ? "Alte Einträge nicht entfernt: " : ""}${globalThis.providerJobErrorDetail?.(outcome) || "Synchronisierung fehlgeschlagen"}`);
+      if (outcome.status === "completed") {
+        done.push(job);
+        continue;
+      }
+      // A partial job still delivered its completed entries; name those as well.
+      const reached = new Set((outcome.items || []).filter((item) => item.status === "completed").map((item) => item.item_key));
+      const entries = job.entries.filter((entry) => reached.has(entry.library_workout_id));
+      if (entries.length) done.push({ ...job, entries, units: job.units.filter((unit) => reached.has(unit.local_id)) });
+      failures.push(`${name}: ${job.kind === "remove" ? "Alte Einträge nicht entfernt: " : ""}${globalThis.providerJobErrorDetail?.(outcome) || "Synchronisierung fehlgeschlagen"}`);
     } catch (error) {
       failures.push(`${name}: ${error.message}`);
     }
@@ -1123,10 +1137,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured), [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
   }
 
-  // One button per week: it sends every unit of the week a provider still waits for and removes
-  // what the app left there for that week. Each job carries the hashes the units were shown with,
-  // so a unit edited meanwhile is refused instead of sent.
-  // The week's sync jobs from its calendar entries and leftovers; none when nothing waits.
+  // The week's sync jobs from its calendar entries and leftovers; none when nothing waits. Each job
+  // carries the hashes the units were shown with, so a unit edited meanwhile is refused instead of sent.
   function plannedWeekJobs(weekEntries, leftovers, todayKey) {
     const units = weekEntries
       .filter((entry) => !entry.is_completed_activity)
@@ -1134,6 +1146,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return plannedWeekSyncJobs(units, leftovers || {}, todayKey, plannedProviderConfiguration(), providerIds());
   }
 
+  // One button per week: it sends every unit of the week a provider still waits for and removes
+  // what the app left there for that week; its tooltip names what it removes.
   function plannedWeekSyncButton(weekKey, weekEntries, leftovers, todayKey) {
     const ids = providerIds();
     const jobs = plannedWeekJobs(weekEntries, leftovers, todayKey);
@@ -1145,6 +1159,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     button.className = "secondary-button planned-sync-button planned-week-sync-button";
     button.textContent = "Woche synchronisieren";
     button.setAttribute("aria-label", `Woche ${planWeekLabel(weekKey)} synchronisieren`);
+    const removed = jobs.flatMap((job) => job.items).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
+    if (removed.length) button.title = `Wird entfernt: ${removed.join(", ")}`;
     button.disabled = state.plannedSyncInFlight.has(key);
     button.addEventListener("click", async () => {
       if (state.plannedSyncInFlight.has(key)) return;

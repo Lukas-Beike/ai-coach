@@ -189,6 +189,11 @@ class PushStateTests(unittest.TestCase):
             [pending for _payload, pending in cases],
             [unit["push_pending"]["intervals"] for unit in projected],
         )
+        # A unit in a sync conflict waits for the athlete's decision first.
+        conflicted = self.project(
+            [{"local_id": "c1", "payload": json.dumps(sent), "sync_state": "conflict"}]
+        )
+        self.assertFalse(conflicted[0]["push_pending"]["intervals"])
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:

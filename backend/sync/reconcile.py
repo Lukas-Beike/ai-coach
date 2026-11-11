@@ -34,6 +34,9 @@ def _apply_remote_event(
         return ""
     remote_event = planning_fields_from_intervals(remote_event)
     if remote_event.get("id") not in (None, ""):
+        if str(remote_event["id"]) != str(payload.get("remote_event_id") or ""):
+            # Another event: a category recorded for the old one no longer applies.
+            payload.pop("remote_event_category", None)
         payload["remote_event_id"] = str(remote_event["id"])
     if remote_event.get("external_id") not in (None, ""):
         external_id = str(remote_event["external_id"])

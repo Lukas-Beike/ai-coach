@@ -135,3 +135,22 @@ test("a week's sync runs every job, reports failures first and keeps going after
     message: "Wahoo: Alte Einträge nicht entfernt: abgelehnt · Garmin: 1 strukturiert · Intervals.icu: 1 gesendet",
   });
 });
+
+test("a partial job still names what arrived, and a strength unit without a Garmin workout says why", async () => {
+  const partial = vm.createContext({
+    api: async () => ({ id: "job-2" }),
+    waitForSyncJob: async (id) => ({ id, status: "partial", items: [{ item_key: "r1", status: "completed" }, { item_key: "s1", status: "failed" }] }),
+    providerJobErrorDetail: () => "Seit der Vorschau geändert",
+    focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null,
+  });
+  vm.runInContext(source.slice(start, end) + ";globalThis.runWeek = runPlannedWeekSync; globalThis.summary = plannedWeekSyncSummary;", partial);
+  const label = (provider) => ({ garmin: "Garmin", intervals: "Intervals.icu" })[provider];
+  const units = [{ local_id: "s1", sport: "strength" }, { local_id: "r1", sport: "ride" }];
+  const jobs = [{ provider: "intervals", kind: "send", entries: [{ library_workout_id: "s1" }, { library_workout_id: "r1" }], units, items: [] }];
+  assert.deepEqual(plain(await partial.runWeek(jobs, ids, label)), {
+    failed: true,
+    message: "Intervals.icu: Seit der Vorschau geändert · Intervals.icu: 1 gesendet",
+  });
+  const blocked = [{ provider: "intervals", kind: "send", entries: [{}], units: [{ sport: "strength", push_blocked: { garmin: "no_structure" } }] }];
+  assert.equal(partial.summary(blocked, ids, label), "Intervals.icu: 1 gesendet, davon 1 als Notiz · Keine Kraftstruktur – nicht an Garmin gesendet");
+});
