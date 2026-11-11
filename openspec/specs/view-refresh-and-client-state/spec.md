@@ -32,7 +32,7 @@ The client SHALL retain a last loaded state snapshot, up to twenty latest persis
 
 #### Scenario: Older history while cached messages sync
 - **WHEN** the start view shows cached messages and the fresh start answers are still pending
-- **THEN** reaching the top of the chat pages in no older history from the cached cursor; paging resumes once the fresh messages have replaced the cache.
+- **THEN** reaching the top of the chat loads no older history automatically from the cached cursor until the fresh messages have replaced the cache; the button for older messages stays usable throughout.
 
 #### Scenario: View read and asset update
 - **WHEN** a recent view is reopened or a saved view cache belongs to other assets
