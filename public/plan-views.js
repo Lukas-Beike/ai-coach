@@ -340,9 +340,17 @@ function calendarWeekLoad(items) {
 }
 
 // The week summary uses one duration format, hours and minutes.
-function calendarHours(seconds) {
+function calendarClock(seconds) {
   const minutes = Math.round(Math.max(0, Number(seconds) || 0) / 60);
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function calendarHours(seconds) {
+  return `${calendarClock(seconds)} h`;
+}
+
+function plannedDurationSeconds(entry) {
+  return Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0);
 }
 
 const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋" };
@@ -798,7 +806,7 @@ function plannedWeekMetrics(planned, actual) {
   const totals = document.createElement("span");
   totals.className = "planned-week-metrics";
   totals.dataset.columns = String(columns.length);
-  const plannedSeconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
+  const plannedSeconds = planned.reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
   const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
   const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
   const rows = [
@@ -1496,6 +1504,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       button.setAttribute("aria-pressed", String(calendarView === value));
       button.addEventListener("click", () => {
         if (calendarView === value) return;
+        // The athlete's choice wins over a still pending jump to today.
+        state.plannedTodayFocusPending = false;
         calendarView = value;
         selectedDayKey = "";
         renderPlanned(renderedCalendar);
@@ -1512,16 +1522,17 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return localDateKey(date);
   }
 
+  // In the month view the selected day also sets the week shown below (renderPlanned).
   function selectPlannedDay(dateKey) {
     selectedDayKey = dateKey;
-    selectedWeekKey = planWeekStart(dateKey);
     renderPlanned(renderedCalendar);
   }
 
   // One day of the month grid: its number and one mark per unit (a dot, on wide screens its duration).
   function plannedMonthDay(view, dateKey, monthKey) {
-    const { eventsByDate, firstWeekKey, lastDateKey, todayKey } = view;
+    const { eventsByDate, firstWeekKey, lastDateKey, planningContextByDate, todayKey } = view;
     const entries = eventsByDate.get(dateKey) || [];
+    const dayContext = planningContextByDate.get(dateKey) || {};
     const button = document.createElement("button");
     button.type = "button";
     button.className = "planned-month-day";
@@ -1537,24 +1548,33 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     marks.className = "planned-month-marks";
     for (const entry of entries) {
       const actual = calendarActualActivity(entry);
+      const status = calendarEntryStatus(entry, dateKey, todayKey);
       const mark = document.createElement("span");
-      mark.className = `planned-month-mark is-${calendarEntryStatus(entry, dateKey, todayKey)}`;
+      // As on the card: a missed unit on a rest or pause day counts as skipped.
+      mark.className = `planned-month-mark is-${status === "missed" && plannedDayStatusLabel(dayContext.day_status) ? "skipped" : status}`;
       mark.dataset.sport = activitySportLabel(calendarSportType(actual || entry));
-      const seconds = actual ? Number(actual.moving_duration_s ?? actual.elapsed_duration_s) : Number(entry.duration_minutes) * 60 || Number(entry.planned_duration_s);
+      const seconds = actual ? Number(actual.moving_duration_s ?? actual.elapsed_duration_s) : plannedDurationSeconds(entry);
       // h:mm fits a day cell; the full label stays on the card.
-      const minutes = Math.round(seconds / 60);
-      mark.textContent = minutes > 0 ? `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}` : "";
+      mark.textContent = seconds >= 30 ? calendarClock(seconds) : "•";
       marks.append(mark);
     }
     button.append(number, marks);
     const units = entries.length ? countLabel(entries.length, "Einheit", "Einheiten") : "keine Einheit";
     button.setAttribute("aria-label", `${DETAIL_DATE_FORMAT.format(dateFromKey(dateKey))}: ${units}`);
     button.addEventListener("click", () => {
+      state.plannedTodayFocusPending = false;
       selectPlannedDay(dateKey);
       const root = $("#plannedCalendar");
       root?.querySelector(`.planned-month-day[data-date="${dateKey}"]`)?.focus();
-      const card = root?.querySelector(`.planned-day[data-date="${dateKey}"] .planned-day-content > .planned-entry`);
-      if (card && wideCalendar?.matches) card.open = true;
+      if (!wideCalendar?.matches) return;
+      const card = root?.querySelector(`.planned-day[data-date="${dateKey}"] .planned-entry`);
+      const group = card?.closest(".planned-group");
+      if (group) group.open = true;
+      if (card) card.open = true;
+      else {
+        const shown = shownPlannedEntry(root);
+        if (shown) shown.open = false;
+      }
     });
     return button;
   }
@@ -1578,8 +1598,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       return day || (key < firstWeekKey ? firstWeekKey : key);
     };
     heading.append(title,
-      plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(previousKey)) : null),
-      plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null),
+      plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(previousKey)) : null, "month"),
+      plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
       plannedViewSwitch());
     const grid = document.createElement("div");
     grid.className = "planned-month-grid";
@@ -1595,7 +1615,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       for (let offset = 0; offset < 7; offset += 1) row.append(plannedMonthDay(view, addDateKey(weekKey, offset), monthKey));
       const planned = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat()
         .filter((entry) => !entry.is_completed_activity);
-      const seconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
+      const seconds = planned.reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
       const week = document.createElement("span");
       week.className = "planned-month-kw";
       week.textContent = [`KW ${isoWeekNumber(weekKey)}`, seconds > 0 ? calendarHours(seconds) : ""].filter(Boolean).join(" · ");
@@ -1606,18 +1626,21 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return month;
   }
 
-  function plannedStep(step, label, onStep) {
+  // A step button; after the step, focus stays on it or on the other one of its pair.
+  function plannedStep(step, label, onStep, pair) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "icon-button planned-week-step";
     button.dataset.step = String(step);
-    button.textContent = step < 0 ? "‹" : "›";
+    button.dataset.pair = pair;
+    button.textContent = step < 0 ? "\u2039" : "\u203a";
     button.setAttribute("aria-label", label);
     button.disabled = !onStep;
     button.addEventListener("click", () => {
+      state.plannedTodayFocusPending = false;
       onStep();
-      const steps = [...($("#plannedCalendar")?.querySelectorAll(`.planned-week-step[aria-label="${label}"]`) || [])];
-      (steps.find((item) => !item.disabled) || $("#plannedCalendar")?.querySelector(".planned-week-step:not(:disabled)"))?.focus();
+      const steps = [...($("#plannedCalendar")?.querySelectorAll(`.planned-week-step[data-pair="${pair}"]:not(:disabled)`) || [])];
+      (steps.find((item) => item.dataset.step === String(step)) || steps[0])?.focus();
     });
     return button;
   }
@@ -1627,10 +1650,11 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       selectedWeekKey = target;
       if (calendarView === "month") selectedDayKey = target;
       renderPlanned(renderedCalendar);
-    } : null);
+    } : null, "week");
     button.dataset.weekStep = String(step);
     return button;
   }
+
 
   function renderPlannedWeek(view) {
     const { eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
