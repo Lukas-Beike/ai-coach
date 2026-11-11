@@ -96,7 +96,7 @@ The system SHALL preserve supported current metadata while restoring audited loc
 
 #### Scenario: Recreate or remove local object
 - **WHEN** undo targets a deleted record or reverses a creation
-- **THEN** the owning restore path recreates or removes the local record with its supported identity/link policy rather than deleting a corresponding remote record.
+- **THEN** the owning restore path recreates or removes the local record with its supported identity/link policy rather than deleting a corresponding remote record. A planned unit that already has an Intervals.icu event is kept hidden with its links, so the event is listed as a leftover and removed only by the athlete's next week sync.
 
 #### Scenario: Planning conflicts or location changes
 - **WHEN** planned restoration would collide with newer calendar state, or profile restoration changes location

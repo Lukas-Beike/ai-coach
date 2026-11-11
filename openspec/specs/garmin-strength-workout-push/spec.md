@@ -6,11 +6,15 @@ Send planned strength units to the athlete's Garmin watch as structured strength
 ## Requirements
 
 ### Requirement: Garmin exercise resolution
-Each strength exercise SHALL resolve to one Garmin catalogue exercise before export: its explicit `garmin_exercise` name or stored pair first, then a catalogue name the athlete confirmed for the same exercise name in another active unit or template, then the exercise name, then a fixed German/English alias list. An explicit unknown name SHALL be rejected on save with `invalid_strength_structure` and catalogue suggestions; a valid one SHALL be stored with its category/exercise pair. A stored name that a later catalogue renamed SHALL stay valid with its stored pair.
+Each strength exercise SHALL resolve to one Garmin catalogue exercise before export: its explicit `garmin_exercise` name or stored pair first, then a catalogue name the athlete confirmed for the same exercise name in another active unit or template, then the exercise name, then a fixed German/English alias list. An explicit unknown name SHALL be rejected on save with `invalid_strength_structure` and catalogue suggestions; a valid one SHALL be stored with its category/exercise pair.
 
 #### Scenario: Explicit catalogue name
 - **WHEN** a strength unit is saved with `garmin_exercise` "barbell back squat"
 - **THEN** the stored exercise carries `garmin_exercise` "Barbell Back Squat" and the pair SQUAT/BARBELL_BACK_SQUAT, always derived from the catalogue on write and never taken from the request; a remote reconcile drops only a stored mapping the catalogue no longer knows and keeps the structure.
+
+#### Scenario: Catalogue rename of a stored exercise
+- **WHEN** a later catalogue no longer knows the stored `garmin_exercise` name of a saved unit
+- **THEN** the stored name stays valid with its stored pair, so the unit stays pushable instead of `no_structure`; a request that sends an unknown name is still rejected.
 
 #### Scenario: Confirmed once, remembered
 - **WHEN** the athlete picks a catalogue exercise for one unit's exercise through the calendar or the Coach
