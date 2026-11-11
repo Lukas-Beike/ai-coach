@@ -1842,7 +1842,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     olderSessions.loading = true;
     const generation = olderSessions.generation;
     const cursor = olderSessions.cursor ? `&cursor=${encodeURIComponent(olderSessions.cursor)}` : "";
-    api(`/api/activities?limit=250${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
+    api(`/api/activities?limit=100${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
       if (generation !== olderSessions.generation) return;
       const known = completedSessionIds(calendar);
       for (const row of Array.isArray(page?.activities) ? page.activities : []) {
