@@ -699,7 +699,8 @@ class AdaptiveReplanPreviewService:
             "scope": (
                 "Zeit-, Schmerz- und Belastungsangaben des Check-ins gelten nur "
                 "am Check-in-Tag. Nur nach Bestätigung werden lokale zukünftige Einheiten angepasst "
-                "und die prognostizierten Krankheitstage eingetragen. Intervals.icu "
+                "und, solange die Krankheitspause läuft, der heutige Check-in als "
+                "krank eingetragen. Intervals.icu "
                 "wird nur bei ausdrücklicher Auswahl synchronisiert."
             ),
         }

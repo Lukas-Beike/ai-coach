@@ -396,6 +396,9 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         )
         self.assertIn("1 zukünftige lokale Einheit(en)", result["message"])
         self.assertIn("nur am Check-in-Tag", result["scope"])
+        # Apply marks only today's check-in, never forecast days (#2135, D-006).
+        self.assertIn("der heutige Check-in als krank", result["scope"])
+        self.assertNotIn("prognostizierten Krankheitstage", result["scope"])
 
     def test_pain_and_stress_apply_only_to_the_checkin_day(self):
         self.feedback.update(
