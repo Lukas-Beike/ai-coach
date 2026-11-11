@@ -1,9 +1,9 @@
 import copy
+import math
 import unittest
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.activity_validation import (
-    PERFORMANCE_METRIC_BOUNDS,
     activity_direct_estimates,
     activity_intensity,
     activity_pace_seconds_per_km,
@@ -148,15 +148,15 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         self.assertIsNone(bounded_performance_metric("cycling_ftp_watts", 30))
         self.assertIsNone(bounded_performance_metric("running_vo2max_ml_kg_min", 15))
         self.assertEqual(activity_direct_estimates({"ftp_w": 1500}), {})
-        for kind, key in (
-            (MetricKind.FTP, "cycling_ftp_watts"),
-            (MetricKind.VO2MAX, "running_vo2max_ml_kg_min"),
-            (MetricKind.THRESHOLD_HR, "run_threshold_hr_bpm"),
-        ):
-            rule = CURRENT_RULES[kind].bounds[0]
-            self.assertEqual(
-                (rule.lower, rule.upper), PERFORMANCE_METRIC_BOUNDS[key], kind
-            )
+        # The bounds are the current value's, inclusive, and reject infinity
+        # (formerly the Garmin helper's own checks).
+        self.assertEqual(bounded_performance_metric("cycling_ftp_watts", "302"), 302)
+        self.assertEqual(bounded_performance_metric("cycling_ftp_watts", 50), 50)
+        self.assertEqual(bounded_performance_metric("cycling_ftp_watts", 700), 700)
+        self.assertIsNone(bounded_performance_metric("run_threshold_watts", 750))
+        self.assertIsNone(bounded_performance_metric("cycling_ftp_watts", math.inf))
+        rule = CURRENT_RULES[MetricKind.FTP].bounds[0]
+        self.assertEqual((rule.lower, rule.upper), (50.0, 700.0))
         self.assertIsNone(
             bounded_performance_metric("cycling_ftp_watts", {"value": 300})
         )

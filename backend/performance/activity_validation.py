@@ -2,12 +2,41 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, Final
 
 from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.labels import sport_label_de
+from backend.canonical.vocabulary import MetricKind
+from backend.performance.source_policy import CURRENT_RULES
+
+
+def _current_bounds(kind: MetricKind) -> tuple[float, float]:
+    """The plausibility bounds the current value of ``kind`` applies."""
+    bounds = CURRENT_RULES[kind].bounds[0]
+    return bounds.lower, bounds.upper
+
+
+# One plausibility bound set per kind: the current value, the chart series, W/kg,
+# the Garmin readers and the activity validation accept the same range.
+PERFORMANCE_METRIC_BOUNDS: Final[Mapping[str, tuple[float, float]]] = MappingProxyType(
+    {
+        "cycling_ftp_watts": _current_bounds(MetricKind.FTP),
+        "run_threshold_watts": _current_bounds(MetricKind.FTP),
+        "running_vo2max_ml_kg_min": _current_bounds(MetricKind.VO2MAX),
+        "cycling_vo2max_ml_kg_min": _current_bounds(MetricKind.VO2MAX),
+        "run_threshold_pace_seconds_per_km": (120, 900),
+        "run_threshold_hr_bpm": _current_bounds(MetricKind.THRESHOLD_HR),
+        "bike_threshold_hr_bpm": _current_bounds(MetricKind.THRESHOLD_HR),
+        "run_5k_seconds": (1, 86400),
+        "run_10k_seconds": (1, 86400),
+        "run_half_marathon_seconds": (1, 172800),
+        "run_marathon_seconds": (1, 345600),
+    }
+)
 
 
 def _present(item: Any, key: str) -> Any:
@@ -135,23 +164,6 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
         if value is not None:
             estimates[key] = value
     return estimates
-
-
-# One plausibility bound set per kind: the current value, the chart series, W/kg and
-# the activity validation accept the same range.
-PERFORMANCE_METRIC_BOUNDS: dict[str, tuple[float, float]] = {
-    "cycling_ftp_watts": (50, 700),
-    "run_threshold_watts": (50, 800),
-    "running_vo2max_ml_kg_min": (20, 100),
-    "cycling_vo2max_ml_kg_min": (20, 100),
-    "run_threshold_pace_seconds_per_km": (120, 1800),
-    "run_threshold_hr_bpm": (80, 230),
-    "bike_threshold_hr_bpm": (80, 230),
-    "run_5k_seconds": (1, 86400),
-    "run_10k_seconds": (1, 86400),
-    "run_half_marathon_seconds": (1, 172800),
-    "run_marathon_seconds": (1, 345600),
-}
 
 
 def bounded_performance_metric(key: str, value: Any) -> float | int | None:

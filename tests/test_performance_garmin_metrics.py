@@ -6,7 +6,6 @@ from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.garmin_metrics import (
     GARMIN_PERFORMANCE_SOURCE,
-    garmin_bounded_metric,
     garmin_performance_context,
     garmin_performance_metrics,
 )
@@ -30,12 +29,6 @@ class GarminMetricHelperTests(unittest.TestCase):
         self.assertIsNone(garmin_duration_seconds("01:02:03:04"))
         self.assertIsNone(garmin_duration_seconds("00:00"))
         self.assertIsNone(garmin_duration_seconds(float("nan")))
-
-        self.assertEqual(garmin_bounded_metric("302", 50, 700), 302)
-        self.assertEqual(garmin_bounded_metric(50, 50, 700), 50)
-        self.assertEqual(garmin_bounded_metric(700, 50, 700), 700)
-        self.assertIsNone(garmin_bounded_metric(49, 50, 700))
-        self.assertIsNone(garmin_bounded_metric(float("inf"), 50, 700))
 
     def test_non_ascii_or_overlong_colon_text_is_absent(self):
         self.assertEqual(garmin_duration_seconds("25:30"), 1530)

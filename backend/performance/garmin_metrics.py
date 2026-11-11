@@ -12,7 +12,6 @@ from typing import Any
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_performance_metric
-from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
 from backend.performance.garmin_canonical import (
     ACTIVITY_MAX_HR_CATEGORIES,
@@ -32,15 +31,6 @@ RACE_PREDICTION_KEYS = (
     "run_half_marathon_seconds",
     "run_marathon_seconds",
 )
-
-
-def garmin_bounded_metric(
-    value: Any, minimum: float, maximum: float
-) -> float | int | None:
-    number = _as_number(value)
-    return (
-        number if number is not None and minimum <= float(number) <= maximum else None
-    )
 
 
 def _garmin_canonical_thresholds(
