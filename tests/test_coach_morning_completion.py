@@ -74,7 +74,11 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             db.execute(
                 "INSERT INTO coach_commands(client_turn_id, status, receipt, updated_at) "
                 "VALUES (?, 'completed', ?, 'old')",
-                ("turn-1", '{"message":"Fertig ✓"}'),
+                # Prepared the day before; completed after midnight (#2134).
+                (
+                    "turn-1",
+                    '{"message":"Fertig ✓","morning_checkin_date":"2026-09-23"}',
+                ),
             )
         self.manager.uow_count = 0
         quick_actions = {"morning_checkin": False, "label": "Morgen ✓"}
@@ -102,9 +106,14 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
         result = service.complete("turn-1")
 
         self.assertEqual(self.manager.uow_count, 2)
-        self.assertEqual(states_seen, [("2026-09-24", "ready")])
+        self.assertEqual(states_seen, [("2026-09-23", "ready")])
         self.assertEqual(
-            result, {"message": "Fertig ✓", "coach_quick_actions": quick_actions}
+            result,
+            {
+                "message": "Fertig ✓",
+                "morning_checkin_date": "2026-09-23",
+                "coach_quick_actions": quick_actions,
+            },
         )
         with self.manager.reader() as db:
             row = db.execute(
@@ -113,7 +122,8 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(
             row["receipt"],
-            '{"message":"Fertig ✓","coach_quick_actions":{"morning_checkin":false,"label":"Morgen ✓"}}',
+            '{"message":"Fertig ✓","morning_checkin_date":"2026-09-23",'
+            '"coach_quick_actions":{"morning_checkin":false,"label":"Morgen ✓"}}',
         )
         self.assertEqual(row["updated_at"], "utc-updated")
 

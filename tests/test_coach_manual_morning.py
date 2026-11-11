@@ -49,9 +49,9 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
     def test_unconfigured_garmin_returns_without_reading_or_refreshing(self) -> None:
         self.garmin_sync.configured.return_value = False
 
-        self.service.prepare()
+        # The day prepared for is still named, for the completion marker (#2134).
+        self.assertEqual(TODAY, self.service.prepare())
 
-        self.local_today.assert_not_called()
         self.garmin_sync.sync.assert_not_called()
         self.garmin_payload.state.assert_not_called()
         self.morning_battery.refresh.assert_not_called()
