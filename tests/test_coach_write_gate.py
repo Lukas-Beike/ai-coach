@@ -649,6 +649,11 @@ class RemoteTierTests(unittest.TestCase):
             "Lade das doch nicht zu Intervals hoch",
             "How can I sync my plan to Intervals?",
             "Wie kann ich meinen Plan zu Intervals synchronisieren?",
+            # Another provider or a past sync names no Intervals.icu sync (#2134).
+            "Sync meine Garmin-Daten",
+            "Ich habe gestern mit Wahoo synchronisiert",
+            "Ich habe gestern mit Intervals synchronisiert",
+            "Der Plan wurde schon hochgeladen.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(gate.remote_requested(text))
@@ -799,6 +804,10 @@ class RemoteTierTests(unittest.TestCase):
             "Lade den Kalender zu Intervals hoch.",
             "Sync den Kalender.",
             "Bitte den Konflikt im Kalender reparieren",
+            # Generic verbs stay accepted; a past clause does not hide a request.
+            "Synchronisiere den Plan",
+            "Ich habe den Plan geändert, synchronisiere ihn bitte.",
+            "Lade die Einheit von meiner Uhr zu Intervals hoch.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(gate.remote_requested(text))
