@@ -16,7 +16,7 @@ An explicit delivery request, or an issue queued for you by the user or a
 coordinating orchestrator, authorizes local requirements and OpenSpec work,
 task commits, the [pr](../pr/SKILL.md) workflow through verified merge, and
 maintenance of the delivered issue only: assign it and add the "in progress"
-label at start; at close a summary comment with the real line balance
+label at start; a comment recording each athlete decision; at close a summary comment with the real line balance
 (production, tests, docs) and any deviation, ticked part checkboxes, closing
 when `python scripts/issue_status.py <n>` shows no open part or PR, and removing
 the label. It does not authorize releases, deployment, provider writes, or
