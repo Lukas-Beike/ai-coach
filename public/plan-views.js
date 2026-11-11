@@ -375,14 +375,14 @@ function calendarRoundedNumber(value, suffix) {
 // The intensity factor as a fraction; stored values above 2 are percent.
 function calendarIntensityFactor(value) {
   const number = Number(value);
-  if (!(number > 0)) return null;
+  if (!Number.isFinite(number) || number <= 0) return null;
   return AppFormat.number(number <= 2 ? number : number / 100, { digits: 2 });
 }
 
 // The average speed, else distance over moving time.
 function calendarSpeedLabel(activity) {
   let speed = Number(activity?.avg_speed_mps);
-  if (!(speed > 0)) speed = Number(activity?.distance_m) / Number(activity?.moving_duration_s);
+  if (!Number.isFinite(speed) || speed <= 0) speed = Number(activity?.distance_m) / Number(activity?.moving_duration_s);
   return Number.isFinite(speed) && speed > 0 ? `${AppFormat.number(speed * 3.6, { digits: 1 })} km/h` : null;
 }
 
