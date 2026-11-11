@@ -3,10 +3,10 @@
 Load = duration x intensity^2 (TSS principle), per sport:
 - Planned unit: ``planned_unit_load.estimate_planned_unit`` (workout steps against
   the current thresholds).
-- Completed activity: ride normalized power (else average power) over FTP; run
-  weighted (grade-adjusted) pace, else average pace, over threshold pace; without
-  both, a heart-rate fallback over LTHR that is marked less precise.
-Thresholds follow the Coach precedence: locally confirmed zone configurations
+- Completed activity: the stored local session load of card M6 (the same value
+  the charts and the Coach context show); a heart-rate based value is marked less
+  precise. A session without a stored value has an unknown load (#2082).
+Thresholds of planned units follow the Coach precedence: locally confirmed zone configurations
 first, then the source-policy provider winners (Garmin, Wahoo). Anything missing is
 unknown and named as such; no number is made up. Strength has no planned session-RPE in
 planned units, so it takes no part. The evidence is extrapolated from distance
@@ -35,6 +35,8 @@ from backend.canonical.vocabulary import (
     Sport,
     ZoneConfigurationMetric,
 )
+from backend.performance.local_tss import METHOD_ID as LOCAL_LOAD_METHOD_ID
+from backend.performance.local_tss import PACE_BRANCH, POWER_BRANCH
 from backend.planning.planned_unit_load import estimate_planned_unit, resolve_thresholds
 from backend.planning.sport import planned_sport_environment
 
@@ -49,6 +51,8 @@ HARD_ZONE = 4
 HARD_STEP_SECONDS = 300
 SEVERITY_CODES = frozenset({"run_spike", "load_spike", "weekly_load_rise"})
 LOAD_SPORTS = frozenset({Sport.RUN, Sport.RIDE})
+# A stored M6 load from power or pace is precise; heart rate is less precise.
+_PRECISE_BRANCHES = frozenset({POWER_BRANCH, PACE_BRANCH})
 
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 
@@ -187,79 +191,27 @@ def computed_hard(estimate: WorkoutEstimate) -> bool | None:
     return hard_s >= HARD_STEP_SECONDS
 
 
-def _intensity_load(hours: float, intensity: float) -> float:
-    return hours * intensity**2 * 100
-
-
-def _ride_intensity(
-    row: Mapping[str, Any], thresholds: AthleteThresholds
-) -> tuple[float, str, bool] | None:
-    ftp = thresholds.zones.ftp
-    normalized = number(row.get("normalized_power"))
-    power = normalized or number(row.get("avg_power"))
-    if not (ftp and power):
+def completed_load(row: Mapping[str, Any]) -> SessionLoad | None:
+    """The stored M6 load of a completed session; ``None`` when it has none."""
+    load = row.get("training_load")
+    if row.get("load_method") != LOCAL_LOAD_METHOD_ID or not isinstance(
+        load, int | float
+    ):
         return None
-    basis = "normalized_power_over_ftp" if normalized else "average_power_over_ftp"
-    return power / ftp, basis, bool(normalized)
-
-
-def _run_intensity(
-    row: Mapping[str, Any], thresholds: AthleteThresholds
-) -> tuple[float, str, bool] | None:
-    reference = thresholds.threshold_speed_mps
-    weighted = number(row.get("grade_adjusted_speed_mps"))
-    speed = weighted or number(row.get("avg_speed_mps"))
-    if not (reference and speed):
-        return None
-    basis = (
-        "grade_adjusted_pace_over_threshold_pace"
-        if weighted
-        else "average_pace_over_threshold_pace"
-    )
-    return speed / reference, basis, bool(weighted)
-
-
-def _heart_rate_intensity(
-    row: Mapping[str, Any], thresholds: AthleteThresholds
-) -> tuple[float, str, bool] | None:
-    heart_rate = number(row.get("avg_hr"))
-    lthr = thresholds.zones.lthr
-    if not (heart_rate and lthr):
-        return None
-    return heart_rate / lthr, "heart_rate_over_lthr_fallback", False
-
-
-def completed_load(
-    row: Mapping[str, Any], sport: Sport, thresholds: AthleteThresholds
-) -> SessionLoad | None:
-    """Load of a completed run or ride; ``None`` when no intensity is computable."""
-    seconds = number(row.get("moving_duration_s")) or 0.0
-    primary = _ride_intensity if sport is Sport.RIDE else _run_intensity
-    found = primary(row, thresholds) or _heart_rate_intensity(row, thresholds)
-    if seconds <= 0 or found is None:
-        return None
-    intensity, basis, precise = found
-    return SessionLoad(_intensity_load(seconds / 3600, intensity), basis, precise)
-
-
-def _environment(row: Mapping[str, Any]) -> Environment:
-    try:
-        return Environment(str(row.get("environment") or ""))
-    except ValueError:
-        return Environment.UNKNOWN
+    branch = str(row.get("load_branch") or "")
+    return SessionLoad(float(load), branch, branch in _PRECISE_BRANCHES)
 
 
 def _completed_loads(
-    completed: Iterable[Mapping[str, Any]], thresholds: LoadThresholds
+    completed: Iterable[Mapping[str, Any]],
 ) -> list[tuple[Sport, str, SessionLoad | None]]:
-    """Run and ride sessions with their load, ``None`` when it is not computable."""
+    """Run and ride sessions with their load, ``None`` when it is not known."""
     result = []
     for row in completed:
         sport = next((s for s in LOAD_SPORTS if s.value == row.get("sport")), None)
         if sport is not None:
-            found = thresholds.for_sport(sport, _environment(row))
             day = iso_date_prefix(row.get("started_at_local"))
-            result.append((sport, day, completed_load(row, sport, found)))
+            result.append((sport, day, completed_load(row)))
     return result
 
 
@@ -277,12 +229,11 @@ def _in_window(day: str, today: date) -> bool:
 def session_spikes(
     sessions: Sequence[PlannedSession],
     completed: Iterable[Mapping[str, Any]],
-    thresholds: LoadThresholds,
     today: date,
 ) -> list[Draft]:
     """Planned load against the highest-load session of the sport in 30 days."""
     best: dict[Sport, SessionLoad] = {}
-    for sport, day, load in _completed_loads(completed, thresholds):
+    for sport, day, load in _completed_loads(completed):
         if load and _in_window(day, today) and load.load > _load_of(best.get(sport)):
             best[sport] = load
     drafts: list[Draft] = []
@@ -386,7 +337,6 @@ def _baseline(
 def weekly_rises(
     sessions: Sequence[PlannedSession],
     completed: Iterable[Mapping[str, Any]],
-    thresholds: LoadThresholds,
     today: date,
 ) -> list[Draft]:
     """Planned weekly load per sport against the mean of the previous 3-4 weeks.
@@ -395,9 +345,7 @@ def weekly_rises(
     and not rest, so they are left out of the mean; fewer than three known weeks
     give no note. A week of the sport with such a session is not judged either.
     """
-    totals, partial = _weekly_totals(
-        sessions, _completed_loads(completed, thresholds), today
-    )
+    totals, partial = _weekly_totals(sessions, _completed_loads(completed), today)
     groups: dict[tuple[Sport, str], list[PlannedSession]] = defaultdict(list)
     for session in sessions:
         if session.day >= today.isoformat():
