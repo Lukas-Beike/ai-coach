@@ -61,7 +61,6 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.first_threshold_post import ADOPT_PATH, FirstThresholdPostRoutes
-from backend.http_api.post_dispatch import HttpPostDispatcher
 from backend.performance.current_metrics import coach_thresholds
 from backend.performance.first_threshold_estimate import (
     MIN_SESSIONS,
@@ -629,43 +628,12 @@ class RouteTests(unittest.TestCase):
         routes = FirstThresholdPostRoutes(lambda: service, lambda: profile)
         handler = Mock()
         handler.read_json.return_value = {"percent_lthr": 90.0}
-        self.assertTrue(routes.handle(handler, ADOPT_PATH))
+        self.assertTrue(dispatch_route(routes, handler, ADOPT_PATH, method="POST"))
         service.adopt.assert_called_once_with({"percent_lthr": 90.0})
         handler.send_json.assert_called_once_with(
             200, {"profile": {}, "first_threshold_estimate": None}
         )
-        self.assertFalse(routes.handle(handler, "/api/profile"))
-
-    def test_the_route_is_part_of_the_authenticated_post_dispatch(self) -> None:
-        routes = Mock()
-        for name in (
-            "coach_actions",
-            "chat",
-            "transcribe",
-            "feedback",
-            "history_undo",
-            "privacy_delete",
-            "diagnostics_delete",
-            "nutrition",
-            "sync_commands",
-        ):
-            getattr(routes, name).handle.return_value = False
-        for name in (
-            "analysis",
-            "equipment",
-            "wahoo",
-            "metric_export",
-            "garmin",
-            "provider_connections",
-            "planned_unit_focus",
-        ):
-            setattr(routes, name, None)
-        routes.first_threshold = Mock()
-        routes.first_threshold.handle.return_value = True
-        dispatcher = HttpPostDispatcher(Mock(), Mock(), Mock(), routes)
-        handler = Mock()
-        dispatcher.handle_authenticated(handler, ADOPT_PATH, {})
-        routes.first_threshold.handle.assert_called_once_with(handler, ADOPT_PATH)
+        self.assertFalse(dispatch_route(routes, handler, "/api/profile", method="POST"))
 
 
 class CoachVisibilityTests(unittest.TestCase):

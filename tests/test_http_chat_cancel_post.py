@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
 
 
@@ -21,7 +23,13 @@ class ChatCancelPostRoutesTests(unittest.TestCase):
         self.session = {"csrf_hash": "session-csrf-hash"}
 
     def test_success_dispatches_csrf_hash_and_operation_id(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/chat/cancel", self.session)
+        handled = dispatch_route(
+            self.routes,
+            self.handler,
+            "/api/chat/cancel",
+            method="POST",
+            session=self.session,
+        )
         self.assertTrue(handled)
         self.handler.read_json.assert_called_once_with()
         self.cancellation_service.cancel.assert_called_once_with(
@@ -30,7 +38,9 @@ class ChatCancelPostRoutesTests(unittest.TestCase):
         self.handler.send_json.assert_called_once_with(200, {"cancelled": True})
 
     def test_wrong_path_returns_false_without_side_effects(self) -> None:
-        handled = self.routes.handle(self.handler, "/api/other", self.session)
+        handled = dispatch_route(
+            self.routes, self.handler, "/api/other", method="POST", session=self.session
+        )
         self.assertFalse(handled)
         self.handler.read_json.assert_not_called()
         self.cancellation_service.cancel.assert_not_called()

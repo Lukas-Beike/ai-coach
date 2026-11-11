@@ -17,7 +17,7 @@ from activity_row_support import (
     FixedActivityRows,
     canonical_source,
 )
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.activities.activity_reference import (
     ActivityReference,
@@ -271,7 +271,11 @@ class ActivityCallerResolutionTests(_Fixture):
         handler = SimpleNamespace(
             read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
         )
-        self.assertTrue(routes.handle(handler, f"/api/activities/{local}/feedback"))
+        self.assertTrue(
+            dispatch_route(
+                routes, handler, f"/api/activities/{local}/feedback", method="POST"
+            )
+        )
         status, body = handler.send_json.call_args.args
         self.assertEqual(200, status)
         self.assertEqual(local, body["activity_feedback"]["activity_id"])
@@ -287,7 +291,9 @@ class ActivityCallerResolutionTests(_Fixture):
             read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
         )
         with self.assertRaises(AppError):
-            routes.handle(handler, "/api/activities/act_missing/feedback")
+            dispatch_route(
+                routes, handler, "/api/activities/act_missing/feedback", method="POST"
+            )
         handler.send_json.assert_not_called()
 
     def test_equipment_without_resolver_keeps_the_reference_unchanged(self) -> None:

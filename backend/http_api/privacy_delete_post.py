@@ -5,11 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.privacy import PrivacyDeleteService
-
-_PATHS = frozenset(
-    {"/api/privacy/delete", "/api/privacy/gps", "/api/privacy/gps/delete"}
-)
 
 
 class PrivacyDeletePostRoutes:
@@ -21,17 +18,23 @@ class PrivacyDeletePostRoutes:
     ) -> None:
         self._privacy_delete_service = privacy_delete_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in _PATHS:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("POST", path, Access.SESSION_CSRF, self._handle)
+            for path in (
+                "/api/privacy/delete",
+                "/api/privacy/gps",
+                "/api/privacy/gps/delete",
+            )
+        ]
 
+    def _handle(self, handler: Any, request: RouteRequest) -> None:
         payload = handler.read_json()
         service = self._privacy_delete_service()
-        if path == "/api/privacy/gps":
+        if request.path == "/api/privacy/gps":
             result = service.set_gps_tracks(payload.get("enabled"))
-        elif path == "/api/privacy/gps/delete":
+        elif request.path == "/api/privacy/gps/delete":
             result = service.delete_gps_tracks(payload.get("confirm"))
         else:
             result = service.delete(payload.get("confirm"))
         handler.send_json(200, result)
-        return True

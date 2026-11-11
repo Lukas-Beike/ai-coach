@@ -42,10 +42,6 @@ from backend.http_api.nutrition import (
 )
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
-from backend.http_api.post_dispatch import (
-    HttpAuthenticatedPostRoutes,
-    HttpPostDispatcher,
-)
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
@@ -56,7 +52,6 @@ from backend.http_api.provider_connections import (
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import HttpResponseTransport
-from backend.http_api.route_dispatch import HttpRouteDispatcher
 from backend.http_api.route_table import RouteTable
 from backend.http_api.settings_put import SettingsPutRoutes
 from backend.http_api.state_events_get import StateEventsGetRoutes
@@ -649,6 +644,9 @@ class HttpApiAssembly:
         self.metric_export_post_routes = _when(
             metric_export_service, MetricExportPostRoutes
         )
+        self.sync_command_post_route = SyncCommandPostRoute(
+            lambda: self.sync_command_endpoint()
+        )
         self.route_table = RouteTable(
             route
             for owner in (
@@ -662,61 +660,42 @@ class HttpApiAssembly:
                 self.privacy_get_routes,
                 self.nutrition_get_routes,
                 self.analysis_routes,
-                *_present(self.wahoo_get_routes),
-                *_present(self.provider_connection_get_routes),
-            )
-            for route in owner.routes()
-        )
-        self.route_dispatcher = HttpRouteDispatcher(
-            (
                 self.settings_put_routes,
                 self.athlete_put_routes,
                 self.nutrition_put_routes,
-                *(
-                    (self.credentials_put_routes,)
-                    if self.credentials_put_routes
-                    else ()
+                self.auth_post_routes,
+                self.privacy_restore_post_routes,
+                self.chat_cancel_post_routes,
+                self.coach_actions_post_routes,
+                self.chat_post_routes,
+                self.transcribe_post_routes,
+                self.feedback_post_routes,
+                self.chat_stream_transport,
+                self.sync_command_post_route,
+                self.history_undo_post_routes,
+                self.privacy_delete_post_routes,
+                self.diagnostics_delete_post_routes,
+                self.nutrition_post_routes,
+                PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
+                *_present(self.credentials_put_routes),
+                *_present(self.wahoo_get_routes),
+                *_present(self.wahoo_post_routes),
+                *_present(self.provider_connection_get_routes),
+                *_present(self.provider_connection_post_routes),
+                *_present(self.equipment_post_routes),
+                *_present(self.metric_export_post_routes),
+                *_present(self.garmin_post_routes),
+                *_present(
+                    _when(
+                        athlete.first_threshold,
+                        FirstThresholdPostRoutes,
+                        profile_service,
+                        database_lock(),
+                    )
                 ),
-            ),
-        )
-        self.sync_command_post_route = SyncCommandPostRoute(
-            lambda: self.sync_command_endpoint()
-        )
-        self.authenticated_post_routes = HttpAuthenticatedPostRoutes(
-            self.coach_actions_post_routes,
-            self.chat_post_routes,
-            self.transcribe_post_routes,
-            self.feedback_post_routes,
-            self.chat_stream_transport,
-            self.sync_command_post_route,
-            self.history_undo_post_routes,
-            self.privacy_delete_post_routes,
-            self.diagnostics_delete_post_routes,
-            self.nutrition_post_routes,
-            self.analysis_routes,
-            self.equipment_post_routes,
-            self.wahoo_post_routes,
-            self.metric_export_post_routes,
-            self.garmin_post_routes,
-            self.provider_connection_post_routes,
-            PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
-            _when(
-                athlete.first_threshold,
-                FirstThresholdPostRoutes,
-                profile_service,
-                database_lock(),
-            ),
-            (
-                ActivityRoutePostRoutes(athlete.activity_routes)
-                if athlete.activity_routes
-                else None
-            ),
-        )
-        self.post_dispatcher = HttpPostDispatcher(
-            self.auth_post_routes,
-            self.privacy_restore_post_routes,
-            self.chat_cancel_post_routes,
-            self.authenticated_post_routes,
+                *_present(_when(athlete.activity_routes, ActivityRoutePostRoutes)),
+            )
+            for route in owner.routes()
         )
         self.response_transport = http_response_transport
         self._handler_configuration = handler_configuration
@@ -778,8 +757,6 @@ class HttpApiAssembly:
                 logger=handler.identity.logger,
                 session_auth_service=handler.identity.session_auth_service,
                 route_table=self.route_table,
-                route_dispatcher=self.route_dispatcher,
-                post_dispatcher=self.post_dispatcher,
                 response_transport=self.response_transport,
                 maintenance_gate=handler.identity.maintenance_gate,
                 redact_text=handler.errors.redact_text,

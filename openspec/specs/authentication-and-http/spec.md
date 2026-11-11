@@ -69,7 +69,7 @@ State-changing authenticated HTTP requests SHALL require the X-CSRF-Token value 
 - **WHEN** login or logout response cookies are formatted
 - **THEN** the session cookie has HttpOnly, both cookies have Path=/ and SameSite=Strict, and Secure follows configuration
 
-Evidence: `backend/http_api/auth.py::SessionAuthService.require_csrf`; `backend/http_api/handler.py::RequestHandler.do_POST`; `backend/http_api/handler.py::RequestHandler._do_PUT`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_server_http.py::test_csrf_rejects_missing_or_foreign_token`; `tests/test_server_http.py::test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility`.
+Evidence: `backend/http_api/auth.py::SessionAuthService.require_csrf`; `backend/http_api/handler.py::RequestHandler._post`; `backend/http_api/handler.py::RequestHandler._put`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_server_http.py::test_csrf_rejects_missing_or_foreign_token`; `tests/test_server_http.py::test_session_cookies_secure_flag_is_configurable_without_changing_csrf_visibility`.
 
 ### Requirement: Bounded client-specific rate limits
 
@@ -122,7 +122,7 @@ Authenticated ordinary POST mutations SHALL revalidate the current session and C
 - **WHEN** the session and CSRF token still match after gate entry
 - **THEN** the request dispatches once without consuming a second require_auth rate-limit slot
 
-Evidence: `backend/http_api/handler.py::RequestHandler.do_POST`; `backend/http_api/post_dispatch.py::HttpPostDispatcher`. Tests: `tests/test_http_post_maintenance_reauth.py`; `tests/test_runtime_maintenance.py::test_operation_rejects_stale_generation`.
+Evidence: `backend/http_api/handler.py::RequestHandler._post`; `backend/http_api/route_table.py::Route`. Tests: `tests/test_http_post_maintenance_reauth.py`; `tests/test_runtime_maintenance.py::test_operation_rejects_stale_generation`.
 
 ### Requirement: Safe classified HTTP errors
 
@@ -160,4 +160,4 @@ The server SHALL return API not-found errors for unmatched API paths, restrict s
 - **WHEN** an API response is formatted with the default response policy
 - **THEN** it includes Cache-Control=no-store, nosniff and DENY framing protection
 
-Evidence: `backend/http_api/route_table.py::RouteTable`; `backend/http_api/handler.py::RequestHandler._get`; `backend/http_api/route_dispatch.py::HttpRouteDispatcher`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.
+Evidence: `backend/http_api/route_table.py::RouteTable`; `backend/http_api/handler.py::RequestHandler._get`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.

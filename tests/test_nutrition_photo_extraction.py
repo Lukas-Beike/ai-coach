@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock
 
 from nutrition_service_support import build_nutrition_services
+from support import dispatch_route
 from test_nutrition_api_and_sync import GLOBAL_BODY_BYTES, json_route_handler
 
 from backend.errors import AppError
@@ -156,7 +157,9 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
                 self.assertGreater(
                     int(handler.headers["Content-Length"]), GLOBAL_BODY_BYTES
                 )
-                self.assertTrue(self.routes.handle(handler, EXTRACT_PATH))
+                self.assertTrue(
+                    dispatch_route(self.routes, handler, EXTRACT_PATH, method="POST")
+                )
                 self.assertEqual(handler.send_json.call_args.args[0], 200)
                 self.request.assert_called_once()
 
@@ -167,7 +170,7 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
         )
 
         with self.assertRaises(AppError) as raised:
-            self.routes.handle(handler, EXTRACT_PATH)
+            dispatch_route(self.routes, handler, EXTRACT_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 413)
         self.request.assert_not_called()

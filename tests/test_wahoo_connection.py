@@ -467,16 +467,22 @@ class WahooRouteTests(unittest.TestCase):
             dispatch_route(routes, SimpleNamespace(path="/x"), "/api/other")
         )
         post = WahooPostRoutes(lambda: self.service)
-        self.assertFalse(post.handle(SimpleNamespace(), "/api/other"))
+        self.assertFalse(
+            dispatch_route(post, SimpleNamespace(), "/api/other", method="POST")
+        )
 
     def test_post_routes_dispatch_to_service(self):
         self.service.start_authorization.return_value = {"authorize_url": "u"}
         self.service.disconnect.return_value = {"status": "ok"}
         routes = WahooPostRoutes(lambda: self.service)
         handler = SimpleNamespace(read_json=Mock(return_value={}), send_json=Mock())
-        self.assertTrue(routes.handle(handler, "/api/wahoo/connect"))
+        self.assertTrue(
+            dispatch_route(routes, handler, "/api/wahoo/connect", method="POST")
+        )
         handler.send_json.assert_called_with(200, {"authorize_url": "u"})
-        self.assertTrue(routes.handle(handler, "/api/wahoo/disconnect"))
+        self.assertTrue(
+            dispatch_route(routes, handler, "/api/wahoo/disconnect", method="POST")
+        )
         handler.send_json.assert_called_with(200, {"status": "ok"})
 
 

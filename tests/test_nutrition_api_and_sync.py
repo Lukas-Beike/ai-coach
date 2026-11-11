@@ -185,7 +185,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             "description": "Porridge",
             "kcal": 350,
         }
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry")
+        handled = dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/entry", method="POST"
+        )
         self.assertTrue(handled)
         self.diary_service.log_meal.assert_called_once()
         self.handler.send_json.assert_called_once_with(
@@ -202,7 +204,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             "status": "ok",
             "deleted_id": "entry-123",
         }
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/entry/delete")
+        handled = dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/entry/delete", method="POST"
+        )
         self.assertTrue(handled)
         self.diary_service.delete_meal.assert_called_once_with("entry-123")
         self.handler.send_json.assert_called_once_with(
@@ -210,7 +214,11 @@ class NutritionHttpApiTests(unittest.TestCase):
         )
 
     def test_the_removed_sync_route_is_not_handled(self) -> None:
-        self.assertFalse(self.post_routes.handle(self.handler, "/api/nutrition/sync"))
+        self.assertFalse(
+            dispatch_route(
+                self.post_routes, self.handler, "/api/nutrition/sync", method="POST"
+            )
+        )
         self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
 
@@ -228,7 +236,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             "records": 1,
         }
 
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        handled = dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+        )
 
         self.assertTrue(handled)
         self.diary_service.sync_status.get_day_summary.assert_called_once_with(
@@ -265,7 +275,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             "reason": "provider_unavailable",
         }
 
-        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+        )
 
         response = self.handler.send_json.call_args.args[1]
         self.assertEqual(response["status"], "partial")
@@ -282,7 +294,9 @@ class NutritionHttpApiTests(unittest.TestCase):
         }
         self.nutrition_refresh_service.refresh.return_value = {"status": "partial"}
 
-        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+        )
 
         self.nutrition_refresh_service.refresh.assert_called_once_with(
             "daily_stats", date(2026, 7, 2), date(2026, 9, 23)
@@ -295,7 +309,9 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.return_value = {"area": "body"}
         self.nutrition_refresh_service.refresh.return_value = {"status": "ok"}
 
-        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+        )
 
         self.nutrition_refresh_service.refresh.assert_called_once_with(
             "weight", date(2026, 7, 3), date(2026, 9, 24)
@@ -307,7 +323,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             {"id": "food-1"}
         ]
 
-        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        dispatch_route(
+            self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+        )
 
         self.nutrition_refresh_service.refresh.assert_not_called()
         self.handler.send_json.assert_called_once_with(
@@ -324,13 +342,17 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.handler.read_json.return_value = {"area": "week", "days": 15}
 
         with self.assertRaises(AppError):
-            self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+            dispatch_route(
+                self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
+            )
         self.nutrition_refresh_service.refresh.assert_not_called()
 
     def test_put_entry_route_is_removed(self) -> None:
         # Only the Coach correction changes an entry (#2137, F-018).
         self.handler.read_json.return_value = {"id": "entry-123", "kcal": 500}
-        handled = self.put_routes.handle(self.handler, "/api/nutrition/entry")
+        handled = dispatch_route(
+            self.put_routes, self.handler, "/api/nutrition/entry", method="PUT"
+        )
         self.assertFalse(handled)
         self.diary_service.update_meal.assert_not_called()
         self.handler.send_json.assert_not_called()
@@ -353,10 +375,10 @@ class NutritionRouteBodyTests(unittest.TestCase):
         self.put_routes = NutritionPutRoutes(lambda: self.library)
 
     def test_non_photo_json_routes_keep_the_global_body_cap(self) -> None:
-        for method, handle, path in (
-            ("POST", self.post_routes.handle, NUTRITION_ENTRY_PATH),
-            ("POST", self.post_routes.handle, f"{NUTRITION_PRODUCTS_PATH}/lookup"),
-            ("PUT", self.put_routes.handle, NUTRITION_PRODUCTS_PATH),
+        for method, routes, path in (
+            ("POST", self.post_routes, NUTRITION_ENTRY_PATH),
+            ("POST", self.post_routes, f"{NUTRITION_PRODUCTS_PATH}/lookup"),
+            ("PUT", self.put_routes, NUTRITION_PRODUCTS_PATH),
         ):
             handler = json_route_handler(
                 {"description": "Pasta", "kcal": 500}, padding=GLOBAL_BODY_BYTES
@@ -365,7 +387,7 @@ class NutritionRouteBodyTests(unittest.TestCase):
                 self.subTest(method=method, path=path),
                 self.assertRaises(AppError) as raised,
             ):
-                handle(handler, path)
+                dispatch_route(routes, handler, path, method=method)
             self.assertEqual(raised.exception.status, 413)
         self.assertEqual(
             self.diary.sync_status.get_day_summary("2026-09-24")["entry_count"], 0

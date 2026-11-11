@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.backup.restore import DatabaseRestoreService
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class PrivacyRestorePostRoutes:
@@ -22,13 +23,19 @@ class PrivacyRestorePostRoutes:
         self._database_restore_service = database_restore_service
         self._max_backup_bytes = max_backup_bytes
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != "/api/privacy/restore":
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "POST",
+                "/api/privacy/restore",
+                Access.SESSION_CSRF,
+                self._restore,
+                gated=False,
+            )
+        ]
 
+    def _restore(self, handler: Any, _request: RouteRequest) -> None:
         auth = self._session_auth_service()
-        session = auth.require_auth(handler)
-        auth.require_csrf(handler, session)
         # The upload is streamed; the restore service stages it to a file in chunks.
         payload = handler.read_body_stream(self._max_backup_bytes)
         result = self._database_restore_service().restore(payload)
@@ -36,4 +43,3 @@ class PrivacyRestorePostRoutes:
         handler.send_json(
             200, result, {"Set-Cookie": [clear_headers[0], clear_headers[1]]}
         )
-        return True

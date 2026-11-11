@@ -69,15 +69,23 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.handler.read_json.return_value = {"id": "off:1"}
 
         with self.assertRaises(AppError) as raised:
-            self.post_routes.handle(
-                self.handler, "/api/nutrition/products/database/delete"
+            dispatch_route(
+                self.post_routes,
+                self.handler,
+                "/api/nutrition/products/database/delete",
+                method="POST",
             )
         self.assertEqual(raised.exception.reason, "confirmation_required")
         self.meal_library.forget_database_food.assert_not_called()
 
         self.handler.read_json.return_value = {"id": "off:1", "confirmed": True}
         self.meal_library.forget_database_food.return_value = {"ok": True}
-        self.post_routes.handle(self.handler, "/api/nutrition/products/database/delete")
+        dispatch_route(
+            self.post_routes,
+            self.handler,
+            "/api/nutrition/products/database/delete",
+            method="POST",
+        )
         self.meal_library.forget_database_food.assert_called_once_with("off:1")
 
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
@@ -121,7 +129,9 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         }
 
         self.assertTrue(
-            self.post_routes.handle(self.handler, "/api/nutrition/products")
+            dispatch_route(
+                self.post_routes, self.handler, "/api/nutrition/products", method="POST"
+            )
         )
 
         self.meal_library.product_catalog.save_product.assert_called_once_with(
@@ -143,7 +153,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
                     **confirmation_field,
                 }
                 with self.assertRaises(AppError) as raised:
-                    self.post_routes.handle(self.handler, "/api/nutrition/products")
+                    dispatch_route(
+                        self.post_routes,
+                        self.handler,
+                        "/api/nutrition/products",
+                        method="POST",
+                    )
                 self.assertEqual(raised.exception.reason, "confirmation_required")
                 self.meal_library.product_catalog.save_product.assert_not_called()
 
@@ -157,7 +172,11 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "id": "product-1",
             "protein_g": 80,
         }
-        self.assertTrue(self.put_routes.handle(self.handler, "/api/nutrition/products"))
+        self.assertTrue(
+            dispatch_route(
+                self.put_routes, self.handler, "/api/nutrition/products", method="PUT"
+            )
+        )
         self.meal_library.product_catalog.update_product.assert_called_once_with(
             "product-1", self.handler.read_json.return_value
         )
@@ -173,7 +192,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "status": "archived",
         }
         self.assertTrue(
-            self.post_routes.handle(self.handler, "/api/nutrition/products/archive")
+            dispatch_route(
+                self.post_routes,
+                self.handler,
+                "/api/nutrition/products/archive",
+                method="POST",
+            )
         )
         self.meal_library.product_catalog.archive_product.assert_called_once_with(
             "product-1"
@@ -190,7 +214,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "favorite": 1,
         }
         self.assertTrue(
-            self.post_routes.handle(self.handler, "/api/nutrition/products/favorite")
+            dispatch_route(
+                self.post_routes,
+                self.handler,
+                "/api/nutrition/products/favorite",
+                method="POST",
+            )
         )
         self.meal_library.product_catalog.set_favorite.assert_called_once_with(
             "product-1", True
@@ -208,7 +237,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         }
         self.diary.add_product_to_meal.return_value = {"id": "entry-1"}
         self.assertTrue(
-            self.post_routes.handle(self.handler, "/api/nutrition/entry/add-product")
+            dispatch_route(
+                self.post_routes,
+                self.handler,
+                "/api/nutrition/entry/add-product",
+                method="POST",
+            )
         )
         self.diary.add_product_to_meal.assert_called_once_with(
             "entry-1", "product-1", 50, "g"

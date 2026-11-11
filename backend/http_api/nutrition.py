@@ -116,38 +116,39 @@ class NutritionPostRoutes:
         self._nutrition_refresh_service = nutrition_refresh_service
         self._local_now = local_now or datetime.now
 
-    def handle(self, handler: Any, path: str) -> bool:
-        routes = {
-            "/api/nutrition/yazio/check": self._check_yazio,
-            NUTRITION_ENTRY_PATH: self._create,
-            f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
-            f"{NUTRITION_ENTRY_PATH}/add-product": self._add_product,
-            "/api/nutrition/refresh": self._refresh,
-            NUTRITION_PRODUCTS_PATH: self._save_product,
-            f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
-            f"{NUTRITION_PRODUCTS_PATH}/extract": self._extract_product,
-            f"{NUTRITION_PRODUCTS_PATH}/archive": self._archive_product,
-            f"{NUTRITION_PRODUCTS_PATH}/favorite": self._favorite_product,
-            f"{NUTRITION_PRODUCTS_PATH}/database/delete": self._forget_database_food,
-        }
-        route = routes.get(path)
-        if route is None:
-            return False
-        route(handler)
-        return True
+    def routes(self) -> list[Route]:
+        return [
+            Route("POST", path, Access.SESSION_CSRF, handle)
+            for path, handle in (
+                ("/api/nutrition/yazio/check", self._check_yazio),
+                (NUTRITION_ENTRY_PATH, self._create),
+                (f"{NUTRITION_ENTRY_PATH}/delete", self._delete),
+                (f"{NUTRITION_ENTRY_PATH}/add-product", self._add_product),
+                ("/api/nutrition/refresh", self._refresh),
+                (NUTRITION_PRODUCTS_PATH, self._save_product),
+                (f"{NUTRITION_PRODUCTS_PATH}/lookup", self._lookup_product),
+                (f"{NUTRITION_PRODUCTS_PATH}/extract", self._extract_product),
+                (f"{NUTRITION_PRODUCTS_PATH}/archive", self._archive_product),
+                (f"{NUTRITION_PRODUCTS_PATH}/favorite", self._favorite_product),
+                (
+                    f"{NUTRITION_PRODUCTS_PATH}/database/delete",
+                    self._forget_database_food,
+                ),
+            )
+        ]
 
-    def _check_yazio(self, handler: Any) -> None:
+    def _check_yazio(self, handler: Any, _request: RouteRequest) -> None:
         handler.read_json()
         handler.send_json(
             200, self._meal_library_service().food_database.check_yazio_connection()
         )
 
-    def _create(self, handler: Any) -> None:
+    def _create(self, handler: Any, _request: RouteRequest) -> None:
         with change_history.collect_changes() as changes:
             entry = self._diary_service().log_meal(handler.read_json())
         handler.send_json(200, {"ok": True, "entry": entry, **_change(changes)})
 
-    def _add_product(self, handler: Any) -> None:
+    def _add_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         with change_history.collect_changes() as changes:
             entry = self._diary_service().add_product_to_meal(
@@ -158,7 +159,7 @@ class NutritionPostRoutes:
             )
         handler.send_json(200, {"ok": True, "entry": entry, **_change(changes)})
 
-    def _delete(self, handler: Any) -> None:
+    def _delete(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         entry_id = payload.get("id") or payload.get("entry_id")
         if not entry_id:
@@ -167,7 +168,7 @@ class NutritionPostRoutes:
             result = self._diary_service().delete_meal(str(entry_id))
         handler.send_json(200, {"ok": True, **result, **_change(changes)})
 
-    def _refresh(self, handler: Any) -> None:
+    def _refresh(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         area = payload.get("area")
         if area not in {"diary", "week", "body", "products"}:
@@ -237,7 +238,7 @@ class NutritionPostRoutes:
                 raise
             return {"status": "partial", "reason": exc.reason}
 
-    def _save_product(self, handler: Any) -> None:
+    def _save_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         confirmed = payload.pop("confirmed", None)
         product = payload.pop("product", payload)
@@ -253,19 +254,19 @@ class NutritionPostRoutes:
             200, {"ok": True, "product": saved, **_change(changes, PRODUCT_ENTITY)}
         )
 
-    def _lookup_product(self, handler: Any) -> None:
+    def _lookup_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         handler.send_json(
             200, self._meal_library_service().product_catalog.lookup_product(payload)
         )
 
-    def _extract_product(self, handler: Any) -> None:
+    def _extract_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler, PHOTO_REQUEST_MAX_BYTES)
         handler.send_json(
             200, self._meal_library_service().extract_packaging_photo(payload)
         )
 
-    def _forget_database_food(self, handler: Any) -> None:
+    def _forget_database_food(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         if payload.get("confirmed") is not True:
             raise AppError(
@@ -280,14 +281,14 @@ class NutritionPostRoutes:
             ),
         )
 
-    def _favorite_product(self, handler: Any) -> None:
+    def _favorite_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         product = self._meal_library_service().product_catalog.set_favorite(
             str(payload.get("id") or ""), payload.get("favorite")
         )
         handler.send_json(200, {"ok": True, "product": product})
 
-    def _archive_product(self, handler: Any) -> None:
+    def _archive_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         if payload.get("confirmed") is not True:
             raise AppError(
@@ -317,9 +318,17 @@ class NutritionPutRoutes:
     ) -> None:
         self._meal_library_service = meal_library_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != "/api/nutrition/products":
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route(
+                "PUT",
+                NUTRITION_PRODUCTS_PATH,
+                Access.SESSION_CSRF,
+                self._update_product,
+            )
+        ]
+
+    def _update_product(self, handler: Any, _request: RouteRequest) -> None:
         payload = _read_object(handler)
         if payload.pop("confirmed", None) is not True:
             raise AppError(
@@ -338,7 +347,6 @@ class NutritionPutRoutes:
             200,
             {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},
         )
-        return True
 
 
 def _change(

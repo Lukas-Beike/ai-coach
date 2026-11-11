@@ -120,7 +120,7 @@ class ServerHttpTests(ServerTestCase):
         table = server.HTTP_API.route_table
         self.assertEqual(
             {(r.method, r.path) for r in table.routes if r.access is Access.PUBLIC},
-            {key for key in PUBLIC_API_ROUTES if key[0] == "GET"},
+            PUBLIC_API_ROUTES,
         )
         dependencies = replace(
             server.HTTP_API.request_handler_class().dependencies,
@@ -132,27 +132,39 @@ class ServerHttpTests(ServerTestCase):
         self.addCleanup(httpd.server_close)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.shutdown)
-        auth = http_auth.SessionAuthService(
-            Mock(),
-            threading.RLock(),
-            replace(server.CONFIG, app_password="synthetic-password-123"),
-            True,
-            RateLimiter(),
+        config = replace(server.CONFIG, app_password="synthetic-password-123")
+        without_session = http_auth.SessionAuthService(
+            Mock(), threading.RLock(), config, True, RateLimiter()
         )
-        statuses = {}
-        with patch.object(server, "get_session_auth_service", return_value=auth):
-            for route in table.routes:
-                if route.access is Access.PUBLIC:
-                    continue
-                path = re.sub(r"\{.*?\}", "abc-123", route.path)
-                connection = http.client.HTTPConnection(
-                    "127.0.0.1", httpd.server_address[1], timeout=10
-                )
-                connection.request(route.method, path)
-                statuses[route.method, path] = connection.getresponse().status
-                connection.close()
-        self.assertGreater(len(statuses), 30)
-        self.assertEqual({401}, set(statuses.values()), statuses)
+        with_session = http_auth.SessionAuthService(
+            server.database_manager(), server.DB_LOCK, config, True, RateLimiter()
+        )
+        cookie = {"Cookie": f"{http_auth.SESSION_COOKIE}={create_test_session(server)}"}
+
+        def statuses(auth, access, headers):
+            found = {}
+            with patch.object(server, "get_session_auth_service", return_value=auth):
+                for route in table.routes:
+                    if route.access is not access:
+                        continue
+                    path = re.sub(r"\{.*?\}", "abc-123", route.path)
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", httpd.server_address[1], timeout=10
+                    )
+                    body = None if route.method == "GET" else b"{}"
+                    connection.request(route.method, path, body=body, headers=headers)
+                    found[route.method, path] = connection.getresponse().status
+                    connection.close()
+            return found
+
+        anonymous = {
+            **statuses(without_session, Access.SESSION, {}),
+            **statuses(without_session, Access.SESSION_CSRF, {}),
+        }
+        missing_csrf = statuses(with_session, Access.SESSION_CSRF, cookie)
+        self.assertGreater(len(missing_csrf), 40)
+        self.assertEqual({401}, set(anonymous.values()), anonymous)
+        self.assertEqual({403}, set(missing_csrf.values()), missing_csrf)
         self.assertEqual([], called)
 
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
@@ -255,9 +267,7 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertEqual(second.server_version, "Pacecraft/synthetic-next")
         self.assertIs(first.dependencies.route_table, server.HTTP_API.route_table)
-        self.assertIs(
-            second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher
-        )
+        self.assertIs(second.dependencies.route_table, server.HTTP_API.route_table)
         self.assertIs(
             first.dependencies.response_transport, server.HTTP_API.response_transport
         )
@@ -299,12 +309,20 @@ class ServerHttpTests(ServerTestCase):
             server.HTTP_API, "sync_command_endpoint", return_value=endpoint
         ) as factory:
             self.assertFalse(
-                server.HTTP_API.sync_command_post_route.handle(handler, "/api/unknown")
+                dispatch_route(
+                    server.HTTP_API.sync_command_post_route,
+                    handler,
+                    "/api/unknown",
+                    method="POST",
+                )
             )
             factory.assert_not_called()
             self.assertTrue(
-                server.HTTP_API.sync_command_post_route.handle(
-                    handler, "/api/weather/sync"
+                dispatch_route(
+                    server.HTTP_API.sync_command_post_route,
+                    handler,
+                    "/api/weather/sync",
+                    method="POST",
                 )
             )
         handler.read_json.assert_not_called()

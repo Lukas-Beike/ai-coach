@@ -680,12 +680,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_http_post_dispatch.py",
-      "code": "call-arg",
-      "message_sha256": "b104e8649068e3856026b1d61f6f36e7d08682408876da27049ccb3185ac267e"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_planning_competitions.py",
       "code": "call-arg",
       "message_sha256": "bfb7c6cc7199c64275ff7bdb3a93e6d034ff3099ef468fe78e1dcd752c1ae1fc"

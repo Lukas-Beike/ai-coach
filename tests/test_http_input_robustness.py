@@ -22,7 +22,7 @@ from backend.http_api.handler import (
 )
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.response_transport import HttpResponseTransport
-from backend.http_api.route_table import RouteTable
+from backend.http_api.route_table import Access, Route, RouteTable
 
 PASSWORD = "synthetic-password-123"
 LOGIN_HEADERS = b"POST /api/login HTTP/1.0\r\nContent-Type: application/json\r\n"
@@ -46,9 +46,8 @@ class RecordingHandler(logging.Handler):
 class UploadRoutes:
     """Stand-in for authenticated body routes: read the body, report its size."""
 
-    def read_and_answer(self, handler, *, json_body=False):
-        size = len(handler.read_json() if json_body else handler.read_body())
-        handler.send_json(200, {"size": size})
+    def read_and_answer(self, handler, _request):
+        handler.send_json(200, {"size": len(handler.read_body())})
 
 
 def make_server(*, input_timeout: float, chunk_bytes: int):
@@ -67,23 +66,23 @@ def make_server(*, input_timeout: float, chunk_bytes: int):
     auth_routes = AuthPostRoutes(lambda: login_service, MagicMock())
     routes = UploadRoutes()
 
-    def handle_before_auth(handler, path):
-        if path == "/api/upload":
-            routes.read_and_answer(handler)
-            return True
-        return auth_routes.handle(handler, path)
-
     gate = MagicMock()
     request_auth = Mock()
     dependencies = HttpRequestHandlerDependencies(
         app_version="test",
         logger=log,
         session_auth_service=lambda: request_auth,
-        route_table=RouteTable([]),
-        route_dispatcher=SimpleNamespace(
-            handle_put=lambda handler, _path: routes.read_and_answer(handler)
+        route_table=RouteTable(
+            [
+                *auth_routes.routes(),
+                Route(
+                    "POST", "/api/upload", Access.SESSION_CSRF, routes.read_and_answer
+                ),
+                Route(
+                    "PUT", "/api/anything", Access.SESSION_CSRF, routes.read_and_answer
+                ),
+            ]
         ),
-        post_dispatcher=SimpleNamespace(handle_before_auth=handle_before_auth),
         response_transport=HttpResponseTransport(),
         maintenance_gate=gate,
         redact_text=lambda text: text,

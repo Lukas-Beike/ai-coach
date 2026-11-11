@@ -21,11 +21,8 @@ class DatabaseBusyResponseTests(unittest.TestCase):
         self.auth_service.authenticated_session.return_value = {
             "csrf_hash": "synthetic"
         }
-        self.routes = Mock()
-        self.get_route = Mock()
-        self.posts = Mock()
-        self.posts.handle_before_auth.return_value = False
-        self.posts.handle_before_maintenance.return_value = False
+        self.get_route, self.login_route = Mock(), Mock()
+        self.post_route, self.put_route = Mock(), Mock()
         self.logger = Mock()
 
         # A bare handler stub: only the attributes the verb methods read are set.
@@ -35,10 +32,15 @@ class DatabaseBusyResponseTests(unittest.TestCase):
         handler.dependencies = SimpleNamespace(
             session_auth_service=lambda: self.auth_service,
             route_table=RouteTable(
-                [Route("GET", "/api/synthetic", Access.SESSION, self.get_route)]
+                [
+                    Route("GET", "/api/synthetic", Access.SESSION, self.get_route),
+                    Route("POST", "/api/login", Access.PUBLIC, self.login_route),
+                    Route(
+                        "POST", "/api/synthetic", Access.SESSION_CSRF, self.post_route
+                    ),
+                    Route("PUT", "/api/synthetic", Access.SESSION_CSRF, self.put_route),
+                ]
             ),
-            route_dispatcher=self.routes,
-            post_dispatcher=self.posts,
             maintenance_gate=MaintenanceGate(),
             logger=self.logger,
             internal_server_error="internal",
@@ -69,12 +71,13 @@ class DatabaseBusyResponseTests(unittest.TestCase):
         self.logger.exception.assert_not_called()
 
     def test_busy_writer_during_login_is_a_retryable_503(self) -> None:
-        self.posts.handle_before_auth.side_effect = DatabaseBusyError("writer")
+        self.handler.path = "/api/login"
+        self.login_route.side_effect = DatabaseBusyError("writer")
         self.handler.do_POST()
         self.assert_busy_response()
 
     def test_busy_database_on_an_authenticated_post_is_a_retryable_503(self) -> None:
-        self.posts.handle_authenticated.side_effect = DatabaseBusyError("writer")
+        self.post_route.side_effect = DatabaseBusyError("writer")
         self.handler.do_POST()
         self.assert_busy_response()
 
@@ -84,7 +87,7 @@ class DatabaseBusyResponseTests(unittest.TestCase):
         self.assert_busy_response()
 
     def test_busy_writer_on_put_is_a_retryable_503(self) -> None:
-        self.routes.handle_put.side_effect = DatabaseBusyError("writer")
+        self.put_route.side_effect = DatabaseBusyError("writer")
         self.handler.do_PUT()
         self.assert_busy_response()
 

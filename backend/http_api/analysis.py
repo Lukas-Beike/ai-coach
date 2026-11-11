@@ -23,6 +23,9 @@ class AnalysisRoutes:
             Route(
                 "GET", "/api/analysis/training-records", Access.SESSION, self._report
             ),
+            Route(
+                "POST", "/api/analysis/refresh", Access.SESSION_CSRF, self._refresh_area
+            ),
         ]
 
     def _report(self, handler: Any, request: RouteRequest) -> None:
@@ -35,28 +38,25 @@ class AnalysisRoutes:
             payload = reports.profiles.power_profiles()
         handler.send_json(200, payload)
 
-    def handle_post(self, handler: Any, path: str) -> bool:
-        if path == "/api/analysis/refresh":
-            payload = handler.read_json()
-            area = payload.get("area") if isinstance(payload, dict) else None
-            if not isinstance(area, str) or area not in {
-                "load",
-                "performance",
-                "recovery",
-                "sessions",
-            }:
-                raise AppError(400, "Ungültiger Analysebereich.")
-            days = payload.get("days")
-            if days is not None and (
-                area not in {"load", "recovery"} or days not in {14, 84}
-            ):
-                raise AppError(400, "Ungültiger Analysezeitraum.")
-            if self._refresh is None:
-                raise AppError(
-                    503,
-                    "Die gezielte Aktualisierung ist nicht verfügbar.",
-                    reason="analysis_refresh_unavailable",
-                )
-            handler.send_json(200, self._refresh().refresh(area, days=days))
-            return True
-        return False
+    def _refresh_area(self, handler: Any, _request: RouteRequest) -> None:
+        payload = handler.read_json()
+        area = payload.get("area") if isinstance(payload, dict) else None
+        if not isinstance(area, str) or area not in {
+            "load",
+            "performance",
+            "recovery",
+            "sessions",
+        }:
+            raise AppError(400, "Ungültiger Analysebereich.")
+        days = payload.get("days")
+        if days is not None and (
+            area not in {"load", "recovery"} or days not in {14, 84}
+        ):
+            raise AppError(400, "Ungültiger Analysezeitraum.")
+        if self._refresh is None:
+            raise AppError(
+                503,
+                "Die gezielte Aktualisierung ist nicht verfügbar.",
+                reason="analysis_refresh_unavailable",
+            )
+        handler.send_json(200, self._refresh().refresh(area, days=days))

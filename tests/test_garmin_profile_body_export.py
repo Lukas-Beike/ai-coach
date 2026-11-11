@@ -8,7 +8,7 @@ from pathlib import Path
 from time import monotonic
 from unittest.mock import Mock, patch
 
-from support import temp_database
+from support import dispatch_route, temp_database
 
 from backend.athlete.profile import ProfileService
 from backend.db import row_factory
@@ -131,7 +131,7 @@ class BodyExportTests(unittest.TestCase):
         }
         send = Mock(return_value="success")
         routes = AthletePutRoutes(lambda: self.profile, threading.RLock(), None, send)
-        routes.handle(handler, "/api/profile")
+        dispatch_route(routes, handler, "/api/profile", method="PUT")
         send.assert_called_once()
         self.assertEqual(
             handler.send_json.call_args.args[1]["garmin_body_export"], "success"
@@ -230,18 +230,18 @@ class BodyExportTests(unittest.TestCase):
             threading.RLock(),
             body_export=self.exporter.export,
         )
-        routes.handle(handler, "/api/profile")
+        dispatch_route(routes, handler, "/api/profile", method="PUT")
         self.assertEqual(
             handler.send_json.call_args.args[1]["garmin_body_export"], "success"
         )
         self.client.add_body_composition.reset_mock()
-        routes.handle(handler, "/api/profile")
+        dispatch_route(routes, handler, "/api/profile", method="PUT")
         self.client.add_body_composition.assert_not_called()
         self.assertEqual(
             handler.send_json.call_args.args[1]["garmin_body_export"], "unchanged"
         )
         handler.read_json.return_value = {"weight_kg": "77"}
-        routes.handle(handler, "/api/profile")
+        dispatch_route(routes, handler, "/api/profile", method="PUT")
         self.client.add_body_composition.assert_not_called()
 
 
