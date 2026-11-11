@@ -88,7 +88,7 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
         return None
     try:
         exercises = strength_structure.normalize_structure(
-            payload.get(STRENGTH_STRUCTURE)
+            payload.get(STRENGTH_STRUCTURE), stored=True
         )
     except AppError:
         return None
@@ -120,7 +120,9 @@ def pushable_fingerprint(
         return None, ("no_structure" if sport is Sport.STRENGTH else None)
     try:
         resolved_exercises(
-            strength_structure.normalize_structure(payload.get(STRENGTH_STRUCTURE))
+            strength_structure.normalize_structure(
+                payload.get(STRENGTH_STRUCTURE), stored=True
+            )
             or [],
             remembered,
         )
@@ -135,7 +137,7 @@ def unmapped_exercises(
     """Each exercise without a Garmin match: its index, name and suggestions."""
     try:
         exercises = strength_structure.normalize_structure(
-            payload.get(STRENGTH_STRUCTURE)
+            payload.get(STRENGTH_STRUCTURE), stored=True
         )
     except AppError:
         return []
