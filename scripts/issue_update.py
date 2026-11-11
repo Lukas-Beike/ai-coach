@@ -53,24 +53,22 @@ def tick(number: int, part: str) -> int:
     return 0
 
 
-def blockers(number: int) -> list[str]:
+def blockers(number: int) -> tuple[bool, list[str]]:
+    """Whether the issue is still open, and what keeps it from being done."""
     issue = gh_json("issue", "view", str(number), "--json", "state,body")
-    found = []
-    if issue["state"] != "OPEN":
-        found.append(f"issue is {issue['state']}")
-    found += [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
+    found = [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
     for pull in gh_json(
         "pr", "list", "--state", "all", "--search", f"#{number} in:body",
         "--json", "number,state,title",
     ):  # fmt: skip
         if pull["state"] == "OPEN":
             found.append(f"open PR #{pull['number']}: {pull['title']}")
-    return found
+    return issue["state"] == "OPEN", found
 
 
 def close(number: int, body_file: str) -> int:
     read_body(body_file)
-    found = blockers(number)
+    is_open, found = blockers(number)
     if found:
         print(f"refused: #{number} is not done")
         for item in found:
@@ -78,8 +76,10 @@ def close(number: int, body_file: str) -> int:
         return 1
     gh("issue", "comment", str(number), "--body-file", body_file)
     edit(number, "--remove-label", IN_PROGRESS)
-    gh("issue", "close", str(number))
-    print(f"closed #{number}")
+    # A merged "Closes #N" PR has usually closed the issue already.
+    if is_open:
+        gh("issue", "close", str(number))
+    print(f"closed #{number}" if is_open else f"#{number} was already closed")
     return 0
 
 

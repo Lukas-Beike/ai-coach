@@ -157,7 +157,6 @@ class IssueUpdateTests(unittest.TestCase):
                 },
                 "open PR #5",
             ),
-            ({"body": "- [x] done\n", "state": "CLOSED"}, "issue is CLOSED"),
         ):
             with self.subTest(expect=expect):
                 code, out, _, fake = self.run_script(
@@ -189,6 +188,17 @@ class IssueUpdateTests(unittest.TestCase):
         )
         self.assertIn("--body-file", fake.calls[2])
         self.assertIn("#12 in:body", fake.calls[1])
+
+    def test_close_after_a_closing_merge_comments_and_unlabels_only(self):
+        code, out, _, fake = self.run_script(
+            "close", "12", "--body-file", str(self.file), body="- [x] done\n",
+            state="CLOSED",
+        )  # fmt: skip
+        self.assertEqual(code, 0)
+        self.assertIn("#12 was already closed", out)
+        self.assertEqual(
+            fake.writes(), [["issue", "comment", "12"], ["issue", "edit", "12"]]
+        )
 
     def test_failed_gh_call_exits_2(self):
         def failing(argv, **_kwargs):
