@@ -684,6 +684,33 @@ class ConfirmedBundleRevivalTests(LinkingCase):
             )
         self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
         self.assertEqual(self._sessions()[GARMIN_ID]["state"], "deleted")
+        # A first-time copy from another provider is deleted with it (#2137, B-011).
+        self._ingest_wahoo([wahoo_workout()], LATER)
+        with self.manager.reader() as db:
+            copy = db.execute(
+                "SELECT state, merged_into_retained FROM activity_sessions "
+                "WHERE primary_provider_activity_id = ?",
+                (WAHOO_ID,),
+            ).fetchone()
+        self.assertEqual(
+            ("deleted", self._sessions()[GARMIN_ID]["activity_id"]),
+            (copy["state"], copy["merged_into_retained"]),
+        )
+        # Undoing the athlete's delete brings the copy back (session_corrections).
+        survivor = self._sessions()[GARMIN_ID]["activity_id"]
+        self._set_session(GARMIN_ID, state="active", merged_into_retained=None)
+        with self.manager.unit_of_work() as db:
+            revived = canonical_store.revive_deleted_copies(
+                db, survivor, exclude={survivor}, now=LATER
+            )
+        self.assertEqual(1, revived)
+        self.assertEqual(
+            ("duplicate", survivor),
+            (
+                self._sessions()[WAHOO_ID]["state"],
+                self._sessions()[WAHOO_ID]["merged_into"],
+            ),
+        )
 
 
 class ExactLinkTests(LinkingCase):

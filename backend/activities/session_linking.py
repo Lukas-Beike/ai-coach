@@ -333,8 +333,10 @@ class _Sessions:
     ) -> None:
         """Delete a new copy of an activity the athlete deleted, as that activity.
 
-        Only an exact link reaches a deleted session (``_upstream_rows``), so a
-        provider's copy of a deleted recording does not bring the activity back.
+        The records of athlete-deleted sessions take part in bundling
+        (``canonical_store.linkable_activity_rows``), and an exact link reaches
+        any deleted session (``_upstream_rows``), so a provider's copy of a deleted
+        recording does not bring the activity back (#2137, B-011).
         """
         for gone, other in ((first, second), (second, first)):
             if (
