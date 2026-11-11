@@ -20,6 +20,7 @@ _OPTIONAL_FIELDS = (
     "course_profile",
     "notes",
     "description",
+    "planned_duration_s",
 )
 # Upcoming races only: past races stay as the archive and never count.
 _MAX_UPCOMING_COMPETITIONS = 20
@@ -76,11 +77,6 @@ def _merge_update(
         # A field sent empty (or null) is cleared; an absent one keeps its value.
         if field not in arguments and existing.get(field) not in (None, ""):
             value[field] = existing[field]
-    if (
-        value.get("planned_duration_s") is None
-        and existing.get("planned_duration_s") is not None
-    ):
-        value["planned_duration_s"] = existing["planned_duration_s"]
 
 
 def _with_derived_event_date(
