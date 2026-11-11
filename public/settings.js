@@ -300,17 +300,21 @@ async function saveCalendarDisplaySettings(event) {
   }
 }
 
-// Export and deletion run up to minutes; their button stays busy so a second click starts nothing.
+// Export and deletion run up to minutes: a second click starts nothing, and no deletion runs
+// during an export. aria-disabled keeps the focused button focusable.
+const privacyInFlight = { export: false, delete: false };
 function setPrivacyButtonBusy(button, busy) {
   if (!button) return;
-  button.disabled = busy;
-  if (busy) button.setAttribute("aria-busy", "true");
-  else button.removeAttribute("aria-busy");
+  for (const name of ["aria-busy", "aria-disabled"]) {
+    if (busy) button.setAttribute(name, "true");
+    else button.removeAttribute(name);
+  }
 }
 
 async function downloadPrivacyExport() {
+  if (privacyInFlight.export) return;
   const button = $("#privacyExportButton");
-  if (button?.disabled) return;
+  privacyInFlight.export = true;
   setPrivacyButtonBusy(button, true);
   try {
     const blob = await downloadRequest(
@@ -325,7 +329,10 @@ async function downloadPrivacyExport() {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
-  } catch (error) { toast(error.message, true); } finally { setPrivacyButtonBusy(button, false); }
+  } catch (error) { toast(error.message, true); } finally {
+    privacyInFlight.export = false;
+    setPrivacyButtonBusy(button, false);
+  }
 }
 
 let gpsTracksState = { confirmation_text: "" };
@@ -377,9 +384,12 @@ function privacyDeleteLeftovers(result) {
 }
 
 async function deletePrivacyData() {
+  if (privacyInFlight.delete) return;
+  if (privacyInFlight.export) { toast("Der Datenexport läuft noch.", true); return; }
   const button = $("#privacyDeleteButton");
-  if (button?.disabled) return;
+  privacyInFlight.delete = true;
   setPrivacyButtonBusy(button, true);
+  const release = () => { privacyInFlight.delete = false; setPrivacyButtonBusy(button, false); };
   try {
     const preview = await api("/api/privacy/delete/preview");
     const categories = (preview.categories || []).map((category) => `${category.label}: ${category.records || 0}`).join("\n");
@@ -398,6 +408,7 @@ async function deletePrivacyData() {
     });
     if (!confirmation) return;
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
+    release();
     const notice = $("#privacyDeleteNotice");
     if (notice) {
       const problems = [];
@@ -424,7 +435,7 @@ async function deletePrivacyData() {
     state.replaceDataOnLoad = true;
     state.loadedAreas.clear();
     await load();
-  } catch (error) { toast(error.message, true); } finally { setPrivacyButtonBusy(button, false); }
+  } catch (error) { toast(error.message, true); } finally { release(); }
 }
 
 async function saveServiceTier(event) {
