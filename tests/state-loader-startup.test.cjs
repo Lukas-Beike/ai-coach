@@ -81,6 +81,16 @@ test("area reads start before the bootstrap response arrives", async () => {
   await loading;
 });
 
+test("a load without arguments reads the full bootstrap and the areas of the open route", async () => {
+  const { context, calls, respond } = loader();
+  const loading = context.load();
+  await Promise.resolve();
+  assert.deepEqual(plain(calls), ["/api/chat/history?limit=100", "/api/bootstrap"]);
+  respond("/api/chat/history?limit=100", {});
+  respond("/api/bootstrap", { state_versions: {} });
+  await loading;
+});
+
 test("a live area refresh reads only its areas and keeps the known versions", async () => {
   const { context, state, calls, respond } = loader();
   state.data = { profile: { weather_location: "Berlin" }, state_versions: { weather: 3 } };

@@ -17,6 +17,8 @@ test("queued coach follow-ups keep order, can be edited or removed without brows
   await expect(input).toHaveAttribute("placeholder", "Folgefrage – wird danach gesendet");
   await expect(page.locator("#steerButton")).toBeDisabled();
   await expect(page.locator("#steerButtonHint")).toHaveText("Schreibe zuerst eine Nachricht, um sie als Nächstes zu senden.");
+  await expect(page.locator("#steerButton")).toHaveAccessibleName("Als Nächstes senden");
+  await expect(page.locator("#steerButton")).toHaveAccessibleDescription("Schreibe zuerst eine Nachricht, um sie als Nächstes zu senden.");
 
   for (const text of ["Erste Folgefrage", "Zweite Folgefrage"]) {
     await input.fill(text);

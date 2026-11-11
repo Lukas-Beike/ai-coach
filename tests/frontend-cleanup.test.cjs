@@ -41,7 +41,7 @@ test("every script and stylesheet of index.html is cached by the service worker"
 test("removed frontend symbols and files are gone from public/", () => {
   assert.ok(!fs.existsSync(path.join(publicDir, "forms.js")));
   const sources = [...scripts, "index.html", "service-worker.js"].map(read).join("\n");
-  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField"]) {
+  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect"]) {
     assert.ok(!sources.includes(removed), `${removed} is still referenced`);
   }
   assert.ok(!/id="trainingPlans"/.test(index));
@@ -49,12 +49,13 @@ test("removed frontend symbols and files are gone from public/", () => {
 
 test("removed CSS classes and tokens are no longer defined", () => {
   const styles = read("styles.css");
-  for (const cls of ["weekly-chart", "weekly-load-line", "weekly-load-point", "weekly-sport-legend", "coach-overview", "garmin-panel", "replan-preview", "replan-change", "adaptive-planning-dialog", "planned-day-form", "planned-day-metrics", "estimate-note", "training-plan", "eyebrow"]) {
+  for (const cls of ["weekly-chart", "weekly-load-line", "weekly-load-point", "weekly-sport-legend", "coach-overview", "garmin-panel", "replan-preview", "replan-change", "adaptive-planning-dialog", "planned-day-form", "planned-day-metrics", "estimate-note", "training-plan", "eyebrow", "chat-composer-hidden"]) {
     assert.ok(!new RegExp(String.raw`\.${cls}(?![\w-])`).test(styles), `.${cls} is still defined`);
   }
-  for (const token of ["bg-elevated", "planned-entry-shadow", "selected-surface", "session-soft", "space-1", "space-2", "space-6", "estimate-ink"]) {
+  for (const token of ["bg-elevated", "planned-entry-shadow", "selected-surface", "session-soft", "space-1", "space-2", "space-6", "estimate-ink", "bottom-nav-clearance", "chat-fixed-ui-clearance"]) {
     assert.ok(!new RegExp(String.raw`--${token}(?![\w-])`).test(styles), `--${token} is still defined`);
   }
+  assert.ok(!styles.includes(".quick-message-templates::after"), "the quick-start fade overlay is back");
 });
 
 test("collapsible summary titles are never hidden by a merged selector list", () => {

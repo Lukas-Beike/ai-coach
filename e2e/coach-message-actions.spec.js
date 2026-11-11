@@ -50,6 +50,12 @@ test("chat message actions keep 44px hit areas, accessible names and a compact r
   const lastAssistantAction = page.locator("#messages .message.assistant").last().locator(".message-action");
   await expect(lastAssistantAction).toHaveCount(1);
   await expect(lastAssistantAction).toHaveAccessibleName("Nachricht kopieren");
+  await expect(lastAssistantAction).toHaveAttribute("title", "Nachricht kopieren");
+  await expect(lastAssistantAction).toHaveText("");
+  const draftAction = page.locator("#messages .message.user").first().getByRole("button", { name: "Als Entwurf bearbeiten" });
+  await expect(draftAction).toHaveCount(1);
+  await expect(draftAction).toHaveAttribute("title", "Als Entwurf bearbeiten");
+  await expect(draftAction).toHaveText("");
 
   const actions = page.locator("#messages .message-action");
   const actionCount = await actions.count();

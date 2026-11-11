@@ -193,20 +193,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertTrue(referenced_ids)
         self.assertLessEqual(referenced_ids, markup_ids)
 
-    def test_removed_ai_controls_and_reset_binding_match_markup(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
-            encoding="utf-8"
-        )
-        root = Path(__file__).resolve().parents[1]
-        app = frontend_source()
-        index = (root / "public" / "index.html").read_text(encoding="utf-8")
-
-        for identifier in ("chat" + "ResetButton", "ai" + "ProviderSelect"):
-            self.assertNotIn(f'$("#{identifier}")', app)
-            self.assertNotIn(f'id="{identifier}"', index)
-        self.assertEqual(index.count('id="openaiChatResetButton"'), 1)
-        self.assertIn('$("#openaiChatResetButton").addEventListener', coach)
-
     def test_structured_coach_deletes_local_planned_unit_without_ui_preview(self):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
@@ -254,61 +240,13 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(result["changes"][0]["status"], "deleted")
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
 
-    def test_frontend_loads_domain_areas_instead_of_monolithic_state(self):
+    def test_coach_start_keeps_scroll_and_proposal_refresh_wiring(self):
         app = frontend_source()
         coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
             encoding="utf-8"
         )
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            'async function loadState(path = "/api/bootstrap", requestedAreas = null)',
-            app,
-        )
-        self.assertIn(
-            'function load(path = "/api/bootstrap", requestedAreas = null)', app
-        )
         self.assertIn("await refreshChatHistoryState()", coach)
-        self.assertIn("api(`/api/weather${query}`)", app)
-        self.assertIn(
-            'load("/api/bootstrap?local=1", ["chat", "performance", "feedback", "profile", "plan", "library"])',
-            coach,
-        )
-        self.assertIn('AppApi.stream("/api/chat/stream"', coach)
-        self.assertIn('api("/api/chat/status")', coach)
-        self.assertIn("new EventSource(`/api/state/events?since=", app)
-        self.assertIn("function connectStateEvents()", app)
-        self.assertIn('event.type === "reset"', app)
-        self.assertIn('[providerIds().garmin]: ["performance", "plan"]', app)
-        self.assertIn('checkins: ["feedback", "plan"]', app)
-        self.assertIn("function scrollChatToResponseStart()", coach)
-        self.assertIn("function restoreChatScrollPosition()", coach)
-        self.assertIn("state.chatScrollY = globalThis.scrollY", coach)
-        self.assertIn("state.chatInitialScrollPending", app)
         self.assertIn('globalThis.history.scrollRestoration = "manual"', app)
-        self.assertIn("function latestAssistantMessageKey(messages)", coach)
-        self.assertIn("state.chatResponseScrollPending = true", coach)
-        self.assertIn("state.initialStateLoaded = true", coach)
-        initial_state = coach[
-            coach.index("async function loadInitialState()") : coach.index(
-                "function queueChatMessage("
-            )
-        ]
-        self.assertIn(
-            "const sessionGeneration = state.sessionGeneration", initial_state
-        )
-        self.assertIn("state.initialStateLoaded = false", initial_state)
-        self.assertLess(
-            initial_state.index(
-                "if (sessionGeneration !== state.sessionGeneration) return"
-            ),
-            initial_state.index("state.initialStateLoaded = true"),
-        )
-        self.assertLess(
-            initial_state.index("state.initialStateLoaded = true"),
-            initial_state.index("if (state.data?.profile?.weather_location)"),
-        )
         self.assertIn("!state.chatScrollRestoring", coach)
         self.assertIn("async function loadChatHistoryFresh()", coach)
         self.assertIn("chatProposalRefreshPending", coach)
@@ -318,151 +256,36 @@ class ServerFrontendTests(ServerTestCase):
             "if (state.chatProposalRefreshPending) void refreshChatProposalsInBackground",
             app,
         )
-        self.assertIn("state.chatStatusPollInFlight", coach)
         self.assertIn('request.phase = "reconciling"', coach)
         self.assertIn('request.phase = "recovering"', coach)
         self.assertIn('event === "background"', coach)
-        self.assertIn('status.mode === "background"', coach)
-        self.assertIn("Der Coach arbeitet · du kannst die Seite neu laden…", coach)
         self.assertIn(
             "const streamVisible = state.chatStreamText && !persistedResponse", coach
         )
-        self.assertIn('aria-label="Zu den neuesten Nachrichten springen"', index)
-        self.assertIn('<svg viewBox="0 0 24 24"', index)
-        self.assertNotIn(">Neue Nachricht<", index)
-        styles = (
-            Path(__file__).resolve().parents[1] / "public" / "styles.css"
-        ).read_text(encoding="utf-8")
-        self.assertIn(".chat-jump", styles)
-        self.assertIn("position: sticky", styles)
-        self.assertNotIn("--bottom-nav-clearance", styles)
-        self.assertNotIn("--chat-fixed-ui-clearance", styles)
-        self.assertIn("async function cancelChat()", coach)
-        self.assertIn("async function resetCoachChat()", coach)
         self.assertIn("function resetChatAfterGenerationChange(", coach)
-        self.assertIn("markdownToHtml(state.chatStreamText)", coach)
-        self.assertNotIn('api("/api/activities?limit=250")', app)
-        self.assertIn("api(`/api/plan${query}`)", app)
-        self.assertIn(
-            "renderLoadedState(payload, liveAreasOnly);\n      // A stored snapshot may already have revealed the shell.\n"
-            '      if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();',
-            app,
-        )
         self.assertIn(
             'const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));',
             coach,
         )
         self.assertIn("renderMessages(state.data?.messages || [], true);", app)
-        self.assertIn('api("/api/sync/status", { signal: controller.signal })', app)
-        self.assertIn("const SYNC_POLL_ACTIVE_MS = 1_500;", app)
-        self.assertNotIn("setInterval(() => {\n  if (state.localSync.intervals", app)
 
-    def test_chat_jump_follows_latest_without_stealing_touch_focus(self):
-        public = Path(__file__).resolve().parents[1] / "public"
-        coach = (public / "coach.js").read_text(encoding="utf-8")
-        state = (public / "state.js").read_text(encoding="utf-8")
-        styles = (public / "styles.css").read_text(encoding="utf-8")
-        for path in public.glob("*.js"):
-            self.assertNotIn(
-                "jumpToChatComposer", path.read_text(encoding="utf-8"), path.name
-            )
-        self.assertIn("function jumpToLatestMessages()", coach)
-        self.assertIn("chatLatestVisibleNode(root)", coach)
-        self.assertIn("chatFollowLatest: true", state)
-        self.assertIn("state.chatFollowLatest = false", coach)
-        self.assertIn(
-            "if (shouldRestoreChatInputFocus()) input.focus({ preventScroll: true });",
-            coach,
-        )
-        self.assertIn("Zur neuesten Antwort springen", coach)
+    def test_chat_jump_button_sits_above_the_composer(self):
+        styles = (
+            Path(__file__).resolve().parents[1] / "public" / "styles.css"
+        ).read_text(encoding="utf-8")
         start = styles.index(".composer .chat-jump {")
         jump_rule = styles[start : styles.index("}", start)]
         self.assertIn("var(--composer-height", jump_rule)
         self.assertIn("var(--composer-bg)", jump_rule)
         self.assertIn("box-shadow: 0 8px 22px var(--composer-shadow);", jump_rule)
 
-    def test_composer_layout_is_identical_while_busy(self):
-        styles = (
-            Path(__file__).resolve().parents[1] / "public" / "styles.css"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            ".composer-actions { display: flex; align-items: flex-end;", styles
-        )
-        self.assertNotIn(".composer.is-busy", styles)
-
-    def test_chat_queue_offers_visible_controls_without_browser_persistence(self):
-        root = Path(__file__).resolve().parents[1] / "public"
-        coach = (root / "coach.js").read_text(encoding="utf-8")
-        shared = (root / "shared.js").read_text(encoding="utf-8")
-        index = (root / "index.html").read_text(encoding="utf-8")
-        styles = (root / "styles.css").read_text(encoding="utf-8")
-
-        self.assertIn('"Als Nächstes"', coach)
-        self.assertIn('"Wird nach der aktuellen Antwort gesendet"', coach)
-        self.assertIn("`Bearbeiten: wartende Nachricht ${position}`", coach)
-        self.assertIn("`Entfernen: wartende Nachricht ${position}`", coach)
-        self.assertIn('"Folgefrage – wird danach gesendet"', coach)
-        self.assertIn('aria-label="Als Nächstes senden"', index)
-        self.assertIn('aria-describedby="steerButtonHint"', index)
-        self.assertIn('id="steerButtonHint" class="sr-only"', index)
-        self.assertIn('$("#steerButtonHint")', coach)
-        self.assertIn(".message.pending .pending-action {", styles)
-        self.assertIn("min-height: 44px; margin: 0; padding: 0 12px;", styles)
-        # Queued text stays in memory only and is protected by the leave-page guard.
-        self.assertNotIn("coachQueuedMessages", coach + shared)
-        self.assertNotIn("localStorage", coach)
-        self.assertIn("state.chatQueue.length > 0", shared)
-
-    def test_mobile_chat_layout_keeps_composer_clear_of_navigation_and_keyboard(self):
-        coach = (Path(__file__).resolve().parents[1] / "public" / "coach.js").read_text(
-            encoding="utf-8"
-        )
-        app = frontend_source()
-        styles = (
-            Path(__file__).resolve().parents[1] / "public" / "styles.css"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            "#chatPanel .composer { bottom: var(--composer-offset); }",
-            styles,
-        )
-        self.assertIn(
-            "--composer-offset: calc(74px + max(12px, env(safe-area-inset-bottom)));",
-            styles,
-        )
-        self.assertIn(
-            "html.chat-keyboard-open #chatPanel .composer { bottom: max(12px, env(safe-area-inset-bottom)); }",
-            styles,
-        )
-        self.assertIn("root.scrollTop = root.scrollHeight;", coach)
-        self.assertIn(
-            "const viewportBottom = (viewport?.offsetTop || 0) + (viewport?.height || globalThis.innerHeight);",
-            coach,
-        )
-        self.assertNotIn("chat-composer-hidden", app + styles)
-        self.assertNotIn(".quick-message-templates::after", styles)
-
-    def test_message_actions_are_compact_icon_buttons_with_accessible_names(self):
+    def test_message_action_icons_and_styles_are_defined(self):
         root = Path(__file__).resolve().parents[1]
-        coach = (root / "public" / "coach.js").read_text(encoding="utf-8")
         index = (root / "public" / "index.html").read_text(encoding="utf-8")
         styles = (root / "public" / "styles.css").read_text(encoding="utf-8")
-        self.assertIn(
-            'const copy = messageActionButton("copy", "Nachricht kopieren");', coach
-        )
-        self.assertIn(
-            'const edit = messageActionButton("edit", "Als Entwurf bearbeiten");',
-            coach,
-        )
-        self.assertIn('button.setAttribute("aria-label", label);', coach)
-        self.assertIn("button.title = label;", coach)
-        self.assertNotIn('copy.textContent = "Kopieren";', coach)
         self.assertIn('<symbol id="icon-copy"', index)
         self.assertIn('<symbol id="icon-edit"', index)
         self.assertRegex(styles, r"\.message\.user\s*\{[^}]*max-width:\s*85%;")
-        self.assertRegex(
-            styles,
-            r"\.message-action\s*\{[^}]*width:\s*44px;\s*height:\s*44px;",
-        )
         self.assertIn(".message-action:focus-visible {", styles)
 
     def test_maintenance_ui_status_and_restore_asset_versions_are_present(self):

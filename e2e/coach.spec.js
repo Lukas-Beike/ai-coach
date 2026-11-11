@@ -710,6 +710,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
     await page.evaluate(() => window.__chatTest.push("delta", { text: "# Trainingsanalyse\n\n- Ruhiger Beginn" }));
     await expect(page.locator(".message.assistant.streaming")).toContainText("Ruhiger Beginn");
+    await expect(page.locator(".message.assistant.streaming li")).toContainText("Ruhiger Beginn");
     await page.evaluate(() => { window.__chatTest.stableMessageNode = document.querySelector(".message.user"); });
     await page.evaluate(() => window.__chatTest.push("delta", { text: "\n- Stabiler Abschluss" }));
     await expect(page.locator(".message.assistant.streaming")).toContainText("Stabiler Abschluss");
