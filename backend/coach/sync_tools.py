@@ -257,9 +257,7 @@ class CoachSyncToolService:
             )
         local_id = str(arguments.get("local_id") or "").strip()
         if local_id:
-            require_coach_scope(
-                intent, f"planned_unit:{local_id}", f"competition:{local_id}"
-            )
+            require_coach_scope(intent, f"competition:{local_id}")
             return self._conflicts.resolve_local(
                 local_id,
                 str(arguments.get("strategy") or "keep_local").strip().casefold(),

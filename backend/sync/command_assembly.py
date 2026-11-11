@@ -77,8 +77,6 @@ class SyncCommandAssembly:
 
     def conflicts(self) -> SyncConflictCommandService:
         return SyncConflictCommandService(
-            self._core.database_manager(),
-            self._core.planned_unit_service(),
             self._core.competition_service(),
             self._core.queue_service(),
         )
