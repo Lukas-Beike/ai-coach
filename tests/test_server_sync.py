@@ -18,7 +18,7 @@ from urllib.error import HTTPError
 import intervals_compaction
 import remote_reconcilers
 from garmin_support import read_garmin, save_garmin
-from performance_day_support import snapshot_metrics
+from performance_day_support import SYNCED_AT, snapshot_metrics
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -822,7 +822,10 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(performance["metrics"]["calories_7d"]["value"], 2030)
 
     def test_performance_does_not_compare_garmin_metrics_to_intervals_history(self):
-        today = server.ATHLETE_CLOCK.now().date()
+        # The fixture maps the undated Garmin FTP to its fixed sync day, so
+        # "today" is that day, not the wall clock: 30 days later the FTP leaves
+        # the comparison window and there is nothing left to compare.
+        today = SYNCED_AT.date()
         snapshot = {
             "synced_at": "now",
             "athlete": {},
@@ -841,7 +844,7 @@ class ServerSyncTests(ServerTestCase):
             }
         )
 
-        comparison = _current_performance_context(snapshot)["comparisons"][
+        comparison = _current_performance_context(snapshot, today)["comparisons"][
             "cycling_ftp_watts_30d"
         ]
         # The Garmin FTP is compared with its own canonical history only, never
