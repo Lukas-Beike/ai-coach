@@ -36,7 +36,6 @@ from backend.performance.current_thresholds import (
 from backend.performance.garmin_canonical import read_garmin_thresholds
 from backend.performance.source_policy import (
     Candidate,
-    preferences_from_profile,
     resolve_candidates,
     source_order,
 )
@@ -188,58 +187,6 @@ class ResolverTests(unittest.TestCase):
         )
         assert resolved is not None
         self.assertEqual(resolved.winner.source, None)
-
-
-class PreferredSourceTests(unittest.TestCase):
-    """The athlete's preferred threshold source applies to Coach and plan (#1668)."""
-
-    def setUp(self) -> None:
-        self.observations = (
-            _obs(MetricKind.FTP, 265.0, ProviderId.WAHOO, Sport.RIDE),
-            _obs(MetricKind.FTP, 280.0, GARMIN, Sport.RIDE),
-        )
-        self.garmin_first = preferences_from_profile(
-            {"preferred_source_thresholds": "garmin"}
-        )
-
-    def test_a_preferred_provider_leads_and_the_other_stays_an_alternative(self):
-        resolved = resolve_current_thresholds(
-            self.observations, as_of=AS_OF, preferences=self.garmin_first
-        )[(MetricKind.FTP, Sport.RIDE)]
-
-        self.assertEqual(
-            (resolved.winner.source, resolved.winner.value), (GARMIN, 280.0)
-        )
-        self.assertEqual(
-            [item.source for item in resolved.alternatives], [ProviderId.WAHOO]
-        )
-        self.assertTrue(resolved.conflict)
-
-    def test_plans_read_the_same_preferred_threshold(self):
-        winners = provider_zone_thresholds(
-            self.observations, as_of=AS_OF, preferences=self.garmin_first
-        )
-
-        ftp = [item for item in winners if item.kind is MetricKind.FTP]
-        self.assertEqual([item.value.value for item in ftp], [280.0])
-
-    def test_a_local_configuration_still_precedes_the_preference(self):
-        resolved = resolve_candidates(
-            MetricKind.FTP,
-            [
-                Candidate(GARMIN, 280.0, AS_OF),
-                Candidate(None, 270.0, AS_OF),
-                Candidate(ProviderId.WAHOO, 265.0, AS_OF),
-            ],
-            as_of=AS_OF,
-            sport=Sport.RIDE,
-            preferences=self.garmin_first,
-        )
-        assert resolved is not None
-        self.assertIsNone(resolved.winner.source)
-        self.assertEqual(
-            [item.source for item in resolved.alternatives], [GARMIN, ProviderId.WAHOO]
-        )
 
 
 class CoachAndPlanParityTests(unittest.TestCase):

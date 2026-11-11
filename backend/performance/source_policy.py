@@ -181,30 +181,17 @@ DAILY_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
 
 # The athlete's preferred source per metric group (#1668), a local profile setting.
 # Each group lists its kinds and the providers the athlete may prefer for it; a
-# stored value of another provider (such as "intervals") is ignored.
+# stored value of another provider (such as "intervals") is ignored. Only groups
+# where a preference changes the result have one (athlete decision 2026-11-11,
+# #2084): Garmin already leads thresholds, HRV, resting HR and sleep, so their
+# stored profile values are kept but read nowhere. "body" makes Garmin win over
+# a newer local or Wahoo measurement.
 PREFERENCE_GROUPS: Final[
     Mapping[str, tuple[frozenset[MetricKind], tuple[ProviderId, ...]]]
 ] = MappingProxyType(
     {
-        "thresholds": (
-            frozenset(
-                {
-                    MetricKind.FTP,
-                    MetricKind.THRESHOLD_HR,
-                    MetricKind.THRESHOLD_PACE,
-                    MetricKind.MAX_HR,
-                }
-            ),
-            (_GARMIN,),
-        ),
         "body": (
             frozenset({MetricKind.WEIGHT, MetricKind.BODY_FAT}),
-            (_GARMIN,),
-        ),
-        "hrv": (frozenset({MetricKind.HRV_RMSSD}), (_GARMIN,)),
-        "resting_hr": (frozenset({MetricKind.RESTING_HR}), (_GARMIN,)),
-        "sleep": (
-            frozenset({MetricKind.SLEEP_DURATION, MetricKind.SLEEP_SCORE}),
             (_GARMIN,),
         ),
     }

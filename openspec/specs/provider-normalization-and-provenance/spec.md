@@ -400,17 +400,21 @@ Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `fiel
 Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.
 
 ### Requirement: Athlete-preferred source per metric group
-The system SHALL let the athlete choose Garmin or the default as preferred source per metric group (thresholds, weight and body fat, HRV, resting HR, sleep) as a local profile setting with receipt and undo (also through the Coach's profile update); a stored `intervals` value is ignored. Every consumer SHALL apply it in the same read, behind a locally confirmed zone configuration.
+The system SHALL let the athlete choose Garmin or the default (the newest measurement) as preferred source for weight and body fat, as a local profile setting with receipt and undo (also through the Coach's profile update); a stored `intervals` value is ignored. Every consumer SHALL apply it in the same read. The settings SHALL show only source controls that change an outcome (#2084).
 
-#### Scenario: Preferred threshold source
-- **WHEN** the athlete prefers Garmin for thresholds and Garmin and Wahoo report different current FTPs
-- **THEN** the Coach context, current metrics and plan thresholds all use Garmin's FTP, and the Wahoo value stays an alternative with its conflict flag.
+#### Scenario: Preferred body source
+- **WHEN** the athlete prefers Garmin for weight and body fat and a local entry is newer than Garmin's measurement
+- **THEN** Garmin's value wins and the local entry stays an alternative; with the default the newer entry wins.
+
+#### Scenario: Groups without a real choice
+- **WHEN** the metric is a threshold, HRV, resting HR or sleep, where Garmin already leads (behind a locally confirmed zone configuration) or is the only source
+- **THEN** the settings show no source control for it and a stored preference value is kept but changes nothing (athlete decision 2026-11-11).
 
 #### Scenario: A stored Intervals.icu preference
 - **WHEN** a stored profile holds `intervals` as a preferred source, and the athlete saves the profile with that value
 - **THEN** the stored value is read as the default order and the save is rejected as an unknown source; stored profiles are not rewritten by reads.
 
-Evidence: `backend/performance/source_policy.py:preferences_from_profile`, `backend/performance/source_policy.py:source_order`, `backend/athlete/profile.py:normalize_profile`, `backend/performance/canonical_inputs.py:CanonicalPerformanceSource`; `tests/test_source_policy.py:PreferredSourceTests`, `tests/test_current_thresholds.py:PreferredSourceTests`, `tests/test_performance_display_sources.py:PreferredDisplayTests`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_change_history.py:test_preferred_sources_are_audited_and_older_rows_stay_matchable`, `tests/test_performance_recovery_context.py:IntervalsIsNeverASourceTests.test_a_stored_intervals_preference_is_ignored`.
+Evidence: `backend/performance/source_policy.py:preferences_from_profile`, `backend/performance/source_policy.py:source_order`, `backend/athlete/profile.py:normalize_profile`, `backend/performance/canonical_inputs.py:CanonicalPerformanceSource`; `tests/test_source_policy.py:PreferredSourceTests`, `tests/test_source_policy.py:PreferredSourceTests.test_the_settings_show_one_control_per_effective_group`, `tests/test_performance_display_sources.py:PreferredDisplayTests`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_change_history.py:test_preferred_sources_are_audited_and_older_rows_stay_matchable`, `tests/test_performance_recovery_context.py:IntervalsIsNeverASourceTests.test_a_stored_intervals_preference_is_ignored`.
 
 ### Requirement: Activity purpose
 The system SHALL classify why an activity was done as training, race, commute, warm-up or cool-down from Garmin's activity event type and stored competitions, never from Intervals.icu fields, and carry it with its source label on the session summary and the Coach activity list.
