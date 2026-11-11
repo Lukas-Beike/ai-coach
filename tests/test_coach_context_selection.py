@@ -176,7 +176,7 @@ class CoachContextSelectionTests(unittest.TestCase):
 
     def test_structured_context_lists_compact_saved_products(self):
         library = Mock()
-        library.list_products.return_value = [
+        library.product_catalog.list_products.return_value = [
             {
                 "id": "p1",
                 "name": "Bio Whey Protein",
@@ -187,7 +187,9 @@ class CoachContextSelectionTests(unittest.TestCase):
                 "provenance": {"kind": "manual"},
             }
         ]
-        library.list_products.return_value[0]["source"] = "packaging_label"
+        library.product_catalog.list_products.return_value[0]["source"] = (
+            "packaging_label"
+        )
         service = CoachStructuredContextService(
             Mock(),
             Mock(),
@@ -215,11 +217,11 @@ class CoachContextSelectionTests(unittest.TestCase):
                 "truncated": False,
             },
         )
-        library.list_products.assert_called_once_with(limit=81)
+        library.product_catalog.list_products.assert_called_once_with(limit=81)
 
     def test_structured_context_marks_truncated_saved_products(self):
         library = Mock()
-        library.list_products.return_value = [
+        library.product_catalog.list_products.return_value = [
             {"id": f"p{index}", "name": f"Produkt {index}"} for index in range(81)
         ]
         service = CoachStructuredContextService(
@@ -233,7 +235,7 @@ class CoachContextSelectionTests(unittest.TestCase):
 
     def test_saved_products_fit_section_budget_and_flag_dropped_items(self):
         library = Mock()
-        library.list_products.return_value = [
+        library.product_catalog.list_products.return_value = [
             {
                 "id": f"{index:032x}",
                 "name": "N" * 200,

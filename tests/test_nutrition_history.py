@@ -92,7 +92,7 @@ class NutritionHistoryTests(NutritionHistoryCase):
 
     def test_undo_of_an_added_product_restores_the_previous_meal(self) -> None:
         library = self.library
-        banana = library.save_product(
+        banana = library.product_catalog.save_product(
             {
                 "name": "Banane",
                 "basis_amount": 100,
@@ -105,7 +105,7 @@ class NutritionHistoryTests(NutritionHistoryCase):
             }
         )
         entry = self.diary.log_meal(MEAL)
-        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+        self.diary.sync_status.mark_date_synced(MEAL_DATE, self.pending_revision())
         self.assertEqual(self.pending_revision(), 0)
 
         updated, changes = self.collected(
@@ -115,7 +115,7 @@ class NutritionHistoryTests(NutritionHistoryCase):
         self.assertEqual([change["action"] for change in changes], ["update"])
         self.assertEqual(updated["kcal"], 690)
         self.assertGreater(self.pending_revision(), 0)
-        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+        self.diary.sync_status.mark_date_synced(MEAL_DATE, self.pending_revision())
 
         self.undo(changes)
 
@@ -133,11 +133,13 @@ class NutritionHistoryTests(NutritionHistoryCase):
         self.assertEqual(restored["description"], "Rice bowl")
         self.assertEqual(restored["nutrition_basis"], entry["nutrition_basis"])
         # A later sync marks the day; undo of the original log still applies.
-        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+        self.diary.sync_status.mark_date_synced(MEAL_DATE, self.pending_revision())
         _, created = self.collected(lambda: self.diary.log_meal(MEAL))
-        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+        self.diary.sync_status.mark_date_synced(MEAL_DATE, self.pending_revision())
         self.undo(created)
-        self.assertEqual(self.diary.get_day_summary(MEAL_DATE)["entry_count"], 1)
+        self.assertEqual(
+            self.diary.sync_status.get_day_summary(MEAL_DATE)["entry_count"], 1
+        )
         self.assertGreater(self.pending_revision(), 0)
 
     def test_undo_is_refused_after_a_later_edit(self) -> None:

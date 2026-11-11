@@ -222,7 +222,7 @@ class CoachReadToolService:
             and not arguments.get("barcode")
             and source in {"bls", "open_food_facts", "yazio"}
         ):
-            local_products = nutrition.list_products(query=query)
+            local_products = nutrition.product_catalog.list_products(query=query)
             try:
                 result = nutrition.food_database.lookup(
                     {**arguments, "query": query, "source": source}
@@ -242,7 +242,7 @@ class CoachReadToolService:
                 else result
             )
         if arguments.get("barcode") or arguments.get("query"):
-            return nutrition.lookup_product(arguments)
+            return nutrition.product_catalog.lookup_product(arguments)
         return nutrition.food_database.lookup(arguments)
 
     @staticmethod
@@ -257,7 +257,7 @@ class CoachReadToolService:
                 "Komponenten können nicht mit Legacy-Lebensmittelreferenzen kombiniert werden.",
             )
         if arguments.get("product_id"):
-            return nutrition.calculate_product(
+            return nutrition.product_catalog.calculate_product(
                 str(arguments.get("product_id")),
                 arguments.get("amount"),
                 str(arguments.get("unit") or ""),
@@ -265,7 +265,9 @@ class CoachReadToolService:
         if "components" in arguments:
             return {
                 "ok": True,
-                **nutrition.calculate_components(arguments["components"]),
+                **nutrition.product_catalog.calculate_components(
+                    arguments["components"]
+                ),
             }
         return {
             "ok": True,
@@ -278,7 +280,7 @@ class CoachReadToolService:
         service = self._nutrition_diary()
         meal_library = self._nutrition_meal_library()
         templates = meal_library.list_templates()
-        products = meal_library.list_products()
+        products = meal_library.product_catalog.list_products()
         product_projection = (
             {"products": products} if isinstance(products, list) else {}
         )
@@ -287,7 +289,7 @@ class CoachReadToolService:
                 "ok": True,
                 "templates": templates,
                 **product_projection,
-                **service.get_day_summary(str(arguments["date"])),
+                **service.sync_status.get_day_summary(str(arguments["date"])),
             }
         if arguments.get("start") and arguments.get("end"):
             start = validate_iso_date(arguments["start"])

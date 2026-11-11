@@ -1551,7 +1551,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
         self.assertEqual(updated["kcal"], 380)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.meal_library_service().get_product(saved["id"]),
+            server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog.get_product(
+                saved["id"]
+            ),
             updated,
         )
         self.assertEqual(
@@ -1593,9 +1595,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_day_summary("2026-09-07")[
-                "entry_count"
-            ],
+            server.NUTRITION_ASSEMBLY.diary_service().sync_status.get_day_summary(
+                "2026-09-07"
+            )["entry_count"],
             0,
         )
 

@@ -35,13 +35,15 @@ class NutritionProductHttpContractTests(unittest.TestCase):
 
     def test_get_products_supports_local_query_and_barcode_lookup(self):
         self.handler.path = "/api/nutrition/products?q=Whey&barcode="
-        self.meal_library.list_products.return_value = [
+        self.meal_library.product_catalog.list_products.return_value = [
             {"id": "product-1", "name": "Whey"}
         ]
 
-        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
+        self.assertTrue(
+            dispatch_route(self.get_routes, self.handler, "/api/nutrition/products")
+        )
 
-        self.meal_library.list_products.assert_called_once_with(
+        self.meal_library.product_catalog.list_products.assert_called_once_with(
             query="Whey", favorites_first=True
         )
         self.handler.send_json.assert_called_once_with(
@@ -53,10 +55,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.handler.path = "/api/nutrition/products?source=database&q=Knoppers"
         self.meal_library.list_database_foods.return_value = [{"id": "off:1"}]
 
-        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
+        self.assertTrue(
+            dispatch_route(self.get_routes, self.handler, "/api/nutrition/products")
+        )
 
         self.meal_library.list_database_foods.assert_called_once_with("Knoppers")
-        self.meal_library.list_products.assert_not_called()
+        self.meal_library.product_catalog.list_products.assert_not_called()
         self.handler.send_json.assert_called_once_with(
             200, {"ok": True, "foods": [{"id": "off:1"}]}
         )
@@ -78,15 +82,17 @@ class NutritionProductHttpContractTests(unittest.TestCase):
 
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
         self.handler.path = "/api/nutrition/products?barcode=4006381333931"
-        self.meal_library.lookup_product.return_value = {
+        self.meal_library.product_catalog.lookup_product.return_value = {
             "ok": True,
             "source": "local",
             "foods": [{"id": "product-1"}],
         }
 
-        self.assertTrue(dispatch_route(self.get_routes, self.handler, "/api/nutrition/products"))
+        self.assertTrue(
+            dispatch_route(self.get_routes, self.handler, "/api/nutrition/products")
+        )
 
-        self.meal_library.lookup_product.assert_called_once_with(
+        self.meal_library.product_catalog.lookup_product.assert_called_once_with(
             {"barcode": "4006381333931"}
         )
         self.handler.send_json.assert_called_once_with(
@@ -109,7 +115,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "confirmed": True,
         }
         self.handler.read_json.return_value = payload
-        self.meal_library.save_product.return_value = {
+        self.meal_library.product_catalog.save_product.return_value = {
             "id": "product-1",
             "name": "Whey",
         }
@@ -118,7 +124,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             self.post_routes.handle(self.handler, "/api/nutrition/products")
         )
 
-        self.meal_library.save_product.assert_called_once_with(
+        self.meal_library.product_catalog.save_product.assert_called_once_with(
             {key: value for key, value in payload.items() if key != "confirmed"}
         )
         self.handler.send_json.assert_called_once_with(
@@ -139,7 +145,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
                 with self.assertRaises(AppError) as raised:
                     self.post_routes.handle(self.handler, "/api/nutrition/products")
                 self.assertEqual(raised.exception.reason, "confirmation_required")
-                self.meal_library.save_product.assert_not_called()
+                self.meal_library.product_catalog.save_product.assert_not_called()
 
     def test_update_and_archive_target_an_explicit_product_id(self):
         self.handler.read_json.return_value = {
@@ -147,12 +153,12 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             "protein_g": 80,
             "confirmed": True,
         }
-        self.meal_library.update_product.return_value = {
+        self.meal_library.product_catalog.update_product.return_value = {
             "id": "product-1",
             "protein_g": 80,
         }
         self.assertTrue(self.put_routes.handle(self.handler, "/api/nutrition/products"))
-        self.meal_library.update_product.assert_called_once_with(
+        self.meal_library.product_catalog.update_product.assert_called_once_with(
             "product-1", self.handler.read_json.return_value
         )
         self.handler.send_json.assert_called_once_with(
@@ -162,14 +168,16 @@ class NutritionProductHttpContractTests(unittest.TestCase):
 
         self.handler.reset_mock()
         self.handler.read_json.return_value = {"id": "product-1", "confirmed": True}
-        self.meal_library.archive_product.return_value = {
+        self.meal_library.product_catalog.archive_product.return_value = {
             "id": "product-1",
             "status": "archived",
         }
         self.assertTrue(
             self.post_routes.handle(self.handler, "/api/nutrition/products/archive")
         )
-        self.meal_library.archive_product.assert_called_once_with("product-1")
+        self.meal_library.product_catalog.archive_product.assert_called_once_with(
+            "product-1"
+        )
         self.handler.send_json.assert_called_once_with(
             200,
             {"ok": True, "product": {"id": "product-1", "status": "archived"}},
@@ -177,14 +185,14 @@ class NutritionProductHttpContractTests(unittest.TestCase):
 
     def test_favorite_and_add_to_meal_target_explicit_ids(self):
         self.handler.read_json.return_value = {"id": "product-1", "favorite": True}
-        self.meal_library.set_product_favorite.return_value = {
+        self.meal_library.product_catalog.set_favorite.return_value = {
             "id": "product-1",
             "favorite": 1,
         }
         self.assertTrue(
             self.post_routes.handle(self.handler, "/api/nutrition/products/favorite")
         )
-        self.meal_library.set_product_favorite.assert_called_once_with(
+        self.meal_library.product_catalog.set_favorite.assert_called_once_with(
             "product-1", True
         )
         self.handler.send_json.assert_called_once_with(

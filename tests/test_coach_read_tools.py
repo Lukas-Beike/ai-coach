@@ -32,7 +32,7 @@ class CoachReadToolServiceTests(unittest.TestCase):
         self.nutrition_diary = Mock()
         self.nutrition_meal_library = Mock()
         self.nutrition_meal_library.list_templates.return_value = [{"id": "template-1"}]
-        self.nutrition_diary.get_day_summary.return_value = {
+        self.nutrition_diary.sync_status.get_day_summary.return_value = {
             "date": "2026-03-30",
             "total_kcal": 2100,
         }
@@ -127,7 +127,9 @@ class CoachReadToolServiceTests(unittest.TestCase):
                 "total_kcal": 2100,
             },
         )
-        self.nutrition_diary.get_day_summary.assert_called_once_with("2026-03-30")
+        self.nutrition_diary.sync_status.get_day_summary.assert_called_once_with(
+            "2026-03-30"
+        )
 
         range_res = self.service.execute(
             "read_nutrition", {"start": "2026-03-01", "end": "2026-03-31"}

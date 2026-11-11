@@ -95,6 +95,10 @@ class NutritionDiaryService:
             observation_reader,
         )
 
+    @property
+    def sync_status(self) -> NutritionSyncStatusService:
+        return self._sync_status
+
     def log_product(
         self,
         product_id: str,
@@ -104,7 +108,9 @@ class NutritionDiaryService:
         meal_date: str | None = None,
         meal_time: str | None = None,
     ) -> dict[str, Any]:
-        calculation = self._meal_library.calculate_product(product_id, amount, unit)
+        calculation = self._meal_library.product_catalog.calculate_product(
+            product_id, amount, unit
+        )
         if calculation.get("kcal") is None:
             raise AppError(
                 400,
@@ -222,11 +228,13 @@ class NutritionDiaryService:
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
         if "components" in payload:
             validate_component_payload(payload)
-            resolved_database = self._meal_library.prepare_component_resolutions(
-                payload["components"]
+            resolved_database = (
+                self._meal_library.component_calculator.prepare_resolutions(
+                    payload["components"]
+                )
             )
             with self._db_lock, self._database_manager.unit_of_work() as db:
-                calculation = self._meal_library.calculate_components_in_transaction(
+                calculation = self._meal_library.component_calculator.calculate(
                     db, payload["components"], resolved_database
                 )
                 values = {
@@ -241,7 +249,7 @@ class NutritionDiaryService:
                 return self._create(db, entry)
         values = self._meal_library.prepare_values(payload)
         if payload.get("product_id"):
-            calculation = self._meal_library.calculate_product(
+            calculation = self._meal_library.product_catalog.calculate_product(
                 str(payload["product_id"]),
                 payload.get("amount"),
                 str(payload.get("unit") or ""),
@@ -276,7 +284,9 @@ class NutritionDiaryService:
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
         payload = _canonical_meal_changes(payload)
         resolved_database = (
-            self._meal_library.prepare_component_resolutions(payload["components"])
+            self._meal_library.component_calculator.prepare_resolutions(
+                payload["components"]
+            )
             if "components" in payload
             else None
         )
@@ -296,7 +306,7 @@ class NutritionDiaryService:
                 validate_component_payload(payload)
                 prepared = {
                     **merged_payload,
-                    **self._meal_library.calculate_components_in_transaction(
+                    **self._meal_library.component_calculator.calculate(
                         db, payload["components"], resolved_database
                     ),
                 }
@@ -343,8 +353,8 @@ class NutritionDiaryService:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
-            added = self._meal_library.calculate_components_in_transaction(
-                db, [component]
+            added = self._meal_library.component_calculator.calculate(
+                db, [component], None
             )["nutrition_basis"]["components"][0]
             basis = existing.get("nutrition_basis") or {}
             earlier = (
@@ -419,7 +429,9 @@ class NutritionDiaryService:
             )
         changes = _canonical_meal_changes(changes)
         resolved_database = (
-            self._meal_library.prepare_component_resolutions(changes["components"])
+            self._meal_library.component_calculator.prepare_resolutions(
+                changes["components"]
+            )
             if "components" in changes
             else None
         )
@@ -483,7 +495,7 @@ class NutritionDiaryService:
         if "components" in changes:
             validate_component_payload(changes)
             merged.update(
-                self._meal_library.calculate_components_in_transaction(
+                self._meal_library.component_calculator.calculate(
                     db, changes["components"], resolved_database
                 )
             )
@@ -558,28 +570,8 @@ class NutritionDiaryService:
             return self._nutrition_repository.update(db, entity_id, entry)
         return self._nutrition_repository.create(db, entry)
 
-    def get_day_summary(self, meal_date: str) -> dict[str, Any]:
-        return self._sync_status.get_day_summary(meal_date)
-
-    def get_week_summary(self, days: int = 7) -> dict[str, Any]:
-        return self._sync_status.get_week_summary(days)
-
-    def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
-        return self._sync_status.get_sync_snapshot(meal_date)
-
-    def approval_manifest(
-        self,
-        *,
-        meal_date: str | None = None,
-        pending_limit: int | None = None,
-        dates: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._sync_status.approval_manifest(
-            meal_date=meal_date, pending_limit=pending_limit, dates=dates
-        )
-
     def get_today_summary(self) -> dict[str, Any]:
-        return self.get_day_summary(self._local_now().date().isoformat())
+        return self._sync_status.get_day_summary(self._local_now().date().isoformat())
 
     def get_range_summary(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
         valid_start = validate_iso_date(start_date)
@@ -615,12 +607,6 @@ class NutritionDiaryService:
                 ).to_dict()
             )
         return summaries
-
-    def list_unsynced_dates(self, limit: int = 14) -> list[str]:
-        return self._sync_status.list_unsynced_dates(limit=limit)
-
-    def mark_date_synced(self, meal_date: str, revision: int) -> bool:
-        return self._sync_status.mark_date_synced(meal_date, revision)
 
     def context(self) -> dict[str, Any]:
         today = self._local_now().date().isoformat()

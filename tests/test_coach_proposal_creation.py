@@ -309,7 +309,7 @@ class CoachProposalCreationTests(unittest.TestCase):
                 ],
             },
         }
-        nutrition.calculate_components.return_value = calculation
+        nutrition.product_catalog.calculate_components.return_value = calculation
         arguments = {
             "payload": {
                 "name": "Synthetic bowl",
@@ -340,7 +340,9 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
         stored = json.loads(str(self._rows()[0]["payload"]))
         self.assertEqual(stored["arguments"]["_food_calculation"], calculation)
-        nutrition.calculate_components.assert_called_once_with(components)
+        nutrition.product_catalog.calculate_components.assert_called_once_with(
+            components
+        )
 
     def test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval(
         self,
@@ -651,7 +653,7 @@ class CoachProposalCreationTests(unittest.TestCase):
                 "sha256": "a" * 64,
             }
         ]
-        nutrition.approval_manifest.return_value = manifest
+        nutrition.sync_status.approval_manifest.return_value = manifest
         intent = {
             "operation": "sync_nutrition",
             "intent": "remote_sync",
@@ -677,7 +679,8 @@ class CoachProposalCreationTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            nutrition.approval_manifest.call_args.kwargs, {"pending_limit": 3}
+            nutrition.sync_status.approval_manifest.call_args.kwargs,
+            {"pending_limit": 3},
         )
 
     def test_distinct_session_keys_own_distinct_proposals(self) -> None:

@@ -203,7 +203,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         with patch.object(
             self.library.food_database, "resolve", side_effect=resolve_outside_lock
         ):
-            self.library.calculate_components([component])
+            self.library.product_catalog.calculate_components([component])
 
         self.assertEqual(calls, ["bls:C133000"])
 
@@ -392,7 +392,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             }
         )
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
         entry = self.service.log_template(
             template["id"], 0.5, meal_date="2026-09-23", meal_time="08:15"
         )
@@ -467,10 +467,12 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
 
         self.assertEqual(clock.now().date().isoformat(), "2026-10-10")
         self.assertEqual(entry["meal_date"], "2026-10-10")
-        summary = service.get_day_summary(clock.now().date().isoformat())
+        summary = service.sync_status.get_day_summary(clock.now().date().isoformat())
         self.assertEqual(summary["entry_count"], 1)
         self.assertEqual(summary["entries"][0]["id"], entry["id"])
-        self.assertEqual(service.get_day_summary("2026-10-09")["entry_count"], 0)
+        self.assertEqual(
+            service.sync_status.get_day_summary("2026-10-09")["entry_count"], 0
+        )
 
     def test_template_meal_type_defaults_from_consumption_time_and_keeps_explicit_type(
         self,
@@ -557,15 +559,15 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "fat_g": 8,
             }
         )
-        before = self.service.approval_manifest(meal_date="2026-09-24")
+        before = self.service.sync_status.approval_manifest(meal_date="2026-09-24")
         self.assertEqual(before[0]["total_kcal"], 400)
         self.assertEqual(before[0]["entry_count"], 1)
         self.assertEqual(before[0]["revision"], 1)
         self.service.correct_meal(
-            self.service.get_day_summary("2026-09-24")["entries"][0]["id"],
+            self.service.sync_status.get_day_summary("2026-09-24")["entries"][0]["id"],
             {"kcal": 450},
         )
-        after = self.service.approval_manifest(dates=["2026-09-24"])
+        after = self.service.sync_status.approval_manifest(dates=["2026-09-24"])
         self.assertNotEqual(before, after)
         self.assertEqual(after[0]["total_kcal"], 450)
 
@@ -598,7 +600,9 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 {"meal_date": "2026-09-24", "description": "Pasta", "kcal": "1,200"}
             )
         self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(self.service.get_day_summary("2026-09-24")["entry_count"], 0)
+        self.assertEqual(
+            self.service.sync_status.get_day_summary("2026-09-24")["entry_count"], 0
+        )
 
     def _logged_lunch(self) -> dict:
         return self.service.log_meal(
@@ -668,9 +672,11 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "source": "photo",
             }
         )
-        old_day = self.service.get_sync_snapshot("2026-09-24")
+        old_day = self.service.sync_status.get_sync_snapshot("2026-09-24")
         self.assertTrue(
-            self.service.mark_date_synced("2026-09-24", old_day["sync_revision"])
+            self.service.sync_status.mark_date_synced(
+                "2026-09-24", old_day["sync_revision"]
+            )
         )
 
         corrected = self.service.correct_meal(
@@ -688,7 +694,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         )
         self.assertEqual(corrected["source"], "photo")
         self.assertEqual(
-            self.service.list_unsynced_dates(), ["2026-09-24", "2026-09-25"]
+            self.service.sync_status.list_unsynced_dates(), ["2026-09-24", "2026-09-25"]
         )
 
     def test_correct_meal_rejects_empty_invalid_or_missing_target(self) -> None:
@@ -751,14 +757,18 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "kcal": 500,
             }
         )
-        snapshot = self.service.get_sync_snapshot("2026-09-24")
+        snapshot = self.service.sync_status.get_sync_snapshot("2026-09-24")
         self.assertTrue(
-            self.service.mark_date_synced("2026-09-24", snapshot["sync_revision"])
+            self.service.sync_status.mark_date_synced(
+                "2026-09-24", snapshot["sync_revision"]
+            )
         )
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
         self.service.delete_meal(saved["id"])
-        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
-        self.assertEqual(self.service.get_day_summary("2026-09-24")["total_kcal"], 0)
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), ["2026-09-24"])
+        self.assertEqual(
+            self.service.sync_status.get_day_summary("2026-09-24")["total_kcal"], 0
+        )
 
     def test_day_summary(self) -> None:
         self.service.log_meal(
@@ -783,7 +793,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "fat_g": 15,
             }
         )
-        summary = self.service.get_day_summary("2026-09-24")
+        summary = self.service.sync_status.get_day_summary("2026-09-24")
         self.assertEqual(summary["date"], "2026-09-24")
         self.assertEqual(summary["total_kcal"], 1000)
         self.assertEqual(summary["total_carbs_g"], 140.0)
@@ -823,13 +833,15 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             (400, "range_too_large"),
         )
 
-        unsynced = self.service.list_unsynced_dates()
+        unsynced = self.service.sync_status.list_unsynced_dates()
         self.assertIn("2026-09-23", unsynced)
         self.assertIn("2026-09-24", unsynced)
 
-        sync_snapshot = self.service.get_sync_snapshot("2026-09-23")
-        self.service.mark_date_synced("2026-09-23", sync_snapshot["sync_revision"])
-        unsynced_after = self.service.list_unsynced_dates()
+        sync_snapshot = self.service.sync_status.get_sync_snapshot("2026-09-23")
+        self.service.sync_status.mark_date_synced(
+            "2026-09-23", sync_snapshot["sync_revision"]
+        )
+        unsynced_after = self.service.sync_status.list_unsynced_dates()
         self.assertNotIn("2026-09-23", unsynced_after)
         self.assertIn("2026-09-24", unsynced_after)
 
@@ -875,12 +887,12 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "fatTotal": -1,
             },
         )
-        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-20"])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), ["2026-09-20"])
 
         second = sync.sync_pending(limit=14)
 
         self.assertEqual(second["synced_dates"], ["2026-09-20"])
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
     def test_macro_edit_after_calories_only_sync_requeues_the_day(self) -> None:
         saved = self.service.log_meal(
@@ -896,13 +908,13 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         config.intervals_athlete_id = "i12345"
         sync = IntervalsNutritionSyncService(config, api, self.service)
         self.assertTrue(sync.sync_day("2026-09-24")["ok"])
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
         self.service.correct_meal(
             saved["id"], {"carbs_g": 90, "protein_g": 20, "fat_g": 10}
         )
 
-        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), ["2026-09-24"])
         result = sync.sync_pending()
         self.assertEqual(result["synced_dates"], ["2026-09-24"])
         self.assertEqual(
@@ -915,7 +927,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "fatTotal": 10,
             },
         )
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
     def test_unknown_macro_after_full_sync_clears_remote_value_and_syncs(self) -> None:
         self.service.log_meal(
@@ -935,7 +947,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         sync = IntervalsNutritionSyncService(config, api, self.service)
         self.assertTrue(sync.sync_day("2026-09-24")["ok"])
         self.assertEqual(api.put.call_args.args[1]["carbohydrates"], 90)
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
         self.service.log_meal(
             {
@@ -946,7 +958,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(self.service.list_unsynced_dates(), ["2026-09-24"])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), ["2026-09-24"])
         result = sync.sync_pending()
         self.assertEqual(result["synced_dates"], ["2026-09-24"])
         self.assertEqual(
@@ -959,7 +971,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
                 "fatTotal": -1,
             },
         )
-        self.assertEqual(self.service.list_unsynced_dates(), [])
+        self.assertEqual(self.service.sync_status.list_unsynced_dates(), [])
 
     def test_context_returns_today_and_recent(self) -> None:
         self.service.log_meal(

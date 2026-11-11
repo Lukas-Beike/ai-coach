@@ -208,7 +208,7 @@ def fixture_coach_response(payload, **kwargs):
         templates = nutrition.list_templates()
         scope = ["local_nutrition"]
         if current_message == "E2E nutrition: mixed meal":
-            product = nutrition.save_product(
+            product = nutrition.product_catalog.save_product(
                 {
                     "name": "Synthetic whey <img src=x>",
                     "brand": "Fixture",
@@ -1907,7 +1907,10 @@ def _fixture_completed_sports(today, by_id):
 def _fixture_nutrition_products():
     """Local manual products show gram/ml bases and archived catalog entries."""
     service = server.NUTRITION_ASSEMBLY.meal_library_service()
-    existing = {item["id"] for item in service.list_products(include_archived=True)}
+    existing = {
+        item["id"]
+        for item in service.product_catalog.list_products(include_archived=True)
+    }
     for key, name, unit, kcal, carbs, protein, fat, status in (
         ("oats", "Synthetic oats", "g", 370, 60, 13, 7, "active"),
         ("drink", "Synthetic sports drink", "ml", 24, 6, 0, 0, "active"),
@@ -1915,7 +1918,7 @@ def _fixture_nutrition_products():
     ):
         product_id = f"fixture-product-{key}"
         if product_id not in existing:
-            service.save_product(
+            service.product_catalog.save_product(
                 {
                     "id": product_id,
                     "name": name,
