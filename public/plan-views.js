@@ -367,6 +367,25 @@ function plannedDurationSeconds(entry) {
 
 const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋" };
 
+function calendarRoundedNumber(value, suffix) {
+  if (value == null || value === "") return null;
+  return calendarMetricNumber(Math.round(Number(value)), suffix);
+}
+
+// The intensity factor as a fraction; stored values above 2 are percent.
+function calendarIntensityFactor(value) {
+  const number = Number(value);
+  if (!(number > 0)) return null;
+  return AppFormat.number(number <= 2 ? number : number / 100, { digits: 2 });
+}
+
+// The average speed, else distance over moving time.
+function calendarSpeedLabel(activity) {
+  let speed = Number(activity?.avg_speed_mps);
+  if (!(speed > 0)) speed = Number(activity?.distance_m) / Number(activity?.moving_duration_s);
+  return Number.isFinite(speed) && speed > 0 ? `${AppFormat.number(speed * 3.6, { digits: 1 })} km/h` : null;
+}
+
 function calendarIntensityLabel(value) {
   if (value == null || value === "") return null;
   const number = Number(value);
@@ -972,27 +991,22 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     };
     const sport = activitySportLabel(calendarSportType(actual));
     if (sport === "Laufen") {
-      const cadence = Number(actual.avg_cadence);
       return [
         ["Pace", values.Pace], ["Ø Puls", values["Ø Puls"]],
         // Runs store the cadence per leg; the step frequency counts both legs.
-        ["Schrittfrequenz", cadence > 0 ? calendarMetricNumber(Math.round(cadence * 2), " spm") : null],
+        ["Schrittfrequenz", Number(actual.avg_cadence) > 0 ? calendarRoundedNumber(Number(actual.avg_cadence) * 2, " spm") : null],
         ["Ø Leistung", values["Ø Leistung"]], ["Belastung", values.Belastung], ["RPE", values.RPE],
-        ["Bodenkontaktzeit", calendarMetricNumber(actual.ground_contact_time_ms != null ? Math.round(Number(actual.ground_contact_time_ms)) : null, " ms")],
+        ["Bodenkontaktzeit", calendarRoundedNumber(actual.ground_contact_time_ms, " ms")],
         ["Höhenmeter", values.Höhenmeter],
       ];
     }
     if (sport === "Radfahren" || sport === "Rad indoor") {
-      const intensity = Number(actual.intensity);
-      const factor = intensity > 0 ? (intensity <= 2 ? intensity : intensity / 100) : null;
-      const speed = Number(actual.avg_speed_mps) > 0 ? Number(actual.avg_speed_mps)
-        : (Number(actual.moving_duration_s) > 0 && Number(actual.distance_m) > 0 ? Number(actual.distance_m) / Number(actual.moving_duration_s) : null);
       return [
         ["Normalized Power", calendarMetricNumber(actual.normalized_power, " W")], ["Ø Leistung", values["Ø Leistung"]],
-        ["Intensitätsfaktor", factor != null ? AppFormat.number(factor, { digits: 2 }) : null], ["Ø Puls", values["Ø Puls"]],
-        ["Trittfrequenz", calendarMetricNumber(actual.avg_cadence != null ? Math.round(Number(actual.avg_cadence)) : null, " rpm")],
+        ["Intensitätsfaktor", calendarIntensityFactor(actual.intensity)], ["Ø Puls", values["Ø Puls"]],
+        ["Trittfrequenz", calendarRoundedNumber(actual.avg_cadence, " rpm")],
         ["Belastung", values.Belastung], ["RPE", values.RPE],
-        ["Ø Tempo", speed != null ? `${AppFormat.number(speed * 3.6, { digits: 1 })} km/h` : null],
+        ["Ø Tempo", calendarSpeedLabel(actual)],
         ["Höhenmeter", values.Höhenmeter],
       ];
     }
