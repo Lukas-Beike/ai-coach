@@ -78,52 +78,6 @@ TimeoutErrorFactory = Callable[[], Exception]
 # adds coach_action_proposals.jsonl without the session and action-token hashes
 # (no schema change).
 PRIVACY_EXPORT_FORMAT_VERSION = 17
-PRIVACY_EXPORT_JSONL_FILES = {
-    "provider_records.jsonl",
-    "activity_sessions.jsonl",
-    "activity_records.jsonl",
-    "observations.jsonl",
-    "activity_detail_sets.jsonl",
-    "activity_stream_channels.jsonl",
-    "activity_laps.jsonl",
-    "activity_zone_times.jsonl",
-    "activity_strength_sets.jsonl",
-    "activity_detail_analysis.jsonl",
-    "sleep_periods.jsonl",
-    "zone_configurations.jsonl",
-    "categorical_observations.jsonl",
-    "gear_items.jsonl",
-    "gear_activity_links.jsonl",
-    "power_curve_points.jsonl",
-    "power_curve_fetches.jsonl",
-    "athlete_checkins.jsonl",
-    "activity_feedback.jsonl",
-    "external_calendar_events.jsonl",
-    "public_event_sources.jsonl",
-    "public_event_candidates.jsonl",
-    "competitions.jsonl",
-    "competition_sync_tombstones.jsonl",
-    "remote_links.jsonl",
-    "messages.jsonl",
-    "coach_plan_artifacts.jsonl",
-    "coach_commands.jsonl",
-    "coach_action_proposals.jsonl",
-    "snapshots.jsonl",
-    "workout_library.jsonl",
-    "planned_units.jsonl",
-    "training_plans.jsonl",
-    "plan_adjustments.jsonl",
-    "change_history.jsonl",
-    "provider_refresh_history.jsonl",
-    "sync_jobs.jsonl",
-    "sync_job_items.jsonl",
-    "provider_sync_cursors.jsonl",
-    "nutrition_logs.jsonl",
-    "nutrition_sync_dates.jsonl",
-    "nutrition_templates.jsonl",
-    "nutrition_products.jsonl",
-    "food_database_entries.jsonl",
-}
 
 
 class PrivacyArchiveExportService:
@@ -144,22 +98,6 @@ class PrivacyArchiveExportService:
         self._competitions = competitions
         self._adaptive_preview = adaptive_preview
         self._config = config
-
-    @staticmethod
-    def _planned_units(db: Any) -> Iterable[dict[str, Any]]:
-        for row in db.execute(
-            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
-            "FROM planned_units ORDER BY updated_at"
-        ):
-            yield {**dict(row), "payload": decode_payload(row["payload"])}
-
-    @staticmethod
-    def _snapshots(db: Any) -> Iterable[dict[str, Any]]:
-        for row in db.execute(
-            "SELECT id, payload, created_at, synced_at, recent_activity_count "
-            "FROM snapshots ORDER BY id"
-        ):
-            yield {**dict(row), "payload": decode_payload(row["payload"])}
 
     @staticmethod
     def _application_state(db: Any) -> dict[str, Any]:
@@ -253,326 +191,8 @@ class PrivacyArchiveExportService:
                         separators=(",", ":"),
                     ),
                 )
-                self._write_jsonl(
-                    archive,
-                    "competitions.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, name, event_date, starts_at_local, sport, environment, sport_detail, priority, category, distance, target, "
-                            "course_profile, notes, description, planned_duration_s, external_id, intervals_event_id, sync_dirty, "
-                            "sync_state, sync_conflict, last_synced_at, created_at, updated_at FROM competitions ORDER BY event_date, priority, name"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "competition_sync_tombstones.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT intervals_event_id, external_id, created_at, provider FROM competition_sync_tombstones ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "remote_links.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT entity_kind, local_id, provider, remote_id, remote_external_id, baseline_hash, sync_state, last_synced_at "
-                            "FROM remote_links ORDER BY entity_kind, local_id, provider"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "messages.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT role, content, attachments, created_at FROM messages ORDER BY id"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "coach_plan_artifacts.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "coach_commands.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "coach_action_proposals.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, action_type, target_system, object_ids, diff, payload, payload_hash, status, expires_at, created_at, used_at "
-                            "FROM coach_action_proposals ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive, "snapshots.jsonl", self._snapshots(db), deadline
-                )
-                self._write_jsonl(
-                    archive, "workout_library.jsonl", iter_workout_library(db), deadline
-                )
-                self._write_jsonl(
-                    archive, "planned_units.jsonl", self._planned_units(db), deadline
-                )
-                self._write_jsonl(
-                    archive,
-                    "training_plans.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at FROM training_plans ORDER BY created_at DESC"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "plan_adjustments.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "change_history.jsonl",
-                    (
-                        change_history.public_view(dict(row))
-                        for row in db.execute(
-                            "SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "provider_refresh_history.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "sync_jobs.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "sync_job_items.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "provider_sync_cursors.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream"
-                        )
-                    ),
-                    deadline,
-                )
-                for table in (
-                    "athlete_checkins",
-                    "activity_feedback",
-                    "external_calendar_events",
-                    "public_event_sources",
-                    "public_event_candidates",
-                    "nutrition_logs",
-                    "nutrition_sync_dates",
-                    "nutrition_templates",
-                    "nutrition_products",
-                    "food_database_entries",
-                ):
-                    self._write_jsonl(
-                        archive,
-                        table + ".jsonl",
-                        (dict(row) for row in db.execute(f"SELECT * FROM {table}")),
-                        deadline,
-                    )
-                self._write_jsonl(
-                    archive,
-                    "provider_records.jsonl",
-                    (
-                        sanitized_provider_row(row, "payload")
-                        for row in db.execute(
-                            "SELECT id, provider, record_kind, source_record_id, payload, payload_hash, fetched_at, "
-                            "mapped_version, state, created_at, updated_at "
-                            "FROM provider_records ORDER BY provider, record_kind, source_record_id"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "activity_sessions.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT activity_id, primary_provider, primary_provider_activity_id, link_kind, "
-                            "athlete_confirmed, state, merged_into, merged_into_retained, started_at, local_date, "
-                            "created_at, updated_at "
-                            "FROM activity_sessions ORDER BY started_at, activity_id"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "activity_records.jsonl",
-                    (
-                        sanitized_provider_row(row, "details")
-                        for row in db.execute(
-                            "SELECT provider, provider_activity_id, activity_id, state, mapper_version, source_kind, "
-                            "recorded_by, source_record_id, sport, environment, started_at, local_date, duration_s, "
-                            "distance_m, load, load_model, avg_hr, avg_power, moving_duration_s, "
-                            "elevation_gain_m, intensity_pct, max_hr, normalized_power, avg_cadence, "
-                            "energy_kj, name, details, fetched_at, "
-                            "created_at, updated_at "
-                            "FROM activity_records ORDER BY started_at, provider, provider_activity_id"
-                        )
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "observations.jsonl",
-                    (
-                        sanitized_provider_row(row, "details")
-                        for row in db.execute(
-                            "SELECT id, natural_key, metric, value, unit, method, aggregation, source_kind, "
-                            "recorded_by, provider, source_record_id, sport, observed_on, observed_at, "
-                            "retrieved_at, label, details, mapper_version, state, owner_record_id, created_at, updated_at "
-                            "FROM observations ORDER BY observed_on, metric, id"
-                        )
-                    ),
-                    deadline,
-                )
-                for table, order in (
-                    (
-                        "activity_detail_sets",
-                        "provider, provider_activity_id, detail_kind",
-                    ),
-                    ("activity_laps", "provider, provider_activity_id, lap_index"),
-                    (
-                        "activity_zone_times",
-                        "provider, provider_activity_id, detail_kind, zone_index",
-                    ),
-                    (
-                        "activity_strength_sets",
-                        "provider, provider_activity_id, set_index",
-                    ),
-                ):
-                    self._write_jsonl(
-                        archive,
-                        table + ".jsonl",
-                        (
-                            dict(row)
-                            for row in db.execute(
-                                f"SELECT * FROM {table} ORDER BY {order}"
-                            )
-                        ),
-                        deadline,
-                    )
-                self._write_jsonl(
-                    archive,
-                    "activity_stream_channels.jsonl",
-                    stream_export_rows(db),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "activity_detail_analysis.jsonl",
-                    analysis_export_rows(db),
-                    deadline,
-                )
-                for table, order in (
-                    ("sleep_periods", "started_at, provider"),
-                    ("categorical_observations", "observed_on, domain, natural_key"),
-                    ("gear_items", "provider, gear_id"),
-                    ("power_curve_points", "provider, duration_s"),
-                    ("power_curve_fetches", "provider, source_record_id"),
-                ):
-                    self._write_jsonl(
-                        archive,
-                        f"{table}.jsonl",
-                        (
-                            sanitized_provider_row(row, "details")
-                            for row in db.execute(
-                                f"SELECT * FROM {table} ORDER BY {order}"
-                            )
-                        ),
-                        deadline,
-                    )
-                self._write_jsonl(
-                    archive,
-                    "zone_configurations.jsonl",
-                    (
-                        sanitized_provider_row(row, "details")
-                        for row in zone_configuration_export_rows(db)
-                    ),
-                    deadline,
-                )
-                self._write_jsonl(
-                    archive,
-                    "gear_activity_links.jsonl",
-                    (
-                        dict(row)
-                        for row in db.execute(
-                            "SELECT * FROM gear_activity_links "
-                            "ORDER BY provider, gear_id, provider_activity_id"
-                        )
-                    ),
-                    deadline,
-                )
+                for name, rows in PRIVACY_EXPORT_JSONL_SOURCES:
+                    self._write_jsonl(archive, name, rows(db), deadline)
                 archive.writestr(
                     "planning.json",
                     json.dumps(
@@ -750,3 +370,233 @@ def manifest(
         ),
         "jsonl_files": sorted(jsonl_files),
     }
+
+
+RowSource = Callable[[Any], Iterable[Mapping[str, Any]]]
+
+
+def _select(sql: str, row: Callable[[Any], Mapping[str, Any]] = dict) -> RowSource:
+    return lambda db: (row(item) for item in db.execute(sql))
+
+
+def _with_payload(row: Any) -> dict[str, Any]:
+    return {**dict(row), "payload": decode_payload(row["payload"])}
+
+
+def _sanitized(*columns: str) -> Callable[[Any], dict[str, Any]]:
+    return lambda row: sanitized_provider_row(row, *columns)
+
+
+def _public_change(row: Any) -> dict[str, Any]:
+    return change_history.public_view(dict(row))
+
+
+# Archive member and row source per exported table, in archive order. Explicit
+# column lists leave out the columns tests/test_data_safety_coverage.py names;
+# provider JSON columns are decoded and sanitized.
+PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
+    (
+        "competitions.jsonl",
+        _select(
+            "SELECT id, name, event_date, starts_at_local, sport, environment, sport_detail, priority, category, distance, target, "
+            "course_profile, notes, description, planned_duration_s, external_id, intervals_event_id, sync_dirty, "
+            "sync_state, sync_conflict, last_synced_at, created_at, updated_at FROM competitions ORDER BY event_date, priority, name"
+        ),
+    ),
+    (
+        "competition_sync_tombstones.jsonl",
+        _select(
+            "SELECT intervals_event_id, external_id, created_at, provider FROM competition_sync_tombstones ORDER BY created_at"
+        ),
+    ),
+    (
+        "remote_links.jsonl",
+        _select(
+            "SELECT entity_kind, local_id, provider, remote_id, remote_external_id, baseline_hash, sync_state, last_synced_at "
+            "FROM remote_links ORDER BY entity_kind, local_id, provider"
+        ),
+    ),
+    (
+        "messages.jsonl",
+        _select(
+            "SELECT role, content, attachments, created_at FROM messages ORDER BY id"
+        ),
+    ),
+    (
+        "coach_plan_artifacts.jsonl",
+        _select(
+            "SELECT id, conversation_id, client_turn_id, base_revision, status, payload, created_at, updated_at FROM coach_plan_artifacts ORDER BY created_at"
+        ),
+    ),
+    (
+        "coach_commands.jsonl",
+        _select(
+            "SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at"
+        ),
+    ),
+    (
+        "coach_action_proposals.jsonl",
+        _select(
+            "SELECT id, action_type, target_system, object_ids, diff, payload, payload_hash, status, expires_at, created_at, used_at "
+            "FROM coach_action_proposals ORDER BY created_at"
+        ),
+    ),
+    (
+        "snapshots.jsonl",
+        _select(
+            "SELECT id, payload, created_at, synced_at, recent_activity_count "
+            "FROM snapshots ORDER BY id",
+            _with_payload,
+        ),
+    ),
+    ("workout_library.jsonl", iter_workout_library),
+    (
+        "planned_units.jsonl",
+        _select(
+            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
+            "FROM planned_units ORDER BY updated_at",
+            _with_payload,
+        ),
+    ),
+    (
+        "training_plans.jsonl",
+        _select(
+            "SELECT id, name, goal, start_date, end_date, status, created_at, updated_at FROM training_plans ORDER BY created_at DESC"
+        ),
+    ),
+    (
+        "plan_adjustments.jsonl",
+        _select(
+            "SELECT id, payload, status, created_at, applied_at FROM plan_adjustments ORDER BY created_at"
+        ),
+    ),
+    (
+        "change_history.jsonl",
+        _select(
+            "SELECT id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff FROM change_history ORDER BY created_at",
+            _public_change,
+        ),
+    ),
+    (
+        "provider_refresh_history.jsonl",
+        _select(
+            "SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at"
+        ),
+    ),
+    (
+        "sync_jobs.jsonl",
+        _select(
+            "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
+        ),
+    ),
+    (
+        "sync_job_items.jsonl",
+        _select(
+            "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
+        ),
+    ),
+    (
+        "provider_sync_cursors.jsonl",
+        _select(
+            "SELECT provider, stream, cursor, high_water_mark, updated_at FROM provider_sync_cursors ORDER BY provider, stream"
+        ),
+    ),
+    *(
+        (f"{table}.jsonl", _select(f"SELECT * FROM {table}"))
+        for table in (
+            "athlete_checkins",
+            "activity_feedback",
+            "external_calendar_events",
+            "public_event_sources",
+            "public_event_candidates",
+            "nutrition_logs",
+            "nutrition_sync_dates",
+            "nutrition_templates",
+            "nutrition_products",
+            "food_database_entries",
+        )
+    ),
+    (
+        "provider_records.jsonl",
+        _select(
+            "SELECT id, provider, record_kind, source_record_id, payload, payload_hash, fetched_at, "
+            "mapped_version, state, created_at, updated_at "
+            "FROM provider_records ORDER BY provider, record_kind, source_record_id",
+            _sanitized("payload"),
+        ),
+    ),
+    (
+        "activity_sessions.jsonl",
+        _select(
+            "SELECT activity_id, primary_provider, primary_provider_activity_id, link_kind, "
+            "athlete_confirmed, state, merged_into, merged_into_retained, started_at, local_date, "
+            "created_at, updated_at "
+            "FROM activity_sessions ORDER BY started_at, activity_id"
+        ),
+    ),
+    (
+        "activity_records.jsonl",
+        _select(
+            "SELECT provider, provider_activity_id, activity_id, state, mapper_version, source_kind, "
+            "recorded_by, source_record_id, sport, environment, started_at, local_date, duration_s, "
+            "distance_m, load, load_model, avg_hr, avg_power, moving_duration_s, "
+            "elevation_gain_m, intensity_pct, max_hr, normalized_power, avg_cadence, "
+            "energy_kj, name, details, fetched_at, "
+            "created_at, updated_at "
+            "FROM activity_records ORDER BY started_at, provider, provider_activity_id",
+            _sanitized("details"),
+        ),
+    ),
+    (
+        "observations.jsonl",
+        _select(
+            "SELECT id, natural_key, metric, value, unit, method, aggregation, source_kind, "
+            "recorded_by, provider, source_record_id, sport, observed_on, observed_at, "
+            "retrieved_at, label, details, mapper_version, state, owner_record_id, created_at, updated_at "
+            "FROM observations ORDER BY observed_on, metric, id",
+            _sanitized("details"),
+        ),
+    ),
+    *(
+        (f"{table}.jsonl", _select(f"SELECT * FROM {table} ORDER BY {order}"))
+        for table, order in (
+            ("activity_detail_sets", "provider, provider_activity_id, detail_kind"),
+            ("activity_laps", "provider, provider_activity_id, lap_index"),
+            (
+                "activity_zone_times",
+                "provider, provider_activity_id, detail_kind, zone_index",
+            ),
+            ("activity_strength_sets", "provider, provider_activity_id, set_index"),
+        )
+    ),
+    ("activity_stream_channels.jsonl", stream_export_rows),
+    ("activity_detail_analysis.jsonl", analysis_export_rows),
+    *(
+        (
+            f"{table}.jsonl",
+            _select(f"SELECT * FROM {table} ORDER BY {order}", _sanitized("details")),
+        )
+        for table, order in (
+            ("sleep_periods", "started_at, provider"),
+            ("categorical_observations", "observed_on, domain, natural_key"),
+            ("gear_items", "provider, gear_id"),
+            ("power_curve_points", "provider, duration_s"),
+            ("power_curve_fetches", "provider, source_record_id"),
+        )
+    ),
+    (
+        "zone_configurations.jsonl",
+        lambda db: (
+            sanitized_provider_row(row, "details")
+            for row in zone_configuration_export_rows(db)
+        ),
+    ),
+    (
+        "gear_activity_links.jsonl",
+        _select(
+            "SELECT * FROM gear_activity_links "
+            "ORDER BY provider, gear_id, provider_activity_id"
+        ),
+    ),
+)
+PRIVACY_EXPORT_JSONL_FILES = {name for name, _rows in PRIVACY_EXPORT_JSONL_SOURCES}
