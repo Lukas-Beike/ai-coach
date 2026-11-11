@@ -927,7 +927,7 @@ function renderAnalysisHistory(history) { // NOSONAR
 
 function sessionRpeSourceLabel(days, rated) {
   const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
-  const providerLabel = [...new Set(days.flatMap((day) => day.rpe_provider_labels || []))].sort().join(" + ") || "Anbieter";
+  const providerLabel = [...new Set(days.flatMap((day) => day.rpe_provider_labels || []))].sort((a, b) => a.localeCompare(b)).join(" + ") || "Anbieter";
   if (!rated) return "Athletenfeedback";
   if (provider === rated) return providerLabel;
   return provider ? `Athletenfeedback + ${providerLabel}` : "Athletenfeedback";
