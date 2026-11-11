@@ -1277,100 +1277,22 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
 
-    def test_tool_specs_derive_todays_hand_kept_tables(self):
-        # The hand-kept tables stay until readers switch to backend/coach/tool_specs.py
-        # (#2072); each derived table must equal today's table exactly.
+    def test_tool_specs_describe_every_catalog_tool_with_a_real_owner(self):
+        # backend/coach/tool_specs.py is the one source of the tool tables
+        # (#2072); the derived tables equalled the former hand-kept ones before
+        # they were removed, and the write-gate tests pin the decisions.
         import inspect
         import sys
 
-        from backend.coach import capabilities, outcomes, proposal_models, sync_tools
-        from backend.coach import tool_execution_service as execution
         from backend.coach import tool_specs as specs
-        from backend.coach import write_gate as gate
 
         catalog = server.COACH_TOOL_CAPABILITIES
         self.assertEqual(set(specs.SPECS), set(catalog))
         self.assertEqual(len(specs.SPECS), len(specs.TOOL_SPECS))
-        pairs = {
-            "read-only": (specs.READ_ONLY_TOOLS, server.STRUCTURED_READ_ONLY_TOOLS),
-            "control": (specs.CONTROL_TOOLS, capabilities.CONTROL_TOOLS),
-            "provider read job": (
-                specs.PROVIDER_READ_JOB_TOOLS,
-                capabilities.PROVIDER_READ_JOB_TOOLS,
-            ),
-            "remote write": (specs.REMOTE_WRITE_TOOLS, capabilities.REMOTE_WRITE_TOOLS),
-            "conditional remote write": (
-                specs.CONDITIONAL_REMOTE_WRITE_TOOLS,
-                capabilities.CONDITIONAL_REMOTE_WRITE_TOOLS,
-            ),
-            "domain": (specs.TOOL_DOMAIN, gate.TOOL_DOMAIN),
-            "ungated": (specs.UNGATED_TOOLS, gate.UNGATED_TOOLS),
-            "delete": (specs.DELETE_TOOLS, gate._DELETE_TOOLS),
-            "whole plan": (specs.WHOLE_PLAN_TOOLS, gate._WHOLE_PLAN_TOOLS),
-            "no record": (specs.NO_RECORD_TOOLS, gate._NO_RECORD_TOOLS),
-            "record lists": (specs.RECORD_LISTS, gate._RECORD_LISTS),
-            "approval": (specs.APPROVAL_TOOLS, gate._APPROVAL_TOOLS),
-            "plan checked": (specs.PLAN_CHECKED_TOOLS, execution.PLAN_CHECKED_TOOLS),
-            "self guarded": (specs.SELF_GUARDED_TOOLS, execution.SELF_GUARDED_TOOLS),
-            "profile mutating": (
-                specs.PROFILE_MUTATING_TOOLS,
-                execution.PROFILE_MUTATING_COACH_TOOLS,
-            ),
-            "external food lookup": (
-                specs.EXTERNAL_FOOD_LOOKUP_TOOLS,
-                execution.COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
-            ),
-            "sync tools": (specs.SYNC_TOOL_NAMES, sync_tools.COACH_SYNC_TOOL_NAMES),
-            "remote proposals": (
-                specs.REMOTE_WRITE_TOOLS | specs.CONDITIONAL_REMOTE_WRITE_TOOLS,
-                proposal_models.REMOTE_COACH_WRITE_TOOLS,
-            ),
-            "operation labels": (
-                specs.OPERATION_LABELS,
-                outcomes.COACH_OPERATION_LABELS,
-            ),
-            "action labels": (specs.ACTION_LABELS, outcomes.COACH_ACTION_LABELS),
-            "effect": (
-                {name: spec.effect for name, spec in specs.SPECS.items()},
-                {name: item["effect"] for name, item in catalog.items()},
-            ),
-        }
-        for table, (derived, hand_kept) in pairs.items():
-            with self.subTest(table=table):
-                self.assertEqual(derived, hand_kept)
-        # Audit finding E-508: the hand-kept owner table names a service that
-        # does not exist and the wrong owner for six tools. The derived owner is
-        # the service that executes the effect; every other owner is unchanged.
-        owners = {name: item["owner"] for name, item in catalog.items()}
-        corrected = {
-            "apply_training_patch": (
-                "CoachPlanningChangeService",
-                specs.TRAINING_PATCH,
-            ),
-            "replace_training_plan": (
-                "CoachPlanningChangeService",
-                specs.PLANNING_CHANGES,
-            ),
-            "apply_training_changes": (
-                "CoachPlanningChangeService",
-                specs.PLANNING_CHANGES,
-            ),
-            "get_sync_job": ("CoachReadToolService", specs.SYNC),
-            "clarify_coach_request": (
-                "CoachDialogueActionService",
-                specs.CLARIFICATION,
-            ),
-            "cancel_coach_request": ("CoachDialogueActionService", specs.EXECUTION),
-        }
         self.assertEqual(
-            {
-                name: (owners[name], spec.owner)
-                for name, spec in specs.SPECS.items()
-                if owners[name] != spec.owner
-            },
-            corrected,
+            {name: item["owner"] for name, item in catalog.items()},
+            {name: spec.owner for name, spec in specs.SPECS.items()},
         )
-        # Every owner names a class the running Coach defines.
         defined = {
             name
             for module_name, module in sys.modules.items()
@@ -1378,6 +1300,28 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             for name, _ in inspect.getmembers(module, inspect.isclass)
         }
         self.assertEqual({spec.owner for spec in specs.TOOL_SPECS} - defined, set())
+        # Audit finding E-508: these owners were wrong in the former table.
+        self.assertEqual(
+            {
+                name: specs.SPECS[name].owner
+                for name in (
+                    "apply_training_patch",
+                    "replace_training_plan",
+                    "apply_training_changes",
+                    "get_sync_job",
+                    "clarify_coach_request",
+                    "cancel_coach_request",
+                )
+            },
+            {
+                "apply_training_patch": "CoachTrainingPatchService",
+                "replace_training_plan": "CoachPlanningChangeToolService",
+                "apply_training_changes": "CoachPlanningChangeToolService",
+                "get_sync_job": "CoachSyncToolService",
+                "clarify_coach_request": "CoachClarificationService",
+                "cancel_coach_request": "CoachStructuredToolExecutionService",
+            },
+        )
 
     def test_planning_tool_schemas_accept_local_start_times(self):
         tools = {tool["name"]: tool for tool in server.COACH_STRUCTURED_TOOLS}

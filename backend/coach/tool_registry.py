@@ -6,12 +6,12 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.capabilities import build_capability_catalog
-from backend.coach.outcomes import COACH_OPERATION_LABELS
 from backend.coach.tool_schemas import (
     ACCEPT_PLAN_FINDINGS,
     _canonical_coach_tool,
     build_structured_tool_schemas,
 )
+from backend.coach.tool_specs import READ_ONLY_TOOLS
 
 
 def build_tool_contracts(
@@ -33,24 +33,7 @@ def build_tool_contracts(
         training_plan_statuses=training_plan_statuses,
     )
     coach_canonical_tool_names = tuple(tool["name"] for tool in coach_structured_tools)
-    structured_read_only_tools = {
-        "read_coach_context",
-        "read_profile",
-        "read_training_state",
-        "list_recent_activities",
-        "get_activity_details",
-        "get_training_report",
-        "read_training_records",
-        "list_workout_library",
-        "list_planned_workouts",
-        "list_change_history",
-        "list_competitions",
-        "list_training_plans",
-        "get_sync_job",
-        "read_nutrition",
-        "lookup_food",
-        "calculate_food_nutrition",
-    }
+    structured_read_only_tools = set(READ_ONLY_TOOLS)
     coach_dialogue_tools = dialogue_tools(
         [
             tool
@@ -112,10 +95,7 @@ def build_tool_contracts(
         ]
     )
     capabilities = build_capability_catalog(
-        coach_structured_tools,
-        coach_dialogue_tools,
-        structured_read_only_tools,
-        COACH_OPERATION_LABELS,
+        coach_structured_tools, coach_dialogue_tools
     )
     return (
         coach_canonical_tool_names,

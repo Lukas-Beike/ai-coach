@@ -24,17 +24,18 @@ from backend.coach.request_payload import (
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
-from backend.coach.tool_execution_service import (
-    COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
-    PROFILE_MUTATING_COACH_TOOLS,
-    CoachStructuredToolExecutionService,
-)
+from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
+from backend.coach.tool_specs import (
+    EXTERNAL_FOOD_LOOKUP_TOOLS,
+    PROFILE_MUTATING_TOOLS,
+    TOOL_DOMAIN,
+)
 from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
-from backend.coach.write_gate import ILLNESS_CODE, TOOL_DOMAIN, record_count
+from backend.coach.write_gate import ILLNESS_CODE, record_count
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.plan_guard_service import (
@@ -304,11 +305,11 @@ class CoachStructuredToolRoundService:
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
-            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+            *EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         with (
             self._profile_mutation_coordinator
-            if name in PROFILE_MUTATING_COACH_TOOLS
+            if name in PROFILE_MUTATING_TOOLS
             else nullcontext(),
             self._database_lock if local_transaction else nullcontext(),
             self._database_manager().unit_of_work()

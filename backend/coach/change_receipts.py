@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any
 
 from backend.coach.outcomes import coach_effect_label
-from backend.coach.write_gate import TOOL_DOMAIN
+from backend.coach.tool_specs import TOOL_DOMAIN
 from backend.planning.plan_checks import BLOCKING_CODES, FINDING_CODES
 
 # Write tools whose success leaves athlete records unchanged: previews and

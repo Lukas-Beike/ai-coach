@@ -7,13 +7,12 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.coach.context_selection import request_chain_ids, select_coach_context
+from backend.coach.tool_specs import TOOL_DOMAIN, UNGATED_TOOLS
 from backend.coach.write_gate import (
     REMOTE_DENIALS,
     REMOTE_GARMIN,
     REMOTE_INTERVALS,
     REMOTE_WAHOO,
-    TOOL_DOMAIN,
-    UNGATED_TOOLS,
     GateDecision,
     ImpactClassifier,
     ImpactVerdict,
