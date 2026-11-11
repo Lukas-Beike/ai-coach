@@ -14,13 +14,13 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.providers.descriptors import (
     GARMIN_ID,
+    GARMIN_NOT_CONFIGURED_MESSAGE,
     WAHOO_NOT_CONFIGURED_MESSAGE,
 )
 from backend.runtime.events import StateEventBuffer
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
     FULL_RESYNC_LABEL,
-    GARMIN_NOT_CONFIGURED_ERROR,
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncOperationJournal,
@@ -84,7 +84,7 @@ class GarminFullResync:
         return self._garmin_service.configured()
 
     def not_configured_error(self) -> AppError:
-        return AppError(503, GARMIN_NOT_CONFIGURED_ERROR, reason="not_configured")
+        return AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
 
     def run(
         self, operation_id: str, _observer: SyncOperationObserver
