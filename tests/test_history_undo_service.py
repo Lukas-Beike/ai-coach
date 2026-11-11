@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch
 
+from support import temp_database
+
 from backend import change_history
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.undo_service import HistoryUndoService
@@ -110,12 +109,7 @@ class _RevisionService:
 
 class HistoryUndoServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        raw_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "history.sqlite",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        raw_manager = temp_database(self, "history.sqlite", row_factory=row_factory)
         with raw_manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute("CREATE TABLE undo_effects(entity_type TEXT, entity_id TEXT)")
@@ -127,10 +121,6 @@ class HistoryUndoServiceTests(unittest.TestCase):
         }
         self.revision = _RevisionService()
         self.service = self._service()
-
-    def tearDown(self):
-        self.raw_manager.close()
-        self.temporary_directory.cleanup()
 
     def _service(self, *, history=None, services=None, revision=None):
         services = services or self.services

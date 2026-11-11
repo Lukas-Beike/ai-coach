@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import patch
+
+from support import temp_database
 
 from backend import change_history
 from backend.athlete.profile import DEFAULT_PROFILE
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, ProfileRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 
@@ -42,23 +41,14 @@ class _FailingReadManager:
 
 class ChangeHistoryServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.database_manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "history.sqlite",
-            sqlite3,
-            row_factory=row_factory,
+        self.database_manager = temp_database(
+            self, "history.sqlite", row_factory=row_factory, schema=True
         )
-        with self.database_manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: "2026-09-20T00:00:00+00:00")
         self.profile_repository = ProfileRepository(self.key_values)
         self.service = ChangeHistoryService(
             self.database_manager, self.profile_repository
         )
-
-    def tearDown(self):
-        self.database_manager.close()
-        self.temporary_directory.cleanup()
 
     def _insert_history(self, history_id, created_at, diff=None):
         diff = diff or {"fields": {}, "before_present": False, "after_present": True}
