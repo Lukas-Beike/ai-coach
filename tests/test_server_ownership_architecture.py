@@ -59,6 +59,7 @@ class ServerOwnershipArchitectureTests(unittest.TestCase):
                 backend_owners.setdefault(
                     symbol, path.relative_to(BACKEND_ROOT.parent).as_posix()
                 )
+        self.assertIn("PLANNED_WORKOUT_LABEL", backend_owners, "backend scan empty")
         violations = [
             f"{backend_owners[symbol]} defines {symbol}, redefined in server.py:{line}"
             for symbol, line in implementations.items()
