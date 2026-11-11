@@ -30,6 +30,7 @@ class ChatCancelPostRoutes:
         ]
 
     def _cancel(self, handler: Any, request: RouteRequest) -> None:
+        """Cancel running Coach work of this session."""
         payload = handler.read_json()
         result = self._coach_cancellation_service().cancel(
             request.session["csrf_hash"], payload.get("operation_id")

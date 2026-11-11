@@ -1,103 +1,77 @@
-"""Keep docs/api-routes.md in step with the routes the HTTP API registers.
+"""Keep the generated route table in docs/api-routes.md current.
 
-Routes are read as text: the /api string literals in backend/http_api and the
-manual and full-resync paths of the provider descriptors. Nothing is imported.
+Run ``python tests/test_api_routes_doc.py --write`` to regenerate it.
 """
 
+import inspect
 import re
+import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-HTTP_API = ROOT / "backend" / "http_api"
-SOURCES = (*sorted(HTTP_API.glob("*.py")), ROOT / "backend/providers/descriptors.py")
-ROUTE_LITERAL = re.compile(r'"(/api/[a-z0-9/_-]*[a-z0-9])"')
-DOC_ROUTE = re.compile(r"`(?:(?:GET|POST|PUT) )?(/api/[^`\s]+)`")
-NUTRITION = "nutrition.py"
+# The repository root, for running this file as a script with --write.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Documented routes no plain literal registers, with the source text that does.
-REGISTERED_ELSEWHERE = {
-    # Built from the nutrition path constants.
-    "/api/nutrition/entry/delete": (NUTRITION, 'f"{NUTRITION_ENTRY_PATH}/delete"'),
-    "/api/nutrition/entry/add-product": (
-        NUTRITION,
-        'f"{NUTRITION_ENTRY_PATH}/add-product"',
-    ),
-    "/api/nutrition/products/favorite": (
-        NUTRITION,
-        'f"{NUTRITION_PRODUCTS_PATH}/favorite"',
-    ),
-    "/api/nutrition/products/lookup": (
-        NUTRITION,
-        'f"{NUTRITION_PRODUCTS_PATH}/lookup"',
-    ),
-    "/api/nutrition/products/extract": (
-        NUTRITION,
-        'f"{NUTRITION_PRODUCTS_PATH}/extract"',
-    ),
-    "/api/nutrition/products/archive": (
-        NUTRITION,
-        'f"{NUTRITION_PRODUCTS_PATH}/archive"',
-    ),
-    "/api/nutrition/products/database/delete": (
-        NUTRITION,
-        'f"{NUTRITION_PRODUCTS_PATH}/database/delete"',
-    ),
-    "/api/providers/{id}/check": (
-        "provider_connections.py",
-        '"/api/providers/{provider}/check"',
-    ),
-    # Route-table patterns over the id segment.
-    "/api/activities/{id}": ("sync_get.py", '"/api/activities/{id}"'),
-    "/api/activities/{id}/feedback": (
-        "feedback_post.py",
-        '"/api/activities/{id}/feedback"',
-    ),
-    "/api/activities/{id}/session": (
-        "feedback_post.py",
-        '"/api/activities/{id}/session"',
-    ),
-    "/api/planned-units/{id}/garmin-exercise": (
-        "planned_unit_focus_post.py",
-        '"/api/planned-units/{id}/garmin-exercise"',
-    ),
-    "/api/planned-units/{id}/focus": (
-        "planned_unit_focus_post.py",
-        '"/api/planned-units/{id}/focus"',
-    ),
-    "/api/sync/jobs/{id}": ("sync_get.py", '"/api/sync/jobs/{id:[0-9a-f-]+}"'),
-}
+from server_test_support import server
+
+from backend.http_api.route_table import route_reference
+
+DOC = Path(__file__).resolve().parents[1] / "docs" / "api-routes.md"
+BEGIN = "<!-- BEGIN GENERATED ROUTES -->\n"
+END = "<!-- END GENERATED ROUTES -->\n"
+PROSE_ROUTE = re.compile(r"`(GET|POST|PUT) (/api/[^`\s]+)`")
 # Former aliases the document names as no longer registered.
 RETIRED_ALIASES = {"/api/logs/clear", "/api/diagnostics/clear"}
 
 
+def _generated(document: str) -> str:
+    return document.split(BEGIN, 1)[1].split(END, 1)[0]
+
+
+def _rendered() -> str:
+    return route_reference(server.HTTP_API.route_table.routes)
+
+
 class ApiRoutesDocTests(unittest.TestCase):
-    def setUp(self):
-        self.registered = {
-            route
-            for source in SOURCES
-            for route in ROUTE_LITERAL.findall(source.read_text(encoding="utf-8"))
+    def test_generated_route_table_is_current(self):
+        self.assertEqual(
+            _generated(DOC.read_text(encoding="utf-8")),
+            _rendered(),
+            "Regenerate with: python tests/test_api_routes_doc.py --write",
+        )
+
+    def test_every_route_handler_states_its_purpose(self):
+        self.assertEqual(
+            [
+                f"{route.method} {route.path}"
+                for route in server.HTTP_API.route_table.routes
+                if not inspect.getdoc(route.handle)
+            ],
+            [],
+        )
+
+    def test_routes_named_in_the_prose_are_registered(self):
+        document = DOC.read_text(encoding="utf-8")
+        registered = {
+            (route.method, re.sub(r"\{(\w+)(?::[^}]+)?\}", "{id}", route.path))
+            for route in server.HTTP_API.route_table.routes
         }
-        doc = (ROOT / "docs" / "api-routes.md").read_text(encoding="utf-8")
-        self.documented = set(DOC_ROUTE.findall(doc))
-
-    def test_every_registered_route_is_documented(self):
-        self.assertEqual(sorted(self.registered - self.documented), [])
-
-    def test_every_documented_route_is_registered(self):
-        known = self.registered | set(REGISTERED_ELSEWHERE) | RETIRED_ALIASES
-        self.assertEqual(sorted(self.documented - known), [])
-
-    def test_exceptions_stay_documented_and_backed_by_their_source(self):
-        self.assertEqual(sorted(self.registered & set(REGISTERED_ELSEWHERE)), [])
-        self.assertEqual(sorted(self.registered & RETIRED_ALIASES), [])
-        for route, (module, source_text) in REGISTERED_ELSEWHERE.items():
-            with self.subTest(route=route):
-                self.assertIn(route, self.documented)
-                source = (HTTP_API / module).read_text(encoding="utf-8")
-                self.assertIn(source_text, source)
-        self.assertLessEqual(RETIRED_ALIASES, self.documented)
+        named = {
+            (method, re.sub(r"\{\w+\}", "{id}", path))
+            for method, path in PROSE_ROUTE.findall(document)
+        }
+        self.assertTrue(named)
+        self.assertEqual(sorted(named - registered), [])
+        for alias in RETIRED_ALIASES:
+            self.assertIn(f"`{alias}`", document)
+            self.assertNotIn(alias, {path for _, path in registered})
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if "--write" in sys.argv:
+        document = DOC.read_text(encoding="utf-8")
+        before, rest = document.split(BEGIN, 1)
+        after = rest.split(END, 1)[1]
+        DOC.write_text(before + BEGIN + _rendered() + END + after, encoding="utf-8")
+    else:
+        unittest.main()

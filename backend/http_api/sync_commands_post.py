@@ -27,12 +27,29 @@ class SyncCommandPostRoute:
         self._registry = registry
 
     def routes(self) -> list[Route]:
-        return [
-            Route("POST", path, Access.SESSION_CSRF, self._execute)
-            for path in sorted(SyncRouteSurface(self._registry).paths())
-        ]
+        surface = SyncRouteSurface(self._registry)
+        routes = []
+        for path in sorted(surface.paths()):
+            route = surface.route(path)
+            if route is not None and route.full_resync_provider is not None:
+                handle = self._full_resync
+            elif route is not None and route.manual is not None:
+                handle = self._manual_sync
+            else:
+                handle = self._execute
+            routes.append(Route("POST", path, Access.SESSION_CSRF, handle))
+        return routes
+
+    def _full_resync(self, handler: Any, request: RouteRequest) -> None:
+        """Start the confirmed full resync in the background (`202` with `operation_id`; `200` `already_running` while one runs)."""
+        self._execute(handler, request)
+
+    def _manual_sync(self, handler: Any, request: RouteRequest) -> None:
+        """Queue a provider synchronization, or a targeted refresh of the external calendars or the weather."""
+        self._execute(handler, request)
 
     def _execute(self, handler: Any, request: RouteRequest) -> None:
+        """Queue a sync job."""
         payload = (
             handler.read_json()
             if needs_sync_body(self._registry, request.path)

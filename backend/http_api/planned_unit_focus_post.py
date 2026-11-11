@@ -34,6 +34,7 @@ class PlannedUnitFocusPostRoutes:
         ]
 
     def _exercise(self, handler: Any, request: RouteRequest) -> None:
+        """Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`)."""
         payload = _read_object(handler)
         with self._database_lock:
             result = self._planned_unit_service().assign_garmin_exercise(
@@ -45,6 +46,7 @@ class PlannedUnitFocusPostRoutes:
         handler.send_json(200, result)
 
     def _focus(self, handler: Any, request: RouteRequest) -> None:
+        """Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit."""
         payload = _read_object(handler)
         values = {key: payload.get(key) for key in FOCUS_ONLY_KEYS}
         with self._database_lock:

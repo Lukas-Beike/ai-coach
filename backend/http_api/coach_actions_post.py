@@ -37,6 +37,7 @@ class CoachActionsPostRoutes:
         ]
 
     def _confirm(self, handler: Any, request: RouteRequest) -> None:
+        """Confirm a Coach proposal."""
         payload = handler.read_json()
         handler.send_json(
             200,
@@ -46,6 +47,7 @@ class CoachActionsPostRoutes:
         )
 
     def _cancel(self, handler: Any, request: RouteRequest) -> None:
+        """Cancel a Coach proposal."""
         payload = handler.read_json()
         handler.send_json(
             200,
@@ -55,6 +57,7 @@ class CoachActionsPostRoutes:
         )
 
     def _execute(self, handler: Any, request: RouteRequest) -> None:
+        """Execute a confirmed Coach proposal."""
         payload = handler.read_json()
         handler.send_json(
             200,

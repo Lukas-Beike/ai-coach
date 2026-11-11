@@ -36,15 +36,18 @@ class PublicGetRoutes:
         ]
 
     def _health(self, handler: Any, _request: RouteRequest) -> None:
+        """Liveness and maintenance state."""
         handler.send_json(
             200, {"status": "ok", "maintenance": self._maintenance_gate.state()}
         )
 
     def _readiness(self, handler: Any, _request: RouteRequest) -> None:
+        """Readiness status; 503 while not ready."""
         readiness = self._readiness_service().state()
         handler.send_json(200 if readiness["ready"] else 503, readiness)
 
     def _auth_status(self, handler: Any, _request: RouteRequest) -> None:
+        """Current login status."""
         session = self._auth_service().authenticated_session(handler)
         handler.send_json(
             200,
@@ -55,4 +58,5 @@ class PublicGetRoutes:
         )
 
     def _bootstrap(self, handler: Any, _request: RouteRequest) -> None:
+        """Initial authenticated client state."""
         handler.send_json(200, self._public_bootstrap_service().read())

@@ -24,6 +24,7 @@ class ProviderConnectionGetRoutes:
         return [Route("GET", STATUS_PATH, Access.SESSION, self._statuses)]
 
     def _statuses(self, handler: Any, _request: RouteRequest) -> None:
+        """Last local connection check per provider, without contacting any provider."""
         handler.send_json(200, {"providers": self._checks().statuses()})
 
 
@@ -42,6 +43,7 @@ class ProviderConnectionPostRoutes:
         ]
 
     def _check(self, handler: Any, request: RouteRequest) -> None:
+        """Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result."""
         provider = request.params["provider"]
         checks = self._checks()
         # Drain the body first, like the other command routes.

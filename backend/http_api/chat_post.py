@@ -25,6 +25,7 @@ class ChatPostRoutes:
         return [Route("POST", "/api/chat/reset", Access.SESSION_CSRF, self._reset)]
 
     def _reset(self, handler: Any, _request: RouteRequest) -> None:
+        """Reset the Coach conversation; needs `{"confirmed": true}`, else 400 `confirmation_required`."""
         payload = handler.read_json(self._max_request_bytes)
         if payload.get("confirmed") is not True:
             raise AppError(

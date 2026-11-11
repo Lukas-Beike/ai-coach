@@ -29,6 +29,7 @@ class DiagnosticsGetRoutes:
         ]
 
     def _download(self, handler: Any, _request: RouteRequest) -> None:
+        """Download the redacted server log as JSON lines."""
         handler.send_bytes(
             200,
             self._recent_log_entries_service().download(),
@@ -39,6 +40,7 @@ class DiagnosticsGetRoutes:
         )
 
     def _logs(self, handler: Any, request: RouteRequest) -> None:
+        """Recent redacted log entries."""
         raw_limit = request.query.get("limit", ["200"])[0]
         try:
             limit = max(1, min(int(raw_limit), 500))
@@ -49,4 +51,5 @@ class DiagnosticsGetRoutes:
         )
 
     def _report(self, handler: Any, _request: RouteRequest) -> None:
+        """Diagnostic report."""
         handler.send_json(200, self._diagnostic_report_service().report())

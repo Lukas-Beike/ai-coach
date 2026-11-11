@@ -82,11 +82,13 @@ class AthleteGetRoutes:
         return routes
 
     def _performance(self, handler: Any, _request: RouteRequest) -> None:
+        """Performance projection."""
         handler.send_json(
             200, self._public_performance_state_service().performance_state()
         )
 
     def _profile(self, handler: Any, _request: RouteRequest) -> None:
+        """Profile and competitions; also `first_threshold_estimate` (percent of the run threshold HR, bpm, session count, quality, date range) or null."""
         payload: dict[str, Any] = {
             "profile": self._profile_service().get(),
             "competitions": self._competitions(),
@@ -98,11 +100,14 @@ class AthleteGetRoutes:
         handler.send_json(200, payload)
 
     def _feedback(self, handler: Any, _request: RouteRequest) -> None:
+        """Activity feedback projection."""
         handler.send_json(200, self._public_feedback_state_service().feedback_state())
 
     def _zones(self, handler: Any, _request: RouteRequest) -> None:
+        """Local and provider zone configurations."""
         if self._zone_service is not None:
             handler.send_json(200, self._zone_service().read())
 
     def _preview(self, handler: Any, _request: RouteRequest) -> None:
+        """Preview of the context the Coach receives."""
         handler.send_json(200, self._coach_context_preview_service().preview())

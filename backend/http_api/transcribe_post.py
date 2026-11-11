@@ -19,6 +19,7 @@ class TranscribePostRoutes:
         return [Route("POST", "/api/transcribe", Access.SESSION_CSRF, self._transcribe)]
 
     def _transcribe(self, handler: Any, _request: RouteRequest) -> None:
+        """Transcribe short-lived voice input."""
         content_type = handler.headers.get("Content-Type", "")
         audio = handler.read_audio_body()
         result = self._audio_client().transcribe(audio, content_type)

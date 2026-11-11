@@ -35,6 +35,7 @@ class PrivacyRestorePostRoutes:
         ]
 
     def _restore(self, handler: Any, _request: RouteRequest) -> None:
+        """Restore a database backup; ends every session."""
         auth = self._session_auth_service()
         # The upload is streamed; the restore service stages it to a file in chunks.
         payload = handler.read_body_stream(self._max_backup_bytes)

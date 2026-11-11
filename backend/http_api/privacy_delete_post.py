@@ -20,21 +20,31 @@ class PrivacyDeletePostRoutes:
 
     def routes(self) -> list[Route]:
         return [
-            Route("POST", path, Access.SESSION_CSRF, self._handle)
-            for path in (
-                "/api/privacy/delete",
-                "/api/privacy/gps",
-                "/api/privacy/gps/delete",
-            )
+            Route("POST", "/api/privacy/delete", Access.SESSION_CSRF, self._delete),
+            Route("POST", "/api/privacy/gps", Access.SESSION_CSRF, self._gps),
+            Route(
+                "POST", "/api/privacy/gps/delete", Access.SESSION_CSRF, self._delete_gps
+            ),
         ]
 
-    def _handle(self, handler: Any, request: RouteRequest) -> None:
+    def _delete(self, handler: Any, _request: RouteRequest) -> None:
+        """Delete the local athlete data after the typed confirmation (`confirm`)."""
         payload = handler.read_json()
-        service = self._privacy_delete_service()
-        if request.path == "/api/privacy/gps":
-            result = service.set_gps_tracks(payload.get("enabled"))
-        elif request.path == "/api/privacy/gps/delete":
-            result = service.delete_gps_tracks(payload.get("confirm"))
-        else:
-            result = service.delete(payload.get("confirm"))
-        handler.send_json(200, result)
+        handler.send_json(
+            200, self._privacy_delete_service().delete(payload.get("confirm"))
+        )
+
+    def _gps(self, handler: Any, _request: RouteRequest) -> None:
+        """Turn GPS-track storage on or off (`enabled`)."""
+        payload = handler.read_json()
+        handler.send_json(
+            200, self._privacy_delete_service().set_gps_tracks(payload.get("enabled"))
+        )
+
+    def _delete_gps(self, handler: Any, _request: RouteRequest) -> None:
+        """Delete every stored GPS track and the routes derived from them after the typed confirmation (`confirm`)."""
+        payload = handler.read_json()
+        handler.send_json(
+            200,
+            self._privacy_delete_service().delete_gps_tracks(payload.get("confirm")),
+        )
