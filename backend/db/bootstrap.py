@@ -7,7 +7,6 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
-from backend.change_history import RETENTION_DAYS
 from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
@@ -92,9 +91,8 @@ def initialize_application_database(
         ).rowcount
         # Receipts hold copies of the chat; a turn whose changes can still be
         # undone keeps its receipt, which is the only place that lists them. It
-        # can be undone only while every change-history row it names is kept
-        # and inside the history's retention window (#2134, K-003).
-        history_cutoff = (current_time - timedelta(days=RETENTION_DAYS)).isoformat()
+        # can be undone only while every change-history row it names is still
+        # stored, as the undo requires (#2134, K-003).
         commands_deleted = db.execute(
             "DELETE FROM coach_commands WHERE status='completed' AND created_at < ? "
             "AND NOT CASE WHEN json_valid(receipt) THEN "
@@ -102,9 +100,9 @@ def initialize_application_database(
             "AND json_extract(receipt, '$.change_summary.undone_at') IS NULL, 0) "
             f"AND EXISTS ({_UNDO_REFERENCES}) "
             f"AND NOT EXISTS ({_UNDO_REFERENCES} AND json_extract(change.value, '$.id') "
-            "NOT IN (SELECT id FROM change_history WHERE created_at >= ?)) "
+            "NOT IN (SELECT id FROM change_history)) "
             "ELSE 0 END",
-            (cutoff, history_cutoff),
+            (cutoff,),
         ).rowcount
         artifacts_deleted = db.execute(
             "DELETE FROM coach_plan_artifacts WHERE status <> 'draft' "

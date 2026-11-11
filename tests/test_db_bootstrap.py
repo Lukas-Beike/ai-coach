@@ -285,9 +285,10 @@ class DatabaseBootstrapTests(unittest.TestCase):
 
         # Undoable only while the history rows it names are kept (#2134, K-003).
         open_undo = undoable("kept")
+        # An old row not yet pruned still allows the undo.
         for change_id, created_at in (
             ("kept", recent),
-            ("expired", (self.current_time - timedelta(days=181)).isoformat()),
+            ("old-but-stored", (self.current_time - timedelta(days=200)).isoformat()),
         ):
             db.execute(
                 "INSERT INTO change_history(id, entity_type, entity_id, action, "
@@ -304,7 +305,9 @@ class DatabaseBootstrapTests(unittest.TestCase):
         self._insert_command(db, "old-plain", old, json.dumps({"text": "chat copy"}))
         self._insert_command(db, "old-open-undo", old, open_undo)
         self._insert_command(db, "old-undo-history-gone", old, undoable("pruned"))
-        self._insert_command(db, "old-undo-history-expired", old, undoable("expired"))
+        self._insert_command(
+            db, "old-undo-history-stored", old, undoable("old-but-stored")
+        )
         self._insert_command(
             db,
             "old-undo-without-reference",
@@ -354,7 +357,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 row[0]
                 for row in db.execute("SELECT client_turn_id FROM coach_commands")
             ),
-            ["old-open-undo", "old-running", "recent"],
+            ["old-open-undo", "old-running", "old-undo-history-stored", "recent"],
         )
         self.assertEqual(
             sorted(row[0] for row in db.execute("SELECT id FROM coach_plan_artifacts")),
@@ -365,7 +368,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
             ["live"],
         )
         (record,) = logs.records
-        self.assertEqual(record.context["coach_commands_deleted"], 8)
+        self.assertEqual(record.context["coach_commands_deleted"], 7)
         self.assertEqual(record.context["coach_plan_artifacts_deleted"], 2)
         self.assertEqual(record.context["coach_action_proposals_deleted"], 1)
         self.assertEqual(
