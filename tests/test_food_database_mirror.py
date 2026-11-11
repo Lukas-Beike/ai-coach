@@ -353,6 +353,34 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
         self.assertEqual(refreshed["missing_fields"], ["sugar_g"])
         self.assertEqual(refreshed["stored_at"], self.now.isoformat())
 
+    def test_a_re_check_never_guesses_a_basis_and_keeps_further_fields(self):
+        stored = {**food(), "servings": [{"name": "Riegel", "amount": 40}]}
+        stored["per_100"]["salt_g"] = 0.3
+        self.mirror.store([stored])
+        fresh = food()
+        fresh["basis_unit"] = None
+        self.off.product = lambda barcode: fresh
+        self.now += timedelta(days=100)
+
+        live = self.service.lookup({"barcode": BARCODE})["foods"][0]
+
+        kept = self.mirror.get(f"off:{BARCODE}")
+        self.assertIsNone(kept["basis_unit"])
+        self.assertIsNone(kept["per_100"]["salt_g"])
+        self.assertEqual(kept["servings"], stored["servings"])
+        self.assertEqual(live["servings"], stored["servings"])
+
+    def test_a_re_check_whose_write_fails_is_reported(self):
+        self.mirror.store([food()])
+        self.now += timedelta(days=1)
+
+        with (
+            patch.object(self.mirror, "refresh", return_value=[]),
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.refresh_stored(f"off:{BARCODE}")
+        self.assertEqual(raised.exception.reason, "food_database_unavailable")
+
     def test_a_failed_or_unknown_re_check_changes_nothing(self):
         self.mirror.store([food()])
         before = self.mirror.get(f"off:{BARCODE}")

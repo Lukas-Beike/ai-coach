@@ -61,16 +61,27 @@ class FoodDatabaseMirror:
 
     def store(self, foods: list[dict[str, Any]]) -> None:
         """Keep fetched records; a failed write never breaks the lookup itself."""
+        with contextlib.suppress(Exception):
+            self.refresh(foods)
+
+    def refresh(self, foods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Store fetched records with their gaps filled; return what is stored.
+
+        A fresh record takes every value it has. A value it lacks is kept
+        from the stored record when both count on the same basis unit, so a
+        re-check fills gaps and never empties a known field.
+        """
         if not foods:
-            return
+            return []
         now = self._utc_now()
-        with (
-            contextlib.suppress(Exception),
-            self._db_lock,
-            self._database_manager().unit_of_work() as db,
-        ):
+        with self._db_lock, self._database_manager().unit_of_work() as db:
+            stored = []
             for food in foods:
-                self._entries.upsert(db, food, now)
+                self._entries.upsert(
+                    db, _filled(food, self._entries.get(db, str(food["id"]))), now
+                )
+                stored.append(self._entries.get(db, str(food["id"])))
+        return [entry for entry in stored if entry is not None]
 
     def delete(self, food_id: str) -> None:
         with self._db_lock, self._database_manager().unit_of_work() as db:
@@ -78,3 +89,35 @@ class FoodDatabaseMirror:
                 raise AppError(
                     404, "Datenbankeintrag nicht gefunden.", reason="food_not_found"
                 )
+
+
+def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, Any]:
+    """The fresh record, with stored values where it has none on the same basis."""
+    if stored is None:
+        return food
+    filled = {
+        **{
+            key: value
+            for key, value in stored.items()
+            if key not in ("fetched_at", "per_100")
+        },
+        **{key: value for key, value in food.items() if value not in (None, "")},
+    }
+    # The basis is the fresh record's own; an unknown unit is never guessed.
+    for key in ("basis_amount", "basis_unit"):
+        filled[key] = food.get(key)
+    per_100 = food.get("per_100")
+    fresh: dict[str, Any] = per_100 if isinstance(per_100, dict) else {}
+    same_basis = food.get("basis_unit") is not None and (
+        food.get("basis_unit"),
+        food.get("basis_amount"),
+    ) == (stored.get("basis_unit"), stored.get("basis_amount"))
+    filled["per_100"] = {
+        **fresh,
+        **{
+            key: value
+            for key, value in (stored["per_100"].items() if same_basis else ())
+            if value is not None and fresh.get(key) is None
+        },
+    }
+    return filled

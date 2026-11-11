@@ -327,7 +327,7 @@ test("@responsive a failed diary load keeps the requested date, shows one error 
 });
 });
 
-test("@responsive a stored database entry is refreshed on request and shows the filled value", async ({ page }) => {
+test("@responsive a stored database entry is refreshed on request and the list is read again", async ({ page }) => {
   let salt = null;
   let listed = 0;
   const refreshes = [];
@@ -355,7 +355,7 @@ test("@responsive a stored database entry is refreshed on request and shows the 
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "Aktualisieren" }).click();
   await expect(page.locator("#nutritionProductStatus")).toContainText("„Haselnuss Riegel“ aktualisiert.");
-  expect(refreshes).toEqual([{ id: "off:4006381333931", confirmed: true }]);
+  expect(refreshes).toEqual([{ id: "off:4006381333931" }]);
   // The list is read again after the refresh, so the filled value is shown.
   await expect.poll(() => listed).toBeGreaterThan(1);
 });

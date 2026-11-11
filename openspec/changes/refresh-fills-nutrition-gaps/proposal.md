@@ -13,7 +13,7 @@ without losing values, and that it can be started by hand.
   fresh result has none; it never empties a known field.
 - Stored foods report which core fields are still missing (`missing_fields`:
   energy, carbohydrates, protein, fat, sugar, fibre, salt).
-- A new confirmed action re-checks one stored food online now, with the same
+- A new action re-checks one stored food online now, with the same
   gap-filling rule, and returns the refreshed food; it fails visibly and
   leaves the stored food unchanged when the database cannot be reached.
 - The "Datenbank" list in Ernährung › Produkte gets an "Aktualisieren" button

@@ -5,6 +5,7 @@ The only durable effect is storing fetched external foods in the local mirror.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import json
 import math
@@ -19,6 +20,7 @@ from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
+from backend.db.repositories import NUTRIENT_COLUMNS
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
 from backend.nutrition.models import nutrition_number
@@ -26,8 +28,6 @@ from backend.providers.open_food_facts import OpenFoodFactsClient
 from backend.providers.yazio import YazioClient
 
 NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g")
-# The values a stored food is complete with; a missing one is a gap to fill.
-CORE_FIELDS = (*NUTRIENTS, "sugar_g", "fiber_g", "salt_g")
 
 # Where a returned food came from; shown to the Coach as `data_origin`.
 LIVE = "live"
@@ -344,9 +344,22 @@ class FoodDatabaseService:
             if stored is None:
                 raise
             return stored, LOCAL_DATABASE_STALE
-        if self._mirror:
-            self._mirror.store([food])
-        return food, LIVE
+        return self._kept(food), LIVE
+
+    def _kept(self, food: dict[str, Any]) -> dict[str, Any]:
+        """Store a live food and return it as kept, with its gaps filled."""
+        kept: list[dict[str, Any]] = []
+        # A failed write never breaks the lookup itself.
+        with contextlib.suppress(Exception):
+            kept = self._mirror.refresh([food]) if self._mirror else []
+        return next(
+            (
+                {key: value for key, value in entry.items() if key != "fetched_at"}
+                for entry in kept
+                if entry["id"] == food["id"]
+            ),
+            food,
+        )
 
     def _search_source(
         self,
@@ -520,7 +533,7 @@ class FoodDatabaseService:
         return {
             **labelled,
             "missing_fields": [
-                key for key in CORE_FIELDS if labelled["per_100"].get(key) is None
+                key for key in NUTRIENT_COLUMNS if labelled["per_100"].get(key) is None
             ],
         }
 
@@ -542,8 +555,22 @@ class FoodDatabaseService:
             food = self._off.product(food_id[4:])
         else:
             food = self._require_yazio().product(food_id[6:])
-        self._mirror.store([food])
-        return self._stored_food(self._mirror.get(food_id) or stored)
+        refreshed = next(
+            (
+                entry
+                for entry in self._mirror.refresh([food])
+                if entry["id"] == food_id
+                and entry["fetched_at"] != stored["fetched_at"]
+            ),
+            None,
+        )
+        if refreshed is None:
+            raise AppError(
+                502,
+                "Der Datenbankeintrag konnte nicht aktualisiert werden.",
+                reason="food_database_unavailable",
+            )
+        return self._stored_food(refreshed)
 
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):
