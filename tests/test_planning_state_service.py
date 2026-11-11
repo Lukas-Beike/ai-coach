@@ -1,13 +1,13 @@
 import ast
 import json
-import sqlite3
-import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import AppError
 from backend.planning import state_service as planning_state_service
@@ -52,12 +52,7 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
         self.assertNotIn("backend.http_api.pagination", imports)
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temp_dir.name) / "state.sqlite",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "state.sqlite", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "CREATE TABLE planning_state (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, updated_at TEXT NOT NULL)"
@@ -104,10 +99,6 @@ class StructuredTrainingStateServiceTests(unittest.TestCase):
             lambda: self._dependency_result(self.jobs),
             lambda: date(2026, 9, 20),
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     @staticmethod
     def _insert_planned(db, local_id, plan_date, name, **flags):

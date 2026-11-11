@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
 from typing import Any
 
+from support import temp_database
+
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
-from backend.db.schema import initialize_schema
 from backend.planning import strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import GarminOrphan
@@ -43,16 +41,9 @@ STRENGTH_PAYLOAD_HASH = (
 
 class PushStateTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.directory.name) / "push.sqlite", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "push.sqlite", row_factory=row_factory, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.directory.cleanup()
 
     def project(self, rows: list[dict]) -> list[dict]:
         pairs = [(row, json.loads(row["payload"])) for row in rows]

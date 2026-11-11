@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.activities.hr_cap import effective_caps
 from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
@@ -20,7 +22,6 @@ from backend.coach.context_selection import select_coach_context
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_schemas import ACCEPT_PLAN_FINDINGS
-from backend.db.manager import DatabaseManager
 from backend.planning import calendar_load, plan_checks
 from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
@@ -73,10 +74,12 @@ class PlanGuardWriteTests(unittest.TestCase):
         path = Path(self.temporary.name) / "guard.sqlite3"
         with closing(sqlite3.connect(path)) as db, db:
             db.execute("CREATE TABLE synthetic_writes (value TEXT NOT NULL)")
-        self.manager = DatabaseManager(
-            path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
+        self.manager = temp_database(
+            self,
+            path=path,
+            row_factory=sqlite3.Row,
+            persist_connections=False,
         )
-        self.addCleanup(self.manager.close)
         self.units: list[dict[str, Any]] = []
         self.completed: list[dict[str, Any]] = []
         self.published: list[str] = []

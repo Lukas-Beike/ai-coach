@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 from typing import Any
 
-from backend.db.manager import DatabaseManager
+from support import temp_database
+
 from backend.errors import AppError
 from backend.planning.calendar_service import CalendarConflictService
 
@@ -28,10 +27,8 @@ class _ExternalCalendarReader:
 
 class CalendarConflictServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._temporary_directory = tempfile.TemporaryDirectory()
-        database_path = Path(self._temporary_directory.name) / "calendar.sqlite"
-        self.database_manager = DatabaseManager(
-            database_path, sqlite3, row_factory=sqlite3.Row
+        self.database_manager = temp_database(
+            self, "calendar.sqlite", row_factory=sqlite3.Row
         )
         with self.database_manager.unit_of_work() as db:
             db.execute(
@@ -54,10 +51,6 @@ class CalendarConflictServiceTests(unittest.TestCase):
         self.service = CalendarConflictService(
             self.database_manager, self.external_reader
         )
-
-    def tearDown(self) -> None:
-        self.database_manager.close()
-        self._temporary_directory.cleanup()
 
     def _add_planned_unit(
         self,

@@ -3,14 +3,13 @@ from __future__ import annotations
 import ast
 import inspect
 import json
-import sqlite3
-import tempfile
 import unittest
 import uuid
 from datetime import date
-from pathlib import Path
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.db.repositories import PlanAdjustmentRepository, PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -36,12 +35,7 @@ class MarkAppliedFailingRepository(PlanAdjustmentRepository):
 
 class AdaptiveReplanApplyServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "adaptive-apply.db",
-            sqlite3,
-            row_factory=row_factory,
-        )
+        self.manager = temp_database(self, "adaptive-apply.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             db.execute(
@@ -52,10 +46,6 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self._previews_created = 0
         self.revisions = PlanningRevisionService(PlanningStateRepository(), lambda: NOW)
         self.service = self.make_service()
-
-    def tearDown(self):
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     def make_service(self, repository=None, calendar_conflict_service=None):
         return AdaptiveReplanApplyService(

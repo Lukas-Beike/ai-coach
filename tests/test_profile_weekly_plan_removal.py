@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
-from pathlib import Path
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, ProfileRepository
-from backend.db.schema import initialize_schema
 from backend.sync.profile_weekly_plan_removal import (
     STATE_KEY,
     ProfileWeeklyPlanRemoval,
@@ -23,14 +21,9 @@ PLAN = json.dumps({"days": {"wed": {"rest_day": True}}})
 
 class ProfileWeeklyPlanRemovalTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(self.temporary.name) / "profile.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "profile.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.profile = ProfileRepository(self.key_values)
         self.stage = ProfileWeeklyPlanRemoval(

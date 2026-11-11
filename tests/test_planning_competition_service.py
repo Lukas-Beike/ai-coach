@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
-from backend.db import DatabaseManager, row_factory
+from support import temp_database
+
+from backend.db import row_factory
 from backend.db.repositories import CompetitionRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning.competition_service import CompetitionService
 
@@ -21,14 +19,9 @@ NOW = "2026-09-20T08:00:00+00:00"
 
 class CompetitionServiceTests(unittest.TestCase):
     def setUp(self):
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.temporary_directory.name) / "competition.db",
-            sqlite3,
-            row_factory=row_factory,
+        self.manager = temp_database(
+            self, "competition.db", row_factory=row_factory, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.now = NOW
         self.service = CompetitionService(
             self.manager,
@@ -36,10 +29,6 @@ class CompetitionServiceTests(unittest.TestCase):
             lambda: self.now,
             lambda: date(2026, 9, 20),
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.temporary_directory.cleanup()
 
     @staticmethod
     def competition(**overrides):
