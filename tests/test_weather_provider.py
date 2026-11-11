@@ -78,7 +78,8 @@ class WeatherProviderTests(unittest.TestCase):
         result = client.fetch("Amsterdam")
 
         self.assertEqual(len(requests), 2)
-        self.assertEqual(result["model"], "ECMWF IFS HRES (3–14 Tage)")
+        # F-010: ECMWF supplies all days, so the label names no day range.
+        self.assertEqual(result["model"], "ECMWF IFS HRES")
         self.assertIs(result["forecast"], base)
         self.logger.warning.assert_not_called()
 
@@ -159,7 +160,7 @@ class WeatherProviderTests(unittest.TestCase):
 
         self.assertEqual(len(requests), 3)
         self.assertEqual(result["forecast"], base)
-        self.assertEqual(result["model"], "ECMWF IFS HRES (3–14 Tage)")
+        self.assertEqual(result["model"], "ECMWF IFS HRES")
         self.logger.warning.assert_called_once_with(
             "ICON-D2 weather synchronization failed; using ECMWF",
             extra={
