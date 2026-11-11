@@ -117,7 +117,7 @@ Detailed contract: the calendar lists the orphans once, on the first card offeri
 Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests, `test_a_linked_unit_that_became_unpushable_is_an_orphan`, `test_a_unit_with_an_unreadable_payload_is_no_orphan`), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.
 
 ### Requirement: Past Garmin workouts are removed after a refresh
-After each Garmin `refresh` job, the system SHALL unschedule and delete the linked workout of every planned unit dated before the athlete's local today and drop its link, at most 50 per refresh, oldest day first. This is the one Garmin write without an athlete request (athlete decision 2026-11-11). It SHALL touch only linked ids, never a recorded activity, a workout of today or later, or an unlinked workout, and SHALL never change the refresh result.
+After each Garmin `refresh` job, the system SHALL unschedule and delete the linked workout of every planned unit dated before the athlete's local today and drop its link, at most 20 per refresh, oldest day first. This is the one Garmin write without an athlete request (athlete decision 2026-11-11). It SHALL touch only linked ids, never a recorded activity or an unlinked workout, SHALL try no SDK login the latest refresh could not make, and SHALL never change the refresh result.
 
 #### Scenario: Day passed
 - **WHEN** a Garmin refresh finishes and a linked strength unit's day lies before today
@@ -126,5 +126,9 @@ After each Garmin `refresh` job, the system SHALL unschedule and delete the link
 #### Scenario: Garmin failure
 - **WHEN** Garmin answers the removal with a server error, or the Garmin login is busy
 - **THEN** the refresh is unaffected, a server error stops the run, and every link stays for the next refresh.
+
+#### Scenario: Refused workout
+- **WHEN** Garmin refuses one workout's deletion with a client error
+- **THEN** its link stays for the next refresh and the other past workouts are still removed.
 
 Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`.
