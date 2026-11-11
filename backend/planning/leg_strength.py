@@ -33,6 +33,7 @@ from backend.planning.local_start import known_start
 from backend.planning.season import target_phase
 from backend.planning.session_focus import (
     SessionFocus,
+    planned_intensity_factor,
     session_focus,
     structure_intensity,
     text_intensity,
@@ -73,14 +74,6 @@ class StrengthClass:
 
     leg: bool | None
     intensity: str | None
-
-
-def planned_intensity_factor(unit: Mapping[str, Any]) -> float | None:
-    """Planned intensity as a factor; percent values above 1.5 are divided by 100."""
-    value = number(unit.get("planned_intensity"))
-    if value is None:
-        return None
-    return value / 100 if value > 1.5 else value
 
 
 def _grade(value: float, heavy: float, moderate: float) -> str:

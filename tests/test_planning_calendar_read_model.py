@@ -326,11 +326,11 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
                 [],
             ),
             (
-                "no_intensity stays conservative for a zone 2 unit",
+                "no_intensity allows a zone 2 unit that is not hard (#2083)",
                 _unit("Generic session", 3600, description="- 60m Z2 Easy"),
                 [_marker(no_intensity=1)],
                 [],
-                ["no_intensity"],
+                [],
             ),
             (
                 "hard unit without markers or races has no conflict",

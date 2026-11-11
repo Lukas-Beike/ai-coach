@@ -14,6 +14,7 @@ from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning import adaptive, calendar, illness_return, plan_checks
 from backend.planning.context import external_calendar_event_dates
+from backend.planning.session_focus import is_hard
 from backend.weather.adaptive import weather_adaptive_reason
 
 MAX_PREVIEW_PLANNED_UNITS = 500
@@ -152,9 +153,9 @@ def _calendar_limits(
     no_intensity_limited = any(
         calendar.calendar_event_has_constraint(event, "no_intensity")
         for event in calendar_events
-    ) and not calendar.workout_is_explicitly_easy(draft)
+    ) and calendar.breaks_no_intensity(draft)
     no_training = any(bool(event.get("no_training")) for event in calendar_events)
-    calendar_limited = adaptive.workout_is_hard(draft) or (
+    calendar_limited = is_hard(draft) or (
         duration is not None and duration > calendar_limit
     )
     return (
@@ -192,7 +193,7 @@ def _reasons(
         reasons.append("pain or high soreness reported")
         if reports_complaint(feedback.get("pain")):
             blocking_triggers.append("injury")
-    if high_load and adaptive.workout_is_hard(draft):
+    if high_load and is_hard(draft):
         reasons.append("recovery signal suggests reducing intensity")
     if limited and not severe:
         reasons.append(f"only {available_minutes} minutes are available")
@@ -341,7 +342,7 @@ def _needs_change(draft: dict[str, Any], state: dict[str, Any]) -> bool:
     return bool(
         state["illness_active"]
         or state["severe"]
-        or (state["high_load"] and adaptive.workout_is_hard(draft))
+        or (state["high_load"] and is_hard(draft))
         or state["limited"]
         or state["calendar_limited"]
         or state["no_intensity_limited"]

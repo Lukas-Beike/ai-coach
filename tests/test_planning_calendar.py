@@ -192,7 +192,10 @@ class PlanningCalendarTests(unittest.TestCase):
                 {**run, "session_focus": "easy"}, event
             )
         )
-        decision = planning_calendar.calendar_constraint_decision(run, event)
+        # A [NO_INTENSITY] day blocks only hard units (#2083): Z2 passes.
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(run, event))
+        hard = {**run, "description": "3x\n- 8m Z4 HR\n- 2m Z1 HR"}
+        decision = planning_calendar.calendar_constraint_decision(hard, event)
         assert decision is not None
         self.assertEqual(decision["reason"], "no_intensity")
 
@@ -217,6 +220,15 @@ class PlanningCalendarTests(unittest.TestCase):
                 {**strength, "session_focus": "legs", "strength_intensity": "heavy"}
             )
         )
+        # Strength is never "hard" under #2083, so a [NO_INTENSITY] day keeps
+        # blocking strength that is not explicitly easy.
+        event = {"id": "e", "name": "x [NO_INTENSITY]", "no_intensity": True}
+        heavy = {**strength, "session_focus": "legs", "strength_intensity": "heavy"}
+        light = {**strength, "session_focus": "legs", "strength_intensity": "light"}
+        decision = planning_calendar.calendar_constraint_decision(heavy, event)
+        assert decision is not None
+        self.assertEqual("no_intensity", decision["reason"])
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(light, event))
 
 
 class AdaptiveChangeCalendarBlockedTests(unittest.TestCase):

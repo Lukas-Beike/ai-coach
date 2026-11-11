@@ -19,7 +19,7 @@ from backend.canonical.vocabulary import Sport
 from backend.planning import calendar as planning_calendar
 from backend.planning.conflicts import calendar_items_share_local_day
 from backend.planning.planned_unit_load import estimate_planned_unit, unit_thresholds
-from backend.planning.session_focus import session_focus
+from backend.planning.session_focus import is_hard, session_focus
 from backend.planning.sport import planned_sport_environment
 from backend.weather import history
 
@@ -37,7 +37,7 @@ def _competition_conflict_codes(
     unit_day: str, unit: dict[str, Any], competitions: list[Any]
 ) -> list[str]:
     """Hard units conflict with A/B races (race day and the day before) and C races (race day)."""
-    if not unit_day or not planning_calendar.workout_is_hard_effort(unit):
+    if not unit_day or not is_hard(unit):
         return []
     codes: list[str] = []
     for competition in competitions:

@@ -47,8 +47,6 @@ SPIKE_WARNING_FACTOR = 1.30
 WEEKLY_RISE_FACTOR = 1.20
 BASELINE_WEEKS = 4
 MIN_BASELINE_WEEKS = 3
-HARD_ZONE = 4
-HARD_STEP_SECONDS = 300
 SEVERITY_CODES = frozenset({"run_spike", "load_spike", "weekly_load_rise"})
 LOAD_SPORTS = frozenset({Sport.RUN, Sport.RIDE})
 # A stored M6 load from power or pace is precise; heart rate is less precise.
@@ -172,23 +170,6 @@ def plan_sessions(
             )
             sessions.append(PlannedSession(unit, sport, _day(unit), estimate))
     return sessions
-
-
-def computed_hard(estimate: WorkoutEstimate) -> bool | None:
-    """Hard by computed zone; ``None`` when any step's intensity is unknown.
-
-    Hard is at least five minutes in steps of zone 4 or higher (power, pace or
-    heart-rate zones, like the Z4-Z7 text rule), so a hard interval set inside
-    an easy session counts.
-    """
-    if not estimate.steps or estimate.intensity_factor is None:
-        return None
-    hard_s = sum(
-        step.duration_s or 0.0
-        for step in estimate.steps
-        if (step.zone or 0) >= HARD_ZONE
-    )
-    return hard_s >= HARD_STEP_SECONDS
 
 
 def completed_load(row: Mapping[str, Any]) -> SessionLoad | None:

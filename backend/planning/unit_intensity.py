@@ -18,8 +18,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from backend.canonical.vocabulary import Sport
-from backend.planning.leg_strength import planned_intensity_factor
-from backend.planning.session_focus import session_focus
+from backend.planning.session_focus import planned_intensity_factor, session_focus
 from backend.planning.sport import planned_sport_environment
 
 STEPS: Final = "steps"
