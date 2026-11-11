@@ -685,6 +685,8 @@ function plannedEntryKey(entry, dateKey) {
 }
 
 let openPlannedEntries = new Set();
+// Calendar cards whose "Details" are open, so a re-render keeps them open (#2258).
+const openActivityDetails = new Set();
 const plannedFocusStatuses = new Map();
 
 // The summary chip follows the saved focus without waiting for the next reload.
@@ -1815,7 +1817,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // Sessions older than the loaded calendar data come page by page from the session list,
   // newest first; sessions the calendar already holds are skipped.
   const olderSessions = { items: [], cursor: undefined, loading: false };
-  const openActivityDetails = new Set();
 
   function completedSessionIds(calendar) {
     return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
