@@ -1122,6 +1122,11 @@ class SyncJobStoreTests(unittest.TestCase):
             },
         )
 
+    def _clear_jobs(self):
+        with self.manager.unit_of_work() as db:
+            db.execute("DELETE FROM sync_job_items")
+            db.execute("DELETE FROM sync_jobs")
+
     def test_requeue_unowned_running_runs_a_lost_outcome_again(self):
         job, _ = self.enqueue()
         self.assertEqual(self.store.claim()["id"], job["id"])
@@ -1147,40 +1152,51 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(self.store.claim()["attempts"], 2)
 
     def test_requeue_unowned_running_never_replays_a_job_with_remote_effects(self):
-        pushed, _ = self.enqueue(
-            "intervals",
-            "plan_push",
-            {"entries": []},
-            [
-                {"item_key": "done", "operation": "push"},
-                {"item_key": "uncertain", "operation": "push"},
-                {"item_key": "other", "operation": "push"},
-            ],
-        )
-        refresh, _ = self.enqueue("garmin", "refresh")
-        self.assertEqual(self.store.claim()["id"], pushed["id"])
-        self.assertEqual(self.store.claim()["id"], refresh["id"])
-        self._set_item_statuses(
-            pushed["id"], "running", done="completed", uncertain="running"
-        )
+        # A restart is a lost outcome too (#2137, A-501); it reports only the
+        # requeued jobs, which are the ones the worker must wake for.
+        for name, expected in (
+            ("requeue_unowned_running", 2),
+            ("resume_interrupted", 1),
+        ):
+            with self.subTest(settle=name):
+                self._clear_jobs()
+                settle = getattr(self.store, name)
+                pushed, _ = self.enqueue(
+                    "intervals",
+                    "plan_push",
+                    {"entries": []},
+                    [
+                        {"item_key": "done", "operation": "push"},
+                        {"item_key": "uncertain", "operation": "push"},
+                        {"item_key": "other", "operation": "push"},
+                    ],
+                )
+                refresh, _ = self.enqueue("garmin", "refresh")
+                self.assertEqual(self.store.claim()["id"], pushed["id"])
+                self.assertEqual(self.store.claim()["id"], refresh["id"])
+                self._set_item_statuses(
+                    pushed["id"], "running", done="completed", uncertain="running"
+                )
 
-        self.assertEqual(self.store.requeue_unowned_running(), 2)
+                self.assertEqual(settle(), expected)
 
-        settled = self.store.state(pushed["id"])
-        self.assertEqual(settled["status"], "partial")
-        self.assertEqual(settled["error_class"], "outcome_not_persisted")
-        items = {item["item_key"]: item for item in settled["items"]}
-        self.assertEqual(
-            {k: v["status"] for k, v in items.items()},
-            {"done": "completed", "uncertain": "failed", "other": "failed"},
-        )
-        self.assertEqual(items["uncertain"]["error_class"], "outcome_not_persisted")
-        # The read-only refresh is requeued; the push waits for the athlete.
-        self.assertEqual(self.store.state(refresh["id"])["status"], "queued")
-        self.assertEqual(self.store.claim()["id"], refresh["id"])
-        self.assertIsNone(self.store.claim())
-        # An explicit resolve is the only way back to a run.
-        self.assertEqual(self.store.resolve(pushed["id"])["status"], "queued")
+                settled = self.store.state(pushed["id"])
+                self.assertEqual(settled["status"], "partial")
+                self.assertEqual(settled["error_class"], "outcome_not_persisted")
+                items = {item["item_key"]: item for item in settled["items"]}
+                self.assertEqual(
+                    {k: v["status"] for k, v in items.items()},
+                    {"done": "completed", "uncertain": "failed", "other": "failed"},
+                )
+                self.assertEqual(
+                    items["uncertain"]["error_class"], "outcome_not_persisted"
+                )
+                # The read-only refresh is requeued; the push waits for the athlete.
+                self.assertEqual(self.store.state(refresh["id"])["status"], "queued")
+                self.assertEqual(self.store.claim()["id"], refresh["id"])
+                self.assertIsNone(self.store.claim())
+                # An explicit resolve is the only way back to a run.
+                self.assertEqual(self.store.resolve(pushed["id"])["status"], "queued")
 
     def test_requeue_unowned_running_leaves_other_states_and_reports_zero(self):
         queued, _ = self.enqueue()
@@ -1193,18 +1209,23 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(self.store.state(done["id"])["status"], "completed")
 
     def test_requeue_unowned_running_fails_a_job_without_attempts_left(self):
-        job, _ = self.enqueue()
-        for attempt in range(1, SYNC_JOB_MAX_ATTEMPTS + 1):
-            self.assertEqual(self.store.claim()["id"], job["id"])
-            if attempt < SYNC_JOB_MAX_ATTEMPTS:
-                self.assertEqual(self.store.requeue_unowned_running(), 1)
+        # The attempt bound holds across restarts as well (#2137, A-501).
+        for name in ("requeue_unowned_running", "resume_interrupted"):
+            with self.subTest(settle=name):
+                self._clear_jobs()
+                settle = getattr(self.store, name)
+                job, _ = self.enqueue()
+                for attempt in range(1, SYNC_JOB_MAX_ATTEMPTS + 1):
+                    self.assertEqual(self.store.claim()["id"], job["id"])
+                    if attempt < SYNC_JOB_MAX_ATTEMPTS:
+                        self.assertEqual(settle(), 1)
 
-        self.assertEqual(self.store.requeue_unowned_running(), 1)
+                settle()
 
-        failed = self.store.state(job["id"])
-        self.assertEqual(failed["status"], "failed")
-        self.assertEqual(failed["error_class"], "outcome_not_persisted")
-        self.assertIsNone(self.store.claim())
+                failed = self.store.state(job["id"])
+                self.assertEqual(failed["status"], "failed")
+                self.assertEqual(failed["error_class"], "outcome_not_persisted")
+                self.assertIsNone(self.store.claim())
 
     def test_automatic_refresh_and_backfill_requests_coalesce_atomically(self):
         for job_type, payload in (
