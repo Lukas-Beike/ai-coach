@@ -82,27 +82,21 @@ def fill_empty_product_fields(
         (product_id,),
     ).fetchone()
     per_100 = food.get("per_100")
-    per_100 = per_100 if isinstance(per_100, dict) else {}
-    updates: dict[str, Any] = {}
-    if not row["brand"] and food.get("brands"):
-        updates["brand"] = str(food["brands"])
-    basis = food.get("basis_amount") or 100
-    if (
+    same_unit = (
         food.get("basis_unit") is not None
         and food.get("basis_unit") == row["basis_unit"]
-    ):
-        for key in NUTRIENT_COLUMNS:
-            value = per_100.get(key)
-            if (
-                row[key] is None
-                and isinstance(value, int | float)
-                and not isinstance(value, bool)
-            ):
-                updates[key] = (
-                    value
-                    if row["basis_amount"] == basis
-                    else round(value * row["basis_amount"] / basis, 3)
-                )
+    )
+    values = per_100 if same_unit and isinstance(per_100, dict) else {}
+    scale = row["basis_amount"] / (food.get("basis_amount") or 100)
+    updates: dict[str, Any] = {
+        key: value if scale == 1 else round(value * scale, 3)
+        for key in NUTRIENT_COLUMNS
+        if row[key] is None
+        and isinstance(value := values.get(key), int | float)
+        and not isinstance(value, bool)
+    }
+    if not row["brand"] and food.get("brands"):
+        updates["brand"] = str(food["brands"])
     if not updates:
         return False
     details = json.loads(row["details"])
