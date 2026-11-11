@@ -244,12 +244,12 @@ test("performance status shows only the server's status text", () => {
 });
 
 test("session-RPE charts name the provider that rated, never a fixed provider", () => {
-  const { sessionRpeSourceLabel } = loadFunctions("analysis.js", ["sessionRpeSourceLabel"], { coachProviderLabel: () => "Intervals.icu", providerIds: () => ({ intervals: "intervals" }) });
+  const { sessionRpeSourceLabel } = loadFunctions("analysis.js", ["sessionRpeSourceLabel"]);
   const day = (athlete, provider, labels) => ({ rpe_sources: { athlete_feedback: athlete, provider }, rpe_provider_labels: labels });
   for (const [days, rated, expected] of [
     [[day(0, 2, ["Garmin Connect"])], 2, "Garmin Connect"],
     [[day(1, 0, []), day(0, 1, ["Garmin Connect"])], 2, "Athletenfeedback + Garmin Connect"],
-    [[day(2, 0, [])], 2, "Athletenfeedback"],
+    [[{ rpe_sources: { athlete_feedback: 2, provider: 0 } }], 2, "Athletenfeedback"],
     [[day(0, 0, [])], 0, "Athletenfeedback"],
   ]) assert.equal(sessionRpeSourceLabel(days, rated), expected);
 });

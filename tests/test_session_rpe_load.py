@@ -231,7 +231,6 @@ class PeriodSumTests(unittest.TestCase):
                 "rated_sessions": 2,
                 "total_sessions": 3,
                 "rpe_sources": {"athlete_feedback": 2, "provider": 0},
-                "rpe_provider_labels": [],
                 "deviating_duration_sessions": 0,
             },
         )
@@ -256,6 +255,10 @@ class PeriodSumTests(unittest.TestCase):
         # C-007: the chart names the provider that rated, served by the server.
         self.assertEqual(
             result["totals"]["rpe_provider_labels"], ["Garmin Connect", "Intervals.icu"]
+        )
+        self.assertEqual(
+            result["days"][0]["rpe_provider_labels"],
+            ["Garmin Connect", "Intervals.icu"],
         )
 
     def test_days_weeks_and_sports_cover_the_whole_period(self) -> None:

@@ -204,8 +204,9 @@ def period_load(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[st
         "rated_sessions": len(known),
         "total_sessions": len(loads),
         "rpe_sources": sources,
-        "rpe_provider_labels": sorted(provider_labels),
         "deviating_duration_sessions": deviating,
+        # Only when a provider rated, to keep the Coach reports small.
+        **({"rpe_provider_labels": sorted(provider_labels)} if provider_labels else {}),
     }
 
 
