@@ -32,7 +32,6 @@ function bodyHistory() {
 }
 
 test("@responsive Body plots measurements and W/kg appears only in the cycling table", async ({ page }) => {
-  if (test.info().project.name === "mobile-small") expect(page.viewportSize().width).toBe(320);
   await page.route("**/api/performance", async (route) => {
     const response = await route.fetch();
     const data = await response.json();

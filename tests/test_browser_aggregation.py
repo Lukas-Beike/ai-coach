@@ -70,7 +70,7 @@ class BrowserAggregationTests(unittest.TestCase):
 
     def test_trial_ten_shard_matrix_requires_every_project_and_shard(self):
         expected = dict.fromkeys(
-            ("desktop", "mobile", "mobile-small", "tablet", "tablet-landscape"), 2
+            ("desktop", "mobile", "tablet-landscape"), 2
         )
         manifests = []
         for project in expected:

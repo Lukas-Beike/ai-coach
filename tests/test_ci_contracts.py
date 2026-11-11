@@ -277,7 +277,7 @@ class WorkflowSourceTests(unittest.TestCase):
             projects.setdefault(project, []).append((int(shard), int(shards)))
         self.assertEqual(
             set(projects),
-            {"mobile-small", "mobile", "tablet", "tablet-landscape", "desktop"},
+            {"mobile", "tablet-landscape", "desktop"},
         )
         for project, shards in projects.items():
             with self.subTest(project=project):
