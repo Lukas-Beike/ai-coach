@@ -87,8 +87,8 @@ from backend.canonical.vocabulary import (
     StrengthSetType,
 )
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
-from backend.providers.fit_rr_mapping import rr_intervals_ms
-from backend.providers.fit_sensor_mapping import sensor_profile
+from backend.providers.fit_rr_mapping import HRV_MESSAGE, rr_intervals_ms
+from backend.providers.fit_sensor_mapping import DEVICE_INFO_MESSAGE, sensor_profile
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
 # Version 2: maximum speed per lap.
@@ -649,3 +649,75 @@ def _category(value: object) -> ExerciseCategory | None:
             return _FIT_EXERCISE_CATEGORIES[number]
         return ExerciseCategory.OTHER
     return None
+
+
+# Fields each mapped message is read for (#2220); 253 (timestamp) and 254
+# (message index) are structural and never counted.
+_STRUCTURAL_FIELDS: Final = frozenset({253, 254})
+MAPPED_FIELDS: Final[Mapping[int, frozenset[int]]] = {
+    _RECORD_MESSAGE: frozenset(
+        {_CADENCE_FIELD, _FRACTIONAL_CADENCE_FIELD, 73, 78}
+        | {field for _channel, field in _RECORD_CHANNEL_FIELDS}
+        | {field for _channel, field, _divisor in _DYNAMICS_FIELDS}
+        | {field for _channel, field in _POSITION_FIELDS}
+    ),
+    _LAP_MESSAGE: frozenset(
+        {_LAP_START_FIELD, _LAP_ELAPSED_FIELD, _LAP_INTENSITY_FIELD, 110, 111}
+        | {field for _name, field in _LAP_METRIC_FIELDS}
+    ),
+    _SET_MESSAGE: frozenset(
+        {
+            _SET_DURATION_FIELD,
+            _SET_REPETITIONS_FIELD,
+            _SET_WEIGHT_FIELD,
+            _SET_TYPE_FIELD,
+            _SET_START_FIELD,
+            _SET_CATEGORY_FIELD,
+            _SET_STEP_FIELD,
+        }
+    ),
+    DEVICE_INFO_MESSAGE: frozenset({0, 1, 2, 3, 4, 25}),
+}
+# Field description (206): developer data index (0) and field number (1).
+_FIELD_DESCRIPTION_MESSAGE: Final = 206
+
+
+def fit_inventory(data: object) -> frozenset[str] | None:
+    """What one FIT file holds, as count keys only (#2220); ``None`` if unreadable.
+
+    ``m<number>`` per unmapped message number present, ``f<message>.<field>`` per field of
+    a mapped message with a usable value that the mapper does not read, and
+    ``d<index>.<field>`` per declared developer field. Numbers only: never a
+    value, name, timestamp or position. Pure and never raises for bad bytes.
+    """
+    if not isinstance(data, bytes):
+        return None
+    try:
+        messages = fit_messages(data)
+    except ValueError:
+        return None
+    keys: set[str] = set()
+    for number, fields in messages:
+        if number not in MAPPED_FIELDS and number != HRV_MESSAGE:
+            keys.add(f"m{number}")
+        if number == _FIELD_DESCRIPTION_MESSAGE:
+            index, field = _whole(fields.get(0)), _whole(fields.get(1))
+            if index is not None and field is not None:
+                keys.add(f"d{index}.{field}")
+        mapped = MAPPED_FIELDS.get(number)
+        if mapped is None:
+            continue
+        keys.update(
+            f"f{number}.{field}"
+            for field, value in fields.items()
+            if field not in mapped
+            and field not in _STRUCTURAL_FIELDS
+            and _usable(value)
+        )
+    return frozenset(keys)
+
+
+def _usable(value: object) -> bool:
+    if isinstance(value, list | tuple):
+        return any(item is not None for item in value)
+    return value is not None

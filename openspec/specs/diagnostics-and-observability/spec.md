@@ -95,6 +95,10 @@ The diagnostic report SHALL include the state of the Garmin rating backfill and 
 - **WHEN** the report is generated
 - **THEN** `local_load`, `session_metrics` and `session_analysis` each carry the status, method version and counts of their last pass, never ids, dates, names or values
 
+#### Scenario: FIT file inventory
+- **WHEN** a Garmin or Wahoo FIT file is read by the detail fetch or the stream backfill
+- **THEN** `fit_inventory` counts it once per recording origin and sport (`files`) with the files holding each unmapped message number, unread field of a mapped message and declared developer field, as numbers only; an unreadable file counts nothing, and no value, name, id, position or file hash is shown
+
 #### Scenario: Failing section
 - **WHEN** reading the rating backfill state fails
 - **THEN** that section reports `{"status": "unavailable"}` and the rest of the report is still returned
