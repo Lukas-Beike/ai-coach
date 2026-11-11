@@ -2,72 +2,35 @@
 
 from __future__ import annotations
 
-import sqlite3
 import unittest
 from unittest.mock import Mock
-
-from support import temp_database
 
 from backend.sync.conflict_commands import SyncConflictCommandService
 
 
 class SyncConflictCommandServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.database_manager = temp_database(
-            self, "conflicts.sqlite", row_factory=sqlite3.Row
-        )
-        with self.database_manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY NOT NULL)"
-            )
-            db.execute("INSERT INTO planned_units(local_id) VALUES (?)", ("planned-1",))
-
-        self.planned_units = Mock()
         self.competitions = Mock()
         self.job_queue = Mock()
-        self.service = SyncConflictCommandService(
-            self.database_manager,
-            self.planned_units,
-            self.competitions,
-            self.job_queue,
-        )
+        self.service = SyncConflictCommandService(self.competitions, self.job_queue)
 
-    def test_resolves_planned_unit_and_preserves_default_strategy(self) -> None:
-        self.planned_units.resolve_conflict.return_value = {
-            "status": "resolved",
-            "planned_unit": {"id": "planned-1"},
-        }
-
-        result = self.service.resolve_local(" planned-1 ")
-
-        self.planned_units.resolve_conflict.assert_called_once_with(
-            "planned-1", "keep_local"
-        )
-        self.competitions.resolve_conflict.assert_not_called()
-        self.assertEqual(
-            result,
-            {
-                "ok": True,
-                "status": "resolved",
-                "planned_unit": {"id": "planned-1"},
-            },
-        )
-
-    def test_resolves_competition_when_no_planned_unit_matches(self) -> None:
+    def test_resolves_competition_with_normalized_strategy(self) -> None:
         self.competitions.resolve_conflict.return_value = {
             "status": "resolved",
             "competition": {"id": "competition-1"},
         }
 
-        result = self.service.resolve_local("competition-1", " ADOPT_REMOTE ")
+        result = self.service.resolve_local(" competition-1 ", " ADOPT_REMOTE ")
 
         self.competitions.resolve_conflict.assert_called_once_with(
             "competition-1", "adopt_remote"
         )
-        self.planned_units.resolve_conflict.assert_not_called()
-        self.assertEqual(result["competition"], {"id": "competition-1"})
+        self.assertEqual(
+            result,
+            {"ok": True, "status": "resolved", "competition": {"id": "competition-1"}},
+        )
 
-    def test_missing_local_id_is_delegated_to_competition_owner(self) -> None:
+    def test_missing_strategy_keeps_local(self) -> None:
         self.competitions.resolve_conflict.return_value = {"status": "resolved"}
 
         self.service.resolve_local("missing-local-id")

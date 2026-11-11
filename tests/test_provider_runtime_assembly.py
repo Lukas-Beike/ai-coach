@@ -174,7 +174,6 @@ def _command_assembly(
     core = SyncCommandCore(
         database_manager=lambda: None,
         queue_service=lambda: queue,
-        planned_unit_service=lambda: None,
         competition_service=lambda: None,
         workout_library_sync_state=lambda: None,
         planning_revision=None,

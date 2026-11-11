@@ -374,46 +374,6 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(library["templates"][0]["id"], template["id"])
         self.assertEqual(planned["local"][0]["date"], tomorrow)
 
-    def test_structured_coach_can_keep_a_planning_conflict_local_before_push(self):
-        planned = server.PLANNING_DATA.planned_unit().create(
-            {
-                "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
-                ).isoformat(),
-                "sport": "Ride",
-                "name": "Local",
-                "description": "- 30m 60% easy",
-            }
-        )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "UPDATE planned_units SET sync_state='conflict', sync_dirty=1, sync_conflict=? WHERE local_id=?",
-                (
-                    json.dumps(
-                        {"type": "remote_changed", "remote": {"name": "Remote"}}
-                    ),
-                    planned["id"],
-                ),
-            )
-        result = server.COACH_TOOL_DISPATCH.service().execute(
-            "resolve_training_sync_conflict",
-            {"local_id": planned["id"], "strategy": "keep_local"},
-            intent={
-                "intent": "local_action",
-                "operation": "resolve_training_sync_conflict",
-                "target_system": "local",
-                "artifact_id": None,
-                "ambiguities": [],
-                "authorization_scope": [f"planned_unit:{planned['id']}"],
-            },
-            conversation_id="conversation-conflict",
-            client_turn_id="turn-conflict",
-            session_csrf_hash="",
-            sync_job_ids=[],
-        )
-        self.assertEqual(result["planned_unit"]["sync_status"], "local")
-        self.assertEqual(result["planned_unit"]["name"], "Local")
-
     def test_structured_state_exposes_current_local_targets_and_hashes(self):
         planned = server.PLANNING_DATA.planned_unit().create(
             {

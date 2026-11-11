@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.db.manager import DatabaseManager
 from backend.planning.competition_service import CompetitionService
-from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.queue import SyncJobQueueService
 
 
@@ -17,30 +15,22 @@ class SyncConflictCommandService:
 
     def __init__(
         self,
-        database_manager: DatabaseManager,
-        planned_unit_service: PlannedUnitService,
         competition_service: CompetitionService,
         job_queue_service: SyncJobQueueService,
     ) -> None:
-        self._database_manager = database_manager
-        self._planned_unit_service = planned_unit_service
         self._competition_service = competition_service
         self._job_queue_service = job_queue_service
 
     def resolve_local(
         self, local_id: str, strategy: str = "keep_local"
     ) -> dict[str, Any]:
-        """Resolve a planned-unit or competition conflict by its local ID."""
-        normalized_id = str(local_id or "").strip()
-        selected_strategy = str(strategy or "keep_local").strip().casefold()
-        with self._database_manager.reader() as db:
-            planned = db.execute(
-                "SELECT 1 FROM planned_units WHERE local_id=?", (normalized_id,)
-            ).fetchone()
-        service = self._planned_unit_service if planned else self._competition_service
+        """Resolve a competition conflict by its local ID."""
         return {
             "ok": True,
-            **service.resolve_conflict(normalized_id, selected_strategy),
+            **self._competition_service.resolve_conflict(
+                str(local_id or "").strip(),
+                str(strategy or "keep_local").strip().casefold(),
+            ),
         }
 
     def job_state(self, job_id: str) -> dict[str, Any]:

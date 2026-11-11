@@ -5,14 +5,10 @@ import unittest
 from datetime import date
 
 from backend.errors import (
-    CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
-    INVALID_PLANNING_ID_ERROR,
     AppError,
 )
 from backend.planning.planned_units import (
-    planned_conflict_payload,
-    planned_conflict_resolution_request,
     prepare_planned_workout_date,
 )
 
@@ -78,64 +74,6 @@ class PreparePlannedWorkoutDateTests(unittest.TestCase):
         self.assertEqual(raised.exception.message, INVALID_PLANNING_DATE_ERROR)
         self.assertIsNone(raised.exception.reason)
         self.assertEqual(current, {"date": "2026-09-20"})
-
-
-class PlannedConflictRequestTests(unittest.TestCase):
-    def test_normalizes_uuid_and_strategy_without_mutating_inputs(self):
-        local_id = LOCAL_ID.upper()
-        strategy = "  ADOPT_REMOTE  "
-
-        result = planned_conflict_resolution_request(local_id, strategy)
-
-        self.assertEqual(result, (LOCAL_ID, "adopt_remote"))
-        self.assertEqual(local_id, LOCAL_ID.upper())
-        self.assertEqual(strategy, "  ADOPT_REMOTE  ")
-
-    def test_invalid_uuid_keeps_application_error_contract(self):
-        with self.assertRaises(AppError) as raised:
-            planned_conflict_resolution_request("not-a-uuid", "keep_local")
-
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.message, INVALID_PLANNING_ID_ERROR)
-        self.assertIsNone(raised.exception.reason)
-
-    def test_invalid_strategy_keeps_application_error_contract(self):
-        with self.assertRaises(AppError) as raised:
-            planned_conflict_resolution_request(LOCAL_ID, "merge")
-
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.message, "Ungültige Konfliktstrategie.")
-        self.assertIsNone(raised.exception.reason)
-
-
-class PlannedConflictPayloadTests(unittest.TestCase):
-    def test_returns_valid_payload_without_mutating_row(self):
-        row = {"payload": '{"name":"Easy run","nested":{"kept":true}}', "id": 3}
-        original_row = copy.deepcopy(row)
-
-        payload = planned_conflict_payload(row)
-        payload["name"] = "Changed in caller"
-        reloaded = planned_conflict_payload(row)
-
-        self.assertEqual(row, original_row)
-        self.assertEqual(
-            reloaded,
-            {"name": "Easy run", "nested": {"kept": True}},
-        )
-        self.assertIsNot(payload, reloaded)
-
-    def test_corrupt_json_and_non_object_payloads_are_rejected(self):
-        for row in (
-            {"payload": "{"},
-            {"payload": "[]"},
-            {"payload": "null"},
-        ):
-            with self.subTest(row=row), self.assertRaises(AppError) as raised:
-                planned_conflict_payload(row)
-
-            self.assertEqual(raised.exception.status, 409)
-            self.assertEqual(raised.exception.message, CORRUPT_PLANNING_ERROR)
-            self.assertIsNone(raised.exception.reason)
 
 
 if __name__ == "__main__":

@@ -152,7 +152,7 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
     sync_tools = CoachSyncToolService(
         queue,
         authority,
-        SyncConflictCommandService(database, mock.Mock(), mock.Mock(), queue),
+        SyncConflictCommandService(mock.Mock(), queue),
         StructuredPlanSyncService(database, authority, plan_push, 28),
         mock.Mock(),
         plan_push,

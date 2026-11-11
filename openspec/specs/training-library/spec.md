@@ -442,7 +442,7 @@ Strength units and templates SHALL carry an optional local `strength_structure` 
 
 #### Scenario: Garmin catalogue exercise
 - **WHEN** an exercise names a Garmin catalogue exercise, or the athlete picks one of the suggested chips of an exercise without a match
-- **THEN** the name is checked against the catalogue and its category and exercise pair is derived on write, never taken from the request; an unknown name is rejected with suggestions; a pick through `POST /api/planned-units/<id>/garmin-exercise` needs the current payload hash, is refused for a unit in a sync conflict, is remembered for the same exercise name in other units and does not change the Intervals.icu sync state.
+- **THEN** the name is checked against the catalogue and its category and exercise pair is derived on write, never taken from the request; an unknown name is rejected with suggestions; a pick through `POST /api/planned-units/<id>/garmin-exercise` needs the current payload hash, is remembered for the same exercise name in other units and does not change the Intervals.icu sync state.
 
 #### Scenario: Export
 - **WHEN** a structured unit is exported to Intervals.icu on an explicit sync
