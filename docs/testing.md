@@ -19,9 +19,13 @@ modules whose file changed, that transitively import a changed module, or whose
 string literals name a changed path or module; a data file under `backend/`
 selects the tests of the module that names it. Imports reached only through
 `server.py` count only when `server.py`, `backend/http_api/`, or
-`backend/runtime/` changed. Changes under
-`backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
-dependency and build files run the full suite. The slow tooling modules
+`backend/runtime/` changed. The full suite runs when `backend/db/manager.py`,
+`backend/db/bootstrap.py`, `backend/db/migrations.py`, the test harness
+(`tests/run_tests.py`, `tests/changed_tests.py`, `tests/support.py`,
+`tests/server_test_support.py`), `tests/fixtures/`, or dependency and build
+files (`requirements*`, `Dockerfile`, `pyproject.toml`) changed, when a source
+cannot be parsed, or when the selection covers at least 80% of the test
+modules; the run prints the reason. The slow tooling modules
 `test_fixture_standard_data` and `test_ci_contracts` run under `--changed` only
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if
@@ -157,8 +161,8 @@ version and digest in `scripts/browser_environment.json`; ordinary matrix jobs
 pull that image and install no browser OS packages. The runner checks the locked
 package and installed browser revisions before tests. The required `Browser
 checks` aggregate rejects failed/missing shards and incomplete or duplicate
-selection evidence. Summaries are scoped to the GitHub run attempt; rerun all
-jobs to supply a complete matrix rather than rerunning only failed jobs.
+selection evidence. Summaries of every run attempt are kept and each shard's latest attempt
+counts, so rerunning only the failed jobs is valid.
 Summaries are uploaded separately from failure reports; authentication remains
 in private temporary storage.
 
@@ -246,7 +250,7 @@ and active, archived, component, zero-target, no-target, and over-target gear.
 All values are synthetic and providers remain blocked; no credentials or live
 athlete data are read. The seed is idempotent and carries a version marker so
 an older demo seed is upgraded in place when the disposable database is reused.
-Version 6 adds review scenarios on top of the v5 data: a rest day and a sick
+Version 8 is current. Version 6 added review scenarios on top of the v5 data: a rest day and a sick
 day with illness text in the check-ins, a planned 30-minute Swim unit with
 planned load next to a 20-minute swim at 11:00 and a fitting 30-minute swim at
 18:00 on the same day (activity matching ambiguity), a

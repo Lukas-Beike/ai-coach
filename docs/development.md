@@ -72,7 +72,7 @@ commits add (so flagged lines already on the branch's base never block a push)
 and commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
 A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
 no scan. After a clean scan the hook runs CI's repository quality ratchet
-(`python tools/quality_baseline.py`: mypy, Ruff and complexity, about 35 seconds
+(`python tools/quality_baseline.py`: mypy and Ruff, about 35 seconds
 on Windows) on a clean export of HEAD; new findings block the push. Do not use `--no-verify`.
 
 Enable the hook in each clone (the relative path also works in its worktrees):

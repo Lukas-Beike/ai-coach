@@ -34,5 +34,5 @@
   store credentials, session data or CSRF tokens in it.
 - Keep microphone and notification features opt-in, bounded, and functional in
   browsers that do not support them. Audio must not be persisted by the client.
-- Keep UI text and feature documentation in `README.md` accurate when adding
-  or changing user-visible behavior.
+- Keep UI text and the `README.md` and `docs/` files it links accurate when
+  adding or changing user-visible behavior.

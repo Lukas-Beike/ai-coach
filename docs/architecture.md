@@ -1,13 +1,13 @@
 # Architecture
 
-`server.py` is the composition root. Business logic lives in `backend/`; the import contract is layered: `athlete` is below `weather`, and `calendar` is below `activities`, which is below `performance`, which is below `planning`. `http_api` owns HTTP transport and route assembly, `coach` owns Coach workflows, `sync` owns synchronization and scheduling, `providers` owns external adapters, and `db` owns persistence. AST layer tests enforce this order.
+`server.py` is the composition root. Business logic lives in `backend/`; the import contract is layered. `canonical` imports only the standard library and itself, `athlete` imports no other domain package, `providers` may import only `canonical`, configuration, errors, observability and the runtime clock, ports and socket deadline, and package import cycles are not allowed. `http_api` owns HTTP transport and route assembly, `coach` owns Coach workflows, `sync` owns synchronization and scheduling, `providers` owns external adapters, and `db` owns persistence. AST layer tests enforce a permitted-import map per layer, the empty cycle baseline and these rules.
 
 ```text
                +-------------------------------------------------------------+
                |                       Trusted Athlete                       |
                |                (Mobile PWA / Desktop Browser)               |
                +------------------------------+------------------------------+
-                                              | HTTPS / WSS / SSE
+                                              | HTTPS / SSE
                                               v
                +-------------------------------------------------------------+
                |                  Reverse Proxy (Caddy / Nginx)              |
@@ -41,6 +41,7 @@
 |  |   - backend.history   : Change history and undo                                      |  |
 |  |   - backend.runtime   : Lifecycle and maintenance state                              |  |
 |  |   - backend.db        : Repositories, schema and SQLCipher persistence              |  |
+|  |   - backend.canonical : Standard-library vocabulary and canonical records           |  |
 |  +-------------------------------------------+-----------------------------------------+  |
 |                                              |                                            |
 |                                              v                                            |

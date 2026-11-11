@@ -3,7 +3,8 @@
 ## Project scope
 
 Pacecraft is a private, mobile-first PWA for one athlete, using Python
-`http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
+`http.server`, SQLCipher, Garmin and Wahoo as sources, Intervals.icu as
+output-only target, and OpenAI Responses.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
 Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) and [docs/operations.md](docs/operations.md) for setup and operational commands.
 
@@ -73,7 +74,8 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   `performance/` (derived/readiness), `runtime/` (lifecycle/maintenance),
   `weather/` (weather/cache), and `canonical/` (stdlib-only vocabulary/records).
   Cross-cutting owners: `config.py`, `privacy.py`, `settings.py`,
-  `change_history.py`, `observability.py`. Extend a cohesive owner first.
+  `change_history.py`, `observability.py`, `errors.py`, `pagination.py`,
+  `provider_credentials.py`. Extend a cohesive owner first.
 - Apply scoped [backend](backend/AGENTS.md), [frontend](public/AGENTS.md), and
   [test](tests/AGENTS.md) instructions, plus [browser fixtures](e2e/AGENTS.md)
   and [CI/release](.github/AGENTS.md), when working in those directories.
@@ -128,7 +130,8 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Work in a dedicated task worktree; leave the primary checkout unchanged. Check
   the branch and existing diff before editing and preserve prior work; keep
   runtime files and worktrees out of commits.
-  `python scripts/prepare_worktree.py` installs Node dependencies and Graphify;
+  `python scripts/prepare_worktree.py` installs Node dependencies, Graphify and the
+  hash-locked Ruff and mypy, then reports newer versions (advisory, online);
   the SessionStart hook keeps the graph current. For symbol, caller, or
   dependency lookups, query Graphify (`python scripts/graphify_local.py query`)
   before Grep. Verify graph results in source.
