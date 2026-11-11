@@ -6,8 +6,6 @@ from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.activities.zone_settings import (
-    HR_ZONE_LIMITS,
-    POWER_ZONE_LIMITS,
     ZoneSettings,
     percent_zone,
 )
@@ -68,8 +66,13 @@ def recorded_profile(
     *,
     ftp_w: float | None = None,
     threshold_hr_bpm: float | None = None,
+    zones: ZoneSettings | None = None,
 ) -> dict[str, Any] | None:
-    """Profile of the recorded watts, else heart rate, colored by the threshold."""
+    """Profile of the recorded watts, else heart rate, colored by the threshold.
+
+    ``zones`` gives the session's configured zone limits; without it the
+    default limits apply.
+    """
     streams = _profile_streams(activity)
     if streams is None:
         return None
@@ -77,8 +80,10 @@ def recorded_profile(
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
     threshold = _number(ftp_w if kind == "watts" else threshold_hr_bpm)
+    zones = zones or ZoneSettings()
+    limits = zones.power_limits if kind == "watts" else zones.hr_limits
     segments = [
-        _recorded_segment(total, coverage, width, kind, threshold)
+        _recorded_segment(total, coverage, width, kind, threshold, limits)
         for total, coverage in zip(totals, known, strict=True)
     ]
     if not any(item["value"] is not None for item in segments):
@@ -230,15 +235,17 @@ def _bucket_totals(
 
 
 def _recorded_segment(
-    total: float, coverage: float, width: float, kind: str, threshold: float | None
+    total: float,
+    coverage: float,
+    width: float,
+    kind: str,
+    threshold: float | None,
+    limits: tuple[float, ...],
 ) -> dict[str, Any]:
     value = total / coverage if coverage >= width * 0.8 else None
     zone = None
     if value is not None and threshold and threshold > 0:
-        percent = value / threshold * 100
-        zone = percent_zone(
-            percent, POWER_ZONE_LIMITS if kind == "watts" else HR_ZONE_LIMITS
-        )
+        zone = percent_zone(value / threshold * 100, limits)
     label = "Missing"
     if value is not None:
         unit = "W" if kind == "watts" else "bpm"

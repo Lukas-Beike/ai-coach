@@ -152,6 +152,10 @@ class WorkoutProfileTests(unittest.TestCase):
         }
         profile = recorded_profile(activity, threshold_hr_bpm=170)
         self.assertEqual(2, profile["segments"][0]["zone"])
+        # C-504: configured limits color the recording (82 % of LTHR is above 80 %).
+        configured = ZoneSettings(hr_limits=(60, 80, 90, 100))
+        profile = recorded_profile(activity, threshold_hr_bpm=170, zones=configured)
+        self.assertEqual(3, profile["segments"][0]["zone"])
         # A provider threshold in the activity is never read.
         self.assertIsNone(recorded_profile(activity)["segments"][0]["zone"])
 
@@ -162,6 +166,13 @@ class WorkoutProfileTests(unittest.TestCase):
             "streams": {"time": list(range(61)), "watts": samples},
             "icu_ftp": 200,
         }
+        configured = ZoneSettings(power_limits=(45, 60, 75, 90, 105, 120))
+        self.assertEqual(
+            2,
+            recorded_profile(activity, ftp_w=200, zones=configured)["segments"][0][
+                "zone"
+            ],
+        )
         profile = recorded_profile(activity, ftp_w=200)
         self.assertEqual("recorded", profile["source"])
         self.assertEqual(60, len(profile["segments"]))

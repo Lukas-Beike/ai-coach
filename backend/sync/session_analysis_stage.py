@@ -392,6 +392,7 @@ class SessionAnalysisStage:
                 threshold_hr_bpm=_value(session.thresholds.get("threshold_hr"))
                 if zones is None
                 else zones.lthr,
+                zones=zones,
             )
         except ArithmeticError, TypeError, ValueError:
             # One unreadable session must not stop the pass; it stays without
