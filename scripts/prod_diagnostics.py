@@ -28,6 +28,7 @@ COUNTS = (
     "change_history",
     "external_calendar_events",
 )
+MEMORY = ("rss_bytes", "peak_rss_bytes")
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
@@ -100,7 +101,13 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
         ),
         "plan_error_classes": error_classes,
         "stuck_jobs": stuck,
-        "memory": numbers((report.get("runtime") or {}).get("process_memory")),
+        "memory": {
+            key: value
+            for key, value in numbers(
+                (report.get("runtime") or {}).get("process_memory")
+            ).items()
+            if key in MEMORY
+        },
     }
 
 

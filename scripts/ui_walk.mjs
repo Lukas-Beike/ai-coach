@@ -67,16 +67,25 @@ async function rendered(page, route) {
   return Date.now() - started;
 }
 
+// Views render asynchronously: wait briefly for a visible control.
 async function clickIfThere(locator) {
-  if (await locator.count()) {
-    await locator.first().click();
-    return true;
+  const target = locator.filter({ visible: true }).first();
+  try {
+    await target.waitFor({ state: "visible", timeout: 3000 });
+  } catch {
+    return false;
   }
-  return false;
+  await target.click();
+  return true;
 }
 
 async function walkCalendar(page, shot) {
   const done = [];
+  // Open a unit first: paging later may land on an empty week.
+  if (await clickIfThere(page.locator(".planned-entry > summary"))) {
+    await shot("plan-unit");
+    done.push("unit opened");
+  }
   if (await clickIfThere(page.locator('.planned-view-switch button[data-view="month"]'))) {
     await shot("plan-month");
     done.push("month");
@@ -85,10 +94,6 @@ async function walkCalendar(page, shot) {
   }
   if (await clickIfThere(page.getByRole("button", { name: "Nächste Woche" }))) done.push("next week");
   if (await clickIfThere(page.getByRole("button", { name: "Vorherige Woche" }))) done.push("previous week");
-  if (await clickIfThere(page.locator(".planned-entry > summary"))) {
-    await shot("plan-unit");
-    done.push("unit opened");
-  }
   return done;
 }
 
