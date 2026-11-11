@@ -360,6 +360,7 @@ class PrivacyDeleteService:
                 secure_deletion(db),
             ):
                 deleted_counts = self._counts(db)
+                gps_tracks_enabled = activity_detail_store.gps_tracks_enabled(db)
                 deleted_tables = dict.fromkeys(
                     table
                     for _category, _label, tables in PRIVACY_DELETE_SCOPE
@@ -375,6 +376,11 @@ class PrivacyDeleteService:
                 dependencies.key_value_repository.set(
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
+                if not gps_tracks_enabled:
+                    # A switched-off setting survives; absent means on (#2137, K-002).
+                    dependencies.key_value_repository.set(
+                        db, activity_detail_store.GPS_TRACKS_KEY, "0"
+                    )
                 dependencies.planning_revision_service.mark_reset_pending()
             self._reclaim_after_commit()
             if dependencies.recovery_copies is not None:
