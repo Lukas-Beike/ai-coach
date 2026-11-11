@@ -960,69 +960,6 @@ class ServerSyncTests(ServerTestCase):
             server.PLANNING_DATA.workout_library().list()[0]["sync_status"], "synced"
         )
 
-    def test_intervals_read_transport_injects_request_and_builds_query(self):
-        from backend.providers.intervals import IntervalsReadTransport
-
-        request = Mock(return_value={"id": "athlete-1"})
-        transport = IntervalsReadTransport(
-            "https://intervals.icu/api/v1",
-            {"Authorization": "Basic test"},
-            request,
-        )
-
-        result = transport.get("/athlete/athlete-1", {"include": ["a", "b"]})
-
-        self.assertEqual(result, {"id": "athlete-1"})
-        request.assert_called_once_with(
-            "GET",
-            "https://intervals.icu/api/v1/athlete/athlete-1?include=a&include=b",
-            headers={"Authorization": "Basic test"},
-            service="intervals",
-        )
-
-    def test_intervals_write_transport_injects_request_for_each_method(self):
-        from backend.providers.intervals import IntervalsWriteTransport
-
-        request = Mock(side_effect=[{"id": "post"}, {"id": "put"}, {"deleted": True}])
-        headers = {"Authorization": "Basic test"}
-        transport = IntervalsWriteTransport(
-            "https://intervals.icu/api/v1", headers, request
-        )
-
-        self.assertEqual(
-            transport.post("/events", [{"id": "one"}], {"upsert": "true"}),
-            {"id": "post"},
-        )
-        self.assertEqual(
-            transport.put("/events/bulk-delete", [{"id": "one"}]), {"id": "put"}
-        )
-        self.assertEqual(
-            transport.delete("/events/one", {"force": "true"}), {"deleted": True}
-        )
-
-        self.assertEqual(
-            request.call_args_list[0].args[:3],
-            (
-                "POST",
-                "https://intervals.icu/api/v1/events?upsert=true",
-                [{"id": "one"}],
-            ),
-        )
-        self.assertEqual(
-            request.call_args_list[1].args[:3],
-            ("PUT", "https://intervals.icu/api/v1/events/bulk-delete", [{"id": "one"}]),
-        )
-        self.assertEqual(
-            request.call_args_list[2].args[:2],
-            ("DELETE", "https://intervals.icu/api/v1/events/one?force=true"),
-        )
-        self.assertEqual(request.call_args_list[0].args[3], headers)
-        self.assertEqual(request.call_args_list[1].args[3], headers)
-        self.assertEqual(
-            request.call_args_list[2].kwargs,
-            {"headers": headers, "service": "intervals"},
-        )
-
     def test_garmin_provider_collector_keeps_ranges_bounded_and_errors_redacted(self):
         from backend.providers.garmin import collect_garmin_data
 

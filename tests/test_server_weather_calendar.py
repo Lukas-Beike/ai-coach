@@ -34,7 +34,6 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
 from backend.runtime import clock as runtime_clock
-from backend.sync.state import SyncStateRepository
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 from backend.weather import projection as weather_projection
@@ -333,7 +332,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ),
             )
         context = server.PLANNING_WORKFLOWS.daily_planning_context_service().build(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
+            snapshot_seed.latest_snapshot(server.database_manager())[
                 "upcoming_calendar"
             ],
             {
@@ -638,11 +637,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             ],
         }
         with (
-            patch.object(
-                SyncStateRepository,
-                "latest_snapshot",
-                return_value=snapshot,
-            ),
             patch.object(
                 planning_planned_unit_service.PlannedUnitService,
                 "list",

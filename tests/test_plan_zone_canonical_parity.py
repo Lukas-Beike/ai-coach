@@ -145,7 +145,6 @@ class PlanZoneParityTests(CanonicalReadFixture):
                 [],
                 [],
                 today=date(2026, 10, 11),
-                provider_window={},
                 default_name="Workout",
                 sport_thresholds=thresholds,
             )

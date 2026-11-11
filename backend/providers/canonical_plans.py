@@ -23,8 +23,6 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
-    PowerCurveFetch,
-    PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
 )
@@ -173,9 +171,6 @@ class DomainBatch:
     zones: tuple[ZoneConfiguration, ...] = ()
     gear_items: tuple[GearItem, ...] = ()
     gear_links: tuple[GearActivityLink, ...] = ()
-    # None keeps the stored power curve points or fetch of the source record.
-    power_curve: tuple[PowerCurvePoint, ...] | None = None
-    power_curve_fetch: PowerCurveFetch | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -185,8 +180,6 @@ class DomainBatch:
             or self.zones
             or self.gear_items
             or self.gear_links
-            or self.power_curve
-            or self.power_curve_fetch is not None
         )
 
 

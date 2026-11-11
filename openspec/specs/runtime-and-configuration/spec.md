@@ -142,7 +142,7 @@ With DATA_RETENTION_DAYS at 0 or below (default -1) startup SHALL delete nothing
 - **WHEN** retention runs
 - **THEN** athlete records, plans, settings, canonical provider data, change history and diagnostics stay, and one log event `data_retention_purged` carries the clamped days and the deletion counts
 
-Evidence: `backend/db/bootstrap.py::initialize_application_database`; `backend/config.py::load_config`. Tests: `tests/test_server_runtime.py::test_unlimited_retention_does_not_delete_history`; `tests/test_db_bootstrap.py::test_retention_purges_old_receipts_artifacts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_unlimited_retention_keeps_old_receipts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_retention_keeps_the_newest_snapshot_after_a_long_sync_gap`; `tests/test_server_database.py::test_snapshot_repository_preserves_latest_payload_and_retention_contract`.
+Evidence: `backend/db/bootstrap.py::initialize_application_database`; `backend/config.py::load_config`. Tests: `tests/test_server_runtime.py::test_unlimited_retention_does_not_delete_history`; `tests/test_db_bootstrap.py::test_retention_purges_old_receipts_artifacts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_unlimited_retention_keeps_old_receipts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_retention_keeps_the_newest_snapshot_after_a_long_sync_gap`.
 
 ### Requirement: Bounded request concurrency and graceful stop
 

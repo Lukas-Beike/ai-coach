@@ -205,8 +205,6 @@ def _structured_service(
     *,
     canonical: bool = False,
 ) -> tuple[CoachStructuredContextService, Mock]:
-    sync_state_repository = Mock()
-    sync_state_repository.latest_snapshot.return_value = latest_snapshot
     checkin_service = Mock()
     checkin_service.context.return_value = {"recent": []}
     weather_service = Mock()

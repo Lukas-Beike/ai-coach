@@ -1120,13 +1120,13 @@ class ServerCoachTests(ServerTestCase):
         context = server.COACH_CONTEXT.training_context_service().build()
 
         self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
+            snapshot_seed.latest_snapshot(server.database_manager()),
             intervals_snapshot,
         )
         self.assertEqual(read_garmin(), garmin_stored)
         self.assertEqual(
             json.dumps(
-                server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
+                snapshot_seed.latest_snapshot(server.database_manager()),
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),

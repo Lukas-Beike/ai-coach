@@ -232,8 +232,6 @@ def ingest_plan(
                 zones=batch.zones,
                 gear_items=batch.gear_items,
                 gear_links=batch.gear_links,
-                power_curve=batch.power_curve,
-                power_curve_fetch=batch.power_curve_fetch,
             )
         )
     for provider_activity_id in sorted(plan.withdrawn_activity_ids):

@@ -91,14 +91,6 @@ def _unit(name: str, day: str, **overrides: Any) -> dict[str, Any]:
     return unit
 
 
-
-
-
-
-
-
-
-
 class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
     def test_paired_activity_ignores_sport_and_calendar_day(self) -> None:
         # Quirk: paired_event_id is trusted without a sport or date check.
@@ -495,7 +487,6 @@ class PlanningCalendarProjectionCharacterizationTests(unittest.TestCase):
             [],
             [],
             today=TODAY,
-            provider_window={},
             default_name="Planned workout",
         )
 

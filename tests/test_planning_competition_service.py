@@ -224,16 +224,6 @@ class CompetitionServiceTests(unittest.TestCase):
                 "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
                 ("42", "ai-coach:competition:test", competition_id),
             )
-            db.execute(
-                "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) "
-                "VALUES ('source', 'Source', 'https://example.test/events', ?, ?)",
-                (NOW, NOW),
-            )
-            db.execute(
-                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, imported_competition_id, created_at, updated_at) "
-                "VALUES ('candidate', 'source', 'uid', 'Race', '2027-09-26', 'Run', ?, ?, ?)",
-                (competition_id, NOW, NOW),
-            )
             history_before = db.execute(
                 "SELECT COUNT(*) AS count FROM change_history"
             ).fetchone()["count"]
@@ -255,13 +245,9 @@ class CompetitionServiceTests(unittest.TestCase):
                 ).fetchone()["count"],
                 0,
             )
-            candidate = db.execute(
-                "SELECT imported_competition_id FROM public_event_candidates"
-            ).fetchone()
             history_after = db.execute(
                 "SELECT COUNT(*) AS count FROM change_history"
             ).fetchone()["count"]
-        self.assertEqual(candidate["imported_competition_id"], competition_id)
         self.assertEqual(history_after, history_before)
 
     def test_restore_in_transaction_updates_and_normalizes_without_history(self):
@@ -354,23 +340,13 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(persisted["name"], "Berlin Marathon")
         self.assertEqual(history_after, history_before)
 
-    def test_delete_creates_remote_tombstone_and_unlinks_public_candidate(self):
+    def test_delete_creates_remote_tombstone(self):
         created = self.service.save(self.competition())
         competition_id = created["competition"]["id"]
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
                 ("42", "ai-coach:competition:test", competition_id),
-            )
-            db.execute(
-                "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) "
-                "VALUES ('source', 'Source', 'https://example.test/events', ?, ?)",
-                (NOW, NOW),
-            )
-            db.execute(
-                "INSERT INTO public_event_candidates(id, source_id, uid, name, event_date, sport, imported_competition_id, created_at, updated_at) "
-                "VALUES ('candidate', 'source', 'uid', 'Race', '2027-09-26', 'Run', ?, ?, ?)",
-                (competition_id, NOW, NOW),
             )
 
         deleted = self.service.delete(competition_id)
@@ -382,13 +358,9 @@ class CompetitionServiceTests(unittest.TestCase):
                 "SELECT intervals_event_id, external_id, provider "
                 "FROM competition_sync_tombstones"
             ).fetchone()
-            candidate = db.execute(
-                "SELECT imported_competition_id FROM public_event_candidates"
-            ).fetchone()
         self.assertEqual(tombstone["intervals_event_id"], "42")
         self.assertEqual(tombstone["external_id"], "ai-coach:competition:test")
         self.assertEqual(tombstone["provider"], "intervals")
-        self.assertIsNone(candidate["imported_competition_id"])
 
     def test_delete_keeps_the_competition_name_and_date_on_the_tombstone(self):
         created = self.service.save(self.competition())

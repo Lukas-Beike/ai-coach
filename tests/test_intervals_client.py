@@ -45,7 +45,6 @@ class IntervalsClientTests(unittest.TestCase):
         client = IntervalsClient(config, request=request_mock)
         self.assertIs(client.config, config)
         self.assertEqual(client.get("/test"), [])
-        self.assertIsInstance(client.pagination, dict)
 
     def test_injected_clock_controls_provider_local_date(self) -> None:
         config = type(

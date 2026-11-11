@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.snapshots import latest_snapshot
 
 
 class SyncStateRepository:
@@ -18,14 +16,12 @@ class SyncStateRepository:
         self,
         database_manager: Any,
         key_value_repository: Any,
-        snapshot_repository: Any,
         now: Callable[[], str],
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ):
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
-        self._snapshot_repository = snapshot_repository
         self._now = now
         self._registry = registry
 
@@ -78,30 +74,3 @@ class SyncStateRepository:
     ) -> None:
         with self._database_manager.unit_of_work() as db:
             write_cursor(db, provider, stream, cursor, high_water_mark, self._now())
-
-    def latest_snapshot(self, db: Any | None = None) -> dict[str, Any] | None:
-        """Read the stored snapshot, inside the caller's transaction when given."""
-        if db is not None:
-            return latest_snapshot(db, self._snapshot_repository)
-        with self._database_manager.reader() as own:
-            return latest_snapshot(own, self._snapshot_repository)
-
-    def sync_metadata(self, db: Any | None = None) -> dict[str, Any]:
-        """Return the snapshot's ``provider_sync`` status only; no section is read.
-
-        Only that member is extracted from the stored payload, inside the caller's
-        transaction when given.
-        """
-        if db is None:
-            with self._database_manager.reader() as own:
-                return self.sync_metadata(own)
-        text = self._snapshot_repository.latest_provider_sync(db)
-        value = json.loads(text) if isinstance(text, str) else None
-        return {"provider_sync": value if isinstance(value, dict) else {}}
-
-    def latest_metadata(self, db: Any | None = None) -> dict[str, Any]:
-        """Read the scalar markers committed with the provider snapshot."""
-        if db is not None:
-            return self._snapshot_repository.latest_metadata(db)
-        with self._database_manager.reader() as connection:
-            return self._snapshot_repository.latest_metadata(connection)

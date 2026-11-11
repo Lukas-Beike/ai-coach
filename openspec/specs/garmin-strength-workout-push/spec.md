@@ -52,7 +52,7 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
 
 ### Requirement: Calendar sync button
-Each calendar week SHALL show one sync button, "Woche synchronisieren", while a future, not yet completed unit of that week still needs a push to a configured provider, or a leftover of that week waits for removal. Intervals.icu waits when the unit's state is local, sync_error or remote_missing, or its event has another category than it gets now. Garmin waits when a strength unit with a valid structure differs from the pushed one. Planned unit cards SHALL carry no sync button.
+Each calendar week SHALL show one sync button, "Woche synchronisieren", while a future, not yet completed unit of that week still needs a push to a configured provider, or a leftover of that week waits for removal. Intervals.icu waits when the unit's state is local or sync_error, or its event has another category than it gets now. Garmin waits when a strength unit with a valid structure differs from the pushed one. Planned unit cards SHALL carry no sync button.
 
 #### Scenario: Pending structured strength unit
 - **WHEN** a future strength unit with a structure is neither synced to Intervals.icu nor pushed to Garmin in its current version

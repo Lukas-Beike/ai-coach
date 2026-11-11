@@ -23,9 +23,6 @@ class _EmptyReader:
     def observations(self, db, kind, *, start=None, end=None):
         return []
 
-    def power_curve(self, db):
-        raise AssertionError("the power curve is not read")
-
     def activity_summaries(self, db, *, start=None, end=None, limit=None):
         return ()
 

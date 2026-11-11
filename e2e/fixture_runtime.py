@@ -714,6 +714,33 @@ def _fixture_intervals_plan(raw, retrieved_at):
     )
 
 
+def _store_snapshot(db, snapshot):
+    """Insert one fixture snapshot row and keep the newest 12."""
+    recent = snapshot.get("recent_activities")
+    db.execute(
+        "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
+        "VALUES (?, ?, ?, ?)",
+        (
+            json.dumps(snapshot, ensure_ascii=False),
+            snapshot["synced_at"],
+            str(snapshot.get("synced_at") or ""),
+            len(recent) if isinstance(recent, list) else 0,
+        ),
+    )
+    db.execute(
+        "DELETE FROM snapshots WHERE id NOT IN "
+        "(SELECT id FROM snapshots ORDER BY id DESC LIMIT 12)"
+    )
+
+
+def _latest_snapshot_payload(db):
+    """Return the newest fixture snapshot payload text."""
+    row = db.execute(
+        "SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return row["payload"] if row else None
+
+
 def _save_intervals_snapshot(db, snapshot):
     """Store a fixture snapshot and ingest its raw block like a partial sync does.
 
@@ -721,7 +748,7 @@ def _save_intervals_snapshot(db, snapshot):
     fixture app reads its data from the canonical tables instead of the pending
     state an installation shows before its first completed backfill.
     """
-    server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
+    _store_snapshot(db, snapshot)
     retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
     if retrieved_at is not None:
         plan = _fixture_intervals_plan(snapshot.get("raw_provider_data"), retrieved_at)
@@ -745,7 +772,7 @@ def _save_garmin_snapshot(db, payload):
 def _merge_snapshot_activities(activities, wellness=None):
     """Upsert fixture activities into the latest snapshot without dropping others."""
     with server.database_manager().unit_of_work() as db:
-        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        payload = _latest_snapshot_payload(db)
         snapshot = json.loads(payload) if payload else {"athlete": {}}
         by_id = {
             str(item.get("id")): item
@@ -2359,7 +2386,7 @@ def _fixture_seed_distance_run(today):
 def _upgrade_preview_demo(today):
     """Add the expanded standard-fixture records without duplicating v1 data."""
     with server.database_manager().unit_of_work() as db:
-        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        payload = _latest_snapshot_payload(db)
         snapshot = json.loads(payload) if payload else {}
     wellness = snapshot.get("recent_wellness")
     if not isinstance(wellness, list):
@@ -2516,7 +2543,7 @@ def seed_preview_demo():
     # deterministic so repeated fixture requests remain idempotent.
     snapshot = {"recent_activities": []}
     with server.database_manager().unit_of_work() as db:
-        payload = server.SNAPSHOT_REPOSITORY.latest_payload(db)
+        payload = _latest_snapshot_payload(db)
         snapshot = json.loads(payload) if payload else snapshot
     _fixture_seed_wave2(today, snapshot, garmin)
     _fixture_seed_v6(today)

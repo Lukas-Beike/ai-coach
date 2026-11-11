@@ -223,7 +223,6 @@ class CompetitionService:
                     event_date=row.get("event_date"),
                 )
             self._repository.delete(db, normalized_id)
-            self._repository.unlink_public_event_candidate(db, normalized_id, now)
             change_history.record_change(
                 db, "competition", normalized_id, "delete", row, None
             )

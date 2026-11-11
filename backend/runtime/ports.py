@@ -9,7 +9,6 @@ from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
     CategoricalObservation,
-    PowerCurve,
     SleepPeriod,
 )
 from backend.canonical.records import ActivityRecord, Observation
@@ -145,18 +144,6 @@ class SleepPeriodReader(Protocol):
     def sleep_periods(
         self, db: Any, *, start: date | None = None, end: date | None = None
     ) -> tuple[SleepPeriod, ...]: ...
-
-
-@runtime_checkable
-class PowerCurveReader(Protocol):
-    """Reads the stored power curve: each provider's latest fetch and best efforts.
-
-    Fetches are ordered by provider and source record, points by provider and
-    duration. Only a source that stores the power curve implements it; a reader
-    without it means no power curve is available from the serving source.
-    """
-
-    def power_curve(self, db: Any) -> PowerCurve: ...
 
 
 @runtime_checkable

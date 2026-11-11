@@ -842,14 +842,6 @@ class CompetitionRepository:
             db, RemoteEntityKind.COMPETITION, competition_id
         )
 
-    def unlink_public_event_candidate(
-        self, db: Any, competition_id: str, now: str
-    ) -> None:
-        db.execute(
-            "UPDATE public_event_candidates SET imported_competition_id=NULL, updated_at=? WHERE imported_competition_id=?",
-            (now, competition_id),
-        )
-
     def resolve_adopt_remote(
         self,
         db: Any,
@@ -1315,63 +1307,6 @@ class ActivityFeedbackRepository:
             "UPDATE activity_feedback SET purpose = ? WHERE activity_id = ?",
             (purpose, activity_id),
         )
-
-
-class SnapshotRepository:
-    """Persist bounded provider snapshots without owning a connection."""
-
-    def save(
-        self,
-        db: Any,
-        snapshot: dict[str, Any],
-        created_at: str,
-        *,
-        keep: int = 12,
-        activity_count: int | None = None,
-    ) -> None:
-        """Store a snapshot and keep the newest ``keep`` rows.
-
-        ``activity_count`` is the number of recent activities the snapshot stood for
-        when it is stored without its activity sections; otherwise the count comes
-        from the snapshot's own ``recent_activities`` list.
-        """
-        recent = snapshot.get("recent_activities")
-        if activity_count is None:
-            activity_count = len(recent) if isinstance(recent, list) else 0
-        db.execute(
-            "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
-            "VALUES (?, ?, ?, ?)",
-            (
-                json.dumps(snapshot, ensure_ascii=False),
-                created_at,
-                str(snapshot.get("synced_at") or ""),
-                activity_count,
-            ),
-        )
-        db.execute(
-            "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY id DESC LIMIT ?)",
-            (keep,),
-        )
-
-    def latest_metadata(self, db: Any) -> dict[str, Any]:
-        row = db.execute(
-            "SELECT synced_at, recent_activity_count FROM snapshots ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        return dict(row) if row else {}
-
-    def latest_provider_sync(self, db: Any) -> str | None:
-        """Return the latest snapshot's ``provider_sync`` JSON text; nothing else."""
-        row = db.execute(
-            "SELECT json_extract(payload, '$.provider_sync') AS provider_sync "
-            "FROM snapshots ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        return row["provider_sync"] if row else None
-
-    def latest_payload(self, db: Any) -> str | None:
-        row = db.execute(
-            "SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        return row["payload"] if row else None
 
 
 NUTRITION_MACRO_FIELDS = ("carbs_g", "protein_g", "fat_g")

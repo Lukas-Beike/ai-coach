@@ -17,7 +17,7 @@ from support import temp_database
 
 from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, canonical_store, row_factory
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.state import SyncStateRepository
@@ -107,7 +107,7 @@ class DualWriteFixture(unittest.TestCase):
         )
         self.key_values = KeyValueRepository(lambda: NOW)
         self.sync_state = SyncStateRepository(
-            self.manager, self.key_values, SnapshotRepository(), lambda: NOW
+            self.manager, self.key_values, lambda: NOW
         )
 
     def count(self, table: str) -> int:

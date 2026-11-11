@@ -91,9 +91,9 @@ class ServerHttpTests(ServerTestCase):
                     connection = http.client.HTTPConnection(
                         "127.0.0.1", httpd.server_address[1], timeout=10
                     )
-                    connection.request(
-                        method, path, body=b"{}" if method != "GET" else None
-                    )
+                    # No body: the server rejects before reading one, and an unread
+                    # body can make Windows abort the connection.
+                    connection.request(method, path)
                     statuses[method, path] = connection.getresponse().status
                     connection.close()
         self.assertEqual(401, statuses["GET", "/api/bootstrap"])
@@ -1140,32 +1140,7 @@ class ServerHttpTests(ServerTestCase):
             list(truncated)
         self.assertEqual(incomplete.exception.status, 400)
 
-    def test_public_state_exposes_provider_calendar_window(self):
-        today = server.ATHLETE_CLOCK.now().date()
-        snapshot_seed.save_snapshot(
-            server.SYNC_PERSISTENCE.state_repository(),
-            {
-                "synced_at": "now",
-                "athlete": {},
-                "recent_activities": [],
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-                "provider_sync": {
-                    "calendar_window": {
-                        "start": (today - timedelta(days=10)).isoformat(),
-                        "end": (today + timedelta(days=20)).isoformat(),
-                    }
-                },
-            },
-        )
-        state = server.PUBLIC_STATE.plan_state_service().read(local_only=True)
-        self.assertEqual(
-            state["planning_view"]["provider_window"]["end"],
-            (today + timedelta(days=20)).isoformat(),
-        )
-        self.assertNotIn("public_calendar", state)
-
-    def test_intervals_collection_pagination_is_bounded_and_reported(self):
+    def test_intervals_collection_pagination_is_bounded(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(server.CONFIG, intervals_api_key="test-key")
         )
@@ -1178,10 +1153,6 @@ class ServerHttpTests(ServerTestCase):
                 "/athlete/0/activities", {"oldest": "2026-01-01"}, "activities"
             )
         self.assertEqual(len(rows), 501)
-        self.assertEqual(
-            client.pagination["activities"],
-            {"pages": 2, "records": 501, "complete": True},
-        )
         self.assertEqual(get.call_args_list[1].args[1]["offset"], 500)
 
     def test_body_battery_only_error_does_not_degrade_garmin_public_state(self):

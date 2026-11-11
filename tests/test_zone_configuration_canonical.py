@@ -164,7 +164,6 @@ class EffectiveZoneTests(unittest.TestCase):
                 [],
                 [],
                 today=date(2026, 10, 11),
-                provider_window={},
                 default_name="Workout",
                 zone_configurations=configurations,
             )
@@ -196,7 +195,6 @@ class EffectiveZoneTests(unittest.TestCase):
             [],
             [],
             today=date(2026, 10, 11),
-            provider_window={},
             default_name="Workout",
             sport_thresholds=thresholds,
             zone_configurations=provider_configurations(

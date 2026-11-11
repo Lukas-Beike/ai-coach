@@ -149,7 +149,6 @@ from backend.db.repositories import (
     PlanAdjustmentRepository,
     PlanningStateRepository,
     ProfileRepository,
-    SnapshotRepository,
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher, database_schema_is_current
@@ -548,7 +547,6 @@ PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
 CHAT_REPOSITORY = ChatRepository(runtime_clock.utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
-SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
@@ -1047,7 +1045,6 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
-    snapshots=SNAPSHOT_REPOSITORY,
     utc_now=runtime_clock.utc_now,
     athlete_clock=lambda: ATHLETE_CLOCK,
 )

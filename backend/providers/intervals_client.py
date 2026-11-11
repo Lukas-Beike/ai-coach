@@ -48,13 +48,6 @@ class IntervalsClient:
             return self._now()
         return local_now()
 
-    @property
-    def pagination(self) -> dict[str, dict[str, Any]]:
-        return {
-            collection: dict(metadata)
-            for collection, metadata in self._api.pagination.items()
-        }
-
     def get(
         self,
         path: str,
