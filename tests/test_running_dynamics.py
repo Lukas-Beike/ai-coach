@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.activities.detail_contract import _coverage, _streams
+from backend.activities.detail_contract import _channels, _coverage, _streams
 from backend.activities.detail_merge import _populated_channel_count, merge_details
 from backend.canonical.activity_detail import CHANNEL_BOUNDS, ActivityStreamSet
 from backend.canonical.mapping import IssueReason, MappingIssue
@@ -282,7 +282,7 @@ class DynamicsReadModelTests(unittest.TestCase):
         self.assertEqual("insufficient_data", run_analysis["form_drift"]["status"])
         self.assertNotIn("form_drift", ride_analysis)
 
-    def test_the_document_and_the_coach_never_receive_the_series(self) -> None:
+    def test_the_main_streams_never_carry_the_series(self) -> None:
         detail = dynamics_set(
             ground_contact_time_ms=(251.0, 252.0, 253.0),
             vertical_oscillation_cm=(9.11, 9.12, 9.13),
@@ -296,9 +296,18 @@ class DynamicsReadModelTests(unittest.TestCase):
         self.assertEqual({"heart_rate_bpm"}, set(served["channels"]))
         for needle in ("ground_contact", "vertical_oscillation", "251.0", "9.11"):
             self.assertNotIn(needle, text)
-        # The coverage, shown with readable labels, leaves the series out as well.
+        # The calendar charts the series apart from the main channels (#2258),
+        # so the coverage names them; the Coach drops them (test_coach_activity_read_tools).
+        dynamics = _channels(merged.streams, running_dynamics=True)
+        assert dynamics is not None
+        self.assertEqual(
+            {"ground_contact_time_ms", "vertical_oscillation_cm"}, set(dynamics)
+        )
         coverage = _coverage([candidate(detail).stored])
-        self.assertEqual({"heart_rate_bpm"}, set(coverage))
+        self.assertEqual(
+            {"heart_rate_bpm", "ground_contact_time_ms", "vertical_oscillation_cm"},
+            set(coverage),
+        )
 
     def test_dynamics_never_decide_the_primary_stream(self) -> None:
         plain = dynamics_set()
