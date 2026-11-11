@@ -82,19 +82,21 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 
 - Startup initializes the database and sync/Coach workers, then enqueues configured
   calendar, Garmin, Wahoo, and weather refreshes; Intervals.icu is an output
-  target and is not read. Preserve daily scheduling,
+  target: it reads no training data, only what an explicit export wrote.
+  Preserve daily scheduling,
   manual refreshes, and browser polling of local sync state.
 - Chat uses saved profile/competitions, performance, recent local feedback,
-  workout library, and latest provider snapshots. Preserve source labels for
-  Garmin, Wahoo, derived values, and AI estimates.
+  workout library, and the canonical provider records (Garmin, Wahoo).
+  Preserve source labels for Garmin, Wahoo, derived values, and AI estimates.
 - Confirmed local profile/competition records are authoritative; OpenAI Conversation
   state is dialogue continuity only. Durable profile, competition, check-in, and
   planning mutations come from an explicit API/UI action or from a Coach turn
   started by the athlete's own stored message, never from an unattended turn.
   Coach writes need no extra UI confirmation; guard them server-side by impact:
-  each change shows a receipt with undo, deletes/archives and bulk changes need
-  a confirmed request in their own domain, and Intervals.icu writes need the
-  athlete to name the sync.
+  each change shows a receipt, with whole-turn undo only when every applied
+  write is fully tracked; deletes/archives and bulk changes need a confirmed
+  request in their own domain, and Intervals.icu writes need the athlete to name
+  the sync (by Intervals.icu or a sync verb).
 - Explicit current-data requests refresh through existing sync before coaching
   where supported; do not refresh every chat unconditionally.
 - Preserve explicit model selection; verify options/defaults against provider code

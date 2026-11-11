@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe optional microphone transcription and browser-local PWA notifications at application revision `d1beefd77`. This baseline inspects client capture, the authenticated transcription route/provider assembly, notification state and the service-worker click handler. It does not promise a server push service, subscription endpoint, closed-app scheduled delivery, or persisted audio. Coach turn sending and safe shell interaction are in `web-pwa-and-accessibility`; session/cache invalidation is in `view-refresh-and-client-state`. Named browser tests are inspected evidence, not an executed permission/device matrix.
+Describe optional microphone transcription and browser-local PWA notifications as currently implemented. This baseline inspects client capture, the authenticated transcription route/provider assembly, notification state and the service-worker click handler. It does not promise a server push service, subscription endpoint, closed-app scheduled delivery, or persisted audio. Coach turn sending and safe shell interaction are in `web-pwa-and-accessibility`; session/cache invalidation is in `view-refresh-and-client-state`. Named browser tests are inspected evidence, not an executed permission/device matrix.
 
 ## Requirements
 
