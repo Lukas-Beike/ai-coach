@@ -271,9 +271,32 @@ class DatabaseBootstrapTests(unittest.TestCase):
         self.bootstrap(db)
         old = (self.current_time - timedelta(days=45)).isoformat()
         recent = (self.current_time - timedelta(days=5)).isoformat()
-        open_undo = json.dumps(
-            {"change_summary": {"undoable": True, "undone_at": None}}
-        )
+
+        def undoable(change_id: str) -> str:
+            return json.dumps(
+                {
+                    "change_summary": {"undoable": True, "undone_at": None},
+                    "command_receipts": [
+                        "malformed",
+                        # A malformed entry never aborts the purge.
+                        {"tool": "update_profile", "changes": ["x", {"id": change_id}]},
+                    ],
+                }
+            )
+
+        # Undoable only while the history rows it names are kept (#2134, K-003).
+        open_undo = undoable("kept")
+        # An old row not yet pruned still allows the undo.
+        for change_id, created_at in (
+            ("kept", recent),
+            ("old-but-stored", (self.current_time - timedelta(days=200)).isoformat()),
+        ):
+            db.execute(
+                "INSERT INTO change_history(id, entity_type, entity_id, action, "
+                "source, created_at, before_hash, after_hash, diff) "
+                "VALUES (?, 'profile', 'profile', 'update', 'local', ?, 'a', 'b', '{}')",
+                (change_id, created_at),
+            )
         undone = json.dumps(
             {"change_summary": {"undoable": True, "undone_at": "2026-08-01"}}
         )
@@ -282,6 +305,16 @@ class DatabaseBootstrapTests(unittest.TestCase):
         )
         self._insert_command(db, "old-plain", old, json.dumps({"text": "chat copy"}))
         self._insert_command(db, "old-open-undo", old, open_undo)
+        self._insert_command(db, "old-undo-history-gone", old, undoable("pruned"))
+        self._insert_command(
+            db, "old-undo-history-stored", old, undoable("old-but-stored")
+        )
+        self._insert_command(
+            db,
+            "old-undo-without-reference",
+            old,
+            json.dumps({"change_summary": {"undoable": True, "undone_at": None}}),
+        )
         self._insert_command(db, "old-undone", old, undone)
         self._insert_command(db, "old-not-undoable", old, not_undoable)
         self._insert_command(db, "old-broken", old, "not json")
@@ -325,7 +358,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 row[0]
                 for row in db.execute("SELECT client_turn_id FROM coach_commands")
             ),
-            ["old-open-undo", "old-running", "recent"],
+            ["old-open-undo", "old-running", "old-undo-history-stored", "recent"],
         )
         self.assertEqual(
             sorted(row[0] for row in db.execute("SELECT id FROM coach_plan_artifacts")),
@@ -336,7 +369,7 @@ class DatabaseBootstrapTests(unittest.TestCase):
             ["live"],
         )
         (record,) = logs.records
-        self.assertEqual(record.context["coach_commands_deleted"], 5)
+        self.assertEqual(record.context["coach_commands_deleted"], 7)
         self.assertEqual(record.context["coach_plan_artifacts_deleted"], 2)
         self.assertEqual(record.context["coach_action_proposals_deleted"], 1)
         self.assertEqual(

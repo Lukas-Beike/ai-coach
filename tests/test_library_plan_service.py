@@ -166,10 +166,8 @@ class LibraryPlanServiceTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.service.apply([{"library_workout_id": missing_id, "date": TODAY}])
         self.assertEqual(raised.exception.status, 404)
-        self.assertEqual(
-            raised.exception.message,
-            "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.",
-        )
+        # Library entries are local; no sync brings a missing one (#2135, D-009).
+        self.assertEqual(raised.exception.message, "Bibliothekseinheit nicht gefunden.")
 
         corrupt_id = str(uuid.uuid4())
         not_object_id = str(uuid.uuid4())
@@ -233,17 +231,21 @@ class LibraryPlanServiceTests(unittest.TestCase):
         other_id = str(uuid.uuid4())
         self.add_template(local_id, self.template())
         self.add_template(other_id, self.template(name="Other ride"))
-        with self.assertRaises(AppError) as raised:
-            self.service.apply(
-                [
-                    {"library_workout_id": local_id, "date": "2026-09-21"},
-                    {"library_workout_id": local_id, "date": "2026-09-21"},
-                    {"library_workout_id": other_id, "date": "2026-09-21"},
-                ]
+        # A repeat is caught even with another template between them (#2135).
+        for order in (
+            (local_id, local_id, other_id),
+            (local_id, other_id, local_id),
+        ):
+            with self.subTest(order=order), self.assertRaises(AppError) as raised:
+                self.service.apply(
+                    [
+                        {"library_workout_id": workout_id, "date": "2026-09-21"}
+                        for workout_id in order
+                    ]
+                )
+            self.assertIn(
+                "2026-09-21: Doppelte Bibliothekseinheit", raised.exception.message
             )
-        self.assertIn(
-            "2026-09-21: Doppelte Bibliothekseinheit", raised.exception.message
-        )
 
     def test_success_creates_batch_with_history_revision_and_one_post_commit_event(
         self,

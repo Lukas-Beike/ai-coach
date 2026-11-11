@@ -10,8 +10,8 @@ Describe the athlete-started Coach dialogue, durable background execution, local
 The system SHALL persist a valid athlete message and its background command before accepting the chat request, and SHALL expose its operation identity and queued state.
 
 #### Scenario: Valid authenticated submission
-- **WHEN** an authenticated athlete submits a message with a nonempty client turn ID through `/api/chat`
-- **THEN** the system stores the message, session-bound command, selected model and thinking level, returns HTTP 202 with the operation ID, and wakes the worker.
+- **WHEN** an authenticated athlete submits a message with a nonempty client turn ID through `/api/chat/stream`
+- **THEN** the system stores the message, session-bound command, selected model and thinking level, sends a `started` event with the operation ID, and wakes the worker.
 
 #### Scenario: Invalid submission
 - **WHEN** the message exceeds 12000 characters, the turn ID is absent or exceeds 120 characters, or the quick-action kind is unsupported
@@ -21,7 +21,7 @@ The system SHALL persist a valid athlete message and its background command befo
 - **WHEN** the same session submits another turn while its different background turn is queued or running
 - **THEN** the system rejects it with a conflict rather than starting concurrent work for that session.
 
-Evidence: `backend/http_api/chat_post.py:ChatPostRoutes.handle`; `backend/coach/job_submission.py:CoachJobSubmissionService.enqueue`, `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `tests/test_http_chat_post_routes.py:test_chat_submission_uses_bounded_body_and_expected_service_arguments`; `tests/test_coach_chat_turn.py:test_new_turn_validates_and_forwards_exact_session`. Source/test inspection; not a claim that these tests ran.
+Evidence: `backend/http_api/chat_stream.py:CoachChatStreamTransport.handle`; `backend/coach/job_submission.py:CoachJobSubmissionService.enqueue`, `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `tests/test_http_chat_stream.py:test_invalid_turn_rejects_before_registration_or_response`; `tests/test_coach_chat_turn.py:test_new_turn_validates_and_forwards_exact_session`. Source/test inspection; not a claim that these tests ran.
 
 ### Requirement: CC2 Session ownership and durable turn replay
 The system SHALL bind command and receipt access to the creating session, return a finished turn's stored receipt without executing it again, and reject conflicting in-progress execution.

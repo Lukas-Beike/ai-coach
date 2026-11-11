@@ -30,7 +30,6 @@ from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.plan_checks import ILLNESS_DAYS
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
-from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_activity_type, planned_sport_environment
 
 DEFAULT_ILLNESS_PAUSE_DAYS = ILLNESS_DAYS
@@ -54,28 +53,6 @@ ADAPTIVE_REPLACEMENT_KEYS = (
 ADAPTIVE_EASY_FOCUS = "easy"
 # Neutral title for a hard draft replaced on a [NO_INTENSITY] day.
 ADAPTIVE_EASY_NAME = "Lockere Einheit"
-
-
-def workout_is_hard(workout: dict[str, Any]) -> bool:
-    """A set session_focus decides (as in plan checks); else the text keywords."""
-    focus = session_focus(workout)
-    if focus.origin == "set":
-        return bool(focus.is_hard)
-    text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
-    return any(
-        term in text
-        for term in (
-            "interval",
-            "vo2",
-            "threshold",
-            "tempo",
-            "sprint",
-            "race",
-            "105%",
-            "110%",
-            "115%",
-        )
-    )
 
 
 def adaptive_recovery_description(sport: str, duration: int) -> str:

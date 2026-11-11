@@ -11,7 +11,6 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
-from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
 
@@ -35,7 +34,6 @@ class PublicBootstrapDependencies:
     sync_job_queue_service: Callable[[], Any]
     state_version_service: Callable[[], Any]
     coach_message_service: Callable[[], Any]
-    training_plan_service: Callable[[], Any]
     local_calendar_events: Callable[..., Any]
     planning_state: Callable[..., Any]
     adaptive_replan_preview_service: Callable[[], Any]
@@ -93,29 +91,12 @@ class PublicBootstrapService:
                 read_only=True,
             )
             jobs = deps.sync_job_queue_service().list()
-            state_version_values = deps.state_version_service().versions(
-                deps.sync_state_repository().latest_metadata(db)
-            )
+            state_version_values = deps.state_version_service().versions()
             state = {
-                "schema_version": 3,
                 "state_versions": state_version_values,
-                "plan_revision": state_version_values.get("plan"),
                 "app": {"name": deps.app_name, "version": deps.app_version},
-                "skeleton": dict.fromkeys(
-                    (
-                        "chat",
-                        "activities",
-                        "plan",
-                        "library",
-                        "performance",
-                        "feedback",
-                        "profile",
-                    ),
-                    True,
-                ),
                 "messages": deps.coach_message_service().list(limit=100),
                 "messages_next_cursor": None,
-                "plans": deps.training_plan_service().list(limit=30),
                 "library": [],
                 "activities": [],
                 "planned": local_planned,
@@ -123,16 +104,8 @@ class PublicBootstrapService:
                 "calendar": deps.local_calendar_events(
                     local_planned, competitions, relevant_external
                 ),
-                "planning_view": {
-                    "source": "local",
-                    "local_count": len(local_planned),
-                    "remote_count": 0,
-                    "items": local_planned,
-                    "provider_window": {},
-                },
                 "planning_compliance": [],
                 "weather": {},
-                "parallel_cycling": [],
                 "profile": profile,
                 "competitions": competitions,
                 "checkins": [],
@@ -171,7 +144,6 @@ class PublicBootstrapService:
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
                 ),
                 "provider_freshness": freshness,
-                "provider_states": bootstrap_provider_states(freshness),
                 "provider_ids": {
                     member.name.lower(): member.value for member in ProviderId
                 },
@@ -197,9 +169,6 @@ class PublicBootstrapService:
                     jobs=jobs,
                     state_versions=state_version_values,
                 ),
-                "running_jobs": [
-                    job for job in jobs if job.get("status") in {"queued", "running"}
-                ],
                 "library_sync": {
                     "last_sync_at": _library_activity_at(deps, db),
                     "last_error": deps.key_values.get_in_transaction(
@@ -217,23 +186,6 @@ class PublicBootstrapService:
                     },
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
-                "competition_sync": {
-                    "last_sync_at": deps.key_values.get_in_transaction(
-                        db, "last_competition_sync_at"
-                    ),
-                    "last_error": deps.key_values.get_in_transaction(
-                        db, "last_competition_sync_error"
-                    )
-                    or None,
-                    "running": deps.key_values.get_in_transaction(
-                        db, "competition_sync_running"
-                    )
-                    == "1",
-                    "status": deps.key_values.get_in_transaction(
-                        db, "competition_sync_status"
-                    )
-                    or None,
-                },
                 "morning_checkin": deps.morning_checkin_state_service().state(),
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),
                 "model": {
@@ -270,54 +222,4 @@ class PublicBootstrapService:
 
 
 def _library_activity_at(deps: Any, db: Any) -> str | None:
-    return latest_library_timestamp(
-        deps.key_values.get_in_transaction(db, "last_library_sync_at"),
-        deps.key_values.get_in_transaction(db, "last_library_push_at"),
-    )
-
-
-def bootstrap_provider_states(
-    freshness: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Project provider freshness into the small, stable bootstrap contract."""
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in freshness:
-        if isinstance(item, dict) and item.get("provider"):
-            grouped.setdefault(str(item["provider"]), []).append(item)
-    state_map = {
-        "not_configured": "not_configured",
-        "syncing": "loading",
-        "never_loaded": "loading",
-        "fresh": "ready",
-        "connected": "ready",
-        "partial": "degraded",
-        "stale": "stale",
-        "error": "error",
-    }
-    result: dict[str, dict[str, Any]] = {}
-    priority = {
-        "error": 5,
-        "stale": 4,
-        "degraded": 3,
-        "loading": 2,
-        "ready": 1,
-        "not_configured": 0,
-    }
-    for provider, areas in grouped.items():
-        projected = [state_map.get(str(item.get("state")), "error") for item in areas]
-        status = (
-            max(projected, key=lambda value: priority[value])
-            if projected
-            else "not_configured"
-        )
-        result[provider] = {
-            "status": status,
-            "areas": {
-                str(item.get("area")): {
-                    "status": state_map.get(str(item.get("state")), "error"),
-                    "last_success_at": item.get("last_success_at"),
-                }
-                for item in areas
-            },
-        }
-    return result
+    return deps.key_values.get_in_transaction(db, "last_library_push_at") or None

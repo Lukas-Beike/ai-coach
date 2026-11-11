@@ -222,17 +222,14 @@ class SyncPublicStateServiceTests(unittest.TestCase):
         )
         self.jobs.list.assert_called_once_with()
 
-    def test_browser_state_is_bounded_and_uses_stored_status_fallback(self) -> None:
-        self.set_values(
-            sync_operation_message="Sync in progress",
-            sync_status="Saved status",
-        )
+    def test_browser_state_is_bounded_and_reports_the_message_as_status(self) -> None:
+        self.set_values(sync_operation_message="Sync in progress")
         projected = self.service.browser_state(freshness=[], jobs=[])
 
         self.assertEqual(
             projected,
             {
-                "status": "Saved status",
+                "status": "Sync in progress",
                 "phase": "idle",
                 "progress": 0,
                 "operation_id": None,
@@ -244,11 +241,6 @@ class SyncPublicStateServiceTests(unittest.TestCase):
                 "jobs": [],
             },
         )
-
-        with self.manager.unit_of_work() as db:
-            db.execute("DELETE FROM kv WHERE key = 'sync_status'")
-        fallback = self.service.browser_state(freshness=[], jobs=[])
-        self.assertEqual(fallback["status"], "Sync in progress")
 
 
 if __name__ == "__main__":

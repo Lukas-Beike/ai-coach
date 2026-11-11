@@ -927,7 +927,7 @@ function renderAnalysisHistory(history) { // NOSONAR
 
 function sessionRpeSourceLabel(days, rated) {
   const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
-  const providerLabel = coachProviderLabel(providerIds().intervals);
+  const providerLabel = [...new Set(days.flatMap((day) => day.rpe_provider_labels || []))].sort((a, b) => a.localeCompare(b)).join(" + ") || "Anbieter";
   if (!rated) return "Athletenfeedback";
   if (provider === rated) return providerLabel;
   return provider ? `Athletenfeedback + ${providerLabel}` : "Athletenfeedback";
@@ -954,7 +954,8 @@ function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start
   const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
   if (!days.some((day) => day.short != null || day.long != null)) { loadMissing.push("Kurz-/Langzeitbelastung"); return; }
   const weekly = analysisHistoryPeriod === "twelveWeeks";
-  const rpeDays = (rpeReport?.days || []).filter((day) => day.date >= start && day.date <= end);
+  // The curves carry load from before the window, so their label reads every reported day.
+  const rpeDays = (rpeReport?.days || []).filter((day) => day.date <= end);
   const source = sessionRpeSourceLabel(rpeDays, rpeDays.reduce((sum, day) => sum + day.rated_sessions, 0));
   const series = [["short", "Kurzzeitbelastung", 2], ["long", "Langzeitbelastung", 5]].map(([key, label, color]) => {
     const points = days.map((day) => ({ date: day.date, value: day[key] }));
@@ -1195,13 +1196,17 @@ async function renderTrainingRecords() { // NOSONAR
   if (!state.data || !equipmentRouteActive()) return;
   const generation = ++trainingRecordsGeneration;
   const session = state.sessionGeneration;
+  const gear = document.getElementById("equipmentItems");
+  const heading = () => reportNode("h3", "Ausrüstung und Wartung");
+  // Only a section without a rendered list shows loading and failure; a failed refresh keeps the list.
+  const rendered = () => Boolean(gear.querySelector(".equipment-tabs"));
+  if (!rendered()) gear.replaceChildren(heading(), createLoadingState("Ausrüstung wird geladen…"));
   try {
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
-    const gear = document.getElementById("equipmentItems");
     const openDetails = new Set([...gear.querySelectorAll("details[open]")]
       .map((details) => `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`));
-    gear.replaceChildren(reportNode("h3", "Ausrüstung und Wartung"));
+    gear.replaceChildren(heading());
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
@@ -1296,7 +1301,7 @@ async function renderTrainingRecords() { // NOSONAR
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
-      for (const id of ["equipmentItems"]) document.getElementById(id).textContent=error.message;
+      if (!rendered()) gear.replaceChildren(heading(), createErrorState(error?.message, () => void renderTrainingRecords()));
     }
   }
 }

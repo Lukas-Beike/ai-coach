@@ -796,23 +796,42 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "resolve_training_sync_conflict:retry_read",
     )
     def test_conflict_choices_and_failed_job_retries(self):
-        local_id = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout()]
-        )[0]["id"]
-        for strategy in ("keep_local", "adopt_remote"):
+        # Planned units no longer reach a conflict (#2147); competitions do.
+        competition_id = server.PLANNING_DATA.competition().save(
+            {
+                "name": "Synthetic race",
+                "event_date": "2026-10-03",
+                "sport": "Run",
+                "priority": "A",
+            }
+        )["competition"]["id"]
+        remote = {
+            "id": "81",
+            "external_id": "remote-race",
+            "name": "Remote race",
+            "starts_at_local": "2026-10-03T09:00:00",
+            "type": "Run",
+            "category": "RACE_A",
+        }
+        for strategy, state in (
+            ("keep_local", "local_override"),
+            ("adopt_remote", "synced"),
+        ):
             with server.database_manager().unit_of_work() as db:
                 db.execute(
-                    "UPDATE planned_units SET sync_state='conflict', sync_conflict=? WHERE local_id=?",
-                    (json.dumps({"type": "remote_missing", "remote": None}), local_id),
+                    "UPDATE competitions SET sync_state='conflict', sync_conflict=? WHERE id=?",
+                    (json.dumps({"remote": remote}), competition_id),
                 )
             self.run_tool(
                 "resolve_training_sync_conflict",
-                {"local_id": local_id, "strategy": strategy},
-                ["planned_unit:" + local_id],
+                {"local_id": competition_id, "strategy": strategy},
+                ["competition:" + competition_id],
             )
-            self.assertEqual(
-                len(self.state()["planned_units"]), 1 if strategy == "keep_local" else 0
-            )
+            with server.database_manager().unit_of_work() as db:
+                stored = db.execute(
+                    "SELECT sync_state FROM competitions WHERE id=?", (competition_id,)
+                ).fetchone()
+            self.assertEqual(stored["sync_state"], state)
         for provider, kind, remote in (
             ("intervals", "competition_push", True),
             ("garmin", "refresh", False),

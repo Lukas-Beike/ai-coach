@@ -6,7 +6,6 @@ function render(data, { reloadRoute = true } = {}) {
   if (reloadRoute && AppRouter.baseRoute() === "nutrition") { if (state.route === "nutrition/products") void loadNutritionProducts("", { background: true }); else void loadNutrition(); }
   renderAppVersion(data.app);
   renderCoachOverview(data);
-  renderCoachReceipts();
   renderQuickMessageTemplates();
   // Device snapshot data may be outdated, so only loaded state notifies.
   if (!state.replaceDataOnLoad) notifyState(data);

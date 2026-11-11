@@ -834,40 +834,6 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual(payload["type"], "Run")
 
-    def test_planned_conflict_can_keep_local_or_adopt_remote(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        event = {
-            "id": "remote-conflict",
-            "external_id": "intervals-event-conflict",
-            "category": "WORKOUT",
-            "start_date_local": tomorrow + "T07:00:00",
-            "type": "Ride",
-            "name": "Original",
-            "description": "- 30m Z2",
-            "moving_time": 1800,
-        }
-        remote_reconcilers.planned_reconciler(server).reconcile([event])
-        local = server.PLANNING_DATA.planned_unit().list()[0]
-        server.PLANNING_DATA.planned_unit().update(
-            local["id"], {"action": "update", "name": "Lokal"}
-        )
-        remote_reconcilers.planned_reconciler(server).reconcile(
-            [{**event, "name": "Remote"}]
-        )
-        kept = server.PLANNING_DATA.planned_unit().resolve_conflict(
-            local["id"], "keep_local"
-        )
-        self.assertEqual(kept["planned_unit"]["name"], "Lokal")
-        remote_reconcilers.planned_reconciler(server).reconcile(
-            [{**event, "name": "Remote"}]
-        )
-        adopted = server.PLANNING_DATA.planned_unit().resolve_conflict(
-            local["id"], "adopt_remote"
-        )
-        self.assertEqual(adopted["planned_unit"]["name"], "Remote")
-
     def test_local_planned_workout_can_be_edited_moved_and_removed(self):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)

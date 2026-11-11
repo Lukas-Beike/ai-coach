@@ -46,7 +46,7 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions and the planning-state revision counter; approval proposals are exported without their session and action-token hashes, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 17.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions and the planning-state revision counter; approval proposals are exported without their session and action-token hashes, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
@@ -59,6 +59,10 @@ The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines m
 #### Scenario: Credential-bearing runtime state
 - **WHEN** stored application state contains sessions, provider credentials, the Personal API key or Garmin or Wahoo tokens
 - **THEN** those values are excluded from the archive, and the non-secret Personal API key expiry date appears only in `provider_settings.json`
+
+#### Scenario: Provider settings and format version
+- **WHEN** the archive is exported
+- **THEN** the stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are in `provider_settings.json`, and the format version is currently 17
 
 #### Scenario: Unauthenticated download
 - **WHEN** a privacy download is requested without a valid session

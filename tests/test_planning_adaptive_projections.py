@@ -10,16 +10,6 @@ from backend.planning import adaptive
 
 
 class AdaptiveProjectionTests(unittest.TestCase):
-    def test_workout_is_hard_uses_name_and_description_terms_case_insensitively(self):
-        self.assertTrue(adaptive.workout_is_hard({"name": "VO2 reps"}))
-        self.assertTrue(adaptive.workout_is_hard({"description": "Threshold blocks"}))
-        self.assertTrue(adaptive.workout_is_hard({"name": "Build to 115%"}))
-        self.assertFalse(
-            adaptive.workout_is_hard(
-                {"name": "Easy conversational run", "description": "Z1 recovery"}
-            )
-        )
-
     def test_recovery_description_preserves_sport_specific_text_and_fallback(self):
         self.assertEqual(
             adaptive.adaptive_recovery_description("Run", 25),

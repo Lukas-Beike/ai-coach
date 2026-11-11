@@ -493,7 +493,7 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.1.0"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1005,9 +1005,6 @@ SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = CONFIG.sync_history_earliest_date
-# Keep enough calendar history to show whether recently planned workouts were
-# completed, while retaining the existing five-week forward planning horizon.
-PLANNED_CALENDAR_HISTORY_DAYS = 35
 PLANNED_CALENDAR_FUTURE_DAYS = 35
 SETTINGS = SettingsService(
     lambda: CONFIG,
@@ -1749,7 +1746,6 @@ SYNC_COMMANDS = SyncCommandAssembly(
     core=SyncCommandCore(
         database_manager=database_manager,
         queue_service=SYNC_JOB_QUEUE.service,
-        planned_unit_service=PLANNING_DATA.planned_unit,
         competition_service=PLANNING_DATA.competition,
         workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
         planning_revision=PLANNING_REVISION_SERVICE,
@@ -2115,7 +2111,6 @@ PUBLIC_STATE = PublicStateAssembly(
             coverage=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
-            snapshot_repository=SNAPSHOT_REPOSITORY,
             sync_persistence=lambda: SYNC_PERSISTENCE,
             planning_data=lambda: PLANNING_DATA,
             athlete_data=lambda: ATHLETE_DATA,
@@ -2151,8 +2146,6 @@ PUBLIC_STATE = PublicStateAssembly(
             external_calendar_window_days=lambda: (
                 calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
             ),
-            calendar_history_days=lambda: PLANNED_CALENDAR_HISTORY_DAYS,
-            calendar_future_days=lambda: PLANNED_CALENDAR_FUTURE_DAYS,
             sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
             all_sync_days=lambda: ALL_SYNC_DAYS,
             planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
@@ -2210,9 +2203,6 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     ),
     bump_planning_revision=PLANNING_REVISION_SERVICE.bump,
     database_manager=database_manager,
-    history_undo=HISTORY.undo_service,
-    database_lock=DB_LOCK,
-    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
         "coach", {"status": "changed"}
     ),
@@ -2379,7 +2369,6 @@ HTTP_API = HttpApiAssembly(
                 actions=HttpCoachWriteActions(
                     job_cancellation_service=COACH_BACKGROUND_JOBS.cancellation_service,
                     context_preview_service=COACH_CONTEXT.preview_service,
-                    proposal_creation_service=COACH_PROPOSALS.creation_service,
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
                     reset_service=COACH_CONVERSATION.reset_service,
@@ -2426,9 +2415,7 @@ HTTP_API = HttpApiAssembly(
                 report=DIAGNOSTICS_ASSEMBLY.report_service,
             ),
             history=HttpHistoryServices(
-                change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
-                session_focus_backfill_undo=lambda: SESSION_FOCUS_BACKFILL.undo,
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,

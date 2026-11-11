@@ -78,9 +78,7 @@ class WorkoutLibraryPlanService:
 
         row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
         if not row:
-            raise AppError(
-                404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren."
-            )
+            raise AppError(404, "Bibliothekseinheit nicht gefunden.")
         try:
             workout = json.loads(row["payload"])
         except (TypeError, ValueError) as exc:
@@ -93,19 +91,18 @@ class WorkoutLibraryPlanService:
         self, requested: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         conflicts: list[dict[str, Any]] = []
-        seen_dates: dict[str, str] = {}
+        seen: set[tuple[str, str]] = set()
         for request in requested:
             plan_date = request["date"]
             workout_id = request["library_workout_id"]
-            previous_id = seen_dates.get(plan_date)
-            if previous_id and previous_id == workout_id:
+            if (plan_date, workout_id) in seen:
                 conflicts.append(
                     {
                         "name": "Doppelte Bibliothekseinheit",
                         "date": plan_date,
                     }
                 )
-            seen_dates[plan_date] = workout_id
+            seen.add((plan_date, workout_id))
 
             source = request["workout"]
             try:

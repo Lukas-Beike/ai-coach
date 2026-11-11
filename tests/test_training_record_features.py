@@ -1104,6 +1104,13 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         for value in (0, -1, float("nan"), float("inf"), True):
             with self.subTest(value=value), self.assertRaises(AppError):
                 service.save({**payload, "lifetime_target_km": value})
+        # A zero target names its rule in German (#2135, D-017).
+        with self.assertRaises(AppError) as raised:
+            service.save({**payload, "lifetime_target_km": 0})
+        self.assertEqual(
+            raised.exception.message,
+            "Die Ziel-Laufleistung muss größer als null sein.",
+        )
         item = service.save(payload)["equipment"]
         self.assertEqual(item["lifetime_target_km"], 100)
         self.assertEqual(service.read()["items"][0]["lifetime"]["percent"], 125)

@@ -48,7 +48,6 @@ from backend.performance.progress_report import weekly_progress
 from backend.performance.season_inputs import (
     SeasonSource,
     read_activity_summaries,
-    read_season_load_inputs,
 )
 from backend.performance.session_analysis_reads import analysis_summaries
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
@@ -354,7 +353,6 @@ class TrainingProfileSelectionService:
             "source": source,
             "cache_coverage": {
                 "records": len(eligible),
-                "cached_records": len(eligible),
                 "usable_records": len(usable),
                 "unknown_records": len(eligible) - len(usable),
                 # Rides only: the power bests cannot come from runs.
@@ -462,8 +460,6 @@ class TrainingReportReadService:
         read_checkins: Callable[[], Any],
         read_feedback: Callable[[list[str]], list[dict[str, Any]]],
         today: Callable[[], date],
-        load_scenarios: Callable[..., dict[str, Any]],
-        season_source: SeasonSource,
         canonical: CanonicalPerformanceSource,
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
@@ -480,26 +476,7 @@ class TrainingReportReadService:
         self._session_feedback = session_feedback
         self._now = now
         self._today = today
-        self._load_scenarios = load_scenarios
-        self._season_source = season_source
         self._canonical = canonical
-
-    def scenarios(
-        self, values: dict[str, Any], timezone: str = "UTC"
-    ) -> dict[str, Any]:
-        if not isinstance(values, dict):
-            raise AppError(400, "Das Szenario muss ein Objekt sein.")
-        today = self._today()
-        with self._season_source.database_manager().read_snapshot() as db:
-            inputs = read_season_load_inputs(
-                self._season_source, db, today=today, timezone=timezone
-            )
-        return self._load_scenarios(
-            self._read_plan() or {},
-            today,
-            values,
-            inputs=inputs,
-        )
 
     def progress(
         self,

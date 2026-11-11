@@ -18,6 +18,14 @@ from backend.db.schema import (
 LOGGER = logging.getLogger("intervals_coach")
 
 
+# The change-history references a receipt's tool steps carry (``turn_changes``).
+_UNDO_REFERENCES = (
+    "SELECT 1 FROM json_each(receipt, '$.command_receipts') AS step, "
+    "json_each(CASE WHEN step.type = 'object' THEN step.value ELSE '{}' END, "
+    "'$.changes') AS change WHERE 1"
+)
+
+
 def apply_startup_invariants(
     db: Any,
     *,
@@ -82,12 +90,18 @@ def initialize_application_database(
             (cutoff,),
         ).rowcount
         # Receipts hold copies of the chat; a turn whose changes can still be
-        # undone keeps its receipt, which is the only place that lists them.
+        # undone keeps its receipt, which is the only place that lists them. It
+        # can be undone only while every change-history row it names is still
+        # stored, as the undo requires (#2134, K-003).
         commands_deleted = db.execute(
             "DELETE FROM coach_commands WHERE status='completed' AND created_at < ? "
             "AND NOT CASE WHEN json_valid(receipt) THEN "
             "COALESCE(json_extract(receipt, '$.change_summary.undoable') = 1 "
             "AND json_extract(receipt, '$.change_summary.undone_at') IS NULL, 0) "
+            f"AND EXISTS ({_UNDO_REFERENCES}) "
+            f"AND NOT EXISTS ({_UNDO_REFERENCES} AND CASE WHEN change.type = 'object' "
+            "THEN json_extract(change.value, '$.id') END "
+            "NOT IN (SELECT id FROM change_history)) "
             "ELSE 0 END",
             (cutoff,),
         ).rowcount

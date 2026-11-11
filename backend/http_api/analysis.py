@@ -1,4 +1,4 @@
-"""Authenticated local analysis reads and scenario projection."""
+"""Authenticated local analysis reads and targeted refresh."""
 
 from __future__ import annotations
 
@@ -21,9 +21,7 @@ class AnalysisRoutes:
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
-            "/api/analysis/endurance",
             "/api/analysis/power-profiles",
-            "/api/analysis/season",
             "/api/analysis/training-records",
         }:
             return False
@@ -35,12 +33,8 @@ class AnalysisRoutes:
         reports = self._reports()
         if path.endswith("/training-records"):
             payload = reports.records.training_records(values)
-        elif path.endswith("/season"):
-            payload = reports.season.season(reports.timezone())
-        elif path.endswith("/power-profiles"):
-            payload = reports.profiles.power_profiles()
         else:
-            payload = reports.records.endurance()
+            payload = reports.profiles.power_profiles()
         handler.send_json(200, payload)
         return True
 
@@ -67,11 +61,5 @@ class AnalysisRoutes:
                     reason="analysis_refresh_unavailable",
                 )
             handler.send_json(200, self._refresh().refresh(area, days=days))
-            return True
-        if path == "/api/analysis/scenarios":
-            reports = self._reports()
-            handler.send_json(
-                200, reports.report.scenarios(handler.read_json(), reports.timezone())
-            )
             return True
         return False

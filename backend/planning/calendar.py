@@ -8,24 +8,22 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
-from backend.planning.session_focus import session_focus
+from backend.canonical.vocabulary import Sport
+from backend.planning.session_focus import is_hard, session_focus
+from backend.planning.sport import planned_sport_environment
 from backend.providers.intervals_workouts import WORKOUT_INTERVALS_FIELD
 
 _HARD_KEYWORD_PATTERN = re.compile(
     r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
 )
 _HARD_PERCENT_PATTERN = re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII)
-# Without a set session_focus, [NO_INTENSITY] and rest classification stay
+# Without a set session_focus, explicit-easy and rest classification stay
 # conservative: a named zone from Z2 up is not easy. A set easy focus wins.
+# [NO_INTENSITY] days block hard units (``session_focus.is_hard``, #2083) and
+# strength that is not explicitly easy (``breaks_no_intensity``).
 _HARD_EFFORT_PATTERNS = (
     _HARD_KEYWORD_PATTERN,
     re.compile(r"\bz(one)?\s*[2-9]\b"),
-    _HARD_PERCENT_PATTERN,
-)
-# Race-proximity conflicts treat zone 2 endurance as easy; only Z3+ counts as hard.
-_RACE_HARD_EFFORT_PATTERNS = (
-    _HARD_KEYWORD_PATTERN,
-    re.compile(r"\bz(one)?\s*[3-9]\b"),
     _HARD_PERCENT_PATTERN,
 )
 _EASY_EFFORT_PATTERN = re.compile(
@@ -40,12 +38,6 @@ def _effort_text(workout: dict[str, Any]) -> str:
         f"{workout.get('steps', '')} {workout.get(WORKOUT_INTERVALS_FIELD, '')} "
         f"{workout.get('workout_steps', '')}"
     ).casefold()
-
-
-def workout_is_hard_effort(workout: dict[str, Any]) -> bool:
-    """Return whether name, description, targets or steps name race-relevant hard effort."""
-    text = _effort_text(workout)
-    return any(pattern.search(text) for pattern in _RACE_HARD_EFFORT_PATTERNS)
 
 
 _EASY_FOCI = frozenset({"recovery", "easy", "endurance", "long", "mobility"})
@@ -69,6 +61,14 @@ def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
     if any(pattern.search(text) for pattern in _HARD_EFFORT_PATTERNS):
         return False
     return bool(_EASY_EFFORT_PATTERN.search(text))
+
+
+def breaks_no_intensity(workout: dict[str, Any]) -> bool:
+    """Whether a unit breaks a [NO_INTENSITY] day: a hard unit (#2083), or
+    strength that is not explicitly easy (light, mobility or easy text)."""
+    if planned_sport_environment(workout)[0] is Sport.STRENGTH:
+        return not workout_is_explicitly_easy(workout)
+    return is_hard(workout)
 
 
 def workout_is_rest(workout: dict[str, Any]) -> bool:
@@ -138,7 +138,7 @@ def calendar_constraint_decision(
             "reason": "no_training",
             "marker": NO_TRAINING_MARKER,
         }
-    if no_intensity and not workout_is_explicitly_easy(workout):
+    if no_intensity and breaks_no_intensity(workout):
         return {
             "blocked": True,
             "reason": "no_intensity",

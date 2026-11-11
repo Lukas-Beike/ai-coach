@@ -10,7 +10,6 @@ from contextlib import contextmanager
 from datetime import date
 from unittest.mock import patch
 
-import remote_planned_unit_fixture
 from support import temp_database
 
 from backend import change_history
@@ -30,7 +29,6 @@ from backend.planning.local_start import known_start
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
 from backend.providers import garmin_strength_workout
-from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 NOW = "2026-09-20T08:00:00+00:00"
 TODAY = date(2026, 9, 20)
@@ -133,21 +131,6 @@ class PlannedUnitServiceTests(unittest.TestCase):
             ).fetchone()["revision"]
         return planned, history, revision
 
-    def make_conflict(self, conflict=None, *, conflict_json=None, state="conflict"):
-        self.service.create(self.workout())
-        self.events.clear()
-        if conflict_json is None:
-            conflict_json = json.dumps(
-                {"remote": None} if conflict is None else conflict
-            )
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE planned_units SET sync_state=?, sync_dirty=1, "
-                "sync_error='stale error', sync_conflict=? WHERE local_id=?",
-                (state, conflict_json, str(self.id)),
-            )
-        return str(self.id)
-
     @unittest.skipUnless(
         garmin_strength_workout.catalogue_available(), "garminconnect is not installed"
     )
@@ -175,17 +158,6 @@ class PlannedUnitServiceTests(unittest.TestCase):
                 self.service.assign_garmin_exercise(
                     str(self.id), index, "V-grip Cable Row", listed["payload_hash"]
                 )
-        # A unit in a sync conflict needs the athlete's decision first.
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE planned_units SET sync_state='conflict' WHERE local_id=?",
-                (str(self.id),),
-            )
-        with self.assertRaises(AppError) as raised:
-            self.service.assign_garmin_exercise(
-                str(self.id), 0, "V-grip Cable Row", listed["payload_hash"]
-            )
-        self.assertEqual("sync_conflict", raised.exception.reason)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
@@ -972,214 +944,6 @@ class PlannedUnitServiceTests(unittest.TestCase):
 
         self.assertEqual(self.state(), before)
         self.assertEqual(self.events, [])
-
-    def test_resolve_conflict_keep_local_resets_sync_metadata_and_bumps_once(self):
-        local_id = self.make_conflict({"remote": {"id": "ignored"}})
-
-        result = self.service.resolve_conflict(local_id, "keep_local")
-
-        planned, history, revision = self.state()
-        payload = json.loads(planned[0]["payload"])
-        self.assertEqual(result["status"], "resolved")
-        self.assertEqual(result["strategy"], "keep_local")
-        self.assertEqual(set(result), {"status", "strategy", "planned_unit"})
-        self.assertEqual(result["planned_unit"]["name"], "Äußerst lockerer Lauf")
-        self.assertEqual(payload["sync_status"], "local")
-        self.assertEqual(planned[0]["sync_dirty"], 1)
-        self.assertEqual(planned[0]["sync_state"], "local")
-        self.assertIsNone(planned[0]["sync_error"])
-        self.assertEqual(planned[0]["sync_conflict"], "")
-        self.assertEqual([row["action"] for row in history], ["create"])
-        self.assertEqual(revision, 2)
-        self.assertEqual(self.events, [])
-        self.assertEqual(self.calendar_conflicts.calls, [])
-
-    def test_resolve_conflict_adopts_normalized_remote_and_metadata(self):
-        provider_event = {
-            "id": "remote-42",
-            "external_id": "provider-workout-42",
-            "category": "WORKOUT",
-            "start_date_local": "2026-09-22T07:30:00+02:00",
-            "type": "Ride",
-            "name": "Remote Fahrt",
-            "description": "- 30m Z2",
-            "moving_time": 1800,
-        }
-        remote = remote_planned_unit_fixture.remote_planned_unit_payload(
-            planning_fields_from_intervals(provider_event), today=TODAY
-        )[0]
-        local_id = self.make_conflict({"remote": remote})
-        with self.manager.unit_of_work() as db:
-            local = json.loads(
-                db.execute(
-                    "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
-                ).fetchone()["payload"]
-            )
-            local.update(plan_id="plan-1", plan_name="Spring plan", archived=False)
-            db.execute(
-                "UPDATE planned_units SET payload=? WHERE local_id=?",
-                (json.dumps(local), local_id),
-            )
-
-        result = self.service.resolve_conflict(local_id, "adopt_remote")
-
-        planned, history, revision = self.state()
-        payload = json.loads(planned[0]["payload"])
-        self.assertEqual(result["strategy"], "adopt_remote")
-        self.assertEqual(result["planned_unit"]["id"], local_id)
-        self.assertEqual(result["planned_unit"]["remote_event_id"], "remote-42")
-        self.assertEqual(result["planned_unit"]["name"], "Remote Fahrt")
-        self.assertEqual(payload["sync_status"], "synced")
-        self.assertEqual(planned[0]["external_id"], "provider-workout-42")
-        self.assertEqual(planned[0]["sync_dirty"], 0)
-        self.assertEqual(planned[0]["sync_state"], "synced")
-        self.assertEqual(planned[0]["sync_conflict"], "")
-        self.assertIsNone(planned[0]["sync_error"])
-        self.assertTrue(planned[0]["baseline_hash"])
-        self.assertEqual(payload["plan_id"], "plan-1")
-        self.assertEqual(payload["plan_name"], "Spring plan")
-        self.assertEqual(
-            planned[0]["baseline_hash"],
-            planned_units.planned_unit_payload_hash(remote),
-        )
-        self.assertEqual(
-            remote_planned_unit_fixture.remote_planned_unit_existing_state(
-                {**planned[0], "sync_dirty": 0, "sync_state": "synced"},
-                planned[0]["baseline_hash"],
-            )[1],
-            "unchanged",
-        )
-        self.assertEqual(planned[0]["last_synced_at"], NOW)
-        self.assertEqual(planned[0]["updated_at"], NOW)
-        self.assertEqual([row["action"] for row in history], ["create"])
-        self.assertEqual(revision, 2)
-        self.assertEqual(self.events, [])
-        self.assertEqual(self.calendar_conflicts.calls, [])
-
-    def test_resolve_conflict_adopts_remote_deletion_as_persistent_tombstone(self):
-        local_id = self.make_conflict({"remote": None})
-
-        result = self.service.resolve_conflict(local_id, "adopt_remote")
-
-        planned, history, revision = self.state()
-        payload = json.loads(planned[0]["payload"])
-        self.assertEqual(result["planned_unit"]["sync_status"], "remote_deleted")
-        self.assertTrue(payload["local_deleted"])
-        self.assertTrue(payload["archived"])
-        self.assertEqual(payload["sync_status"], "remote_deleted")
-        self.assertEqual(planned[0]["sync_state"], "remote_deleted")
-        self.assertEqual(planned[0]["sync_dirty"], 0)
-        self.assertEqual(planned[0]["sync_conflict"], "")
-        self.assertIsNone(planned[0]["sync_error"])
-        self.assertEqual([row["action"] for row in history], ["create"])
-        self.assertEqual(revision, 2)
-        self.assertEqual(self.events, [])
-
-    def test_resolve_conflict_rejects_closed_and_missing_conflicts(self):
-        self.make_conflict(state="local")
-        with self.assertRaises(AppError) as closed:
-            self.service.resolve_conflict(str(self.id), "keep_local")
-        with self.assertRaises(AppError) as missing:
-            self.service.resolve_conflict(
-                "52345678-1234-5678-1234-567812345678", "keep_local"
-            )
-
-        for caught in (closed.exception, missing.exception):
-            self.assertEqual(caught.status, 409)
-            self.assertEqual(
-                caught.message,
-                "Für diese Planung liegt kein offener Synchronisierungskonflikt vor.",
-            )
-        self.assertEqual(self.state()[2], 1)
-        self.assertEqual(self.events, [])
-
-    def test_resolve_conflict_rejects_invalid_conflict_json(self):
-        self.make_conflict(conflict_json="{invalid")
-
-        with self.assertRaises(AppError) as caught:
-            self.service.resolve_conflict(str(self.id), "keep_local")
-
-        self.assertEqual(caught.exception.status, 409)
-        self.assertEqual(
-            caught.exception.message,
-            "Der gespeicherte Synchronisierungskonflikt ist nicht mehr gültig.",
-        )
-        self.assertEqual(self.state()[2], 1)
-        self.assertEqual(self.events, [])
-
-    def test_non_object_conflict_is_treated_as_remote_deletion(self):
-        self.make_conflict(conflict_json=json.dumps([{"remote": {"id": "ignored"}}]))
-
-        result = self.service.resolve_conflict(str(self.id), "adopt_remote")
-
-        payload = json.loads(self.state()[0][0]["payload"])
-        self.assertEqual(result["planned_unit"]["sync_status"], "remote_deleted")
-        self.assertTrue(payload["local_deleted"])
-        self.assertTrue(payload["archived"])
-
-    def test_resolve_conflict_rejects_invalid_remote_event(self):
-        self.make_conflict({"remote": {"id": "race", "category": "RACE"}})
-
-        with self.assertRaises(AppError) as caught:
-            self.service.resolve_conflict(str(self.id), "adopt_remote")
-
-        self.assertEqual(caught.exception.status, 409)
-        self.assertEqual(
-            caught.exception.message,
-            "Das Remote-Event kann nicht übernommen werden.",
-        )
-        self.assertEqual(self.state()[2], 1)
-        self.assertEqual(self.events, [])
-
-    def test_resolve_conflict_revision_failure_rolls_back_payload_and_metadata(self):
-        local_id = self.make_conflict({"remote": None})
-        before = self.state()
-
-        with (
-            patch.object(
-                self.service._planning_revision_service,
-                "bump",
-                side_effect=RuntimeError("revision unavailable"),
-            ),
-            self.assertRaisesRegex(RuntimeError, "revision unavailable"),
-        ):
-            self.service.resolve_conflict(local_id, "adopt_remote")
-
-        self.assertEqual(self.state(), before)
-        self.assertEqual(self.events, [])
-
-    def test_resolve_conflict_reads_back_only_after_commit_and_has_no_side_effects(
-        self,
-    ):
-        local_id = self.make_conflict({"remote": None})
-        original_list = self.service.list
-        observed = []
-
-        def readback(limit=500, include_archived=False, *, future_only=False):
-            with self.manager.reader() as db:
-                observed.append(
-                    db.execute(
-                        "SELECT sync_state FROM planned_units WHERE local_id=?",
-                        (local_id,),
-                    ).fetchone()["sync_state"]
-                )
-            return original_list(limit, include_archived, future_only=future_only)
-
-        self.service.list = readback
-        with (
-            patch("backend.providers.intervals.IntervalsApiClient.post") as post,
-            patch("backend.providers.intervals.IntervalsApiClient.put") as put,
-            patch("backend.providers.intervals.IntervalsApiClient.delete") as delete,
-        ):
-            result = self.service.resolve_conflict(local_id, "adopt_remote")
-
-        self.assertEqual(observed, ["remote_deleted"])
-        self.assertEqual(result["planned_unit"]["sync_status"], "remote_deleted")
-        self.assertEqual(self.events, [])
-        self.assertEqual(self.calendar_conflicts.calls, [])
-        post.assert_not_called()
-        put.assert_not_called()
-        delete.assert_not_called()
 
     def test_restore_existing_in_transaction_restores_visibility_and_local_state(self):
         entity_id = str(self.id)

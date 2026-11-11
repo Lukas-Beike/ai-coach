@@ -22,6 +22,7 @@ from backend.planning.adaptive_preview_service import (
 )
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.session_focus import is_hard
 
 NOW = "2026-09-20T08:00:00+00:00"
 TODAY = date(2026, 9, 20)
@@ -595,7 +596,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         saved_run = self.saved(run_id)
         self.assertEqual(saved_run["session_focus"], "easy")
         self.assertNotIn("hr_cap", saved_run)  # no caps wired in this fixture
-        self.assertFalse(adaptive.workout_is_hard(saved_run))
+        self.assertFalse(is_hard(saved_run))
         saved_strength = self.saved(strength_id)
         self.assertEqual(saved_strength["strength_intensity"], "light")
         exercise = saved_strength["strength_structure"][0]
@@ -636,7 +637,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
     def test_illness_archive_beside_an_ordinary_event_applies(self):
         workout_id = str(uuid.uuid4())
         draft = self.workout(
-            workout_id, "2026-09-22", name="Tempo ride", description="- 30m 80%"
+            workout_id, "2026-09-22", name="Threshold ride", description="- 30m 100%"
         )
 
         preview, result = self.preview_and_apply(
@@ -865,19 +866,6 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
 
 
 class AdaptiveHardAndReplacementTests(unittest.TestCase):
-    def test_set_focus_decides_hardness_before_keywords(self):
-        self.assertTrue(
-            adaptive.workout_is_hard(
-                {"type": "Run", "name": "Schwelle 3x10", "session_focus": "threshold"}
-            )
-        )
-        self.assertFalse(
-            adaptive.workout_is_hard(
-                {"type": "Run", "name": "kein Tempo", "session_focus": "easy"}
-            )
-        )
-        self.assertTrue(adaptive.workout_is_hard({"type": "Run", "name": "Tempo run"}))
-
     def test_run_replacement_takes_the_easy_cap(self):
         caps = {"easy": {"percent_lthr": 87.0}}
         replacement = adaptive.adaptive_recovery_replacement(

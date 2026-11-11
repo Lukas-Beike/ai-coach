@@ -3,13 +3,11 @@
 Provider routes, their not-configured messages and their period rules come from
 the provider registry. The registry is read once per registry into a single
 route table (``SyncRouteSurface``), so a request only looks its path up. The
-job queue and job resolution are not provider routes and stay explicit in this
-module.
+job queue is not a provider route and stays explicit in this module.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -22,7 +20,6 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRe
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 
-SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 SYNC_JOBS_PATH = "/api/sync/jobs"
 
 
@@ -107,12 +104,11 @@ class SyncRouteSurface:
         )
 
     def accepts(self, path: str) -> bool:
-        return path in self._routes or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return path in self._routes
 
     def requires_body(self, path: str) -> bool:
         route = self._routes.get(path)
-        reads_body = route is not None and route.reads_body
-        return reads_body or SYNC_JOB_RESOLVE_RE.match(path) is not None
+        return route is not None and route.reads_body
 
     def not_configured_message(self, provider: str) -> str | None:
         """Return the rejection text for a provider id, matched case-insensitively."""
@@ -197,8 +193,6 @@ class SyncCommandEndpoint:
     def execute(self, path: str, payload: Any = None) -> tuple[int, dict[str, Any]]:
         if path == SYNC_JOBS_PATH:
             return self._enqueue_job(payload)
-        if match := SYNC_JOB_RESOLVE_RE.match(path):
-            return 200, self._queue.resolve(match.group(1), payload)
         route = self._surface.route(path)
         if route is not None and route.manual is not None:
             manual = route.manual

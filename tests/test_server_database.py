@@ -1,5 +1,6 @@
 """Server integration tests for database."""
 
+import dataclasses
 import http.client
 import json
 import os
@@ -35,9 +36,12 @@ from backend.db.schema import (
     database_table_names,
 )
 from backend.http_api import server as http_server_module
+from backend.http_api.bootstrap_state import (
+    PublicBootstrapDependencies,
+    PublicBootstrapService,
+)
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.export_streams import ExportStreamTransport
-from backend.http_api.public_state import PublicStateService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import STREAM_CHUNK_BYTES
 from backend.providers import openai as openai_provider
@@ -359,27 +363,10 @@ class ServerDatabaseTests(ServerTestCase):
         )
         real_connect = backend.connect
         with patch.object(backend, "connect", wraps=real_connect) as connect:
-            server.PUBLIC_STATE.state_service().read(local_only=True)
-        self.assertEqual(connect.call_count, 2)
+            server.PUBLIC_STATE.bootstrap_service().read()
+        self.assertEqual(connect.call_count, 1)
 
-    def test_public_state_resolves_database_manager_under_database_lock(self):
-        database_lock = threading.RLock()
-        manager_factory = server.database_manager
-        calls = []
-
-        def resolve_manager():
-            self.assertTrue(database_lock._is_owned())
-            calls.append(True)
-            return manager_factory()
-
-        with (
-            patch.object(server, "DB_LOCK", database_lock),
-            patch.object(server, "database_manager", side_effect=resolve_manager),
-        ):
-            server.PUBLIC_STATE.state_service()
-        self.assertTrue(calls)
-
-    def test_public_state_resolves_active_manager_after_weather_restore(self):
+    def test_public_bootstrap_resolves_active_manager_after_restore(self):
         class Manager:
             def __init__(self):
                 self.closed = False
@@ -401,93 +388,50 @@ class ServerDatabaseTests(ServerTestCase):
         def manager_factory():
             return active_manager[0]
 
-        def owner(**methods):
-            result = Mock()
-            for name, value in methods.items():
-                getattr(result, name).return_value = value
-            return result
-
+        key_values = Mock()
+        key_values.get_in_transaction.return_value = ""
         settings = Mock()
         settings.selected_model.return_value = ""
         settings.available_model_options.return_value = []
         settings.selected_thinking_level.return_value = ""
         settings.available_thinking_level_options.return_value = []
         settings.calendar_display_settings.return_value = {}
-        weather_prelude = Mock()
-
-        def restore_during_weather(*_args):
-            old_manager.closed = True
-            active_manager[0] = new_manager
-            return {"configured": False}
-
-        weather_prelude.project.side_effect = restore_during_weather
-        dependencies = SimpleNamespace(
-            local_prelude=owner(
-                read=SimpleNamespace(
-                    sync_metadata={"provider_sync": {}},
-                    activities=[],
-                    local_planned=[],
-                    canonical_planned=[],
-                    calendar_window={},
-                    weather={},
-                )
-            ),
-            weather_prelude=weather_prelude,
-            calendar_projection=owner(
-                read=SimpleNamespace(
-                    checkins=[],
-                    competitions=[],
-                    external_calendar={},
-                    daily_context=[],
-                    calendar_projection={},
-                )
-            ),
-            database_manager=manager_factory,
-            key_values=owner(get=""),
-            app_name="Pacecraft · AI Coach",
-            app_version="test",
-            config=SimpleNamespace(
-                garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
-                intervals_api_key="",
-                openai_api_key="",
-                calendar_ical_url="",
-                wahoo_configured=False,
-            ),
-            settings=settings,
-            coach_messages=owner(list=[]),
-            training_plans=owner(list=[]),
-            workout_library=owner(list=[]),
-            profile=owner(get={}),
-            public_feedback=owner(
-                feedback_state={
-                    "checkins": [],
-                    "local_feedback": [],
-                    "activity_feedback": [],
-                }
-            ),
-            public_performance=owner(from_inputs={"performance": {}, "garmin": {}}),
-            sync_state=owner(sync_period=30),
-            provider_freshness=owner(current={}),
-            garmin_sync_state=owner(core_error_entries=[]),
-            sync_public_state=owner(browser_state={}),
-            workout_library_sync_running=lambda: False,
-            workout_library_sync_state=owner(summary={}),
-            garmin_sync=owner(running=False),
-            provider_resync=owner(state={}),
-            provider_credentials=None,
-            planning_preview=owner(latest_preview={}, status={}),
-            morning_checkin=owner(state={}),
-            coach_quick_actions=owner(state={}),
-            provider_state=owner(summary={}),
-            sync_period_defaults={"intervals": 90, "garmin": 30},
-            all_sync_days=3650,
-            calendar_history_days=30,
-            calendar_future_days=90,
-            local_now=lambda: datetime(2026, 9, 23, tzinfo=UTC),
+        owners = {
+            field.name: Mock()
+            for field in dataclasses.fields(PublicBootstrapDependencies)
+            if field.name.endswith(("_service", "_reader", "_repository"))
+            or field.name
+            in {"local_calendar_events", "planning_state", "intervals_public_state"}
+        }
+        service = PublicBootstrapService(
+            PublicBootstrapDependencies(
+                **owners,
+                database_manager=manager_factory,
+                database_lock=threading.RLock(),
+                config=SimpleNamespace(
+                    garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
+                    intervals_api_key="",
+                    openai_api_key="",
+                    calendar_ical_url="",
+                    wahoo_configured=False,
+                ),
+                app_name="Pacecraft · AI Coach",
+                app_version="test",
+                key_values=key_values,
+                diagnostic_capture=Mock(),
+                workout_library_sync_running=lambda: False,
+                external_calendar_window_days=14,
+                sync_period_defaults={"intervals": 90, "garmin": 30},
+                all_sync_days=3650,
+                settings=settings,
+                local_date=lambda: datetime(2026, 9, 23, tzinfo=UTC).date(),
+            )
         )
-        service = PublicStateService(dependencies)
+        # A restore swaps the manager after the service was built.
+        old_manager.closed = True
+        active_manager[0] = new_manager
 
-        result = service.read(local_only=True)
+        result = service.read()
 
         self.assertIn("configured", result)
         self.assertEqual(old_manager.unit_of_work_calls, 0)

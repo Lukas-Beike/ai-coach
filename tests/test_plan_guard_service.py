@@ -395,7 +395,10 @@ class PlanGuardWriteTests(unittest.TestCase):
                 "sport": "ride",
                 "started_at_local": "2026-10-30T08:00:00",
                 "moving_duration_s": 3600,
-                "normalized_power": 200,
+                # The stored card M6 load the activity reader sets (#2082).
+                "training_load": 64.0,
+                "load_method": "local-tss-load",
+                "load_branch": "power",
             }
         ]
         self.units = []

@@ -62,7 +62,7 @@ The system SHALL store a check-in for an explicit nonfuture calendar date or ath
 
 #### Scenario: Valid local check-in
 - **WHEN** the athlete supplies daily form, illness, pain, availability, notes or scores
-- **THEN** the date defaults to local today, scores normalize to integers from 0 through 10 or unknown, available minutes to 0 through 1440 or unknown, and bounded text is saved by date.
+- **THEN** the date defaults to local today, scores are whole numbers from 0 through 10 or unknown, available minutes whole numbers from 0 through 1440 or unknown (a fraction or a boolean is rejected, never cut), and bounded text is saved by date.
 
 #### Scenario: Invalid date or values
 - **WHEN** a future/invalid date, invalid score or invalid available-minute value is supplied
@@ -160,13 +160,13 @@ The system SHALL show an estimated first threshold heart rate, derived from stor
 Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
 
 ### Requirement: Recorded sensors linked to equipment
-The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.
+The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL show the active main equipment item that an earlier release's stored link names for a sensor; no route or Coach tool sets or removes a link. A serial number SHALL never be stored or shown.
 
-#### Scenario: Link a sensor
-- **WHEN** the athlete links a listed sensor to an active main equipment item
-- **THEN** the registry shows that equipment id for the sensor; an unknown sensor or an archived, component or unknown item is rejected, and a null equipment id removes the link.
+#### Scenario: Stored sensor link
+- **WHEN** a listed sensor has a stored link
+- **THEN** the registry shows that equipment id for the sensor, and a link to equipment that no longer exists is not reported.
 
-Evidence: `backend/athlete/equipment.py:EquipmentService.assign_sensor`, `backend/canonical/sensor_registry.py:registry`; `tests/test_sensor_equipment.py`.
+Evidence: `backend/athlete/equipment.py:EquipmentService.read`, `backend/canonical/sensor_registry.py:registry`; `tests/test_sensor_equipment.py`.
 
 ### Requirement: AP9 Explicit equipment assignments and honest usage
 The system SHALL assign only resolved canonical completed activities to compatible active main equipment, allow explicit unassignment, and calculate usage from known assignments and supported Garmin links with coverage metadata. Usage, hours, distance, maintenance and sport derivation SHALL read canonical session summaries, so each session counts once whichever providers recorded it.

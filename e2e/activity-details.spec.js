@@ -7,7 +7,8 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
   const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
-  await entry.locator("summary").click();
+  // On wide screens a unit of the week may already be open as the detail pane.
+  if (!(await entry.evaluate((element) => element.open))) await entry.locator("summary").click();
   const open = entry.getByRole("button", { name: "Aktivität analysieren" });
   await open.click();
   const dialog = page.getByRole("dialog", { name: "Synthetic ride <img src=x>" });

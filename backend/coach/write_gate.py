@@ -276,7 +276,9 @@ def remote_requested(text: str) -> bool:
     negated part of a sentence ("nicht zu Intervals hochladen", "ohne Sync")
     asks nothing until a contrast word ("..., sondern synchronisieren"). An
     "ohne" negates only when its phrase names the sync, so "Sync mit Intervals
-    ohne die Ruhetage" still asks for it.
+    ohne die Ruhetage" still asks for it. A part that names Garmin or Wahoo but
+    not Intervals.icu ("Sync meine Garmin-Daten"), or that describes a past sync
+    ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
     """
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
@@ -288,7 +290,8 @@ def remote_requested(text: str) -> bool:
         if any(
             _mentions_remote(part)
             and not _negates(part)
-            and not _names_other_provider_only(part)
+            and not _names_other_provider(part)
+            and not _describes_past(part)
             for part in _CONTRAST.split(sentence)
         ):
             return True
@@ -384,17 +387,45 @@ def _offered_providers(previous_assistant_text: str) -> frozenset[str]:
     return frozenset(str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(last))
 
 
-def _names_other_provider_only(part: str) -> bool:
-    """Whether a part is a Garmin or Wahoo push or removal request, not Intervals.icu.
+def _names_other_provider(part: str) -> bool:
+    """Whether a part names Garmin or Wahoo and not Intervals.icu (#2134, E-012)."""
+    return bool(_PROVIDER_TARGETS.search(part)) and not _INTERVALS_NAME.search(part)
 
-    Other mentions of Garmin ("Lösch das Garmin-Duplikat") keep their meaning.
-    """
-    loose = _loose(part)
+
+# A past sync: an auxiliary with only past participles of the sync verbs
+# ("Ich habe gestern synchronisiert", "Der Plan wurde hochgeladen").
+_PAST_AUXILIARIES = frozenset(
+    {"habe", "hab", "hast", "hat", "haben", "habt", "hatte", "hatten", "hattest",
+     "wurde", "wurden", "wurdest", "war", "waren", "have", "has", "had", "was",
+     "were", "already", "schon", "bereits"}
+)  # fmt: skip
+_SYNC_PARTICIPLES = frozenset(
+    _loose(word)
+    for word in _words(
+        "synchronisiert,gesynct,gesynced,gesyncht,synced,synchronized,"
+        "hochgeladen,uploaded,abgeglichen,resynced,resynct,repariert"
+    )
+)
+_SYNC_VERB = _compile(
+    "^" + stem
+    for stem in _words("sync,synchronisier,abgleich,hochlad,upload,resync,reparier")
+)
+
+
+def _describes_past(part: str) -> bool:
+    """Whether every sync verb of a part is a past participle after an auxiliary."""
+    tokens = re.findall(r"[a-z]+", _loose(part))
+    verbs = [
+        token
+        for token in tokens
+        if _SYNC_VERB.match(token) or token in _SYNC_PARTICIPLES
+    ]
+    # Auxiliaries on the unfolded words: "haette"/"wuerde" (a polite request)
+    # must not fold into "hatte"/"wurde".
     return (
-        bool(_PROVIDER_TARGETS.search(part))
-        and not _INTERVALS_NAME.search(part)
-        and bool(_PROVIDER_OBJECT.search(loose))
-        and bool(_PUSH_VERBS.search(loose) or _REMOVE_VERBS.search(loose))
+        bool(_PAST_AUXILIARIES.intersection(re.findall(r"[a-z]+", part)))
+        and bool(verbs)
+        and all(token in _SYNC_PARTICIPLES for token in verbs)
     )
 
 

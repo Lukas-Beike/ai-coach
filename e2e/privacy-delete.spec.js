@@ -50,6 +50,33 @@ test("the deletion stays locked while the backup before deletion is running", as
   await expect(backup).toBeEnabled();
   await expect(backup).not.toHaveAttribute("aria-busy", "true");
   await expect(accept).toBeEnabled();
+  // J-202: the deletion button stays busy while its dialog is open.
+  await expect(page.locator("#privacyDeleteButton")).toBeDisabled();
+  await page.locator("#confirmationDialogCancel").click();
+  await expect(page.locator("#privacyDeleteButton")).toBeEnabled();
+
+  // J-202: a running export keeps its button busy, so a second click starts no second export.
+  let exports = 0;
+  let releaseExport;
+  const exportReleased = new Promise((resolve) => { releaseExport = resolve; });
+  await page.route("**/api/privacy/export", async (route) => {
+    exports += 1;
+    await exportReleased;
+    await route.continue();
+  });
+  const exportButton = page.locator("#privacyExportButton");
+  await exportButton.click();
+  await expect(exportButton).toBeDisabled();
+  await expect(exportButton).toHaveAttribute("aria-busy", "true");
+  await expect(exportButton).toHaveCSS("opacity", "0.55");
+  await exportButton.evaluate((button) => button.click());
+  // No deletion starts while the export runs.
+  await page.locator("#privacyDeleteButton").evaluate((button) => button.click());
+  await expect(page.locator(".toast").filter({ hasText: "Der Datenexport läuft noch." })).toBeVisible();
+  await expect(page.locator("#confirmationDialog")).toBeHidden();
+  releaseExport();
+  await expect(exportButton).toBeEnabled();
+  expect(exports).toBe(1);
 });
 
 test("local data deletion requires the exact confirmation text", async ({ page }) => {

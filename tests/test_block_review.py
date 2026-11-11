@@ -20,9 +20,7 @@ from backend.planning.block_review import (
     last_completed_test,
 )
 from backend.planning.plan_guard_service import build_planning_brief
-from backend.planning.season_preparation import load_scenarios
 from tests.test_training_report import (
-    _empty_season_source,
     _FakeDatabaseManager,
     _Rows,
     _summary,
@@ -50,8 +48,6 @@ def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
         read_checkins=lambda: list(checkins),
         read_feedback=lambda keys: list(feedback),
         today=lambda: TODAY,
-        load_scenarios=load_scenarios,
-        season_source=_empty_season_source(),
         canonical=CanonicalPerformanceSource(
             database_manager=_FakeDatabaseManager,
             observation_reader=_EmptyReader,

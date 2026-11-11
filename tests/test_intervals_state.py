@@ -1,22 +1,9 @@
 import unittest
 
-from backend.sync.intervals_state import (
-    connection_state,
-    latest_library_timestamp,
-    public_state,
-)
+from backend.sync.intervals_state import connection_state, public_state
 
 
 class IntervalsStateTests(unittest.TestCase):
-    def test_latest_library_timestamp_picks_the_newest_text(self) -> None:
-        self.assertEqual(
-            "2026-05-02T08:00:00+00:00",
-            latest_library_timestamp(
-                "2026-05-01T08:00:00+00:00", None, "2026-05-02T08:00:00+00:00", ""
-            ),
-        )
-        self.assertIsNone(latest_library_timestamp(None, ""))
-
     def test_connection_state_follows_configuration_run_error_and_push(self) -> None:
         self.assertEqual("not_configured", connection_state(False, True, "x", "t"))
         self.assertEqual("syncing", connection_state(True, True, "x", "t"))

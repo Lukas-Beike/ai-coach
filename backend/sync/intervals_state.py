@@ -3,12 +3,6 @@
 from typing import Any
 
 
-def latest_library_timestamp(*values: str | None) -> str | None:
-    """Return the newest library import/push ISO timestamp, if any."""
-    texts = [value for value in values if isinstance(value, str) and value]
-    return max(texts) if texts else None
-
-
 def connection_state(
     configured: bool,
     running: bool,

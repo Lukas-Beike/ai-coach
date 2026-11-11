@@ -1,4 +1,4 @@
-"""Authenticated metric export preview and confirmed execute routes."""
+"""Authenticated automatic metric export configuration route."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from backend.sync.metric_export import MetricExportService
 
 
 class MetricExportPostRoutes:
-    """Preview metric exports and send only an explicitly confirmed selection."""
+    """Switch the automatic metric export on explicit, confirmed consent."""
 
     def __init__(self, metric_export: Callable[[], MetricExportService]) -> None:
         self._metric_export = metric_export
@@ -19,11 +19,5 @@ class MetricExportPostRoutes:
             handler.send_json(
                 200, self._metric_export().configure_automatic(handler.read_json())
             )
-            return True
-        if path == "/api/metric-export/preview":
-            handler.send_json(200, self._metric_export().preview(handler.read_json()))
-            return True
-        if path == "/api/metric-export/execute":
-            handler.send_json(200, self._metric_export().export(handler.read_json()))
             return True
         return False

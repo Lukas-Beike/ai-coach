@@ -340,7 +340,7 @@ Local planning records (planned units, workout-library entries, competitions, st
 
 #### Scenario: Coach save of a competition
 - **WHEN** an athlete-started Coach turn saves a competition with `starts_at_local` and `planned_duration_s`
-- **THEN** the competition is stored with those values.
+- **THEN** the competition is stored with those values; an explicit null clears the planned duration and an absent one keeps it.
 
 Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
 
@@ -388,7 +388,7 @@ Planned units and library templates SHALL carry an optional local session focus,
 #### Scenario: One-time backfill of future units
 - **WHEN** the application starts and the versioned focus backfill has not run
 - **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
-- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics), and `POST /api/change-history/undo-focus-backfill` restores all of them in one transaction, or none when a unit was edited since; a second run changes nothing.
+- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics); a second run changes nothing.
 
 Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
 
@@ -442,7 +442,7 @@ Strength units and templates SHALL carry an optional local `strength_structure` 
 
 #### Scenario: Garmin catalogue exercise
 - **WHEN** an exercise names a Garmin catalogue exercise, or the athlete picks one of the suggested chips of an exercise without a match
-- **THEN** the name is checked against the catalogue and its category and exercise pair is derived on write, never taken from the request; an unknown name is rejected with suggestions; a pick through `POST /api/planned-units/<id>/garmin-exercise` needs the current payload hash, is refused for a unit in a sync conflict, is remembered for the same exercise name in other units and does not change the Intervals.icu sync state.
+- **THEN** the name is checked against the catalogue and its category and exercise pair is derived on write, never taken from the request; an unknown name is rejected with suggestions; a pick through `POST /api/planned-units/<id>/garmin-exercise` needs the current payload hash, is remembered for the same exercise name in other units and does not change the Intervals.icu sync state.
 
 #### Scenario: Export
 - **WHEN** a structured unit is exported to Intervals.icu on an explicit sync

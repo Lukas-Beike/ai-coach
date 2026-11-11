@@ -72,7 +72,7 @@ def _bounded(
     return int(parsed) if whole else parsed
 
 
-def _exercise(item: Any) -> dict[str, Any]:
+def _exercise(item: Any, stored: bool) -> dict[str, Any]:
     if not isinstance(item, Mapping) or set(item) - set(EXERCISE_KEYS):
         raise _invalid("Jede Übung der Kraftstruktur muss ein bekanntes Objekt sein.")
     name = " ".join(str(item.get("name") or "").split())[:80]
@@ -94,7 +94,7 @@ def _exercise(item: Any) -> dict[str, Any]:
     note = " ".join(str(item.get("note") or "").split())[:MAX_NOTE]
     if note:
         result["note"] = note
-    _garmin_exercise(item, result)
+    _garmin_exercise(item, result, stored)
     return result
 
 
@@ -117,13 +117,16 @@ def _warmup(value: Any) -> dict[str, Any] | None:
     return result
 
 
-def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
+def _garmin_exercise(
+    item: Mapping[str, Any], result: dict[str, Any], stored: bool
+) -> None:
     """Store an explicit Garmin catalogue exercise with its resolved pair.
 
     Without an explicit name nothing is stored; the export resolves the exercise
     name or an alias itself. The pair is always derived from the catalogue,
     never taken from the request. Any name the catalogue does not know is
-    rejected with suggestions, also one a later catalogue version renamed.
+    rejected with suggestions; only a ``stored`` structure keeps its well-formed
+    stored pair when a later catalogue renamed the exercise (#2135, A-516).
     """
     requested = " ".join(str(item.get("garmin_exercise") or "").split())[:80]
     if not requested:
@@ -133,6 +136,8 @@ def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
         result["garmin_exercise"] = requested
         return
     found = garmin_catalogue.catalogue_exercise(requested)
+    if found is None and stored:
+        found = garmin_catalogue.stored_pair(item)
     if found is None:
         hint = garmin_catalogue.suggestions(requested)
         raise _invalid(
@@ -162,15 +167,20 @@ def without_unknown_garmin(value: Any) -> Any:
     ]
 
 
-def normalize_structure(value: Any) -> list[dict[str, Any]] | None:
-    """Validated exercises, or ``None`` when no structure is given."""
+def normalize_structure(
+    value: Any, *, stored: bool = False
+) -> list[dict[str, Any]] | None:
+    """Validated exercises, or ``None`` when no structure is given.
+
+    ``stored`` reads a saved structure, whose Garmin pair outlives a rename.
+    """
     if value in (None, "", []):
         return None
     if not isinstance(value, Sequence) or isinstance(value, str | bytes):
         raise _invalid("Die Kraftstruktur muss eine Liste von Übungen sein.")
     if len(value) > MAX_EXERCISES:
         raise _invalid(f"Die Kraftstruktur erlaubt höchstens {MAX_EXERCISES} Übungen.")
-    return [_exercise(item) for item in value]
+    return [_exercise(item, stored) for item in value]
 
 
 def _plain(value: float) -> str:

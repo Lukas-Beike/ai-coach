@@ -89,11 +89,11 @@ test("@responsive a hanging analysis read times out into the retry state", async
   await expect(profile.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
 });
 
-test("@responsive a failed session list read offers a retry", async ({ page }) => {
+test("@responsive a failed session list or equipment read offers a retry", async ({ page }) => {
   let fail = true;
-  await page.route(/\/api\/activities\?limit=/, (route) => (fail
-    ? route.fulfill({ status: 503, json: { error: "E2E fixture: Einheiten nicht erreichbar" } })
-    : route.fallback()));
+  const failing = (message) => (route) => (fail ? route.fulfill({ status: 503, json: { error: message } }) : route.fallback());
+  await page.route(/\/api\/activities\?limit=/, failing("E2E fixture: Einheiten nicht erreichbar"));
+  await page.route("**/api/analysis/training-records", failing("E2E fixture: Ausrüstung nicht erreichbar"));
   await openAnalysis(page, "sessions");
   const list = page.locator("#activityAnalysis");
   await expect(list.locator(".error-state")).toBeVisible();
@@ -103,4 +103,19 @@ test("@responsive a failed session list read offers a retry", async ({ page }) =
   // The empty fixture has no sessions, so the retry ends in the tab's one empty card.
   await expect(page.locator("#analysisEmptyState .empty-state strong")).toHaveText("Noch keine Einheiten");
   await expect(list).toBeHidden();
+
+  // J-201: the equipment read fails into the same retry card.
+  fail = true;
+  await page.goto("/#more/equipment");
+  const gear = page.locator("#equipmentItems");
+  await expect(gear.locator(".error-state")).toContainText("Ausrüstung nicht erreichbar");
+  fail = false;
+  await gear.getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect(gear.locator(".equipment-tabs")).toBeVisible();
+  await expect(gear.locator(".error-state")).toHaveCount(0);
+  // A failed refresh keeps the rendered list.
+  fail = true;
+  await page.evaluate(async () => { invalidateAnalysisReport("/api/analysis/training-records"); await renderTrainingRecords(); });
+  await expect(gear.locator(".equipment-tabs")).toBeVisible();
+  await expect(gear.locator(".error-state")).toHaveCount(0);
 });

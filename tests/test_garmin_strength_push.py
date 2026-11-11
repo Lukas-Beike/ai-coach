@@ -21,7 +21,11 @@ from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
-from backend.planning.push_state import attach_push_state, garmin_fingerprint
+from backend.planning.push_state import (
+    attach_push_state,
+    garmin_fingerprint,
+    pushable_fingerprint,
+)
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import GarminStrengthPushService
@@ -269,6 +273,18 @@ class StructureTests(unittest.TestCase):
                 strength_structure.normalize_structure(
                     [{**SQUAT, "garmin_exercise": "Frnt Squat", "garmin_pair": pair}]
                 )
+        # A stored structure keeps its pair after a catalogue rename (#2135).
+        renamed = {
+            **SQUAT,
+            "garmin_exercise": "Retired Squat",
+            "garmin_pair": {"category": "SQUAT", "exercise": "RETIRED"},
+        }
+        self.assertEqual(
+            [renamed],
+            strength_structure.normalize_structure([renamed], stored=True),
+        )
+        payload = {"sport": "WeightTraining", "strength_structure": [renamed]}
+        self.assertIsNone(pushable_fingerprint(payload, {})[1])
 
     def test_a_reconcile_keeps_a_structure_with_a_retired_garmin_name(self) -> None:
         stored = {

@@ -40,7 +40,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
             "intervals_state",
             "diagnostic_capture",
             "workout_library_sync_running",
-            "snapshot_repository",
             "daily_context",
             "adaptive_followup",
             "adaptive_preview",
@@ -50,8 +49,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
             "local_date",
             "local_now",
             "calendar_window",
-            "calendar_history",
-            "calendar_future",
             "sync_defaults",
             "all_sync_days",
             "workout_label",
@@ -68,8 +65,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
         deps["settings"].return_value = settings
         deps["maintenance_gate"].return_value = gate
         deps["calendar_window"].return_value = 21
-        deps["calendar_history"].return_value = 14
-        deps["calendar_future"].return_value = 42
         deps["all_sync_days"].return_value = 3650
         deps["workout_label"].return_value = "Synthetic workout"
         deps["sync_defaults"].return_value = {"intervals": 30}
@@ -87,7 +82,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
                     key_value_service=deps["key_value_service"],
                 ),
                 owners=PublicStateOwnerAssemblies(
-                    snapshot_repository=deps["snapshot_repository"],
                     sync_persistence=deps["sync_persistence"],
                     planning_data=deps["planning_data"],
                     athlete_data=deps["athlete_data"],
@@ -119,8 +113,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
                     local_date=deps["local_date"],
                     local_now=deps["local_now"],
                     external_calendar_window_days=deps["calendar_window"],
-                    calendar_history_days=deps["calendar_history"],
-                    calendar_future_days=deps["calendar_future"],
                     sync_period_defaults=deps["sync_defaults"],
                     all_sync_days=deps["all_sync_days"],
                     planned_workout_label=deps["workout_label"],
@@ -147,6 +139,7 @@ class PublicStateAssemblyTests(unittest.TestCase):
         self.assertIs(service._dependencies.config, owners["config"])
         self.assertIs(service._dependencies.settings, owners["settings"])
         self.assertIs(service._dependencies.database_lock, owners["lock"])
+        self.assertIs(service._dependencies.database_manager, deps["database_manager"])
         deps["database_manager"].assert_not_called()
         deps["sync_persistence"].assert_called_once_with()
         deps["planning_data"].assert_called_once_with()
@@ -172,20 +165,7 @@ class PublicStateAssemblyTests(unittest.TestCase):
         self.assertIs(
             service._state_version_data._key_values, deps["key_value_service"]()
         )
-        self.assertIs(
-            service._state_version_data._snapshots, deps["snapshot_repository"]
-        )
         self.assertIs(service._profile_service, profile_service)
-
-    def test_public_state_assembly_retains_the_settings_without_a_read_lock(self):
-        assembly, _deps, owners = self.make_assembly()
-
-        service = assembly.state_service()
-
-        self.assertFalse(hasattr(service._deps, "database_lock"))
-        self.assertIs(service._deps.config, owners["config"])
-        self.assertIs(service._deps.settings, owners["settings"])
-        self.assertIs(service._deps.database_manager, _deps["database_manager"])
 
 
 if __name__ == "__main__":

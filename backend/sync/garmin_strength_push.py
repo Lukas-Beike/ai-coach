@@ -347,7 +347,7 @@ class GarminStrengthPushService:
         if day < self._today():
             raise ValueError("Vergangene Einheiten werden nicht an Garmin gesendet.")
         exercises = strength_structure.normalize_structure(
-            unit.get("strength_structure")
+            unit.get("strength_structure"), stored=True
         )
         if not exercises:
             raise ValueError(NO_STRUCTURE_MESSAGE)

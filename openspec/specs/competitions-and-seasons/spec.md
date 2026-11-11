@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe local target competitions, their explicit synchronization/conflict boundary, season phase projection, observed preparation evidence and nonmutating load scenarios. Provider transport details belong to provider synchronization capabilities.
+Describe local target competitions, their explicit synchronization/conflict boundary, season phase projection, observed preparation evidence. Provider transport details belong to provider synchronization capabilities.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ The system SHALL create or edit one local competition with stable identity, pres
 
 #### Scenario: Upcoming-race bound
 - **WHEN** twenty races dated today or later are stored and a save creates a race dated today or later or moves a past race into the future
-- **THEN** it fails with "Es können maximal 20 anstehende Wettkämpfe gespeichert werden."; past races never count and are never limited, and editing an upcoming race is not blocked.
+- **THEN** it fails with "Es können maximal 20 anstehende Wettkämpfe gespeichert werden."; past races never count and are never limited, and editing an upcoming race is not blocked. A bounded list (profile, bootstrap) keeps the latest races, so no upcoming race drops out.
 
 #### Scenario: Missing identity or history failure
 - **WHEN** an edit ID is malformed/missing in storage or audit persistence fails
@@ -66,7 +66,7 @@ The system SHALL keep remote pushes explicit and output-only (Intervals.icu rece
 
 #### Scenario: Output only, no import
 - **WHEN** a competition sync reads the remote events to match identities
-- **THEN** no remote event ever becomes a local competition and a clean local row never takes remote values; a clean linked row whose remote event is gone, or a dirty unlinked row that matches a remote event only by name and date, is marked as a conflict instead.
+- **THEN** no remote event ever becomes a local competition and a clean local row never takes remote values; a clean linked row inside the fetched calendar window whose remote event is gone, or a dirty unlinked row that matches a remote event only by name and date, is marked as a conflict instead.
 
 #### Scenario: Named approved push
 - **WHEN** the athlete explicitly requests competition synchronization and approves its frozen manifest
@@ -112,23 +112,6 @@ The system SHALL report preparation from eligible recorded sessions and known an
 
 Evidence: `backend/planning/season_preparation.py:season_preparation`, `backend/planning/season_preparation.py:_evidence_window`, `backend/planning/season_preparation.py:_target_context`, `backend/planning/season_preparation.py:_specificity_evidence`; `tests/test_season_preparation.py:test_preparation_is_observed_and_does_not_follow_calendar_phase`, `tests/test_season_preparation.py:test_race_context_requires_confirmed_units_and_reports_known_dimensions`, `tests/test_season_preparation.py:test_no_history_unknown_distance_and_target_remain_nullable`, `tests/test_season_preparation.py:test_past_competition_window_is_anchored_at_event_date`, `tests/test_season_preparation.py:test_future_competition_evidence_covers_the_weeks_up_to_today`.
 
-### Requirement: CS8 Read-only load scenarios with labeled estimates
-The system SHALL provide deterministic current/alternative load curves from yesterday's local fitness and fatigue (card M7, never Intervals.icu CTL/ATL) and known completed/planned load, expose model assumptions and input identity, and leave local/remote workouts unchanged.
-
-#### Scenario: Valid current and alternative scenarios
-- **WHEN** yesterday's local fitness and fatigue and all required loads are known with valid scale/taper/end parameters
-- **THEN** the system returns reproducible curves and an input hash, labels the local 42-day/7-day model assumptions, keeps today's completed load fixed and avoids double-counting completed planned sessions.
-
-#### Scenario: Estimated planned load
-- **WHEN** a future unit lacks recorded load but has usable duration and intensity
-- **THEN** its duration/intensity load estimate is explicitly labeled; recorded load takes precedence over estimates.
-
-#### Scenario: Missing basis, missing load or invalid parameters
-- **WHEN** CTL/ATL or a required load is unknown, or parameters are invalid
-- **THEN** the response reports insufficient-data with missing units, or rejects invalid parameters; it does not fabricate provider settings, race-time predictions or an applied replan.
-
-Evidence: `backend/planning/season_preparation.py:load_scenarios`, `backend/performance/season_inputs.py:read_season_load_inputs`, `tests/test_season_canonical_reads.py:test_scenarios_read_the_load_basis_only_from_the_tables`, `backend/planning/season_preparation.py:_scenario_values`, `backend/planning/season_preparation.py:_planned_loads`, `backend/planning/season_preparation.py:_estimated_load`; `tests/test_season_preparation.py:test_scenarios_are_deterministic_nonmutating_and_taper_changes_load`, `tests/test_season_preparation.py:test_missing_basis_or_planned_load_is_not_zero_filled`, `tests/test_season_preparation.py:test_completed_today_load_is_fixed_and_not_double_counted_or_scaled`, `tests/test_season_preparation.py:test_planned_load_is_estimated_from_duration_and_intensity`, `tests/test_season_preparation.py:test_recorded_planned_load_wins_over_estimate`, `tests/test_season_preparation.py:test_load_scale_accepts_german_decimal_comma`.
-
 ### Requirement: CS9 Competition-focused overview
 The system SHALL present the planning segment as `Wettkämpfe`, with individually expandable, initially collapsed upcoming events ordered by date, priority and name. Each summary SHALL show saved name, date, sport, distance, personal A/B/C priority and athlete-local relative date without requiring training history.
 
@@ -160,11 +143,11 @@ The system SHALL reveal saved optional event details only on expansion, omit emp
 Evidence: `public/plan-views.js:competitionCard`, `public/plan-views.js:competitionFact`; `e2e/competitions.spec.js` (saved details, archive, safe text, empty lists); `e2e/text-reflow.spec.js`.
 
 ### Requirement: CS11 Overview excludes training analysis
-The competition overview SHALL exclude date-derived training phases, weekly training volume/history, preparation evidence, long-session analysis and load-scenario controls. Reading the overview SHALL remain usable without activity analyses or scenario availability.
+The competition overview SHALL exclude date-derived training phases, weekly training volume/history, preparation evidence and long-session analysis. Reading the overview SHALL remain usable without activity analyses.
 
 #### Scenario: Athlete checks competition dates
 - **WHEN** the competition overview is loaded or an event is expanded
-- **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, phase labels or scenario inputs.
+- **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, or phase labels.
 
 Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile and desktop); `e2e/training-feature-panels.spec.js`.
 

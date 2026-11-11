@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
-const { contrastRatio } = require("./helpers/ui");
+const { contrastRatio, showCalendarDay } = require("./helpers/ui");
 
 let fixture;
 test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(request); });
@@ -382,7 +382,7 @@ test("reload recovers a partial write receipt and executable undo proposal", asy
   } }));
   await page.reload();
   await expect(page.locator(".message.assistant").filter({ hasText: "Check-in saved; summary unavailable." })).toBeVisible();
-  await expect(page.locator("#coachReceipts")).toContainText("Tages-Check-in gespeichert");
+  await expect(page.locator("#toast")).toContainText("Tages-Check-in gespeichert");
   await expect(page.getByRole("button", { name: "Änderung zurücknehmen", exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe(null);
 });
@@ -528,11 +528,11 @@ test("plan overview deep link focuses and reveals today after loading", { tag: "
   const position = await today.evaluate((element) => ({
     top: element.getBoundingClientRect().top,
     viewportHeight: window.innerHeight,
-    weekOpen: element.closest(".planned-week")?.open,
+    atBottom: window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 1,
   }));
-  expect(position.weekOpen).toBe(true);
   expect(position.top).toBeGreaterThanOrEqual(0);
-  expect(position.top).toBeLessThan(position.viewportHeight / 2);
+  // One week is shown, so a late weekday sits lower only when the page cannot scroll further.
+  expect(position.top < position.viewportHeight / 2 || position.atBottom).toBe(true);
 });
 
 test("current plan payload displays each requested sport exactly", async ({ page }) => {
@@ -587,10 +587,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
       { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
     ];
     renderPlanned(state.data.training_calendar);
-    // Past days with sessions start collapsed; open them with the weeks so every session can be inspected.
-    document.querySelectorAll(".planned-week, .planned-day-toggle").forEach((toggle) => { toggle.open = true; });
     return date;
   });
+  // The week view opens on today's week; on wide screens a unit of it is already open as the detail pane.
   const day = page.locator(`.planned-day[data-date="${today}"]`);
   await expect(day.locator("time")).toHaveAttribute("datetime", today);
   await expect(day.locator(".planned-today-label")).toHaveText("Heute");
@@ -605,41 +604,54 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   await expect(day).not.toContainText("Emsdetten");
   await expect(day).not.toContainText("Open-Meteo");
   await expect(day.locator(".planned-day-observations img")).toHaveCount(0);
-  const previousDate = await page.evaluate((date) => addDateKey(date, -1), today);
-  const previous = page.locator(`.planned-day[data-date="${previousDate}"]`);
-  await expect(previous).toHaveCount(1);
-  await expect(previous.locator(".planned-day-metrics")).toHaveCount(0);
-  await expect(previous.locator(".planned-day-health")).toHaveText("Krankheit: Magen-Darm");
-  await expect(previous.locator(".planned-day-empty")).toBeVisible();
-  const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
-  await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
-  await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
-  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 min · Belastung 25");
-  await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
-  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
-  await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
-  await expect(day.locator("xpath=ancestor::details[contains(@class,'planned-week')]//span[@class='planned-week-metrics']")).toContainText("Geplant");
+  await expect(page.locator(".planned-week").filter({ has: day }).locator(".planned-week-metrics")).toContainText("Geplant");
   await expect(day.locator(".planned-day-flag")).toHaveText(["AQI 64", "🌿 1-2"]);
-  await expect(previous.locator(".planned-day-flag")).toHaveText(["💧 75 %"]);
-  await expect(previous.locator(".planned-day-weather")).toHaveAttribute("title", /Gespeicherte Wettervorhersage\n75 % Regen \(max\. 14:00 Uhr\) · 21,1 km\/h Wind/);
   const workout = day.locator(".planned-entry").filter({ hasText: "Lockerer Dauerlauf mit Steigerungen" });
   await expect(workout.locator(".planned-meta")).toHaveText("Laufen · 18:30 · 45 min");
   await expect(workout.locator(".planned-session-header")).toContainText("Laufen · 18:30");
   await expect(workout.locator(".planned-session-header")).toBeVisible();
+  if (await workout.evaluate((element) => element.open)) await day.locator(".planned-entry").filter({ hasText: "Mobilität" }).locator("summary").click();
   await expect(workout.locator(".planned-description")).toBeHidden();
   await workout.locator("summary").focus();
   await page.keyboard.press("Enter");
   await expect(workout.locator(".planned-description")).toBeVisible();
   await expect(workout.locator("img")).toHaveCount(0);
   await page.keyboard.press("Enter");
+  await expect(workout.locator(".planned-description")).toBeHidden();
+  expect(await day.evaluate((element) => {
+    const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
+    const firstUnit = element.querySelector(".planned-entry").getBoundingClientRect();
+    return heading.bottom <= firstUnit.top + 1 && element.scrollWidth <= element.clientWidth;
+  })).toBe(true);
+  await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
+  const previousDate = await page.evaluate((date) => addDateKey(date, -1), today);
+  await showCalendarDay(page, previousDate);
+  const previous = page.locator(`.planned-day[data-date="${previousDate}"]`);
+  await expect(previous).toHaveCount(1);
+  await expect(previous.locator(".planned-day-metrics")).toHaveCount(0);
+  await expect(previous.locator(".planned-day-health")).toHaveText("Krankheit: Magen-Darm");
+  await expect(previous.locator(".planned-day-empty")).toBeVisible();
+  await expect(previous.locator(".planned-day-flag")).toHaveText(["💧 75 %"]);
+  await expect(previous.locator(".planned-day-weather")).toHaveAttribute("title", /Gespeicherte Wettervorhersage\n75 % Regen \(max\. 14:00 Uhr\) · 21,1 km\/h Wind/);
+  await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, -2), today));
+  const matched = page.locator(".planned-entry", { hasText: "Aktivierung absolviert" });
+  await expect(matched.locator(".planned-execution")).toHaveText("✓ 136 %");
+  await expect(matched.locator(".planned-execution")).toHaveAttribute("aria-label", "136 Prozent des Plans · Belastung");
+  await expect(matched.locator(".planned-session-target")).toContainText("Plan: Aktivierung · 45 min · Belastung 25");
+  await expect(matched.locator(".planned-session-metrics")).toContainText("125 bpm · 201 W · Belastung 34");
+  await matched.screenshot({ path: testInfo.outputPath("planned-execution.png") });
+  await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, -3), today));
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveText("✕ 0 %");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("aria-label", "0 Prozent des Plans");
+  await expect(page.locator(".planned-entry.is-missed .planned-execution")).toHaveAttribute("title", "Ausführung gegenüber Plan");
+  await showCalendarDay(page, await page.evaluate((date) => addDateKey(date, 1), today));
+  await expect(page.locator(".planned-entry").filter({ hasText: "Grundlagenausfahrt" }).locator(".planned-execution")).toHaveCount(0);
   const completed = page.locator(".planned-entry.is-completed").filter({ hasText: "Grundlagenausfahrt" });
   await expect(completed.locator(".planned-session-header")).toContainText("Radfahren · 07:15");
   await expect(completed.locator(".planned-entry-status")).toBeVisible();
-  await expect(completed.locator(".planned-actual-facts")).toBeHidden();
+  if (!(await completed.evaluate((element) => element.open))) await expect(completed.locator(".planned-actual-facts")).toBeHidden();
   const completedHeaders = page.locator(".planned-entry.is-completed .planned-session-header");
-  await expect(completedHeaders).toHaveCount(6);
+  await expect(page.locator(`.planned-day[data-date="${await page.evaluate((date) => addDateKey(date, 1), today)}"] .planned-entry.is-completed`)).toHaveCount(5);
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selectedTheme) => { document.documentElement.dataset.theme = selectedTheme; }, theme);
     const computedColors = await completedHeaders.evaluateAll((headers) => headers.map((header) => {
@@ -649,21 +661,9 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
-  await completed.locator("summary").click();
+  if (!(await completed.evaluate((element) => element.open))) await completed.locator("summary").click();
   await expect(completed.locator(".planned-actual-facts")).toContainText("Trainingsload 42");
-  await completed.locator("summary").click();
-  expect(await day.evaluate((element) => {
-    const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
-    const content = element.querySelector(".planned-day-content").getBoundingClientRect();
-    return heading.bottom <= content.top + 1 && element.scrollWidth <= element.clientWidth;
-  })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
-  await matched.screenshot({ path: testInfo.outputPath("planned-execution.png") });
-  const week = page.locator(".planned-week").first();
-  await week.locator(":scope > summary").click();
-  await page.evaluate(() => renderPlanned(state.data.training_calendar));
-  await expect(week).not.toHaveAttribute("open", "");
 });
 
 test("JSON and audio errors retain status, reason and retry delay", async ({ page }) => {

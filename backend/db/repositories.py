@@ -439,6 +439,13 @@ class StateVersionRepository:
                 "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
                 "FROM activity_feedback"
             ).fetchone(),
+            # Counts only: these tables have no updated_at index to scan cheaply.
+            "activities": db.execute(
+                "SELECT COUNT(*) AS count FROM activity_records"
+            ).fetchone(),
+            "observations": db.execute(
+                "SELECT COUNT(*) AS count FROM observations"
+            ).fetchone(),
         }
 
 
@@ -473,10 +480,15 @@ class CompetitionRepository:
     )
 
     def list(self, db: Any, limit: int | None = None) -> list[dict[str, Any]]:
-        query = f"SELECT {self._LIST_FIELDS} FROM competitions ORDER BY event_date, priority, name"
+        order = "ORDER BY event_date, priority, name"
+        query = f"SELECT {self._LIST_FIELDS} FROM competitions {order}"
         params: tuple[Any, ...] = ()
         if limit is not None:
-            query += " LIMIT ?"
+            # A limit keeps the latest races, so upcoming ones never drop out.
+            query = (
+                f"SELECT * FROM (SELECT {self._LIST_FIELDS} FROM competitions "
+                f"ORDER BY event_date DESC LIMIT ?) {order}"
+            )
             params = (limit,)
         return [dict(row) for row in db.execute(query, params).fetchall()]
 

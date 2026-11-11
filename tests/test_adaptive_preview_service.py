@@ -19,6 +19,7 @@ from backend.planning.adaptive_preview_service import (
     AdaptiveReplanPreviewService,
 )
 from backend.planning.plan_checks import ILLNESS_DAYS
+from backend.planning.session_focus import is_hard
 
 
 class _Checkins:
@@ -269,7 +270,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         payload = easy["payload"]
         self.assertEqual(payload["name"], adaptive.ADAPTIVE_EASY_NAME)
         self.assertEqual(easy["after"]["name"], adaptive.ADAPTIVE_EASY_NAME)
-        self.assertFalse(calendar.workout_is_hard_effort({"name": payload["name"]}))
+        self.assertFalse(is_hard({"name": payload["name"]}))
         self.assertTrue(calendar.workout_is_explicitly_easy(payload))
         self.assertEqual(payload["target"], "AUTO")
         self.assertEqual(payload["duration_minutes"], 75)
@@ -395,6 +396,9 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         )
         self.assertIn("1 zukünftige lokale Einheit(en)", result["message"])
         self.assertIn("nur am Check-in-Tag", result["scope"])
+        # Apply marks only today's check-in, never forecast days (#2135, D-006).
+        self.assertIn("der heutige Check-in als krank", result["scope"])
+        self.assertNotIn("prognostizierten Krankheitstage", result["scope"])
 
     def test_pain_and_stress_apply_only_to_the_checkin_day(self):
         self.feedback.update(

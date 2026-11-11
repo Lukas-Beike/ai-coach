@@ -73,9 +73,7 @@ class NutritionGetRoutes:
         if path not in {
             "/api/nutrition/yazio/status",
             "/api/nutrition/day",
-            "/api/nutrition/range",
             "/api/nutrition/week",
-            "/api/nutrition/templates",
             NUTRITION_PRODUCTS_PATH,
         }:
             return False
@@ -100,27 +98,11 @@ class NutritionGetRoutes:
         if path == NUTRITION_PRODUCTS_PATH:
             handler.send_json(200, self._products(query))
             return True
-        if path == "/api/nutrition/templates":
-            meal_library = self._meal_library_service()
-            handler.send_json(
-                200, {"ok": True, "templates": meal_library.list_templates()}
-            )
-            return True
-
         if path == "/api/nutrition/day":
             date_param = (
                 query.get("date", [None])[0] or self._local_now().date().isoformat()
             )
             handler.send_json(200, {"ok": True, **self._day_summary(date_param)})
-            return True
-
-        if path == "/api/nutrition/range":
-            diary = self._diary_service()
-            today = self._local_now().date().isoformat()
-            start_param = query.get("start", [today])[0]
-            end_param = query.get("end", [today])[0]
-            summaries = diary.get_range_summary(start_param, end_param)
-            handler.send_json(200, {"ok": True, "summaries": summaries})
             return True
 
         return False

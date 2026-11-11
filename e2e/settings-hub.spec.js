@@ -23,6 +23,13 @@ test("@responsive sports are toggle chips of at least 44 px and need no hint", a
   await running.click();
   expect(await box.isChecked()).toBe(!before);
   await expect(page.locator("#profileDirtyIndicator")).toBeVisible();
+  // H-201: leaving the dirty profile for another "Mehr" segment asks first.
+  await page.evaluate(() => { location.hash = "#more/connections"; });
+  await expect(page.locator("#confirmationDialog")).toBeVisible();
+  await page.locator("#confirmationDialogCancel").click();
+  await expect(page.locator("#profilePanel")).toBeVisible();
+  await expect(page).toHaveURL(/#more\/profile$/);
+  expect(await box.isChecked()).toBe(!before);
   const saved = page.waitForResponse((response) => response.url().endsWith("/api/profile") && response.request().method() === "PUT");
   await page.getByRole("button", { name: "Athletenkontext speichern" }).click();
   const request = (await saved).request().postDataJSON();

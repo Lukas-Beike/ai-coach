@@ -65,7 +65,6 @@ globalThis.AppState = (() => {
     stateEventBaselined: false,
     coachActionProposals: [],
     coachActionUnknownIds: new Set(),
-    coachReceipts: [],
     chatQueue: [],
     chatQueueSequence: 0,
     profileDirty: false,

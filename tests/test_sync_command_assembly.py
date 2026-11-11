@@ -15,7 +15,6 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         self.manager = object()
         self.queue = object()
         self.intervals = object()
-        self.planned_units = object()
         self.competitions = object()
         self.library_state = object()
         self.revision = object()
@@ -23,7 +22,6 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         self.database_manager = Mock(return_value=self.manager)
         self.queue_service = Mock(return_value=self.queue)
         self.intervals_sync = Mock(return_value=self.intervals)
-        self.planned_unit_service = Mock(return_value=self.planned_units)
         self.competition_service = Mock(return_value=self.competitions)
         self.library_sync_state = Mock(return_value=self.library_state)
         self.config = Mock()
@@ -37,7 +35,6 @@ class SyncCommandAssemblyTests(unittest.TestCase):
             core=SyncCommandCore(
                 database_manager=self.database_manager,
                 queue_service=self.queue_service,
-                planned_unit_service=self.planned_unit_service,
                 competition_service=self.competition_service,
                 workout_library_sync_state=self.library_sync_state,
                 planning_revision=self.revision,

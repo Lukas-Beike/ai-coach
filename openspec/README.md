@@ -51,6 +51,7 @@ are in the docs.
 | [diagnostics-and-observability](specs/diagnostics-and-observability/spec.md) | Redacted bounded capture, local reports, logs and safe correlation |
 | [build-release-and-deployment](specs/build-release-and-deployment/spec.md) | Pinned standalone runtime, protected immutable delivery and signed digests |
 | [isolated-test-execution](specs/isolated-test-execution/spec.md) | Focused and complete test selection, isolated browser and SQLCipher runs |
+| [developer-quality-gates](specs/developer-quality-gates/spec.md) | Pre-push secret scan and quality ratchet, coverage floor, test shards and changed-test selection, backend layering, documented versions |
 
 ## Coverage and changes
 

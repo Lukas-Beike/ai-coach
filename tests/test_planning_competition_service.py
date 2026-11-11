@@ -89,6 +89,14 @@ class CompetitionServiceTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(len(self.service.list()), 25)
+        # A limit keeps the upcoming races, not the earliest ones (#2135, D-531).
+        self.assertEqual(
+            [row["event_date"] for row in self.service.list(limit=20)],
+            [
+                (date(2026, 9, 20) + timedelta(days=day)).isoformat()
+                for day in range(20)
+            ],
+        )
 
     def test_full_upcoming_cap_allows_past_race_and_blocks_move_into_future(self):
         past = self.service.save(self.competition(event_date="2026-02-01"))
@@ -107,7 +115,9 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 400)
 
     def test_empty_values_clear_optional_fields_and_absent_ones_keep_them(self):
-        created = self.service.save(self.competition(description="Flat"))
+        created = self.service.save(
+            self.competition(description="Flat", planned_duration_s=10800)
+        )
         competition_id = created["competition"]["id"]
 
         cleared = self.service.save(
@@ -120,11 +130,18 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(saved["notes"], "")
         self.assertEqual(saved["distance"], "42200")
         self.assertEqual(saved["description"], "Flat")
+        self.assertEqual(saved["planned_duration_s"], 10800)
         self.assertEqual(kept["competition"]["target"], "")
         no_description = self.service.save(
-            {"competition_id": competition_id, "description": ""}
+            {
+                "competition_id": competition_id,
+                "description": "",
+                "planned_duration_s": None,
+            }
         )
         self.assertEqual(no_description["competition"]["description"], "")
+        # An explicit null clears the planned duration too (#2135, D-019).
+        self.assertIsNone(no_description["competition"]["planned_duration_s"])
         with self.manager.reader() as db:
             diff = db.execute(
                 "SELECT diff FROM change_history WHERE action='update' ORDER BY rowid"

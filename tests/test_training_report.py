@@ -19,7 +19,7 @@ from backend.performance.report_service import (
 from backend.performance.season_inputs import SeasonSource
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import training_report
-from backend.planning.season_preparation import load_scenarios, season_preparation
+from backend.planning.season_preparation import season_preparation
 
 
 class _EmptyReader:
@@ -486,8 +486,6 @@ class TrainingReportTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=_canonical(),
         )
         result = service.read({}, "Europe/Berlin")
@@ -525,8 +523,6 @@ class TrainingReportTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=canonical,
         )
 
@@ -678,10 +674,14 @@ class TrainingReportTests(unittest.TestCase):
             "/api/analysis/reports",
             "/api/analysis/impact",
             "/api/analysis/comparisons",
+            "/api/analysis/endurance",
+            "/api/analysis/season",
         ):
             with self.subTest(path=path):
                 self.assertFalse(route.handle(handler, path))
-        self.assertFalse(route.handle_post(handler, "/api/analysis/reports"))
+        for path in ("/api/analysis/reports", "/api/analysis/scenarios"):
+            with self.subTest(path=path):
+                self.assertFalse(route.handle_post(handler, path))
         auth.require_auth.assert_not_called()
         reports.assert_not_called()
         handler.send_json.assert_not_called()
@@ -692,9 +692,7 @@ class TrainingReportTests(unittest.TestCase):
         reports = Mock()
         route = AnalysisRoutes(lambda: auth, reports)
         for path in (
-            "/api/analysis/endurance",
             "/api/analysis/power-profiles",
-            "/api/analysis/season",
             "/api/analysis/training-records",
         ):
             with self.subTest(path=path), self.assertRaises(AppError):

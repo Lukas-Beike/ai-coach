@@ -13,7 +13,6 @@ from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    inputs_for_snapshot,
     read_once,
     read_performance_inputs,
     resolve_reader,
@@ -83,10 +82,6 @@ class PublicPerformanceStateService:
                 ),
             )
             return self._project(garmin, canonical, today, observations=reader)
-
-    def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
-        """Read the load inputs inside the caller's snapshot transaction."""
-        return inputs_for_snapshot(self._canonical, db, as_of=self._today())
 
     def from_inputs(
         self, canonical: CanonicalPerformanceInputs | None

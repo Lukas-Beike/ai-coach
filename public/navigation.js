@@ -107,7 +107,8 @@ globalThis.AppRouter = (() => {
     const mainRoute = baseRoute(panelRoute);
     const shouldFocusPlannedToday = mainRoute === "plan" && planSegmentFromRoute(panelRoute) === "overview";
     const navigationRoute = linkRoutes[mainRoute] || mainRoute;
-    const currentPanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
+    // "Mehr" is one nav item for several panels, so the current route names the panel.
+    const currentPanel = routes[state.route] || document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
     if (currentPanel !== routes[panelRoute] && handlers.hasUnsavedChanges({ includeChatDraft: false })) {
       if (!(await handlers.confirmDiscardChanges())) return false;
       handlers.discardUnsavedChanges();

@@ -23,7 +23,6 @@ from intervals_plan_stub import intervals_snapshot_coverage
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
-from backend.http_api.state_prelude import CalendarWindowRange, PublicStateLocalPrelude
 from backend.planning.compact_activities import (
     RECENT_ACTIVITY_LIMIT,
     ActivitySummarySource,
@@ -274,44 +273,6 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
 
 
 class HttpStateReadTests(CanonicalContextReadCase):
-    def _prelude_activities(
-        self, selector: Any, snapshot: dict[str, Any]
-    ) -> list[dict[str, Any]]:
-        state = Mock()
-        state.sync_metadata.return_value = {
-            "provider_sync": snapshot.get("provider_sync", {})
-        }
-        feedback = Mock()
-        feedback.attach_to_activities.side_effect = lambda rows: rows
-        planned = Mock()
-        planned.list.return_value = []
-        weather = Mock()
-        weather.state.return_value = {}
-        prelude = PublicStateLocalPrelude(
-            state,
-            feedback,
-            planned,
-            weather,
-            _Manager(self),  # type: ignore[arg-type]
-            lambda: TODAY,
-            CalendarWindowRange(35, 35),
-            None,
-            self._source(selector),
-        )
-        return prelude.read(True).activities
-
-    def test_state_prelude_activities_come_from_the_tables(self) -> None:
-        pending, tables = self._pending_and_tables(self._prelude_activities)
-
-        self.assertEqual(pending, [])
-        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
-
-    def test_state_prelude_does_not_need_the_snapshot_sections(self) -> None:
-        full, stripped = self._with_and_without_sections(self._prelude_activities)
-
-        self.assertTrue(stripped)
-        self.assertEqual(_by_id(stripped), _by_id(full))
-
     def _plan_activities(
         self, selector: Any, snapshot: dict[str, Any]
     ) -> list[dict[str, Any]]:

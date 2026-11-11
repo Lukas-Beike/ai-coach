@@ -11,9 +11,7 @@ from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.canonical.planning_fields import HR_CAP
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
-from backend.canonical.vocabulary import ProviderId
 from backend.errors import (
-    CORRUPT_PLANNING_ERROR,
     INVALID_PLANNING_DATE_ERROR,
     INVALID_PLANNING_ID_ERROR,
     AppError,
@@ -35,32 +33,6 @@ from backend.providers.intervals_workouts import (
 )
 
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
-
-
-def adopt_normalized_remote_planned_unit(
-    remote: dict[str, Any],
-) -> tuple[dict[str, Any], str] | None:
-    """Validate a persisted normalized snapshot without treating its local ID as remote."""
-    if (
-        remote.get("source") != ProviderId.INTERVALS
-        or remote.get("category") != "WORKOUT"
-    ):
-        return None
-    remote_id = str(remote.get("remote_event_id") or "").strip()
-    event_date = str(remote.get("date") or "").strip()
-    try:
-        if not remote_id or LocalDate.parse(event_date).isoformat() != event_date:
-            return None
-    except ValueError:
-        return None
-    identity = str(
-        remote.get("remote_event_external_id")
-        or remote.get("external_id")
-        or f"intervals-event-{remote_id}"
-    ).strip()
-    if not identity:
-        return None
-    return {**remote, "remote_event_external_id": identity}, identity
 
 
 # The focus keys no provider receives; the heart-rate cap reaches the watch, so a
@@ -298,29 +270,6 @@ def prepare_planned_workout_date(
             )
             candidate["starts_at_local"] = candidate["date"] + time_suffix
     return date_changed
-
-
-def planned_conflict_resolution_request(
-    local_id: Any, strategy: Any
-) -> tuple[str, str]:
-    try:
-        normalized_id = str(uuid.UUID(str(local_id)))
-    except (ValueError, AttributeError) as exc:
-        raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
-    selected = str(strategy or "").strip().casefold()
-    if selected not in {"keep_local", "adopt_remote"}:
-        raise AppError(400, "Ungültige Konfliktstrategie.")
-    return normalized_id, selected
-
-
-def planned_conflict_payload(row: dict[str, Any]) -> dict[str, Any]:
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except (TypeError, ValueError) as exc:
-        raise AppError(409, CORRUPT_PLANNING_ERROR) from exc
-    if not isinstance(payload, dict):
-        raise AppError(409, CORRUPT_PLANNING_ERROR)
-    return payload
 
 
 def _as_number(value: Any) -> float | int | None:

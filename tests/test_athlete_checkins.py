@@ -121,10 +121,16 @@ class AthleteCheckinTests(unittest.TestCase):
         self.assertEqual(bounded_score("10"), 10)
 
     def test_bounded_score_rejects_non_integer_and_out_of_range_values(self):
-        with self.assertRaisesRegex(
-            AppError, "Lokale Feedback-Werte müssen ganze Zahlen sein"
-        ):
-            bounded_score("not-a-number")
+        # A fraction or a boolean is refused, never cut to a whole (#2135).
+        for value in ("not-a-number", 7.9, True, float("nan")):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(
+                    AppError, "Lokale Feedback-Werte müssen ganze Zahlen sein"
+                ),
+            ):
+                bounded_score(value)
+        self.assertEqual(bounded_score(7.0), 7)
         with self.assertRaisesRegex(
             AppError, "Lokale Feedback-Werte müssen zwischen 0 und 10 liegen"
         ):
@@ -141,10 +147,14 @@ class AthleteCheckinTests(unittest.TestCase):
         self.assertEqual(bounded_minutes("1440"), 1440)
 
     def test_bounded_minutes_rejects_non_integer_and_out_of_range_values(self):
-        with self.assertRaisesRegex(
-            AppError, "Die verfügbare Trainingszeit muss eine ganze Zahl sein"
-        ):
-            bounded_minutes("not-a-number")
+        for value in ("not-a-number", 45.5, False):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(
+                    AppError, "Die verfügbare Trainingszeit muss eine ganze Zahl sein"
+                ),
+            ):
+                bounded_minutes(value)
         with self.assertRaisesRegex(
             AppError,
             "Die verfügbare Trainingszeit muss zwischen 0 und 1440 Minuten liegen",

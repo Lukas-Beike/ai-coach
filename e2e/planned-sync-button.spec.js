@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { stubSyncJobs } = require("./helpers/sync-jobs");
+const { showCalendarEntry } = require("./helpers/ui");
 
 test("@responsive a week with pending units offers one sync button that queues their pushes", async ({ page, request }) => {
   test.setTimeout(180_000);
@@ -14,6 +15,8 @@ test("@responsive a week with pending units offers one sync button that queues t
   });
   await page.goto("/#plan/overview");
   await page.waitForFunction(() => state.initialStateLoaded);
+  // Late in the week the next pending unit can sit in the following week.
+  await showCalendarEntry(page, { pending: "intervals" });
   const button = page.locator(".planned-week .planned-week-sync-button").first();
   await button.evaluate((element) => {
     for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;

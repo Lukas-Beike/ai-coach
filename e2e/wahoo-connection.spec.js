@@ -131,7 +131,7 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
   await page.locator("#wahooSyncButton").click();
   await expect(page.locator("#toast")).toContainText("Wahoo synchronisiert");
   await page.locator("#wahooFullResyncButton").click();
-  await expect(page.locator("#confirmationDialog")).toContainText("nicht gelöscht");
+  await expect(page.locator("#confirmationDialog")).toContainText("Lokale Daten bleiben erhalten; nur in Wahoo gelöschte Einheiten werden auch hier entfernt.");
   await page.locator("#confirmationDialog").locator("#confirmationDialogAccept").click();
   await expect.poll(() => requests.length).toBe(2);
   const csrf = (await page.context().cookies()).find((cookie) => cookie.name === "ic_csrf")?.value;

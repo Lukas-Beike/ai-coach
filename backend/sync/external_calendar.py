@@ -187,9 +187,6 @@ class ExternalCalendarSyncService:
                 "last_external_calendar_sync_skipped",
                 json.dumps(skips, sort_keys=True) if skips else "",
             )
-            self._key_value_repository.set(
-                db, "external_calendar_constraints_refresh_required", ""
-            )
         self._state_event_buffer.publish("coach", {"status": "changed"})
         replan = self._replan_projection("external calendar")
         return {
