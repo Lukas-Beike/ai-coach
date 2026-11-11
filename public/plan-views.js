@@ -1816,7 +1816,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // Sessions older than the loaded calendar data come page by page from the session list,
   // newest first; sessions the calendar already holds are skipped.
-  const olderSessions = { items: [], cursor: undefined, loading: false };
+  const olderSessions = { items: [], cursor: undefined, loading: false, generation: 0 };
+
+  // New calendar data (sync, reload, undo, feedback) drops the cached older pages, so a deleted,
+  // split or edited session is read again; an answer for the dropped pages is ignored.
+  function resetOlderSessions() {
+    Object.assign(olderSessions, { items: [], cursor: undefined, loading: false, generation: olderSessions.generation + 1 });
+  }
 
   function completedSessionIds(calendar) {
     return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
@@ -1833,8 +1839,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const loadedStart = calendar.filter((item) => calendarActualActivity(item)).map(plannedEventDate).filter(Boolean).sort()[0];
     if (loadedStart && shownStartKey >= loadedStart) return;
     olderSessions.loading = true;
+    const generation = olderSessions.generation;
     const cursor = olderSessions.cursor ? `&cursor=${encodeURIComponent(olderSessions.cursor)}` : "";
     api(`/api/activities?limit=250${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
+      if (generation !== olderSessions.generation) return;
       const known = completedSessionIds(calendar);
       for (const row of Array.isArray(page?.activities) ? page.activities : []) {
         // Only sessions before the loaded ones are new; later ones are in the loaded data already.
@@ -1845,12 +1853,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       olderSessions.cursor = page?.next_cursor || null;
       olderSessions.loading = false;
       renderPlanned(renderedCalendar);
-    }, () => { olderSessions.loading = false; });
+    }, () => { if (generation === olderSessions.generation) olderSessions.loading = false; });
   }
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
     if (!root) return;
+    if (trainingCalendar !== renderedCalendar) resetOlderSessions();
     renderedCalendar = trainingCalendar;
     const calendar = withOlderSessions(Array.isArray(trainingCalendar) ? trainingCalendar : []);
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
