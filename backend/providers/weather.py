@@ -163,7 +163,7 @@ class WeatherClient:
             if weather_forecast.weather_forecast_is_complete(short_forecast):
                 return (
                     weather_forecast.merge_weather_forecasts(forecast, short_forecast),
-                    "ICON-D2 (0–2 Tage) + ECMWF IFS HRES (3–14 Tage)",
+                    f"ICON-D2 (0–2 Tage) + {ECMWF_ONLY_MODEL} (3–14 Tage)",
                 )
         except Exception as exc:  # noqa: BLE001
             self._logger.warning(
