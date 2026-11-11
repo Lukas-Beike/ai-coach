@@ -7,17 +7,17 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from support import temp_database
 
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.coach.proposal_creation import (
     _approved_garmin_arguments,
     _garmin_approval_details,
 )
 from backend.db import DatabaseManager, row_factory
-from backend.db.remote_links import RemoteLinkRepository
+from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
@@ -1010,6 +1010,167 @@ class PushTests(unittest.TestCase):
 def find_orphans_listed(database_manager: DatabaseManager) -> list:
     with database_manager.reader() as db:
         return find_orphans(db, TODAY, limit=None)[0]
+
+
+def past_removal_service(database_manager, garmin) -> GarminStrengthPushService:
+    """A push service over ``database_manager`` that writes to the in-memory Garmin."""
+
+    @contextmanager
+    def session():
+        yield garmin
+
+    return GarminStrengthPushService(
+        configured=lambda: True,
+        database_manager=lambda: database_manager,
+        sdk_session=session,
+        today=lambda: TODAY,
+        now=lambda: NOW,
+        redactor=lambda text: text,
+    )
+
+
+def garmin_link(database_manager, local_id: str):
+    with database_manager.unit_of_work() as db:
+        return RemoteLinkRepository().get(
+            db, RemoteEntityKind.PLANNED_UNIT, local_id, "garmin"
+        )
+
+
+class PastWorkoutRemovalTests(unittest.TestCase):
+    """A refresh removes the app's own Garmin workouts of past days (#2185)."""
+
+    def setUp(self) -> None:
+        self.database_manager = temp_database(
+            self, "past.sqlite", row_factory=row_factory, schema=True
+        )
+        self.garmin = FakeGarmin()
+        self.service = past_removal_service(self.database_manager, self.garmin)
+
+    def link(self, local_id: str):
+        return garmin_link(self.database_manager, local_id)
+
+    def linked(self, local_id: str, day: str, *, tombstone: int = 0) -> str:
+        payload = json.dumps({**UNIT, "date": day})
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO planned_units(id, local_id, payload, tombstone, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (local_id, local_id, payload, tombstone, "2026-11-01", "2026-11-01"),
+            )
+        workout_id = self.garmin._id()
+        schedule_id = self.garmin._id()
+        self.garmin.workouts[workout_id] = {"workoutName": "Kraft A"}
+        self.garmin.schedules[schedule_id] = (workout_id, day)
+        with self.database_manager.unit_of_work() as db:
+            RemoteLinkRepository().upsert(
+                db,
+                RemoteLink(
+                    entity_kind=RemoteEntityKind.PLANNED_UNIT,
+                    local_id=local_id,
+                    provider="garmin",
+                    sync_state=RemoteLinkState.SYNCED,
+                    remote_id=workout_id,
+                    remote_external_id=schedule_id,
+                ),
+            )
+        return workout_id
+
+    def test_refresh_deletes_linked_workouts_of_past_days_only(self) -> None:
+        self.linked(U1, "2026-11-05")
+        today = self.linked(U2, "2026-11-06")
+        self.linked(U3, "2026-11-04", tombstone=1)
+        self.garmin.workouts["999"] = {"workoutName": "eigenes Workout"}
+        adapter = GarminJobAdapter(jobs=Mock(), plan_push=self.service)
+
+        adapter.execute({"id": "j"}, {}, "r", job_type="refresh")
+
+        # The past ones are unscheduled and deleted, oldest day first; today's
+        # workout and a workout the app never linked stay.
+        self.assertEqual(
+            [
+                ("unschedule", "506"),
+                ("delete", "505"),
+                ("unschedule", "502"),
+                ("delete", "501"),
+            ],
+            self.garmin.calls,
+        )
+        self.assertEqual({today, "999"}, set(self.garmin.workouts))
+        self.assertEqual(
+            [None, today, None],
+            [getattr(self.link(u), "remote_id", None) for u in (U1, U2, U3)],
+        )
+
+    def test_a_refused_workout_keeps_its_link_and_the_others_still_go(self) -> None:
+        refused = self.linked(U3, "2026-11-04")
+        self.linked(U1, "2026-11-05")
+        delete = self.garmin.delete_workout
+
+        def refuse(workout_id):
+            if workout_id == refused:
+                raise _http_error(403)
+            return delete(workout_id)
+
+        with patch.object(self.garmin, "delete_workout", side_effect=refuse):
+            self.assertEqual(1, self.service.remove_past())
+
+        self.assertIsNone(self.link(U1))
+        self.assertEqual(refused, self.link(U3).remote_id)
+
+    def test_refusals_bound_the_attempts_of_one_refresh(self) -> None:
+        units = [f"{index:08d}-1111-4111-8111-111111111111" for index in range(41)]
+        for index, local_id in enumerate(units):
+            self.linked(local_id, f"2026-10-{index % 28 + 1:02d}")
+
+        with patch.object(
+            self.garmin, "delete_workout", side_effect=_http_error(403)
+        ) as delete:
+            self.assertEqual(0, self.service.remove_past())
+
+        # Every workout is refused: 40 attempts, then the next refresh goes on.
+        self.assertEqual(40, delete.call_count)
+
+    def test_a_workout_already_gone_still_drops_its_link(self) -> None:
+        workout_id = self.linked(U1, "2026-11-05")
+        del self.garmin.workouts[workout_id]
+        self.garmin.schedules.clear()
+
+        self.assertEqual(1, self.service.remove_past())
+
+        self.assertIsNone(self.link(U1))
+
+    def test_a_garmin_failure_keeps_the_links_and_never_raises(self) -> None:
+        self.linked(U1, "2026-11-05")
+        self.linked(U2, "2026-11-04")
+        with patch.object(
+            self.garmin, "unschedule_workout", side_effect=_http_error(500)
+        ) as unschedule:
+            self.assertEqual(0, self.service.remove_past())
+
+        # One remote failure stops the run; both links stay for the next refresh.
+        self.assertEqual(1, unschedule.call_count)
+        self.assertIsNotNone(self.link(U1))
+        self.assertIsNotNone(self.link(U2))
+
+    def test_a_busy_or_unconfigured_garmin_removes_nothing(self) -> None:
+        self.linked(U1, "2026-11-05")
+
+        @contextmanager
+        def busy():
+            raise AppError(409, "busy", reason="garmin_busy")
+            yield  # pragma: no cover
+
+        self.service._sdk_session = busy
+        self.assertEqual(0, self.service.remove_past())
+        self.service._configured = lambda: False
+        self.assertEqual(0, self.service.remove_past())
+        # A refresh that could not log the SDK in (login or MFA) tries no login.
+        self.service._configured = lambda: True
+        self.service._sdk_session = Mock(side_effect=AssertionError("no login"))
+        self.service._write_ready = lambda: False
+        self.assertEqual(0, self.service.remove_past())
+        self.assertIsNotNone(self.link(U1))
+        self.assertEqual([], self.garmin.calls)
 
 
 if __name__ == "__main__":

@@ -46,7 +46,9 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   validated, data-preserving migrations; encryption must remain enabled.
 - Workouts created by the coach are local training-library entries until the
   athlete explicitly synchronizes the library to Intervals.icu. Do not add
-  implicit remote workout writes.
+  implicit remote workout writes. The one exception is the deletion of the
+  app's own linked Garmin workouts once their day has passed, after a Garmin
+  refresh (athlete decision 2026-11-11, #2185).
 - Adaptive replanning may update future local library entries only after its preview is
   explicitly approved; it must not silently overwrite, delete, or reschedule
   remote calendar events.
