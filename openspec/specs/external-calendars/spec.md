@@ -55,7 +55,7 @@ The system SHALL expand supported daily, weekly, monthly, and yearly recurrence 
 - **WHEN** a feed has more than 10,000 components, more than 1000 unique events in the sync window, or needs more than 1,000,000 expansion steps
 - **THEN** the parser rejects the feed instead of claiming a complete truncated event set.
 
-Detailed contract: skipped are components with `COUNT` or `INTERVAL` outside 1 to 1000, `EXRULE`, an `RDATE` period, an invalid `RECURRENCE-ID`, or no UID or DTSTART.
+Detailed contract: skipped are components with `COUNT` or `INTERVAL` outside 1 to 1000, an `EXRULE` on a series whose `RRULE` reaches the sync window, an `RDATE` period, an invalid `RECURRENCE-ID`, or no UID or DTSTART.
 
 Evidence: `backend/providers/calendar.py:_ical_rrule`, `backend/providers/calendar.py:_ical_instances`, `backend/providers/calendar.py:parse_ical_calendar`; `tests/test_provider_calendar.py:test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst`, `tests/test_provider_calendar.py:test_rdate_exdate_recurrence_id_and_cancelled`, `tests/test_provider_calendar.py:test_recurrence_iteration_caps_are_fixed_not_tautological`, `tests/test_provider_calendar.py:test_unsupported_series_is_skipped_and_counted_without_event_text`.
 
