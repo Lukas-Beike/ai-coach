@@ -54,14 +54,11 @@ are in the docs.
 
 - [Coverage, executed checks and explicit gaps](COVERAGE.md)
 - [Complete Coach tool-to-requirement map](COACH_TOOLS.md)
-- [Machine-readable source/HTTP/tool ownership inventory](coverage.json)
-- The coverage ledger and inventory are snapshots of the baseline revision.
+- The coverage ledger is a snapshot of the baseline revision.
   Capabilities added later, such as `garmin-profile-body-export`, appear in the
-  index above and cite their own evidence, not in these snapshots.
-- [Completed baseline change](changes/archive/2026-10-23-backfill-application-specs/proposal.md)
-- Change artifacts live under `changes/`; completed changes move to
-  `changes/archive/` after reviewed specs are synchronized. The archived baseline
-  retains its proposal, design, task/evidence state and deltas.
+  index above and cite their own evidence, not in this snapshot.
+- Change artifacts live under `changes/`; after `archive` synchronizes the
+  reviewed specs, the archived folder is deleted and git history keeps it.
 
 The baseline is comprehensive at capability/surface level. It is not a line-by-line
 application audit, a guarantee of live provider behavior or an executed full

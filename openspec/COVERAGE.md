@@ -15,15 +15,6 @@ SHALL requirements describe behavior supported by the inspected implementation;
 unverified desired changes and supported discrepancies do not become accepted
 requirements merely because a document is format-valid.
 
-The [surface inventory](coverage.json) maps tracked application/operational paths,
-HTTP path literals/regular expressions (including provider registry routes), and
-literal Coach tool declarations to capability owners. A mapped row establishes
-ownership/discovery, not independent semantic validation of every helper. Dynamic
-HTTP method/query/body validation remains in the cited route owners; the inventory
-is not an OpenAPI document. Historical review documents, skills, test-fixture
-corpora and generated/local state are evidence or development material rather
-than additional athlete-facing capabilities.
-
 The reviewed baseline contains 30 capabilities, 272 requirements and 759 scenarios.
 The executable Coach catalog has 49 canonical schemas, 52 dialogue schemas,
 53 union tool names and 17 read-only tools. The [complete tool map](COACH_TOOLS.md)
@@ -144,7 +135,8 @@ configuration or contacting providers.
   All seven existing AI documentation contract tests passed. Compile checks,
   the local CLI wrapper syntax check and whitespace checks also passed.
 - The reviewed main specs are synchronized and the completed baseline change is
-  [archived with all 16 tasks complete](changes/archive/2026-10-23-backfill-application-specs/tasks.md).
+  archived with all 16 tasks complete (the archive folder was later removed;
+  git history keeps it).
   Final strict validation covers all 30 main specs and archived task completion.
   The parent closing retrospective ran during archival: the independent review
   caught semantic omissions beyond structural validation, source/patch identity
