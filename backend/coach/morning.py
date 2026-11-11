@@ -47,11 +47,12 @@ class ManualMorningCheckinService:
         self._local_today = local_today
         self._logger = logger
 
-    def prepare(self) -> None:
-        if not self._garmin_sync.configured():
-            return
-
+    def prepare(self) -> date:
+        """Prepare the morning check-in and return the local day it is for."""
         checkin_date = self._local_today()
+        if not self._garmin_sync.configured():
+            return checkin_date
+
         try:
             self._garmin_sync.sync(
                 days=GARMIN_AUTOMATIC_SYNC_DAYS,
@@ -73,6 +74,7 @@ class ManualMorningCheckinService:
             )
 
         self._morning_battery.refresh(checkin_date)
+        return checkin_date
 
     def _sleep_ready(self, checkin_date: date) -> bool:
         # Only the stored sleep freshness is read, never a Garmin section.

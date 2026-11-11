@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from backend.coach.service import command_receipt
@@ -34,9 +34,11 @@ class MorningCoachJobCompletionService:
 
     def complete(self, client_turn_id: str) -> dict[str, Any] | None:
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            self._key_values.set(
-                db, "morning_checkin_date", self._local_now().date().isoformat()
-            )
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                (client_turn_id,),
+            ).fetchone()
+            self._key_values.set(db, "morning_checkin_date", self._checkin_date(row))
             self._key_values.set(db, "morning_checkin_status", "ready")
 
         quick_actions = self._quick_actions_service().state()
@@ -60,3 +62,13 @@ class MorningCoachJobCompletionService:
                 ),
             )
         return completed_receipt
+
+    def _checkin_date(self, row: Any) -> str:
+        """The local day the check-in was prepared for; today without one."""
+        prepared = command_receipt(row["receipt"] if row else None).get(
+            "morning_checkin_date"
+        )
+        try:
+            return date.fromisoformat(str(prepared)).isoformat()
+        except ValueError:
+            return self._local_now().date().isoformat()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import unittest
+from datetime import date
 from unittest.mock import Mock
 
 from backend.coach.background_job import CoachBackgroundJobRunner
@@ -193,10 +194,15 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
             "status": "completed",
             "coach_quick_actions": {},
         }
+        self.morning.prepare.return_value = date(2026, 9, 23)
         operation_id, _ = self.streams.register("synthetic-session")
         try:
             self.runner.run(self.job(operation_id, request_kind="morning_checkin"))
             self.morning.prepare.assert_called_once_with()
+            # The day prepared for is kept for the marker (#2134, E-014).
+            self.jobs.merge_receipt.assert_any_call(
+                "synthetic-turn", {"morning_checkin_date": "2026-09-23"}
+            )
             self.completion.complete.assert_called_once_with("synthetic-turn")
             event, receipt = self.streams.events(
                 "synthetic-session", operation_id
