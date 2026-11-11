@@ -243,6 +243,17 @@ test("performance status shows only the server's status text", () => {
   assert.deepEqual(Array.from(performanceDataStatus(undefined)), []);
 });
 
+test("session-RPE charts name the provider that rated, never a fixed provider", () => {
+  const { sessionRpeSourceLabel } = loadFunctions("analysis.js", ["sessionRpeSourceLabel"], { coachProviderLabel: () => "Intervals.icu", providerIds: () => ({ intervals: "intervals" }) });
+  const day = (athlete, provider, labels) => ({ rpe_sources: { athlete_feedback: athlete, provider }, rpe_provider_labels: labels });
+  for (const [days, rated, expected] of [
+    [[day(0, 2, ["Garmin Connect"])], 2, "Garmin Connect"],
+    [[day(1, 0, []), day(0, 1, ["Garmin Connect"])], 2, "Athletenfeedback + Garmin Connect"],
+    [[day(2, 0, [])], 2, "Athletenfeedback"],
+    [[day(0, 0, [])], 0, "Athletenfeedback"],
+  ]) assert.equal(sessionRpeSourceLabel(days, rated), expected);
+});
+
 test("current performance shows the status lines below its heading", () => {
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });

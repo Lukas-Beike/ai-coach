@@ -231,6 +231,7 @@ class PeriodSumTests(unittest.TestCase):
                 "rated_sessions": 2,
                 "total_sessions": 3,
                 "rpe_sources": {"athlete_feedback": 2, "provider": 0},
+                "rpe_provider_labels": [],
                 "deviating_duration_sessions": 0,
             },
         )
@@ -243,13 +244,18 @@ class PeriodSumTests(unittest.TestCase):
         self.assertTrue(result["evidence_card"].endswith("m1-session-rpe-load.md"))
 
     def test_sums_count_both_rating_sources(self) -> None:
+        garmin: dict[str, Any] = {"rpe": 7, "sources": {"rpe": "Garmin Connect"}}
         result = report(
-            [summary("a"), summary("b", 50, **provider_rpe(6))],
+            [summary("a"), summary("b", 50, **provider_rpe(6)), summary("c", **garmin)],
             {"a": {"session_rpe": 5}},
         )
-        self.assertEqual(result["totals"]["value"], 600.0)
+        self.assertEqual(result["totals"]["value"], 1020.0)
         self.assertEqual(
-            result["totals"]["rpe_sources"], {"athlete_feedback": 1, "provider": 1}
+            result["totals"]["rpe_sources"], {"athlete_feedback": 1, "provider": 2}
+        )
+        # C-007: the chart names the provider that rated, served by the server.
+        self.assertEqual(
+            result["totals"]["rpe_provider_labels"], ["Garmin Connect", "Intervals.icu"]
         )
 
     def test_days_weeks_and_sports_cover_the_whole_period(self) -> None:
@@ -371,7 +377,6 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
         self.undo(created["change"])
         (session,) = self.load()["sessions"]
         self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
-
 
     def test_a_rating_without_a_stored_session_counts_once_its_id_is_unique(
         self,
