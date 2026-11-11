@@ -111,6 +111,11 @@ test("@responsive a failed session list or equipment read offers a retry", async
   await expect(gear.locator(".error-state")).toContainText("Ausrüstung nicht erreichbar");
   fail = false;
   await gear.getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect(gear.locator(".equipment-tabs")).toBeVisible();
   await expect(gear.locator(".error-state")).toHaveCount(0);
-  await expect(gear.getByRole("heading", { name: "Ausrüstung und Wartung" })).toBeVisible();
+  // A failed refresh keeps the rendered list.
+  fail = true;
+  await page.evaluate(async () => { invalidateAnalysisReport("/api/analysis/training-records"); await renderTrainingRecords(); });
+  await expect(gear.locator(".equipment-tabs")).toBeVisible();
+  await expect(gear.locator(".error-state")).toHaveCount(0);
 });
