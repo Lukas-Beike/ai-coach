@@ -6,7 +6,7 @@ import math
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend import change_history
@@ -61,6 +61,10 @@ def _names_time_without_flag(changes: dict[str, Any]) -> bool:
     return bool({"logged_at", "meal_time"} & set(changes)) and (
         "logged_time_known" not in changes
     )
+
+
+# The longest inclusive span one range read returns (#2137, F-017).
+MAX_RANGE_DAYS = 366
 
 
 class NutritionDiaryService:
@@ -582,6 +586,13 @@ class NutritionDiaryService:
         valid_end = validate_iso_date(end_date)
         if valid_start > valid_end:
             raise AppError(400, "Startdatum muss vor oder am Enddatum liegen.")
+        span = date.fromisoformat(valid_end) - date.fromisoformat(valid_start)
+        if span.days >= MAX_RANGE_DAYS:
+            raise AppError(
+                400,
+                f"Der Zeitraum darf höchstens {MAX_RANGE_DAYS} Tage umfassen.",
+                reason="range_too_large",
+            )
         with self._database_manager.reader() as db:
             entries = self._nutrition_repository.list_by_range(
                 db, valid_start, valid_end

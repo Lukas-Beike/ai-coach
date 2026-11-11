@@ -812,6 +812,16 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(len(summaries), 2)
         self.assertEqual(summaries[0]["date"], "2026-09-23")
         self.assertEqual(summaries[1]["date"], "2026-09-24")
+        # A range spans at most 366 days, both ends included (#2137).
+        self.assertEqual(
+            len(self.service.get_range_summary("2025-09-24", "2026-09-24")), 2
+        )
+        with self.assertRaises(AppError) as raised:
+            self.service.get_range_summary("2025-09-23", "2026-09-24")
+        self.assertEqual(
+            (raised.exception.status, raised.exception.reason),
+            (400, "range_too_large"),
+        )
 
         unsynced = self.service.list_unsynced_dates()
         self.assertIn("2026-09-23", unsynced)
