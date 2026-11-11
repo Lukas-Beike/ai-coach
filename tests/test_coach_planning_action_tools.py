@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from support import temp_database
 
+from backend.coach.change_receipts import change_summary
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
@@ -292,6 +293,15 @@ class CoachPlanningActionToolServiceTests(unittest.TestCase):
                 "change": {"id": "change-1", "action": "update"},
                 "restored_entity_type": "planned_unit",
                 "restored_entity_id": "unit-1",
+            },
+        )
+        # The real result counts as a change of the turn (#2134, E-501).
+        self.assertEqual(
+            change_summary([{"tool": "undo_training_change", "result": result}]),
+            {
+                "labels": ["Lokale Änderung zurückgenommen"],
+                "undoable": False,
+                "undone_at": None,
             },
         )
         self.history.preview.assert_called_once_with("change-1")
