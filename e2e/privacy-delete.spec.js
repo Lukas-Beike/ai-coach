@@ -68,6 +68,7 @@ test("the deletion stays locked while the backup before deletion is running", as
   await exportButton.click();
   await expect(exportButton).toBeDisabled();
   await expect(exportButton).toHaveAttribute("aria-busy", "true");
+  await expect(exportButton).toHaveCSS("opacity", "0.55");
   await exportButton.evaluate((button) => button.click());
   // No deletion starts while the export runs.
   await page.locator("#privacyDeleteButton").evaluate((button) => button.click());

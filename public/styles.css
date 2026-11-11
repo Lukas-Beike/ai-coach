@@ -1182,7 +1182,7 @@ h2 {
   transition: background .16s ease, border-color .16s ease;
 }
 .secondary-button:hover { border-color: var(--line-strong); background: var(--surface-raised); }
-.secondary-button:disabled { cursor: wait; opacity: .55; }
+.secondary-button:disabled, .secondary-button[aria-disabled="true"] { cursor: wait; opacity: .55; }
 .secondary-button.busy { animation: pulse-button 1.4s ease-in-out infinite; }
 @keyframes pulse-button { 50% { opacity: .65; } }
 .secondary-button.danger-button { border-color: var(--danger-border); color: var(--danger-ink); }
