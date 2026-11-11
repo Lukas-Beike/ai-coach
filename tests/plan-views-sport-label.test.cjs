@@ -10,8 +10,8 @@ function loadPublicScript(name) {
 
 const context = vm.createContext({});
 vm.runInContext(loadPublicScript("performance-view.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarSportType = calendarSportType;`, context);
-const { calendarSportType, activitySportLabel } = context;
+vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarSportType = calendarSportType;globalThis.calendarDisplayName = calendarDisplayName;`, context);
+const { calendarSportType, activitySportLabel, calendarDisplayName } = context;
 const label = (item) => activitySportLabel(calendarSportType(item));
 
 test("completed activities are labelled from the canonical sport and environment", () => {
@@ -34,4 +34,23 @@ test("session summaries are labelled without an Intervals type", () => {
   assert.equal(activitySportLabel({ sport: "ride", environment: "outdoor" }), "Radfahren");
   assert.equal(activitySportLabel({ sport: "run" }), "Laufen");
   assert.equal(activitySportLabel({ sport: "yoga" }), "Andere");
+});
+
+test("activity names show without the athlete's own place, other names stay intact", () => {
+  for (const [stored, shown] of [
+    ["Emsdetten - 3 x 10 Min Schwelle", "3 x 10 Min Schwelle"],
+    ["Emsdetten – Grundlagenausfahrt", "Grundlagenausfahrt"],
+    ["emsdetten — Lockerer Lauf", "Lockerer Lauf"],
+    ["Emsdetten - Kontrollierter Schwellenlauf – 3 x 9 Minuten", "Kontrollierter Schwellenlauf – 3 x 9 Minuten"],
+    // Another place, no spaced dash or a workout name before the dash: the name stays whole.
+    ["Münster - Radfahren", "Münster - Radfahren"],
+    ["Emsdetten Laufen", "Emsdetten Laufen"],
+    ["Emsdetten-Lauf", "Emsdetten-Lauf"],
+    ["Sweet Spot - 3 x 12 min", "Sweet Spot - 3 x 12 min"],
+    ["Bergläufe - 6 x 2 min", "Bergläufe - 6 x 2 min"],
+    ["Lockerer Lauf – 40 Minuten", "Lockerer Lauf – 40 Minuten"],
+    ["Emsdetten -", "Emsdetten -"],
+    ["", ""],
+  ]) assert.equal(calendarDisplayName(stored, "Emsdetten, Deutschland"), shown, stored);
+  assert.equal(calendarDisplayName("Emsdetten - 3 x 10 Min Schwelle", ""), "Emsdetten - 3 x 10 Min Schwelle");
 });

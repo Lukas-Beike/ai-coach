@@ -49,7 +49,7 @@ test("@responsive compact calendar week shows one week, groups repeats and keeps
   await showCalendarDay(page, days.past);
   await expect(page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`)).toHaveCount(2);
   await showCalendarDay(page, days.missed);
-  await expect(page.locator(`.planned-day[data-date="${days.missed}"] .planned-execution`)).toBeVisible();
+  await expect(page.locator(`.planned-day[data-date="${days.missed}"] .planned-entry-status`)).toHaveText("✕ Nicht absolviert");
   // A planned session is outlined apart from completed ones and needs no status word.
   await showCalendarDay(page, days.next);
   const planned = page.locator(`.planned-day[data-date="${days.next}"] .planned-entry`);
@@ -91,6 +91,20 @@ test("@responsive compact calendar week shows one week, groups repeats and keeps
   for (const profileWeek of await profileWeeks.all()) await expect(profileWeek.locator(".planned-zone-legend")).toHaveText("Z1Z4");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator(".planned-day.is-today").screenshot({ path: testInfo.outputPath("calendar-week-compact.png") });
+  // #2258: an opened session shows each value once, per sport; a value without data is left out.
+  const facts = await page.evaluate(() => {
+    const day = addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), -1);
+    state.data.training_calendar = [
+      { id: "act_run", date: day, name: "Lauf", sport: "run", is_completed_activity: true, started_at_local: `${day}T07:00:00`, moving_duration_s: 3600, distance_m: 12000, training_load: 80, avg_hr: 150, avg_power: 270, avg_cadence: 86, ground_contact_time_ms: 248.6, elevation_gain_m: 40 },
+      { id: "act_ride", date: day, name: "Rad", sport: "ride", environment: "indoor", is_completed_activity: true, started_at_local: `${day}T18:00:00`, moving_duration_s: 3600, distance_m: 30000, training_load: 70, rpe: 6, avg_hr: 140, avg_power: 210, normalized_power: 225, intensity: 0.86, avg_cadence: 90, elevation_gain_m: 0 },
+    ];
+    renderPlanned(state.data.training_calendar);
+    return [...document.querySelectorAll(".planned-actual-facts")].map((node) => [...node.children].map((item) => item.textContent));
+  });
+  expect(facts).toEqual([
+    ["Pace 5:00 min/km", "Ø Puls 150 bpm", "Schrittfrequenz 172 spm", "Ø Leistung 270 W", "Belastung 80", "Bodenkontaktzeit 249 ms", "Höhenmeter 40 m"],
+    ["Normalized Power 225 W", "Ø Leistung 210 W", "Intensitätsfaktor 0,86", "Ø Puls 140 bpm", "Trittfrequenz 90 rpm", "Belastung 70", "RPE 6/10", "Ø Tempo 30 km/h", "Höhenmeter 0 m"],
+  ]);
 });
 
 test("@responsive opening a single calendar entry and a grouped row shows their details", async ({ page, request }) => {

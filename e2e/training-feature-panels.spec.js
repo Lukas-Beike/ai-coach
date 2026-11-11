@@ -194,8 +194,15 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
     for (let section = profile.closest("details"); section; section = section.parentElement.closest("details")) if (!section.classList.contains("planned-entry")) section.open = true;
   });
   await expect(plannedProfile).toBeVisible();
+  // A completed unit is a slim row (#2258); its recorded profile is drawn when the card opens.
   await showCalendarEntry(page, { profile: "recorded" });
-  await expect(page.locator(".calendar-workout-profile[aria-label='Aufgezeichnetes Belastungsprofil']").first()).toBeAttached();
+  await expect(page.locator(".planned-entry.is-completed summary .calendar-workout-profile")).toHaveCount(0);
+  const recordedProfile = page.locator(".planned-detail-profile .calendar-workout-profile[aria-label='Aufgezeichnetes Belastungsprofil']");
+  for (const card of await page.locator(".planned-entry.is-completed").all()) {
+    if (await recordedProfile.count()) break;
+    await card.evaluate((element) => { element.open = true; });
+  }
+  await expect(recordedProfile.first()).toBeAttached();
 
   await page.evaluate(async () => { await AppRouter.navigate("more/equipment", { historyMode: "replace" }); });
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Fixture Garmin bike" })).toBeVisible();
