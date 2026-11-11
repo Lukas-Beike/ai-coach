@@ -176,7 +176,10 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
     severe_weather = sum(25 for code in summary["weather_codes"] if code >= 95) + sum(
         8 for code in summary["weather_codes"] if 61 <= code <= 86
     )
-    running = "run" in str(event.get("type") or "").casefold()
+    # The same sport resolution as the eligibility check (``is_outdoor_activity``).
+    sport, environment = _event_sport(event)
+    running = sport is Sport.RUN
+    outdoor_ride = sport is Sport.RIDE and is_outdoor_endurance(sport, environment)
     wind_speed = summary["wind_speed_average"] or 0
     gust_maximum = summary["gust_maximum"] or 0
     rain_total = summary["rain_total"] or 0
@@ -185,8 +188,7 @@ def _weather_window_score(event: dict[str, Any], summary: dict[str, Any]) -> flo
         summary["precipitation_average"] * 0.8
         + rain_total * 8
         + max(0, wind_speed - 20) * (0.5 if running else 1.4)
-        + max(0, gust_maximum - 30)
-        * (1.0 if is_outdoor_activity(event) and not running else 0.5)
+        + max(0, gust_maximum - 30) * (1.0 if outdoor_ride else 0.5)
         + max(0, 4 - summary["temperature_average"]) * 1.5
         + max(0, summary["temperature_average"] - 27) * 1.2
         + max(0, air_quality - 40) * 0.6
