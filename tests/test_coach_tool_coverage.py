@@ -222,16 +222,19 @@ def _terms(item: dict, each: str = "") -> list[str]:
     return terms
 
 
+def _names(fields) -> str:
+    return ", ".join(f"`{field}`" for field in fields)
+
+
 def _clause(option: dict) -> str:
     """A ``oneOf`` branch made of ``required`` and ``not`` conditions."""
-    names = lambda fields: ", ".join(f"`{field}`" for field in fields)
-    parts = [f"with {names(option['required'])}"] if "required" in option else []
+    parts = [f"with {_names(option['required'])}"] if "required" in option else []
     excluded = option.get("not", {})
     fields = excluded.get("required", []) + [
         field for branch in excluded.get("anyOf", ()) for field in branch["required"]
     ]
     if fields:
-        parts.append(f"without {names(fields)}")
+        parts.append(f"without {_names(fields)}")
     return " ".join(parts)
 
 
