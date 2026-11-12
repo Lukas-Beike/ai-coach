@@ -158,7 +158,7 @@ test("the analysis empty card offers one action that depends on the connected so
   state.data = { garmin: { configured: false }, wahoo: { connected: true } };
   assert.equal(analysisDataSourceConnected(state.data), true);
   const connected = analysisEmptyCard("load");
-  assert.deepEqual([connected.cause, connected.action.tag, textOf(connected.action), Object.keys(connected.action.listeners).length], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
+  assert.deepEqual([connected.cause, connected.action.tag, textOf(connected.action), Object.values(connected.action._listenerCounts).reduce((sum, count) => sum + count, 0)], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
   // An empty 14-day window may hide older data, so it offers the 12-week view instead of a sync.
   const shortWindow = analysisEmptyCard("recovery");
   assert.deepEqual([shortWindow.title, shortWindow.cause, textOf(shortWindow.action)], ["Noch keine Erholungsdaten", "Keine Daten in den letzten 14 Tagen.", "12 Wochen anzeigen"]);

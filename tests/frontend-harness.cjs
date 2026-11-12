@@ -52,18 +52,49 @@ function extractFunctions(file, names, globals = {}) {
   return context;
 }
 
+// A minimal element. Beyond the plain fields it records, for the golden tree comparisons, which properties were
+// explicitly set (even to "" or false), how often each listener type was registered and the SVG namespace;
+// textContent replaces the children like in a browser, and querySelector answers ".a", ".a + .b[data-k="v"]"
+// and ":scope > .a" (any other selector throws).
 class FakeElement {
   constructor(tag = "div") {
-    Object.assign(this, { tag, tagName: tag.toUpperCase(), children: [], attributes: {}, dataset: {}, style: {}, listeners: {}, className: "", textContent: "", value: "", title: "", disabled: false });
+    const hidden = { explicit: new Set(), listenerCounts: {}, text: "" };
+    for (const [name, value] of Object.entries(hidden)) Object.defineProperty(this, `_${name}`, { value, writable: true });
+    Object.assign(this, { tag, tagName: tag.toUpperCase(), children: [], attributes: {}, dataset: {}, style: {}, listeners: {}, className: "", value: "", title: "", disabled: false });
+    Object.defineProperty(this.style, "setProperty", { value: (name, value) => { this.style[name] = value; } });
     this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(" "); } };
+    // Properties set after construction count as explicit, whatever their value.
+    return new Proxy(this, { set: (target, key, value) => { if (!String(key).startsWith("_")) target._explicit.add(key); return Reflect.set(target, key, value); } });
   }
+  get textContent() { return this._text; }
+  set textContent(value) { this._text = value; this.children = value === "" || value == null ? [] : [value]; }
   get childElementCount() { return this.children.filter((child) => typeof child !== "string").length; }
+  get lastElementChild() { return this.children.findLast((child) => typeof child !== "string") ?? null; }
+  get isConnected() { return true; }
+  remove() {}
   append(...items) { this.children.push(...items); }
-  replaceChildren(...items) { this.children = items; }
+  replaceChildren(...items) { this._text = ""; this.children = items; }
   setAttribute(name, value) { this.attributes[name] = value; }
-  addEventListener(type, handler) { this.listeners[type] = handler; }
+  addEventListener(type, handler) { this.listeners[type] = handler; this._listenerCounts[type] = (this._listenerCounts[type] || 0) + 1; }
   focus() { this.focused = true; }
   fire(type, event = {}) { return this.listeners[type]({ preventDefault() {}, ...event }); }
+  descendants() { return this.children.flatMap((child) => (typeof child === "string" ? [] : [child, ...child.descendants()])); }
+  querySelectorAll(selector) {
+    const scoped = /^:scope > (.+)$/.exec(selector);
+    const pool = scoped ? this.children.filter((child) => typeof child !== "string") : this.descendants();
+    return pool.filter((node) => node.matchesSelector(scoped ? scoped[1] : selector, this));
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
+  matchesSelector(selector, root) {
+    const parts = /^\.([\w-]+)(?: \+ \.([\w-]+)(?:\[data-([\w-]+)="([^"]*)"\])?)?$/.exec(selector);
+    if (!parts) throw new Error(`FakeElement does not support the selector ${selector}`);
+    const [, first, second, key, value] = parts;
+    const classes = (node) => String(node.className).split(" ");
+    if (!second) return classes(this).includes(first);
+    const parent = [root, ...root.descendants()].find((node) => node.children.includes(this));
+    const before = parent?.children[parent.children.indexOf(this) - 1];
+    return classes(this).includes(second) && (!key || this.dataset[key] === value) && Boolean(before) && classes(before).includes(first);
+  }
 }
 
 // querySelector hands out one element per selector, kept in `nodes`.
@@ -81,6 +112,9 @@ function fakeDocument() {
 }
 
 // Text of a fake node and its descendants; the element helper appends text as string children.
-const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
+const textOf = (node) => {
+  if (typeof node !== "object") return String(node);
+  return node instanceof FakeElement ? node.children.map(textOf).join("") : `${node.textContent || ""}${node.children.map(textOf).join("")}`;
+};
 
 module.exports = { babelParse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };

@@ -1,8 +1,7 @@
-<dialog aria-labelledby="activityDetailTitle" class="activity-detail-dialog">
-  <button class="secondary-button" type="button">
+<dialog aria-labelledby="activityDetailTitle" class="activity-detail-dialog" on:cancel="1" on:close="1">
+  <button class="secondary-button" on:click="1" type="button">
     "Zurück zum Kalender"
   <h2 id="activityDetailTitle">
-    "Testlauf"
     "Testlauf"
   <div>
     <p>
@@ -10,29 +9,29 @@
     <section class="activity-series">
       <h3>
         "Leistung (W)"
-      <svg aria-label="Leistung, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewbox="0 0 680 220">
-        <line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
-        <text text-anchor="end" x="56" y="20">
+      <svg:svg aria-label="Leistung, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewBox="0 0 680 220">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
+        <svg:text text-anchor="end" x="56" y="20">
           "230"
-        <line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
-        <text text-anchor="end" x="56" y="105">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
+        <svg:text text-anchor="end" x="56" y="105">
           "215"
-        <line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
-        <text text-anchor="end" x="56" y="190">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
+        <svg:text text-anchor="end" x="56" y="190">
           "200"
-        <text text-anchor="middle" x="64" y="212">
+        <svg:text text-anchor="middle" x="64" y="212">
           "0 min"
-        <text text-anchor="middle" x="366" y="212">
+        <svg:text text-anchor="middle" x="366" y="212">
           "2 min"
-        <text text-anchor="middle" x="668" y="212">
+        <svg:text text-anchor="middle" x="668" y="212">
           "4 min"
-        <path d="M64.0,186.0 L215.0,129.3  M517.0,16.0 L668.0,44.3">
+        <svg:path d="M64.0,186.0 L215.0,129.3  M517.0,16.0 L668.0,44.3">
       <p class="muted">
         "200–230 W · 0–4 min · 1 fehlende Messpunkte"
       <details class="activity-values">
         <summary>
           "Alle 4 Messwerte ansehen"
-        <div aria-label="Leistung in W: Messwerte" class="analysis-chart-table" role="region" tabindex="0">
+        <div aria-label="Leistung in W: Messwerte" class="analysis-chart-table" role="region" tabIndex="0">
           <table>
             <caption>
               "Leistung in W; fehlende Werte sind als Lücke markiert."
@@ -71,29 +70,29 @@
     <section class="activity-series">
       <h3>
         "Temperatur (°C)"
-      <svg aria-label="Temperatur, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewbox="0 0 680 220">
-        <line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
-        <text text-anchor="end" x="56" y="20">
+      <svg:svg aria-label="Temperatur, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewBox="0 0 680 220">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
+        <svg:text text-anchor="end" x="56" y="20">
           "20,5"
-        <line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
-        <text text-anchor="end" x="56" y="105">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
+        <svg:text text-anchor="end" x="56" y="105">
           "20"
-        <line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
-        <text text-anchor="end" x="56" y="190">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
+        <svg:text text-anchor="end" x="56" y="190">
           "19,5"
-        <text text-anchor="middle" x="64" y="212">
+        <svg:text text-anchor="middle" x="64" y="212">
           "0 min"
-        <text text-anchor="middle" x="366" y="212">
+        <svg:text text-anchor="middle" x="366" y="212">
           "2 min"
-        <text text-anchor="middle" x="668" y="212">
+        <svg:text text-anchor="middle" x="668" y="212">
           "4 min"
-        <path d="M64.0,101.0 L215.0,101.0 L366.0,101.0 L517.0,101.0 L668.0,101.0">
+        <svg:path d="M64.0,101.0 L215.0,101.0 L366.0,101.0 L517.0,101.0 L668.0,101.0">
       <p class="muted">
         "20–20 °C · 0–4 min · 0 fehlende Messpunkte"
       <details class="activity-values">
         <summary>
           "Alle 5 Messwerte ansehen"
-        <div aria-label="Temperatur in °C: Messwerte" class="analysis-chart-table" role="region" tabindex="0">
+        <div aria-label="Temperatur in °C: Messwerte" class="analysis-chart-table" role="region" tabIndex="0">
           <table>
             <caption>
               "Temperatur in °C; fehlende Werte sind als Lücke markiert."
@@ -140,7 +139,7 @@
       "Kraftsätze"
     <p class="muted">
       "3 Sätze · 13 Wdh. · 1.060 kg Volumen · Garmin-Sätze"
-    <div aria-label="Kraftsätze" class="analysis-chart-table" role="region" tabindex="0">
+    <div aria-label="Kraftsätze" class="analysis-chart-table" role="region" tabIndex="0">
       <table>
         <caption>
           "Ausgeführte Sätze je Übung"
@@ -158,7 +157,7 @@
               "Pause"
         <tbody>
           <tr>
-            <th rowspan="2" scope="rowgroup">
+            <th rowSpan="2" scope="rowgroup">
               "Kniebeuge – Barbell Back Squat"
             <td>
               "1"
@@ -179,7 +178,7 @@
               "–"
         <tbody>
           <tr>
-            <th rowspan="1" scope="rowgroup">
+            <th rowSpan="1" scope="rowgroup">
               "Unterarmstütz"
             <td>
               "1"
@@ -193,11 +192,11 @@
       <h3>
         "Dein Feedback"
       <p data-session-rpe-load="" hidden="true">
-      <form class="activity-feedback-form">
+      <form class="activity-feedback-form" on:submit="1">
         <label>
           "Art der Einheit"
-          <select name="purpose">
-            <option>
+          <select name="purpose" value="">
+            <option value="">
               "Automatisch"
             <option value="training">
               "Training"
@@ -211,8 +210,8 @@
               "Ausfahren"
         <label>
           "Session-RPE (0–10)"
-          <select name="session_rpe">
-            <option>
+          <select name="session_rpe" value="">
+            <option value="">
               "Keine Angabe"
             <option value="0">
               "0 · Ruhe"
@@ -258,15 +257,14 @@
               "10 · Maximal"
         <label>
           "Abweichungsgrund"
-          <input maxlength="500" name="deviation_reason">
+          <input maxLength="500" name="deviation_reason" value="">
         <label>
           "Notizen"
-          <textarea maxlength="4000" name="notes" rows="3">
+          <textarea maxLength="4000" name="notes" rows="3" value="">
         <button type="submit">
           "Feedback speichern"
       <p class="muted" role="status">
         ""
   <p class="muted" role="status">
-    "Lokale Daten werden geladen …"
   <div>
     <div class="dialog-actions">

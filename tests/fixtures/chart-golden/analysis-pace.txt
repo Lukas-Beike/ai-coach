@@ -5,7 +5,7 @@
     <li data-color="0" data-line="solid">
       <button aria-describedby="analysis-info-1" aria-expanded="false" aria-label="Erklärung zu Schwellenpace" class="analysis-legend-info" popovertarget="analysis-info-1" type="button">
         "Schwellenpace"
-      <div class="analysis-info-tooltip" data-series="0" id="analysis-info-1" popover="auto" role="tooltip">
+      <div class="analysis-info-tooltip" data-series="0" id="analysis-info-1" on:toggle="1" popover="auto" role="tooltip">
         "Schwellenpace: 4:50 min/km · 08.10.2026 · Quelle: Garmin Connect. Pace aus Garmin."
         <span class="analysis-metric-meta">
           "08.10.2026 · Garmin Connect"
@@ -16,7 +16,7 @@
     <li data-color="1" data-line="dashed">
       <button aria-describedby="analysis-info-2" aria-expanded="false" aria-label="Erklärung zu Zielpace" class="analysis-legend-info" popovertarget="analysis-info-2" type="button">
         "Zielpace"
-      <div class="analysis-info-tooltip" data-series="1" id="analysis-info-2" popover="auto" role="tooltip">
+      <div class="analysis-info-tooltip" data-series="1" id="analysis-info-2" on:toggle="1" popover="auto" role="tooltip">
         "Zielpace: 5:05 min/km · 08.10.2026. Pace aus Garmin."
         <span class="analysis-metric-meta">
           "08.10.2026"
@@ -26,96 +26,96 @@
           "Seit 05.10.2026: −0:05 min/km"
         <p class="analysis-reference-note">
           "Mittlere Hälfte deiner früheren Werte (Quartile) · 42 Tage vor der letzten Messung · vorläufig"
-  <div class="analysis-info-tooltip" id="point-info-3" popover="auto" role="tooltip">
+  <div class="analysis-info-tooltip" id="point-info-3" on:toggle="1" popover="auto" role="tooltip">
     <strong>
       "05.10.2026"
     <p>
       "Schwellenpace: 5:00 min/km · Garmin Connect"
     <p>
       "Zielpace: 5:10 min/km"
-  <div class="analysis-info-tooltip" id="point-info-4" popover="auto" role="tooltip">
+  <div class="analysis-info-tooltip" id="point-info-4" on:toggle="1" popover="auto" role="tooltip">
     <strong>
       "07.10.2026"
     <p>
       "Schwellenpace: 4:55 min/km · Garmin Connect"
-  <div class="analysis-info-tooltip" id="point-info-5" popover="auto" role="tooltip">
+  <div class="analysis-info-tooltip" id="point-info-5" on:toggle="1" popover="auto" role="tooltip">
     <strong>
       "08.10.2026"
     <p>
       "Schwellenpace: 4:50 min/km · Garmin Connect"
     <p>
       "Zielpace: 5:05 min/km"
-  <svg aria-label="Laufpace: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." role="group" viewbox="0 0 460 200">
-    <title>
+  <svg:svg aria-label="Laufpace: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." role="group" viewBox="0 0 460 200">
+    <svg:title>
       "Laufpace · 05.10.2026 bis 08.10.2026"
-    <desc>
+    <svg:desc>
       "Eigene Skala: min/km · schneller oben. Fehlende Messungen bleiben unbekannt."
-    <line class="analysis-grid-line" x1="60" x2="436" y1="30" y2="30">
-    <text class="analysis-value-tick" text-anchor="end" x="52" y="34">
+    <svg:line class="analysis-grid-line" x1="60" x2="436" y1="30" y2="30">
+    <svg:text class="analysis-value-tick" text-anchor="end" x="52" y="34">
       "4:40"
-    <line class="analysis-grid-line" x1="60" x2="436" y1="62.5" y2="62.5">
-    <text class="analysis-value-tick" text-anchor="end" x="52" y="66.5">
+    <svg:line class="analysis-grid-line" x1="60" x2="436" y1="62.5" y2="62.5">
+    <svg:text class="analysis-value-tick" text-anchor="end" x="52" y="66.5">
       "4:50"
-    <line class="analysis-grid-line" x1="60" x2="436" y1="95" y2="95">
-    <text class="analysis-value-tick" text-anchor="end" x="52" y="99">
+    <svg:line class="analysis-grid-line" x1="60" x2="436" y1="95" y2="95">
+    <svg:text class="analysis-value-tick" text-anchor="end" x="52" y="99">
       "5:00"
-    <line class="analysis-grid-line" x1="60" x2="436" y1="127.5" y2="127.5">
-    <text class="analysis-value-tick" text-anchor="end" x="52" y="131.5">
+    <svg:line class="analysis-grid-line" x1="60" x2="436" y1="127.5" y2="127.5">
+    <svg:text class="analysis-value-tick" text-anchor="end" x="52" y="131.5">
       "5:10"
-    <line class="analysis-grid-line" x1="60" x2="436" y1="160" y2="160">
-    <text class="analysis-value-tick" text-anchor="end" x="52" y="164">
+    <svg:line class="analysis-grid-line" x1="60" x2="436" y1="160" y2="160">
+    <svg:text class="analysis-value-tick" text-anchor="end" x="52" y="164">
       "5:20"
-    <text class="analysis-axis-unit" x="4" y="15">
+    <svg:text class="analysis-axis-unit" x="4" y="15">
       "min/km · schneller oben"
-    <circle cx="60" cy="95" data-color="0" data-series="0" r="2.5">
-      <title>
+    <svg:circle cx="60" cy="95" data-color="0" data-series="0" r="2.5">
+      <svg:title>
         "Schwellenpace · 05.10.2026: 5:00 min/km"
-    <circle cx="310.66666666666663" cy="78.75" data-color="0" data-series="0" r="2.5">
-      <title>
+    <svg:circle cx="310.66666666666663" cy="78.75" data-color="0" data-series="0" r="2.5">
+      <svg:title>
         "Schwellenpace · 07.10.2026: 4:55 min/km"
-    <circle cx="436" cy="62.5" data-color="0" data-series="0" r="2.5">
-      <title>
+    <svg:circle cx="436" cy="62.5" data-color="0" data-series="0" r="2.5">
+      <svg:title>
         "Schwellenpace · 08.10.2026: 4:50 min/km"
-    <path d="M60.00,95.00 L310.67,78.75 L436.00,62.50 " data-color="0" data-line="solid" data-series="0" fill="none">
-    <rect class="analysis-baseline-band" height="97.5" width="376" x="60" y="46.25">
-    <circle cx="60" cy="127.5" data-color="1" data-series="1" r="2.5">
-      <title>
+    <svg:path d="M60.00,95.00 L310.67,78.75 L436.00,62.50 " data-color="0" data-line="solid" data-series="0" fill="none">
+    <svg:rect class="analysis-baseline-band" height="97.5" width="376" x="60" y="46.25">
+    <svg:circle cx="60" cy="127.5" data-color="1" data-series="1" r="2.5">
+      <svg:title>
         "Zielpace · 05.10.2026: 5:10 min/km"
-    <circle cx="436" cy="111.25" data-color="1" data-series="1" r="2.5">
-      <title>
+    <svg:circle cx="436" cy="111.25" data-color="1" data-series="1" r="2.5">
+      <svg:title>
         "Zielpace · 08.10.2026: 5:05 min/km"
-    <path d="M60.00,127.50 L436.00,111.25 " data-color="1" data-line="dashed" data-series="1" fill="none">
-    <text class="analysis-point-value" data-value-series="0" text-anchor="start" x="60" y="85">
+    <svg:path d="M60.00,127.50 L436.00,111.25 " data-color="1" data-line="dashed" data-series="1" fill="none">
+    <svg:text class="analysis-point-value" data-value-series="0" text-anchor="start" x="60" y="85">
       "5:00"
-    <text class="analysis-point-value" data-value-series="0" text-anchor="end" x="436" y="52.5">
+    <svg:text class="analysis-point-value" data-value-series="0" text-anchor="end" x="436" y="52.5">
       "4:50"
-    <text class="analysis-point-value" data-value-series="1" text-anchor="start" x="60" y="117.5">
+    <svg:text class="analysis-point-value" data-value-series="1" text-anchor="start" x="60" y="117.5">
       "5:10"
-    <text class="analysis-point-value" data-value-series="1" text-anchor="end" x="436" y="101.25">
+    <svg:text class="analysis-point-value" data-value-series="1" text-anchor="end" x="436" y="101.25">
       "5:05"
-    <line class="analysis-tick-mark" x1="60" x2="60" y1="160" y2="168">
-    <text class="analysis-date-tick" text-anchor="middle" x="60" y="188">
+    <svg:line class="analysis-tick-mark" x1="60" x2="60" y1="160" y2="168">
+    <svg:text class="analysis-date-tick" text-anchor="middle" x="60" y="188">
       "05.10"
-    <line class="analysis-tick-mark" x1="185.33333333333331" x2="185.33333333333331" y1="160" y2="168">
-    <text class="analysis-date-tick" text-anchor="middle" x="185.33333333333331" y="188">
+    <svg:line class="analysis-tick-mark" x1="185.33333333333331" x2="185.33333333333331" y1="160" y2="168">
+    <svg:text class="analysis-date-tick" text-anchor="middle" x="185.33333333333331" y="188">
       "06.10"
-    <line class="analysis-tick-mark" x1="310.66666666666663" x2="310.66666666666663" y1="160" y2="168">
-    <text class="analysis-date-tick" text-anchor="middle" x="310.66666666666663" y="188">
+    <svg:line class="analysis-tick-mark" x1="310.66666666666663" x2="310.66666666666663" y1="160" y2="168">
+    <svg:text class="analysis-date-tick" text-anchor="middle" x="310.66666666666663" y="188">
       "07.10"
-    <line class="analysis-tick-mark" x1="436" x2="436" y1="160" y2="168">
-    <text class="analysis-date-tick" text-anchor="middle" x="436" y="188">
+    <svg:line class="analysis-tick-mark" x1="436" x2="436" y1="160" y2="168">
+    <svg:text class="analysis-date-tick" text-anchor="middle" x="436" y="188">
       "08.10"
-    <g aria-describedby="point-info-3" aria-expanded="false" aria-label="05.10.2026" class="analysis-day-marker" data-date="2026-10-05" role="button" tabindex="-1">
-      <rect fill="transparent" height="137" width="44" x="60" y="26">
-    <g aria-describedby="point-info-4" aria-expanded="false" aria-label="07.10.2026" class="analysis-day-marker" data-date="2026-10-07" role="button" tabindex="-1">
-      <rect fill="transparent" height="137" width="44" x="288.66666666666663" y="26">
-    <g aria-describedby="point-info-5" aria-expanded="false" aria-label="08.10.2026" class="analysis-day-marker" data-date="2026-10-08" role="button" tabindex="0">
-      <rect fill="transparent" height="137" width="22" x="414" y="26">
-    <rect aria-hidden="true" class="analysis-plot-hit" fill="transparent" height="137" width="376" x="60" y="26">
+    <svg:g aria-describedby="point-info-3" aria-expanded="false" aria-label="05.10.2026" class="analysis-day-marker" data-date="2026-10-05" on:click="1" on:focus="2" on:keydown="2" on:mouseenter="1" on:mouseleave="1" role="button" tabindex="-1">
+      <svg:rect fill="transparent" height="137" width="44" x="60" y="26">
+    <svg:g aria-describedby="point-info-4" aria-expanded="false" aria-label="07.10.2026" class="analysis-day-marker" data-date="2026-10-07" on:click="1" on:focus="2" on:keydown="2" on:mouseenter="1" on:mouseleave="1" role="button" tabindex="-1">
+      <svg:rect fill="transparent" height="137" width="44" x="288.66666666666663" y="26">
+    <svg:g aria-describedby="point-info-5" aria-expanded="false" aria-label="08.10.2026" class="analysis-day-marker" data-date="2026-10-08" on:click="1" on:focus="2" on:keydown="2" on:mouseenter="1" on:mouseleave="1" role="button" tabindex="0">
+      <svg:rect fill="transparent" height="137" width="22" x="414" y="26">
+    <svg:rect aria-hidden="true" class="analysis-plot-hit" fill="transparent" height="137" on:click="1" on:pointerleave="1" on:pointermove="1" width="376" x="60" y="26">
   <details>
     <summary>
       "Werte ansehen"
-    <div aria-label="Laufpace: Einzelwerte" class="analysis-chart-table" role="region" tabindex="0">
+    <div aria-label="Laufpace: Einzelwerte" class="analysis-chart-table" role="region" tabIndex="0">
       <table>
         <caption>
           "Laufpace · min/km · schneller oben · nur vorhandene Werte"

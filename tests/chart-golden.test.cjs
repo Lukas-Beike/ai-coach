@@ -9,58 +9,32 @@ const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = requir
 // in, the produced element tree serialized to text, compared to the committed fixture.
 const FIXTURES = path.join(__dirname, "fixtures", "chart-golden");
 
-// A fake element that also answers the few selectors the chart code asks its own tree.
-class DomElement extends FakeElement {
-  constructor(tag) {
-    super(tag);
-    this.styleValues = {};
-    this.style = { setProperty: (name, value) => { this.styleValues[name] = value; } };
-  }
-  get isConnected() { return true; }
-  get childElementCount() { return this.children.filter((child) => typeof child !== "string").length; }
-  get lastElementChild() { return this.children.findLast((child) => typeof child !== "string") ?? null; }
-  remove() {}
-  descendants() { return this.children.flatMap((child) => (typeof child === "string" ? [] : [child, ...child.descendants()])); }
-  querySelectorAll(selector) { return this.descendants().filter((node) => node.matchesSelector(selector, this)); }
-  querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
-  // ".a" or ".a + .b[data-key=\"n\"]": the two selector forms the chart code uses on its own tree.
-  matchesSelector(selector, root) {
-    const [, first, second, key, value] = /^\.([\w-]+)(?: \+ \.([\w-]+)(?:\[data-([\w-]+)="(\d+)"\])?)?$/.exec(selector) ?? [];
-    const classes = (node) => String(node.className).split(" ");
-    if (!second) return classes(this).includes(first);
-    const parent = [root, ...root.descendants()].find((node) => node.children.includes(this));
-    const before = parent?.children[parent.children.indexOf(this) - 1];
-    const dataOk = !key || this.dataset[key] === value;
-    return classes(this).includes(second) && dataOk && Boolean(before) && classes(before).includes(first);
-  }
-}
-
 function chartDocument() {
   const document = fakeDocument();
-  document.createElement = (tag) => new DomElement(tag);
-  document.createElementNS = (namespace, tag) => Object.assign(new DomElement(tag), { namespace });
-  document.getElementById = () => new DomElement();
-  document.body = new DomElement("body");
+  document.getElementById = () => new FakeElement();
+  document.body = new FakeElement("body");
   return document;
 }
 
-// One line per node: tag, sorted attributes (properties and data-* included), then the text and children indented.
-const INTERNAL = new Set(["tag", "tagName", "children", "attributes", "dataset", "style", "listeners", "classList", "className", "textContent", "focused", "namespace", "styleValues"]);
+// One line per node: tag (svg: for the SVG namespace), attributes and explicitly set properties with their exact
+// names (an explicit "" or false stays visible), data-*, style, listener types with counts, then the children indented.
+const INTERNAL = new Set(["tag", "tagName", "children", "attributes", "dataset", "style", "listeners", "classList", "className", "focused", "namespace", "textContent"]);
+const SVG_NS = "http://www.w3.org/2000/svg";
 function serialize(node, depth = 0) {
   const pad = "  ".repeat(depth);
   if (typeof node === "string") return `${pad}"${node}"`;
   const attributes = {};
   if (node.className) attributes.class = node.className;
-  for (const [key, value] of Object.entries(node)) {
-    if (!INTERNAL.has(key) && value !== "" && value !== false && value !== undefined) attributes[key.toLowerCase()] = String(value);
+  for (const key of node._explicit) {
+    if (!INTERNAL.has(key) && node[key] !== undefined) attributes[key] = String(node[key]);
   }
-  for (const [key, value] of Object.entries(node.attributes)) attributes[key.toLowerCase()] = String(value);
-  if (Object.keys(node.styleValues).length) attributes.style = Object.entries(node.styleValues).map(([name, value]) => `${name}:${value}`).join(";");
+  Object.assign(attributes, node.attributes);
+  for (const [key, value] of Object.entries(node.style)) attributes[`style.${key}`] = String(value);
   for (const [key, value] of Object.entries(node.dataset)) attributes[`data-${key.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`] = String(value);
-  const rendered = Object.keys(attributes).sort((a, b) => a.localeCompare(b)).map((key) => ` ${key}="${attributes[key]}"`).join("");
-  const text = node.textContent === "" ? [] : [`${pad}  "${node.textContent}"`];
-  const lines = [`${pad}<${node.tag}${rendered}>`, ...text, ...node.children.map((child) => serialize(child, depth + 1))];
-  return lines.join("\n");
+  for (const [type, count] of Object.entries(node._listenerCounts)) attributes[`on:${type}`] = String(count);
+  const rendered = Object.keys(attributes).sort().map((key) => ` ${key}="${attributes[key]}"`).join("");
+  const prefix = node.namespace === SVG_NS ? "svg:" : "";
+  return [`${pad}<${prefix}${node.tag}${rendered}>`, ...node.children.map((child) => serialize(child, depth + 1))].join("\n");
 }
 
 function expectGolden(name, node) {
@@ -121,7 +95,7 @@ test("the activity analysis panel keeps its rendered tree: channel charts with p
   const context = chartContext(390);
   loadPublicScript(["activity-details.js", "activity-analysis.js"], context);
   context.api = async () => ANALYSIS_PAYLOAD;
-  const panel = new DomElement("div");
+  const panel = new FakeElement("div");
   await context.ActivityAnalysis.loadPanel(panel, { activity_id: "a1", sport: "run" });
   expectGolden("activity-analysis", panel);
 });
