@@ -192,7 +192,14 @@ class GarminChangeCheckTests(unittest.TestCase):
         self.assertEqual(["activities"] * 8, self.personal.calls)
         self.assertEqual((6, 2), (day_reads, len(self.personal.calls) - day_reads))
         self.assertEqual(
-            {"checks": 8, "changes": 0, "daytime": 0, "throttled": 0, "failed": 0},
+            {
+                "checks": 8,
+                "changes": 0,
+                "daily": 0,
+                "daytime": 0,
+                "throttled": 0,
+                "failed": 0,
+            },
             self.check.counts,
         )
 
@@ -409,6 +416,24 @@ class GarminChangeCheckTests(unittest.TestCase):
             "garmin", "authentication", 403
         )
         self.assertTrue(self.due())
+
+    def test_the_diagnostics_show_counts_and_times_without_provider_data(
+        self,
+    ) -> None:
+        self.assertEqual(
+            {"active": True, "checks": 0, "last_check_at": None},
+            {k: self.check.status()[k] for k in ("active", "checks", "last_check_at")},
+        )
+        self.personal.activity_ids.insert(0, "900006")
+        self.assertTrue(self.due())
+
+        status = self.check.status()
+        self.assertEqual(1, status["changes"])
+        self.assertEqual(600, status["next_check_seconds"])
+        self.assertEqual("2026-11-12T10:00:00+01:00", status["last_due_at"])
+        self.assertNotIn("900006", repr(status))
+        self.keyed = False
+        self.assertFalse(self.check.status()["active"])
 
     def test_a_slow_check_never_delays_a_foreground_write(self) -> None:
         # The check reads remotely outside any database lease (#2287 style):
