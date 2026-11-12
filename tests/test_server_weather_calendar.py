@@ -1374,9 +1374,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with patch.object(
             weather_provider.WeatherClient, "fetch", return_value=forecast
         ) as fetch:
-            first = server.WEATHER_ASSEMBLY.sync_service().sync("test")
-            second = server.WEATHER_ASSEMBLY.sync_service().sync("test")
-            manual = server.WEATHER_ASSEMBLY.sync_service().sync("manuell", force=True)
+            first = server.WEATHER_SYNC().sync("test")
+            second = server.WEATHER_SYNC().sync("test")
+            manual = server.WEATHER_SYNC().sync("manuell", force=True)
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
         self.assertEqual(manual["status"], "ok")
@@ -1402,7 +1402,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value={"changes": [{"id": "change-1"}]},
             ) as preview,
         ):
-            result = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+            result = server.WEATHER_SYNC().sync("test")
         preview.assert_called_once_with()
         self.assertTrue(result["needs_replan"])
         self.assertEqual(result["replan_changes"], 1)

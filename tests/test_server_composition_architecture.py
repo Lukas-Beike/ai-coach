@@ -626,21 +626,13 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for node in weather_tree.body
             )
         )
-        assembly_tree = _parse(BACKEND_ROOT / "weather" / "assembly.py")
-        assembly = next(
+        wiring_tree = _parse(BACKEND_ROOT / "weather" / "wiring.py")
+        builder = next(
             node
-            for node in assembly_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "WeatherAssembly"
+            for node in wiring_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_weather"
         )
-        service_method = next(
-            node
-            for node in assembly.body
-            if isinstance(node, ast.FunctionDef) and node.name == "service"
-        )
-        self.assertIn(
-            "weather.WEATHER_SERVICE_CACHE.get",
-            ast.unparse(service_method),
-        )
+        self.assertIn("weather.WEATHER_SERVICE_CACHE.get", ast.unparse(builder))
         server_tree = _parse(SERVER_PATH)
         weather_assembly = next(
             node
@@ -651,7 +643,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for target in node.targets
             )
         )
-        self.assertIn("WeatherAssembly", ast.unparse(weather_assembly.value))
+        self.assertIn("build_weather", ast.unparse(weather_assembly.value))
         self.assertFalse(
             any(
                 isinstance(node, ast.FunctionDef)

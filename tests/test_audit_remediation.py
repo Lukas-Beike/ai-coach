@@ -236,7 +236,7 @@ with patch.object(Path, 'read_text', deny):
             "state",
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
-            server.WEATHER_ASSEMBLY.sync_service().sync()
+            server.WEATHER_SYNC().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute(
