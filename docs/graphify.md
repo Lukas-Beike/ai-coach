@@ -1,9 +1,12 @@
 # Local code graph
 
 Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
-development dependencies, the hash-locked `ruff` and `mypy` pins from
-`requirements-dev.txt` into that interpreter (`tools/quality_baseline.py` runs
-them as `python -m`), set up Graphify and generate the first graph. It then
+development dependencies and the locked Playwright Chromium, the hash-locked
+`ruff`, `mypy` and `tzdata` pins from `requirements-dev.txt` into that
+interpreter (`tools/quality_baseline.py` runs the tools as `python -m`; Windows
+has no system time zone database), set up Graphify, generate the first graph,
+and build this checkout's browser-test app image (skipped when Docker is not
+running). Agent worktrees run it too, so each gets its own `node_modules`. It then
 prints an advisory list of pinned Python (queried at pypi.org) and npm
 (`npm outdated`) packages that have a newer release; this needs network access,
 installs nothing and never changes the exit code.

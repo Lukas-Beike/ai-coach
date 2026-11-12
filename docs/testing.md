@@ -114,8 +114,9 @@ and failed/partial/list runs never overwrite the authoritative recording.
 ## Playwright Browser E2E Tests
 
 The shared runner lists the locked Playwright selection and gives every spec its
-own disposable SQLCipher fixture. Prepare the locked native browser and build
-current application source before running locally:
+own disposable SQLCipher fixture. `python scripts/prepare_worktree.py` prepares
+the locked native browser and the image; after source changes, rebuild the
+image before running locally:
 
 ```powershell
 npm ci --ignore-scripts
