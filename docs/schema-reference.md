@@ -15,9 +15,9 @@ releases and what each version added.
   name, SQL with every run of whitespace collapsed to one space).
 - **Digest:** SHA-256 of the UTF-8 JSON array of those tuples, serialized with
   `ensure_ascii=False` and the separators `,` and `:`.
-- **Current:** `PRAGMA user_version` is 0 or the schema version below, the table
-  and index sets are exactly those below and the signature equals the one the
-  DDL below produces. A database at the baseline version with the baseline
+- **Current:** `PRAGMA user_version` is the schema version below, the table and
+  index sets are exactly those below and the signature equals the one the DDL
+  below produces. A database at the baseline version with the baseline
   digest is upgraded in one transaction; any other version, digest or pair is
   refused unchanged.
 - **New database:** `PRAGMA journal_mode=WAL`, then the DDL below in one
