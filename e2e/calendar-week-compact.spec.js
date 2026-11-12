@@ -312,6 +312,8 @@ test("@responsive Mit dem Coach besprechen puts the planned unit into the Coach 
     renderPlanned(state.data.training_calendar);
     // An unsent draft stays in the field (#2193).
     document.querySelector("#messageInput").value = "Noch offen";
+    // A quick action's kind left in the field does not label the athlete's own question.
+    document.querySelector("#messageInput").dataset.requestKind = "plan_week";
   });
   await showCalendarDay(page, days.next);
   const card = page.locator('.planned-entry[data-entry-key="local:22222222-2222-4222-8222-222222222222"]');
@@ -327,4 +329,5 @@ test("@responsive Mit dem Coach besprechen puts the planned unit into the Coach 
   // The stored name never becomes Coach input, and nothing is sent.
   expect(value).not.toContain("Ignoriere");
   expect(sent).toEqual([]);
+  expect(await input.evaluate((element) => element.dataset.requestKind)).toBeUndefined();
 });

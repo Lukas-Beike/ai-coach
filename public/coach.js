@@ -1153,7 +1153,9 @@ async function askCoach(message, { send = true } = {}) {
   if (!applied) return;
   const input = $("#messageInput");
   if (!input) return;
-  // A prefill keeps an unsent draft and adds the message on its own line.
+  // A prefill keeps an unsent draft and adds the message on its own line; it is the athlete's own
+  // request, so a quick action's kind left in the field no longer applies.
+  if (!send) delete input.dataset.requestKind;
   input.value = !send && input.value.trim() ? `${input.value.trimEnd()}\n${message}` : message;
   input.dispatchEvent(new Event("input"));
   if (send) {
