@@ -18,8 +18,8 @@ function contextFor(globals) {
 // Scripts that render get the element helpers of components.js unless the test stubs them.
 function provideElementHelpers(files, globals) {
   if ([files].flat().includes("components.js") || !globals.document || "h" in globals) return;
-  const { h, table } = extractFunctions("components.js", ["h", "table"], { document: globals.document });
-  Object.assign(globals, { h, table });
+  const { h, table, svgNode } = extractFunctions("components.js", ["h", "SVG_NS", "svgNode", "table"], { document: globals.document });
+  Object.assign(globals, { h, table, svgNode });
 }
 
 // Runs whole public files (one name or a list, in order) and returns the context. The element
@@ -71,6 +71,7 @@ function fakeDocument() {
   return {
     nodes,
     createElement: (tag) => new FakeElement(tag),
+    createElementNS: (namespace, tag) => Object.assign(new FakeElement(tag), { namespace }),
     querySelector(selector) {
       if (!nodes.has(selector)) nodes.set(selector, new FakeElement());
       return nodes.get(selector);

@@ -1,0 +1,113 @@
+<section class="analysis-chart-card">
+  <h3>
+    "Schlaf"
+    " "
+    <span class="status-chip estimate-chip" data-status="estimate">
+      "Schätzung"
+  <ul class="analysis-chart-legend">
+    <li data-color="0" data-line="solid">
+      <button aria-describedby="analysis-info-6" aria-expanded="false" aria-label="Erklärung zu Schlafdauer" class="analysis-legend-info" popovertarget="analysis-info-6" type="button">
+        "Schlafdauer"
+      <div class="analysis-info-tooltip" data-series="0" id="analysis-info-6" popover="auto" role="tooltip">
+        "Schlafdauer: 8:12 h · 07.10.2026. Schlaf aus Garmin."
+        <span class="analysis-metric-meta">
+          "07.10.2026"
+        <span class="analysis-metric-meta">
+          "Daten für 3 von 3 Tagen vorhanden."
+        <span class="analysis-metric-change">
+          "Seit 05.10.2026: +0:42 h"
+        <p class="analysis-reference-note">
+          "Ziellinie: 8:00 h · persönliches Schlafziel"
+        <p class="analysis-reference-note">
+          "Gestrichelte Linie: Durchschnitt der angezeigten Werte."
+  <div class="analysis-info-tooltip" id="point-info-7" popover="auto" role="tooltip">
+    <strong>
+      "05.10.2026"
+    <p>
+      "Schlafdauer: 7:30 h"
+  <div class="analysis-info-tooltip" id="point-info-8" popover="auto" role="tooltip">
+    <strong>
+      "06.10.2026"
+    <p>
+      "Schlafdauer: 6:48 h"
+  <div class="analysis-info-tooltip" id="point-info-9" popover="auto" role="tooltip">
+    <strong>
+      "07.10.2026"
+    <p>
+      "Schlafdauer: 8:12 h"
+  <svg aria-label="Schlaf: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen." role="group" viewbox="0 0 460 200">
+    <title>
+      "Schlaf · 05.10.2026 bis 07.10.2026"
+    <desc>
+      "Eigene Skala: h. Fehlende Messungen bleiben unbekannt."
+    <line class="analysis-zero-line" x1="60" x2="436" y1="160" y2="160">
+    <text class="analysis-value-tick" text-anchor="end" x="52" y="164">
+      "0"
+    <line class="analysis-grid-line" x1="60" x2="436" y1="95" y2="95">
+    <text class="analysis-value-tick" text-anchor="end" x="52" y="99">
+      "5"
+    <line class="analysis-grid-line" x1="60" x2="436" y1="30" y2="30">
+    <text class="analysis-value-tick" text-anchor="end" x="52" y="34">
+      "10"
+    <text class="analysis-axis-unit" x="4" y="15">
+      "h"
+    <line class="analysis-target-line" x1="60" x2="436" y1="56" y2="56">
+    <line class="analysis-average-line" x1="60" x2="436" y1="62.5" y2="62.5">
+      <title>
+        "Schlafdauer: Durchschnitt 7:30 h"
+    <text class="analysis-point-value analysis-average-value" paint-order="stroke" stroke="var(--surface)" stroke-linejoin="round" stroke-width="4" text-anchor="end" x="436" y="54.5">
+      "Ø 7:30 h"
+    <rect class="analysis-series-bar" data-color="0" height="97.5" rx="3" width="24" x="48" y="62.5">
+    <rect class="analysis-series-bar" data-color="0" height="88.39999999999999" rx="3" width="24" x="236" y="71.60000000000001">
+    <rect class="analysis-series-bar" data-color="0" height="106.6" rx="3" width="24" x="424" y="53.400000000000006">
+    <text class="analysis-point-value" data-value-series="0" text-anchor="start" x="60" y="30.5">
+      "7:30"
+    <text class="analysis-point-value" data-value-series="0" text-anchor="middle" x="248" y="39.60000000000001">
+      "6:48"
+    <text class="analysis-point-value" data-value-series="0" text-anchor="end" x="436" y="21.400000000000006">
+      "8:12"
+    <line class="analysis-tick-mark" x1="60" x2="60" y1="160" y2="168">
+    <text class="analysis-date-tick" text-anchor="middle" x="60" y="188">
+      "05.10"
+    <line class="analysis-tick-mark" x1="248" x2="248" y1="160" y2="168">
+    <text class="analysis-date-tick" text-anchor="middle" x="248" y="188">
+      "06.10"
+    <line class="analysis-tick-mark" x1="436" x2="436" y1="160" y2="168">
+    <text class="analysis-date-tick" text-anchor="middle" x="436" y="188">
+      "07.10"
+    <g aria-describedby="point-info-7" aria-expanded="false" aria-label="05.10.2026" class="analysis-day-marker" data-date="2026-10-05" role="button" tabindex="-1">
+      <rect fill="transparent" height="137" width="44" x="60" y="26">
+    <g aria-describedby="point-info-8" aria-expanded="false" aria-label="06.10.2026" class="analysis-day-marker" data-date="2026-10-06" role="button" tabindex="-1">
+      <rect fill="transparent" height="137" width="44" x="226" y="26">
+    <g aria-describedby="point-info-9" aria-expanded="false" aria-label="07.10.2026" class="analysis-day-marker" data-date="2026-10-07" role="button" tabindex="0">
+      <rect fill="transparent" height="137" width="22" x="414" y="26">
+    <rect aria-hidden="true" class="analysis-plot-hit" fill="transparent" height="137" width="376" x="60" y="26">
+  <details>
+    <summary>
+      "Werte ansehen"
+    <div aria-label="Schlaf: Einzelwerte" class="analysis-chart-table" role="region" tabindex="0">
+      <table>
+        <caption>
+          "Schlaf · h · nur vorhandene Werte"
+        <thead>
+          <tr>
+            <th scope="col">
+              "Tag"
+            <th scope="col">
+              "Schlafdauer"
+        <tbody>
+          <tr>
+            <th scope="row">
+              "05.10.2026"
+            <td>
+              "7:30 h"
+          <tr>
+            <th scope="row">
+              "06.10.2026"
+            <td>
+              "6:48 h"
+          <tr>
+            <th scope="row">
+              "07.10.2026"
+            <td>
+              "8:12 h"
