@@ -808,6 +808,18 @@ def render_report(
     return "\n".join(lines) + "\n"
 
 
+def _errored(case_id: str, error: Exception) -> dict[str, Any]:
+    """A failed case for an unexpected error; only its type, never its text."""
+    return {
+        "id": case_id,
+        "passed": False,
+        "safety": [],
+        "misses": [f"error:{type(error).__name__}"],
+        "unnecessary_clarifications": 0,
+        "turns": [{"tools": [], "text": ""}],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live Coach dialogue evaluation.")
     parser.add_argument("--base-url", required=True)
@@ -844,6 +856,11 @@ def main(argv: list[str] | None = None) -> int:
             results.append(run_case(case, counter, settings))
         except CapReached:
             not_run.append(case["id"])
+        except KeyboardInterrupt:
+            not_run.append(case["id"])
+            break
+        except Exception as error:  # noqa: BLE001 - keep the report, never raw text
+            results.append(_errored(case["id"], error))
     sys.stdout.write(render_report(args, counter, results, not_run))
     return 0
 

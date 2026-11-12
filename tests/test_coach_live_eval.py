@@ -11,6 +11,7 @@ import itertools
 import json
 import sys
 import unittest
+from fnmatch import fnmatch
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -114,12 +115,8 @@ class CaseDefinitionTests(unittest.TestCase):
         )
 
     def test_the_live_harness_is_never_discovered_by_the_suite(self):
-        import run_tests
-
-        names = {test.id().split(".")[0] for test in run_tests.discover_tests()}
-        self.assertNotIn("coach_live_eval", names)
-        self.assertFalse(live.__file__.endswith("test_coach_live_eval.py"))
-        self.assertFalse(Path(live.__file__).name.startswith("test_"))
+        # The suite, CI and the pre-push hook discover only test_*.py files.
+        self.assertFalse(fnmatch(Path(live.__file__).name, "test_*.py"))
 
 
 class ScorerTests(unittest.TestCase):
@@ -751,6 +748,18 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Provider host: 127.0.0.1\n", text)
         self.assertNotIn("8317", text)
         self.assertIn("Antwort A", text)
+
+    def test_an_unexpected_error_fails_its_case_and_keeps_the_report(self):
+        secret_text = "raw upstream detail"
+        with (
+            patch.object(live, "fetch_model_ids", return_value=["m"]),
+            patch.object(live, "run_case", side_effect=RuntimeError(secret_text)),
+        ):
+            code, text = run_main(*self.ARGS, "--cases", "c10-advice-only")
+        self.assertEqual(code, 0)
+        self.assertIn("0 passed, 1 failed, 0 not run", text)
+        self.assertIn("error:RuntimeError", text)
+        self.assertNotIn(secret_text, text)
 
     def test_the_report_names_failures_safety_and_never_raw_errors(self):
         args = Mock(base_url="http://127.0.0.1:1/v1", model="m", thinking="low")
