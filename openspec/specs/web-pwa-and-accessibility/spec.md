@@ -339,7 +339,7 @@ The client SHALL mark every derived or estimated value with one "Schätzung" chi
 
 #### Scenario: Estimates and predictions
 - **WHEN** a derived value (VO2max, race predictions, CP/CS, load, fitness/fatigue/form, heart-rate drift, projected daily expenditure) is shown
-- **THEN** it carries the chip, race predictions are whole minutes, and a dashed line is named in the legend or a line key.
+- **THEN** it carries the chip, 5 and 10 km predictions show minutes and seconds while half marathon and marathon show hours and minutes, VO2max keeps the precise provider value's one decimal, and a dashed line is named in the legend or a line key.
 
 #### Scenario: Hit areas and contrast
 - **WHEN** the analysis or nutrition routes render in the light theme
@@ -349,7 +349,7 @@ The client SHALL mark every derived or estimated value with one "Schätzung" chi
 - **WHEN** the diary, the history or the product tab renders
 - **THEN** calories form one hero tile above one macro row, runs of days without data collapse to one row, and the product tab has one primary action.
 
-Evidence: `public/components.js::createEstimateChip`, `public/performance-view.js::predictionTime`, `public/analysis.js::appendAnalysisLineKey`, `public/nutrition.js::nutritionChartRows`, `tests/test_css_design_tokens.py::test_training_focus_percentages_use_neutral_text_in_both_themes`, `e2e/estimates-targets.spec.js`.
+Evidence: `public/components.js::createEstimateChip`, `public/performance-view.js::predictionTime`, `public/analysis.js::appendAnalysisLineKey`, `public/nutrition.js::nutritionChartRows`, `tests/test_css_design_tokens.py::test_training_focus_percentages_use_neutral_text_in_both_themes`, `tests/analysis-presentation.test.cjs::race prediction rows exclude body weight and empty states give a reason`, `backend/sync/garmin_payload_metrics.py:_garmin_collect_vo2_values`, `tests/test_performance_garmin_metrics.py:test_precise_vo2max_wins_over_its_rounded_twin`, `e2e/estimates-targets.spec.js`.
 
 ### Requirement: Selection, sources and axes read consistently
 The client SHALL fill the selected tab or range with one accent style everywhere, show the app name, a password toggle and an invalid-field border on the login, and show a meal source only when it differs from the manual local default. Charts SHALL keep a minimum axis span, draw a flat series as a line and space tick labels evenly, naming weeks "Woche ab". Session detail SHALL show one muted source line with the provenance folded away.
