@@ -274,7 +274,7 @@ class OrchestrationCase(unittest.TestCase):
             schedule_policies=policies,
         )
 
-    def wahoo_freshness(self) -> dict[str, Any]:
+    def _wahoo_freshness(self) -> dict[str, Any]:
         entries = self.freshness.current(
             profile={},
             garmin_has_core_error=False,
@@ -417,7 +417,7 @@ class QueueAndExecutionTests(OrchestrationCase):
 
 class FreshnessAndStatusTests(OrchestrationCase):
     def test_freshness_moves_from_never_loaded_to_fresh_then_stale(self) -> None:
-        self.assertEqual(self.wahoo_freshness()["state"], "never_loaded")
+        self.assertEqual(self._wahoo_freshness()["state"], "never_loaded")
 
         self.queue.enqueue(
             WAHOO_ID, "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
@@ -426,7 +426,7 @@ class FreshnessAndStatusTests(OrchestrationCase):
         drain(self)
         success_at = self.clock.current.isoformat()
 
-        fresh = self.wahoo_freshness()
+        fresh = self._wahoo_freshness()
         self.assertEqual(fresh["state"], "fresh")
         self.assertTrue(fresh["configured"])
         self.assertTrue(fresh["read_only"])
@@ -434,14 +434,14 @@ class FreshnessAndStatusTests(OrchestrationCase):
         self.assertTrue(fresh["has_last_good"])
 
         self.clock.advance(3 * 24 * 60 * 60)
-        stale = self.wahoo_freshness()
+        stale = self._wahoo_freshness()
         self.assertEqual(stale["state"], "stale")
         self.assertTrue(stale["stale"])
 
     def test_disconnected_provider_is_reported_as_not_configured(self) -> None:
         self.connect_wahoo(connected=False)
 
-        entry = self.wahoo_freshness()
+        entry = self._wahoo_freshness()
 
         self.assertEqual(entry["state"], "not_configured")
         self.assertFalse(entry["configured"])
