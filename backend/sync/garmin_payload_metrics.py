@@ -21,7 +21,7 @@ from backend.performance.garmin_metrics import (
     assemble_garmin_metrics,
 )
 from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers.garmin_fields import colon_time_parts
+from backend.providers.garmin_fields import GARMIN_VO2MAX_ALIASES, colon_time_parts
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.sync import garmin_weight
 
@@ -304,8 +304,12 @@ def _garmin_collect_vo2_values(
     value: Any, values: dict[str, list[float | int]], path: tuple[str, ...] = ()
 ) -> None:
     if isinstance(value, dict):
+        # The precise value hides its rounded twin in the same section (#2263).
+        precise = _garmin_vo2_value(value.get(GARMIN_VO2MAX_ALIASES[0])) is not None
         for key, item in value.items():
             normalized = _garmin_key(key)
+            if precise and key in GARMIN_VO2MAX_ALIASES[1:]:
+                continue
             if "vo2max" in normalized or ("vo2" in normalized and "max" in normalized):
                 number = _garmin_vo2_value(item)
                 if number is not None:

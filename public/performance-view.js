@@ -212,10 +212,10 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     }
     head.append(header); table.append(head);
     const body = reportNode("tbody");
-    for (const { label, metric } of predictions) {
+    for (const { label, metric, withSeconds } of predictions) {
       const row = reportNode("tr");
       const distance = reportNode("th", label); distance.scope = "row";
-      row.append(distance, reportNode("td", predictionTime(metric.value)));
+      row.append(distance, reportNode("td", predictionTime(metric.value, withSeconds)));
       body.append(row);
     }
     table.append(body);
@@ -225,18 +225,20 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   renderAnalysisSegments(state.route);
 }
 
-// Model estimates are shown in whole minutes: "25 min", "3:55 h".
-function predictionTime(seconds) {
+// Model estimates: short races as a clock with seconds ("21:47"), long ones in whole minutes ("3:55 h", "25 min").
+function predictionTime(seconds, withSeconds = false) {
+  if (withSeconds) return AppFormat.clock(seconds);
   const minutes = Math.round(Number(seconds) / 60);
   if (minutes < 60) return `${minutes} min`;
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
 }
 
 function racePredictionRows(metrics) {
-  const distances = [["run_5k_seconds", "5 km"], ["run_10k_seconds", "10 km"],
-    ["run_half_marathon_seconds", "Halbmarathon"], ["run_marathon_seconds", "Marathon"]];
+  // 5 and 10 km keep their seconds (#2263); the longer races stay in hours and minutes.
+  const distances = [["run_5k_seconds", "5 km", true], ["run_10k_seconds", "10 km", true],
+    ["run_half_marathon_seconds", "Halbmarathon", false], ["run_marathon_seconds", "Marathon", false]];
   const values = metrics || {};
-  return distances.filter(([key]) => values[key]?.value != null).map(([key, label]) => ({ label, metric: values[key] }));
+  return distances.filter(([key]) => values[key]?.value != null).map(([key, label, withSeconds]) => ({ label, metric: values[key], withSeconds }));
 }
 
 function racePredictionEmptyReason(metrics) {

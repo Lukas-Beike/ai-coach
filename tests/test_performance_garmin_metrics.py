@@ -112,6 +112,21 @@ class GarminPerformanceMetricTests(unittest.TestCase):
             result["running_vo2max_ml_kg_min"]["source"], GARMIN_PERFORMANCE_SOURCE
         )
 
+    def test_precise_vo2max_wins_over_its_rounded_twin(self):
+        # Garmin sends both fields in one section; the precise one keeps its decimal (#2263).
+        snapshot = {
+            "max_metrics": [
+                {
+                    "generic": {"vo2MaxPreciseValue": 54.3, "vo2MaxValue": 54},
+                    "cycling": {"vo2MaxValue": 58, "vo2MaxPreciseValue": 58.6},
+                }
+            ]
+        }
+        result = garmin_payload_performance_metrics(snapshot, CURRENT_DATE)
+
+        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 54.3)
+        self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 58.6)
+
     def test_threshold_aliases_speed_scaling_and_bounds(self):
         cases = (
             ("speedInMetersPerSecond", 3.8, 263),
