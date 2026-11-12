@@ -6,7 +6,7 @@ import json
 import sqlite3
 import unittest
 
-from backend.diagnostics.plan_sync import summarize_plan_sync
+from backend.diagnostics.plan_sync import summarize_garmin_removal, summarize_plan_sync
 
 
 class PlanSyncDiagnosticsTests(unittest.TestCase):
@@ -87,6 +87,75 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(report["unsynced_total"], 1)
         self.assertIsNone(report["unsynced_units"][0]["date"])
+
+
+class GarminRemovalDiagnosticsTests(unittest.TestCase):
+    """#2408: the past-workout removal's state is visible as counts only."""
+
+    def database(self) -> sqlite3.Connection:
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.executescript(
+            """
+            CREATE TABLE kv (key, value, updated_at);
+            CREATE TABLE remote_links (local_id, provider, entity_kind, remote_id);
+            CREATE TABLE planned_units (local_id, payload);
+            """
+        )
+        return db
+
+    def test_reports_counts_and_last_run_without_ids(self):
+        db = self.database()
+        db.execute(
+            "INSERT INTO kv VALUES ('garmin_app_workout_cleanup', ?, 't')",
+            (
+                json.dumps(
+                    {
+                        "done": True,
+                        "checked": ["701", "702"],
+                        "removed": 3,
+                        "last_run_at": "2026-11-12T16:23:00+00:00",
+                    }
+                ),
+            ),
+        )
+        for local_id, day in (("u1", "2000-01-01"), ("u2", "2999-01-01")):
+            db.execute(
+                "INSERT INTO remote_links VALUES (?, 'garmin', 'planned_unit', ?)",
+                (local_id, f"remote-{local_id}"),
+            )
+            db.execute(
+                "INSERT INTO planned_units VALUES (?, ?)",
+                (local_id, json.dumps({"date": day})),
+            )
+
+        report = summarize_garmin_removal(db)
+
+        self.assertEqual(
+            {
+                "one_time_done": True,
+                "checked": 2,
+                "removed": 3,
+                "last_run_at": "2026-11-12T16:23:00+00:00",
+                "past_links_pending": 1,
+            },
+            report,
+        )
+        self.assertNotIn("remote-u1", json.dumps(report))
+
+    def test_a_removal_that_never_ran_reports_no_run(self):
+        report = summarize_garmin_removal(self.database())
+
+        self.assertEqual(
+            {
+                "one_time_done": False,
+                "checked": 0,
+                "removed": 0,
+                "last_run_at": None,
+                "past_links_pending": 0,
+            },
+            report,
+        )
 
 
 if __name__ == "__main__":

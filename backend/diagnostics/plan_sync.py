@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from backend.db.repositories import KeyValueRepository
+from backend.sync.garmin_strength_push import APP_WORKOUT_CLEANUP_KEY
 from backend.sync.jobs import job_dto, read_job
 
 _JOB_LIMIT = 10
@@ -68,4 +71,34 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
             }
             for unit in units
         ],
+    }
+
+
+def summarize_garmin_removal(db: Any) -> dict[str, Any]:
+    """Counts only: the one-time removal's state, removals, last run, links waiting."""
+    try:
+        state = json.loads(
+            KeyValueRepository(str).get(db, APP_WORKOUT_CLEANUP_KEY) or "{}"
+        )
+    except TypeError, ValueError:
+        state = {}
+    state = state if isinstance(state, dict) else {}
+    removed = state.get("removed")
+    last_run = state.get("last_run_at")
+    checked = state.get("checked")
+    pending = db.execute(
+        "SELECT COUNT(*) AS count FROM remote_links l "
+        "JOIN planned_units p ON p.local_id = l.local_id "
+        "WHERE l.provider='garmin' AND l.entity_kind='planned_unit' "
+        "AND json_valid(p.payload) "
+        "AND substr(json_extract(p.payload, '$.date'), 1, 10) < date('now')"
+    ).fetchone()["count"]
+    return {
+        "one_time_done": state.get("done") is True,
+        "checked": len(checked) if isinstance(checked, list) else 0,
+        "removed": removed
+        if isinstance(removed, int) and not isinstance(removed, bool)
+        else 0,
+        "last_run_at": last_run if isinstance(last_run, str) else None,
+        "past_links_pending": pending,
     }

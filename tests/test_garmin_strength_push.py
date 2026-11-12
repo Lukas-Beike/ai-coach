@@ -1226,7 +1226,15 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         )
         self.assertIsNone(self.link(U2))
         self.assertEqual(upcoming, self.link(U1).remote_id)
-        self.assertEqual({"done": True, "checked": ["703", "704"]}, self.cleanup())
+        self.assertEqual(
+            {
+                "done": True,
+                "checked": ["703", "704"],
+                "removed": 2,
+                "last_run_at": NOW.isoformat(),
+            },
+            self.cleanup(),
+        )
         self.garmin.calls.clear()
         self.garmin.workouts["706"] = dict(app)
         self.assertEqual(0, self.service.remove_past())
@@ -1267,7 +1275,10 @@ class PastWorkoutRemovalTests(unittest.TestCase):
             self.assertEqual(1, self.service.remove_past())
 
         self.assertEqual({"701", "702"}, set(self.garmin.workouts))
-        self.assertEqual({"done": True, "checked": ["701", "702"]}, self.cleanup())
+        self.assertEqual(
+            {"done": True, "checked": ["701", "702"]},
+            {key: self.cleanup()[key] for key in ("done", "checked")},
+        )
 
     def test_a_garmin_outage_keeps_the_progress_of_the_pass(self) -> None:
         self.cleanup({})
@@ -1277,7 +1288,10 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         with patch.object(self.garmin, "delete_workout", side_effect=_http_error(500)):
             self.assertEqual(0, self.service.remove_past())
 
-        self.assertEqual({"done": False, "checked": ["701"]}, self.cleanup())
+        self.assertEqual(
+            {"done": False, "checked": ["701"]},
+            {key: self.cleanup()[key] for key in ("done", "checked")},
+        )
         self.assertEqual(1, self.service.remove_past())
         self.assertTrue(self.cleanup()["done"])
 
@@ -1297,9 +1311,54 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.service._configured = lambda: True
         self.service._sdk_session = Mock(side_effect=AssertionError("no login"))
         self.service._write_ready = lambda: False
-        self.assertEqual(0, self.service.remove_past())
+        with self.assertLogs("intervals_coach", "INFO") as logs:
+            self.assertEqual(0, self.service.remove_past())
+        self.assertEqual(
+            ["garmin_past_workout_removal_skipped"],
+            [getattr(record, "event", None) for record in logs.records],
+        )
+        self.assertEqual(
+            {"reason": "sdk_skipped"}, getattr(logs.records[0], "context", None)
+        )
         self.assertIsNotNone(self.link(U1))
         self.assertEqual([], self.garmin.calls)
+
+    def test_every_run_logs_and_records_its_count_zero_included(self) -> None:
+        # #2408: a quiet run must be told apart from one that never ran.
+        later = datetime(2026, 11, 7, 9, 30, tzinfo=UTC)
+        self.service._now = lambda: later
+        with self.assertLogs("intervals_coach", "INFO") as logs:
+            self.assertEqual(0, self.service.remove_past())
+        self.assertEqual(
+            [("garmin_past_workouts_removed", {"count": 0})],
+            [
+                (getattr(record, "event", None), getattr(record, "context", None))
+                for record in logs.records
+            ],
+        )
+        # Nothing to remove: no SDK session is opened, the run is still recorded.
+        self.assertEqual([], self.garmin.calls)
+        self.assertEqual(later.isoformat(), self.cleanup()["last_run_at"])
+        self.linked(U1, "2026-11-05")
+
+        self.assertEqual(1, self.service.remove_past())
+        self.assertEqual(1, self.cleanup()["removed"])
+        self.assertTrue(self.cleanup()["done"])
+
+    def test_a_failed_run_logs_the_failure_only(self) -> None:
+        self.linked(U1, "2026-11-05")
+        with (
+            patch.object(
+                self.garmin, "unschedule_workout", side_effect=_http_error(500)
+            ),
+            self.assertLogs("intervals_coach", "INFO") as logs,
+        ):
+            self.assertEqual(0, self.service.remove_past())
+        self.assertEqual(
+            ["garmin_past_workout_removal_failed"],
+            [getattr(record, "event", None) for record in logs.records],
+        )
+        self.assertEqual(NOW.isoformat(), self.cleanup()["last_run_at"])
 
 
 if __name__ == "__main__":

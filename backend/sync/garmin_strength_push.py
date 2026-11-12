@@ -188,37 +188,72 @@ class GarminStrengthPushService:
 
         Runs after a Garmin refresh. Nothing happens while the latest refresh
         could not log the SDK in, so no extra login is tried. A failure is logged
-        and never fails the refresh: the links stay for the next refresh.
+        and never fails the refresh: the links stay for the next refresh. Every
+        run logs its count, zero included, and stores its time and removals for
+        the diagnostics (#2408); a skip logs its reason.
         """
-        removed = [0]
-        try:
-            if not self._configured() or not self._write_ready():
-                return 0
-            cleanup = self._cleanup_state()
-            if not self._past_links() and cleanup["done"]:
-                return 0
-            operation = (
-                self._gate.operation() if self._gate is not None else nullcontext()
+        if not self._configured():
+            return 0
+        if not self._write_ready():
+            # Counts only: the removal waits for a refresh that logs the SDK in.
+            _LOGGER.info(
+                "Garmin past workout removal skipped",
+                extra={
+                    "event": "garmin_past_workout_removal_skipped",
+                    "context": {"reason": "sdk_skipped"},
+                },
             )
-            with operation, self._lock, self._sdk_session() as client:
-                # Read again under the lock: a push may have moved a unit meanwhile.
-                self._remove_links(client, self._past_links(), removed)
-                if not cleanup["done"]:
-                    self._remove_unlinked(client, cleanup, removed)
+            return 0
+        removed = [0]
+        cleanup: dict[str, Any] | None = None
+        failed = False
+        try:
+            cleanup = self._cleanup_state()
+            if self._past_links() or not cleanup["done"]:
+                operation = (
+                    self._gate.operation() if self._gate is not None else nullcontext()
+                )
+                with operation, self._lock, self._sdk_session() as client:
+                    # Read again under the lock: a push may have moved a unit meanwhile.
+                    self._remove_links(client, self._past_links(), removed)
+                    if not cleanup["done"]:
+                        self._remove_unlinked(client, cleanup, removed)
         except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
+            failed = True
             _LOGGER.warning(
                 "Garmin past workout removal failed",
                 extra={"event": "garmin_past_workout_removal_failed"},
             )
-        if removed[0]:
-            _LOGGER.info(
-                "Garmin past workouts removed",
-                extra={
-                    "event": "garmin_past_workouts_removed",
-                    "context": {"count": removed[0]},
-                },
-            )
+        if cleanup is not None:
+            self._record_run(removed[0])
+        if failed and not removed[0]:
+            return 0
+        # Logged on every run, zero included, so a quiet run is visible (#2408).
+        _LOGGER.info(
+            "Garmin past workouts removed",
+            extra={
+                "event": "garmin_past_workouts_removed",
+                "context": {"count": removed[0]},
+            },
+        )
         return removed[0]
+
+    def _record_run(self, removed: int) -> None:
+        """Add the run's time and removals to the stored state the diagnostics read."""
+        try:
+            state = self._cleanup_state()
+            self._save_cleanup(
+                {
+                    **state,
+                    "removed": state["removed"] + removed,
+                    "last_run_at": self._now().astimezone(UTC).isoformat(),
+                }
+            )
+        except Exception:  # noqa: BLE001 - a status write never fails the refresh
+            _LOGGER.warning(
+                "Garmin past workout removal state not stored",
+                extra={"event": "garmin_past_workout_state_failed"},
+            )
 
     def _past_links(self) -> list[tuple[str, str | None, str | None]]:
         """(unit id, workout id, schedule id) of linked units before today, oldest first."""
@@ -252,15 +287,13 @@ class GarminStrengthPushService:
 
         A refused workout keeps its link and uses an attempt but no removal slot,
         so a few refusals never block the later workouts and many never turn into
-        a burst of requests.
+        a burst of requests. An outage stops the run and is logged by the caller.
         """
         for attempt, (local_id, workout_id, schedule_id) in enumerate(links):
             if removed[0] >= _PAST_REMOVAL_BATCH or attempt >= _PAST_REMOVAL_ATTEMPTS:
                 return
             try:
                 self._discard(client, workout_id, schedule_id)
-            except _StopRun:
-                return
             except AppError:
                 continue  # Garmin refused this one; the next refresh tries again
             with self._database_manager().unit_of_work() as db:
@@ -298,7 +331,7 @@ class GarminStrengthPushService:
                 finished = True
         finally:
             # A Garmin outage keeps what this pass already read.
-            self._save_cleanup({"done": finished, "checked": sorted(checked)})
+            self._save_cleanup({**state, "done": finished, "checked": sorted(checked)})
 
     def _remove_if_own(self, client: Any, workout_id: str) -> bool:
         """Delete one workout if the app sent it; False for another's or a refused one.
@@ -344,11 +377,17 @@ class GarminStrengthPushService:
         if not isinstance(value, dict):
             value = {}
         checked = value.get("checked")
+        removed = value.get("removed")
+        last_run = value.get("last_run_at")
         return {
             "done": value.get("done") is True,
             "checked": [str(item) for item in checked]
             if isinstance(checked, list)
             else [],
+            "removed": removed
+            if isinstance(removed, int) and not isinstance(removed, bool)
+            else 0,
+            "last_run_at": last_run if isinstance(last_run, str) else None,
         }
 
     def _save_cleanup(self, state: dict[str, Any]) -> None:
