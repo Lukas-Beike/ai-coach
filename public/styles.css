@@ -1120,13 +1120,12 @@ h2 {
 .equipment-card > summary { flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
 .equipment-card > summary::after { order: 1; }
 .equipment-card > summary > :is(.equipment-card-line, progress) { order: 2; flex: 1 1 100%; }
-.equipment-card > summary progress { height: 4px; border: 0; border-radius: 999px; background: var(--progress-track); accent-color: var(--accent-bright); }
-.equipment-card > summary progress::-webkit-progress-bar { background: var(--progress-track); }
-.equipment-card[data-state="unchecked"] > summary progress { accent-color: var(--orange); }
-.equipment-card[data-state="error"] > summary progress { accent-color: var(--danger); }
-.equipment-card[data-state="off"] > summary progress { accent-color: var(--subtle); }
+.equipment-card > summary progress { height: 4px; }
+.equipment-card[data-state="unchecked"] { --bar-color: var(--orange); }
+.equipment-card[data-state="error"] { --bar-color: var(--danger); }
+.equipment-card[data-state="off"] { --bar-color: var(--subtle); }
 .equipment-source-tag { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; }
-.equipment-card h5 { margin: 0; color: var(--ink); font-size: .74rem; }
+.equipment-card .connection-card-status h4 { margin: 0; color: var(--ink); font-size: .74rem; }
 .equipment-card .connection-card-status :is(p, ul) { margin: 0; color: var(--muted); font-size: .8rem; }
 .equipment-card .connection-card-status ul { padding-left: 18px; }
 .connection-lines { display: grid; gap: 2px; margin: 0; padding: 0; color: var(--muted); font-size: .72rem; list-style: none; }
@@ -1179,10 +1178,10 @@ h2 {
 .connection-sync-progress-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .72rem; }
 .connection-sync-progress-header strong { color: var(--ink); font-size: .76rem; }
 .connection-sync-progress-header span { text-align: right; }
-.connection-sync-progress-bar { width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 999px; background: var(--progress-track); accent-color: var(--accent-bright); }
+.connection-sync-progress-bar { width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 999px; background: var(--progress-track); accent-color: var(--bar-color, var(--accent-bright)); }
 .connection-sync-progress-bar::-webkit-progress-bar { background: var(--progress-track); }
-.connection-sync-progress-bar::-webkit-progress-value { background: var(--accent-bright); }
-.connection-sync-progress-bar::-moz-progress-bar { background: var(--accent-bright); }
+.connection-sync-progress-bar::-webkit-progress-value { background: var(--bar-color, var(--accent-bright)); }
+.connection-sync-progress-bar::-moz-progress-bar { background: var(--bar-color, var(--accent-bright)); }
 .connection-sync-progress-bar.is-indeterminate { appearance: none; background: linear-gradient(90deg, var(--transparent) 0 20%, var(--accent-bright) 35% 55%, var(--transparent) 70% 100%); background-size: 200% 100%; animation: connection-progress 1.2s linear infinite; }
 @keyframes connection-progress { to { background-position: -200% 0; } }
 .settings-message { margin: 0; text-align: left; }

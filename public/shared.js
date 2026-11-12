@@ -107,8 +107,6 @@ function currentPlanLoadAreas() {
 }
 
 function ensureRouteData(route = state.route) {
-  // Connection and equipment cards start collapsed on every visit (#2301, #2302).
-  if (AppRouter.baseRoute(route) === "more") document.querySelectorAll(".connection-card[open], #equipmentItems details[open]").forEach((card) => { card.open = false; });
   if (!state.data) return;
   const requested = [];
   const panelRoute = AppRouter.baseRoute(route);
@@ -120,7 +118,14 @@ function ensureRouteData(route = state.route) {
   if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
 }
 
+// Connection and equipment cards start collapsed on every visit to their segment (#2301, #2302),
+// but stay as they are when the shown segment is navigated to again (re-login, active segment link).
+let shownMoreSegment = null;
+
 function renderActiveRoute(mainRoute, panelRoute) {
+  const moreSegment = mainRoute === "more" ? AppRouter.moreSegmentFromRoute(panelRoute) : null;
+  if (moreSegment && moreSegment !== shownMoreSegment) document.querySelectorAll(".connection-card[open], #equipmentItems details[open]").forEach((card) => { card.open = false; });
+  shownMoreSegment = moreSegment;
   document.dispatchEvent(new CustomEvent("app:route-rendered", { detail: { route: mainRoute } }));
   AppNutrition.handleRoute(panelRoute);
   if (mainRoute === "analysis") renderAnalysisSegments(panelRoute);

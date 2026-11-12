@@ -314,7 +314,7 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await localCard.locator("summary").click();
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   await expect(localCard).toHaveAttribute("open", "");
-  await expect(localCard.locator("h5")).toHaveText(["Nutzung", "Wartung", "Garmin"]);
+  await expect(localCard.locator(".connection-card-status h4")).toHaveText(["Nutzung", "Wartung", "Garmin"]);
   await expect(localCard).toContainText("125 km von 100 km · 125% · Ziel überschritten");
   await expect(localCard).toContainText("Statuskonflikt");
   await expect(localCard.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);

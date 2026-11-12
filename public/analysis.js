@@ -1250,11 +1250,11 @@ async function renderTrainingRecords() { // NOSONAR
     tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
     const localItems = equipment.items || [];
     const parents = new Map(localItems.map((item) => [item.id, item.name]));
-    const card = ({ item, source }) => equipmentCard(item, source, parents);
+    const card = (place) => ({ item, source }) => equipmentCard(item, source, parents, place);
     const archive = (key, entries) => {
       const archived = reportNode("details", null, "training-focus-details equipment-archive");
       archived.dataset.key = `archive:${key}`;
-      archived.append(reportNode("summary", `Ausgemustert (${entries.length})`), ...entries.map(card));
+      archived.append(reportNode("summary", `Ausgemustert (${entries.length})`), ...entries.map(card(key)));
       return archived;
     };
     const isArchivedEquipment = (item) => item.status === "archived";
@@ -1294,8 +1294,8 @@ async function renderTrainingRecords() { // NOSONAR
       panel.id = `equipmentPanel-${key}`; panel.setAttribute("role", "tabpanel");
       panel.setAttribute("aria-labelledby", tab.id); panel.tabIndex = 0;
       panel.hidden = equipmentTab !== key;
-      for (const item of groups[key].items) panel.append(card({ item, source: "local" }));
-      for (const item of garminGroups[key]) panel.append(card({ item, source: "provider" }));
+      for (const item of groups[key].items) panel.append(card(key)({ item, source: "local" }));
+      for (const item of garminGroups[key]) panel.append(card(key)({ item, source: "provider" }));
       if (archivedGroups[key].length) panel.append(archive(key, archivedGroups[key]));
       if (!groups[key].items.length && !garminGroups[key].length && !archivedGroups[key].length) {
         panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
@@ -1314,8 +1314,8 @@ async function renderTrainingRecords() { // NOSONAR
     if (uncategorizedItems.length || uncategorizedGarminItems.length || archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
       const other = reportNode("section", null, "equipment-uncategorized");
       other.append(reportNode("h4", "Weitere Ausrüstung"));
-      for (const item of uncategorizedItems) other.append(card({ item, source: "local" }));
-      for (const item of uncategorizedGarminItems) other.append(card({ item, source: "provider" }));
+      for (const item of uncategorizedItems) other.append(card("other")({ item, source: "local" }));
+      for (const item of uncategorizedGarminItems) other.append(card("other")({ item, source: "provider" }));
       if (archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
         other.append(archive("other", [
           ...archivedUncategorizedItems.map((item) => ({ item, source: "local" })),
@@ -1601,7 +1601,7 @@ function renderTrainingFocus(report) {
 
 // One collapsible card per item (#2302): name, status chip, one line and the lifetime bar when
 // closed; usage, maintenance, Garmin state and the action when open. Garmin-only items carry a tag.
-function equipmentCard(item, source, parents) {
+function equipmentCard(item, source, parents, place) {
   const local = source === "local";
   const usage = item.usage || {};
   const distance = local ? usage.distance_km : item.distance_km;
@@ -1610,7 +1610,7 @@ function equipmentCard(item, source, parents) {
   // The provider's name comes from the bootstrap labels, never from a literal here.
   const garmin = state.data?.provider_labels?.[providerIds().garmin] || "";
   const card = reportNode("details", null, "connection-card equipment-card");
-  card.dataset.key = `${source}:${item.id}`;
+  card.dataset.key = `${place}:${source}:${item.id}`;
   card.dataset.state = kind;
   const summary = reportNode("summary");
   summary.append(reportNode("strong", item.name));
@@ -1618,9 +1618,10 @@ function equipmentCard(item, source, parents) {
   summary.append(reportNode("span", label, `connection-chip is-${kind}`));
   const parent = local && item.kind === "component" ? (item.parent_pending ? "Fahrrad offen" : parents.get(item.parent_id)) : "";
   const known = Number.isFinite(Number(distance ?? Number.NaN));
-  summary.append(reportNode("span", [parent, known ? analysisValue(distance, "km") : "", life.percent == null ? "" : analysisPercent(life.percent)].filter(Boolean).join(" \u00b7 "), "equipment-card-line"));
+  const line = [parent, known ? analysisValue(distance, "km") : "", life.percent == null ? "" : analysisPercent(life.percent)].filter(Boolean).join(" \u00b7 ");
+  if (line) summary.append(reportNode("span", line, "equipment-card-line"));
   if (life.percent != null) {
-    const progress = reportNode("progress");
+    const progress = reportNode("progress", null, "connection-sync-progress-bar");
     progress.max = 100;
     progress.value = life.progress;
     progress.setAttribute("aria-label", `${item.name}: ${analysisPercent(life.percent)} Lebensdauer${life.over ? ", Ziel \u00fcberschritten" : ""}`);
@@ -1629,7 +1630,7 @@ function equipmentCard(item, source, parents) {
   const body = reportNode("div", null, "connection-card-body");
   const part = (title, nodes) => {
     const section = reportNode("div", null, "connection-card-status");
-    section.append(reportNode("h5", title), ...nodes.filter(Boolean));
+    section.append(reportNode("h4", title), ...nodes.filter(Boolean));
     body.append(section);
   };
   const facts = local
