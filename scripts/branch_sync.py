@@ -74,7 +74,10 @@ def rebased(onto: str) -> bool:
 
 
 def new_root_files(onto: str) -> list[str]:
-    added = git("diff", "--name-only", "--diff-filter=A", f"{onto}...HEAD")
+    added = git(
+        *("-c", "core.quotePath=false", "diff", "--name-only", "--no-renames"),
+        *("--diff-filter=A", f"{onto}...HEAD"),
+    )
     return [name for name in added.splitlines() if name and "/" not in name]
 
 
