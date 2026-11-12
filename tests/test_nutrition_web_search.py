@@ -156,6 +156,7 @@ class NutritionWebSearchTests(unittest.TestCase):
             "not http": ([value("salt_g", 0.7, "ftp://example.test/x")], (), 0, 1),
             "known field": ([value("kcal", 400)], (PAGE,), 0, 1),
             "not a core field": ([value("sodium_g", 1)], (PAGE,), 0, 1),
+            "unhashable field": ([value(["salt_g"], 1)], (PAGE,), 0, 1),
             "negative": ([value("salt_g", -1)], (PAGE,), 0, 1),
             "above gram limit": ([value("fiber_g", 1001)], (PAGE,), 0, 1),
             "bool": ([value("salt_g", True)], (PAGE,), 0, 1),

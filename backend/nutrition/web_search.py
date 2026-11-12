@@ -237,12 +237,13 @@ def _kept_values(
         if per_mass:
             limit = min(limit, 9.5 * basis if field == "kcal" else basis)
         if (
-            field in missing
+            isinstance(field, str)
+            and field in missing
             and field not in kept
             and _plausible(value, limit)
             and _cited(url, cited)
         ):
-            kept[str(field)] = {
+            kept[field] = {
                 "field": field,
                 "value": round(value, 3),
                 "source_url": url,
