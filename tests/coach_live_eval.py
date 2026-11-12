@@ -601,7 +601,14 @@ def snapshot(server: Any) -> dict[str, Any]:
                     "SELECT id, object_ids, diff, status FROM coach_action_proposals"
                 )
             ],
-            "jobs": [r["id"] for r in rows("SELECT id FROM sync_jobs")],
+            # Read refreshes write nothing remote; every other job type does.
+            "jobs": [
+                r["id"]
+                for r in rows(
+                    "SELECT id FROM sync_jobs"
+                    " WHERE type NOT IN ('refresh', 'historical_backfill')"
+                )
+            ],
         }
     state["plans"] = {
         p["id"]: {
