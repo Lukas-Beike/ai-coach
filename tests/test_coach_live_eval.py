@@ -62,6 +62,7 @@ def base_snapshot():
         "nutrition": {},
         "proposals": [],
         "jobs": {},
+        "job_types": {},
         "pending": None,
     }
 
@@ -621,8 +622,15 @@ class ScorerTests(unittest.TestCase):
                 "name": "Herbstklassiker",
             }
             after["jobs"]["J"] = []
+            after["job_types"]["J"] = "competition_push"
 
         self.assertTrue(scored("s09-competition-saved-and-synced", saved)["passed"])
+        # A plan push of every unit is no competition sync.
+        plan_push = scored(
+            "s09-competition-saved-and-synced",
+            lambda a: (saved(a), a["job_types"].update(J="plan_push")),
+        )
+        self.assertIn("sync_scope_wrong", plan_push["misses"])
         self.assertIn(
             "sync_job_missing",
             scored(

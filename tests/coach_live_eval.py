@@ -180,7 +180,11 @@ def _sync_failures(sync, before, after, tags) -> list[str]:
     if not new:
         return ["sync_job_missing"]
     if sync == "competition":
-        return []
+        # Only competition pushes; a plan push in a competition sync is out of scope.
+        types = {after["job_types"].get(job) for job in after["jobs"]} - {
+            before["job_types"].get(job) for job in before["jobs"]
+        }
+        return [] if types == {"competition_push"} else ["sync_scope_wrong"]
     covered = {oid for units in new for oid in units}
     pending = {k for k, v in before["units"].items() if not v["tombstone"]}
     created = set(_live_units(after)) - set(before["units"])
@@ -871,6 +875,13 @@ def snapshot(server: Any) -> dict[str, Any]:
                 r["id"]: _job_units(r["payload"])
                 for r in rows(
                     "SELECT id, payload FROM sync_jobs"
+                    " WHERE type NOT IN ('refresh', 'historical_backfill')"
+                )
+            },
+            "job_types": {
+                r["id"]: r["type"]
+                for r in rows(
+                    "SELECT id, type FROM sync_jobs"
                     " WHERE type NOT IN ('refresh', 'historical_backfill')"
                 )
             },
