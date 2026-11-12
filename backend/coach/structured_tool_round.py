@@ -22,12 +22,7 @@ from backend.coach.request_payload import (
     RESUMED_STEPS_NOTICE,
     compose_model_instructions,
 )
-from backend.coach.response_transport import (
-    ModelRequest,
-    ModelStep,
-    ModelTurn,
-    raise_if_chat_cancelled,
-)
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
@@ -48,6 +43,7 @@ from backend.planning.plan_guard_service import (
     PLAN_FINDINGS_ARGUMENT,
     illness_confirmation,
 )
+from backend.providers.model_seam import ModelRequest, ModelStep, ModelTurn
 
 COACH_TOOL_MAX_ROUNDS = 12
 _TURN_RELEASED = {

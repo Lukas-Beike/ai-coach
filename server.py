@@ -1275,7 +1275,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
-# The photo reading and the web search share this one transport.
+# The nutrition web search sends its Responses payload through this transport.
 nutrition_openai_request = lambda path, payload: (
     MODEL_TRANSPORT.openai_responses_client().request(path, payload)
 )
@@ -1291,8 +1291,9 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             photo_extractor=lambda: NutritionPhotoExtractionService(
                 selected_model=SETTINGS.selected_model,
-                openai_request=nutrition_openai_request,
-                openai_path=OPENAI_RESPONSES_PATH,
+                complete=lambda request: (
+                    MODEL_TRANSPORT.openai_responses_client().complete(request)
+                ),
             ),
             web_searcher=lambda: NutritionWebSearchService(
                 selected_model=SETTINGS.selected_model,

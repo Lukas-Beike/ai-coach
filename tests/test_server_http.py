@@ -30,8 +30,6 @@ from server_test_support import (
 from support import dispatch_route, store_canonical_snapshot
 
 from backend.coach import streams as coach_streams
-from backend.coach.response_transport import ModelRequest
-from backend.coach.responses_adapter import request_payload
 from backend.errors import AppError, ClientDisconnected, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import readiness as readiness_module
@@ -45,6 +43,8 @@ from backend.http_api.state_events_transport import StateEventTransport
 from backend.providers import http as provider_http
 from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
+from backend.providers.model_seam import ModelRequest
+from backend.providers.openai_responses_adapter import request_payload
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY

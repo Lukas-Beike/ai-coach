@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, Mock
 from support import temp_database
 
 from backend.coach.final_receipt import CoachFinalReceiptService
-from backend.coach.response_transport import ModelTurn
 from backend.db.repositories import ChatRepository, KeyValueRepository
+from backend.providers.model_seam import ModelTurn
 from backend.runtime.events import StateEventBuffer
 
 

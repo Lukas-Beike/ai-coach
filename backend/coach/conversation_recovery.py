@@ -8,10 +8,10 @@ from typing import Any
 
 from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
 from backend.coach.request_payload import model_confirmed_steps
-from backend.coach.response_transport import ModelRequest
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest
 
 
 class CoachConversationRecoveryService:

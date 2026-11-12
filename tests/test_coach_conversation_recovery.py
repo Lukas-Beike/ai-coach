@@ -8,10 +8,11 @@ import threading
 import unittest
 from unittest.mock import MagicMock, Mock
 
+from backend.coach.attachments import model_attachments
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
-from backend.coach.response_transport import ModelRequest, ModelStep
-from backend.coach.responses_adapter import request_payload
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest, ModelStep
+from backend.providers.openai_responses_adapter import request_payload
 
 PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
@@ -51,7 +52,7 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             model="m",
             instructions="base",
             input="old",
-            attachments=attachments or [],
+            attachments=model_attachments(attachments or []),
             conversation_id=conversation_id,
             steps=[ModelStep([], [{"call_id": "c", "output": "{}"}])],
         )

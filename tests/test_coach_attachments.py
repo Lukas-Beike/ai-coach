@@ -19,12 +19,13 @@ from backend.coach.attachments import (
     _fit_session_summary,
     fit_summary,
     gpx_summary,
+    model_attachments,
     validate_attachments,
 )
-from backend.coach.responses_adapter import model_input
 from backend.errors import AppError
 from backend.providers import openai_requests, openai_stream
 from backend.providers.fit_file import _fit_crc16, _fit_data_record
+from backend.providers.openai_responses_adapter import model_input
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII="
@@ -437,7 +438,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(validated[0]["data"], attachment["data"])
         self.assertEqual(validated[0]["summary"]["distance_km"], 1.234)
         self.assertEqual(validated[0]["summary"]["avg_heart_rate_bpm"], 145)
-        request_input = model_input("Analyze this activity", validated)
+        request_input = model_input(
+            "Analyze this activity", model_attachments(validated)
+        )
         raw_part = request_input[0]["content"][-1]
         self.assertEqual(raw_part["type"], "input_file")
         self.assertEqual(raw_part["filename"], "ride.fit.json")
@@ -672,7 +675,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 self.upload(FIT, "ride.fit"),
             ]
         )
-        value = model_input("Analyze the route and chart", attachments)
+        value = model_input(
+            "Analyze the route and chart", model_attachments(attachments)
+        )
         serialized = json.dumps(value)
         self.assertIn('"type": "input_image"', serialized)
         self.assertIn("uploaded_gpx", serialized)

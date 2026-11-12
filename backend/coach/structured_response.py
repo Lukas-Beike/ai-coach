@@ -14,11 +14,10 @@ from backend.coach.limits import COACH_LONG_PLAN_MAX_OUTPUT_TOKENS
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
-    ModelRequest,
-    ModelTurn,
     raise_if_chat_cancelled,
 )
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest, ModelTurn
 
 
 def _discard_delta(_delta: str) -> None:

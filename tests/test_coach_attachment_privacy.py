@@ -9,9 +9,9 @@ import unittest
 import zlib
 
 from backend.coach.attachment_privacy import hidden_position_indexes
-from backend.coach.attachments import validate_attachments
+from backend.coach.attachments import model_attachments, validate_attachments
 from backend.coach.image_metadata import strip_image_metadata
-from backend.coach.responses_adapter import model_input
+from backend.providers.openai_responses_adapter import model_input
 
 STEP_DEGREES = 0.0009  # about 100 m of latitude
 POINTS = 40
@@ -139,7 +139,7 @@ def _upload(data, name):
 def _sent_file(upload):
     """The file part of the request as the provider receives it."""
     attachments = validate_attachments([upload])
-    parts = model_input("Analyze this", attachments)[0]["content"]
+    parts = model_input("Analyze this", model_attachments(attachments))[0]["content"]
     body = json.dumps(parts)
     encoded = parts[-1]["file_data"].split(",", 1)[1]
     return body, json.loads(base64.b64decode(encoded)), attachments[0]
@@ -275,7 +275,9 @@ class ImageMetadataTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 attachments = validate_attachments([_upload(data, name)])
-                part = model_input("Look", attachments)[0]["content"][-1]
+                part = model_input("Look", model_attachments(attachments))[0][
+                    "content"
+                ][-1]
                 sent = base64.b64decode(part["image_url"].split(",", 1)[1])
                 self.assertNotIn(b"SYNTHETIC", sent)
                 # The stored attachment keeps the athlete's original bytes.

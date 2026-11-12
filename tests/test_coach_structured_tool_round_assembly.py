@@ -4,7 +4,6 @@ import threading
 import unittest
 from unittest.mock import Mock
 
-from backend.coach.response_transport import ModelTurn
 from backend.coach.structured_tool_round_assembly import (
     CoachStructuredToolRoundAssembly,
     StructuredToolRoundContract,
@@ -14,6 +13,7 @@ from backend.coach.structured_tool_round_assembly import (
     StructuredToolRoundState,
 )
 from backend.coach.write_gate import ImpactVerdict
+from backend.providers.model_seam import ModelTurn
 
 
 class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):

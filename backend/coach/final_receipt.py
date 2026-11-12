@@ -9,10 +9,10 @@ from typing import Any
 from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
 from backend.coach.receipt_compaction import compact_receipt
-from backend.coach.response_transport import ModelTurn
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
+from backend.providers.model_seam import ModelTurn
 from backend.runtime.events import StateEventBuffer
 
 

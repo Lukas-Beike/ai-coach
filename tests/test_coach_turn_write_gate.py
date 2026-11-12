@@ -12,8 +12,6 @@ from unittest.mock import MagicMock, Mock, patch
 from support import latest_tool_outputs
 
 from backend import change_history
-from backend.coach.response_transport import ModelRequest, ModelTurn
-from backend.coach.responses_adapter import request_payload
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -27,6 +25,8 @@ from backend.coach.write_gate import (
     WRITE_CAP,
     ImpactVerdict,
 )
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_responses_adapter import request_payload
 
 READ_ONLY = frozenset({"read_profile"})
 

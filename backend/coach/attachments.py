@@ -434,6 +434,37 @@ def validate_attachments(value):
     return attachments
 
 
+def model_attachments(attachments):
+    """The provider-safe parts of validated attachments for a ModelRequest."""
+    parts = []
+    for item in attachments:
+        evidence = {"untrusted_attachment_name": item["name"]}
+        if item["type"] in {"gpx", "fit"}:
+            evidence[item["type"]] = item.get("summary")
+            data, mime = openai_attachment_data(item)
+            parts.append(
+                {
+                    "evidence": evidence,
+                    "kind": "file",
+                    "filename": item["name"] + ".json",
+                    "mime": mime,
+                    "data": data,
+                }
+            )
+        elif item["type"] == "image":
+            parts.append(
+                {
+                    "evidence": evidence,
+                    "kind": "image",
+                    "mime": item["mime"],
+                    "data": openai_attachment_data(item)[0],
+                }
+            )
+        else:
+            parts.append({"evidence": evidence})
+    return parts
+
+
 def openai_attachment_data(item):
     """Return the provider-safe representation without changing persisted bytes.
 

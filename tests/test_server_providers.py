@@ -14,10 +14,10 @@ from urllib.parse import quote
 from server_test_support import ServerTestCase, server
 
 from backend.coach import streams as coach_streams
-from backend.coach.response_transport import ModelRequest, ModelTurn
 from backend.errors import AppError, ClientDisconnected
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
+from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses import response_text
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import freshness as sync_freshness

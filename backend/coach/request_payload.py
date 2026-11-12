@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from backend.coach import dialogue
+from backend.coach.attachments import model_attachments
 from backend.coach.context import CoachTrainingContextService
 from backend.coach.context_selection import (
     CoachContextSelection,
@@ -14,7 +15,7 @@ from backend.coach.context_selection import (
     select_coach_context,
 )
 from backend.coach.playbooks import nutrition_playbook, playbook_for
-from backend.coach.response_transport import ModelRequest
+from backend.providers.model_seam import ModelRequest
 from backend.settings import SettingsService
 
 
@@ -179,7 +180,7 @@ class CoachRequestPayloadService:
             model=model or self._settings.selected_model(),
             instructions=model_instructions,
             input=json.dumps(dialogue_input, ensure_ascii=False, separators=(",", ":")),
-            attachments=attachments,
+            attachments=model_attachments(attachments),
             tools=tools,
             reasoning_effort=thinking_level or self._settings.selected_thinking_level(),
             max_output_tokens=self._max_output_tokens,
@@ -205,7 +206,7 @@ class CoachRequestPayloadService:
                     "input_characters": len(
                         json.dumps(request.input, ensure_ascii=False)
                     )
-                    + sum(len(item.get("data") or "") for item in attachments),
+                    + sum(len(item.get("data") or "") for item in request.attachments),
                     "tool_schema_characters": len(
                         json.dumps(request.tools, ensure_ascii=False)
                     ),

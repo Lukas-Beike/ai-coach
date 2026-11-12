@@ -1,8 +1,9 @@
-"""The OpenAI Responses adapter: the one Coach module that knows the wire format.
+"""The OpenAI Responses adapter: the one module that knows the wire format.
 
 A ModelRequest becomes a Responses payload and a Responses reply becomes a
 ModelTurn. Responses is the only supported dialect; nothing else may read or
-write its item types (function_call, reasoning, encrypted_content, ...).
+write its item types (function_call, reasoning, encrypted_content, input_text,
+input_image, ...).
 """
 
 from __future__ import annotations
@@ -10,40 +11,45 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.coach.attachments import openai_attachment_data
-from backend.coach.response_transport import ModelRequest, ModelTurn
+from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses import response_text
 
 ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content"
 
 
+def _data_url(mime: str, data: str) -> str:
+    return f"data:{mime};base64,{data}"
+
+
 def model_input(text: str, attachments: list[dict[str, Any]]) -> Any:
-    """The user input: plain text, or one user message with the attachment parts."""
+    """The user input: plain text, or one user message with the attachment parts.
+
+    Each attachment is {"evidence": dict, "kind": "file" | "image" | absent,
+    "mime", "data" (base64), "filename" for a file}.
+    """
     if not attachments:
         return text
     parts = [{"type": "input_text", "text": text}]
     for item in attachments:
-        summary_key = item["type"] if item["type"] in {"gpx", "fit"} else None
-        evidence = {"untrusted_attachment_name": item["name"]}
-        if summary_key:
-            evidence[summary_key] = item.get("summary")
         parts.append(
-            {"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)}
+            {
+                "type": "input_text",
+                "text": json.dumps(item["evidence"], ensure_ascii=False),
+            }
         )
-        if item["type"] in {"gpx", "fit"}:
-            data, mime = openai_attachment_data(item)
+        if item.get("kind") == "file":
             parts.append(
                 {
                     "type": "input_file",
-                    "filename": item["name"] + ".json",
-                    "file_data": f"data:{mime};base64,{data}",
+                    "filename": item["filename"],
+                    "file_data": _data_url(item["mime"], item["data"]),
                 }
             )
-        elif item["type"] == "image":
+        elif item.get("kind") == "image":
             parts.append(
                 {
                     "type": "input_image",
-                    "image_url": f"data:{item['mime']};base64,{openai_attachment_data(item)[0]}",
+                    "image_url": _data_url(item["mime"], item["data"]),
                     "detail": "auto",
                 }
             )
@@ -62,6 +68,22 @@ def _tool_outputs(results: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 
 def _input(request: ModelRequest) -> Any:
+    if request.images:
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": request.input},
+                    *(
+                        {
+                            "type": "input_image",
+                            "image_url": _data_url(image["mime"], image["data"]),
+                        }
+                        for image in request.images
+                    ),
+                ],
+            }
+        ]
     if not request.steps:
         return model_input(request.input, request.attachments)
     if request.conversation_id:
@@ -80,28 +102,35 @@ def _input(request: ModelRequest) -> Any:
     return items
 
 
+def _one_shot_payload(request: ModelRequest) -> dict[str, Any]:
+    payload: dict[str, Any] = {"model": request.model}
+    if request.instructions:
+        payload["instructions"] = request.instructions
+    payload["input"] = _input(request)
+    if request.output_schema is not None:
+        output_format: dict[str, Any] = {
+            "type": "json_schema",
+            "name": request.output_schema["name"],
+            "strict": True,
+            "schema": request.output_schema["schema"],
+        }
+    else:
+        output_format = {"type": "json_object"}
+    payload["text"] = {"format": output_format}
+    if request.stateless:
+        payload["store"] = False
+    if request.max_output_tokens is not None:
+        payload["max_output_tokens"] = request.max_output_tokens
+    if request.reasoning_effort:
+        payload["reasoning"] = {"effort": request.reasoning_effort}
+    return payload
+
+
 def request_payload(request: ModelRequest) -> dict[str, Any]:
     """The Responses API payload for one request."""
-    if request.output_schema is not None:
-        payload: dict[str, Any] = {
-            "model": request.model,
-            "instructions": request.instructions,
-            "input": request.input,
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": request.output_schema["name"],
-                    "strict": True,
-                    "schema": request.output_schema["schema"],
-                }
-            },
-            "store": False,
-            "max_output_tokens": request.max_output_tokens,
-        }
-        if request.reasoning_effort:
-            payload["reasoning"] = {"effort": request.reasoning_effort}
-        return payload
-    payload = {"model": request.model}
+    if request.output_schema is not None or request.json_output:
+        return _one_shot_payload(request)
+    payload: dict[str, Any] = {"model": request.model}
     if request.reasoning_effort:
         payload["reasoning"] = {"effort": request.reasoning_effort}
     if request.conversation_id:

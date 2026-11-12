@@ -5,15 +5,13 @@ import unittest
 from typing import Any, ClassVar
 from unittest.mock import Mock
 
-from backend.coach import responses_adapter
 from backend.coach.response_transport import (
     CoachResponseTransport,
-    ModelRequest,
-    ModelStep,
-    ModelTurn,
     raise_if_chat_cancelled,
 )
 from backend.errors import AppError
+from backend.providers import openai_responses_adapter as responses_adapter
+from backend.providers.model_seam import ModelRequest, ModelStep, ModelTurn
 
 
 class CoachResponseTransportTests(unittest.TestCase):
@@ -21,23 +19,19 @@ class CoachResponseTransportTests(unittest.TestCase):
         self.openai = Mock()
         self.openai_stream = Mock()
         self.transport = CoachResponseTransport(
-            lambda: self.openai, lambda: self.openai_stream, responses_adapter
+            lambda: self.openai, lambda: self.openai_stream
         )
 
     def test_transport_uses_openai_responses_adapter(self) -> None:
         openai_factory = Mock(return_value=self.openai)
         stream_factory = Mock(return_value=self.openai_stream)
-        transport = CoachResponseTransport(
-            openai_factory, stream_factory, responses_adapter
-        )
-        self.openai.responses.return_value = {"output_text": "OpenAI"}
+        transport = CoachResponseTransport(openai_factory, stream_factory)
+        request = ModelRequest(model="m", instructions="i")
+        self.openai.complete.return_value = ModelTurn(text="OpenAI")
 
-        turn = transport.request(ModelRequest(model="m", instructions="i"))
+        self.assertEqual(transport.request(request), ModelTurn(text="OpenAI"))
 
-        self.assertEqual(turn, ModelTurn(text="OpenAI"))
-        self.openai.responses.assert_called_once_with(
-            responses_adapter.request_payload(ModelRequest(model="m", instructions="i"))
-        )
+        self.openai.complete.assert_called_once_with(request)
 
         openai_factory.assert_called_once_with()
         stream_factory.assert_not_called()
@@ -177,6 +171,35 @@ class ResponsesAdapterTests(unittest.TestCase):
         )
         self.assertIs(payload["store"], True)
         self.assertNotIn("include", payload)
+
+    def test_one_shot_json_request_with_an_image(self) -> None:
+        request = ModelRequest(
+            model="m",
+            input="Lies das Etikett",
+            images=[{"mime": "image/png", "data": "QUJD"}],
+            json_output=True,
+            stateless=False,
+        )
+
+        self.assertEqual(
+            responses_adapter.request_payload(request),
+            {
+                "model": "m",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Lies das Etikett"},
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,QUJD",
+                            },
+                        ],
+                    }
+                ],
+                "text": {"format": {"type": "json_object"}},
+            },
+        )
 
     def test_one_shot_schema_request_is_stateless_without_tools(self) -> None:
         request = ModelRequest(

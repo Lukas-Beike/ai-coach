@@ -9,9 +9,9 @@ from unittest.mock import Mock
 
 from test_coach_dialogue import DialogueHarness, server
 
-from backend.coach.response_transport import ModelTurn
-from backend.coach.responses_adapter import model_turn
 from backend.coach.turn_outcome import CoachStructuredOutcomeService
+from backend.providers.model_seam import ModelTurn
+from backend.providers.openai_responses_adapter import model_turn
 
 
 class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):

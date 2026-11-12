@@ -19,7 +19,6 @@ from backend.coach.outcomes import (
     coach_failure_lines,
     unresolved_coach_steps,
 )
-from backend.coach.response_transport import ModelTurn
 from backend.coach.service import (
     effects_from_receipts,
     mark_resolved_receipts,
@@ -27,6 +26,7 @@ from backend.coach.service import (
 )
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.providers.model_seam import ModelTurn
 
 _READ_ONLY_JOB_TYPES = frozenset({"refresh", "activity_details", "historical_backfill"})
 _READ_ONLY_REFRESH_TOOLS = frozenset({"start_provider_refresh"})

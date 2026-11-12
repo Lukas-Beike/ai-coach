@@ -59,7 +59,6 @@ from backend.canonical.vocabulary import (
     Sport,
     StreamChannel,
 )
-from backend.coach.responses_adapter import model_turn, request_payload
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
@@ -69,6 +68,7 @@ from backend.providers.canonical_plans import (
     IngestPlan,
     RawRecord,
 )
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter

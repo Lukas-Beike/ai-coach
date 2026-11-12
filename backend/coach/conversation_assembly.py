@@ -7,7 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend.coach import responses_adapter
 from backend.coach.conversation import (
     CoachAttachmentContextService,
     CoachConversationHistoryService,
@@ -135,5 +134,4 @@ class CoachConversationAssembly:
         return CoachResponseTransport(
             self._model_transport.openai_responses_client,
             self._model_transport.openai_stream_client,
-            responses_adapter,
         )

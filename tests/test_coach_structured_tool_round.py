@@ -13,8 +13,6 @@ from backend.coach.request_payload import (
     RESUMED_STEPS_NOTICE,
     compose_model_instructions,
 )
-from backend.coach.response_transport import ModelRequest, ModelTurn
-from backend.coach.responses_adapter import request_payload
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -23,6 +21,8 @@ from backend.coach.structured_tool_round import (
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.errors import AppError
 from backend.observability import JsonLogFormatter, Redactor
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_responses_adapter import request_payload
 from tests import test_observability as observability_tests
 
 

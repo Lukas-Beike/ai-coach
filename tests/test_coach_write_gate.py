@@ -13,11 +13,11 @@ from backend.coach.proposal_models import (
     LOCAL_COACH_WRITE_TOOLS,
     REMOTE_COACH_WRITE_TOOLS,
 )
-from backend.coach.response_transport import ModelTurn
-from backend.coach.responses_adapter import model_turn, request_payload
 from backend.coach.tool_registry import build_tool_contracts
 from backend.coach.training_template_tools import TrainingTemplateToolService
 from backend.coach.turn_write_gate import CoachTurnWriteGate, build_impact_classifier
+from backend.providers.model_seam import ModelTurn
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 _DELETE_TOOLS = (
     "delete_competition",

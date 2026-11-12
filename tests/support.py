@@ -20,12 +20,12 @@ import snapshot_seed
 from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
-from backend.coach.responses_adapter import model_turn, request_payload
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.route_table import RouteRequest, RouteTable
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.runtime import clock as runtime_clock
 from backend.sync.metric_export_runner import MetricExportRunner
 

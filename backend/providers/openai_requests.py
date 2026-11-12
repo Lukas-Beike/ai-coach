@@ -10,6 +10,8 @@ from urllib.parse import quote, urlparse, urlunparse
 
 from backend.errors import COACH_ABORTED_ERROR, OPENAI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 if TYPE_CHECKING:
     from backend.providers.state import ProviderStateService
@@ -242,6 +244,10 @@ class OpenAIResponsesClient:
             service_tier=self.service_tier(str(payload.get("model", ""))),
         )
         return self._responses_prepared(request_payload, cancel_event=cancel_event)
+
+    def complete(self, request: ModelRequest) -> ModelTurn:
+        """Send a one-shot model request and return the model's turn."""
+        return model_turn(self.responses(request_payload(request)))
 
     def create_conversation(self, metadata: Mapping[str, str]) -> str:
         """Create a remote conversation and return its id."""

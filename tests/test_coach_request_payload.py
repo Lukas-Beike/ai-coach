@@ -12,7 +12,7 @@ from backend.coach.request_payload import (
     RESUMED_STEPS_NOTICE,
     CoachRequestPayloadService,
 )
-from backend.coach.responses_adapter import request_payload
+from backend.providers.openai_responses_adapter import request_payload
 
 PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"

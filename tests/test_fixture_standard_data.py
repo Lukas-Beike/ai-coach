@@ -27,7 +27,7 @@ from server_test_support import server
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.canonical.section_items import split_section
 from backend.canonical.vocabulary import StreamChannel
-from backend.coach.response_transport import ModelRequest, raise_if_chat_cancelled
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.db.manager import DATABASE_MANAGER_CACHE
@@ -38,6 +38,7 @@ from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.providers.calendar import parse_ical_calendar
+from backend.providers.model_seam import ModelRequest
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server

@@ -10,6 +10,7 @@ from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 from backend.observability import DiagnosticCapture, Redactor
 from backend.providers import http as provider_http
 from backend.providers.http import ProviderRequestCancelled, ProviderResponseTooLarge
+from backend.providers.model_seam import ModelRequest
 from backend.providers.openai_errors import (
     error_details,
     error_diagnostic_details,
@@ -1398,6 +1399,18 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen.",
             ),
         )
+
+    def test_complete_sends_a_model_request_and_returns_its_turn(self):
+        http = _ClientHTTP({"output_text": "Hallo", "status": "completed"})
+        client = self._client(http)
+
+        turn = client.complete(ModelRequest(model="m", input="Hi", json_output=True))
+
+        self.assertEqual((turn.text, turn.stop_reason), ("Hallo", "completed"))
+        args, _kwargs = http.calls[0]
+        self.assertEqual(args[:2], ("POST", "https://api.example.test/v1/responses"))
+        self.assertEqual(args[2]["text"], {"format": {"type": "json_object"}})
+        self.assertEqual(args[2]["reasoning"], {"effort": "high"})
 
     def test_conversation_create_sends_the_metadata_and_requires_an_id(self):
         http = _ClientHTTP({"id": "conv-new"})

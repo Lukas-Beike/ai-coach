@@ -12,10 +12,10 @@ from backend.coach.context import (
 )
 from backend.coach.context_selection import CoachContextSelection, select_coach_context
 from backend.coach.read_tools import CoachReadToolService
-from backend.coach.response_transport import ModelTurn
 from backend.errors import AppError
 from backend.observability import JsonLogFormatter, Redactor
 from backend.performance.canonical_inputs import PENDING_PERFORMANCE_INPUTS
+from backend.providers.model_seam import ModelTurn
 from tests import test_coach_request_payload as payload_tests
 from tests import test_coach_structured_context as context_tests
 from tests import test_coach_structured_tool_round as round_tests

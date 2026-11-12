@@ -7,7 +7,6 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.coach.context_selection import request_chain_ids, select_coach_context
-from backend.coach.response_transport import ModelRequest, ModelTurn
 from backend.coach.tool_specs import TOOL_DOMAIN, UNGATED_TOOLS
 from backend.coach.write_gate import (
     CLASSIFIER_INSTRUCTIONS,
@@ -27,6 +26,7 @@ from backend.coach.write_gate import (
     illness_override_confirmed,
     parse_verdict,
 )
+from backend.providers.model_seam import ModelRequest, ModelTurn
 
 
 def build_impact_classifier(
