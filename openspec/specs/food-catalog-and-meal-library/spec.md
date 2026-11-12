@@ -427,6 +427,14 @@ Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_ya
 ### Requirement: Coach fills empty product fields
 The Coach SHALL list own products and stored database foods with empty core fields, and SHALL write values into named products only where the field is empty at write time, per the product's own basis, each with its origin, source page and time. Known values SHALL never be replaced. Every write SHALL be in the change history so the turn receipt names product, field, value and origin and whole-turn undo restores the empty fields.
 
+#### Scenario: Origin backed by a lookup
+- **WHEN** the Coach writes a value with origin Open Food Facts, Yazio, BLS or web
+- **THEN** it is accepted only if a database lookup or the web search returned that value (scaled to the product's basis) in the last hour; otherwise the item is rejected, and a value the athlete states is written with origin `manual`.
+
+#### Scenario: Implausible value for the basis
+- **WHEN** a value exceeds the product's basis in grams, or its energy exceeds that of pure fat
+- **THEN** the item is rejected without a write.
+
 #### Scenario: Incomplete products listed
 - **WHEN** the Coach lists incomplete products
 - **THEN** own products and stored database foods with empty core fields are returned with id, name, brand, EAN, basis, origin and their missing fields, and complete products are not.
@@ -443,7 +451,7 @@ The Coach SHALL list own products and stored database foods with empty core fiel
 - **WHEN** a named product does not exist, a field is not a core field, or a value is not a finite number in range
 - **THEN** that item is rejected without writing it.
 
-Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
+Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`, `backend/nutrition/food_database.py::FoodDatabaseService.found_value`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`, `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`, `tests/test_nutrition_web_search.py::NutritionWebSearchCatalogTests.test_a_web_fill_needs_the_value_of_a_search_from_its_own_page`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
 
 ### Requirement: Coach web search for missing product values
 The Coach SHALL be able to search the web for the still-empty core values of up to five named products through one Responses API request with the `web_search` tool, sending only product name, brand, EAN, basis and missing field names. Only finite, plausible values whose source page the search read or cited SHALL be returned, with origin `web`, the source page and an untrusted-data notice.

@@ -98,6 +98,7 @@ _ORIGIN_NAMES = {
     "yazio": "Yazio",
     "bls": "BLS",
     "web": "Web",
+    "manual": "eigene Angabe",
 }
 
 

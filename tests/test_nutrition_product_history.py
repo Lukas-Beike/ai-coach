@@ -208,8 +208,16 @@ class NutritionProductHistoryTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             FoodDatabaseEntryRepository().upsert(db, food, "2026-09-01")
         fill = [
-            {"id": own["id"], "values": {"fat_g": 1.5, "salt_g": 0.2}, "origin": "bls"},
-            {"id": food["id"], "values": {"salt_g": 0.7, "kcal": 1}, "origin": "yazio"},
+            {
+                "id": own["id"],
+                "values": {"fat_g": 1.5, "salt_g": 0.2},
+                "origin": "manual",
+            },
+            {
+                "id": food["id"],
+                "values": {"salt_g": 0.7, "kcal": 1},
+                "origin": "manual",
+            },
         ]
         result, changes = self.collected(lambda: self.catalog.fill_product_gaps(fill))
 
@@ -246,7 +254,7 @@ class NutritionProductHistoryTests(unittest.TestCase):
             FoodDatabaseEntryRepository().upsert(db, food, "2026-09-01")
         _, changes = self.collected(
             lambda: self.catalog.fill_product_gaps(
-                [{"id": food["id"], "values": {"fat_g": 1}, "origin": "bls"}]
+                [{"id": food["id"], "values": {"fat_g": 1}, "origin": "manual"}]
             )
         )
         with self.manager.unit_of_work() as db:

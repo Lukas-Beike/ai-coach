@@ -1469,7 +1469,7 @@ def build_structured_tool_schemas(
     COACH_STRUCTURED_TOOLS.append(
         _canonical_coach_tool(
             "fill_nutrition_product_gaps",
-            "Write looked-up values into empty core fields of own products or stored database foods named by their exact id from list_incomplete_nutrition_products. Values count on the product's own basis (basis_amount and basis_unit); never convert units. Only empty fields are written; known values stay and are reported as skipped. Each item names the origin of its values; web values also need the source page in source_url. Filling several products needs the athlete's yes first (ask 'Soll ich sie eintragen?'); one product needs none. Name product, field, value and origin in the reply.",
+            "Write looked-up values into empty core fields of own products or stored database foods named by their exact id from list_incomplete_nutrition_products. Values count on the product's own basis (basis_amount and basis_unit); never convert units. Only empty fields are written; known values stay and are reported as skipped. Each item names the origin of its values: manual for values the athlete states, open_food_facts, yazio or bls only for values lookup_food returned, web only for values search_web_for_product_values returned (also with the source page in source_url); an origin no lookup backs is rejected. Filling several products needs the athlete's yes first (ask 'Soll ich sie eintragen?'); one product needs none. Name product, field, value and origin in the reply.",
             {
                 "products": {
                     "type": "array",

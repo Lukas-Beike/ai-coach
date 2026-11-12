@@ -60,7 +60,7 @@ NUTRIENT_COLUMNS = (
     "fiber_g",
     "salt_g",
 )
-_DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
+_DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio", "bls": "bls"}
 # Origin of a field value the athlete entered; a re-check keeps it.
 MANUAL_ORIGIN = "manual"
 

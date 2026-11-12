@@ -6,11 +6,11 @@ import json
 import math
 from collections.abc import Callable
 from typing import Any, TypeGuard
-from urllib.parse import parse_qsl, urlsplit
 
 from backend.db.repositories import NUTRIENT_COLUMNS
 from backend.errors import AppError
-from backend.nutrition.catalog import MAX_GAP_GRAMS, MAX_GAP_KCAL, SOURCE_URL
+from backend.nutrition.catalog import SOURCE_URL, gap_limit, mass_basis
+from backend.nutrition.food_database import page_key
 from backend.providers.model_seam import ModelRequest, ModelTurn
 
 UNTRUSTED_NOTICE = (
@@ -116,7 +116,7 @@ class NutritionWebSearchService:
                 raise TypeError("products")
         except AppError, AttributeError, KeyError, TypeError, ValueError:
             return dict(UNAVAILABLE)
-        cited = {_page_key(url) for url in turn.sources}
+        cited = {page_key(url) for url in turn.sources}
         # Only integer refs name a requested product; anything else is dropped.
         by_ref = {
             item["ref"]: item.get("values")
@@ -150,37 +150,17 @@ def _request_item(ref: int, product: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _page_key(url: str) -> tuple[str, str, tuple[tuple[str, str], ...]]:
-    """A page address regardless of scheme, ``www.``, fragment, tracking and slash."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return (url, "", ())
-    query = tuple(
-        sorted(
-            (key, value)
-            for key, value in parse_qsl(parts.query)
-            if not key.startswith("utm_")
-        )
-    )
-    return (parts.netloc.lower().removeprefix("www."), parts.path.rstrip("/"), query)
-
-
 def _kept_values(
     product: dict[str, Any], values: Any, cited: set[Any]
 ) -> dict[str, Any]:
     missing = set(product.get("missing_fields") or ())
-    # Per gram or millilitre of basis, no value exceeds the basis itself and no
-    # energy exceeds that of pure fat.
-    basis_amount = product.get("basis_amount")
-    basis = float(basis_amount) if isinstance(basis_amount, int | float) else 0.0
-    per_mass = product.get("basis_unit") in {"g", "ml"} and basis > 0
+    basis = mass_basis(product.get("basis_amount"), product.get("basis_unit"))
     kept: dict[str, dict[str, Any]] = {}
     entries = values if isinstance(values, list) else []
     for entry in entries:
         item = entry if isinstance(entry, dict) else {}
         field, value, url = item.get("field"), item.get("value"), item.get("source_url")
-        limit = _limit(field, basis if per_mass else 0.0)
+        limit = gap_limit(field, basis)
         if (
             isinstance(field, str)
             and field in missing
@@ -196,15 +176,6 @@ def _kept_values(
     return {"values": list(kept.values()), "dropped": len(entries) - len(kept)}
 
 
-def _limit(field: Any, basis: float) -> float:
-    """The largest plausible value; with a mass basis, no more than the basis
-    itself and no more energy than pure fat."""
-    limit: float = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
-    if basis > 0:
-        limit = min(limit, 9.5 * basis if field == "kcal" else basis)
-    return limit
-
-
 def _plausible(value: Any, limit: float) -> TypeGuard[float]:
     return (
         isinstance(value, int | float)
@@ -218,5 +189,5 @@ def _cited(url: Any, cited: set[Any]) -> bool:
     return (
         isinstance(url, str)
         and SOURCE_URL.fullmatch(url) is not None
-        and _page_key(url) in cited
+        and page_key(url) in cited
     )

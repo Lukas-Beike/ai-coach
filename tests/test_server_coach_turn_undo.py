@@ -139,13 +139,13 @@ class CoachTurnUndoTests(ServerTestCase):
         server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
         # Filled before the turn: undo of the turn keeps this value and its origin.
         catalog.fill_product_gaps(
-            [{"id": food["id"], "values": {"fat_g": 30}, "origin": "yazio"}]
+            [{"id": food["id"], "values": {"fat_g": 30}, "origin": "manual"}]
         )
         with change_history.collect_changes() as changes:
             result = catalog.fill_product_gaps(
                 [
-                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "bls"},
-                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "bls"},
+                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "manual"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "manual"},
                 ]
             )
         steps = [
@@ -161,8 +161,8 @@ class CoachTurnUndoTests(ServerTestCase):
             self._messages(turn_id)[1]["coach_changes"]["labels"],
             [
                 "Produktlücken gefüllt (2)",
-                "Synthetic skyr: Fett 0,2 (BLS)",
-                "Synthetic bar: Salz 0,7 (BLS)",
+                "Synthetic skyr: Fett 0,2 (eigene Angabe)",
+                "Synthetic bar: Salz 0,7 (eigene Angabe)",
             ],
         )
         self.assertEqual(
@@ -178,7 +178,7 @@ class CoachTurnUndoTests(ServerTestCase):
         # Undo restores the food as it was stored: salt is absent again.
         self.assertNotIn("salt_g", restored["per_100"])
         self.assertEqual(restored["per_100"]["fat_g"], 30)
-        self.assertEqual(restored["filled_fields"]["fat_g"]["origin"], "yazio")
+        self.assertEqual(restored["filled_fields"]["fat_g"]["origin"], "manual")
 
     def test_a_record_changed_after_the_turn_aborts_the_whole_undo(self) -> None:
         turn_id = self._coach_turn()

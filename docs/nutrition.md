@@ -53,7 +53,11 @@ basis, into named products. Only fields that are empty at write time are
 written; a known value is reported as skipped, never replaced. An invalid item
 (unknown product, non-core field, negative or implausible value) is rejected
 whole. Each written field records its origin (`open_food_facts`, `yazio`, `bls`
-or `web`, a web value with its source page) and time under `filled_fields`.
+or `web`, a web value with its source page; `manual` for a value you state) and
+time under `filled_fields`. A database or web origin is accepted only for a value
+that a lookup or web search returned in the last hour, scaled to the product's
+basis; otherwise the item is rejected. A value above the basis in grams, or with
+more energy than pure fat, is rejected for every origin.
 Filling two or more products is a bulk change: the Coach asks first and needs
 your yes. The turn's change line in the chat lists each product, field, value and origin, and
 undo of the turn empties exactly those fields again (change history entity
