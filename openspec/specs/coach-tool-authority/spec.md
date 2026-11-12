@@ -66,13 +66,13 @@ The system SHALL require a successful domain-specific impact confirmation for lo
 
 #### Scenario: Whole plan or accumulated bulk
 - **WHEN** committing/replacing a whole plan, or accumulated counted records exceed seven
-- **THEN** the impact verdict must confirm the bulk request for that domain, including effects resumed from prior receipts.
+- **THEN** the impact verdict must confirm the bulk request for that domain, including effects resumed from prior receipts. Only calls that did not fail count: a failed write saved nothing, so its records go back to the turn and a corrected retry stays within the original authority (it still counts toward the per-turn write cap).
 
 #### Scenario: Classifier failure or cross-domain approval
 - **WHEN** the classifier is unavailable, errors, emits invalid output or confirms only another domain
 - **THEN** the server denies the destructive/bulk call without opening its write transaction, adding a durable effect receipt or claiming a save.
 
-Evidence: `backend/coach/write_gate.py:call_impact`, `backend/coach/write_gate.py:record_count`, `backend/coach/write_gate.py:check_write`; `backend/coach/turn_write_gate.py:CoachTurnWriteGate`; `tests/test_coach_write_gate.py:test_delete_confirmation_is_bound_to_its_domain`, `tests/test_coach_write_gate.py:test_whole_plan_tools_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_no_classifier_and_failures_fail_closed`; `tests/test_coach_turn_write_gate.py:test_denied_write_does_not_execute_record_or_open_a_transaction`.
+Evidence: `backend/coach/write_gate.py:call_impact`, `backend/coach/write_gate.py:record_count`, `backend/coach/write_gate.py:check_write`; `backend/coach/turn_write_gate.py:CoachTurnWriteGate`; `tests/test_coach_write_gate.py:test_delete_confirmation_is_bound_to_its_domain`, `tests/test_coach_write_gate.py:test_whole_plan_tools_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_write_gate.py:test_no_classifier_and_failures_fail_closed`; `tests/test_coach_turn_write_gate.py:test_denied_write_does_not_execute_record_or_open_a_transaction`, `tests/test_coach_turn_write_gate.py:test_a_failed_write_refunds_its_bulk_records_to_the_retry`, `tests/test_coach_turn_write_gate.py:test_a_failed_write_leaves_the_bulk_budget_to_its_retry`, `tests/test_coach_turn_write_gate.py:test_resumed_budget_adds_up_the_gates_own_record_counts`; `backend/coach/turn_write_gate.py:CoachTurnWriteGate.settle`.
 
 ### Requirement: CA5 Named remote synchronization and explicit proposals
 The system SHALL require the athlete's named sync request for the step's own provider before a remote-write step (the Intervals.icu name or a sync verb for Intervals.icu, Garmin or watch wording for a Garmin push), preserve a separate per-step remote target/scope, and run a named remote write without an approval card, bound to stored state as a card would bind it; only an explicit Garmin removal still goes through the explicit approval proposal.
