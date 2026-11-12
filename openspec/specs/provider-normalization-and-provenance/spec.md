@@ -318,7 +318,7 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 
 #### Scenario: Target range of planned steps
 - **WHEN** a planned unit's step targets a zone, a percent of a threshold, or absolute bpm or watts
-- **THEN** its profile segment carries the range in bpm, W or s/km from the zones and thresholds in effect on the unit's day (a zone starts one above the zone below it, the lowest zone has no lower end, the open top zone no upper end); a zone step without the athlete's own zones of that signal, or any step without its threshold, carries no range.
+- **THEN** its profile segment carries the range in bpm, W or s/km from the zones and thresholds in effect on the unit's day (a zone starts one above the zone below it, the lowest zone has no lower end, the open top zone no upper end); whole bpm and watts end at the last whole unit below the limit, so Garmin zones read as on the watch; a zone step without the athlete's own zones of that signal or outside their zone count, or any step without its threshold, carries no range.
 
 #### Scenario: Thresholds without a zone configuration
 - **WHEN** a planned workout's sport has no configuration for a metric

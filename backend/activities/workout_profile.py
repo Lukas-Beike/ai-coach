@@ -196,6 +196,9 @@ def _zone_percents(
     if source == DEFAULT_ZONE_SOURCE:
         return None
     first, last = int(zone[1]), int(zone[2] or zone[1])
+    # A zone the athlete's set does not have gets no range.
+    if not 1 <= first <= last <= len(limits) + 1:
+        return None
     return (
         limits[first - 2] if first > 1 else None,
         limits[last - 1] if last - 1 < len(limits) else None,
@@ -212,8 +215,13 @@ def _scaled(
     if unit == "s/km":
         # Faster is more intense: the slower end comes first.
         return _range(unit, *(None if v is None else 1000 / v for v in (low, high)))
-    # A zone starts one unit above the one below it ("110–128 bpm").
-    return _range(unit, None if low is None else round(low) + int(zone_start), high)
+    if not zone_start:
+        return _range(unit, low, high)
+    # Whole bpm or watts: a zone ends at the last whole unit below its limit and
+    # starts one above the zone below ("110–128 bpm"); Garmin's limits lie half a
+    # unit above the zone's last bpm, a local limit on it.
+    low, high = (None if v is None else math.floor(v + 1e-6) for v in (low, high))
+    return _range(unit, None if low is None else low + 1, high)
 
 
 def _range(unit: str, low: float | None, high: float | None) -> dict[str, Any]:

@@ -146,25 +146,29 @@ class WorkoutProfileTests(unittest.TestCase):
         self.assertEqual(4, low_threshold["segments"][0]["zone"])
 
     def test_planned_steps_carry_their_target_range_from_the_zones_of_the_day(self):
-        # #2447. Worked examples: LTHR 163 bpm with heart-rate zone limits 67.5,
-        # 78.5, 86.5 and 93.9 % (Z1 up to 110, Z2 111-128 bpm); FTP 280 W with
+        # #2447. Worked examples: Garmin heart-rate zones with floors 110, 129, 142
+        # and 155 bpm at an LTHR of 160 are stored half a bpm above each zone's
+        # last bpm (Z1 up to 109, Z2 110-128, Z5 from 155 bpm); FTP 280 W with
         # local power limits 55 and 75 % (Z2 155-210 W); threshold pace 4:28 /km
         # (3.731 m/s), 90 % of its speed is 4:58 /km (298 s).
         settings = ZoneSettings(
-            lthr=163,
+            lthr=160,
             max_hr=186,
             ftp=280,
             threshold_pace=1000 / 268,
-            hr_limits=(67.5, 78.5, 86.5, 93.9),
+            hr_limits=tuple(bpm / 160 * 100 for bpm in (109.5, 128.5, 141.5, 154.5)),
             hr_source="Garmin",
             power_limits=(55, 75, 90, 105, 120, 150),
             power_source="Lokal",
         )
         for description, expected in (
-            ("- 40m Z1 HR", {"unit": "bpm", "max": 110}),
-            ("- 55m Z2 HR", {"unit": "bpm", "min": 111, "max": 128}),
-            ("- 10m Z5 HR", {"unit": "bpm", "min": 154}),
-            ("- 20m 86-89% LTHR", {"unit": "bpm", "min": 140, "max": 145}),
+            ("- 40m Z1 HR", {"unit": "bpm", "max": 109}),
+            ("- 55m Z2 HR", {"unit": "bpm", "min": 110, "max": 128}),
+            ("- 30m Z3 HR", {"unit": "bpm", "min": 129, "max": 141}),
+            ("- 10m Z5 HR", {"unit": "bpm", "min": 155}),
+            # A zone the athlete's five zones do not have.
+            ("- 10m Z6 HR", None),
+            ("- 20m 86-89% LTHR", {"unit": "bpm", "min": 138, "max": 142}),
             ("- 20m 70% HR", {"unit": "bpm", "min": 130, "max": 130}),
             ("- 30m Z2", {"unit": "W", "min": 155, "max": 210}),
             ("- 30m 200w", {"unit": "W", "min": 200, "max": 200}),
