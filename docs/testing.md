@@ -186,7 +186,7 @@ Keep the smaller matrix/serial path until measured concurrency gains justify
 additional runner-minutes. The full isolated selection can take substantial time
 on Docker Desktop; retain its manifest and wait for the terminal result.
 
-Follow the [disposable browser validation notes](../.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md)
+Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md)
 for manual login, PWA/offline and UI checks. Never target a connected installation.
 Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.

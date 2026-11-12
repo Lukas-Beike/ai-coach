@@ -137,7 +137,7 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
   before Grep. Verify graph results in source.
 - Skills live only in [`.agents/skills/`](.agents/skills/README.md); read the
   relevant one when a task needs it. Never install them globally. Coding uses the
-  [Ponytail](.agents/skills/ai-coach-ponytail/SKILL.md) smallest-complete-change
+  [Ponytail](.agents/skills/pacecraft-ponytail/SKILL.md) smallest-complete-change
   approach. Subagents follow [orchestration](.agents/skills/orchestrated-plan-implementation/SKILL.md):
   main model by default, fixed model tiers, no model questions.
 - Default effort is `medium` (`effortLevel` in `.claude/settings.json`); use
@@ -150,11 +150,13 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Stop line growth: answer a static-analysis finding without splitting a module
   into more files, pass-through classes, or wrapper functions; if it cannot be
   fixed without new indirection, say so in the PR. Every PR description states
-  its line balance: production and test lines added and removed.
+  its line balance: production and test lines added and removed. Exception
+  (athlete, 2026-11-11, #2275): skills and their scripts may be split into
+  more files, one base skill per operation.
 - OpenSpec is optional, for larger features; see the
   [OpenSpec runbook](docs/openspec.md) and use
   `npm run openspec -- <arguments>`.
-- Requested local security scans use `.agents/skills/ai-coach-codex-security/SKILL.md`
+- Requested local security scans use `.agents/skills/pacecraft-codex-security/SKILL.md`
   with the Codex Security plugin or `--auth chatgpt`; no API key or GitHub
   Actions workflow for it.
 
@@ -191,7 +193,7 @@ files with the [dependency recipe](docs/dependencies.md).
 Use Docker for application and UI integration: the pinned SQLCipher dependency
 has no Windows wheel. Never bypass encrypted startup. [docs/setup.md](docs/setup.md) is the single
 runbook for setup and Garmin login. Browser checks prefer the disposable fixture
-in `.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md`. Rebuild
+in `.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md`. Rebuild
 the image after application, dependency, or startup changes; keep the data mount,
 token store, and recovery backups when recreating the container, and never use
 `docker rm -v`. The non-root container uses port 8090 and a writable `/data`;
