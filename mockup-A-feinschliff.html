@@ -1,0 +1,701 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pacecraft Mockup A · Feinschliff</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700&family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
+<style>
+.mv{font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground,#888)}
+.mv-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.mv-bar select,.mv-bar button{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--border,#8886);background:var(--card,transparent);color:inherit;font:600 13px var(--font-sans,system-ui,sans-serif);cursor:pointer}
+.mv-bar select{flex:1 1 220px;min-width:0}
+.mv-bar button[aria-pressed=true]{background:var(--foreground,#888);color:var(--background,#fff)}
+.mv-grp{display:flex;gap:4px}
+.mv-stage{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.mv-frame{margin:0}
+.mv-frame figcaption{font:600 12px var(--font-sans,system-ui,sans-serif);opacity:.75;margin-bottom:6px}
+.mv-clip{overflow:hidden;border-radius:14px;outline:1px solid var(--border,#8886)}
+.mv-clip .app{transform-origin:0 0}
+.app.full{height:auto!important}.app.full .shell{position:relative;min-height:inherit}.app.full .main{overflow:visible}.app.full .login{position:relative;min-height:inherit}
+/* Structural base shared by all directions. Look comes from tokens + direction overrides. */
+.app{container:app/inline-size;position:relative;overflow:hidden;background:var(--bg);color:var(--ink);font:400 15px/1.45 var(--font);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;text-align:left;
+  --sp-run:var(--run);--sp-ride:var(--ride);--sp-strength:var(--strength);--nav-h:68px}
+.app *,.app *::before,.app *::after{box-sizing:border-box;margin:0}
+.app button,.app input,.app select,.app textarea{font:inherit;color:inherit}
+.app a{color:var(--accent-text)}
+.app ul{padding:0;list-style:none}
+.app h1,.app h2,.app h3,.app h4{font-family:var(--font-d);line-height:1.2;font-weight:650}
+.app h1{font-size:26px}.app h2{font-size:18px}.app h3{font-size:16px}.app h4{font-size:13px;color:var(--muted);margin-top:8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.shell{position:absolute;inset:0;display:flex;flex-direction:column}
+.main{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+.nav{flex:none;order:2;height:var(--nav-h);display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border-top:1px solid var(--line)}
+.nav-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:48px;font-size:11px;font-weight:600;text-decoration:none;color:var(--muted)!important}
+.nav-item[aria-current]{color:var(--accent-text)!important}
+.page{padding:16px 16px 28px;display:grid;gap:16px;max-width:1080px;margin:0 auto;align-content:start}
+.page>*,.grid2>*,.more-body>*,.cal-col>*{min-width:0}
+.page-h{display:flex;align-items:center;justify-content:space-between;min-height:44px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.between{justify-content:space-between}
+.center{text-align:center}
+.grid2{display:grid;gap:16px}
+.list{display:grid;gap:12px}
+.foot{font-size:12.5px;color:var(--muted)}
+.u{font-size:.72em;font-weight:500;color:var(--muted);font-family:var(--font)}
+
+/* controls */
+.btn{min-height:44px;padding:0 16px;border-radius:var(--r-btn);border:1px solid var(--line-2);background:var(--surface);font-weight:600;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;text-align:center}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent-text);padding:0 10px}
+.btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+.btn.ghost.danger{border-color:transparent}
+.btn.block{width:100%}
+.btn .ic{width:18px;height:18px}
+.icon-btn{width:44px;height:44px;flex:none;border-radius:var(--r-btn);border:0;background:transparent;color:var(--muted);display:inline-grid;place-items:center;cursor:pointer}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+.tabs a{flex:1 0 auto;min-height:44px;padding:0 14px;display:grid;place-items:center;text-decoration:none;font-weight:600;font-size:14px;color:var(--muted);white-space:nowrap;border-radius:var(--r-btn)}
+.tabs a[aria-current]{color:var(--ink);background:var(--surface-2)}
+.seg{display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--surface-2);border-radius:var(--r-btn);padding:3px;gap:2px;justify-self:start}
+.seg button{min-height:38px;padding:0 14px;border:0;border-radius:calc(var(--r-btn) - 3px);background:transparent;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer;white-space:nowrap;position:relative}
+.seg button::after{content:"";position:absolute;inset:-3px 0}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-s)}
+.field{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.field>span:first-child{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.app input,.app select,.app textarea{min-height:44px;width:100%;padding:0 12px;border-radius:var(--r-s);border:1px solid var(--line-2);background:var(--input);color:var(--ink);font-weight:500;font-size:15px}
+.app input::placeholder,.app textarea::placeholder{color:var(--muted);opacity:1}
+.pw{display:flex;gap:8px}.pw input{flex:1;min-width:0}
+.form2{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end}
+.switch{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:600}
+.switch input{position:absolute;opacity:0;width:1px;min-height:0;height:1px}
+.switch i{width:44px;height:26px;border-radius:99px;background:var(--line-2);position:relative;flex:none}
+.switch i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--surface);transition:.15s}
+.switch input:checked+i{background:var(--accent)}.switch input:checked+i::after{left:21px;background:var(--on-accent)}
+.file{display:flex;align-items:center;gap:10px}.file em{font-style:normal;font-weight:400}
+
+/* chips, sources */
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:650;background:var(--surface-2);color:var(--ink);white-space:nowrap}
+.chip.ok,.chip.warn,.chip.err,.chip.off{background:transparent;border:1px solid var(--line-2)}
+.chip.ok::before,.chip.warn::before,.chip.err::before,.chip.off::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.chip.warn::before{background:var(--warn)}.chip.err::before{background:var(--danger)}.chip.off::before{background:var(--muted)}
+.chip.est{background:transparent;border:1px dashed var(--muted);color:var(--muted);font-weight:600}
+.src{font-size:11.5px;font-weight:700;letter-spacing:.02em;padding:1px 7px;border-radius:4px;border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.src[data-src=garmin]{color:var(--src-garmin);border-color:color-mix(in srgb,var(--src-garmin) 45%,transparent)}
+.src[data-src=wahoo]{color:var(--src-wahoo);border-color:color-mix(in srgb,var(--src-wahoo) 45%,transparent)}
+.src[data-src=ai]{border-style:dashed}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid var(--line-2);color:var(--muted)}
+.tag.is-derived{border-style:dashed}
+
+/* cards */
+.card,.acc,.box{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:12px;align-content:start}
+.box{background:transparent;border-radius:var(--r-s);padding:14px}
+.card-h{display:flex;align-items:center;gap:8px;min-height:28px;flex-wrap:wrap}
+.card-h h3{flex:1}
+.card-h .icon-btn,.group .icon-btn{margin:-10px -10px -10px 0}
+.group{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.acc{padding:0;gap:0}
+.acc>summary,.sec>summary,.sec2>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 16px;flex-wrap:wrap}
+.acc>summary::-webkit-details-marker,.sec>summary::-webkit-details-marker,.sec2>summary::-webkit-details-marker,.unit>summary::-webkit-details-marker{display:none}
+.acc-t{font-family:var(--font-d);font-weight:650;font-size:16px;flex:1}
+.acc-m{font-size:13px;color:var(--muted)}
+.chev{width:18px;height:18px;color:var(--muted);transition:transform .15s}
+details[open]>summary .chev{transform:rotate(90deg)}
+.acc-b{padding:4px 16px 16px;display:grid;gap:14px}
+.sec{padding:0;gap:0}.sec>summary{justify-content:space-between}.sec>.kv{padding:0 16px 10px}
+.sec2{display:grid;gap:12px}.sec2>summary{padding:0;min-height:44px;justify-content:space-between}.sec2 .group{margin:0;justify-content:flex-start}
+.more>summary{min-height:44px;display:flex;align-items:center;font-size:13.5px;font-weight:600;color:var(--accent-text);cursor:pointer}
+.sub>summary{min-height:44px;display:flex;align-items:center;font-weight:650;cursor:pointer}
+.sub{display:grid;gap:12px}
+.eq-line{flex:1 0 100%;font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.life{flex:1 0 100%;height:4px;border-radius:9px;background:var(--surface-2);overflow:hidden;margin-bottom:6px}.life i{display:block;height:100%;background:var(--accent)}
+.lines{display:grid;gap:4px;font-size:14px}
+.notice,.alert{font-size:13px;padding:12px 14px;border-radius:var(--r-s);background:var(--surface-2);color:var(--ink)}
+.alert{display:grid;gap:4px;border-left:3px solid var(--warn)}
+.setrow{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:center;justify-content:space-between;padding:6px 0}
+.setrow>div{display:grid;gap:2px;flex:1 1 200px}.setrow>div span{font-size:13px;color:var(--muted)}
+.setrow+.setrow{border-top:1px solid var(--line);padding-top:14px}
+.card.setrow{padding:12px 16px}
+.savebar{position:sticky;bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:var(--shadow)}
+.fresh{display:grid;gap:6px;padding:10px 0;border-top:1px solid var(--line)}.fresh .btn{justify-self:start}
+.progress{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:baseline;padding:12px 16px;border-radius:var(--r);background:var(--accent-soft);font-size:14px}
+.progress progress{grid-column:1/-1;width:100%;height:6px;appearance:none;border:0;border-radius:9px;overflow:hidden;background:var(--line-2)}
+.progress progress::-webkit-progress-bar{background:var(--line-2)}.progress progress::-webkit-progress-value{background:var(--accent-text)}
+.logs{font:12px/1.5 ui-monospace,Consolas,monospace;padding:12px;border-radius:var(--r-s);background:var(--surface-2);overflow:auto;white-space:pre}
+
+/* data */
+.kv{display:grid}
+.kv>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.kv>div:first-child{border-top:0}
+.kv dt{color:var(--muted);font-size:14px}.kv dd{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.kv dd b{font-family:var(--font-n);font-size:17px;font-weight:650}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.tile{display:grid;gap:2px;padding:12px;border-radius:var(--r-s);background:var(--surface-2);align-content:start}
+.tile .k{font-size:12.5px;color:var(--muted);font-weight:600}
+.tile .v{font-family:var(--font-n);font-size:22px;font-weight:650;line-height:1.15}
+.tile .chip{justify-self:start;margin-top:4px}
+.tiles.nut{grid-template-columns:repeat(3,1fr)}
+.tiles.nut .hero{grid-column:1/-1}.tiles.nut .hero .v{font-size:38px}
+.tiles.nut .tile{background:var(--surface);border:1px solid var(--line)}
+.tile.below{box-shadow:inset 0 -3px 0 var(--warn)}.tile.above{box-shadow:inset 0 -3px 0 var(--info)}
+.tiles.facts .tile{padding:10px 12px}.tiles.facts .v{font-size:19px}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{font-size:12px;font-weight:650;color:var(--muted);text-align:right;padding:6px 6px}
+.tbl td{padding:9px 6px;border-top:1px solid var(--line);text-align:right;font-family:var(--font-n)}
+.tbl th:first-child,.tbl td:first-child{text-align:left;padding-left:0;font-family:var(--font)}
+.tbl th:last-child,.tbl td:last-child{padding-right:0}
+.tbl.thr td b{font-family:var(--font-n);font-size:18px}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .ax{font:500 9.5px var(--font);fill:var(--muted)}
+.chart .band{fill:var(--muted);opacity:.16}
+.chart .avg{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3}
+.chart .line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.chart .dashed{stroke-dasharray:6 4}
+.chart .area{opacity:.12;stroke:none}
+.c0{--c:var(--c0)}.c1{--c:var(--c1)}.c2{--c:var(--c2)}.c3{--c:var(--c3)}.c4{--c:var(--c4)}
+.chart .line{stroke:var(--c)}.chart .area,.chart .bar,.chart .dot{fill:var(--c)}
+.legend{display:flex;flex-wrap:wrap;gap:0 14px}
+.lg{min-height:44px;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer}
+.lg i{width:14px;height:3px;border-radius:2px;background:var(--c0)}
+.lg[data-c="1"] i{background:var(--c1)}.lg[data-c="2"] i{background:var(--c2)}.lg[data-c="3"] i{background:var(--c3)}.lg[data-c="4"] i{background:var(--c4)}
+.legend.plain{gap:6px 16px;font-size:13.5px}.legend.plain li{display:flex;align-items:center;gap:6px}
+.mini{display:grid;gap:4px}.mini header{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;color:var(--muted)}.mini h4{margin:0}
+[data-z="1"]{--z:var(--z1)}[data-z="2"]{--z:var(--z2)}[data-z="3"]{--z:var(--z3)}[data-z="4"]{--z:var(--z4)}[data-z="5"]{--z:var(--z5)}[data-z="6"]{--z:var(--z6)}[data-z="7"]{--z:var(--z7)}
+.zf1{fill:var(--z1)}.zf2{fill:var(--z2)}.zf3{fill:var(--z3)}.zf4{fill:var(--z4)}.zf5{fill:var(--z5)}.zf6{fill:var(--z6)}.zf7{fill:var(--z7)}
+.sw{width:12px;height:12px;border-radius:3px;background:var(--z);flex:none;display:inline-block}
+.zones{display:grid;gap:2px}
+.zone{display:grid;grid-template-columns:12px 26px auto 1fr auto;gap:8px;align-items:center;min-height:30px;font-size:14px}
+.zone b{font-weight:700}.zone .zn{color:var(--muted)}.zone .zv{grid-column:-2/-1;font-family:var(--font-n);font-weight:600;text-align:right;white-space:nowrap}
+.zbar{grid-column:3/5;height:8px;border-radius:9px;background:var(--surface-2);overflow:hidden}.zbar i{display:block;height:100%;background:var(--z);border-radius:9px;min-width:3px}
+.share{display:flex;height:14px;border-radius:9px;overflow:hidden;gap:2px}.share i{background:var(--z)}
+.zleg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;font-weight:600;color:var(--muted)}.zleg li{display:flex;gap:5px;align-items:center}
+.profile svg{display:block;width:100%;height:56px}
+.profile-ax{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:4px}
+
+/* login */
+.login{position:absolute;inset:0;display:grid;place-items:center;padding:24px}
+.login-card{width:min(100%,360px);display:grid;gap:18px}
+.brand{font-weight:700;color:var(--accent-text);font-size:14px}
+
+/* coach */
+.page.coach{max-width:800px;min-height:100%;grid-template-rows:auto 1fr auto;padding-bottom:0}
+.strip{display:flex;align-items:center;gap:8px;padding:4px 4px 4px 14px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);font-size:13.5px;flex-wrap:wrap}
+.strip .dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}.strip span{color:var(--muted);flex:1}.strip a{min-height:44px;display:grid;place-items:center;padding:0 8px;font-weight:650}
+.msgs{display:grid;gap:14px;align-content:end}
+.load-more{justify-self:center}
+.msg{display:grid;gap:8px;max-width:100%}
+.msg.user{justify-self:end;max-width:86%;padding:10px 14px;background:var(--bubble);border-radius:var(--r) var(--r) 6px var(--r)}
+.msg ul{padding-left:18px;list-style:disc;display:grid;gap:2px}
+.msg-actions{display:flex;margin:-6px 0 -6px -10px}.msg.user .msg-actions{justify-content:flex-end;margin:-6px -10px -8px 0}
+.msg-actions .ic{width:17px;height:17px}
+.msg.pending{opacity:.92;border:1px dashed var(--line-2);background:transparent}.msg.pending small{font-weight:650;color:var(--muted)}
+.plan-note{font-size:13.5px;padding:10px 12px;border-radius:var(--r-s);background:var(--surface-2)}
+.receipt{display:flex;align-items:center;gap:8px;padding:2px 2px 2px 12px;border-radius:var(--r-s);border:1px solid var(--line);font-size:13.5px}
+.receipt>.ic{color:var(--ok);width:18px;height:18px}.receipt span{flex:1}
+.approval{display:grid;gap:10px;padding:16px;border-radius:var(--r);background:var(--surface);border:1px solid var(--warn)}
+.approval header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.approval .chip{white-space:normal}
+.diff{display:grid;gap:4px;font-size:14px}.diff .del{color:var(--danger)}
+.approval .actions .btn{flex:1 1 auto}
+.working{display:flex;align-items:center;gap:5px;font-size:13.5px;color:var(--muted)}
+.working i{width:6px;height:6px;border-radius:50%;background:var(--accent-text)}.working span{margin-left:6px}
+.dock{position:sticky;bottom:0;display:grid;gap:8px;padding:8px 0 12px;background:var(--bg);box-shadow:0 -14px 14px var(--bg)}
+.toast{justify-self:center;padding:10px 16px;border-radius:99px;background:var(--accent);color:var(--on-accent);font-weight:650;font-size:13.5px;box-shadow:var(--shadow)}
+.quick{display:flex;gap:8px;overflow-x:auto}.quick .btn{border-radius:99px;white-space:nowrap}
+.composer{display:flex;align-items:center;gap:4px;padding:6px 6px 6px 8px;border-radius:calc(var(--r) + 6px);background:var(--surface);border:1px solid var(--line-2);box-shadow:var(--shadow)}
+.composer textarea{border:0;background:transparent;resize:none;padding:11px 8px;min-width:0;flex:1}
+.composer-actions{display:flex}
+.icon-btn.send{background:var(--accent);color:var(--on-accent);border-radius:50%}
+
+/* calendar */
+.cal-bar{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.cal-title{flex:1;display:grid;text-align:center;line-height:1.2}.cal-title b{font-family:var(--font-d);font-size:16px}.cal-title span{font-size:12.5px;color:var(--muted)}
+.datef input{text-align:center;font-weight:650}
+.cal-grid,.cal-col,.agenda{display:grid;gap:12px;align-content:start}
+.pane{display:none}
+.week-sum .count{font-size:13.5px;color:var(--muted)}
+.day{display:grid;grid-template-columns:40px 1fr;gap:10px}
+.day-h{display:grid;justify-items:center;align-content:start;gap:1px;padding-top:6px;font-size:12px;color:var(--muted)}
+.day-h b{font-weight:650;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.dnum{font-family:var(--font-n);font-size:19px;font-weight:650;color:var(--ink);width:34px;height:34px;display:grid;place-items:center;border-radius:50%}
+.is-today .dnum{background:var(--accent);color:var(--on-accent)}
+.day-h em{font-style:normal;font-weight:700;font-size:10.5px;color:var(--accent-text)}
+.day-b{display:grid;gap:8px;min-width:0;align-content:start}
+.wx{font-size:12.5px;color:var(--muted);display:flex;gap:8px;align-items:center}.flag{font-weight:600}
+.note{font-size:14px;padding:10px 12px;border-radius:var(--r-s);background:var(--surface-2);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+[data-sport=run]{--sp:var(--run);--sp-soft:var(--run-soft)}[data-sport=ride]{--sp:var(--ride);--sp-soft:var(--ride-soft)}[data-sport=strength]{--sp:var(--strength);--sp-soft:var(--strength-soft)}
+.unit{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--sp);border-radius:var(--r-s);min-width:0}
+.unit>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;padding:12px;min-height:60px}
+.u-ic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--sp-soft);color:var(--sp)}.u-ic .ic{width:19px;height:19px}
+.u-main{display:grid;min-width:0}.u-main b{font-weight:650;font-size:15px}.u-main small{font-size:12.5px;color:var(--muted)}
+.u-num{display:grid;justify-items:end;font-family:var(--font-n)}.u-num b{font-size:16px;font-weight:650}.u-num small{font-size:12.5px;color:var(--muted)}
+.unit .tags,.unit summary .profile{grid-column:1/-1}
+.unit summary .profile svg{height:26px}
+.unit.is-planned,.unit.is-today{border-style:dashed;border-left-style:solid}
+.unit.is-missed{border-left-color:var(--danger)}.unit.is-missed .u-main b{text-decoration:line-through;text-decoration-color:var(--danger)}
+.unit.is-selected{border-color:var(--sp);border-style:solid}
+.unit-body{display:grid;gap:14px;padding:4px 12px 14px}
+.unit-body>.profile svg{height:84px}
+.load b{font-family:var(--font-n);font-size:20px}
+.chipbtn{border-style:dashed;border-radius:99px}
+.desc{font-size:14.5px}
+.planline{font-size:13.5px;color:var(--muted)}
+.unit-body .tbl{font-size:13px}
+.cal-foot{display:grid;gap:8px;padding:4px 0}
+.month{padding:10px}
+.month table{width:100%;border-collapse:collapse;table-layout:fixed}
+.month thead th{font-size:11.5px;color:var(--muted);font-weight:650;padding:4px 0}
+.month td{padding:1px;text-align:center}
+.month td button{width:100%;min-height:46px;border:0;background:none;border-radius:var(--r-s);display:grid;justify-items:center;align-content:center;gap:4px;font-family:var(--font-n);font-weight:600;font-size:14px;cursor:pointer}
+.month td.out button{color:var(--muted)}
+.month tr.cur td button{background:var(--surface-2);border-radius:0}
+.month td.is-today button span{background:var(--accent);color:var(--on-accent);border-radius:99px;padding:0 7px}
+.month tbody th{font-size:11px;color:var(--muted);font-weight:650;line-height:1.25}.month tbody th small{display:block;font-weight:500;font-family:var(--font-n)}
+.mark{width:8px;height:8px;border-radius:50%;background:var(--sp);display:block}
+.mark.is-planned,.mark.is-today{background:transparent;box-shadow:inset 0 0 0 2px var(--sp)}
+.mark.is-missed{background:transparent;box-shadow:inset 0 0 0 2px var(--danger);border-radius:2px}
+
+/* nutrition */
+.meal header,.prod header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-6px -8px -6px 0}
+.meal,.prod{gap:6px}.vals{font-family:var(--font-n);font-weight:600;font-size:14px}
+.star.on{color:var(--warn)}.star.on .ic{fill:currentColor}
+.prod .actions{margin-top:6px}
+
+/* more */
+.more-grid,.more-body{display:grid;gap:14px;align-content:start}
+.more-nav{flex-wrap:wrap}.more-nav a{flex:1 1 30%}
+
+/* desktop */
+@container app (min-width:900px){
+  .shell{flex-direction:row}
+  .nav{order:0;width:216px;height:auto;grid-template-columns:1fr;align-content:start;gap:4px;padding:20px 12px;border-top:0;border-right:1px solid var(--line)}
+  .nav-item{flex-direction:row;justify-content:flex-start;gap:12px;padding:0 14px;min-height:48px;font-size:15px;border-radius:var(--r-btn)}
+  .page{padding:28px 36px 40px;gap:20px}
+  .app h1{font-size:30px}
+  .tabs{justify-self:start}.tabs a{flex:0 0 auto;padding:0 18px}
+  .grid2{grid-template-columns:1fr 1fr}
+  .tiles.facts{grid-template-columns:repeat(4,1fr)}
+  .tiles.nut{grid-template-columns:2fr repeat(5,1fr)}.tiles.nut .hero{grid-column:auto}
+  .cal-grid{grid-template-columns:440px 1fr;gap:24px}
+  .cal-bar{max-width:440px}
+  .pane{display:grid;gap:14px;align-content:start;position:sticky;top:0;background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--sp);border-radius:var(--r);padding:20px}
+  .pane-h{display:grid;gap:4px;justify-items:start}.pane-h p{font-size:13.5px;color:var(--muted)}
+  .pane .unit-body{padding:0}.pane .tiles.facts{grid-template-columns:repeat(4,1fr)}
+  .unit>.unit-body{display:none}
+  .more-grid{grid-template-columns:220px 1fr;gap:28px}
+  .more-nav{flex-direction:column;position:sticky;top:0}.more-nav a{justify-content:start;place-items:center start;flex:none}
+  .page.coach{padding-top:20px}
+}
+
+.dir-a{
+/* A · Feinschliff: the current look, tidied. Soft cards, one green accent, floating pill navigation. */
+.app{--font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-d:var(--font);--font-n:var(--font);
+  --r:18px;--r-s:12px;--r-btn:12px}
+.app[data-theme=dark]{--bg:#0c0d0f;--surface:#17181b;--surface-2:#222428;--input:#1d1f23;--bubble:#25272c;--ink:#f3f4f6;--muted:#a6abb3;--line:rgba(255,255,255,.08);--line-2:rgba(255,255,255,.2);
+  --accent:#34cfa1;--on-accent:#04231a;--accent-text:#4ddbb0;--accent-soft:rgba(52,207,161,.13);--ok:#34cfa1;--warn:#ffb340;--danger:#ff8479;--info:#6cb6ff;
+  --run:#5fd27a;--run-soft:rgba(95,210,122,.15);--ride:#62b0ff;--ride-soft:rgba(98,176,255,.15);--strength:#e0a35c;--strength-soft:rgba(224,163,92,.15);
+  --z1:#22bfa6;--z2:#4fc968;--z3:#f2c53a;--z4:#ff8f33;--z5:#f4517a;--z6:#a47cf5;--z7:#a39bbd;
+  --c0:#34cfa1;--c1:#f0a030;--c2:#b39bff;--c3:#4fc3f7;--c4:#ff8097;--src-garmin:#83c7ff;--src-wahoo:#ffb38a;
+  --shadow:0 12px 32px rgba(0,0,0,.45);--shadow-s:0 1px 3px rgba(0,0,0,.4)}
+.app[data-theme=light]{--bg:#f4f5f6;--surface:#ffffff;--surface-2:#eceef0;--input:#ffffff;--bubble:#e6f3ee;--ink:#15171a;--muted:#5a6069;--line:rgba(0,0,0,.08);--line-2:rgba(0,0,0,.22);
+  --accent:#08785f;--on-accent:#ffffff;--accent-text:#076a54;--accent-soft:rgba(8,120,95,.09);--ok:#08785f;--warn:#a05a00;--danger:#b42318;--info:#0b63c4;
+  --run:#1f7a33;--run-soft:rgba(31,122,51,.11);--ride:#0b63b8;--ride-soft:rgba(11,99,184,.1);--strength:#8f5a14;--strength-soft:rgba(143,90,20,.11);
+  --z1:#00826e;--z2:#218a3a;--z3:#a37400;--z4:#c75a00;--z5:#cc1548;--z6:#6a41d2;--z7:#615a79;
+  --c0:#08785f;--c1:#b45309;--c2:#7c3aed;--c3:#0369a1;--c4:#be123c;--src-garmin:#005a9c;--src-wahoo:#a34a12;
+  --shadow:0 10px 28px rgba(20,30,40,.12);--shadow-s:0 1px 2px rgba(20,30,40,.14)}
+.app{--nav-h:84px}
+.nav{background:transparent;border:0;padding:8px 14px 14px;height:var(--nav-h);position:absolute;left:0;right:0;bottom:0;pointer-events:none}
+.nav::before{content:"";position:absolute;inset:8px 14px 14px;border-radius:24px;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(14px);border:1px solid var(--line-2);box-shadow:var(--shadow)}
+.nav-item{position:relative;pointer-events:auto;border-radius:18px;margin:5px 3px}
+.nav-item[aria-current]{background:var(--accent-soft)}
+.main{padding-bottom:var(--nav-h)}
+.main:has(.coach){padding-bottom:0}.coach .dock{padding-bottom:calc(var(--nav-h) + 2px)}
+.tabs{background:var(--surface-2);padding:3px;border-radius:14px}
+.tabs a{min-height:40px;border-radius:11px;position:relative}.tabs a::after{content:"";position:absolute;inset:-3px 0}
+.tabs a[aria-current]{background:var(--surface);box-shadow:var(--shadow-s)}
+.card,.acc{box-shadow:var(--shadow-s)}
+.unit{border-radius:14px}
+.app h1{letter-spacing:-.02em}
+.tile .v{letter-spacing:-.01em}
+@container app (min-width:900px){
+  .nav{position:static;pointer-events:auto;padding:20px 12px;height:auto;background:var(--surface);border-right:1px solid var(--line)}
+  .nav::before{display:none}.nav-item{margin:0}
+  .main{padding-bottom:0}.coach .dock{padding-bottom:12px}
+  .more-nav{background:transparent;padding:0}
+}
+
+}</style></head><body>
+<div class="mv"><div class="mv-bar"><button data-step="-1" aria-label="Vorherige Seite">‹</button><select id="mvScreen" aria-label="Seite"></select><button data-step="1" aria-label="Nächste Seite">›</button>
+<span class="mv-grp"><button data-set="device:phone">Handy</button><button data-set="device:desktop">Desktop</button></span>
+<span class="mv-grp"><button data-set="theme:both">Hell + Dunkel</button><button data-set="theme:light">Hell</button><button data-set="theme:dark">Dunkel</button></span></div>
+<div class="mv-stage"></div></div>
+<script>/* Pacecraft redesign mockups: shared screens, fictional sample data only. */
+(function () {
+  const I = {
+    coach: '<path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5a3.5 3.5 0 0 1-3.5 3.5h-3l-3.5 3v-3H8.5A3.5 3.5 0 0 1 5 11.5z"/><path d="M8 8.5h8M8 11.5h5"/>',
+    plan: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M8 3v4M16 3v4"/>',
+    analysis: '<path d="M5 19V5M5 19h15"/><path d="m8 15 3-4 3 2 4-6"/>',
+    nutrition: '<path d="M5 3v6m3-6v6M5 6h3M6.5 9v12M17 3v18M17 3c-4 3-4 8 0 8"/>',
+    more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+    refresh: '<path d="M20 11a8 8 0 0 0-14.5-4L4 9M4 5v4h4M4 13a8 8 0 0 0 14.5 4L20 15m0 4v-4h-4"/>',
+    copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+    mic: '<rect x="8" y="3" width="8" height="12" rx="4"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    send: '<path d="M12 19V5m0 0 6 6m-6-6-6 6"/>',
+    check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+    undo: '<path d="M8 5 4 9l4 4"/><path d="M4 9h10a5 5 0 0 1 0 10h-3"/>',
+    star: '<path d="m12 4 2.5 5.1 5.5.8-4 3.9.9 5.6-4.9-2.6-4.9 2.6.9-5.6-4-3.9 5.5-.8z"/>',
+    info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/>',
+    prev: '<path d="m14.5 6-6 6 6 6"/>',
+    next: '<path d="m9.5 6 6 6-6 6"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    run: '<circle cx="14.5" cy="4.5" r="1.7"/><path d="m5 20 4.5-4.5L8 11l4-3 3 3.5h4M12 14l3 2.5V21"/>',
+    ride: '<circle cx="6" cy="16.5" r="3.5"/><circle cx="18" cy="16.5" r="3.5"/><path d="m6 16.5 4-8h5l3 8M9.5 8.5H8M11.5 16.5l3.5-8"/>',
+    strength: '<path d="M3 12h18M6.5 7.5v9M17.5 7.5v9M3.5 9.5v5M20.5 9.5v5"/>',
+  };
+  const ic = (n, c = '') => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+  const ibtn = `<button class="icon-btn ibtn" aria-label="Info">${ic('info')}</button>`;
+  const est = '<span class="chip est">Schätzung</span>';
+  const src = (k, t) => `<span class="src" data-src="${k}">${t}</span>`;
+  const SRC = { garmin: src('garmin', 'Garmin'), wahoo: src('wahoo', 'Wahoo'), local: src('local', 'Lokal berechnet') };
+  const tabs = (items, cur, cls = 'tabs') => `<nav class="${cls}">${items.map(t => `<a href="#"${t === cur ? ' aria-current="page"' : ''}>${t}</a>`).join('')}</nav>`;
+  const head = (t, refresh = true) => `<header class="page-h"><h1>${t}</h1>${refresh ? `<button class="icon-btn" aria-label="${t} aktualisieren">${ic('refresh')}</button>` : ''}</header>`;
+  const seg = (items, cur) => `<div class="seg" role="group">${items.map(t => `<button aria-pressed="${t === cur}">${t}</button>`).join('')}</div>`;
+  const field = (l, input, extra = '') => `<label class="field"><span>${l}${extra}</span>${input}</label>`;
+  const inp = (v = '', type = 'text', ph = '') => `<input type="${type}" value="${v}" placeholder="${ph}">`;
+  const sel = v => `<select><option>${v}</option></select>`;
+  const acc = (title, meta, body, { open = false, chip = '', pre = '' } = {}) =>
+    `<details class="acc"${open ? ' open' : ''}><summary>${pre}<span class="acc-t">${title}</span>${meta ? `<span class="acc-m">${meta}</span>` : ''}${chip}${ic('next', 'chev')}</summary>${open ? `<div class="acc-b">${body}</div>` : ''}</details>`;
+  const chip = (st, t) => `<span class="chip ${st}">${t}</span>`;
+
+  /* ---------- deterministic sample series ---------- */
+  let seed = 11;
+  const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const walk = (n, start, step, drift = 0) => { let v = start; return Array.from({ length: n }, () => { v += (rnd() - .5) * step + drift; return +v.toFixed(1); }); };
+  const X14 = ['30.10.', '05.11.', '12.11.'], X12 = ['24.08.', '05.10.', '09.11.'];
+
+  function chart(series, o = {}) {
+    const W = 340, H = o.h || 128, L = 34, R = 8, T = 8, B = 20;
+    const all = series.flatMap(s => s.pts).concat(o.band || []);
+    let mn = Math.min(...all), mx = Math.max(...all); const pad = (mx - mn) * .14 || 1; mn -= pad; mx += pad; if (o.zero) mn = 0;
+    const n = series[0].pts.length, bar = series[0].bar;
+    const x = i => bar ? L + (W - L - R) * (i + .5) / n : L + (W - L - R) * i / (n - 1);
+    const y = v => T + (H - T - B) * (1 - (v - mn) / (mx - mn));
+    const fmt = o.fmt || (v => Math.round(v));
+    let g = '';
+    [0, .5, 1].forEach(f => { const v = mn + (mx - mn) * f, yy = y(v); g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/><text class="ax" x="${L - 6}" y="${yy + 3.5}" text-anchor="end">${fmt(v)}</text>`; });
+    (o.x || X14).forEach((t, i) => { g += `<text class="ax" x="${[L, (L + W - R) / 2, W - R][i]}" y="${H - 4}" text-anchor="${['start', 'middle', 'end'][i]}">${t}</text>`; });
+    if (o.band) g += `<rect class="band" x="${L}" width="${W - L - R}" y="${y(o.band[1])}" height="${y(o.band[0]) - y(o.band[1])}"/>`;
+    if (o.avg != null) g += `<line class="avg" x1="${L}" x2="${W - R}" y1="${y(o.avg)}" y2="${y(o.avg)}"/>`;
+    series.forEach((s, si) => {
+      const c = s.c ?? si;
+      if (s.bar) { const bw = (W - L - R) / n * .62; s.pts.forEach((v, i) => { g += `<rect class="bar c${c}" x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(1, y(mn) - y(v))}" rx="1.5"/>`; }); return; }
+      const d = s.pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('');
+      if (s.area !== false && series.length === 1 || s.area) g += `<path class="area c${c}" d="${d}L${x(n - 1)} ${y(mn)}L${x(0)} ${y(mn)}Z"/>`;
+      g += `<path class="line c${c}${s.dashed ? ' dashed' : ''}" d="${d}"/><circle class="dot c${c}" cx="${x(n - 1)}" cy="${y(s.pts[n - 1])}" r="3.2"/>`;
+    });
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
+  }
+  function profile(segs, axis) {
+    const W = 340, H = 64, tot = segs.reduce((a, s) => a + s[0], 0); let x = 0, g = '';
+    segs.forEach(([d, z]) => { const w = W * d / tot, h = 12 + z * 7; g += `<rect class="zf zf${z}" x="${x + .5}" y="${H - h}" width="${Math.max(1, w - 1)}" height="${h}" rx="1.5"/>`; x += w; });
+    return `<div class="profile"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Intervallprofil">${g}</svg>${axis ? `<div class="profile-ax"><span>0</span><span>${axis}</span></div>` : ''}</div>`;
+  }
+  const zones = rows => `<ul class="zones">${rows.map(([z, name, val, pct]) => `<li class="zone" data-z="${z}"><i class="sw"></i><b>Z${z}</b>${name ? `<span class="zn">${name}</span>` : ''}${pct != null ? `<span class="zbar"><i style="width:${pct}%"></i></span>` : ''}<span class="zv">${val}</span></li>`).join('')}</ul>`;
+  const ccard = (title, body, { chip: c = '', info = true, legend, foot, vals = true } = {}) =>
+    `<section class="card chartc"><header class="card-h"><h3>${title}</h3>${c}${info ? ibtn : ''}</header>${legend ? `<ul class="legend">${legend.map((l, i) => `<li><button class="lg" data-c="${l.c ?? i}"><i></i>${l.t}</button></li>`).join('')}</ul>` : ''}${body}${foot ? `<p class="foot">${foot}</p>` : ''}${vals ? '<details class="more"><summary>Werte ansehen</summary></details>' : ''}</section>`;
+  const kv = rows => `<dl class="kv">${rows.map(([k, v, u, x = '']) => `<div><dt>${k}</dt><dd><b>${v}</b>${u ? ` <span class="u">${u}</span>` : ''}${x}</dd></div>`).join('')}</dl>`;
+  const tiles = (rows, cls = '') => `<div class="tiles ${cls}">${rows.map(([k, v, u, x = '', c = '']) => `<div class="tile ${c}"><span class="k">${k}</span><span class="v">${v}${u ? ` <span class="u">${u}</span>` : ''}</span>${x}</div>`).join('')}</div>`;
+  const tbl = (heads, rows) => `<table class="tbl"><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+
+  /* ---------- Login ---------- */
+  const login = () => `<div class="login"><form class="login-card"><p class="brand">Pacecraft · AI Coach</p><h1>Anmelden</h1>
+    <label class="field"><span>Passwort</span><span class="pw"><input type="password" value="••••••••••••••"><button type="button" class="btn ghost">Anzeigen</button></span></label>
+    <button type="button" class="btn primary block">Anmelden</button></form></div>`;
+
+  /* ---------- Coach ---------- */
+  const coach = () => `<div class="page coach">
+    <section class="strip" data-level="info"><i class="dot"></i><b>Schwellenwerte prüfen</b><span>Stand vor 4 min</span><a href="#">Prüfen</a><button class="icon-btn" aria-label="Für diese Sitzung ausblenden">${ic('close')}</button></section>
+    <div class="msgs">
+      <button class="btn ghost load-more">Weitere Nachrichten laden</button>
+      <article class="msg user"><p>Die Intervalle am Dienstag liefen gut. Kannst du den lockeren Lauf auf Donnerstag legen und die Woche an Intervals.icu senden?</p>
+        <div class="msg-actions"><button class="icon-btn" aria-label="Nachricht kopieren">${ic('copy')}</button><button class="icon-btn" aria-label="Als Entwurf bearbeiten">${ic('edit')}</button></div></article>
+      <article class="msg assistant"><p>Passt. Dienstag war sauber: <strong>4 × 8 min bei 4:26 /km</strong>, Puls blieb unter 172 bpm.</p>
+        <ul><li>Donnerstag: Lockerer Dauerlauf, 50 min</li><li>Samstag: Sweet Spot 3 × 15 min bleibt</li></ul>
+        <p class="plan-note"><b>Hinweis:</b> Harte Tage in Folge · Di, Mi · Belastung 78 und 92</p>
+        <div class="receipt">${ic('check')}<span>Einheiten lokal geplant · Lockerer Dauerlauf auf Do 12.11.</span><button class="btn ghost">${ic('undo')}Rückgängig</button></div>
+        <div class="msg-actions"><button class="icon-btn" aria-label="Nachricht kopieren">${ic('copy')}</button></div></article>
+      <section class="approval"><header><h2>Aktion prüfen</h2><span class="chip warn">Freigabe und Ergebnis getrennt prüfen</span></header>
+        <p>Woche KW 46 an Intervals.icu senden</p>
+        <ul class="diff"><li><b>3 Einträge</b></li><li>Behalten: Lockerer Dauerlauf · Sweet Spot 3 × 15 min · Langer Lauf</li><li class="del">Löschen: Sweet Spot 2 × 20 min</li></ul>
+        <div class="actions"><button class="btn">Nicht freigeben</button><button class="btn primary">Remote-Änderung freigeben</button></div></section>
+      <article class="msg user pending"><small>Als Nächstes</small><p>Und wie sieht das Wetter am Sonntag aus?</p><div class="actions"><button class="btn ghost">Bearbeiten</button><button class="btn ghost">Entfernen</button></div></article>
+      <div class="working"><i></i><i></i><i></i><span>Coach arbeitet an deiner Antwort…</span></div>
+    </div>
+    <div class="dock">
+      <output class="toast">Trainingsplan geändert: Lockerer Dauerlauf verschoben</output>
+      <div class="quick"><button class="btn">Morgen-Check-in</button><button class="btn">Analyse &amp; Plan</button></div>
+      <form class="composer"><textarea rows="1" placeholder="Frage deinen Coach…"></textarea>
+        <div class="composer-actions"><button type="button" class="icon-btn" aria-label="Aktionen und Anhänge">${ic('plus')}</button><button type="button" class="icon-btn" aria-label="Spracheingabe starten">${ic('mic')}</button><button type="button" class="icon-btn send" aria-label="Senden">${ic('send')}</button></div></form>
+    </div></div>`;
+
+  /* ---------- Kalender ---------- */
+  const P_SS = [[15, 1], [5, 2], [15, 4], [5, 1], [15, 4], [5, 1], [15, 4], [30, 2], [15, 1]];
+  const P_TH = [[12, 1], [6, 2], [8, 4], [3, 1], [8, 4], [3, 1], [8, 4], [3, 1], [8, 4], [6, 1]];
+  const U = {
+    th: { sp: 'run', st: 'done', t: 'Schwellenintervalle 4 × 8 min', meta: 'Laufen · 06:45 · ✓ Absolviert · 96 %', dur: '1:05 h', dist: '12,4 km', tags: ['Schwelle'], p: P_TH },
+    gl: { sp: 'ride', st: 'done', t: 'Grundlage Rolle', meta: 'Rad indoor · 18:10 · ✓ Absolviert · 100 %', dur: '1:30 h', dist: '46,2 km', tags: ['Grundlage'], p: [[10, 1], [70, 2], [10, 1]] },
+    dl: { sp: 'run', st: 'today', t: 'Lockerer Dauerlauf', meta: 'Laufen · 07:30 · Heute geplant', dur: '0:50 h', dist: '9,0 km', tags: ['Grundlage', '≤ 85 % LSHF · 143 bpm · gemessen'], p: [[5, 1], [40, 2], [5, 1]] },
+    kr: { sp: 'strength', st: 'planned', t: 'Kraft Beine &amp; Rumpf', meta: 'Kraft · 17:00 · Geplant', dur: '0:45 h', dist: '', tags: ['Beine ≈Mittel'], derived: 1 },
+    ss: { sp: 'ride', st: 'planned', t: 'Sweet Spot 3 × 15 min', meta: 'Radfahren · 09:00 · Geplant', dur: '2:00 h', dist: '58 km', tags: ['≈Schwelle'], derived: 1, p: P_SS },
+    ll: { sp: 'run', st: 'planned', t: 'Langer Lauf', meta: 'Laufen · 08:30 · Geplant', dur: '1:45 h', dist: '20,0 km', tags: ['Grundlage'], p: [[10, 1], [85, 2], [10, 3]] },
+    mi: { sp: 'run', st: 'missed', t: 'Lauf-ABC &amp; Steigerungen', meta: 'Laufen · ✕ Nicht absolviert', dur: '0:30 h', dist: '', tags: [] },
+  };
+  const bodyPlanned = () => `<div class="unit-body">${profile(P_SS, '2:00 h')}
+    <div class="row between"><span class="load">Belastung <b>112</b></span><span class="chip">Geplant</span></div>
+    <div class="form2">${field('Art der Einheit', sel('Sweet Spot'))}<button class="btn chipbtn">≈ Schwelle übernehmen</button></div>
+    <p class="desc">15 min einfahren · 3 × 15 min bei 88–93 % FTP (236–249 W), dazwischen 5 min locker · 30 min Grundlage · ausfahren.</p></div>`;
+  const bodyDone = () => `<div class="unit-body">
+    ${tiles([['Pace', '4:52', '/km'], ['Ø Puls', '156', 'bpm'], ['Schrittfrequenz', '176', 'spm'], ['Ø Leistung', '312', 'W'], ['Belastung', '78'], ['RPE', '7', '/10'], ['Bodenkontaktzeit', '238', 'ms'], ['Höhenmeter', '86', 'm']], 'facts')}
+    ${profile(P_TH, '1:05 h')}
+    <p class="planline">Plan: Schwellenintervalle 4 × 8 min · 1:05 h · Belastung 81</p>
+    <details class="sub" open><summary>Details</summary>
+      ${kv([['Distanz', '12,4', 'km'], ['Bewegungszeit', '1:00:24'], ['Gesamtzeit', '1:05:02'], ['Max. Herzfrequenz', '178', 'bpm'], ['Anstieg', '86', 'm'], ['Kalorien', '842', 'kcal'], ['Effizienzfaktor', '1,42'], ['Decoupling', '3,1', '%']])}
+      <div class="mini"><header><h4>Herzfrequenz</h4><span>Ø 156 · Max 178 bpm</span></header>${chart([{ c: 4, pts: [118, 132, 141, 168, 171, 138, 169, 173, 140, 170, 174, 139, 171, 176, 142, 131] }], { h: 96, x: ['0:00', '0:32', '1:05'] })}</div>
+      <div class="mini"><header><h4>Pace</h4><span>Ø 4:52 · Beste 4:18 /km</span></header>${chart([{ c: 3, pts: [5.6, 5.3, 5.2, 4.45, 4.4, 5.5, 4.42, 4.4, 5.6, 4.4, 4.38, 5.6, 4.36, 4.3, 5.5, 5.7].map(v => 10 - v) }], { h: 96, x: ['0:00', '0:32', '1:05'], fmt: v => { const p = 10 - v; return Math.floor(p) + ':' + String(Math.round((p % 1) * 60)).padStart(2, '0'); } })}</div>
+      <h4>Zeit in HF-Zonen</h4>${zones([[5, '', '4 % · 2:36', 4], [4, '', '46 % · 29:54', 46], [3, '', '9 % · 5:51', 9], [2, '', '27 % · 17:33', 27], [1, '', '14 % · 9:06', 14]])}
+      <p class="foot">Zonen laut Garmin am Tag der Einheit.</p>
+      <h4>Runden</h4>${tbl(['#', 'Zeit', 'Distanz', 'Pace', 'Ø W', 'Ø HF', 'Anstieg'], [['1', '12:00', '2,2 km', '5:27', '268', '132', '14 m'], ['2', '8:00', '1,8 km', '4:27', '341', '168', '8 m'], ['3', '3:00', '0,5 km', '6:00', '232', '141', '2 m'], ['4', '8:00', '1,8 km', '4:26', '343', '171', '10 m'], ['5', '3:00', '0,5 km', '6:02', '230', '143', '4 m']])}
+    </details>
+    <p class="foot">Quelle: ${SRC.garmin} · Stand 10.11. 08:42</p>
+    <details class="more"><summary>Herkunft im Detail</summary></details>
+    <div class="actions"><button class="btn primary">Mit dem Coach analysieren</button><button class="btn">Feedback</button><button class="btn">Garmin: Detaildaten aktualisieren</button></div></div>`;
+  const unit = (id, open) => { const u = U[id]; return `<details class="unit is-${u.st}${open ? ' is-selected' : ''}" data-sport="${u.sp}"${open ? ' open' : ''}>
+    <summary><span class="u-ic">${ic(u.sp)}</span><span class="u-main"><b>${u.t}</b><small>${u.meta}</small></span><span class="u-num"><b>${u.dur}</b><small>${u.dist}</small></span>
+    ${u.tags.length ? `<span class="tags">${u.tags.map(t => `<span class="tag${t.includes('≈') ? ' is-derived' : ''}">${t}</span>`).join('')}</span>` : ''}${u.p ? profile(u.p) : ''}</summary>
+    ${open === 'planned' ? bodyPlanned() : open === 'done' ? bodyDone() : ''}</details>`; };
+  const day = (dow, num, wx, inner, today) => `<section class="day${today ? ' is-today' : ''}"><header class="day-h"><b>${dow}</b><span class="dnum">${num}</span>${today ? '<em>Heute</em>' : ''}</header><div class="day-b"><span class="wx">${wx}</span>${inner}</div></section>`;
+  const agenda = open => `${day('Mo', 9, '☁ 6° / 11°', '<p class="note">Ruhetag</p>')}
+    ${day('Di', 10, '☁ 5° / 10°', unit('th', open === 'done' ? 'done' : ''))}
+    ${day('Mi', 11, '🌧 7° / 9° <span class="flag">💧 80 %</span>', '<p class="note">📅 Elternabend · 19:30 <span class="tag">Nur kurze Einheiten</span></p>' + unit('gl'))}
+    ${day('Do', 12, '☀ 3° / 9°', unit('dl'), true)}
+    ${day('Fr', 13, '☀ 2° / 8°', unit('kr'))}
+    ${day('Sa', 14, '☀ 4° / 9°', unit('ss', open === 'planned' ? 'planned' : ''))}
+    ${day('So', 15, '☁ 6° / 10° <span class="flag">AQI 42</span>', unit('ll'))}`;
+  const calHead = (title, sub, cur) => `${head('Kalender')}${tabs(['Übersicht', 'Bibliothek', 'Wettkämpfe'], 'Übersicht')}
+    <div class="cal-bar"><button class="icon-btn" aria-label="Zurück">${ic('prev')}</button><div class="cal-title"><b>${title}</b><span>${sub}</span></div><button class="icon-btn" aria-label="Weiter">${ic('next')}</button>${seg(['Woche', 'Monat'], cur)}</div>`;
+  const weekSummary = `<section class="card week-sum"><p class="count">2 abgeschlossen · 4 geplant</p>
+      <table class="tbl cmp"><thead><tr><th></th><th>Geplant</th><th>Absolviert</th></tr></thead><tbody><tr><td>Dauer</td><td>8:35 h</td><td>2:35 h</td></tr><tr><td>Distanz</td><td>146 km</td><td>58,6 km</td></tr><tr><td>Belastung</td><td>486</td><td>170</td></tr></tbody></table>
+      <button class="btn block">Woche synchronisieren</button></section>`;
+  const zoneLegend = `<footer class="cal-foot"><ul class="zleg">${[1, 2, 3, 4, 5, 6, 7].map(z => `<li data-z="${z}"><i class="sw"></i>Z${z}</li>`).join('')}</ul><p class="foot">6 geplant · 2 absolviert · Belastung geplant 486 · absolviert 170</p></footer>`;
+  const pane = kind => kind === 'planned'
+    ? `<aside class="pane" data-sport="ride"><header class="pane-h"><h2>Sweet Spot 3 × 15 min</h2><p>Samstag, 14.11. · 09:00 · Radfahren · ☀ 4° / 9°</p><p>Vorlage: Sweet Spot 3 × 15</p></header>${bodyPlanned()}</aside>`
+    : `<aside class="pane" data-sport="run"><header class="pane-h"><h2>Schwellenintervalle 4 × 8 min</h2><p>Dienstag, 10.11. · 06:45 · Laufen · ☁ 5° / 10°</p><span class="chip ok">✓ Absolviert · 96 %</span></header>${bodyDone()}</aside>`;
+  const calWeek = kind => () => `<div class="page cal">${calHead('09.11. – 15.11.2026', 'KW 46', 'Woche')}
+    <div class="cal-grid"><div class="cal-col">${weekSummary}<div class="agenda">${agenda(kind)}</div>${zoneLegend}</div>${pane(kind)}</div></div>`;
+  const calMonth = () => {
+    const pat = { 2: 'run', 3: 'ride', 4: 'run', 5: 'strength', 6: 'ride', 0: 'run' };
+    const rows = [[44, 26, '7:10 h'], [45, 2, '8:05 h'], [46, 9, '8:35 h'], [47, 16, '9:10 h'], [48, 23, '6:20 h'], [49, 30, '7:40 h']].map(([kw, start, h]) => {
+      let cells = '';
+      for (let i = 0; i < 7; i++) {
+        let d = start + i, out = false; if (kw === 44) { d = i < 6 ? 26 + i : 1; out = i < 6; } else if (d > 30) { d -= 30; out = true; }
+        const dateIdx = kw === 44 ? (i < 6 ? -5 + i : 1) : start + i, sp = pat[(i + 1) % 7];
+        const st = dateIdx === 6 ? 'missed' : dateIdx < 12 ? 'done' : dateIdx === 12 ? 'today' : 'planned';
+        cells += `<td class="${out ? 'out' : ''}${dateIdx === 12 ? ' is-today' : ''}${kw === 46 ? ' in-week' : ''}"><button><span>${d}</span>${sp ? `<i class="mark is-${st}" data-sport="${sp}"></i>` : ''}${i === 5 && sp ? '' : ''}</button></td>`;
+      }
+      return `<tr${kw === 46 ? ' class="cur"' : ''}>${cells}<th>KW ${kw}<small>${h}</small></th></tr>`;
+    }).join('');
+    return `<div class="page cal">${calHead('November 2026', '', 'Monat')}
+      <div class="cal-grid"><div class="cal-col"><section class="card month"><table><thead><tr>${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So', 'KW'].map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></section>
+      <div class="agenda">${agenda('')}</div>${zoneLegend}</div>${pane('planned')}</div></div>`;
+  };
+
+  /* ---------- Analyse ---------- */
+  const A_TABS = ['Laufen', 'Radfahren', 'Belastung', 'Erholung'];
+  const period = cur => seg(['Letzte 14 Tage', '12 Wochen'], cur);
+  const paceFmt = v => { const s = 600 - v; return Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0'); };
+  const anRun = () => `<div class="page">${head('Analyse')}${tabs(A_TABS, 'Laufen')}
+    <details class="card sec" open><summary><h3>Aktuelle Werte</h3>${ic('next', 'chev')}</summary>${kv([['Schwellenpace', '4:28', '/km'], ['Schwellenleistung', '338', 'W'], ['Schwellenpuls (LSHF)', '168', 'bpm'], ['LT1 · Pace', '5:12', '/km'], ['LT1 · Puls', '148', 'bpm'], ['VO₂max', '54', 'ml/kg/min', est]])}</details>
+    <h2 class="group">Entwicklung ${ibtn}</h2>
+    <div class="grid2">
+      ${ccard('Schwellenpace', chart([{ pts: walk(12, 322, 5, 1.1) }], { x: X12, fmt: paceFmt }), { foot: 'min/km · schneller oben' })}
+      ${ccard('VO₂max', chart([{ c: 2, dashed: 1, area: false, pts: walk(12, 52, .8, .18) }], { x: X12 }), { chip: est })}
+      ${ccard('Lauf-Belastbarkeit', chart([{ c: 3, pts: walk(12, 61, 5, .8) }], { x: X12 }), { foot: SRC.garmin })}
+    </div>
+    <section class="card"><header class="card-h"><h3>Bestwerte · 90 Tage</h3></header>${tbl(['Dauer', 'Pace'], [['1 Minute', '3:12 /km'], ['5 Minuten', '3:48 /km'], ['20 Minuten', '4:14 /km'], ['5 km', '20:38'], ['10 km', '43:05']])}
+      <p class="foot">${est} Experimentell · CS (90 Tage): Lauf CS 3,9 m/s · D′ 210 m (unsicher) · 1× Wettkampf</p></section>
+    <section class="card"><header class="card-h"><h3>Laufprognosen</h3>${est}</header>${tbl(['Distanz', 'Geschätzte Zeit'], [['5 km', '20:25'], ['10 km', '42:40'], ['Halbmarathon', '1:34:50'], ['Marathon', '3:21:30']])}</section></div>`;
+  const anRide = () => `<div class="page">${head('Analyse')}${tabs(A_TABS, 'Radfahren')}
+    <details class="card sec" open><summary><h3>Aktuelle Werte</h3>${ic('next', 'chev')}</summary>${kv([['FTP', '268', 'W'], ['Leistung pro Gewicht', '3,7', 'W/kg'], ['Schwellenpuls (LSHF)', '164', 'bpm'], ['LT1 · Leistung', '198', 'W'], ['LT1 · Puls', '142', 'bpm'], ['VO₂max', '56', 'ml/kg/min', est]])}</details>
+    <h2 class="group">Entwicklung ${ibtn}</h2>
+    <section class="card"><header class="card-h"><h3>Leistungsprofil</h3></header><p class="foot">Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen</p>
+      ${tbl(['Dauer', 'Leistung'], [['5 Sekunden', '912 W'], ['1 Minute', '486 W'], ['5 Minuten', '338 W'], ['20 Minuten', '284 W'], ['1 Stunde', '251 W']])}
+      <p class="foot">Rad outdoor CP 262 W · W′ 18,4 kJ (unsicher)</p></section>
+    <div class="grid2">
+      ${ccard('Leistungsschwelle · FTP', chart([{ c: 0, area: false, pts: walk(12, 256, 3, 1.1) }, { c: 3, area: false, pts: walk(12, 252, 4, 1.3) }], { x: X12 }), { legend: [{ t: 'Garmin', c: 0 }, { t: 'Wahoo', c: 3 }] })}
+      ${ccard('VO₂max', chart([{ c: 2, dashed: 1, area: false, pts: walk(12, 54, .8, .15) }], { x: X12 }), { chip: est })}
+    </div></div>`;
+  const anLoad = () => `<div class="page">${head('Analyse')}${tabs(A_TABS, 'Belastung')}
+    <section class="card"><header class="card-h"><h3>Trainingsfokus</h3>${ibtn}</header>
+      <div class="share"><i data-z="2" style="width:68%"></i><i data-z="4" style="width:24%"></i><i data-z="5" style="width:8%"></i></div>
+      <ul class="legend plain"><li data-z="2"><i class="sw"></i>Leicht aerob <b>68 %</b></li><li data-z="4"><i class="sw"></i>Hoch aerob <b>24 %</b></li><li data-z="5"><i class="sw"></i>Anaerob <b>8 %</b></li></ul></section>
+    <div class="grid2">
+      <section class="card"><header class="card-h"><h3>HF-Zonen</h3></header>${zones([[5, '', '3 % · 0:14', 3], [4, '', '11 % · 0:52', 11], [3, '', '14 % · 1:06', 14], [2, '', '49 % · 3:51', 49], [1, '', '23 % · 1:48', 23]])}</section>
+      <section class="card"><header class="card-h"><h3>Power-Zonen</h3></header>${zones([[7, '', '1 % · 0:02', 1], [6, '', '2 % · 0:05', 2], [5, '', '5 % · 0:13', 5], [4, '', '16 % · 0:42', 16], [3, '', '18 % · 0:47', 18], [2, '', '41 % · 1:47', 41], [1, '', '17 % · 0:44', 17]])}</section>
+    </div>
+    ${period('12 Wochen')}
+    <div class="grid2">
+      ${ccard('Akute Belastung · Ø 412', chart([{ pts: walk(12, 380, 90, 4) }], { x: X12, avg: 412 }), { foot: SRC.garmin })}
+      ${ccard('Trainingszeit · Ø 7:40 h pro Woche', chart([{ bar: 1, c: 3, pts: [6.2, 7.1, 7.8, 5.0, 7.4, 8.2, 8.9, 5.6, 7.9, 8.6, 9.1, 8.6] }], { x: X12, zero: 1, avg: 7.67 }))}
+      ${ccard('Session-RPE-Last · 9/11 bewertet', chart([{ bar: 1, c: 1, pts: [1800, 2100, 2400, 1500, 2200, 2500, 2700, 1600, 2400, 2600, 2800, 2300] }], { x: X12, zero: 1 }), { chip: est })}
+      ${ccard('Kurz-/Langzeitbelastung', chart([{ c: 0, area: false, pts: walk(12, 360, 110, 6) }, { c: 2, area: false, pts: walk(12, 350, 22, 5) }], { x: X12 }), { chip: est, legend: [{ t: 'Kurzzeitbelastung', c: 0 }, { t: 'Langzeitbelastung', c: 2 }] })}
+      ${ccard('Fitness, Ermüdung, Form', chart([{ c: 0, area: false, pts: walk(12, 58, 3, 1) }, { c: 4, area: false, pts: walk(12, 64, 16, 1) }, { c: 2, area: true, pts: walk(12, -6, 12, 0) }], { x: X12 }), { chip: est, legend: [{ t: 'Fitness', c: 0 }, { t: 'Ermüdung', c: 4 }, { t: 'Form', c: 2 }], foot: SRC.local + ' · 2 Einheiten ohne TSS' })}
+    </div>
+    <h2 class="group">Alltagsaktivität</h2>
+    <div class="grid2">
+      ${ccard('Schritte · Ø 9.840 pro Tag', chart([{ bar: 1, c: 3, pts: walk(12, 9800, 4200, 0) }], { x: X12, zero: 1 }), { foot: SRC.garmin })}
+      ${ccard('Stockwerke · Ø 14 pro Tag', chart([{ bar: 1, c: 1, pts: walk(12, 14, 9, 0).map(Math.abs) }], { x: X12, zero: 1 }), { foot: SRC.garmin })}
+    </div>
+    <details class="card sec"><summary><h3>Ausdauer-Score</h3>${ic('next', 'chev')}</summary></details></div>`;
+  const anRec = () => `<div class="page">${head('Analyse')}${tabs(A_TABS, 'Erholung')}
+    ${period('Letzte 14 Tage')}
+    <h2 class="group">Erholung · Letzte 14 Tage ${ibtn}</h2>
+    <div class="grid2">
+      ${ccard('Trainingsbereitschaft', chart([{ pts: [62, 71, 58, 44, 67, 74, 81, 55, 49, 68, 77, 72, 61, 70] }]), { foot: SRC.garmin })}
+      ${ccard('Schlafdauer · Ø 7:12 h', chart([{ bar: 1, c: 3, pts: [7.4, 6.8, 7.9, 6.1, 7.2, 8.1, 7.6, 6.4, 7.0, 7.5, 7.8, 6.9, 7.1, 7.3] }], { zero: 1, avg: 7.2, fmt: v => v.toFixed(0) + ' h' }), { foot: SRC.garmin })}
+      ${ccard('HRV · Ø 62 ms', chart([{ c: 2, area: false, pts: [64, 61, 66, 55, 58, 63, 67, 60, 57, 62, 65, 66, 61, 63] }], { band: [56, 68] }), { foot: 'Im Bereich deiner früheren Werte · 7-Tage-Mittel 62 ms · ' + SRC.garmin })}
+      ${ccard('Ruhepuls · Ø 47 bpm', chart([{ c: 4, area: false, pts: [47, 48, 46, 51, 49, 47, 46, 48, 50, 47, 46, 46, 48, 47] }], { band: [45, 49] }), { foot: 'Im Bereich deiner früheren Werte · ' + SRC.garmin })}
+    </div></div>`;
+
+  /* ---------- Ernährung ---------- */
+  const N_TABS = ['Tagebuch', 'Verlauf', 'Körper', 'Produkte'];
+  const meal = (t, d, v, s, n) => `<article class="card meal"><header><h3>${t}</h3><button class="btn ghost danger">Löschen</button></header><p>${d}</p><p class="vals">${v}</p><p class="foot">${s}</p><details class="more"><summary>Zutaten anzeigen (${n})</summary></details></article>`;
+  const nutDay = () => `<div class="page">${head('Ernährung')}${tabs(N_TABS, 'Tagebuch')}
+    <div class="cal-bar"><button class="icon-btn" aria-label="Vorheriger Tag">${ic('prev')}</button><label class="cal-title datef"><span class="sr">Tag</span><input type="date" value="2026-11-12"></label><button class="icon-btn" aria-label="Nächster Tag">${ic('next')}</button><button class="btn">Heute</button></div>
+    ${tiles([['Kalorien', '2.140', 'kcal', '', 'hero'], ['Kohlenhydrate', '268', 'g', '', 'below'], ['Protein', '112', 'g'], ['Fett', '64', 'g'], ['Zucker', '58', 'g', '', 'minor above'], ['Salz', '4,1', 'g', '', 'minor']], 'nut')}
+    <section class="card"><header class="card-h"><h3>Energieverbrauch</h3></header><p class="foot">${src('garmin', 'Garmin Connect')} · Aktuell · Vorläufig, da der Tag noch läuft</p>
+      ${tiles([['Tagesverbrauch', '1.980', 'kcal'], ['Prognose Tagesverbrauch', '2.860', 'kcal', est], ['Aktivkalorien', '640', 'kcal'], ['Grundumsatz', '1.720', 'kcal']], 'facts')}<p class="foot">Sync: 12:40</p></section>
+    <div class="list">
+      ${meal('07:10 · Frühstück', 'Haferflocken mit Skyr, Banane und Walnüssen', '612 kcal · KH 78 g · Protein 34 g · Fett 17 g', src('ai', 'Coach-Schätzung') + ' · Lokal', 4)}
+      ${meal('12:35 · Mittagessen', 'Vollkornpasta mit Linsenbolognese', '840 kcal · KH 118 g · Protein 42 g · Fett 19 g', src('ai', 'Foto-Schätzung') + ' · Synchronisiert', 6)}
+      ${meal('15:50 · Snack', 'Proteinriegel Kakao', '208 kcal · KH 19 g · Protein 20 g · Fett 6 g', src('local', 'Lokales Produkt · Verpackungsangabe') + ' · Lokal', 1)}
+    </div></div>`;
+  const prod = (n, v, o, e, fav, warn) => `<article class="card prod"><header><h3>${n}</h3><button class="icon-btn star${fav ? ' on' : ''}" aria-label="Favorit">${ic('star')}</button></header><p class="vals">${v}</p><p class="foot"><span class="src" data-src="local">${o}</span>${warn ? ` <span class="chip warn">⚠ fehlt: ${warn}</span>` : ''}</p><p class="foot">${e}</p>
+    <div class="actions"><button class="btn primary">Verwenden</button><button class="btn">Bearbeiten</button><button class="btn">Aktualisieren</button><button class="btn ghost danger">Löschen</button></div></article>`;
+  const nutProd = () => `<div class="page">${head('Ernährung')}${tabs(N_TABS, 'Produkte')}
+    <section class="card"><header class="card-h"><h3>Produkte</h3></header>
+      <div class="actions"><button class="btn primary">Barcode scannen</button><button class="btn">Nährwerttabelle fotografieren</button><button class="btn">Produkt manuell erfassen</button></div>
+      <label class="field"><span>Produkte suchen</span><span class="pw"><input type="search" placeholder="Name, Marke oder EAN"><button class="btn">Suchen</button></span></label></section>
+    <details class="sec2" open><summary><h2 class="group">Favoriten (2)</h2>${ic('next', 'chev')}</summary><div class="grid2">
+      ${prod('Hofmühle · Haferflocken zart', '372 kcal · KH 59 g · Protein 13 g · Fett 7 g', 'eigen · Verpackungsangabe', 'EAN 4000000001234 · Basis: 100 g', 1)}
+      ${prod('Alpina · Skyr natur', '63 kcal · KH 4 g · Protein 11 g · Fett 0,2 g', 'Datenbank · Stand 03.11.2026', 'EAN 4000000005678 · Basis: 100 g', 1)}</div></details>
+    <details class="sec2" open><summary><h2 class="group">Alle Produkte (14) <span class="chip warn">⚠ 1</span></h2>${ic('next', 'chev')}</summary><div class="grid2">
+      ${prod('Nordkorn · Proteinriegel Kakao', '378 kcal · KH 34 g · Protein 36 g · Fett 11 g', 'eigen · manuell', 'EAN 4000000009012 · Basis: 100 g', 0, 'Zucker, Salz')}
+      ${prod('Talhof · Apfelschorle', '24 kcal · KH 5,6 g · Protein 0 g · Fett 0 g', 'Datenbank · Stand 28.10.2026', 'EAN 4000000003456 · Basis: 100 ml')}</div></details></div>`;
+
+  /* ---------- Mehr ---------- */
+  const M_TABS = ['Darstellung', 'Profil', 'Ausrüstung und Wartung', 'Anbindungen', 'Coach &amp; Modell', 'Betrieb &amp; Diagnose'];
+  const more = (cur, body) => `<div class="page more">${head('Mehr', false)}<div class="more-grid">${tabs(M_TABS, cur, 'tabs more-nav')}<div class="more-body">${body}</div></div></div>`;
+  const mApp = () => more('Darstellung', `<section class="card"><header class="card-h"><h3>Darstellung</h3></header><div class="field"><span>Farbschema</span>${seg(['System', 'Hell', 'Dunkel'], 'System')}</div></section>
+    ${acc('Kalenderansicht', '1 Woche zurück · 4 voraus', `<div class="form2">${field('Wochen zurück', inp('1', 'number'))}${field('Wochen voraus', inp('4', 'number'))}</div><button class="btn">Kalenderansicht speichern</button>`, { open: true })}`);
+  const mCoach = () => more('Coach &amp; Modell', `
+    ${acc('Coach-Modell &amp; Thinking', 'Claude Sonnet · Hoch', `${field('Coach-Modell', sel('Claude Sonnet'))}<div class="form2">${field('Geschwindigkeit', sel('Standard'))}${field('Thinking Level', sel('Hoch'))}</div>`, { open: true })}
+    ${acc('Verbrauch', '42 Anfragen · 1,84 Mio. Tokens', `${tiles([['Anfragen', '42'], ['Eingabe-Tokens', '1,71 Mio.'], ['Ausgabe-Tokens', '128.400'], ['Gesamt-Tokens', '1,84 Mio.']], 'facts')}${kv([['Restkontingent Anfragen', '3.958'], ['Restkontingent Tokens', '7,2 Mio.'], ['Letzte Anfrage', '12.11. 12:41'], ['Status', 'OK']])}`, { open: true })}
+    ${acc('Chat-Kontext und Prompt', '', `<div class="row between"><span class="foot">Noch nicht geladen.</span><button class="btn">Kontext laden</button></div>`, { open: true })}`);
+  const mProfile = () => more('Profil', `
+    <p class="notice"><b>Coach-Kontext:</b> Die folgenden Profil-, Ziel- und Verfügbarkeitsangaben werden lokal gespeichert und können in Coach-Anfragen an OpenAI eingehen. Prüfe sie vor dem Speichern.</p>
+    ${acc('Person', 'Radfahren, Laufen · 72,4 kg', '')}${acc('Ziele &amp; Woche', '8–10 Stunden, 5 Trainingstage', '')}
+    ${acc('Zonen &amp; Schwellen', '1 Wert veraltet', `
+      <p class="alert warn"><b>Schwellen prüfen und neue Werte hier lokal speichern</b><span>• Schwellenpace 4:28 /km · Garmin · 96 Tage alt – nicht mehr verwendet</span></p>
+      ${seg(['Radfahren', 'Laufen', 'Schwimmen'], 'Radfahren')}
+      <section class="box"><header class="card-h"><h3>Schwellen</h3><span class="foot">gilt seit 02.10.2026</span><button class="btn ghost">Bearbeiten</button></header>
+        <table class="tbl thr"><thead><tr><th></th><th>Leistung</th><th>Puls</th></tr></thead><tbody><tr><td>LT1</td><td><b>198 W</b></td><td><b>142 bpm</b></td></tr><tr><td>LT2 / FTP</td><td><b>268 W</b></td><td><b>164 bpm</b></td></tr></tbody></table>
+        <p class="foot">LT1 aus der Herzfrequenzvariabilität (App), Leistung aus Zone 2 · LT2 von ${SRC.wahoo}</p></section>
+      <div class="grid2">
+      <section class="box"><header class="card-h"><h3>Leistungszonen</h3><span class="foot">% der FTP</span><button class="btn ghost">Bearbeiten</button></header>
+        ${zones([[1, 'Regeneration', 'bis 147 W'], [2, 'Grundlage', '148–201 W · 75 %'], [3, 'Tempo', '202–241 W · 90 %'], [4, 'Schwelle', '242–281 W · 105 %'], [5, 'VO2max', '282–322 W · 120 %'], [6, 'Anaerob', '323–402 W · 150 %'], [7, 'Neuromuskulär', 'ab 403 W']])}
+        <p class="foot">${src('local', 'Lokal gespeichert')}</p></section>
+      <section class="box"><header class="card-h"><h3>Pulszonen</h3><span class="foot">bpm</span><button class="btn ghost">Bearbeiten</button></header>
+        ${zones([[1, '', 'bis 132'], [2, '', '133–146 · 89 %'], [3, '', '147–154 · 94 %'], [4, '', '155–163 · 99 %'], [5, '', 'ab 164 · max 186']])}
+        <p class="foot">${SRC.garmin}, gilt für alle Sportarten</p></section></div>`, { open: true, chip: chip('warn', '1') })}
+    ${acc('Training', 'Pyramidal', '')}${acc('Quellen &amp; Coach', 'Europe/Berlin', '')}
+    <div class="savebar"><span class="chip ok">Gespeichert</span><button class="btn primary">Athletenkontext speichern</button></div>`);
+  const fresh = (l, st, cls, meta, retry) => `<div class="fresh"><div class="row between"><b>${l}</b>${chip(cls, st)}</div><p class="foot">${meta}</p>${retry ? '<button class="btn">Erneut versuchen</button>' : ''}</div>`;
+  const mConn = () => more('Anbindungen', `
+    <section class="progress"><b>Wahoo</b><span>3/5 Arbeitsschritte abgeschlossen</span><progress value="3" max="5"></progress></section>
+    ${acc('Garmin', '', `
+      <ul class="lines"><li>Personal API: gültig bis 14.02.2027</li><li>SDK-Login: aktiv</li></ul>
+      ${fresh('Aktivitäten', 'Frisch', 'ok', 'Letzter Versuch: 12:31 · Letzter Erfolg: 12:31 · Nächster Versuch ab: 18:30')}
+      ${fresh('Schlaf &amp; HRV', 'Veraltet, aber nutzbar', 'warn', 'Letzter Versuch: 12:31 · Letzter Erfolg: 06:02 · Rate Limit erreicht', 1)}
+      <section class="box"><header class="card-h"><h3>Garmin-Konto</h3><span class="src" data-src="local">In der App gespeichert</span></header><div class="row between"><span>Verbunden</span><button class="btn danger">Garmin trennen</button></div></section>
+      <section class="box"><header class="card-h"><h3>Personal API</h3></header>
+        ${field('API-Schlüssel', inp('', 'password', 'Neuen Schlüssel eingeben'), ' <span class="src" data-src="local">In der App gespeichert</span>')}
+        ${field('Gültig bis', inp('2027-02-14', 'date'), ' <span class="src" data-src="local">In der App gespeichert</span>')}<button class="btn">Speichern</button></section>
+      ${field('Zeitraum (Tage)', inp('84', 'number'))}
+      <div class="actions"><button class="btn">Verbindung prüfen</button><button class="btn primary">Garmin synchronisieren</button><button class="btn danger">Lokale Daten neu laden</button></div>`, { open: true, chip: chip('ok', 'Verbunden') })}
+    ${acc('Wahoo', '', '', { chip: chip('ok', 'Verbunden') })}${acc('Intervals.icu', '', '', { chip: chip('ok', 'Verbunden') })}
+    ${acc('OpenAI', '', '', { chip: chip('off', 'Nicht eingerichtet') })}${acc('Claude (Anthropic)', '', '', { chip: chip('ok', 'Verbunden') })}
+    ${acc('Yazio', '', '', { chip: chip('warn', 'Nicht geprüft') })}${acc('Gemeinsamer Kalender', '', '', { chip: chip('err', 'Fehler') })}${acc('Open-Meteo', '', '', { chip: chip('ok', 'Verbunden') })}`);
+  const eq = (n, line, pct, st, cls, body, garmin) => acc(n, '', body, { open: !!body, chip: chip(cls, st), pre: '' }).replace('</summary>', `<span class="eq-line">${garmin ? SRC.garmin + ' ' : ''}${line}</span><span class="life"><i style="width:${pct}%"></i></span></summary>`);
+  const mEq = () => more('Ausrüstung und Wartung', `<h2 class="group">Ausrüstung und Wartung</h2>${seg(['Fahrrad', 'Laufschuhe'], 'Fahrrad')}
+    ${eq('Gravelrad Kiesel', '4.820 km · 48 %', 48, 'Wartung fällig', 'warn', `
+      <h4>Nutzung</h4><p>Fahrrad · Radfahren · aktiv</p><p>4.820 km · 198 h · 86 zugeordnete Einheiten</p><p>4.820 km von 10.000 km · 48 %</p>
+      <h4>Wartung</h4><p>Seit letzter Wartung: 1.240 km · 52 h</p><p><b>Wartung fällig</b></p><ul class="lines"><li>18.08.2026 · Kette gewachst</li><li>02.05.2026 · Wartung erfasst</li></ul>
+      <button class="btn primary">Wartung erledigt</button>`, 1)}
+    ${eq('Kette', 'Gravelrad Kiesel · 2.140 km · 71 %', 71, 'Ziel ok', 'ok')}
+    ${eq('Rennrad Falke', '12.360 km · Lebensdauerziel unbekannt', 0, 'Wartung ok', 'ok', '', 1)}
+    ${eq('Reifen vorn', 'Fahrrad offen · 5.210 km · 104 %', 100, 'Ziel überschritten', 'err')}
+    <details class="more"><summary>Ausgemustert (1)</summary></details>
+    <p class="foot">${SRC.garmin} · Stand 12.11.2026</p>`);
+  const mOps = which => () => more('Betrieb &amp; Diagnose', `
+    ${acc('Server-Logs', '', `<div class="actions"><button class="btn">Logs herunterladen</button><button class="btn">Logs aktualisieren</button><button class="btn danger">Logs löschen</button></div>
+      <pre class="logs">12:31:04 INFO sync garmin activities ok count=2\n12:31:06 INFO sync garmin wellness ok\n12:31:09 WARN sync garmin sleep rate_limited retry_after=3600\n12:40:12 INFO coach turn stored tokens_in=18422 tokens_out=912</pre>`, { open: which === 'diag' })}
+    ${acc('Datenschutz &amp; Backup', '', `
+      <div class="setrow"><div><b>PWA-Benachrichtigungen</b><span>Noch nicht aktiviert</span></div><button class="btn">Benachrichtigungen aktivieren</button></div>
+      <div class="setrow"><button class="btn">Daten exportieren</button><button class="btn danger">Lokale Daten löschen</button></div>
+      <div class="setrow"><label class="switch"><input type="checkbox" checked><i></i><span>GPS-Spuren speichern</span></label><button class="btn danger">GPS-Spuren löschen (12)</button></div>
+      <div class="setrow"><div><b>Verschlüsseltes Datenbank-Backup</b><span>Die Datei kann nur mit demselben APP_PASSWORD wiederhergestellt werden.</span></div><button class="btn">Backup herunterladen</button></div>
+      <div class="setrow"><label class="field"><span>Backup wiederherstellen</span><span class="file"><button type="button" class="btn">Datei auswählen</button><em>Keine ausgewählt</em></span></label><button class="btn danger">Backup wiederherstellen</button></div>`, { open: which === 'priv' })}
+    ${acc('Diagnose', '', `<div class="actions"><button class="btn">Diagnose herunterladen</button><button class="btn danger">Diagnose löschen</button></div><p class="foot">128 technische Einträge gespeichert.</p>`, { open: which === 'diag' })}
+    <section class="card setrow"><div><b>Sitzung</b></div><button class="btn">Abmelden</button></section><p class="foot center">Version 2.0.5</p>`);
+
+  const defs = [
+    ['login', 'Login', '', login], ['coach', 'Coach', 'coach', coach],
+    ['kal-woche', 'Kalender · Woche + geplante Einheit', 'plan', calWeek('planned')], ['kal-absolviert', 'Kalender · absolvierte Einheit', 'plan', calWeek('done')], ['kal-monat', 'Kalender · Monat', 'plan', calMonth],
+    ['an-laufen', 'Analyse · Laufen', 'analysis', anRun], ['an-rad', 'Analyse · Radfahren', 'analysis', anRide], ['an-belastung', 'Analyse · Belastung', 'analysis', anLoad], ['an-erholung', 'Analyse · Erholung', 'analysis', anRec],
+    ['ern-tag', 'Ernährung · Tagebuch', 'nutrition', nutDay], ['ern-produkte', 'Ernährung · Produkte', 'nutrition', nutProd],
+    ['mehr-darstellung', 'Mehr · Einstellungen (Darstellung)', 'more', mApp], ['mehr-coach', 'Mehr · Einstellungen (Coach & Modell)', 'more', mCoach], ['mehr-anbindungen', 'Mehr · Anbindungen', 'more', mConn], ['mehr-ausruestung', 'Mehr · Ausrüstung', 'more', mEq],
+    ['mehr-zonen', 'Mehr · Zonen & Schwellen', 'more', mProfile], ['mehr-datenschutz', 'Mehr · Datenschutz & Backup', 'more', mOps('priv')], ['mehr-diagnose', 'Mehr · Diagnose', 'more', mOps('diag')],
+  ];
+  const NAV = [['coach', 'Coach'], ['plan', 'Kalender'], ['analysis', 'Analyse'], ['nutrition', 'Ernährung'], ['more', 'Mehr']];
+  const cache = {};
+  window.MOCK = {
+    list: defs.map(([key, title]) => ({ key, title })),
+    shell(key) {
+      if (cache[key]) return cache[key];
+      const d = defs.find(x => x[0] === key);
+      const html = key === 'login' ? d[3]() : `<div class="shell"><nav class="nav" aria-label="Hauptnavigation">${NAV.map(([k, t]) => `<a href="#" class="nav-item"${k === d[2] ? ' aria-current="page"' : ''}>${ic(k)}<span>${t}</span></a>`).join('')}</nav><main class="main">${d[3]()}</main></div>`;
+      return (cache[key] = html);
+    },
+  };
+})();
+</script><script>
+const DIRS=[["a","A · Feinschliff"]], state={screen:'kal-woche',device:'phone',theme:'both',full:''};
+const stage=document.querySelector('.mv-stage'), sel=document.querySelector('#mvScreen');
+sel.innerHTML=MOCK.list.map(s=>'<option value="'+s.key+'">'+s.title+'</option>').join('');
+function render(){
+  sel.value=state.screen;
+  const themes=state.theme==='both'?['light','dark']:[state.theme];
+  const W=state.device==='phone'?412:1280,H=state.device==='phone'?880:820;
+  const frames=[];DIRS.forEach(d=>themes.forEach(t=>frames.push([d,t])));
+  const perRow=state.device==='phone'?frames.length:1,avail=stage.clientWidth||712;
+  const z=Math.min(1,(avail-14*(perRow-1))/(perRow*W));
+  stage.innerHTML=frames.map(([d,t])=>'<figure class="mv-frame dir-'+d[0]+'"><figcaption>'+d[1]+' · '+(t==='light'?'Hell':'Dunkel')+'</figcaption><div class="mv-clip" style="width:'+Math.floor(W*z)+'px;height:'+Math.floor(H*z)+'px"><div class="app'+(state.full?' full':'')+'" data-theme="'+t+'" style="width:'+W+'px;height:'+H+'px;min-height:'+H+'px;transform:scale('+z+')">'+MOCK.shell(state.screen)+'</div></div></figure>').join('');
+  stage.querySelectorAll('.mv-clip').forEach(c=>{const a=c.firstChild;c.style.height=Math.floor(a.offsetHeight*z)+'px';const m=a.querySelector('.main');if(m&&a.querySelector('.coach'))m.scrollTop=m.scrollHeight});
+  document.querySelectorAll('[data-set]').forEach(b=>{const [k,v]=b.dataset.set.split(':');b.setAttribute('aria-pressed',state[k]===v)});
+}
+document.querySelector('.mv-bar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.set){const [k,v]=b.dataset.set.split(':');state[k]=v}
+  if(b.dataset.step){const i=MOCK.list.findIndex(s=>s.key===state.screen),n=MOCK.list.length;state.screen=MOCK.list[(i+ +b.dataset.step+n)%n].key}
+  render()});
+sel.addEventListener('change',()=>{state.screen=sel.value;render()});
+stage.addEventListener('click',e=>{if(e.target.closest('a,summary'))e.preventDefault()});
+const q=new URLSearchParams(location.hash.slice(1));['screen','device','theme','full'].forEach(k=>{if(q.get(k))state[k]=q.get(k)});
+addEventListener('resize',render);render();</script></body></html>
