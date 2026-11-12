@@ -269,16 +269,16 @@ class SessionAnalysisStage:
         if prepared:
             prepared = self._current_targets(db, changed, prepared, context)
         computed = 0
-        for session, analysed in precomputed_batch(
+        for (session, _), analysed in precomputed_batch(
             [
                 (session.session_id, fingerprint, (session, fingerprint))
                 for session, fingerprint in changed
             ],
             self._batch_size,
             prepared,
-            lambda entry: self._analyse(db, *entry, context),
+            lambda entry: self._analyse(db, entry[0], entry[1], context),
         ):
-            self._store(db, session[0], analysed, now, tally)
+            self._store(db, session, analysed, now, tally)
             computed += 1
         done = computed == len(changed)
         counts = {
