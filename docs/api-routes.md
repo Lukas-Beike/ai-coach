@@ -1,22 +1,32 @@
 # HTTP API Routes
 
-This inventory lists every route registered by `backend/http_api` in the
-current build. All routes use the same origin. `Session` means an authenticated
-session cookie; `Session + CSRF` means that session plus the `X-CSRF-Token`
-header. The request handler checks the access level before any route code runs;
-a path that is not in the table answers 404 (an unknown POST or PUT only after
-the session and CSRF checks).
+This is the HTTP contract of every route registered by `backend/http_api` in
+the current build. All routes use the same origin. `Session` means an
+authenticated session cookie; `Session + CSRF` means that session plus the
+`X-CSRF-Token` header. The request handler checks the access level before any
+route code runs; a path that is not in the table answers 404 (an unknown POST
+or PUT only after the session and CSRF checks).
 
-During a restore the maintenance operation gate answers 503. A PUT enters it
-before authentication. A POST enters it after the session and CSRF checks and
-checks the session again inside it, except login, chat cancellation and the
-restore itself, which run outside it, and logout, which enters it only to end
-the session. GET routes do not enter it, except the Wahoo callback while it
+The maintenance gate column says where the request handler enters the
+maintenance operation gate, which answers 503 `maintenance` during a restore:
+`before access` (every PUT, before authentication), `after access` (a POST,
+after the session and CSRF checks; the session is checked again inside the
+gate) or `no`. Login, logout, chat cancellation and the restore itself are
+POST routes outside it; logout enters it only to end the session. GET routes
+do not enter it, except the Wahoo callback inside its handler while it
 completes the authorization.
 
-The table between the markers is generated from the route table
-(`backend/http_api/route_table.py`); the purpose is each handler's docstring.
-Regenerate it with `python tests/test_api_routes_doc.py --write`.
+The route contracts list only route-specific errors. Every route can also
+answer the common errors: 401 without a valid session, 403 without a valid
+CSRF token, 429 when rate limited, 503 during maintenance or while the
+database is busy, 400, 413 or 415 for a malformed, oversized or non-JSON
+request body, and 500 for an unexpected failure. Errors are JSON with a German
+`error` message and no secret or raw provider text.
+
+Everything between the markers is generated from the route table
+(`backend/http_api/route_table.py`): the purpose and the contract are each
+handler's docstring. Regenerate it with
+`python tests/test_api_routes_doc.py --write`.
 
 <!-- BEGIN GENERATED ROUTES -->
 | Method | Path | Access | Purpose |
@@ -119,82 +129,6 @@ Regenerate it with `python tests/test_api_routes_doc.py --write`.
 | PUT | `/api/zones` | Session + CSRF | Save one local zone configuration; returns a receipt with an undo reference. |
 | PUT | `/api/zones/remove` | Session + CSRF | Remove one local zone configuration; needs `confirmed: true`. |
 <!-- END GENERATED ROUTES -->
-
-## Wahoo callback
-
-`/api/wahoo/callback` is the only API GET that needs no session: the
-SameSite=Strict session cookies are not sent on Wahoo's cross-site redirect.
-Its only accepted credential is the single-use, expiring `state` stored on the
-server by `POST /api/wahoo/connect`.
-
-## Activity identifiers
-
-Activity routes accept the local session ID (`act_...`) or the provider activity
-ID of one of the session's records, as long as that ID names one session. The
-Intervals.icu ingest store was removed by the #1728 purge of release 2.0.0; its
-activity IDs no longer resolve.
-
-- `GET /api/activities` items carry the local session `id` and `record_ids`
-  (provider to provider activity ID). `GET /api/activities/{id}` serves the
-  `activity_detail.v1` document of the session whatever form the ID has; an
-  unknown or ambiguous ID returns `404` (`activity_details_not_found`).
-- The list `cursor` is versioned:
-  `{"v": 3, "after": [started_at, id], "day": "YYYY-MM-DD"}`, base64url-encoded.
-  Any other version or an unrecognized cursor returns the first page.
-- `POST /api/activities/{id}/feedback` and the Coach activity tools (feedback,
-  equipment assignment, session confirmation) accept either form and store the
-  data under the live session the ID leads to. A reference that leads to no
-  live session is passed through unchanged and receives the route's existing
-  not-found or validation response.
-- `POST /api/activities/{id}/session` confirms, splits, merges or deletes one
-  session bundle (`action`: `confirm`, `split` with `member_id`, `merge` with
-  `other_id`, `delete` with `confirmed: true`) and returns the new
-  `session_bundle`.
-
-## Provider credentials and Garmin login
-
-These routes are reached from the provider cards under **Mehr > Anbindungen**. They never
-return a secret: the response is the credential status only.
-
-- `PUT /api/settings/credentials` takes a JSON object whose keys are credential
-  fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
-  `intervals_athlete_id`, `garmin_personal_api_key`,
-  `garmin_personal_api_key_expires` (ISO date; changing the key without it
-  clears the stored date), `wahoo_client_id`,
-  `wahoo_client_secret`, `garmin_email`, `yazio_email`, `yazio_password`).
-  `garmin_email` and `yazio_email` are reported as configured only, never
-  echoed back; `garmin_email` has no UI field and pairs with the
-  environment `GARMIN_PASSWORD` fallback. A string
-  stores the value; `null` or a blank string clears the value stored in the app,
-  so the environment value applies again. Each field is validated server-side.
-  Setting `openai_base_url`, `wahoo_client_id` or `wahoo_client_secret` (not
-  clearing them) also needs the `APP_PASSWORD` in the body field `app_password`;
-  a missing or wrong password answers 403 and changes nothing. The password is
-  compared in constant time, rate limited and never stored.
-  The response is the credential status: `fields` with per field `source`
-  (`db`, `env` or `none`), `configured`, and `value` only for non-secret
-  fields, plus `garmin_connected`, `garmin_connection_source`,
-  `openai_configured`, `intervals_configured`, `wahoo_configured`,
-  `yazio_configured` and `garmin_connection` (`connected`, `source`,
-  `mfa_pending`).
-- `POST /api/garmin/login` takes `{"email": "...", "password": "..."}`. The
-  password is used once and never stored. The response is `{"status":
-  "connected"}` or `{"status": "mfa_required"}`, plus the current
-  `connected`, `source` and `mfa_pending` fields. An MFA challenge keeps its pending login on the
-  server for 10 minutes, until a code is submitted or a new login starts;
-  cancelling in the UI does not discard it. Wrong Garmin credentials return
-  `422`, an unreachable Garmin returns `502`.
-- `POST /api/garmin/login/mfa` takes `{"code": "..."}` and completes the pending
-  login. The response is `{"status": "connected"}` with the same fields. A wrong
-  code returns `422` and keeps the pending login for another attempt. The fifth
-  wrong code discards it and returns `409`, as does a missing, expired or
-  superseded pending login. A privacy delete also discards it.
-- `POST /api/garmin/disconnect` takes an empty JSON object, deletes the stored
-  Garmin tokens and returns `{"status": "disconnected"}` with the same fields. Garmin data already stored
-  locally is kept.
-
-Each POST and PUT above requires the session cookie and `X-CSRF-Token`.
-Errors are JSON with a German `error` message and no secret or raw provider text.
 
 The former `/api/logs/clear` and `/api/diagnostics/clear` aliases are not
 registered. Static files and the application shell are served separately from
