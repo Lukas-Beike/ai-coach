@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from backend.errors import OPENAI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
-from backend.providers.openai_requests import endpoint
+from backend.providers.http import endpoint
 
 if TYPE_CHECKING:
     from backend.providers.state import ProviderStateService

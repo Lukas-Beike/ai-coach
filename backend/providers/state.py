@@ -16,7 +16,11 @@ from backend.providers import usage as provider_usage
 from backend.providers.openai_errors import rate_limit_snapshot
 from backend.providers.openai_responses import OpenAIResponseFailure, validate_response
 
-_PROVIDERS = frozenset({"openai"})
+_PROVIDERS = frozenset({"openai", "anthropic"})
+_AVAILABLE_MESSAGES = {
+    "openai": "OpenAI ist verfügbar.",
+    "anthropic": "Claude ist verfügbar.",
+}
 _STATUS_KEYS = {provider: f"{provider}_status" for provider in _PROVIDERS}
 _USAGE_KEYS = {provider: f"{provider}_usage" for provider in _PROVIDERS}
 _OPENAI_RATE_LIMITS_KEY = "openai_rate_limits"
@@ -25,7 +29,7 @@ _SAFE_CODE = re.compile(r"(?a)^[a-z0-9][a-z0-9_.:/-]{0,79}$")
 
 def _provider(value: Any) -> str:
     if value not in _PROVIDERS:
-        raise ValueError("provider must be exactly 'openai'")
+        raise ValueError("provider must be 'openai' or 'anthropic'")
     return value
 
 
@@ -175,7 +179,7 @@ class ProviderStateService:
                 provider,
                 state="ok",
                 reason="ok",
-                message="OpenAI ist verfügbar.",
+                message=_AVAILABLE_MESSAGES[provider],
                 http_status=http_status,
                 provider_error_code=None,
             )
@@ -230,11 +234,13 @@ class ProviderStateService:
                 recorded_at=_timestamp(self._now()),
             )
             self._repository.set(db, _USAGE_KEYS[provider], _json(updated))
-        if self._logger is not None and provider == "openai":
+        if self._logger is not None:
             self._logger.info(
-                "OpenAI usage recorded",
+                "OpenAI usage recorded"
+                if provider == "openai"
+                else "Claude usage recorded",
                 extra={
-                    "event": "openai_usage",
+                    "event": f"{provider}_usage",
                     "context": {
                         "operation": safe_operation,
                         **counts,
