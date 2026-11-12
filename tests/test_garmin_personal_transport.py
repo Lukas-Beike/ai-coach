@@ -325,7 +325,13 @@ class PersonalClientTests(unittest.TestCase):
             ["/activitylist-service/activities/search/activities"], api.data_paths()
         )
 
-        for header, wait in (("120", 120.0), ("soon", None), (None, None)):
+        for header, wait in (
+            ("120", 120.0),
+            ("99999999999", 86400.0),
+            ("²", None),
+            ("soon", None),
+            (None, None),
+        ):
             with self.subTest(header=header):
                 headers = Message()
                 if header is not None:

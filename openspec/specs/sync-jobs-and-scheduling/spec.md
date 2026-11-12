@@ -56,8 +56,8 @@ The system SHALL wait 300 seconds before each automatic loop pass, schedule elig
 
 #### Scenario: Garmin change check
 - **WHEN** a Personal API key is configured and Garmin is neither blocked, active nor held by a retry
-- **THEN** Garmin is due when the check finds a new activity or a newly published night, or from 12:00 athlete-local time when no Garmin refresh succeeded that day
-- **AND** the check reads the newest activity ids of today and yesterday and, until today's night is stored, today's sleep entry through the Personal API, every 10 minutes and every 30 minutes between 23:00 and 05:00 athlete-local time; an unchanged result writes and queues nothing, a failure doubles the wait up to eight times and never undercuts a `Retry-After` wait, a rejected key makes the refresh due so its failure surfaces, and the morning reading waits for the stored night or 12:00.
+- **THEN** Garmin is due when the check finds a new activity or a newly published night, or, at most hourly, from 12:00 athlete-local time when no Garmin refresh succeeded that day
+- **AND** the check reads the newest activity ids of today and yesterday and, until today's night is stored, today's sleep entry through the Personal API, every 10 minutes and every 30 minutes between 23:00 and 05:00 athlete-local time; an unchanged result writes and queues nothing, a change a successful refresh did not store is held back for an hour, a failure doubles the wait up to eight times and never undercuts a `Retry-After` wait, a rejected key or endpoint makes the refresh due at that pace so its failure surfaces, and the morning reading waits for the stored night or 12:00.
 
 #### Scenario: Loop failure and shutdown
 - **WHEN** scheduling raises an error or the stop event is set during its wait

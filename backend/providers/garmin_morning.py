@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.canonical.section_items import merge_records
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import (
+    GARMIN_SLEEP_DATE_KEYS,
+    GARMIN_SLEEP_DURATION_ALIASES,
+)
 from backend.providers.garmin_fields import first_present as _first_present
 
 ExternalCall = Callable[[str, str, Callable[[], Any], dict[str, Any] | None], Any]
@@ -90,14 +94,18 @@ def morning_sleep_element(
 def has_night(elements: Any, day: date) -> bool:
     """Whether a sleep element of ``day`` holds a recorded sleep duration."""
     for element in elements if isinstance(elements, list) else []:
-        if not isinstance(element, dict) or element.get("calendarDate") != (
-            day.isoformat()
+        night = element.get("dailySleepDTO") if isinstance(element, dict) else None
+        values = night if isinstance(night, dict) else element
+        if (
+            str(
+                _first_present(element, GARMIN_SLEEP_DATE_KEYS)
+                or _first_present(values, GARMIN_SLEEP_DATE_KEYS)
+                or ""
+            )[:10]
+            != day.isoformat()
         ):
             continue
-        night = element.get("dailySleepDTO")
-        seconds = (night if isinstance(night, dict) else element).get(
-            "sleepTimeSeconds"
-        )
+        seconds = _first_present(values, GARMIN_SLEEP_DURATION_ALIASES)
         if isinstance(seconds, (int, float)) and seconds > 0:
             return True
     return False

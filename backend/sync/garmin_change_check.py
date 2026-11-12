@@ -6,15 +6,15 @@ minutes at night (athlete-local time) it reads the newest activity ids and,
 until last night is stored, today's sleep entry, and compares them read-only
 with the local database. Only a new activity or a newly published night makes
 the existing refresh due. A full refresh is still guaranteed once per local
-day, at the latest at noon, for the data only the SDK serves.
+day from noon, for the data only the SDK serves, repeated at most hourly.
 
 An unchanged check writes nothing and queues nothing. A change that a later
-successful refresh still did not store is not reported again, so data the
-refresh never keeps cannot queue a refresh on every check. Throttling and errors
-back off in memory; a ``Retry-After`` wait is never undercut. A rejected key
-makes the refresh due once, so its failure surfaces and the retry hold stops
-the schedule until the credentials change. The cadence state and the counts
-live in memory: a restart checks at once.
+successful refresh still did not store is held back for an hour, so data the
+refresh does not keep queues at most an hourly refresh, as before. Throttling
+and errors back off in memory; a ``Retry-After`` wait is never undercut. A
+rejected key or endpoint makes the refresh due at the backoff pace, so its
+failure surfaces and the retry hold can stop the schedule. The cadence state
+and the counts live in memory: a restart checks at once.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.performance.morning_battery_service import MORNING_SLEEP_WAIT_UNTIL_HOUR
-from backend.providers import http as provider_http
 from backend.providers.garmin_morning import has_night
 from backend.providers.garmin_personal import GarminPersonalClient
 
@@ -39,6 +38,8 @@ NIGHT_CHECK_SECONDS = 30 * 60
 MAX_BACKOFF_FACTOR = 8
 # The full refresh of a local day is due from this hour without a change.
 DAILY_REFRESH_HOUR = MORNING_SLEEP_WAIT_UNTIL_HOUR
+# A change a successful refresh did not store returns after this wait.
+HOLD_SECONDS = 60 * 60
 # Stored activities compared with the newest page: today and yesterday.
 ACTIVITY_DAYS = 2
 
@@ -74,10 +75,10 @@ class GarminChangeCheck:
         self._next_check_at: float | None = None
         self._failures = 0
         # The changes the last due answer named, and when; what a later
-        # successful refresh still did not store is ignored, so it cannot make
-        # the refresh due every check.
+        # successful refresh still did not store is held back for an hour, so
+        # it cannot make the refresh due every check.
         self._awaiting: tuple[frozenset[str], datetime] | None = None
-        self._ignored: set[str] = set()
+        self._held: dict[str, float] = {}
         self.counts = dict.fromkeys(("checks", "changes", "throttled", "failed"), 0)
 
     def active(self) -> bool:
@@ -97,36 +98,42 @@ class GarminChangeCheck:
             self._stored_sleep(local.date()), local.date()
         )
 
-    def refresh_due(self) -> bool:
-        """Whether a change or the daily guarantee makes the refresh due."""
+    def refresh_due(self, marker_due: Callable[[], bool]) -> bool:
+        """Whether a change or the daily guarantee makes the refresh due.
+
+        ``marker_due`` is the hourly attempt marker: the noon guarantee asks
+        it, so a refresh that cannot mark today's success repeats hourly.
+        """
         local = self._local_now()
         today = local.date()
-        if local.hour >= DAILY_REFRESH_HOUR and not self._refreshed_today(local):
+        if (
+            local.hour >= DAILY_REFRESH_HOUR
+            and not self._refreshed_today(local)
+            and marker_due()
+        ):
             return True
         with self._lock:
             now = self._monotonic()
             if self._next_check_at is not None and now < self._next_check_at:
                 return False
             delay: float = check_seconds(local)
+            # Local reads stay outside the remote error handling, so a
+            # maintenance or busy database is never counted as a Garmin failure.
+            stored_night = has_night(self._stored_sleep(today), today)
             try:
-                changes = self._probe(today)
-            except provider_http.ProviderHTTPError as error:
-                if error.status in {401, 403}:
-                    # The refresh reports the rejected key; the retry hold then
-                    # waits for new credentials.
-                    self._next_check_at = now + delay
-                    return True
-                delay = self._failed(delay, error)
-                self._next_check_at = now + delay
-                return False
+                newest, night = self._read(today, stored_night=stored_night)
             except Exception as error:  # noqa: BLE001 - a failed check must not stop the loop
-                delay = self._failed(delay, error)
-                self._next_check_at = now + delay
-                return False
+                self._next_check_at = now + self._failed(delay, error)
+                # A rejected key or endpoint queues the refresh at the backoff
+                # pace, so its error shows and the retry hold can apply.
+                return getattr(error, "status", None) in {401, 403}
             self._failures = 0
             self._next_check_at = now + delay
             self.counts["checks"] += 1
-            changes = self._settle(changes)
+            changes = set(newest) - set(self._known_activity_ids(ACTIVITY_DAYS))
+            if night:
+                changes.add(f"night:{today.isoformat()}")
+            changes = self._settle(changes, now)
             if not changes:
                 return False
             self._awaiting = (frozenset(changes), local)
@@ -151,33 +158,36 @@ class GarminChangeCheck:
         last = self._last_local(local)
         return last is not None and last.date() == local.date()
 
-    def _probe(self, today: date) -> set[str]:
-        """The new activity ids and ``night:<day>`` Garmin has and we lack."""
+    def _read(self, today: date, *, stored_night: bool) -> tuple[list[str], bool]:
+        """The newest activity ids and whether Garmin has a night we lack."""
         client = self._personal()
         if client is None:
-            return set()
+            return [], False
         newest = client.newest_activity_ids(
             (today - timedelta(days=1)).isoformat(), today.isoformat()
         )
-        changes = set(newest) - set(self._known_activity_ids(ACTIVITY_DAYS))
         day = today.isoformat()
-        if not has_night(self._stored_sleep(today), today) and has_night(
-            client.get_sleep_daily(day, day), today
-        ):
-            changes.add(f"night:{day}")
-        return changes
+        night = not stored_night and has_night(client.get_sleep_daily(day, day), today)
+        return newest, night
 
-    def _settle(self, changes: set[str]) -> set[str]:
-        """Drop the changes a successful refresh since their trigger left out."""
+    def _settle(self, changes: set[str], now: float) -> set[str]:
+        """Hold back for an hour what a successful refresh since its trigger left out.
+
+        A partial refresh may miss a read, so the change comes back hourly, the
+        pace of the schedule it replaces, instead of every check.
+        """
         if self._awaiting is not None:
             keys, since = self._awaiting
             last = self._last_local(since)
             if last is not None and last > since:
-                self._ignored |= keys & changes
+                self._held.update(dict.fromkeys(keys & changes, now))
                 self._awaiting = None
-        # Forget what Garmin no longer reports.
-        self._ignored &= changes
-        return changes - self._ignored
+        self._held = {
+            key: held_at
+            for key, held_at in self._held.items()
+            if key in changes and now - held_at < HOLD_SECONDS
+        }
+        return changes - set(self._held)
 
     def _failed(self, delay: float, error: Exception) -> float:
         self._failures += 1

@@ -101,7 +101,7 @@ class GarminSchedulePolicy:
         """The change check's answer, or the hourly marker without one."""
         if self._change_check is None or not self._change_check.active():
             return marker_due()
-        return self._change_check.refresh_due()
+        return self._change_check.refresh_due(marker_due)
 
     def configured(self) -> bool:
         return self._garmin.configured()

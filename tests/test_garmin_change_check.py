@@ -18,7 +18,9 @@ from support import temp_database
 
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
+from backend.errors import AppError
 from backend.providers import http as provider_http
+from backend.providers.garmin_morning import has_night
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_change_check import GarminChangeCheck
@@ -114,12 +116,16 @@ class GarminChangeCheckTests(unittest.TestCase):
                 db, {"synced_at": NOW, **sections}
             )
 
+    def due(self) -> bool:
+        """Ask the check as the scheduler does, with the hourly attempt marker."""
+        return self.check.refresh_due(lambda: self.markers.is_due("garmin", self.local))
+
     def ticks(self, start: datetime, minutes: int) -> list[bool]:
         """Ask the check every 5 minutes, like the daily loop."""
         answers = []
         for step in range(0, minutes, 5):
             self.local = start + timedelta(minutes=step)
-            answers.append(self.check.refresh_due())
+            answers.append(self.due())
             self.mono += 300
         return answers
 
@@ -140,67 +146,71 @@ class GarminChangeCheckTests(unittest.TestCase):
         )
 
     def test_a_new_activity_makes_the_refresh_due_until_it_is_stored(self) -> None:
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.personal.activity_ids.insert(0, "900002")
         self.mono += 600
 
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
         self.store(activities=[_activity(900002)])
         self.mono += 600
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.assertEqual(1, self.check.counts["changes"])
 
-    def test_a_change_the_refresh_does_not_store_is_reported_once(self) -> None:
+    def test_a_change_the_refresh_does_not_store_returns_hourly(self) -> None:
         self.personal.activity_ids.insert(0, "900003")
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
         self.mono += 600
         # Still queued or failed: no successful refresh since, so it stays due.
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
 
         self.local += timedelta(minutes=20)
         self.markers.mark("garmin", self.local)
         for _ in range(3):
             self.mono += 600
             self.local += timedelta(minutes=10)
-            self.assertFalse(self.check.refresh_due())
+            self.assertFalse(self.due())
+        # An hour after it was held back it is reported again, the old pace.
+        self.mono += 2400
+        self.assertTrue(self.due())
+        self.store(activities=[_activity(900003)])
         self.personal.activity_ids.insert(0, "900004")
         self.mono += 600
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
 
     def test_a_new_night_makes_the_refresh_due_and_morning_waits_for_it(self) -> None:
         self.local = datetime(2026, 11, 13, 6, 0, tzinfo=ZONE)
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.assertEqual(["activities", "sleep"], self.personal.calls)
         self.assertFalse(self.check.morning_due())
 
         # Garmin publishes an empty entry first, then the night.
         self.personal.nights = [_night(self.local.date(), None)]
         self.mono += 600
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.personal.nights = [_night(self.local.date())]
         self.mono += 600
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
 
         self.store(sleep=[_night(self.local.date())])
         self.assertTrue(self.check.morning_due())
         self.mono += 600
         self.personal.calls.clear()
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.assertEqual(["activities"], self.personal.calls)
 
     def test_retry_after_delays_the_next_check(self) -> None:
         self.personal.error = provider_http.ProviderHTTPError(
             "garmin", "rate_limited", 429, retry_after=3600.0
         )
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.personal.error = None
 
         for minutes in (10, 30, 59):
             self.mono = 1000.0 + minutes * 60
-            self.assertFalse(self.check.refresh_due())
+            self.assertFalse(self.due())
         self.assertEqual(1, len(self.personal.calls))
         self.mono = 1000.0 + 3600
-        self.check.refresh_due()
+        self.due()
         self.assertEqual(2, len(self.personal.calls))
         self.assertEqual(1, self.check.counts["throttled"])
 
@@ -208,32 +218,59 @@ class GarminChangeCheckTests(unittest.TestCase):
         self,
     ) -> None:
         self.personal.error = OSError("synthetic outage")
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.mono += 600
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.assertEqual(1, len(self.personal.calls))
         self.mono += 600
 
+        # A rejected key or endpoint queues the refresh, at the backoff pace.
         self.personal.error = provider_http.ProviderHTTPError(
-            "garmin", "authentication", 401
+            "garmin", "authentication", 403
         )
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
+        self.mono += 1200
+        self.assertFalse(self.due())
+        self.assertEqual(2, len(self.personal.calls))
+        self.assertEqual(2, self.check.counts["failed"])
+
+    def test_a_local_database_error_is_no_garmin_failure(self) -> None:
+        def maintenance(_days: int) -> list[str]:
+            raise AppError(503, "maintenance", reason="maintenance")
+
+        self.check._known_activity_ids = maintenance
+        with self.assertRaises(AppError):
+            self.due()
+        self.assertEqual(0, self.check.counts["failed"])
 
     def test_one_full_refresh_per_day_is_due_from_noon_without_a_remote_read(
         self,
     ) -> None:
         self.local = datetime(2026, 11, 13, 11, 55, tzinfo=ZONE)
         self.personal.nights = []
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
         self.personal.calls.clear()
 
         self.local = datetime(2026, 11, 13, 12, 0, tzinfo=ZONE)
-        self.assertTrue(self.check.refresh_due())
+        self.assertTrue(self.due())
         self.assertTrue(self.check.morning_due())
         self.assertEqual([], self.personal.calls)
+        # The queued refresh ended without today's success: hourly, not every pass.
+        self.markers.mark_attempt("garmin", self.local)
+        self.local += timedelta(minutes=5)
+        self.mono += 600
+        self.assertFalse(self.due())
+        self.local += timedelta(minutes=55)
+        self.assertTrue(self.due())
         self.markers.mark("garmin", self.local)
         self.mono += 600
-        self.assertFalse(self.check.refresh_due())
+        self.assertFalse(self.due())
+
+    def test_a_night_is_found_under_either_garmin_alias(self) -> None:
+        flat = {"summaryDate": TODAY.isoformat(), "sleepDuration": 27000}
+        self.assertTrue(has_night([flat], TODAY))
+        self.assertFalse(has_night([{**flat, "sleepDuration": 0}], TODAY))
+        self.assertFalse(has_night([flat], TODAY + timedelta(days=1)))
 
     def test_without_a_personal_key_the_hourly_marker_and_morning_polling_stay(
         self,
@@ -249,7 +286,7 @@ class GarminChangeCheckTests(unittest.TestCase):
         # The check reads remotely outside any database lease (#2287 style):
         # a login waiting for the writer gets it while Garmin is slow.
         self.personal.release = threading.Event()
-        worker = threading.Thread(target=self.check.refresh_due)
+        worker = threading.Thread(target=self.due)
         worker.start()
         self.addCleanup(worker.join, 5)
         self.assertTrue(self.personal.reading.wait(5))

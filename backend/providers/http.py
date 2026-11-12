@@ -359,6 +359,9 @@ class ProviderHTTPError(Exception):
         return f"{self.service} {self.category}{status}{detail}"
 
 
+RETRY_AFTER_MAX_SECONDS = 24 * 3600.0
+
+
 def classify_provider_status(
     status: int, service: str, detail: Any = "", retry_after: float | None = None
 ) -> ProviderHTTPError:
@@ -372,16 +375,19 @@ def classify_provider_status(
 
 
 def parse_retry_after(value: Any, now: float | None = None) -> float | None:
-    """Return the wait a ``Retry-After`` value names, as seconds or an HTTP date."""
+    """Return the wait a ``Retry-After`` value names, as seconds or an HTTP date.
+
+    The wait is capped at one day, so an absurd value cannot stop a caller.
+    """
     text = str(value or "").strip()
-    if text.isdigit():
-        return float(text)
+    if text.isascii() and text.isdigit():
+        return min(float(text), RETRY_AFTER_MAX_SECONDS)
     try:
         when = email.utils.parsedate_to_datetime(text)
     except TypeError, ValueError, IndexError:
         return None
     current = time.time() if now is None else now
-    return max(0.0, when.timestamp() - current)
+    return min(max(0.0, when.timestamp() - current), RETRY_AFTER_MAX_SECONDS)
 
 
 def read_bounded_response(
