@@ -96,14 +96,12 @@ def has_night(elements: Any, day: date) -> bool:
     for element in elements if isinstance(elements, list) else []:
         night = element.get("dailySleepDTO") if isinstance(element, dict) else None
         values = night if isinstance(night, dict) else element
-        if (
-            str(
-                _first_present(element, GARMIN_SLEEP_DATE_KEYS)
-                or _first_present(values, GARMIN_SLEEP_DATE_KEYS)
-                or ""
-            )[:10]
-            != day.isoformat()
-        ):
+        recorded_on = str(
+            _first_present(element, GARMIN_SLEEP_DATE_KEYS)
+            or _first_present(values, GARMIN_SLEEP_DATE_KEYS)
+            or ""
+        )
+        if not recorded_on.startswith(day.isoformat()):
             continue
         seconds = _first_present(values, GARMIN_SLEEP_DURATION_ALIASES)
         if isinstance(seconds, (int, float)) and seconds > 0:

@@ -179,8 +179,7 @@ class DailySyncLoop:
             self._run_wal_checkpoint()
             try:
                 self._daily_scheduler.schedule()
-                if self._morning_due is None or self._morning_due():
-                    self._morning_battery.refresh()
+                self._refresh_morning()
             except AppError as exc:
                 if exc.reason != "maintenance":
                     self._logger.error(
@@ -198,6 +197,11 @@ class DailySyncLoop:
                         },
                     },
                 )
+
+    def _refresh_morning(self) -> None:
+        """Refresh the morning reading unless the change check holds it back."""
+        if self._morning_due is None or self._morning_due():
+            self._morning_battery.refresh()
 
     def _run_housekeeping(self) -> None:
         """Run the periodic upkeep; its failure never skips the scheduling."""
