@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from sonar_check import find_sonar
 
 
 def git(*args: str, input: bytes | None = None) -> bytes:
@@ -108,7 +109,8 @@ def check(updates: str) -> int:
     objects = outgoing_objects(updates)
     if not objects:
         return 0
-    scanner = shutil.which("sonar")
+    # The same lookup as sonar-check: PATH, then the CLI's install directories.
+    scanner = find_sonar()
     if not scanner:
         raise RuntimeError("Sonar CLI unavailable; push refused")
     metadata = git(
