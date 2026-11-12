@@ -9,7 +9,7 @@ from collections import Counter
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 
 from backend import change_history
 from backend.coach.authorization import coach_execution_scope
@@ -396,10 +396,13 @@ class CoachStructuredToolRoundService:
         cancelled: bool,
         rounds: int,
     ) -> ModelTurn:
-        followup = replace(
-            state.request,
-            instructions=state.model_instructions,
-            tool_choice="none" if question or cancelled else "auto",
+        followup = cast(
+            ModelRequest,
+            replace(
+                state.request,
+                instructions=state.model_instructions,
+                tool_choice="none" if question or cancelled else "auto",
+            ),
         )
         if any(
             step.get("tool") == "read_coach_context"
@@ -416,10 +419,13 @@ class CoachStructuredToolRoundService:
             return result
         state.budget_exhausted = True
         _log_budget_exhausted(state, rounds)
-        final = replace(
-            followup,
-            instructions=state.model_instructions + _TOOL_BUDGET_NOTICE,
-            tool_choice="none",
+        final = cast(
+            ModelRequest,
+            replace(
+                followup,
+                instructions=state.model_instructions + _TOOL_BUDGET_NOTICE,
+                tool_choice="none",
+            ),
         )
         not_executed = [
             {"call_id": str(item.get("call_id") or ""), "output": _NOT_EXECUTED}
@@ -436,9 +442,9 @@ class CoachStructuredToolRoundService:
     ) -> ModelRequest:
         """Continue a turn: the conversation holds its items, else resend them."""
         if request.conversation_id:
-            return replace(request, steps=[ModelStep([], results)])
+            return cast(ModelRequest, replace(request, steps=[ModelStep([], results)]))
         state.steps = [*state.steps, ModelStep(turn.opaque_state, results)]
-        return replace(request, steps=list(state.steps))
+        return cast(ModelRequest, replace(request, steps=list(state.steps)))
 
     def _respond(
         self, followup: ModelRequest, state: StructuredCoachRoundState
