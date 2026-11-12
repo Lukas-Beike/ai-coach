@@ -1,13 +1,16 @@
 import base64
+import hashlib
 import json
 import struct
 import unittest
 import zipfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach import attachments as coach_attachments
+from backend.coach import structured_tool_round
 from backend.coach.attachments import (
     _FIT_SPORTS,
     AttachmentRequestTooLarge,
@@ -18,6 +21,7 @@ from backend.coach.attachments import (
     validate_attachments,
 )
 from backend.errors import AppError
+from backend.providers import openai_requests, openai_stream
 from backend.providers.fit_file import _fit_crc16, _fit_data_record
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
@@ -248,6 +252,139 @@ class FitEnhancedFieldTests(unittest.TestCase):
 class AttachmentTests(DialogueHarness, unittest.TestCase):
     def upload(self, data=GPX, name="route.gpx"):
         return {"name": name, "data": base64.b64encode(data).decode("ascii")}
+
+    GOLDEN = Path(__file__).parent / "fixtures" / "coach_wire_payloads.json"
+
+    def _wire(self, turn, message, steps, attachments=None, conversation=False):
+        """Run one queued job over the real transport; return its outgoing payloads."""
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            message, turn, "synthetic-session", attachments=attachments
+        )
+        sent = []
+        queue = iter(steps)
+
+        def stream(_client, payload, _on_delta, *_args, **_kwargs):
+            sent.append(json.dumps(payload))
+            step = next(queue)
+            if callable(step):
+                step = step(payload)
+            if isinstance(step, Exception):
+                raise step
+            return step
+
+        def classify(_client, payload):
+            sent.append(json.dumps(payload))
+            return {"output_text": json.dumps(self.gate_verdict)}
+
+        provision = Mock(
+            binding=Mock(return_value="synthetic-conversation"),
+            bind_remote=Mock(return_value="synthetic-conversation"),
+            rotate=Mock(return_value="synthetic-conversation"),
+        )
+        with (
+            patch.object(openai_stream.OpenAIStreamClient, "stream", stream),
+            patch.object(openai_requests.OpenAIResponsesClient, "responses", classify),
+            patch.object(
+                server.COACH_CONVERSATION, "provision_service", return_value=provision
+            ),
+            patch(
+                "backend.coach.context.CoachTrainingContextService.build",
+                return_value="Synthetic local data",
+            ),
+        ):
+            server.COACH_TURNS.chat_turn_service().run(
+                message,
+                client_turn_id=turn,
+                session_csrf_hash="synthetic-session",
+                background_job=True,
+            )
+        # Instructions and tool schemas are fixed text: compare their hash.
+        return [
+            {
+                key: (
+                    {"sha256": hashlib.sha256(json.dumps(value).encode()).hexdigest()}
+                    if key in {"instructions", "tools"}
+                    else value
+                )
+                for key, value in json.loads(payload).items()
+            }
+            for payload in sent
+        ]
+
+    def _budget_exhausted(self, read, text):
+        with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):
+            return self._wire(
+                "wire-budget", "Noch mal lesen", [read("c-5"), read("c-6"), text]
+            )
+
+    def test_outgoing_wire_payloads_of_representative_turns_are_unchanged(self):
+        """Golden payloads, recorded before the model seam (#2073 PR 2)."""
+        reasoning = {"type": "reasoning", "id": "rs-1", "encrypted_content": "enc-1"}
+        bare = {"type": "reasoning", "id": "rs-2"}
+
+        def read(call_id):
+            return lambda _: {
+                **self.call("read_training_state", call_id=call_id),
+                "output": [
+                    reasoning,
+                    bare,
+                    self.call("read_training_state", call_id=call_id)["output"][0],
+                ],
+            }
+
+        text = {"output_text": "Fertig."}
+        server.PLANNING_DATA.competition().save(
+            {
+                "name": "Synthetic Giro",
+                "event_date": "2026-10-03",
+                "sport": "Ride",
+                "priority": "A",
+            }
+        )
+        (competition,) = server.PLANNING_DATA.competition().list()
+        delete = lambda _: self.call(
+            "delete_competition",
+            {"competition_id": competition["id"]},
+            [f"competition:{competition['id']}"],
+        )
+        self.confirm_impact("competition", delete=True)
+        image = {"name": "chart.png", "data": PNG}
+        invalid = AppError(
+            502, "Synthetic invalid conversation", reason="conversation_state_invalid"
+        )
+        incomplete = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [reasoning],
+        }
+        actual = {
+            "plain": self._wire("wire-plain", "Wie war meine Woche?", [text]),
+            "tool_round": self._wire(
+                "wire-tools", "Plan ansehen", [read("c-1"), read("c-2"), text]
+            ),
+            "classifier_delete": self._wire(
+                "wire-delete", "Den Giro entfernen", [delete, text]
+            ),
+            "reasoning_escalation": self._wire(
+                "wire-tokens", "Erkläre die Woche", [incomplete, text]
+            ),
+            "tool_budget_exhausted": self._budget_exhausted(read, text),
+            "attachment_conversation": self._wire(
+                "wire-image", "Analysiere das", [read("c-3"), text], [image]
+            ),
+            "conversation_recovery": self._wire(
+                "wire-recover",
+                "Und jetzt?",
+                [invalid, read("c-4"), text],
+                [self.upload()],
+            ),
+        }
+        # The competition id is generated per run.
+        actual = json.loads(
+            json.dumps(actual).replace(competition["id"], "synthetic-competition")
+        )
+        expected = json.loads(self.GOLDEN.read_text(encoding="utf-8"))
+        self.assertEqual(expected, json.loads(json.dumps(actual, sort_keys=True)))
 
     def test_gpx_distance_elevation_and_segment_boundaries(self):
         summary = gpx_summary(GPX)
