@@ -19,6 +19,7 @@ from backend.nutrition.food_mirror import FoodDatabaseMirror
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.nutrition.web_search import NutritionWebSearchService
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.observed_opener import Opener
 from backend.providers.open_food_facts import OpenFoodFactsClient
@@ -40,6 +41,7 @@ class NutritionRuntime:
     local_now: Callable[[], Any]
     intervals_request: Callable[[], Callable[..., Any]]
     photo_extractor: Callable[[], NutritionPhotoExtractionService] | None = None
+    web_searcher: Callable[[], NutritionWebSearchService] | None = None
     # The profile sex Yazio searches send; empty sends none (#1774).
     athlete_sex: Callable[[], str] = lambda: ""
     # Observed openers for the Yazio and Open Food Facts requests, by service name.
@@ -88,6 +90,7 @@ class NutritionAssembly:
         self._product_repository = NutritionProductRepository()
         self._template_repository = NutritionTemplateRepository()
         self._runtime_photo_extractor = dependencies.runtime.photo_extractor
+        self._runtime_web_searcher = dependencies.runtime.web_searcher
 
     def secret_values(self) -> tuple[str, ...]:
         """Runtime-only provider tokens for the log redactor."""
@@ -109,6 +112,9 @@ class NutritionAssembly:
             photo_extractor=self._photo_extractor(),
             product_repository=self._product_repository,
             template_repository=self._template_repository,
+            web_search=(
+                self._runtime_web_searcher() if self._runtime_web_searcher else None
+            ),
         )
 
     def product_catalog_service(self) -> ProductCatalogService:

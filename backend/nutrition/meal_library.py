@@ -23,6 +23,7 @@ from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
     validate_packaging_extraction,
 )
+from backend.nutrition.web_search import NutritionWebSearchService
 
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 TEMPLATE_ENTITY_TYPE = "nutrition_template"
@@ -54,6 +55,7 @@ class NutritionMealLibraryService:
         photo_extractor: NutritionPhotoExtractionService | None = None,
         product_repository: NutritionProductRepository | None = None,
         template_repository: NutritionTemplateRepository | None = None,
+        web_search: NutritionWebSearchService | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
@@ -72,6 +74,7 @@ class NutritionMealLibraryService:
             utc_now,
             self.food_database,
             self._component_calculator,
+            web_search.search if web_search else None,
         )
         self._photo_extractor = photo_extractor
 

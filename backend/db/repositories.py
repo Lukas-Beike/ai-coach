@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
@@ -211,12 +211,16 @@ class NutritionProductRepository:
         return product
 
     @staticmethod
-    def list_incomplete(db: Any, limit: int = 50) -> list[dict[str, Any]]:
+    def list_incomplete(
+        db: Any, limit: int = 50, ids: Sequence[str] | None = None
+    ) -> list[dict[str, Any]]:
         """Active own products and stored database foods with an empty core field.
 
         A food whose EAN an own product holds is listed as that product only.
-        Each row names its ``origin`` and the ``missing_fields``.
+        Each row names its ``origin`` and the ``missing_fields``; ``ids`` narrows
+        the list to those products.
         """
+        wanted = list(ids or ())
         rows = db.execute(
             "SELECT id, origin, name, brand, barcode, basis_amount, basis_unit, "
             + ", ".join(NUTRIENT_COLUMNS)
@@ -225,8 +229,9 @@ class NutritionProductRepository:
             + ") AND (CASE WHEN origin = 'own' THEN status = 'active' ELSE "
             "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
             "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL)) END) "
-            "ORDER BY origin <> 'own', name COLLATE NOCASE, id LIMIT ?",
-            (max(1, min(int(limit), 100)),),
+            + (f"AND id IN ({','.join('?' * len(wanted))}) " if ids is not None else "")
+            + "ORDER BY origin <> 'own', name COLLATE NOCASE, id LIMIT ?",
+            (*wanted, max(1, min(int(limit), 100))),
         ).fetchall()
         found = [dict(row) for row in rows]
         return [

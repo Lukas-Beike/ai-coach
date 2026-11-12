@@ -58,6 +58,16 @@ Filling two or more products is a bulk change: the Coach asks first and needs
 your yes. The turn's change line in the chat lists each product, field, value and origin, and
 undo of the turn empties exactly those fields again (change history entity
 `food_database_entry` for stored database foods).
+Missing values can also come from the web: `search_web_for_product_values`
+(up to five named products) sends one separate OpenAI Responses request with the
+`web_search` tool and the selected model. The request carries only each
+product's name, brand, EAN, basis and missing field names, never an athlete
+record or message. A value is returned only when it is a plausible number for a
+still-empty core field and its source page is one the search cited; it carries
+origin `web` and that page, and web text is treated as untrusted data. The Coach
+shows the values before writing them with `fill_nutrition_product_gaps`. If the
+endpoint rejects the tool or the request fails, the result says web search is
+not available and nothing is written.
 For the Coach, matches carry the origin `data_origin` (`live`,
 `local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
 section lists the stored entries; "Lokal speichern" (save locally) takes over an

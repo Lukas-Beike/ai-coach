@@ -165,7 +165,15 @@ class CoachReadToolService:
             return self._food_database_read(name, arguments)
         if name == "list_incomplete_nutrition_products":
             return self._list_incomplete_products()
+        if name == "search_web_for_product_values":
+            return self._search_web_values(arguments)
         return None
+
+    def _search_web_values(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self._nutrition_meal_library is None:
+            raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+        catalog = self._nutrition_meal_library().product_catalog
+        return catalog.search_web_values(arguments.get("products"))
 
     def _list_incomplete_products(self) -> dict[str, Any]:
         if self._nutrition_meal_library is None:

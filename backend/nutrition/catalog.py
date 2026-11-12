@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
@@ -34,6 +35,9 @@ GAP_ORIGINS = frozenset({"open_food_facts", "yazio", "bls", "web"})
 MAX_GAP_PRODUCTS = 25
 MAX_GAP_KCAL = 9000
 MAX_GAP_GRAMS = 1000
+# The source page of a web value: an http(s) address without whitespace.
+SOURCE_URL = re.compile(r"https?://\S{1,490}")
+MAX_WEB_SEARCH_PRODUCTS = 5
 
 
 class ProductCatalogService:
@@ -45,7 +49,9 @@ class ProductCatalogService:
         utc_now: Any,
         food_database: FoodDatabaseService,
         component_calculator: MealComponentCalculator,
+        web_search: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
     ) -> None:
+        self._web_search = web_search
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._products = products
@@ -93,6 +99,29 @@ class ProductCatalogService:
     def list_incomplete_products(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             return self._products.list_incomplete(db, limit)
+
+    def search_web_values(self, ids: Any) -> dict[str, Any]:
+        """Web values for the empty core fields of up to five named products."""
+        if (
+            not isinstance(ids, list)
+            or not 1 <= len(ids) <= MAX_WEB_SEARCH_PRODUCTS
+            or not all(isinstance(item, str) for item in ids)
+        ):
+            raise AppError(
+                400,
+                f"products muss 1 bis {MAX_WEB_SEARCH_PRODUCTS} Produkt-IDs enthalten.",
+                reason="tool_arguments_invalid",
+            )
+        if self._web_search is None:
+            raise AppError(503, "Die Websuche ist nicht verfügbar.")
+        wanted = list(dict.fromkeys(ids))
+        with self._database_manager.reader() as db:
+            found = self._products.list_incomplete(db, ids=wanted)
+        known = {product["id"] for product in found}
+        # The search runs after the read: no database lock is held for the request.
+        result = self._web_search(found) if found else {"ok": True, "products": []}
+        skipped = [item for item in wanted if item not in known]
+        return {**result, **({"skipped": skipped} if skipped else {})}
 
     def get_product(self, product_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
@@ -464,7 +493,7 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, str]:
     source_url = str(item.get("source_url") or "").strip()
     if origin not in GAP_ORIGINS:
         raise ValueError("origin muss open_food_facts, yazio, bls oder web sein.")
-    if source_url and not re.fullmatch(r"https?://\S{1,490}", source_url):
+    if source_url and not SOURCE_URL.fullmatch(source_url):
         raise ValueError("source_url muss eine http(s)-Adresse sein.")
     if origin == "web" and not source_url:
         raise ValueError("Webwerte brauchen die Quellseite source_url.")

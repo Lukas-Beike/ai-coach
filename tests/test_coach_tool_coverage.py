@@ -9,7 +9,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 # The repository root, for running this file as a script with --write.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -1713,6 +1713,85 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
             0,
         )
+
+    @covers("search_web_for_product_values:success")
+    def test_web_search_returns_cited_values_and_degrades_to_unavailable(self):
+        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        own = catalog.save_product(
+            {
+                "name": "Synthetic skyr",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 63,
+                "protein_g": 11,
+                "carbs_g": 4,
+                "fat_g": 0.2,
+                "sugar_g": 4,
+                "fiber_g": 0,
+                "source": "manual",
+            }
+        )
+        page = "https://example.test/skyr"
+        found = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(
+                                {
+                                    "products": [
+                                        {
+                                            "ref": 1,
+                                            "values": [
+                                                {
+                                                    "field": "salt_g",
+                                                    "value": 0.1,
+                                                    "source_url": page,
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            ),
+                            "annotations": [{"type": "url_citation", "url": page}],
+                        }
+                    ],
+                }
+            ]
+        }
+        client = Mock()
+        client.request.return_value = found
+        with patch.object(
+            server.MODEL_TRANSPORT, "openai_responses_client", return_value=client
+        ):
+            result = self.run_tool(
+                "search_web_for_product_values", {"products": [own["id"]]}
+            )
+            client.request.side_effect = AppError(400, "raw provider detail")
+            unavailable, _ = self.turn(
+                "Suche die Werte im Web.",
+                [
+                    lambda _: self.call(
+                        "search_web_for_product_values", {"products": [own["id"]]}
+                    ),
+                    {"output_text": "Synthetischer Ergebnistext."},
+                ],
+            )
+
+        self.assertEqual(result["data_origin"], "web")
+        self.assertEqual(
+            result["products"][0]["values"],
+            [{"field": "salt_g", "value": 0.1, "source_url": page}],
+        )
+        payload = client.request.call_args_list[0].args[1]
+        self.assertEqual(payload["tools"], [{"type": "web_search"}])
+        self.assertEqual(unavailable["status"], "completed")
+        outcome = unavailable["command_receipts"][0]["result"]
+        self.assertEqual(outcome["status"], "unavailable")
+        self.assertNotIn("raw provider", json.dumps(outcome))
+        self.assertIsNone(catalog.get_product(own["id"])["salt_g"])
 
     @covers(
         "list_incomplete_nutrition_products:success",
