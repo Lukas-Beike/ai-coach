@@ -10,7 +10,7 @@ It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale
 2. Local training calendar and workout library for running, cycling and strength; adaptive replanning only after you approve a preview.
 3. Garmin (official Personal API key plus optional unofficial login) and Wahoo as data sources, bundled into one session per workout.
 4. Intervals.icu as an explicit, output-only target for workouts, competitions, nutrition and thresholds.
-5. Structured strength workouts with named exercises, sent to the Garmin watch on request.
+5. Structured strength and run workouts, sent to the Garmin watch on request.
 6. Local performance methods M1-M8 (session load, fitness/fatigue/form, critical power/speed, HRV, sleep) with evidence cards.
 7. Analysis of load, performance, recovery and sessions with full-resolution charts.
 8. Weather, air quality, pollen and external calendars shape what the Coach plans; the weather during each outdoor session adds a heat note to its analysis.
@@ -68,7 +68,7 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 
 | Provider | Role | Setup |
 | :--- | :--- | :--- |
-| Garmin | Input: activities, details, sleep, HRV, daily health, thresholds. Personal API key plus optional login for the rest; planned strength workouts can be sent to the watch. | [Garmin](docs/setup.md#garmin-authentication--mfa-setup) |
+| Garmin | Input: activities, details, sleep, HRV, daily health, thresholds. Personal API key plus optional login for the rest; planned strength and run workouts can be sent to the watch. | [Garmin](docs/setup.md#garmin-authentication--mfa-setup) |
 | Wahoo | Input: activities and FIT files, cycling FTP, weight; plan export on request. | [Wahoo](docs/setup.md#wahoo-connection) |
 | Intervals.icu | Output target only, on explicit synchronization. | [Credentials](docs/setup.md#provider-credentials-in-the-app) |
 | OpenAI | Coach (Responses API) and voice transcription. | [Configuration](docs/configuration.md) |

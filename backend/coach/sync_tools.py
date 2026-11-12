@@ -178,7 +178,7 @@ class CoachSyncToolService:
     def _push_strength_to_garmin(
         self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
     ) -> dict[str, Any]:
-        """Queue the approved Garmin strength push; entries come from the card."""
+        """Queue the approved Garmin push; entries come from the card."""
         if (
             "push_strength_to_garmin" not in authorized_operations(intent)
             or intent.get("target_system") != ProviderId.GARMIN

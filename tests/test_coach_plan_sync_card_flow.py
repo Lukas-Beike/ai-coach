@@ -635,6 +635,28 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
 
         self.assertEqual(unit_entries(self.flow, STRENGTH_IDS), queued)
 
+    def test_a_run_unit_is_accepted_for_the_garmin_push(self) -> None:
+        run_id = WEEK[1][0]
+        call = prepared_call(
+            self.flow,
+            "push_strength_to_garmin",
+            {"entries": [{"local_id": run_id}]},
+            request_for(
+                "garmin",
+                ["garmin_sync", f"planned_unit:{run_id}"],
+                sync_scope=SELECTED,
+            ),
+        )
+
+        card = create_card(self.flow, call)
+        approve_card(self.flow, card)
+
+        self.assertEqual(["An Garmin"], [detail["sport"] for detail in card["diff"]])
+        queued = json.loads(queued_jobs(self.flow, "plan_push")[0]["payload"])[
+            "entries"
+        ]
+        self.assertEqual(unit_entries(self.flow, [run_id]), queued)
+
     def test_a_garmin_selection_outside_the_request_scope_is_rejected(self) -> None:
         with self.assertRaises(AppError):
             prepared_call(

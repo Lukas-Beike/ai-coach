@@ -17,6 +17,16 @@ structure (one line per exercise; free text without a structure), and readback r
 The structured strength workout reaches the watch only through the explicit
 Garmin push.
 
+A run unit with step text goes to Garmin through the same push as a running
+workout (sport running, one segment; the name defaults to "Lauf", the
+description starts with "Pacecraft"). Warm-up and cool-down steps follow their
+block header, a repeated block is a repeat group, and a step ends by time or
+distance. Percent and zone targets are resolved to absolute watts, bpm or m/s
+from the athlete's run zones on the unit's date, and the heart-rate cap is sent
+as bpm. A ramp, a pace unit other than /km or /mi, or a capped run without a
+known threshold heart rate is not sent. Switch off Intervals.icu's Garmin
+upload for running, or each run arrives twice.
+
 References:
 
 - [Official workout builder guide](https://forum.intervals.icu/t/workout-builder/1163/1)

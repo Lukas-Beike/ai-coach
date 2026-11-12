@@ -525,7 +525,7 @@ effect `local_write`; gate domain `planning`; counts no records toward the bulk 
 
 ### `push_strength_to_garmin`
 
-effect `remote_write`; gate domain `remote_garmin`; receipt „Garmin-Krafteinheiten beauftragt“; proposal card „Krafteinheiten an Garmin senden“; not fully tracked (no turn undo).
+effect `remote_write`; gate domain `remote_garmin`; receipt „Garmin-Einheiten beauftragt“; proposal card „Kraft- und Laufeinheiten an Garmin senden“; not fully tracked (no turn undo).
 
 - `entries` (array; ≥1 items; ≤28 items)
 - `entries[].local_id`* (string; uuid)

@@ -522,9 +522,7 @@ def _approved_garmin_arguments(
     """
     raw = arguments.get("entries")
     if not isinstance(raw, list) or not 1 <= len(raw) <= _MAX_GARMIN_ENTRIES:
-        raise AppError(
-            400, "Wähle 1 bis 28 Krafteinheiten.", reason="invalid_job_request"
-        )
+        raise AppError(400, "Wähle 1 bis 28 Einheiten.", reason="invalid_job_request")
     selected = [
         (
             planning_library.workout_library_entry_id(item.get("local_id")),
@@ -604,7 +602,7 @@ def _garmin_approval_details(
     details = _plan_workout_details(rows)
     for detail in details:
         detail["sport"] = (
-            "Von Garmin entfernen" if detail["id"] in removals else "Kraft an Garmin"
+            "Von Garmin entfernen" if detail["id"] in removals else "An Garmin"
         )
     details.extend(
         {

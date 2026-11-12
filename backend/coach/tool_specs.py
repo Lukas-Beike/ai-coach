@@ -466,8 +466,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         SYNC,
         REMOTE_WRITE,
         REMOTE_GARMIN,
-        done="Garmin-Krafteinheiten beauftragt",
-        action="Krafteinheiten an Garmin senden",
+        done="Garmin-Einheiten beauftragt",
+        action="Kraft- und Laufeinheiten an Garmin senden",
         requirements=(
             "garmin-strength-workout-push/Explicit Garmin strength push",
             CA5,
