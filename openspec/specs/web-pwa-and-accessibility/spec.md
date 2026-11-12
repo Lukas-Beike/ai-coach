@@ -255,24 +255,6 @@ The client SHALL expose server-advertised model, thinking, and speed capabilitie
 
 Evidence: `public/settings.js::saveProfile`, `public/settings.js::saveModel`, `public/settings.js::saveThinkingLevel`, `public/settings.js::saveServiceTier`, `public/settings.js::saveCalendarDisplaySettings`, `public/shared.js::applyAppearance`, `public/appearance.js` (early theme projection), `public/views.js::renderModel`; `e2e/model-settings.spec.js::model and speed selection persist with capability checks @responsive`, `e2e/audit-remediation.spec.js::profile edits made while saving remain dirty and visible`, `e2e/contracts.spec.js::appearance choice updates the theme and survives reload on this device`, `tests/test_settings.py::SettingsServiceTests.test_calendar_defaults_clamping_and_write_keys`.
 
-### Requirement: Calendar display window setting
-
-The calendar display setting SHALL hold `past_weeks` (default 1) and `future_weeks` (default 4), each an integer from 0 to 52, stored under `calendar_display_past_weeks` and `calendar_display_future_weeks`. The route contract and its error messages are in `docs/api-routes.md` (`PUT /api/settings/calendar-display`).
-
-#### Scenario: Stored value out of range or unreadable
-- **WHEN** a stored value is not an integer or lies outside 0 to 52
-- **THEN** reads return the default, or the value clamped to 0 to 52
-
-#### Scenario: Invalid save
-- **WHEN** the payload is not an object, a value is not an integer, a value is outside 0 to 52, or neither key is present
-- **THEN** the save fails with HTTP 400 and nothing is written, also when one of two sent values is valid
-
-#### Scenario: Partial save
-- **WHEN** only one key is sent
-- **THEN** only that key is stored and the answer is `{"status": "ok", "past_weeks", "future_weeks"}` with both stored values
-
-Evidence: `backend/settings.py::SettingsService.save_calendar_display_settings`; `backend/settings.py::SettingsService.calendar_display_settings`. Tests: `tests/test_settings.py::test_calendar_defaults_clamping_and_write_keys`; `tests/test_settings.py::test_calendar_invalid_values_have_exact_errors_and_no_partial_write`.
-
 ### Requirement: Diagnostics and destructive operational controls retain reviewable outcomes
 The client SHALL expose operations through their explicit controls, keep downloads and destructive requests visibly pending, request applicable confirmation, and display failures without implying a completed restore/deletion. Diagnostic values SHALL be displayed as inert text.
 
@@ -433,7 +415,7 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 Evidence: `public/analysis.js::renderAnalysisSegments`, `public/analysis.js::renderRunningBestEfforts`, `public/analysis.js::criticalPowerLine`, `public/analysis.js::renderAnalysisHistory`, `public/performance-view.js::renderCurrentPerformance`, `public/navigation.js::routeFromHash`; `tests/analysis-presentation.test.cjs::an analysis segment is empty only when every content container reports no data`, `tests/analysis-presentation.test.cjs::current performance shows the status lines below its heading`, `e2e/performance-values.spec.js::@responsive Laufen and Radfahren each show only their sport`.
 
 ### Requirement: Calendar display range setting
-The system SHALL store how many weeks the training calendar shows back and ahead as `past_weeks` and `future_weeks`, each a whole number from 0 to 52 with defaults 1 and 4. `PUT /api/settings/calendar-display` SHALL change only the values it names and return `status: "ok"` with both (contract in `docs/api-routes.md`).
+The system SHALL store how many weeks the training calendar shows back and ahead as `past_weeks` and `future_weeks`, each a whole number from 0 to 52 with defaults 1 and 4, stored under `calendar_display_past_weeks` and `calendar_display_future_weeks`. `PUT /api/settings/calendar-display` SHALL change only the values it names and return `status: "ok"` with both (contract in `docs/api-routes.md`).
 
 #### Scenario: Partial update
 - **WHEN** only `future_weeks` is sent
@@ -441,10 +423,10 @@ The system SHALL store how many weeks the training calendar shows back and ahead
 
 #### Scenario: Invalid input
 - **WHEN** the body is not an object, names neither value, or a value cannot be converted to an integer or lies outside 0 to 52 (a convertible value such as `3.7` or `true` is stored as its integer)
-- **THEN** the request fails with 400 and nothing changes.
+- **THEN** the request fails with 400 and nothing changes, also when one of two sent values is valid.
 
 #### Scenario: Stored value out of range
 - **WHEN** a stored value is not a number or lies outside the range
 - **THEN** the default is used for the first, and the value is clamped to 0 to 52 for the second.
 
-Evidence: `backend/settings.py::SettingsService._calendar_display_settings`, `backend/settings.py::SettingsService.save_calendar_display_settings`, `backend/http_api/settings_put.py`, `public/settings.js`; `tests/test_server_weather_calendar.py::test_calendar_display_settings_are_persisted_and_validated`, `tests/test_http_settings_put_routes.py::test_calendar_display_route_passes_whole_payload`.
+Evidence: `backend/settings.py::SettingsService._calendar_display_settings`, `backend/settings.py::SettingsService.save_calendar_display_settings`, `backend/http_api/settings_put.py`, `public/settings.js`; `tests/test_server_weather_calendar.py::test_calendar_display_settings_are_persisted_and_validated`, `tests/test_http_settings_put_routes.py::test_calendar_display_route_passes_whole_payload`, `tests/test_settings.py::test_calendar_defaults_clamping_and_write_keys`, `tests/test_settings.py::test_calendar_invalid_values_have_exact_errors_and_no_partial_write`.
