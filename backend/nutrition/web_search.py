@@ -233,9 +233,7 @@ def _kept_values(
     for entry in entries:
         item = entry if isinstance(entry, dict) else {}
         field, value, url = item.get("field"), item.get("value"), item.get("source_url")
-        limit: float = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
-        if per_mass:
-            limit = min(limit, 9.5 * basis if field == "kcal" else basis)
+        limit = _limit(field, basis if per_mass else 0.0)
         if (
             isinstance(field, str)
             and field in missing
@@ -249,6 +247,15 @@ def _kept_values(
                 "source_url": url,
             }
     return {"values": list(kept.values()), "dropped": len(entries) - len(kept)}
+
+
+def _limit(field: Any, basis: float) -> float:
+    """The largest plausible value; with a mass basis, no more than the basis
+    itself and no more energy than pure fat."""
+    limit: float = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
+    if basis > 0:
+        limit = min(limit, 9.5 * basis if field == "kcal" else basis)
+    return limit
 
 
 def _plausible(value: Any, limit: float) -> TypeGuard[float]:
