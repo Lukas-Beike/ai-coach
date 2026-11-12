@@ -25,23 +25,13 @@ class ProductionProviderWiringTests(unittest.TestCase):
         self.assertIs(DEFAULT_PROVIDER_REGISTRY, runtime.static)
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, SQLCIPHER_SKIP_REASON)
-    def test_schedule_orders_follow_registry_ranks(self) -> None:
-        policies = server.provider_runtime().schedule_policies()
+    def test_schedulers_carry_a_policy_for_every_scheduled_provider(self) -> None:
+        scheduled = {WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID}
+        schedulers = server.SYNC_SCHEDULERS
 
-        self.assertEqual(
-            (WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID),
-            tuple(policies["daily"]),
-        )
-        self.assertEqual(
-            (CALENDAR_ID, GARMIN_ID, WEATHER_ID, WAHOO_ID),
-            tuple(policies["startup"]),
-        )
-        self.assertEqual(
-            DEFAULT_PROVIDER_REGISTRY.daily_order(), tuple(policies["daily"])
-        )
-        self.assertEqual(
-            DEFAULT_PROVIDER_REGISTRY.startup_order(), tuple(policies["startup"])
-        )
+        self.assertEqual(scheduled, set(schedulers.daily_scheduler()._policies))
+        self.assertEqual(scheduled, set(schedulers.startup_scheduler()._policies))
+        self.assertEqual(scheduled, set(DEFAULT_PROVIDER_REGISTRY.daily_order()))
 
     def test_sync_period_defaults_are_derived_from_the_registry(self) -> None:
         self.assertEqual({"garmin": 84, "wahoo": 84}, server.SYNC_PERIOD_DEFAULTS)

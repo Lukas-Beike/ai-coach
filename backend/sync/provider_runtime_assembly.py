@@ -41,9 +41,6 @@ from backend.sync.provider_runtime import (
 )
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.schedule_policies import (
-    CalendarSchedulePolicy,
-    GarminSchedulePolicy,
-    WahooSchedulePolicy,
     WeatherSchedulePolicy,
 )
 
@@ -78,17 +75,9 @@ def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindi
 
 
 def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the Garmin automatic schedule, full resync and Coach refresh."""
+    """Bind the Garmin full resync and Coach refresh."""
     garmin = deps.garmin
     all_sync_days = deps.historical.all_sync_days
-
-    def schedule() -> GarminSchedulePolicy:
-        return GarminSchedulePolicy(
-            garmin.sync_service(),
-            deps.garmin_automatic_sync_days,
-            deps.garmin_resync_gate,
-            None if garmin.change_check is None else garmin.change_check(),
-        )
 
     def full_resync() -> GarminFullResync:
         return GarminFullResync(
@@ -106,7 +95,6 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         provider_id=GARMIN_ID,
         configured=lambda: bool(garmin.sync_service().configured()),
         gate=deps.garmin_resync_gate,
-        schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[GARMIN_ID],
         full_resync=full_resync,
         synchronous_refresh=synchronous_refresh,
@@ -117,15 +105,6 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
     """Bind the Wahoo workout sync, scheduled once the athlete connected."""
     wahoo = deps.wahoo
     all_sync_days = deps.historical.all_sync_days
-
-    def schedule() -> WahooSchedulePolicy:
-        return WahooSchedulePolicy(
-            configured=lambda: wahoo.sync_service().configured(),
-            sync_state=deps.state.sync_state_repository(),
-            sync_period_defaults=deps.historical.sync_period_defaults,
-            all_sync_days=all_sync_days,
-            resync_gate=wahoo.resync_gate,
-        )
 
     def full_resync() -> WahooFullResync:
         return WahooFullResync(
@@ -146,7 +125,6 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         provider_id=WAHOO_ID,
         configured=lambda: wahoo.sync_service().configured(),
         gate=wahoo.resync_gate,
-        schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[WAHOO_ID],
         full_resync=full_resync,
         synchronous_refresh=synchronous_refresh,
@@ -155,34 +133,19 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
 
 def weather_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the weather forecast's location-driven schedule."""
-
-    def schedule() -> WeatherSchedulePolicy:
-        return WeatherSchedulePolicy(
-            deps.profile(),
-            refresh_due=lambda: (
-                deps.calendar_weather.weather_sync_service().refresh_due()
-            ),
-        )
-
+    """Bind the weather forecast, configured once a location is saved."""
     return ProviderRuntimeBinding(
         provider_id=WEATHER_ID,
-        configured=lambda: schedule().configured(),
-        schedule=schedule,
+        configured=lambda: WeatherSchedulePolicy(deps.profile()).configured(),
         freshness=DEFAULT_FRESHNESS_SOURCES[WEATHER_ID],
     )
 
 
 def calendar_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the external calendar's configured-URL schedule."""
-
-    def schedule() -> CalendarSchedulePolicy:
-        return CalendarSchedulePolicy(enabled=bool(deps.config().calendar_ical_url))
-
+    """Bind the external calendar, configured by its feed URL."""
     return ProviderRuntimeBinding(
         provider_id=CALENDAR_ID,
-        configured=lambda: schedule().configured(),
-        schedule=schedule,
+        configured=lambda: bool(deps.config().calendar_ical_url),
         freshness=DEFAULT_FRESHNESS_SOURCES[CALENDAR_ID],
     )
 

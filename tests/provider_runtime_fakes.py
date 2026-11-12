@@ -123,18 +123,15 @@ def fake_freshness_inputs(
 def fake_binding(
     provider_id: str = ACME_ID,
     *,
-    policy: FakeSchedulePolicy | None = None,
     freshness: Mapping[str, FreshnessSource] | None = None,
     configured: bool = True,
 ) -> ProviderRuntimeBinding:
     """Build a binding around fakes; freshness defaults to the acme area."""
-    schedule_policy = FakeSchedulePolicy() if policy is None else policy
     sources: Mapping[str, FreshnessSource] = (
         {ACME_AREA: acme_freshness_source()} if freshness is None else freshness
     )
     return ProviderRuntimeBinding(
         provider_id=provider_id,
         configured=lambda: configured,
-        schedule=lambda: schedule_policy,
         freshness=sources,
     )

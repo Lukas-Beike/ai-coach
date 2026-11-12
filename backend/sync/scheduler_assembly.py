@@ -17,13 +17,15 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import scheduler
 from backend.sync.backfill_resume import BackfillChainResumer
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.execution_assembly import WahooJobDependencies
 from backend.sync.garmin_service import GarminSyncService
-from backend.sync.provider_runtime import (
-    ProviderRuntimeRegistry,
-    ProviderSchedulePolicy,
-)
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.schedule_policies import build_schedule_policies
+from backend.sync.schedule_policies import (
+    ProviderSchedulePolicy,
+    WahooSchedulePolicy,
+    build_schedule_policies,
+)
 from backend.sync.state import SyncStateRepository
 
 
@@ -67,11 +69,24 @@ class DailySyncLoopSettings:
     morning_due: Callable[[], bool] | None = None
 
 
+@dataclass(frozen=True)
+class SyncScheduleProviders:
+    """Provider owners the schedule policies read, resolved per scheduler build."""
+
+    garmin_resync_gate: ProviderResyncGate
+    weather_refresh_due: Callable[[], bool]
+    wahoo: WahooJobDependencies
+    sync_period_defaults: Mapping[str, int]
+    all_sync_days: int
+    # The light change check that schedules the automatic Garmin refresh (#2303).
+    garmin_change_check: Callable[[], Any] | None = None
+
+
 class SyncSchedulerAssembly:
     """Create configured scheduler and daily-loop objects on demand.
 
-    With ``provider_runtime`` the schedules and registry order come from the
-    runtime registry, resolved fresh for each scheduler that is built.
+    Schedule policies are built fresh for each scheduler, so a scheduler sees
+    the configuration of the moment it was built.
     """
 
     @dataclass(frozen=True)
@@ -81,12 +96,12 @@ class SyncSchedulerAssembly:
         controls: SyncScheduleControls
         policy: SyncSchedulePolicy
         daily_loop: DailySyncLoopSettings
+        providers: SyncScheduleProviders
 
     def __init__(
         self,
         *,
         dependencies: SyncSchedulerAssembly.Inputs,
-        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
     ) -> None:
         owners = dependencies.owners
         persistence = dependencies.persistence
@@ -110,7 +125,7 @@ class SyncSchedulerAssembly:
         self._logger = daily_loop.logger
         self._database_manager = daily_loop.database_manager
         self._morning_due = daily_loop.morning_due
-        self._provider_runtime = provider_runtime
+        self._providers = dependencies.providers
 
     def daily_scheduler(self) -> scheduler.DailySyncScheduler:
         """Create a daily schedule using the current provider configuration."""
@@ -120,7 +135,6 @@ class SyncSchedulerAssembly:
         queue = self._queue_service()
         markers = self._daily_sync_marker_service()
         garmin = self._garmin_sync_service()
-        runtime = self._runtime()
         return scheduler.DailySyncScheduler(
             profile,
             queue,
@@ -132,16 +146,11 @@ class SyncSchedulerAssembly:
                 garmin_automatic_sync_days=self._garmin_automatic_sync_days,
                 auto_update_label=self._auto_update_label,
             ),
-            schedule_policies=(
-                self._schedule_policies(
-                    profile=profile,
-                    garmin=garmin,
-                    calendar_enabled=calendar_enabled,
-                )
-                if runtime is None
-                else runtime.schedule_policies()["daily"]
+            schedule_policies=self._schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                calendar_enabled=calendar_enabled,
             ),
-            registry=None if runtime is None else runtime.static,
             retry_held=self._retry_held,
             backfill_resumer=self.backfill_resumer().resume,
         )
@@ -151,7 +160,6 @@ class SyncSchedulerAssembly:
         config = self._config()
         profile = self._profile_service()
         garmin = self._garmin_sync_service()
-        runtime = self._runtime()
         return BackfillChainResumer(
             self._queue_service(),
             self._sync_state_repository(),
@@ -159,12 +167,9 @@ class SyncSchedulerAssembly:
                 profile=profile,
                 garmin=garmin,
                 calendar_enabled=bool(config.calendar_ical_url),
-            )
-            if runtime is None
-            else runtime.schedule_policies()["daily"],
+            ),
             chunk_days=self._sync_chunk_days,
             earliest_date=self._sync_earliest_date,
-            registry=None if runtime is None else runtime.static,
         )
 
     def startup_scheduler(self) -> scheduler.StartupSyncScheduler:
@@ -175,7 +180,6 @@ class SyncSchedulerAssembly:
         queue = self._queue_service()
         garmin = self._garmin_sync_service()
         sync_state = self._sync_state_repository()
-        runtime = self._runtime()
         return scheduler.StartupSyncScheduler(
             profile,
             queue,
@@ -187,20 +191,12 @@ class SyncSchedulerAssembly:
                 sync_chunk_days=self._sync_chunk_days,
                 sync_earliest_date=self._sync_earliest_date,
             ),
-            schedule_policies=(
-                self._schedule_policies(
-                    profile=profile,
-                    garmin=garmin,
-                    calendar_enabled=calendar_enabled,
-                )
-                if runtime is None
-                else runtime.schedule_policies()["startup"]
+            schedule_policies=self._schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                calendar_enabled=calendar_enabled,
             ),
-            registry=None if runtime is None else runtime.static,
         )
-
-    def _runtime(self) -> ProviderRuntimeRegistry | None:
-        return None if self._provider_runtime is None else self._provider_runtime()
 
     def _schedule_policies(
         self,
@@ -209,12 +205,25 @@ class SyncSchedulerAssembly:
         garmin: GarminSyncService,
         calendar_enabled: bool,
     ) -> Mapping[str, ProviderSchedulePolicy]:
-        """Build the built-in policies from the snapshot taken by the caller."""
+        """Build the provider policies from the snapshot taken by the caller."""
+        providers = self._providers
+        wahoo = providers.wahoo
+        change_check = providers.garmin_change_check
         return build_schedule_policies(
             profile=profile,
             garmin=garmin,
             calendar_enabled=calendar_enabled,
             garmin_automatic_sync_days=self._garmin_automatic_sync_days,
+            garmin_resync_gate=providers.garmin_resync_gate,
+            garmin_change_check=None if change_check is None else change_check(),
+            weather_refresh_due=providers.weather_refresh_due,
+            wahoo=WahooSchedulePolicy(
+                configured=lambda: wahoo.sync_service().configured(),
+                sync_state=self._sync_state_repository(),
+                sync_period_defaults=providers.sync_period_defaults,
+                all_sync_days=providers.all_sync_days,
+                resync_gate=wahoo.resync_gate,
+            ),
         )
 
     def daily_loop(self) -> scheduler.DailySyncLoop:

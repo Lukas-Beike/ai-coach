@@ -20,6 +20,8 @@ class WeatherSyncWorkflow(Protocol):
         operation_id: str | None = None,
     ) -> dict[str, Any]: ...
 
+    def refresh_due(self) -> bool: ...
+
 
 @dataclass(frozen=True)
 class WeatherStateOwners:

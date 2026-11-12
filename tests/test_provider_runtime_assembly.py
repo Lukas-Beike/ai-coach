@@ -16,14 +16,13 @@ import unittest
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest import mock
 
 from provider_runtime_fakes import (
     ACME_AREA,
     ACME_ID,
     FakeJobOwner,
-    FakeSchedulePolicy,
     acme_descriptor,
     fake_binding,
 )
@@ -62,7 +61,6 @@ from backend.sync.provider_table import (
     CALENDAR_ID,
     DEFAULT_PROVIDER_DESCRIPTORS,
     WEATHER_ID,
-    SchedulePolicy,
 )
 
 BUILTIN_IDS = frozenset({INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID})
@@ -157,10 +155,9 @@ class _KeyValuesFake:
 
 def _acme_binding(
     *,
-    policy: FakeSchedulePolicy | None = None,
     refresh: _SynchronousRefreshFake | None = None,
 ) -> ProviderRuntimeBinding:
-    binding = fake_binding(ACME_ID, policy=policy)
+    binding = fake_binding(ACME_ID)
     if refresh is None:
         return binding
     return dataclasses.replace(binding, synchronous_refresh=lambda: refresh)
@@ -225,44 +222,6 @@ class BuiltinBindingTests(unittest.TestCase):
         self.assertEqual(set(runtime.synchronous_refreshes()), {GARMIN_ID, WAHOO_ID})
         self.assertEqual(set(runtime.running_probes()), {WAHOO_ID})
 
-    def test_builtin_schedules_follow_registry_order(self) -> None:
-        runtime = build_provider_runtime(
-            DEFAULT_PROVIDER_REGISTRY,
-            builtin_bindings(_builtin_deps(intervals_key="fake", calendar_url="fake")),
-        )
-
-        policies = runtime.schedule_policies()
-
-        self.assertEqual(
-            list(policies["daily"]),
-            [
-                pid
-                for pid in DEFAULT_PROVIDER_REGISTRY.daily_order()
-                if pid in BUILTIN_IDS
-            ],
-        )
-        self.assertEqual(
-            list(policies["startup"]),
-            [
-                pid
-                for pid in DEFAULT_PROVIDER_REGISTRY.startup_order()
-                if pid in BUILTIN_IDS
-            ],
-        )
-
-    def test_weather_schedule_waits_while_the_forecast_cache_is_fresh(self) -> None:
-        deps = _builtin_deps()
-        weather = cast(Any, deps.calendar_weather).weather_sync_service.return_value
-        runtime = build_provider_runtime(
-            DEFAULT_PROVIDER_REGISTRY, builtin_bindings(deps)
-        )
-        policy = runtime.schedule_policies()["daily"][WEATHER_ID]
-
-        weather.refresh_due.return_value = False
-        self.assertTrue(policy.blocked())
-        weather.refresh_due.return_value = True
-        self.assertFalse(policy.blocked())
-
 
 class RegistryValidationTests(unittest.TestCase):
     def test_binding_without_descriptor_is_rejected(self) -> None:
@@ -286,36 +245,8 @@ class RegistryValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "freshness sources"):
             ProviderRuntimeRegistry(ACME_ONLY_STATIC, [fake_binding(freshness={})])
 
-    def test_schedule_requires_a_descriptor_rank(self) -> None:
-        unranked = dataclasses.replace(
-            acme_descriptor(),
-            schedule=SchedulePolicy(
-                daily_rank=None, startup_rank=None, daily_marker=False
-            ),
-        )
-
-        with self.assertRaisesRegex(ValueError, "schedule policy requires"):
-            ProviderRuntimeRegistry(ProviderRegistry((unranked,)), [_acme_binding()])
-
 
 class AcmeAssemblyTests(unittest.TestCase):
-    def test_schedule_order_places_acme_by_its_descriptor_rank(self) -> None:
-        policy = FakeSchedulePolicy()
-        deps = _builtin_deps(intervals_key="fake", calendar_url="fake")
-        runtime = ProviderRuntimeRegistry(
-            ACME_STATIC,
-            (*builtin_bindings(deps), _acme_binding(policy=policy)),
-        )
-
-        policies = runtime.schedule_policies()
-        bound = BUILTIN_IDS | {ACME_ID}
-
-        self.assertEqual(
-            list(policies["daily"]),
-            [pid for pid in ACME_STATIC.daily_order() if pid in bound],
-        )
-        self.assertIs(policies["daily"][ACME_ID], policy)
-
     def test_queued_refresh_enqueues_through_the_runtime_registry(self) -> None:
         queue = _QueueFake()
         runtime = ProviderRuntimeRegistry(ACME_ONLY_STATIC, [_acme_binding()])

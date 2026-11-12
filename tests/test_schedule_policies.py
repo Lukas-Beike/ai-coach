@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from provider_runtime_fakes import ACME_ID, FakeSchedulePolicy, acme_descriptor
 
-from backend.canonical.vocabulary import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_table import (
@@ -189,6 +189,32 @@ class BuildSchedulePoliciesTests(unittest.TestCase):
         self.assertTrue(policies[WEATHER_ID].configured())
         self.assertTrue(policies[CALENDAR_ID].configured())
         self.assertTrue(policies[GARMIN_ID].configured())
+
+    def test_production_options_reach_their_policies(self) -> None:
+        # Moved from the runtime bindings (#2070): weather waits on its cache,
+        # Wahoo is included when given, Garmin carries its resync gate.
+        due = [False]
+        gate = ProviderResyncGate("Garmin")
+        wahoo = cast(Any, FakeSchedulePolicy())
+        policies = build_schedule_policies(
+            profile=cast(Any, _Profile()),
+            garmin=cast(Any, _Garmin()),
+            calendar_enabled=True,
+            garmin_automatic_sync_days=7,
+            garmin_resync_gate=gate,
+            weather_refresh_due=lambda: due[0],
+            wahoo=wahoo,
+        )
+
+        self.assertEqual(set(policies), {WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID})
+        self.assertIs(wahoo, policies[WAHOO_ID])
+        self.assertTrue(policies[WEATHER_ID].blocked())
+        due[0] = True
+        self.assertFalse(policies[WEATHER_ID].blocked())
+        self.assertFalse(policies[GARMIN_ID].blocked())
+        gate.begin_reset()
+        self.addCleanup(gate.end_reset)
+        self.assertTrue(policies[GARMIN_ID].blocked())
 
 
 class _ScheduleQueue:

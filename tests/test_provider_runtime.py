@@ -24,13 +24,13 @@ from backend.sync.provider_runtime import (
     FreshnessSource,
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
-    ProviderSchedulePolicy,
 )
 from backend.sync.provider_table import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     ProviderDescriptor,
     SchedulePolicy,
 )
+from backend.sync.schedule_policies import ProviderSchedulePolicy
 
 BETA_ID = "beta-mock"
 
@@ -181,18 +181,14 @@ class ProviderRuntimeValidationTests(unittest.TestCase):
 
 class ProviderRuntimeAccessorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.acme_policy = _CountingFactory(FakeSchedulePolicy())
-        self.beta_policy = _CountingFactory(FakeSchedulePolicy())
         self.acme = ProviderRuntimeBinding(
             provider_id=ACME_ID,
             configured=lambda: True,
-            schedule=self.acme_policy,
             freshness={ACME_AREA: acme_freshness_source()},
         )
         self.beta = ProviderRuntimeBinding(
             provider_id=BETA_ID,
             configured=lambda: True,
-            schedule=self.beta_policy,
             freshness={ACME_AREA: acme_freshness_source()},
         )
         self.registry = _build([self.beta, self.acme])
@@ -207,33 +203,10 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
             self.registry.binding("intervals")
 
     def test_unbound_providers_are_absent_from_every_mapping(self) -> None:
-        self.assertNotIn("intervals", self.registry.schedule_policies()["daily"])
         self.assertNotIn("intervals", self.registry.freshness_sources())
         self.assertNotIn("intervals", self.registry.resync_handlers())
         self.assertNotIn("intervals", self.registry.synchronous_refreshes())
         self.assertNotIn("intervals", self.registry.running_probes())
-
-    def test_schedule_policies_follow_daily_and_startup_order(self) -> None:
-        policies = self.registry.schedule_policies()
-        self.assertEqual(("beta-mock", ACME_ID), tuple(policies["daily"]))
-        self.assertEqual((ACME_ID, BETA_ID), tuple(policies["startup"]))
-
-    def test_schedule_policy_is_built_once_for_both_orders(self) -> None:
-        policies = self.registry.schedule_policies()
-        self.registry.schedule_policies()
-        self.assertEqual(1, self.acme_policy.calls)
-        self.assertIs(policies["daily"][ACME_ID], policies["startup"][ACME_ID])
-        self.assertIsInstance(policies["daily"][ACME_ID], FakeSchedulePolicy)
-
-    def test_bound_provider_without_schedule_factory_is_absent(self) -> None:
-        unscheduled = ProviderRuntimeBinding(
-            provider_id=ACME_ID,
-            configured=lambda: True,
-            freshness={ACME_AREA: acme_freshness_source()},
-        )
-        registry = _build([unscheduled])
-        self.assertEqual({}, dict(registry.schedule_policies()["daily"]))
-        self.assertEqual({}, dict(registry.schedule_policies()["startup"]))
 
     def test_schedule_policy_protocol_is_satisfied_by_fake(self) -> None:
         policy: ProviderSchedulePolicy = FakeSchedulePolicy(blocked=True)
@@ -316,7 +289,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
 
     def test_every_mapping_is_read_only(self) -> None:
         for mapping in (
-            self.registry.schedule_policies(),
             self.registry.freshness_sources(),
             self.registry.resync_handlers(),
             self.registry.synchronous_refreshes(),
@@ -340,13 +312,6 @@ class ProviderRuntimeIterableInputTests(unittest.TestCase):
 
 
 class RuntimeOrchestrationBindingTests(unittest.TestCase):
-    def test_schedule_requires_a_descriptor_rank(self) -> None:
-        static = ProviderRegistry(
-            (dataclasses.replace(acme_descriptor(), schedule=SchedulePolicy()),)
-        )
-        with self.assertRaisesRegex(ValueError, "schedule policy requires"):
-            ProviderRuntimeRegistry(static, [fake_binding()])
-
     def test_synchronous_refresh_requires_a_coach_rank(self) -> None:
         static = ProviderRegistry(
             (dataclasses.replace(acme_descriptor(), coach_rank=None),)
@@ -381,16 +346,16 @@ class RuntimeOrchestrationBindingTests(unittest.TestCase):
     def test_factory_may_read_another_accessor_without_deadlock(self) -> None:
         holder: list[ProviderRuntimeRegistry] = []
 
-        def schedule() -> FakeSchedulePolicy:
+        def refresh() -> Any:
             holder[0].resync_handlers()
-            return FakeSchedulePolicy()
+            return _FakeSynchronousRefresh()
 
-        binding = dataclasses.replace(fake_binding(), schedule=schedule)
+        binding = dataclasses.replace(fake_binding(), synchronous_refresh=refresh)
         registry = ProviderRuntimeRegistry(
             ProviderRegistry((acme_descriptor(),)), [binding]
         )
         holder.append(registry)
-        self.assertIn(ACME_ID, registry.schedule_policies()["daily"])
+        self.assertIn(ACME_ID, registry.synchronous_refreshes())
 
 
 if __name__ == "__main__":

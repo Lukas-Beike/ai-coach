@@ -1,7 +1,6 @@
 """Runtime contracts for provider-owned synchronization orchestration.
 
-Providers contribute runtime objects (schedule policies, freshness
-sources, full-resync handlers, synchronous refreshes, running probes) through a
+Providers contribute runtime objects (freshness sources, full-resync handlers, synchronous refreshes, running probes) through a
 ``ProviderRuntimeBinding``. ``ProviderRuntimeRegistry`` checks each binding
 against the static descriptor in ``ProviderRegistry`` and exposes the bound
 objects in descriptor order.
@@ -16,7 +15,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from backend.errors import AppError
 from backend.sync.gates import ProviderResyncGate
@@ -25,21 +24,6 @@ from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_table import ProviderDescriptor
 
 _T = TypeVar("_T")
-
-
-class ProviderSchedulePolicy(Protocol):
-    """Decides whether a provider is scheduled and what its refresh payload is."""
-
-    def configured(self) -> bool:
-        """Return whether the provider has the settings it needs."""
-
-    def blocked(self) -> bool:
-        """Return whether a scheduled refresh must wait."""
-
-    def refresh_payload(
-        self, trigger: Literal["daily", "startup"], reason: str
-    ) -> dict[str, Any]:
-        """Return the job payload for a scheduled refresh."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +86,6 @@ class ProviderRuntimeBinding:
     provider_id: str
     configured: Callable[[], bool]
     gate: ProviderResyncGate | None = None
-    schedule: Callable[[], ProviderSchedulePolicy] | None = None
     freshness: Mapping[str, FreshnessSource] = field(default_factory=dict)
     full_resync: Callable[[], FullResyncHandler] | None = None
     synchronous_refresh: Callable[[], SynchronousRefresh] | None = None
@@ -146,19 +129,10 @@ def _check_resync(
 def _check_capabilities(
     descriptor: ProviderDescriptor, binding: ProviderRuntimeBinding
 ) -> None:
-    if binding.schedule is not None and not _has_schedule_rank(descriptor):
-        raise ValueError("schedule policy requires a descriptor schedule rank")
     if binding.synchronous_refresh is not None and descriptor.coach_rank is None:
         raise ValueError("synchronous refresh requires a descriptor coach rank")
     if descriptor.coach_waits_for_completion and binding.synchronous_refresh is None:
         raise ValueError("descriptor waiting requires a synchronous refresh")
-
-
-def _has_schedule_rank(descriptor: ProviderDescriptor) -> bool:
-    return (
-        descriptor.schedule.daily_rank is not None
-        or descriptor.schedule.startup_rank is not None
-    )
 
 
 def _validate_binding(
@@ -216,15 +190,6 @@ class ProviderRuntimeRegistry:
         """Return a provider's binding; an unbound provider raises KeyError."""
         return self._by_id[provider_id]
 
-    def schedule_policies(self) -> Mapping[str, Mapping[str, ProviderSchedulePolicy]]:
-        """Return policies keyed by "daily" and "startup", each in that order."""
-        return MappingProxyType(
-            {
-                "daily": self._scheduled(self._static.daily_order()),
-                "startup": self._scheduled(self._static.startup_order()),
-            }
-        )
-
     def freshness_sources(self) -> Mapping[str, Mapping[str, FreshnessSource]]:
         return self._freshness_views
 
@@ -255,18 +220,6 @@ class ProviderRuntimeRegistry:
             if binding.running_probe is not None:
                 probes[binding.provider_id] = binding.running_probe
         return MappingProxyType(probes)
-
-    def _scheduled(
-        self, order: tuple[str, ...]
-    ) -> Mapping[str, ProviderSchedulePolicy]:
-        policies: dict[str, ProviderSchedulePolicy] = {}
-        for provider_id in order:
-            binding = self._by_id.get(provider_id)
-            if binding is not None and binding.schedule is not None:
-                policies[provider_id] = self._resolve(
-                    "schedule", provider_id, binding.schedule
-                )
-        return MappingProxyType(policies)
 
     def _factory_mapping(
         self,

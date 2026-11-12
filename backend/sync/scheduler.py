@@ -19,9 +19,11 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.schedule_policies import build_schedule_policies
+from backend.sync.schedule_policies import (
+    ProviderSchedulePolicy,
+    build_schedule_policies,
+)
 from backend.sync.state import SyncStateRepository
 
 LOGGER = logging.getLogger("intervals_coach")
