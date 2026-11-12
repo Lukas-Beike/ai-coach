@@ -157,6 +157,14 @@ class BrowserRunnerTests(unittest.TestCase):
                     with self.assertRaises(runner.RunnerError):
                         runner.read_weights(path)
 
+    def test_bare_spec_name_resolves_to_its_single_listed_path(self):
+        listing = runner.parse_listing(report())
+        timing = runner.read_weights(None)
+        (child,) = runner.select(listing, "desktop", ["b.spec.js"], 1, 1, timing)
+        self.assertEqual(child["file"], "e2e/b.spec.js")
+        with self.assertRaisesRegex(runner.RunnerError, "e2e/<name>.spec.js"):
+            runner.select(listing, "desktop", ["absent.spec.js"], 1, 1, timing)
+
     def test_invalid_and_zero_selection_fail(self):
         listing = runner.parse_listing(report())
         timing = runner.read_weights(None)
