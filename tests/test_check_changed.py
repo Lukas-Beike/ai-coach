@@ -26,7 +26,12 @@ class FakeRun:
         if any(word in argv[0] for word in self.missing):
             raise FileNotFoundError(argv[0])
         failed = any(word in argv for word in self.failing)
-        output = "\n".join(f"line {n}" for n in range(30)) if failed else "fine"
+        output = (
+            "FAIL: test_x (mod.Case.test_x)\n"
+            + "\n".join(f"line {n}" for n in range(30))
+            if failed
+            else "fine"
+        )
         return subprocess.CompletedProcess(argv, 1 if failed else 0, output, None)
 
 
@@ -76,6 +81,12 @@ class CheckChangedTests(unittest.TestCase):
         self.assertIn("line 29", out)
         self.assertIn("line 10", out)
         self.assertNotIn("line 9\n", out)
+        # The failed test's name sits far above the tail but is still shown,
+        # and the whole output is kept in a temporary file.
+        self.assertIn("FAIL: test_x (mod.Case.test_x)", out)
+        log = Path(out.split("full output: ", 1)[1].splitlines()[0])
+        self.addCleanup(log.unlink)
+        self.assertIn("line 5\n", log.read_text(encoding="utf-8"))
 
     def test_node_tests_run_with_the_flag_or_when_the_diff_has_js(self):
         cases = [
