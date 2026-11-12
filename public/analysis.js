@@ -782,7 +782,7 @@ async function renderCyclingPowerProfile() {
     renderAnalysisSegmentsIfActive();
   } catch (error) {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
-      showProfileCardsState(error || new Error());
+      showProfileCardsState(error || new Error("Konnte nicht geladen werden."));
       renderAnalysisSegmentsIfActive();
     }
   }
