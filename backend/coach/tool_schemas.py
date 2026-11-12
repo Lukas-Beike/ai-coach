@@ -12,6 +12,7 @@ from backend.activities.hr_cap import (
     cap_table_text,
 )
 from backend.athlete.profile import COACH_READ_ONLY_FIELDS
+from backend.db.repositories import NUTRIENT_COLUMNS
 from backend.nutrition.catalog import (
     GAP_ORIGINS,
     MAX_GAP_GRAMS,
@@ -1511,6 +1512,15 @@ def build_structured_tool_schemas(
                                 "enum": sorted(GAP_ORIGINS),
                             },
                             "source_url": {"type": "string", "maxLength": 500},
+                            "source_urls": {
+                                "type": "object",
+                                "description": "Source page per field when the values come from different pages (web search results); overrides source_url for that field.",
+                                "additionalProperties": False,
+                                "properties": {
+                                    field: {"type": "string", "maxLength": 500}
+                                    for field in NUTRIENT_COLUMNS
+                                },
+                            },
                         },
                         "required": ["id", "values", "origin"],
                     },

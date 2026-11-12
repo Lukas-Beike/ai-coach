@@ -203,6 +203,25 @@ class NutritionProductContractTests(unittest.TestCase):
         )
         self.assertEqual(again["unchanged"][0]["skipped"], ["salt_g"])
         self.assertEqual(catalog.get_product(own["id"])["salt_g"], 0.4)
+        # Values from different web pages each name their own page.
+        stored_fill = catalog.fill_product_gaps(
+            [
+                {
+                    "id": stored["id"],
+                    "values": {"sugar_g": 4, "fiber_g": 0.8},
+                    "origin": "web",
+                    "source_url": "https://example.test/a",
+                    "source_urls": {"fiber_g": "https://example.test/b"},
+                }
+            ]
+        )
+        self.assertEqual(
+            {
+                item["field"]: item["source_url"]
+                for item in stored_fill["changes"][0]["written"]
+            },
+            {"sugar_g": "https://example.test/a", "fiber_g": "https://example.test/b"},
+        )
 
     def test_invalid_gap_fills_are_rejected_without_a_write(self):
         catalog = self.library.product_catalog

@@ -102,11 +102,12 @@ class ProductCatalogService:
 
     def search_web_values(self, ids: Any) -> dict[str, Any]:
         """Web values for the empty core fields of up to five named products."""
-        if (
-            not isinstance(ids, list)
-            or not 1 <= len(ids) <= MAX_WEB_SEARCH_PRODUCTS
-            or not all(isinstance(item, str) for item in ids)
-        ):
+        wanted = (
+            list(dict.fromkeys(str(item).strip() for item in ids))
+            if isinstance(ids, list) and all(isinstance(item, str) for item in ids)
+            else []
+        )
+        if not 1 <= len(wanted) <= MAX_WEB_SEARCH_PRODUCTS or "" in wanted:
             raise AppError(
                 400,
                 f"products muss 1 bis {MAX_WEB_SEARCH_PRODUCTS} Produkt-IDs enthalten.",
@@ -114,12 +115,19 @@ class ProductCatalogService:
             )
         if self._web_search is None:
             raise AppError(503, "Die Websuche ist nicht verfügbar.")
-        wanted = list(dict.fromkeys(ids))
         with self._database_manager.reader() as db:
             found = self._products.list_incomplete(db, ids=wanted)
         known = {product["id"] for product in found}
         # The search runs after the read: no database lock is held for the request.
-        result = self._web_search(found) if found else {"ok": True, "products": []}
+        result = (
+            self._web_search(found)
+            if found
+            else {
+                "ok": True,
+                "products": [],
+                "notice": "Keines der Produkte hat leere Kernwerte.",
+            }
+        )
         skipped = [item for item in wanted if item not in known]
         return {**result, **({"skipped": skipped} if skipped else {})}
 
@@ -217,7 +225,7 @@ class ProductCatalogService:
     def _fill_one(self, db: Any, item: Any, fetched_at: str) -> dict[str, Any]:
         product_id = str(item.get("id") or "") if isinstance(item, dict) else ""
         try:
-            values, origin, source_url = _gap_values(item)
+            values, origin, sources = _gap_values(item)
         except (TypeError, ValueError) as exc:
             return {"id": product_id, "rejected": str(exc)}
         previous = self._products.get(db, product_id)
@@ -226,14 +234,17 @@ class ProductCatalogService:
             previous and previous.get("status") != "active"
         ):
             return {"id": product_id, "rejected": PRODUCT_NOT_FOUND}
-        written = fill_empty_nutrients(
-            db,
-            product_id,
-            values,
-            origin=origin,
-            fetched_at=fetched_at,
-            source_url=source_url,
-        )
+        written: dict[str, Any] = {}
+        # One write per source page, so each value names its own page.
+        for page in dict.fromkeys(sources.values()):
+            written |= fill_empty_nutrients(
+                db,
+                product_id,
+                {key: value for key, value in values.items() if sources[key] == page},
+                origin=origin,
+                fetched_at=fetched_at,
+                source_url=page or None,
+            )
         if written and previous:
             change_history.record_change(
                 db,
@@ -261,7 +272,7 @@ class ProductCatalogService:
                     "field": field,
                     "value": value,
                     "origin": origin,
-                    **({"source_url": source_url} if source_url else {}),
+                    **({"source_url": sources[field]} if sources[field] else {}),
                 }
                 for field, value in written.items()
             ],
@@ -485,18 +496,20 @@ class ProductCatalogService:
         return self._products.save(db, restored)
 
 
-def _gap_values(item: Any) -> tuple[dict[str, float], str, str]:
-    """The values, origin and source page of one gap-fill item, or a rejection."""
+def _gap_values(item: Any) -> tuple[dict[str, float], str, dict[str, str]]:
+    """The values, origin and each value's source page of one gap-fill item.
+
+    ``source_urls`` names a page per field; ``source_url`` is the page of the
+    others. Raise on a rejection.
+    """
     if not isinstance(item, dict):
         raise TypeError("Der Eintrag muss ein Objekt sein.")
     origin = item.get("origin")
-    source_url = str(item.get("source_url") or "").strip()
     if origin not in GAP_ORIGINS:
         raise ValueError("origin muss open_food_facts, yazio, bls oder web sein.")
-    if source_url and not SOURCE_URL.fullmatch(source_url):
-        raise ValueError("source_url muss eine http(s)-Adresse sein.")
-    if origin == "web" and not source_url:
-        raise ValueError("Webwerte brauchen die Quellseite source_url.")
+    per_field = item.get("source_urls") or {}
+    if not isinstance(per_field, dict):
+        raise TypeError("source_urls muss je Feld eine Adresse nennen.")
     raw = item.get("values")
     if not isinstance(raw, dict) or not raw:
         raise ValueError("values muss Kernfelder mit Zahlen enthalten.")
@@ -512,4 +525,13 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, str]:
         ):
             raise ValueError(f"Ungültiger Wert für {field}.")
         values[field] = round(value, 3)
-    return values, str(origin), source_url
+    sources = {
+        field: str(per_field.get(field) or item.get("source_url") or "").strip()
+        for field in values
+    }
+    for field, page in sources.items():
+        if page and not SOURCE_URL.fullmatch(page):
+            raise ValueError(f"source_url für {field} muss eine http(s)-Adresse sein.")
+        if origin == "web" and not page:
+            raise ValueError(f"Webwerte brauchen eine source_url für {field}.")
+    return values, str(origin), sources

@@ -62,10 +62,13 @@ Missing values can also come from the web: `search_web_for_product_values`
 (up to five named products) sends one separate OpenAI Responses request with the
 `web_search` tool and the selected model. The request carries only each
 product's name, brand, EAN, basis and missing field names, never an athlete
-record or message. A value is returned only when it is a plausible number for a
-still-empty core field and its source page is one the search cited; it carries
-origin `web` and that page, and web text is treated as untrusted data. The Coach
-shows the values before writing them with `fill_nutrition_product_gaps`. If the
+record or message; it runs at low reasoning effort and the default service tier.
+A value is returned only when it is a plausible number for a still-empty core
+field (no more than the product's basis in grams, no more energy than pure fat)
+and its source page is one the search read or cited; it carries origin `web` and
+that page, and web text is treated as untrusted data. The Coach shows the values
+before writing them with `fill_nutrition_product_gaps`, each with its own source
+page (`source_urls`). If the
 endpoint rejects the tool or the request fails, the result says web search is
 not available and nothing is written.
 For the Coach, matches carry the origin `data_origin` (`live`,

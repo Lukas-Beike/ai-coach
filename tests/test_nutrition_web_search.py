@@ -19,11 +19,24 @@ PAGE = "https://example.test/synthetic-bar"
 NOW = datetime(2026, 11, 12, 8, 0, tzinfo=UTC)
 
 
-def response(values: list[dict[str, Any]], cited=(PAGE,), ref=1) -> dict[str, Any]:
-    """A Responses API result: JSON text with url_citation annotations."""
+def response(
+    values: list[dict[str, Any]], cited=(PAGE,), ref=1, read=(), narrated=False
+) -> dict[str, Any]:
+    """A Responses API result: the pages read, then the JSON text with citations."""
+    narration = [
+        {
+            "type": "message",
+            "content": [{"type": "output_text", "text": "Ich suche die Werte ..."}],
+        }
+    ]
     return {
         "output": [
-            {"type": "web_search_call", "id": "ws_1"},
+            *(narration if narrated else []),
+            {
+                "type": "web_search_call",
+                "id": "ws_1",
+                "action": {"sources": [{"url": url} for url in read]},
+            },
             {
                 "type": "message",
                 "content": [
@@ -85,7 +98,24 @@ class NutritionWebSearchTests(unittest.TestCase):
         self.assertEqual(request["tools"], [{"type": "web_search"}])
         self.assertEqual(
             set(request),
-            {"path", "model", "tools", "instructions", "input", "text", "store"},
+            {
+                "path",
+                "model",
+                "tools",
+                "instructions",
+                "input",
+                "text",
+                "store",
+                "include",
+                "reasoning",
+                "service_tier",
+            },
+        )
+        self.assertEqual(request["include"], ["web_search_call.action.sources"])
+        # An auxiliary lookup never inherits a premium tier or high reasoning.
+        self.assertEqual(
+            (request["reasoning"], request["service_tier"]),
+            ({"effort": "low"}, "default"),
         )
         self.assertEqual(
             json.loads(request["input"]),
@@ -116,6 +146,13 @@ class NutritionWebSearchTests(unittest.TestCase):
                 0,
             ),
             "uncited page": ([value("salt_g", 0.7)], ("https://other.test/",), 0, 1),
+            "cited as http and www": (
+                [value("salt_g", 0.7)],
+                ("http://www.example.test/synthetic-bar",),
+                1,
+                0,
+            ),
+            "above the basis": ([value("fiber_g", 101)], (PAGE,), 0, 1),
             "not http": ([value("salt_g", 0.7, "ftp://example.test/x")], (), 0, 1),
             "known field": ([value("kcal", 400)], (PAGE,), 0, 1),
             "not a core field": ([value("sodium_g", 1)], (PAGE,), 0, 1),
@@ -129,11 +166,22 @@ class NutritionWebSearchTests(unittest.TestCase):
         for label, (values, cited, kept, dropped) in cases.items():
             with self.subTest(label):
                 result = service(response(values, cited))[0].search([ROW])
-                product = result["products"][0]
-                self.assertEqual(len(product["values"]), kept)
-                self.assertEqual(product["dropped"], dropped)
-                self.assertEqual(result["data_origin"], "web")
-                self.assertIn("untrusted", result["notice"])
+                self._assert_kept(result, kept, dropped)
+
+    def test_a_page_the_search_read_counts_without_an_inline_citation(self) -> None:
+        # JSON output carries no inline citations; the read sources still count,
+        # and a narrating message before the answer is not part of the JSON.
+        result = service(
+            response([value("salt_g", 0.7)], cited=(), read=(PAGE,), narrated=True)
+        )[0].search([ROW])
+        self._assert_kept(result, 1, 0)
+
+    def _assert_kept(self, result: dict[str, Any], kept: int, dropped: int) -> None:
+        product = result["products"][0]
+        self.assertEqual(len(product["values"]), kept)
+        self.assertEqual(product["dropped"], dropped)
+        self.assertEqual(result["data_origin"], "web")
+        self.assertIn("untrusted", result["notice"])
 
     def test_kept_value_names_field_number_and_source_page(self) -> None:
         result = service(response([value("salt_g", 0.7), value("fiber_g", 2.5)]))[
@@ -239,11 +287,14 @@ class NutritionWebSearchCatalogTests(unittest.TestCase):
         )
 
     def test_invalid_product_lists_are_rejected(self) -> None:
-        for ids in (None, [], "x", [1], [str(n) for n in range(6)]):
+        for ids in (None, [], "x", [1], [" "], [str(n) for n in range(6)]):
             with self.subTest(ids=ids), self.assertRaises(AppError) as raised:
                 self.catalog.search_web_values(ids)
             self.assertEqual(raised.exception.status, 400)
         self.assertEqual(self.sent, [])
+        # Repeats and spaces count once: six entries of one product are one search.
+        self.catalog.search_web_values([f" {self.own['id']} "] * 6)
+        self.assertEqual(len(json.loads(self.sent[0]["input"])["products"]), 1)
 
 
 if __name__ == "__main__":
