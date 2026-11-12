@@ -8,7 +8,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
@@ -17,6 +17,7 @@ from backend import change_history
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.errors import AppError
+from backend.nutrition.food_database import FOUND_TTL_SECONDS, FoodDatabaseService
 from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
     validate_packaging_extraction,
@@ -89,6 +90,29 @@ class NutritionProductContractTests(unittest.TestCase):
             **changes,
         }
 
+    def catalog_with_lookups(self, *foods):
+        """The catalog over a real food database that a mocked lookup returned
+        ``foods`` from: only those values can back a gap-fill origin."""
+        self.food_database = FoodDatabaseService()
+        catalog = self.build_service().product_catalog
+        self.lookup(*foods)
+        return catalog
+
+    def lookup(self, *foods):
+        with patch.object(
+            self.food_database, "_search", return_value=(list(foods), "")
+        ):
+            self.food_database.lookup({"query": "synthetic"})
+
+    @staticmethod
+    def found_food(food_id, unit="g", **per_100):
+        return {
+            "id": food_id,
+            "basis_amount": 100,
+            "basis_unit": unit,
+            "per_100": per_100,
+        }
+
     def test_a_new_product_fills_its_gaps_from_stored_foods_of_its_ean(self):
         stored = {
             "id": "off:4006381333931",
@@ -121,7 +145,22 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual((cleared["salt_g"], cleared["filled_fields"]), (None, {}))
 
     def test_incomplete_products_are_listed_and_only_their_empty_fields_filled(self):
-        catalog = self.library.product_catalog
+        whey = "https://example.test/whey"
+        catalog = self.catalog_with_lookups(
+            self.found_food(
+                "yazio:0a1b2c3d-0000-4000-8000-000000000001", "ml", salt_g=0.1
+            ),
+            self.found_food("yazio:0a1b2c3d-0000-4000-8000-000000000002", kcal=1),
+        )
+        self.food_database.remember_found(
+            "web",
+            [
+                (field, value, 100, "g", whey)
+                for field, value in (("fat_g", 5.5), ("salt_g", 0.4), ("protein_g", 1))
+            ]
+            + [("sugar_g", 4, 100, "ml", "https://example.test/a")]
+            + [("fiber_g", 0.8, 100, "ml", "https://example.test/b")],
+        )
         own = catalog.save_product(
             self.product_payload(barcode="4006381333931", fat_g=None, salt_g=None)
         )
@@ -161,9 +200,9 @@ class NutritionProductContractTests(unittest.TestCase):
                     # Known protein stays; fat and salt are empty.
                     "values": {"fat_g": 5.5, "salt_g": 0.4, "protein_g": 1},
                     "origin": "web",
-                    "source_url": "https://example.test/whey",
+                    "source_url": whey,
                 },
-                {"id": stored["id"], "values": {"salt_g": 0.1}, "origin": "bls"},
+                {"id": stored["id"], "values": {"salt_g": 0.1}, "origin": "yazio"},
                 {"id": complete["id"], "values": {"kcal": 1}, "origin": "yazio"},
             ]
         )
@@ -171,7 +210,7 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(
             [item["id"] for item in result["changes"]], [own["id"], stored["id"]]
         )
-        page = {"origin": "web", "source_url": "https://example.test/whey"}
+        page = {"origin": "web", "source_url": whey}
         self.assertEqual(
             result["changes"][0]["written"],
             [
@@ -190,14 +229,14 @@ class NutritionProductContractTests(unittest.TestCase):
         with self.manager.reader() as db:
             food = FoodDatabaseEntryRepository().get(db, stored["id"])
         self.assertEqual(food["per_100"]["salt_g"], 0.1)
-        self.assertEqual(food["filled_fields"]["salt_g"]["origin"], "bls")
+        self.assertEqual(food["filled_fields"]["salt_g"]["origin"], "yazio")
         self.assertEqual(food["fetched_at"], "2026-10-01")
         self.assertEqual(
             [item["id"] for item in catalog.list_incomplete_products()], [stored["id"]]
         )
         # A second call finds nothing left to write.
         again = catalog.fill_product_gaps(
-            [{"id": own["id"], "values": {"salt_g": 9}, "origin": "bls"}]
+            [{"id": own["id"], "values": {"salt_g": 9}, "origin": "manual"}]
         )
         self.assertEqual(
             (again["ok"], again["status"], again["changes"]),
@@ -369,9 +408,13 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertNotEqual(edited["updated_at"], before["updated_at"])
 
     def test_invalid_gap_fills_are_rejected_without_a_write(self):
-        catalog = self.library.product_catalog
+        catalog = self.catalog_with_lookups(self.found_food("bls:C1", fat_g=5))
+        self.food_database.remember_found(
+            "web", [("fat_g", 5, 100, "g", "https://example.test/a")]
+        )
         own = catalog.save_product(self.product_payload(fat_g=None, salt_g=None))
         base = {"id": own["id"], "values": {"fat_g": 5}, "origin": "bls"}
+        unbacked = "Kein Suchergebnis belegt"
         for label, item, reason in (
             ("unknown id", {**base, "id": "missing"}, "Produkt nicht gefunden."),
             ("non-core field", {**base, "values": {"name": 5}}, "name"),
@@ -395,6 +438,33 @@ class NutritionProductContractTests(unittest.TestCase):
                 "salt_g",
             ),
             ("not an object", "fat_g", "Objekt"),
+            (
+                "no lookup returned it",
+                {**base, "origin": "open_food_facts", "values": {"fat_g": 99}},
+                f"{unbacked} fat_g aus open_food_facts",
+            ),
+            ("another value", {**base, "values": {"fat_g": 6}}, unbacked),
+            ("another origin", {**base, "origin": "yazio"}, unbacked),
+            (
+                "another page",
+                {**base, "origin": "web", "source_url": "https://example.test/b"},
+                unbacked,
+            ),
+            (
+                "one unbacked field rejects the item",
+                {**base, "values": {"fat_g": 5, "salt_g": 1}},
+                f"{unbacked} salt_g",
+            ),
+            (
+                "above the basis",
+                {**base, "origin": "manual", "values": {"fiber_g": 101}},
+                "unplausibel",
+            ),
+            (
+                "more energy than pure fat",
+                {**base, "origin": "manual", "values": {"kcal": 1000}},
+                "unplausibel",
+            ),
         ):
             with self.subTest(label):
                 result = catalog.fill_product_gaps([item])
@@ -411,6 +481,40 @@ class NutritionProductContractTests(unittest.TestCase):
             catalog.fill_product_gaps([base])["unchanged"][0]["rejected"],
             "Produkt nicht gefunden.",
         )
+
+    def test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value(self):
+        catalog = self.catalog_with_lookups(
+            self.found_food("bls:C1", fat_g=4, kcal=200)
+        )
+        half = catalog.save_product(
+            self.product_payload(basis_amount=50, kcal=None, fat_g=None, salt_g=None)
+        )
+        item = {"id": half["id"], "values": {"fat_g": 2, "kcal": 100}, "origin": "bls"}
+
+        def written(items):
+            changes = catalog.fill_product_gaps(items)["changes"][0]["written"]
+            return [(w["field"], w["origin"]) for w in changes]
+
+        # A value of the lookup, scaled to the product's own basis, keeps its origin.
+        self.assertEqual(written([item]), [("fat_g", "bls"), ("kcal", "bls")])
+        # The athlete's own value carries no database origin and needs no lookup.
+        manual = {**item, "values": {"salt_g": 0.4}, "origin": "manual"}
+        self.assertEqual(written([manual]), [("salt_g", "manual")])
+        filled = catalog.get_product(half["id"])["filled_fields"]
+        self.assertEqual(filled["salt_g"]["origin"], "manual")
+
+        # After an hour the lookup no longer backs an origin.
+        other = catalog.save_product(
+            self.product_payload(barcode="4006381333948", fat_g=None, salt_g=None)
+        )
+        with patch("backend.nutrition.food_database.time.monotonic") as clock:
+            clock.return_value = FOUND_TTL_SECONDS + 1e9
+            result = catalog.fill_product_gaps(
+                [{**item, "id": other["id"], "values": {"fat_g": 4}}]
+            )
+        self.assertEqual(result["changes"], [])
+        self.assertIn("Kein Suchergebnis", result["unchanged"][0]["rejected"])
+        self.assertIsNone(catalog.get_product(other["id"])["fat_g"])
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
         saved = self.library.product_catalog.save_product(self.product_payload())

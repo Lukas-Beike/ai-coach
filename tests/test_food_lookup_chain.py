@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import threading
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from unittest.mock import patch
 
 from support import temp_database
 
 from backend.db import row_factory
 from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
-from backend.nutrition.food_database import FoodDatabaseService
+from backend.nutrition.food_database import (
+    FOUND_LIMIT,
+    FOUND_TTL_SECONDS,
+    FoodDatabaseService,
+)
 from backend.nutrition.food_mirror import FoodDatabaseMirror
 
 START = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
@@ -427,6 +433,43 @@ class LookupChainTests(unittest.TestCase):
         self.service.refresh_stored(f"off:{BARCODE}")
 
         self.assertEqual(self.yazio.calls, [])
+
+    def test_returned_values_back_a_gap_fill_origin_for_an_hour(self):
+        bls = {**off_food(), "id": "bls:C1", "per_100": {"fat_g": 2.0, "kcal": None}}
+        self.yazio.hits = [yazio_food()]
+        self.service.lookup({"query": "Haferflocken"})
+        with patch("backend.nutrition.food_database._bls_search") as search:
+            search.return_value = ([bls], False)
+            self.service.lookup({"query": "Haferflocken", "source": "bls"})
+        self.mirror.store([off_food()])
+        self.now += timedelta(days=1)
+        self.service.refresh_stored(f"off:{BARCODE}")
+
+        for label, args, expected in (
+            ("returned value", ("yazio", "kcal", 370, 100, "g"), True),
+            ("scaled to the basis", ("yazio", "kcal", 185, 50, "g"), True),
+            ("within one percent", ("yazio", "kcal", 372, 100, "g"), True),
+            ("another value", ("yazio", "kcal", 380, 100, "g"), False),
+            ("another origin", ("open_food_facts", "kcal", 370, 100, "g"), False),
+            ("another unit", ("yazio", "kcal", 370, 100, "ml"), False),
+            ("no basis", ("yazio", "kcal", 370, 0, "g"), False),
+            ("empty field never returned", ("bls", "kcal", 0, 100, "g"), False),
+            ("bls value", ("bls", "fat_g", 2, 100, "g"), True),
+            ("re-checked value", ("open_food_facts", "kcal", 365, 100, "g"), True),
+        ):
+            with self.subTest(label):
+                self.assertIs(self.service.found_value(*args), expected)
+        # A value expires after the hour.
+        later = time.monotonic() + FOUND_TTL_SECONDS + 1
+        with patch("backend.nutrition.food_database.time.monotonic") as clock:
+            clock.return_value = later
+            self.assertFalse(self.service.found_value("yazio", "kcal", 370, 100, "g"))
+        # Only the newest values are kept.
+        self.service.remember_found(
+            "yazio", [("kcal", 1.5, 100, "g", None)] * FOUND_LIMIT
+        )
+        self.assertFalse(self.service.found_value("yazio", "kcal", 370, 100, "g"))
+        self.assertTrue(self.service.found_value("yazio", "kcal", 1.5, 100, "g"))
 
     def test_unknown_yazio_id_is_not_found(self):
         self.yazio.error = AppError(404, "x", reason="food_not_found")

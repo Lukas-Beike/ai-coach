@@ -13,12 +13,13 @@ import re
 import threading
 import time
 import unicodedata
-from collections import OrderedDict
-from collections.abc import Callable
+from collections import OrderedDict, deque
+from collections.abc import Callable, Iterable
 from functools import lru_cache
 from itertools import accumulate
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from backend.db.repositories import NUTRIENT_COLUMNS
 from backend.errors import AppError
@@ -39,6 +40,11 @@ FALLBACK_NOTICE = " Eine Onlinequelle war nicht verfügbar oder ohne passenden T
 YAZIO_NOT_CONFIGURED = "Yazio ist nicht konfiguriert."
 YAZIO_LOGIN_NOTICE = " Yazio-Zugangsdaten prüfen."
 YAZIO_VERSION_NOTICE = " Yazio-App-Version prüfen (YAZIO_USER_AGENT)."
+# Values a lookup or web search returned stay checkable for the Coach's gap-fill
+# write for an hour (this and the previous turn), at most this many.
+FOUND_TTL_SECONDS = 3600.0
+FOUND_LIMIT = 2000
+_FOOD_ORIGINS = {"off": "open_food_facts", "yazio": "yazio", "bls": "bls"}
 _YAZIO_ID = re.compile(r"yazio:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
@@ -51,6 +57,30 @@ _WORD_ENDINGS = ("en", "n", "s", "e")
 _MIN_STEM = 4
 # Catches one typo ("zuccini"); 0.8 would read "Rinderhüftsteak" as Rumpsteak.
 _TYPO_CUTOFF = 0.85
+
+
+def page_key(url: str) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    """A page address regardless of scheme, ``www.``, fragment, tracking and slash."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return (url, "", ())
+    query = tuple(
+        sorted(
+            (key, value)
+            for key, value in parse_qsl(parts.query)
+            if not key.startswith("utm_")
+        )
+    )
+    return (parts.netloc.lower().removeprefix("www."), parts.path.rstrip("/"), query)
+
+
+def _is_number(value: Any) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def _search_text(value: str) -> str:
@@ -317,6 +347,11 @@ class FoodDatabaseService:
         self._yazio = yazio
         self._legacy_retry_after: OrderedDict[str, float] = OrderedDict()
         self._legacy_retry_lock = threading.Lock()
+        # (found_at, origin, field, value, basis_amount, basis_unit, web page key)
+        self._found: deque[tuple[float, str, str, float, float, Any, Any]] = deque(
+            maxlen=FOUND_LIMIT
+        )
+        self._found_lock = threading.Lock()
 
     @property
     def yazio_configured(self) -> bool:
@@ -534,6 +569,72 @@ class FoodDatabaseService:
             for food in foods
         ]
 
+    def remember_found(
+        self, origin: str, values: Iterable[tuple[str, Any, Any, Any, Any]]
+    ) -> None:
+        """Remember (field, value, basis_amount, basis_unit, source_url) values.
+
+        Only what a lookup or web search returned can later back a gap-fill
+        origin; a web value is tied to its source page.
+        """
+        now = time.monotonic()
+        rows = [
+            (
+                now,
+                origin,
+                field,
+                float(value),
+                float(amount),
+                unit,
+                page_key(url) if origin == "web" and isinstance(url, str) else None,
+            )
+            for field, value, amount, unit, url in values
+            if _is_number(value) and _is_number(amount) and amount > 0
+        ]
+        with self._found_lock:
+            self._found.extend(rows)
+
+    def _remember_foods(self, foods: list[dict[str, Any]]) -> None:
+        for food in foods:
+            origin = _FOOD_ORIGINS.get(str(food.get("id") or "").partition(":")[0])
+            if origin:
+                basis = (food.get("basis_amount"), food.get("basis_unit"), None)
+                self.remember_found(
+                    origin,
+                    [
+                        (field, value, *basis)
+                        for field, value in (food.get("per_100") or {}).items()
+                    ],
+                )
+
+    def found_value(
+        self,
+        origin: str,
+        field: str,
+        value: float,
+        basis_amount: Any,
+        basis_unit: Any,
+        source_url: str | None = None,
+    ) -> bool:
+        """Whether a recent lookup or web search returned this value, scaled to
+        the given basis of the same unit (web: from the same source page)."""
+        if not _is_number(basis_amount) or basis_amount <= 0:
+            return False
+        page = page_key(source_url) if origin == "web" and source_url else None
+        cutoff = time.monotonic() - FOUND_TTL_SECONDS
+        with self._found_lock:
+            rows = list(self._found)
+        for found_at, f_origin, f_field, f_value, f_amount, f_unit, f_page in rows:
+            scaled = f_value * basis_amount / f_amount
+            if (
+                found_at >= cutoff
+                and (f_origin, f_field, f_unit, f_page)
+                == (origin, field, basis_unit, page)
+                and abs(scaled - value) <= max(0.01, 0.01 * abs(scaled))
+            ):
+                return True
+        return False
+
     def stored_foods(self, query: str | None = None) -> list[dict[str, Any]]:
         """List mirrored foods (newest first without a query) for the athlete.
 
@@ -587,6 +688,7 @@ class FoodDatabaseService:
                 reason="food_database_unavailable",
             )
         filled, yazio_failed = self._fill_from_yazio(refreshed)
+        self._remember_foods([filled])
         return {
             **self._stored_food(filled),
             **(
@@ -651,6 +753,7 @@ class FoodDatabaseService:
                 raise AppError(400, "Suchbegriff muss 2 bis 120 Zeichen enthalten.")
             foods, search_notice = self._search(query, source)
             notice += search_notice
+        self._remember_foods(foods)
         return {"ok": True, "foods": foods, "notice": notice}
 
     def _search(self, query: str, source: Any) -> tuple[list[dict[str, Any]], str]:

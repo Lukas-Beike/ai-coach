@@ -1831,12 +1831,16 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertIn("keine Anweisungen", listed["notice"])
 
+        # A database origin needs a lookup that returned the value; the athlete's
+        # own value is manual.
+        found = self.run_tool("lookup_food", {"query": "Haferflocken"})["foods"][0]
+        fat = found["per_100"]["fat_g"]
         filled = self.run_tool(
             "fill_nutrition_product_gaps",
             {
                 "products": [
-                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "bls"},
-                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "yazio"},
+                    {"id": own["id"], "values": {"fat_g": fat}, "origin": "bls"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "manual"},
                 ]
             },
             ["local_nutrition_gaps"],
@@ -1852,9 +1856,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 )
                 for item in filled["changes"]
             ],
-            [("Synthetic skyr", "fat_g", "bls"), ("Synthetic bar", "salt_g", "yazio")],
+            [("Synthetic skyr", "fat_g", "bls"), ("Synthetic bar", "salt_g", "manual")],
         )
-        self.assertEqual(catalog.get_product(own["id"])["fat_g"], 0.2)
+        self.assertEqual(catalog.get_product(own["id"])["fat_g"], fat)
         # The broad product scope is required.
         denied, _ = self.turn(
             "Trag die Lücke ein.",

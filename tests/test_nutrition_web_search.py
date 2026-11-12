@@ -423,6 +423,32 @@ class NutritionWebSearchCatalogTests(unittest.TestCase):
             ["carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g"],
         )
 
+    def test_a_web_fill_needs_the_value_of_a_search_from_its_own_page(self) -> None:
+        item = {
+            "id": self.own["id"],
+            "values": {"salt_g": 0.7},
+            "origin": "web",
+            "source_url": PAGE,
+        }
+        other_value = {**item, "values": {"salt_g": 0.8}}
+        other_page = {**item, "source_url": "https://example.test/other"}
+        same_page = {**item, "source_url": "https://www.example.test/synthetic-bar/#x"}
+
+        def rejected(candidate: dict[str, Any]) -> str:
+            result = self.catalog.fill_product_gaps([candidate])
+            self.assertEqual(result["changes"], [])
+            return str(result["unchanged"][0]["rejected"])
+
+        # Before any search nothing backs the origin.
+        self.assertIn("Kein Suchergebnis belegt salt_g", rejected(item))
+        self.catalog.search_web_values([self.own["id"]])
+        self.assertIn("Kein Suchergebnis", rejected(other_value))
+        self.assertIn("Kein Suchergebnis", rejected(other_page))
+        written = self.catalog.fill_product_gaps([same_page])["changes"][0]["written"]
+        self.assertEqual(
+            [(w["field"], w["origin"]) for w in written], [("salt_g", "web")]
+        )
+
     def test_invalid_product_lists_are_rejected(self) -> None:
         for ids in (None, [], "x", [1], [" "], [str(n) for n in range(6)]):
             with self.subTest(ids=ids), self.assertRaises(AppError) as raised:
