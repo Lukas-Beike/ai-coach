@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from backend.db.repositories import NUTRIENT_COLUMNS
+from backend.db.repositories import NUTRIENT_COLUMNS, database_origin
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
 from backend.nutrition.models import nutrition_number
@@ -44,7 +44,8 @@ YAZIO_VERSION_NOTICE = " Yazio-App-Version prüfen (YAZIO_USER_AGENT)."
 # write for an hour (this and the previous turn), at most this many.
 FOUND_TTL_SECONDS = 3600.0
 FOUND_LIMIT = 2000
-_FOOD_ORIGINS = {"off": "open_food_facts", "yazio": "yazio", "bls": "bls"}
+# The origins whose values a lookup returns; web values are remembered apart.
+DATABASE_ORIGINS = frozenset({"open_food_facts", "yazio", "bls"})
 _YAZIO_ID = re.compile(r"yazio:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
@@ -347,10 +348,10 @@ class FoodDatabaseService:
         self._yazio = yazio
         self._legacy_retry_after: OrderedDict[str, float] = OrderedDict()
         self._legacy_retry_lock = threading.Lock()
-        # (found_at, origin, field, value, basis_amount, basis_unit, web page key)
-        self._found: deque[tuple[float, str, str, float, float, Any, Any]] = deque(
-            maxlen=FOUND_LIMIT
-        )
+        # (origin, field, basis_unit) -> (found_at, value, basis_amount, web page key)
+        self._found: dict[
+            tuple[str, str, Any], deque[tuple[float, float, float, Any]]
+        ] = {}
         self._found_lock = threading.Lock()
 
     @property
@@ -578,34 +579,41 @@ class FoodDatabaseService:
         origin; a web value is tied to its source page.
         """
         now = time.monotonic()
-        rows = [
-            (
-                now,
-                origin,
-                field,
-                float(value),
-                float(amount),
-                unit,
-                page_key(url) if origin == "web" and isinstance(url, str) else None,
-            )
-            for field, value, amount, unit, url in values
-            if _is_number(value) and _is_number(amount) and amount > 0
-        ]
         with self._found_lock:
-            self._found.extend(rows)
+            for field, value, amount, unit, url in values:
+                if (
+                    field in NUTRIENT_COLUMNS
+                    and _is_number(value)
+                    and _is_number(amount)
+                    and amount > 0
+                ):
+                    page = (
+                        page_key(url)
+                        if origin == "web" and isinstance(url, str)
+                        else None
+                    )
+                    self._found.setdefault(
+                        (origin, field, unit), deque(maxlen=FOUND_LIMIT)
+                    ).append((now, float(value), float(amount), page))
 
     def _remember_foods(self, foods: list[dict[str, Any]]) -> None:
+        """Remember the values a lookup returned, each under its own origin.
+
+        A value the food took from elsewhere (the athlete's edit, a fill from
+        another database or the web) is not this database's value: it is
+        remembered under the database it came from, or not at all.
+        """
         for food in foods:
-            origin = _FOOD_ORIGINS.get(str(food.get("id") or "").partition(":")[0])
-            if origin:
-                basis = (food.get("basis_amount"), food.get("basis_unit"), None)
-                self.remember_found(
-                    origin,
-                    [
-                        (field, value, *basis)
-                        for field, value in (food.get("per_100") or {}).items()
-                    ],
-                )
+            try:
+                own = database_origin(str(food.get("id") or ""))
+            except KeyError:
+                continue
+            marks = food.get("filled_fields") or {}
+            basis = (food.get("basis_amount"), food.get("basis_unit"), None)
+            for field, value in (food.get("per_100") or {}).items():
+                origin = (marks.get(field) or {}).get("origin", own)
+                if origin in DATABASE_ORIGINS:
+                    self.remember_found(origin, [(field, value, *basis)])
 
     def found_value(
         self,
@@ -623,17 +631,14 @@ class FoodDatabaseService:
         page = page_key(source_url) if origin == "web" and source_url else None
         cutoff = time.monotonic() - FOUND_TTL_SECONDS
         with self._found_lock:
-            rows = list(self._found)
-        for found_at, f_origin, f_field, f_value, f_amount, f_unit, f_page in rows:
-            scaled = f_value * basis_amount / f_amount
-            if (
+            rows = self._found.get((origin, field, basis_unit), ())
+            return any(
                 found_at >= cutoff
-                and (f_origin, f_field, f_unit, f_page)
-                == (origin, field, basis_unit, page)
-                and abs(scaled - value) <= max(0.01, 0.01 * abs(scaled))
-            ):
-                return True
-        return False
+                and f_page == page
+                and abs(f_value * basis_amount / f_amount - value)
+                <= max(0.01, 0.01 * abs(f_value * basis_amount / f_amount))
+                for found_at, f_value, f_amount, f_page in rows
+            )
 
     def stored_foods(self, query: str | None = None) -> list[dict[str, Any]]:
         """List mirrored foods (newest first without a query) for the athlete.

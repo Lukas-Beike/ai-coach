@@ -412,7 +412,9 @@ class NutritionProductContractTests(unittest.TestCase):
         self.food_database.remember_found(
             "web", [("fat_g", 5, 100, "g", "https://example.test/a")]
         )
-        own = catalog.save_product(self.product_payload(fat_g=None, salt_g=None))
+        own = catalog.save_product(
+            self.product_payload(fat_g=None, salt_g=None, kcal=None)
+        )
         base = {"id": own["id"], "values": {"fat_g": 5}, "origin": "bls"}
         unbacked = "Kein Suchergebnis belegt"
         for label, item, reason in (
@@ -457,7 +459,7 @@ class NutritionProductContractTests(unittest.TestCase):
             ),
             (
                 "above the basis",
-                {**base, "origin": "manual", "values": {"fiber_g": 101}},
+                {**base, "origin": "manual", "values": {"salt_g": 101}},
                 "unplausibel",
             ),
             (
@@ -502,6 +504,33 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(written([manual]), [("salt_g", "manual")])
         filled = catalog.get_product(half["id"])["filled_fields"]
         self.assertEqual(filled["salt_g"]["origin"], "manual")
+        # A known field is only skipped; its value needs no backing (review).
+        partial = catalog.save_product(
+            self.product_payload(barcode="4006381333962", fat_g=None)
+        )
+        known = catalog.fill_product_gaps(
+            [
+                {
+                    "id": partial["id"],
+                    "values": {"protein_g": 99, "fat_g": 4},
+                    "origin": "bls",
+                }
+            ]
+        )
+        self.assertEqual(known["changes"][0]["skipped"], ["protein_g"])
+        self.assertEqual(catalog.get_product(partial["id"])["fat_g"], 4)
+        # A dense liquid weighs up to two grams per millilitre.
+        syrup = catalog.save_product(
+            self.product_payload(
+                barcode="4006381333955", basis_unit="ml", carbs_g=None, kcal=None
+            )
+        )
+        self.assertEqual(
+            written(
+                [{"id": syrup["id"], "values": {"carbs_g": 115}, "origin": "manual"}]
+            ),
+            [("carbs_g", "manual")],
+        )
 
         # After an hour the lookup no longer backs an origin.
         other = catalog.save_product(

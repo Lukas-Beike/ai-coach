@@ -434,6 +434,28 @@ class LookupChainTests(unittest.TestCase):
 
         self.assertEqual(self.yazio.calls, [])
 
+    def test_a_filled_value_backs_only_the_origin_it_came_from(self):
+        # An off: entry whose salt came from Yazio and whose sugar the athlete
+        # entered: salt backs yazio, sugar backs nothing, fat backs off.
+        food = {
+            **off_food(),
+            "per_100": {"fat_g": 6.0, "salt_g": 0.3, "sugar_g": 1.0},
+            "filled_fields": {
+                "salt_g": {"origin": "yazio"},
+                "sugar_g": {"origin": "manual"},
+            },
+        }
+        self.service._remember_foods([food])
+        for args, expected in (
+            (("open_food_facts", "fat_g", 6.0, 100, "g"), True),
+            (("open_food_facts", "salt_g", 0.3, 100, "g"), False),
+            (("yazio", "salt_g", 0.3, 100, "g"), True),
+            (("open_food_facts", "sugar_g", 1.0, 100, "g"), False),
+            (("manual", "sugar_g", 1.0, 100, "g"), False),
+        ):
+            with self.subTest(args=args):
+                self.assertIs(self.service.found_value(*args), expected)
+
     def test_returned_values_back_a_gap_fill_origin_for_an_hour(self):
         bls = {**off_food(), "id": "bls:C1", "per_100": {"fat_g": 2.0, "kcal": None}}
         self.yazio.hits = [yazio_food()]

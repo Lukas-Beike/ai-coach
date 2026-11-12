@@ -12,6 +12,7 @@ from typing import Any
 from backend import change_history
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import (
+    MANUAL_ORIGIN,
     NUTRIENT_COLUMNS,
     FoodDatabaseEntryRepository,
     NutritionProductRepository,
@@ -35,7 +36,7 @@ INCOMPLETE_PRODUCTS_NOTICE = (
 # Where a gap value may come from; a web value names its source page. Database
 # and web origins need a lookup that returned the value; "manual" is the
 # athlete's own statement.
-GAP_ORIGINS = frozenset({"open_food_facts", "yazio", "bls", "web", "manual"})
+GAP_ORIGINS = frozenset({"open_food_facts", "yazio", "bls", "web", MANUAL_ORIGIN})
 MAX_GAP_PRODUCTS = 25
 MAX_GAP_KCAL = 9000
 MAX_GAP_GRAMS = 1000
@@ -398,10 +399,14 @@ class ProductCatalogService:
         amount = (target or {}).get("basis_amount")
         unit = (target or {}).get("basis_unit")
         basis = mass_basis(amount, unit)
+        # A known field is only skipped, so its value needs no backing.
+        known = (target or {}).get("per_100") or target or {}
         for field, value in values.items():
+            if known.get(field) is not None:
+                continue
             if value > gap_limit(field, basis):
                 return f"{field} {value:g} ist für die Bezugsmenge des Produkts unplausibel."
-            if origin != "manual" and not self.food_database.found_value(
+            if origin != MANUAL_ORIGIN and not self.food_database.found_value(
                 origin, field, value, amount, unit, sources[field] or None
             ):
                 return (
@@ -698,10 +703,14 @@ _DATABASE_OWNED_FIELDS = (
 
 
 def mass_basis(amount: Any, unit: Any) -> float:
-    """The basis in g or ml; 0 for any other basis, which has no mass bound."""
-    if unit in {"g", "ml"} and isinstance(amount, int | float) and amount > 0:
-        return float(amount)
-    return 0.0
+    """The most grams a basis can weigh; 0 for a basis without a mass bound.
+
+    A millilitre of a dense liquid such as syrup or honey weighs up to about
+    two grams.
+    """
+    if not (isinstance(amount, int | float) and amount > 0):
+        return 0.0
+    return {"g": 1.0, "ml": 2.0}.get(unit, 0.0) * float(amount)
 
 
 def gap_limit(field: Any, basis: float) -> float:
