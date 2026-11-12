@@ -1,6 +1,6 @@
 ---
 name: pacecraft-debugging
-description: Diagnose a Pacecraft bug, flaky test, or unexplained failure before changing code. Use for root-cause investigation; use pacecraft-pr-ci for GitHub check status and pacecraft-codex-security for requested security scans.
+description: Diagnose a Pacecraft bug, flaky test, or unexplained failure before changing code. Use for root-cause investigation; use pacecraft-pr-state for GitHub check status and pacecraft-codex-security for requested security scans.
 license: MIT adaptation; see ../THIRD_PARTY.md.
 ---
 

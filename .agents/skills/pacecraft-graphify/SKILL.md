@@ -44,9 +44,7 @@ Commands (run from the repository root):
 - `python scripts/graphify_local.py prune` removes other unlocked shared environments that no running Graphify command uses; nothing prunes automatically.
 - `python scripts/graphify_local.py update` generates or refreshes the graph.
 - `python scripts/graphify_local.py status` reports local availability/freshness.
-- `python scripts/graphify_local.py query <terms>` searches the active graph.
-- `python scripts/graphify_local.py path <source> <target>` explores a path.
-- `python scripts/graphify_local.py explain <symbol>` inspects structural links.
+- Queries (`query`, `path`, `explain`) are the [graphify-query](../pacecraft-graphify-query/SKILL.md) base skill.
 - `python scripts/graphify_local.py export html --output .graphify-local/exports/graph.html` creates a local HTML view.
 - `python scripts/graphify_local.py export wiki --output .graphify-local/exports/wiki` creates a local wiki view.
 - `python scripts/graphify_local.py mcp` starts a local stdio MCP server. The

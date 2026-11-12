@@ -88,7 +88,7 @@ application fix from a prevention measure; a skill edit does not fix runtime cod
   Choose synthetic checks with [validation](../pacecraft-validation/SKILL.md).
   Use [UI design](../pacecraft-ui-design/SKILL.md) for a supported usability issue
   and [PWA validation](../pacecraft-pwa-e2e/SKILL.md) for browser evidence.
-- Use [PR/CI diagnosis](../pacecraft-pr-ci/SKILL.md) when hosted check evidence is
+- Use [PR state](../pacecraft-pr-state/SKILL.md) when hosted check evidence is
   needed. A retro alone does not authorize PR comments, issue creation, pushes,
   merges, deployments, provider writes, or relaxed gates; only the per-finding
   decision below authorizes an issue or an in-session fix.
