@@ -36,7 +36,26 @@ class HistoryUndoPostRoutes:
         ]
 
     def _undo(self, handler: Any, _request: RouteRequest) -> None:
-        """Apply an undo from the change history."""
+        """Apply an undo from the change history.
+
+        Request: JSON body `{"change_id": string, "expected_current_hash": string,
+        "activity_id": string}`. `change_id` is the change-history entry (36
+        characters, `0-9`, `a-f`, `-`); `expected_current_hash` is the hash from the
+        undo preview and is required, a missing or different one answers 409;
+        `activity_id` is optional and only used for `activity_feedback` entries.
+
+        Response: 200 `{"status": "undone", "change_id": string, "entity_type":
+        string, "entity_id": string, "remote_untouched": true}`; for
+        `activity_feedback` with a string `activity_id` also `session_rpe_load`
+        (omitted if it cannot be read).
+
+        Errors: 400 "Ungültige Änderungshistorie-ID."; 404 "Änderung nicht
+        gefunden."; 409 "Eine Undo-Aktion kann nicht erneut zurückgenommen
+        werden."; 400 "Ein Export an einen Anbieter lässt sich nicht zurücknehmen.";
+        400 "Diese Änderung lässt sich nicht mehr zurücknehmen."; 409 "Die lokale
+        Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen."; 400
+        "Unbekannte lokale Änderung.".
+        """
         payload = handler.read_json()
         result = self._history_undo_service().apply(payload)
         activity_id = payload.get("activity_id") if isinstance(payload, dict) else None
@@ -47,6 +66,21 @@ class HistoryUndoPostRoutes:
         handler.send_json(200, result)
 
     def _undo_turn(self, handler: Any, _request: RouteRequest) -> None:
-        """Undo every tracked write of one Coach turn."""
+        """Undo every tracked write of one Coach turn.
+
+        Request: JSON body `{"client_turn_id": string}`, 1 to 120 characters.
+
+        Response: 200 `{"status": "undone", "client_turn_id": string,
+        "coach_changes": object, "remote_untouched": true}`; `coach_changes` is the
+        turn's change summary with `undone_at` set. All changes are restored in one
+        transaction or none.
+
+        Errors: 400 "Ungültiger Coach-Auftrag."; 404 "Coach-Antwort nicht
+        gefunden." for an unknown or unfinished turn; 409 "Diese Coach-Antwort hat
+        nichts geändert."; 409 "Diese Coach-Änderungen wurden bereits
+        zurückgenommen."; 409 "Diese Coach-Änderungen können nicht gesammelt
+        zurückgenommen werden."; 409 "Die lokale Änderung wurde inzwischen weiter
+        geändert; Undo wurde abgebrochen." when a record changed since the turn.
+        """
         client_turn_id = handler.read_json().get("client_turn_id")
         handler.send_json(200, self._coach_turn_undo_service.undo(client_turn_id))

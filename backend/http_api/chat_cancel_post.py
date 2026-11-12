@@ -30,7 +30,20 @@ class ChatCancelPostRoutes:
         ]
 
     def _cancel(self, handler: Any, request: RouteRequest) -> None:
-        """Cancel running Coach work of this session."""
+        """Cancel running Coach work of this session.
+
+        Request: JSON body `{"operation_id": string}`; `operation_id` is optional
+        and names the attached stream or background turn to cancel.
+
+        Response: 200 `{"status": "cancelling", "operation_id": string}` when
+        running work of this session was signalled, `{"status": "not_running"}`
+        when there is none.
+
+        Errors: 409 "Die angegebene Coach-Anfrage ist nicht mehr aktiv." when
+        `operation_id` differs from the attached stream's.
+
+        The route is not held back by maintenance mode.
+        """
         payload = handler.read_json()
         result = self._coach_cancellation_service().cancel(
             request.session["csrf_hash"], payload.get("operation_id")

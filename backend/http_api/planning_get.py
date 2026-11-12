@@ -32,7 +32,19 @@ class PlanningGetRoutes:
         ]
 
     def _plan(self, handler: Any, request: RouteRequest) -> None:
-        """Planning projection."""
+        """Planning projection.
+
+        Request: query `local` (`1` skips the weather refresh and answers from
+        stored data; any other value or none first refreshes the weather when it is stale).
+
+        Response: 200 with `plans`, `planned`, `training_calendar`, `calendar`,
+        `planning_view`, `planning_compliance`, `parallel_cycling`, `weather`,
+        `external_calendar`, `daily_planning_context`, `planning` and
+        `coach_quick_actions`, composed by `PublicPlanStateService.read_public`
+        from one database snapshot.
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(
             200,
             self._public_plan_state_service().read_public(
@@ -41,7 +53,21 @@ class PlanningGetRoutes:
         )
 
     def _weather(self, handler: Any, request: RouteRequest) -> None:
-        """Weather projection."""
+        """Weather projection.
+
+        Request: query `local` (`1` answers from the stored forecast without
+        contacting the weather provider; any other value or none refreshes it
+        when it is stale).
+
+        Response: 200 with `configured`, `state` (`not_configured`, `loading`,
+        `ready`, `stale` or `error`), `provider`, `days` and `recommendations`;
+        a ready or stale forecast adds `attribution`, `model`, `location`,
+        `fetched_at`, and a stale one `stale` and `error`. Without a configured
+        location it carries `message` instead; `error` and `loading` states
+        carry `error` or `loading` and `message`.
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(
             200,
             self._public_weather_state_service().state(
@@ -50,7 +76,19 @@ class PlanningGetRoutes:
         )
 
     def _library(self, handler: Any, request: RouteRequest) -> None:
-        """Workout library page."""
+        """Workout library page.
+
+        Request: query `cursor` (opaque `next_cursor` of the previous page; an
+        invalid cursor is ignored and starts at the first page) and `limit`
+        (1 to 100, default 100; an unparsable value gives 100).
+
+        Response: 200 with `workouts` (active, undated library templates ordered
+        by sport, name and id, each with the derived `type` and, when Wahoo state
+        exists, `wahoo_state`), `next_cursor` (null on the last page) and
+        `limit` (the applied page size).
+
+        Errors: none beyond the common ones.
+        """
         query = request.query
         handler.send_json(
             200,

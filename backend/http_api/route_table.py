@@ -123,23 +123,45 @@ _ACCESS_LABELS = {
     Access.SESSION: "Session",
     Access.SESSION_CSRF: "Session + CSRF",
 }
+# Where the request handler enters the maintenance operation gate.
+_GATE_LABELS = {"GET": "no", "PUT": "before access"}
+# The contract paragraphs every route handler's docstring carries.
+CONTRACT_LABELS = ("Request:", "Response:", "Errors:")
+
+
+def _handler(route: Route) -> Any:
+    return getattr(route.handle, "__func__", route.handle)
+
+
+def _gate(route: Route) -> str:
+    if route.method in _GATE_LABELS:
+        return _GATE_LABELS[route.method]
+    return "after access" if route.gated and route.access is not Access.PUBLIC else "no"
 
 
 def route_reference(routes: Iterable[Route]) -> str:
-    """The Markdown table of ``routes`` that ``docs/api-routes.md`` carries.
+    """The route table and route contracts that ``docs/api-routes.md`` carries.
 
-    The purpose column is the first paragraph of each handler's docstring.
+    The purpose is the first paragraph of each handler's docstring; the
+    contract is the rest of it, shown once for the routes sharing a handler.
     """
     order = {"GET": 0, "POST": 1, "PUT": 2}
+    ordered = sorted(routes, key=lambda item: (item.path, order[item.method]))
     lines = [
-        "| Method | Path | Access | Purpose |",
-        "| --- | --- | --- | --- |",
+        "| Method | Path | Access | Maintenance gate | Purpose |",
+        "| --- | --- | --- | --- | --- |",
     ]
-    for route in sorted(routes, key=lambda item: (item.path, order[item.method])):
+    shared: dict[Any, list[str]] = {}
+    for route in ordered:
         path = _PARAMETER.sub(r"{\1}", route.path)
         summary = (inspect.getdoc(route.handle) or "").split("\n\n")[0]
         lines.append(
             f"| {route.method} | `{path}` | {_ACCESS_LABELS[route.access]} "
-            f"| {' '.join(summary.split())} |"
+            f"| {_gate(route)} | {' '.join(summary.split())} |"
         )
+        shared.setdefault(_handler(route), []).append(f"`{route.method} {path}`")
+    lines += ["", "## Route contracts"]
+    for handle, names in shared.items():
+        contract = (inspect.getdoc(handle) or "").partition("\n\n")[2]
+        lines += ["", f"### {', '.join(names)}", "", contract]
     return "\n".join(lines) + "\n"

@@ -30,7 +30,22 @@ class AuthPostRoutes:
         ]
 
     def _login(self, handler: Any, _request: RouteRequest) -> None:
-        """Create a session."""
+        """Create a session.
+
+        Request: JSON body `{"password": string}`; no session or CSRF token. A
+        missing `password` counts as empty. Runs outside the maintenance gate.
+
+        Response: 200 with `status` (`"ok"`), `authenticated` (`true`) and `csrf`
+        (the CSRF token for the `X-CSRF-Token` header). `Set-Cookie` sets the
+        `ic_session` (HttpOnly) and `ic_csrf` cookies, both `SameSite=Strict` and
+        valid for 30 days.
+
+        Errors: 401 "Ungültiges Passwort." for a wrong password; 429 `rate_limited`
+        "Zu viele Anmeldeversuche. Erneut versuchen in etwa N Sekunden." after 5
+        failed attempts within 15 minutes from one client address (only failed
+        attempts count); 503 "Die sichere App-Konfiguration ist unvollständig."
+        when the secure configuration is incomplete.
+        """
         auth = self._session_auth_service()
         result = auth.login_user(handler)
         token = result.pop("session_token")
@@ -42,7 +57,15 @@ class AuthPostRoutes:
         )
 
     def _logout(self, handler: Any, _request: RouteRequest) -> None:
-        """End the current session."""
+        """End the current session.
+
+        Request: no body.
+
+        Response: 200 with `status` (`"ok"`); `Set-Cookie` clears the `ic_session`
+        and `ic_csrf` cookies. The stored session is deleted.
+
+        Errors: none beyond the common ones.
+        """
         auth = self._session_auth_service()
         with self._maintenance_gate.operation():
             auth.logout_user(handler)

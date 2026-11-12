@@ -34,7 +34,26 @@ class PlannedUnitFocusPostRoutes:
         ]
 
     def _exercise(self, handler: Any, request: RouteRequest) -> None:
-        """Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`)."""
+        """Assign the Garmin catalogue exercise of one strength exercise of a unit.
+
+        Request: path `{id}`, the local unit id; JSON body `{"exercise_index":
+        integer, "garmin_exercise": string, "expected_payload_hash": string}`. The
+        index counts into the unit's strength structure from 0; the hash is the
+        unit's content hash from the read the pick was made on. A name is trimmed,
+        cut to 80 characters and checked against the Garmin catalogue; the pair is
+        derived from it. An empty name removes the pick.
+
+        Response: 200 `{"status": "local", "local_id", "library_entry"}` with the
+        updated unit. The unit's Intervals.icu sync state is kept and nothing is
+        written remotely.
+
+        Errors: 404 "Einheit nicht gefunden." for an unknown or deleted unit; 409
+        `planning_revision_conflict` "Die Einheit wurde inzwischen geändert." for a
+        missing or outdated `expected_payload_hash`; 400 `invalid_exercise_index`
+        "Unbekannte Übung." when the unit has no strength structure or the index is
+        not an integer within it; 400 `invalid_strength_structure` "Unbekannte
+        Garmin-Übung: ..." with suggestions for a name the catalogue does not know.
+        """
         payload = _read_object(handler)
         with self._database_lock:
             result = self._planned_unit_service().assign_garmin_exercise(
@@ -46,7 +65,24 @@ class PlannedUnitFocusPostRoutes:
         handler.send_json(200, result)
 
     def _focus(self, handler: Any, request: RouteRequest) -> None:
-        """Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit."""
+        """Set or clear the focus of a planned unit without a remote write.
+
+        Request: path `{id}`, the local unit UUID; JSON body `{"session_focus":
+        string|null, "strength_intensity": string|null}`. Both fields are always
+        applied: an omitted or `null` field is cleared. `session_focus` must be a
+        focus of the unit's sport; `strength_intensity` is `light`, `moderate` or
+        `heavy` and only for strength units.
+
+        Response: 200 `{"status": "local", "local_id", "library_entry"}` with the
+        updated unit. A focus-only change keeps the Intervals.icu sync state.
+
+        Errors: 400 "Ungültige lokale Planungs-ID." for an id that is no UUID; 404
+        "Lokale Planung nicht gefunden."; 403 "Nur lokale geplante Einheiten können
+        bearbeitet werden." for a record without a date; 400 `invalid_session_focus`
+        "Ungültige Art der Einheit für diese Sportart." or "Ungültige
+        Krafteinheit-Intensität."; 409 `plan_date_conflict` when an external
+        calendar marker rules out the unit's day.
+        """
         payload = _read_object(handler)
         values = {key: payload.get(key) for key in FOCUS_ONLY_KEYS}
         with self._database_lock:

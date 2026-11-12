@@ -25,7 +25,20 @@ class ChatPostRoutes:
         return [Route("POST", "/api/chat/reset", Access.SESSION_CSRF, self._reset)]
 
     def _reset(self, handler: Any, _request: RouteRequest) -> None:
-        """Reset the Coach conversation; needs `{"confirmed": true}`, else 400 `confirmation_required`."""
+        """Reset the Coach conversation.
+
+        Request: JSON body `{"confirmed": true}` (required); body limit 28 000 000
+        bytes. Running Coach turns are cancelled first.
+
+        Response: 200 `{"status": "ok", "generation": string,
+        "remote_conversation_deleted": null | false, "message": string}`; `null`
+        means the remote conversation is deleted in the background.
+
+        Errors: 400 `confirmation_required` "Das Zurücksetzen muss bestätigt werden."
+        unless `confirmed` is `true`; 409 `chat_reset_timeout` "Die laufende
+        Coach-Anfrage wird noch beendet. Bitte den Chat gleich erneut
+        zurücksetzen." when the running turn does not stop in time.
+        """
         payload = handler.read_json(self._max_request_bytes)
         if payload.get("confirmed") is not True:
             raise AppError(
