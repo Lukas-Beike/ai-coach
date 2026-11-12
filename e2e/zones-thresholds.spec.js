@@ -21,7 +21,11 @@ async function openProfile(page) {
       cycling_ftp_watts: { value: 285, unit: "W", source: "Garmin Connect", observed_at: "2026-11-09" },
       bike_threshold_hr_bpm: { value: 163, unit: "bpm", source: "Garmin Connect", observed_at: "2026-11-09" },
       run_threshold_pace_seconds_per_km: { value: 268, unit: "s/km", source: "Garmin Connect", observed_at: "2026-11-09" },
-      run_threshold_hr_bpm: { value: 168, unit: "bpm", source: "Garmin Connect", observed_at: "2026-11-09" } } };
+      run_threshold_hr_bpm: { value: 168, unit: "bpm", source: "Garmin Connect", observed_at: "2026-11-09" } },
+      // #2427: the server derives LT1; without power zones the power is a fixed share of the FTP.
+      thresholds: { first_thresholds: {
+        ride: { hr_bpm: 142, hr_origin: "estimated", watts: 214, power_origin: "fixed_share" },
+        run: { hr_bpm: 146, hr_origin: "estimated", pace_seconds_per_km: 305, pace_origin: "fixed_share" } } } };
     state.data.profile = { ...state.data.profile, first_threshold_pct: "87", first_threshold_origin: "estimated" };
   });
 }
@@ -53,9 +57,9 @@ test("@responsive each sport shows LT1 and LT2 and its zone kinds, and Bearbeite
   await expect(thresholds.locator('[data-threshold="lt2-main"]')).toHaveText("285 W");
   await expect(thresholds.locator('[data-threshold="lt2-hr"]')).toHaveText("163 bpm");
   await expect(thresholds.locator('[data-threshold="lt1-hr"]')).toHaveText("142 bpm");
-  // Without power zones LT1 power has no zone 2 to read.
-  await expect(thresholds.locator('[data-threshold="lt1-main"]')).toHaveText("—");
-  await expect(thresholds).toContainText("LT1 aus der Herzfrequenzvariabilität (App)");
+  // Without power zones LT1 power is the server's fixed share of the FTP.
+  await expect(thresholds.locator('[data-threshold="lt1-main"]')).toHaveText("214 W");
+  await expect(thresholds).toContainText("LT1 aus der Herzfrequenzvariabilität (App), Leistung Schätzung");
   await expect(thresholds).toContainText("LT2 von Garmin Connect");
   const heart = overview.locator('[data-zone-box="heart_rate"]');
   await expect(heart.locator(".zone-list li")).toHaveCount(5);
@@ -94,9 +98,14 @@ test("@responsive each sport shows LT1 and LT2 and its zone kinds, and Bearbeite
 
 test("@responsive Analyse shows LT1 like the zones page", async ({ page }) => {
   await openProfile(page);
-  // Opened after startup, the route itself reads the zones and redraws the current values.
-  await page.evaluate(async () => { await AppRouter.navigate("analysis/cycling", { historyMode: "replace" }); });
+  // The current values carry LT1 without any zones; a fixed share wears the estimate chip (#2427).
+  await page.evaluate(async () => {
+    await AppRouter.navigate("analysis/cycling", { historyMode: "replace" });
+    renderPerformance(state.data.performance);
+  });
   const cycling = page.locator("#currentPerformance table[data-analysis-sport='ride']");
   await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] td')).toHaveText("142 bpm");
-  await expect(cycling.locator('[data-metric="cycling_lt1_watts"]')).toHaveCount(0);
+  await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] .estimate-chip')).toHaveCount(0);
+  await expect(cycling.locator('[data-metric="cycling_lt1_watts"] td')).toHaveText("214 W");
+  await expect(cycling.locator('[data-metric="cycling_lt1_watts"] .estimate-chip')).toHaveText("Schätzung");
 });

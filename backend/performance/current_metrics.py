@@ -100,6 +100,58 @@ def coach_thresholds(
     return result
 
 
+# LT1 as a fixed share of LT2 when no measured or adopted value exists (athlete
+# decision 2026-11-12, #2427): heart rate of the threshold HR, cycling power of
+# the FTP and running speed of the threshold speed. Change them here only.
+LT1_HR_SHARE: Final = 0.90
+LT1_POWER_SHARE: Final = 0.75
+LT1_RUN_SPEED_SHARE: Final = 0.88
+# Where an LT1 value comes from: the profile value (measured, or the adopted
+# DFA-a1 estimate), the top of the configured zone 2, or a fixed share of LT2.
+LT1_ZONE_TWO: Final = "zone_2"
+LT1_FIXED_SHARE: Final = "fixed_share"
+
+
+def first_thresholds(
+    metrics: Mapping[str, Mapping[str, Any]],
+    first_threshold_pct: float | None,
+    origin: str,
+    zone_two_tops: Mapping[str, float] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """LT1 of running and cycling with the origin of each value.
+
+    Heart rate: the stored share of the threshold HR (``origin``, measured or
+    estimated) or else ``LT1_HR_SHARE``. Pace and power: the top of zone 2 when
+    ``zone_two_tops`` has one for the sport (``"run"`` in s/km, ``"ride"`` in W),
+    otherwise the fixed share of the threshold pace or the FTP. A value without
+    its LT2 is left out.
+    """
+    tops = zone_two_tops or {}
+    result: dict[str, dict[str, Any]] = {}
+    for sport, lthr_key, lt2_key, main_key, main_origin_key, share in (
+        ("run", "run_threshold_hr_bpm", "run_threshold_pace_seconds_per_km",
+         "pace_seconds_per_km", "pace_origin", 1 / LT1_RUN_SPEED_SHARE),
+        ("ride", "bike_threshold_hr_bpm", "cycling_ftp_watts",
+         "watts", "power_origin", LT1_POWER_SHARE),
+    ):  # fmt: skip
+        values: dict[str, Any] = {}
+        lthr = as_number(metrics.get(lthr_key, {}).get("value"))
+        if lthr is not None and lthr > 0:
+            pct = first_threshold_pct
+            values["hr_bpm"] = round(lthr * (pct / 100 if pct else LT1_HR_SHARE))
+            values["hr_origin"] = origin if pct else LT1_FIXED_SHARE
+        lt2 = as_number(metrics.get(lt2_key, {}).get("value"))
+        if tops.get(sport):
+            values[main_key] = round(tops[sport])
+            values[main_origin_key] = LT1_ZONE_TWO
+        elif lt2 is not None and lt2 > 0:
+            values[main_key] = round(lt2 * share)
+            values[main_origin_key] = LT1_FIXED_SHARE
+        if values:
+            result[sport] = values
+    return result
+
+
 def as_number(value: Any) -> float | int | None:
     """Return a finite number parsed from a provider value, or None."""
     try:

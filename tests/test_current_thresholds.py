@@ -2,6 +2,7 @@
 
 import unittest
 from datetime import date, timedelta
+from typing import ClassVar
 
 from canonical_domain_support import provenance, zone_configuration
 from performance_day_support import (
@@ -10,6 +11,7 @@ from performance_day_support import (
     garmin_threshold_observations,
 )
 
+from backend.activities.zone_settings import zone_two_top
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     Environment,
@@ -19,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
     ZoneConfigurationMetric,
+    ZonePercentBasis,
 )
 from backend.performance.canonical_current import (
     read_current_inputs,
@@ -27,6 +30,7 @@ from backend.performance.canonical_current import (
 from backend.performance.current_metrics import (
     coach_thresholds,
     current_performance_metrics,
+    first_thresholds,
 )
 from backend.performance.current_thresholds import (
     configured_thresholds,
@@ -409,6 +413,89 @@ class ExportThresholdTests(unittest.TestCase):
             (winner.provenance.provider, winner.value.value), (GARMIN, 172.0)
         )
         self.assertNotIn((MetricKind.THRESHOLD_HR, Sport.RIDE), exported)
+
+
+class FirstThresholdTests(unittest.TestCase):
+    """LT1 per sport (#2427): measured or adopted > zone 2 or fixed share of LT2."""
+
+    METRICS: ClassVar[dict[str, dict[str, float]]] = {
+        "run_threshold_hr_bpm": {"value": 170},
+        "run_threshold_pace_seconds_per_km": {"value": 270},
+        "bike_threshold_hr_bpm": {"value": 160},
+        "cycling_ftp_watts": {"value": 280},
+    }
+
+    def test_precedence_of_each_value(self) -> None:
+        # Worked examples: 90 % of 170 and 160 bpm; 4:30 /km at 88 % speed is
+        # 5:07 /km; 75 % of 280 W; 86 % of 170 and 160 bpm.
+        fixed = "fixed_share"
+        for name, pct, origin, tops, expected in (
+            ("no LT1 value", None, "", None, {
+                "run": {"hr_bpm": 153, "hr_origin": fixed,
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 144, "hr_origin": fixed,
+                         "watts": 210, "power_origin": fixed}}),
+            ("measured", 86.0, "measured", None, {
+                "run": {"hr_bpm": 146, "hr_origin": "measured",
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 138, "hr_origin": "measured",
+                         "watts": 210, "power_origin": fixed}}),
+            ("adopted DFA estimate", 86.0, "estimated", None, {
+                "run": {"hr_bpm": 146, "hr_origin": "estimated",
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 138, "hr_origin": "estimated",
+                         "watts": 210, "power_origin": fixed}}),
+            ("zone 2 configured", None, "", {"run": 300.4, "ride": 200.0}, {
+                "run": {"hr_bpm": 153, "hr_origin": fixed,
+                        "pace_seconds_per_km": 300, "pace_origin": "zone_2"},
+                "ride": {"hr_bpm": 144, "hr_origin": fixed,
+                         "watts": 200, "power_origin": "zone_2"}}),
+        ):  # fmt: skip
+            with self.subTest(name):
+                self.assertEqual(
+                    expected, first_thresholds(self.METRICS, pct, origin, tops)
+                )
+
+    def test_a_value_without_its_lt2_is_left_out(self) -> None:
+        metrics = {"run_threshold_hr_bpm": {"value": 170}}
+        self.assertEqual(
+            {"run": {"hr_bpm": 153, "hr_origin": "fixed_share"}},
+            first_thresholds(metrics, None, ""),
+        )
+        self.assertEqual({}, first_thresholds({}, 86.0, "measured"))
+
+    def test_zone_two_top_of_pace_and_power_zones(self) -> None:
+        pace = {
+            "metric": ZoneConfigurationMetric.PACE,
+            "threshold": None,
+            "maximum": None,
+            "resting": None,
+            "limits": None,
+        }
+        for name, configuration, threshold_pace, expected in (
+            # 4:30 /km at 87.7 % of the threshold speed: 270 * 100 / 87.7.
+            ("pace percent of the run threshold", zone_configuration(
+                **pace, percent_limits=(77.5, 87.7, 94.3),
+                percent_basis=ZonePercentBasis.THRESHOLD), 270.0, 307.87),
+            ("pace percent without any threshold", zone_configuration(
+                **pace, percent_limits=(77.5, 87.7, 94.3),
+                percent_basis=ZonePercentBasis.THRESHOLD), None, None),
+            # 3.5 m/s is 285.71 s/km.
+            ("absolute pace limits", zone_configuration(
+                **{**pace, "limits": (3.0, 3.5, 4.0)}), None, 285.71),
+            ("absolute power limits", _local_power(300.0), None, 200.0),
+            ("power percent of the FTP", zone_configuration(
+                metric=ZoneConfigurationMetric.POWER, sport=Sport.RIDE,
+                threshold=300.0, maximum=None, resting=None, limits=None,
+                percent_limits=(55.0, 75.0, 90.0),
+                percent_basis=ZonePercentBasis.THRESHOLD), None, 225.0),
+        ):  # fmt: skip
+            with self.subTest(name):
+                top = zone_two_top(configuration, threshold_pace)
+                if expected is None:
+                    self.assertIsNone(top)
+                else:
+                    self.assertAlmostEqual(expected, top, places=2)
 
 
 if __name__ == "__main__":

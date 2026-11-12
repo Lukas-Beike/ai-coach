@@ -48,8 +48,10 @@ class PublicPerformanceStateService:
         *,
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
+        zone_configurations: Callable[[], Any] = tuple,
     ) -> None:
         self._garmin_payload_service = garmin_payload_service
+        self._zone_configurations = zone_configurations
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
@@ -115,6 +117,7 @@ class PublicPerformanceStateService:
             today,
             canonical=inputs,
             session_feedback=self._session_feedback,
+            zone_configurations=self._zone_configurations(),
         )
         timezone = str(profile.get("timezone") or "UTC")
         performance = {

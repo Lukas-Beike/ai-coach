@@ -133,33 +133,29 @@ function currentPerformanceRows(metrics, items) {
     if (metric?.value == null) continue;
     const row = h("tr"); row.dataset.metric = key;
     const heading = h("th", null, label); heading.scope = "row";
-    if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
+    if (ESTIMATED_METRICS.has(key) || metric.estimated) heading.append(" ", createEstimateChip());
     row.append(heading, h("td", null, analysisValue(metric.value, metric.unit || "")));
     body.append(row);
   }
   return body;
 }
 
-// LT1 as on the zones page (#2262): the stored share of the threshold heart rate and the
-// power or pace at the top of zone 2. The zones are read once; their arrival redraws the table.
-function withFirstThresholds(metrics, status) {
-  if (typeof thresholdRows !== "function") return metrics;
-  // Only Analyse lists LT1, so only there the zones are read.
-  if (!zoneDataLoad && ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) void ensureZoneData().then(() => renderCurrentPerformance(state.data?.performance?.metrics || {}, state.data?.performance?.history, status));
-  const run = thresholdRows("run", metrics);
-  const ride = thresholdRows("ride", metrics);
-  const value = (number, unit) => (number == null ? undefined : { value: unit === "s/km" ? number : Math.round(number), unit });
+// LT1 per sport from the performance values (#2427): measured, the adopted HRV estimate,
+// the top of zone 2 or a fixed share of LT2; a fixed share carries the estimate chip.
+function withFirstThresholds(metrics) {
+  const lt1 = state.data?.performance?.thresholds?.first_thresholds || {};
+  const value = (number, unit, origin) => (number == null ? undefined : { value: number, unit, estimated: origin === "fixed_share" });
   return {
     ...metrics,
-    run_lt1_pace_seconds_per_km: value(run.lt1.main, "s/km"),
-    run_lt1_hr_bpm: value(run.lt1.hr, "bpm"),
-    cycling_lt1_watts: value(ride.lt1.main, "W"),
-    cycling_lt1_hr_bpm: value(ride.lt1.hr, "bpm"),
+    run_lt1_pace_seconds_per_km: value(lt1.run?.pace_seconds_per_km, "s/km", lt1.run?.pace_origin),
+    run_lt1_hr_bpm: value(lt1.run?.hr_bpm, "bpm", lt1.run?.hr_origin),
+    cycling_lt1_watts: value(lt1.ride?.watts, "W", lt1.ride?.power_origin),
+    cycling_lt1_hr_bpm: value(lt1.ride?.hr_bpm, "bpm", lt1.ride?.hr_origin),
   };
 }
 
 function renderCurrentPerformance(metrics, history, status = []) {
-  metrics = withFirstThresholds(currentPerformanceValues(metrics, history), status);
+  metrics = withFirstThresholds(currentPerformanceValues(metrics, history));
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
   root.replaceChildren(h("h3", null, "Aktuelle Werte"));

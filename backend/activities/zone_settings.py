@@ -391,6 +391,35 @@ def effective_zone_configuration(
     return _later_stand_in(matching, day) if day is not None else None
 
 
+def zone_two_top(
+    configuration: ZoneConfiguration, threshold_pace: float | None = None
+) -> float | None:
+    """The upper limit of zone 2: watts for power, seconds per km for pace.
+
+    Percent pace limits are percent of the threshold speed: the configuration's
+    own threshold (m/s), else ``threshold_pace`` (s/km). None when it cannot be
+    resolved.
+    """
+    percent = (configuration.percent_limits or ())[1:2]
+    absolute = (configuration.limits or ())[1:2]
+    if configuration.metric is ZoneConfigurationMetric.PACE:
+        if absolute and absolute[0] > 0:
+            return 1000 / absolute[0]
+        if percent and percent[0] > 0 and configuration.threshold:
+            return 1000 / (configuration.threshold * percent[0] / 100)
+        if percent and percent[0] > 0 and threshold_pace:
+            return threshold_pace * 100 / percent[0]
+        return None
+    if absolute:
+        return absolute[0]
+    base = (
+        configuration.maximum
+        if configuration.percent_basis is ZonePercentBasis.MAXIMUM
+        else configuration.threshold
+    )
+    return base * percent[0] / 100 if percent and base else None
+
+
 def _later_stand_in(
     matching: list[ZoneConfiguration], day: date
 ) -> ZoneConfiguration | None:

@@ -103,6 +103,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
             today,
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
+            zone_configurations=(),
         )
         garmin_payload_service.sync_status.assert_called_once_with()
         garmin_payload_service.view.assert_not_called()
