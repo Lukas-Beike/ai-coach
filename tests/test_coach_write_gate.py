@@ -1044,9 +1044,11 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_output_items_are_parsed(self):
         text = '{"requests":[{"domain":"planning","delete":false,"bulk":true}]}'
+        # Only the message text is the verdict (#2073): a reasoning item's text,
+        # which the former parser could pick first, is never read.
         response = {
             "output": [
-                {"type": "reasoning", "summary": []},
+                {"type": "reasoning", "content": [{"type": "text", "text": "x"}]},
                 {"type": "message", "content": [{"type": "output_text", "text": text}]},
             ]
         }
@@ -1067,6 +1069,19 @@ class OpenAIClassifierTests(unittest.TestCase):
             {
                 "output_text": '{"requests":[{"domain":"remote_intervals",'
                 '"delete":true},{"domain":"admin"},{"domain":["profile"]},3]}'
+            },
+            # Two message text parts are one joined text, not a JSON verdict
+            # (#2073): the classifier confirms nothing.
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": '{"requests":[]}'},
+                            {"type": "output_text", "text": "{}"},
+                        ],
+                    }
+                ]
             },
         ):
             with self.subTest(response=response):
