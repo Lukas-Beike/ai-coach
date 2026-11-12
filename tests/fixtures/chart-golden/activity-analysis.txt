@@ -1,0 +1,180 @@
+<div>
+  <dl class="activity-analysis-stats">
+    <div>
+      <dt>
+        "Distanz"
+      <dd>
+        "5,0 km"
+    <div>
+      <dt>
+        "Bewegungszeit"
+      <dd>
+        "25:00"
+    <div>
+      <dt>
+        "Ø Pace"
+      <dd>
+        "5:13 min/km"
+    <div>
+      <dt>
+        "Ø Herzfrequenz"
+      <dd>
+        "140 bpm"
+    <div>
+      <dt>
+        "Max. Herzfrequenz"
+      <dd>
+        "152 bpm"
+  <div>
+    <p>
+      "Form ließ nach"
+    <p>
+      "Bodenkontaktzeit 240 → 252 ms (+5,0 %)"
+  <div class="activity-analysis-charts">
+    <section class="activity-analysis-chart is-heart">
+      <div class="activity-analysis-chart-header">
+        <h4>
+          "Herzfrequenz"
+        <p class="activity-analysis-chart-stats">
+          <span>
+            "Ø 140 · Max 152 bpm"
+          <span class="activity-analysis-readout">
+      <svg:svg aria-label="Herzfrequenz: Ø 140 · Max 152 bpm, über 5:00" on:pointerdown="1" on:pointerleave="1" on:pointermove="1" role="img" viewBox="0 0 340 150">
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="116.19999999999999" y2="116.19999999999999">
+        <svg:text text-anchor="end" x="34" y="120.19999999999999">
+          "121"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="69" y2="69">
+        <svg:text text-anchor="end" x="34" y="73">
+          "136"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="21.799999999999958" y2="21.799999999999958">
+        <svg:text text-anchor="end" x="34" y="25.799999999999958">
+          "151"
+        <svg:text text-anchor="start" x="40" y="144">
+          "0:00"
+        <svg:text text-anchor="middle" x="186" y="144">
+          "2:30"
+        <svg:text text-anchor="end" x="332" y="144">
+          "5:00"
+        <svg:path class="activity-analysis-area" d="M40.0,128 L40.0,119.9 L98.4,94.4 L98.4,128 Z M215.2,128 L215.2,53.1 L273.6,18.1 L332.0,27.7 L332.0,128 Z ">
+        <svg:path class="activity-analysis-line" d="M40.0,119.9 L98.4,94.4 M215.2,53.1 L273.6,18.1 L332.0,27.7 ">
+        <svg:line class="activity-analysis-average" x1="40" x2="332" y1="56.28448275862069" y2="56.28448275862069">
+        <svg:line class="activity-analysis-cursor" visibility="hidden" y1="10" y2="128">
+        <svg:circle class="activity-analysis-dot" r="3.5" visibility="hidden">
+    <section class="activity-analysis-chart is-speed">
+      <div class="activity-analysis-chart-header">
+        <h4>
+          "Pace"
+        <p class="activity-analysis-chart-stats">
+          <span>
+            "Ø 5:13 · Beste 4:46 min/km"
+          <span class="activity-analysis-readout">
+      <svg:svg aria-label="Pace: Ø 5:13 · Beste 4:46 min/km, über 5:00" on:pointerdown="1" on:pointerleave="1" on:pointermove="1" role="img" viewBox="0 0 340 150">
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="21.8" y2="21.8">
+        <svg:text text-anchor="end" x="34" y="25.8">
+          "4:47"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="69" y2="69">
+        <svg:text text-anchor="end" x="34" y="73">
+          "5:10"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="116.2" y2="116.2">
+        <svg:text text-anchor="end" x="34" y="120.2">
+          "5:32"
+        <svg:text text-anchor="start" x="40" y="144">
+          "0:00"
+        <svg:text text-anchor="middle" x="186" y="144">
+          "2:30"
+        <svg:text text-anchor="end" x="332" y="144">
+          "5:00"
+        <svg:path class="activity-analysis-area" d="M40.0,128 L40.0,119.9 L98.4,75.4 L98.4,128 Z M215.2,128 L215.2,36.1 L273.6,18.1 L332.0,55.1 L332.0,128 Z ">
+        <svg:path class="activity-analysis-line" d="M40.0,119.9 L98.4,75.4 M215.2,36.1 L273.6,18.1 L332.0,55.1 ">
+        <svg:line class="activity-analysis-average" x1="40" x2="332" y1="75.35775862068968" y2="75.35775862068968">
+        <svg:line class="activity-analysis-cursor" visibility="hidden" y1="10" y2="128">
+        <svg:circle class="activity-analysis-dot" r="3.5" visibility="hidden">
+    <section class="activity-analysis-chart is-elevation">
+      <div class="activity-analysis-chart-header">
+        <h4>
+          "Höhe"
+        <p class="activity-analysis-chart-stats">
+          <span>
+            "Min 100 · Max 110 m"
+          <span class="activity-analysis-readout">
+      <svg:svg aria-label="Höhe: Min 100 · Max 110 m, über 5:00" on:pointerdown="1" on:pointerleave="1" on:pointermove="1" role="img" viewBox="0 0 340 150">
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="116.20000000000003" y2="116.20000000000003">
+        <svg:text text-anchor="end" x="34" y="120.20000000000003">
+          "100"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="69" y2="69">
+        <svg:text text-anchor="end" x="34" y="73">
+          "105"
+        <svg:line class="activity-analysis-grid" x1="40" x2="332" y1="21.79999999999997" y2="21.79999999999997">
+        <svg:text text-anchor="end" x="34" y="25.79999999999997">
+          "110"
+        <svg:text text-anchor="start" x="40" y="144">
+          "0:00"
+        <svg:text text-anchor="middle" x="186" y="144">
+          "2:30"
+        <svg:text text-anchor="end" x="332" y="144">
+          "5:00"
+        <svg:path class="activity-analysis-area" d="M40.0,128 L40.0,119.9 L98.4,94.4 L156.8,69.0 L215.2,79.2 L273.6,38.5 L332.0,18.1 L332.0,128 Z ">
+        <svg:path class="activity-analysis-line" d="M40.0,119.9 L98.4,94.4 L156.8,69.0 L215.2,79.2 L273.6,38.5 L332.0,18.1 ">
+        <svg:line class="activity-analysis-cursor" visibility="hidden" y1="10" y2="128">
+        <svg:circle class="activity-analysis-dot" r="3.5" visibility="hidden">
+  <section class="activity-analysis-zones">
+    <h4>
+      "Zeit in HF-Zonen"
+    <ol>
+      <li data-zone="Z2">
+        <span class="activity-analysis-zone-label">
+          "Z2"
+        <span class="activity-analysis-zone-bar" style.--zone-share="60%">
+        <span class="activity-analysis-zone-value">
+          "15:00 · 60 %"
+      <li data-zone="Z1">
+        <span class="activity-analysis-zone-label">
+          "Z1"
+        <span class="activity-analysis-zone-bar" style.--zone-share="40%">
+        <span class="activity-analysis-zone-value">
+          "10:00 · 40 %"
+    <p class="muted">
+      "Zonen laut Garmin am Tag der Einheit."
+  <section class="activity-analysis-laps">
+    <h4>
+      "Runden"
+    <div aria-label="Runden dieser Einheit" class="analysis-chart-table" role="region" tabIndex="0">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">
+              "#"
+            <th scope="col">
+              "Zeit"
+            <th scope="col">
+              "Distanz"
+            <th scope="col">
+              "Pace"
+            <th scope="col">
+              "Ø HF"
+        <tbody>
+          <tr>
+            <th scope="row">
+              "1"
+            <td>
+              "5:00"
+            <td>
+              "1,0 km"
+            <td>
+              "5:03"
+            <td>
+              "140"
+          <tr>
+            <th scope="row">
+              "2"
+            <td>
+              "4:40"
+            <td>
+              "1,0 km"
+            <td>
+              "4:46"
+            <td>
+              "150"
+  <div class="dialog-actions">
+  <p class="muted" role="status">
+    ""

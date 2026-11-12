@@ -1,0 +1,270 @@
+<dialog aria-labelledby="activityDetailTitle" class="activity-detail-dialog" on:cancel="1" on:close="1">
+  <button class="secondary-button" on:click="1" type="button">
+    "Zurück zum Kalender"
+  <h2 id="activityDetailTitle">
+    "Testlauf"
+  <div>
+    <p>
+      ""
+    <section class="activity-series">
+      <h3>
+        "Leistung (W)"
+      <svg:svg aria-label="Leistung, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewBox="0 0 680 220">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
+        <svg:text text-anchor="end" x="56" y="20">
+          "230"
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
+        <svg:text text-anchor="end" x="56" y="105">
+          "215"
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
+        <svg:text text-anchor="end" x="56" y="190">
+          "200"
+        <svg:text text-anchor="middle" x="64" y="212">
+          "0 min"
+        <svg:text text-anchor="middle" x="366" y="212">
+          "2 min"
+        <svg:text text-anchor="middle" x="668" y="212">
+          "4 min"
+        <svg:path d="M64.0,186.0 L215.0,129.3  M517.0,16.0 L668.0,44.3">
+      <p class="muted">
+        "200–230 W · 0–4 min · 1 fehlende Messpunkte"
+      <details class="activity-values">
+        <summary>
+          "Alle 4 Messwerte ansehen"
+        <div aria-label="Leistung in W: Messwerte" class="analysis-chart-table" role="region" tabIndex="0">
+          <table>
+            <caption>
+              "Leistung in W; fehlende Werte sind als Lücke markiert."
+            <thead>
+              <tr>
+                <th scope="col">
+                  "Zeit"
+                <th scope="col">
+                  "Leistung"
+            <tbody>
+              <tr>
+                <th scope="row">
+                  "0:00"
+                <td>
+                  "200 W"
+              <tr>
+                <th scope="row">
+                  "1:00"
+                <td>
+                  "210 W"
+              <tr>
+                <th scope="row">
+                  "2:00"
+                <td>
+                  "Lücke"
+              <tr>
+                <th scope="row">
+                  "3:00"
+                <td>
+                  "230 W"
+              <tr>
+                <th scope="row">
+                  "4:00"
+                <td>
+                  "225 W"
+    <section class="activity-series">
+      <h3>
+        "Temperatur (°C)"
+      <svg:svg aria-label="Temperatur, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt" role="img" viewBox="0 0 680 220">
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="16" y2="16">
+        <svg:text text-anchor="end" x="56" y="20">
+          "20,5"
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="101" y2="101">
+        <svg:text text-anchor="end" x="56" y="105">
+          "20"
+        <svg:line class="activity-gridline" x1="64" x2="668" y1="186" y2="186">
+        <svg:text text-anchor="end" x="56" y="190">
+          "19,5"
+        <svg:text text-anchor="middle" x="64" y="212">
+          "0 min"
+        <svg:text text-anchor="middle" x="366" y="212">
+          "2 min"
+        <svg:text text-anchor="middle" x="668" y="212">
+          "4 min"
+        <svg:path d="M64.0,101.0 L215.0,101.0 L366.0,101.0 L517.0,101.0 L668.0,101.0">
+      <p class="muted">
+        "20–20 °C · 0–4 min · 0 fehlende Messpunkte"
+      <details class="activity-values">
+        <summary>
+          "Alle 5 Messwerte ansehen"
+        <div aria-label="Temperatur in °C: Messwerte" class="analysis-chart-table" role="region" tabIndex="0">
+          <table>
+            <caption>
+              "Temperatur in °C; fehlende Werte sind als Lücke markiert."
+            <thead>
+              <tr>
+                <th scope="col">
+                  "Zeit"
+                <th scope="col">
+                  "Temperatur"
+            <tbody>
+              <tr>
+                <th scope="row">
+                  "0:00"
+                <td>
+                  "20 °C"
+              <tr>
+                <th scope="row">
+                  "1:00"
+                <td>
+                  "20 °C"
+              <tr>
+                <th scope="row">
+                  "2:00"
+                <td>
+                  "20 °C"
+              <tr>
+                <th scope="row">
+                  "3:00"
+                <td>
+                  "20 °C"
+              <tr>
+                <th scope="row">
+                  "4:00"
+                <td>
+                  "20 °C"
+    <h3>
+      "Intervalle / Runden"
+    <ol class="activity-laps">
+      <li>
+        "Runde 1 · 120 s · 205 W · 140 bpm"
+      <li>
+        "Intervall 2 · 60 s"
+    <h3>
+      "Kraftsätze"
+    <p class="muted">
+      "3 Sätze · 13 Wdh. · 1.060 kg Volumen · Garmin-Sätze"
+    <div aria-label="Kraftsätze" class="analysis-chart-table" role="region" tabIndex="0">
+      <table>
+        <caption>
+          "Ausgeführte Sätze je Übung"
+        <thead>
+          <tr>
+            <th scope="col">
+              "Übung"
+            <th scope="col">
+              "Satz"
+            <th scope="col">
+              "Wdh. / Dauer"
+            <th scope="col">
+              "kg"
+            <th scope="col">
+              "Pause"
+        <tbody>
+          <tr>
+            <th rowSpan="2" scope="rowgroup">
+              "Kniebeuge – Barbell Back Squat"
+            <td>
+              "1"
+            <td>
+              "5"
+            <td>
+              "80"
+            <td>
+              "2:00"
+          <tr>
+            <td>
+              "2"
+            <td>
+              "5"
+            <td>
+              "82,5"
+            <td>
+              "–"
+        <tbody>
+          <tr>
+            <th rowSpan="1" scope="rowgroup">
+              "Unterarmstütz"
+            <td>
+              "1"
+            <td>
+              "1:00"
+            <td>
+              "–"
+            <td>
+              "–"
+    <section class="activity-feedback">
+      <h3>
+        "Dein Feedback"
+      <p data-session-rpe-load="" hidden="true">
+      <form class="activity-feedback-form" on:submit="1">
+        <label>
+          "Art der Einheit"
+          <select name="purpose" value="">
+            <option value="">
+              "Automatisch"
+            <option value="training">
+              "Training"
+            <option value="race">
+              "Wettkampf"
+            <option value="commute">
+              "Pendeln"
+            <option value="warmup">
+              "Einfahren"
+            <option value="cooldown">
+              "Ausfahren"
+        <label>
+          "Session-RPE (0–10)"
+          <select name="session_rpe" value="">
+            <option value="">
+              "Keine Angabe"
+            <option value="0">
+              "0 · Ruhe"
+            <option value="0.5">
+              "0,5"
+            <option value="1">
+              "1 · Sehr, sehr leicht"
+            <option value="1.5">
+              "1,5"
+            <option value="2">
+              "2 · Leicht"
+            <option value="2.5">
+              "2,5"
+            <option value="3">
+              "3 · Moderat"
+            <option value="3.5">
+              "3,5"
+            <option value="4">
+              "4 · Etwas schwer"
+            <option value="4.5">
+              "4,5"
+            <option value="5">
+              "5 · Schwer"
+            <option value="5.5">
+              "5,5"
+            <option value="6">
+              "6"
+            <option value="6.5">
+              "6,5"
+            <option value="7">
+              "7 · Sehr schwer"
+            <option value="7.5">
+              "7,5"
+            <option value="8">
+              "8"
+            <option value="8.5">
+              "8,5"
+            <option value="9">
+              "9"
+            <option value="9.5">
+              "9,5"
+            <option value="10">
+              "10 · Maximal"
+        <label>
+          "Abweichungsgrund"
+          <input maxLength="500" name="deviation_reason" value="">
+        <label>
+          "Notizen"
+          <textarea maxLength="4000" name="notes" rows="3" value="">
+        <button type="submit">
+          "Feedback speichern"
+      <p class="muted" role="status">
+        ""
+  <p class="muted" role="status">
+  <div>
+    <div class="dialog-actions">

@@ -111,14 +111,10 @@
     const ticks = [low + (high - low) * 0.1, (low + high) / 2, high - (high - low) * 0.1];
     for (const value of ticks) {
       svg.append(svgNode("line", { x1: LEFT, x2: WIDTH - RIGHT, y1: scale.y(value), y2: scale.y(value), class: "activity-analysis-grid" }));
-      const label = svgNode("text", { x: LEFT - 6, y: scale.y(value) + 4, "text-anchor": "end" });
-      label.textContent = channel.format(value);
-      svg.append(label);
+      svg.append(svgNode("text", { x: LEFT - 6, y: scale.y(value) + 4, "text-anchor": "end" }, channel.format(value)));
     }
     [0, 0.5, 1].forEach((fraction) => {
-      const label = svgNode("text", { x: scale.x(start + span * fraction), y: HEIGHT - 6, "text-anchor": ["start", "middle", "end"][fraction * 2] });
-      label.textContent = clock(span * fraction);
-      svg.append(label);
+      svg.append(svgNode("text", { x: scale.x(start + span * fraction), y: HEIGHT - 6, "text-anchor": ["start", "middle", "end"][fraction * 2] }, clock(span * fraction)));
     });
   }
 
@@ -163,14 +159,9 @@
       y: (value) => TOP + (channel.invert ? share(value) : 1 - share(value)) * (HEIGHT - TOP - BOTTOM),
     };
 
-    const section = h("section", `activity-analysis-chart is-${channel.color}`);
-    const header = h("div", "activity-analysis-chart-header");
-    header.append(h("h4", null, channel.label));
-    const stats = h("p", "activity-analysis-chart-stats");
     const readout = h("span", "activity-analysis-readout");
     const summaryText = chartSummary(channel, sorted, valid);
-    stats.append(h("span", null, summaryText), readout);
-    header.append(stats);
+    const header = h("div", "activity-analysis-chart-header", h("h4", null, channel.label), h("p", "activity-analysis-chart-stats", h("span", null, summaryText), readout));
 
     const svg = svgNode("svg", { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: "img", "aria-label": `${channel.label}: ${summaryText}, über ${clock(span)}` });
     appendAxes(svg, channel, scale);
@@ -183,8 +174,7 @@
       svg.append(svgNode("line", { x1: LEFT, x2: WIDTH - RIGHT, y1: average, y2: average, class: "activity-analysis-average" }));
     }
     attachScrubber(svg, channel, scale, valid, readout);
-    section.append(header, svg);
-    return section;
+    return h("section", `activity-analysis-chart is-${channel.color}`, header, svg);
   }
 
   const measure = (value, unit) => {
@@ -246,13 +236,7 @@
       ...ActivityDetails.runningDynamics(metrics),
     ].filter(([, value]) => value);
     if (!values.length) return null;
-    const grid = h("dl", "activity-analysis-stats");
-    for (const [label, value] of values) {
-      const item = h("div");
-      item.append(h("dt", null, label), h("dd", null, value));
-      grid.append(item);
-    }
-    return grid;
+    return h("dl", "activity-analysis-stats", values.map(([label, value]) => h("div", null, h("dt", null, label), h("dd", null, value))));
   }
 
   function zones(title, zone) {
@@ -260,21 +244,15 @@
       .map((bucket) => ({ id: String(bucket.label || `Z${bucket.index}`), secs: bucket.seconds }));
     const total = items.reduce((sum, item) => sum + item.secs, 0);
     if (!total) return null;
-    const section = h("section", "activity-analysis-zones");
-    section.append(h("h4", null, title));
     const rows = h("ol");
     for (const item of [...items].reverse()) {
       const share = item.secs / total;
-      const row = h("li");
-      row.dataset.zone = item.id.match(/^Z\d/)?.[0] || "";
       const bar = h("span", "activity-analysis-zone-bar");
       bar.style.setProperty("--zone-share", `${Math.round(share * 1000) / 10}%`);
-      row.append(h("span", "activity-analysis-zone-label", item.id.slice(0, 20)), bar, h("span", "activity-analysis-zone-value", `${clock(item.secs)} · ${Math.round(share * 100)} %`));
-      rows.append(row);
+      rows.append(h("li", { dataset: { zone: item.id.match(/^Z\d/)?.[0] || "" } }, h("span", "activity-analysis-zone-label", item.id.slice(0, 20)), bar, h("span", "activity-analysis-zone-value", `${clock(item.secs)} · ${Math.round(share * 100)} %`)));
     }
     // Derived zones use the zone settings of the session day, as the reports (#1743).
-    section.append(rows, h("p", "muted", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`));
-    return section;
+    return h("section", "activity-analysis-zones", h("h4", null, title), rows, h("p", "muted", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`));
   }
 
   function laps(activity, lapSet) {
@@ -307,19 +285,11 @@
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
     const driftLines = ActivityDetails.formDriftLines(payload?.analysis?.form_drift);
-    if (driftLines.length) {
-      const drift = h("div");
-      drift.append(...driftLines.map((line) => h("p", null, line)));
-      panel.append(drift);
-    }
+    if (driftLines.length) panel.append(h("div", null, driftLines.map((line) => h("p", null, line))));
     // The running dynamics share the time axis of the other channels.
     const streams = payload?.streams && { ...payload.streams, channels: { ...payload.streams.channels, ...payload.running_dynamics_streams } };
     const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
-    if (charts.length) {
-      const grid = h("div", "activity-analysis-charts");
-      grid.append(...charts);
-      panel.append(grid);
-    }
+    if (charts.length) panel.append(h("div", "activity-analysis-charts", charts));
     for (const section of [zones("Zeit in HF-Zonen", payload?.zones?.heart_rate), zones("Zeit in Leistungszonen", payload?.zones?.power), laps(activity, payload?.laps)]) {
       if (section) panel.append(section);
     }

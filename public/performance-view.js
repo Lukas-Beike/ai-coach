@@ -131,11 +131,8 @@ function currentPerformanceRows(metrics, items) {
   for (const [key, label] of items) {
     const metric = metrics?.[key];
     if (metric?.value == null) continue;
-    const row = h("tr"); row.dataset.metric = key;
-    const heading = h("th", null, label); heading.scope = "row";
-    if (ESTIMATED_METRICS.has(key) || metric.estimated) heading.append(" ", createEstimateChip());
-    row.append(heading, h("td", null, analysisValue(metric.value, metric.unit || "")));
-    body.append(row);
+    const estimated = ESTIMATED_METRICS.has(key) || metric.estimated;
+    body.append(h("tr", { dataset: { metric: key } }, h("th", { scope: "row" }, label, estimated && [" ", createEstimateChip()]), h("td", null, analysisValue(metric.value, metric.unit || ""))));
   }
   return body;
 }
@@ -182,9 +179,6 @@ function renderCurrentPerformance(metrics, history, status = [], thresholds = nu
   const grid = h("div", "current-performance-groups");
   // Laufen and Radfahren each show their own table (#2265); the caption names it for screen readers.
   for (const [sport, analysisSport, items] of groups) {
-    const table = h("table", "current-performance-table");
-    table.dataset.analysisSport = analysisSport;
-    table.append(h("caption", "sr-only", sport));
     const body = currentPerformanceRows(metrics, items);
     // A status message (e.g. a failed read) keeps the section visible.
     root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
@@ -194,8 +188,7 @@ function renderCurrentPerformance(metrics, history, status = [], thresholds = nu
       grid.append(none);
       continue;
     }
-    table.append(body);
-    grid.append(table);
+    grid.append(h("table", { className: "current-performance-table", dataset: { analysisSport } }, h("caption", "sr-only", sport), body));
   }
   root.dataset.analysisEmpty = String(root.dataset.analysisEmptyRunning === "true" && root.dataset.analysisEmptyCycling === "true");
   root.append(grid);
@@ -217,30 +210,14 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;
-  const predictionHeading = h("h4", null, "Laufprognosen");
-  predictionHeading.append(" ", createEstimateChip());
-  root.append(predictionHeading);
+  root.append(h("h4", null, "Laufprognosen", " ", createEstimateChip()));
   root.dataset.analysisEmpty = String(!predictions.length);
   if (!predictions.length) {
     root.append(h("p", "muted", racePredictionEmptyReason(values)));
   } else {
-    const table = h("table", "race-predictions-table");
-    const head = h("thead");
-    const header = h("tr");
-    for (const label of ["Distanz", "Gesch\u00e4tzte Zeit"]) {
-      const cell = h("th", null, label); cell.scope = "col"; header.append(cell);
-    }
-    head.append(header); table.append(head);
-    const body = h("tbody");
-    for (const { label, metric, withSeconds } of predictions) {
-      const row = h("tr");
-      const distance = h("th", null, label); distance.scope = "row";
-      row.append(distance, h("td", null, predictionTime(metric.value, withSeconds)));
-      body.append(row);
-    }
-    table.append(body);
+    const rows = predictions.map(({ label, metric, withSeconds }) => [h("th", { scope: "row" }, label), predictionTime(metric.value, withSeconds)]);
     const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Geschätzte Zeiten nach Distanz");
-    scroll.append(table); root.append(scroll);
+    scroll.append(table(["Distanz", "Gesch\u00e4tzte Zeit"], rows, { className: "race-predictions-table" })); root.append(scroll);
   }
   renderAnalysisSegments(state.route);
 }

@@ -41,7 +41,7 @@ function contextValueNodeFor() {
 }
 
 function descendants(node) {
-  return node.children.flatMap((child) => [child, ...descendants(child)]);
+  return node.children.filter((child) => typeof child !== "string").flatMap((child) => [child, ...descendants(child)]);
 }
 
 test("the context preview shows readable values and keeps deeply nested provider data as compact text", () => {

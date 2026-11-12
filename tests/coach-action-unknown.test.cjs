@@ -12,12 +12,17 @@ function harness() {
   });
 }
 
+// The text a textContent assignment leaves as a string child is read through textContent itself.
+function elements(node) {
+  return node.children.filter((child) => typeof child !== "string");
+}
+
 function texts(node) {
-  return [node.textContent, ...node.children.flatMap(texts)];
+  return [node.textContent, ...elements(node).flatMap(texts)];
 }
 
 function tagNames(node) {
-  return [node.tag, ...node.children.flatMap(tagNames)];
+  return [node.tag, ...elements(node).flatMap(tagNames)];
 }
 
 test("an unknown proposal action type renders a neutral error card without buttons", () => {
