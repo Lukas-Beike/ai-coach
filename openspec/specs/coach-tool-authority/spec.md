@@ -137,7 +137,7 @@ The system SHALL return cached receipts for repeated identical calls/effects, re
 
 #### Scenario: Same effect with another call ID
 - **WHEN** a non-read tool repeats a successful effect in the same durable turn
-- **THEN** the stored result is replayed rather than executing the write again.
+- **THEN** the stored result is replayed rather than executing the write again, marked `replayed: true` with a notice that nothing new was saved, so the Coach reports the change once.
 
 #### Scenario: Changed call or current read
 - **WHEN** the same call ID carries a different effect, or a new call ID reads mutable local state
@@ -147,7 +147,7 @@ The system SHALL return cached receipts for repeated identical calls/effects, re
 - **WHEN** a cached draft is missing or based on an older planning revision, or an earlier effect failed
 - **THEN** successful-effect replay is not used as proof of a valid current result and the permitted repair path can run.
 
-Evidence: `backend/coach/tool_replay.py:CoachStructuredToolReplayService.lookup`; `backend/coach/tool_round_journal.py:CoachStructuredToolRoundJournal`; `tests/test_coach_tool_replay.py:test_replays_matching_call_id_and_rejects_changed_effect`, `tests/test_coach_tool_replay.py:test_replays_successful_mutating_effect_with_different_call_id`, `tests/test_coach_tool_replay.py:test_does_not_replay_effect_for_read_only_tool`, `tests/test_coach_tool_replay.py:test_does_not_replay_failed_effect`, `tests/test_coach_tool_replay.py:test_does_not_replay_missing_or_stale_draft`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`.
+Evidence: `backend/coach/tool_replay.py:CoachStructuredToolReplayService.lookup`, `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_tool_call`; `tests/test_coach_tool_coverage.py:test_nutrition_entries_can_be_saved_read_and_deleted`; `backend/coach/tool_round_journal.py:CoachStructuredToolRoundJournal`; `tests/test_coach_tool_replay.py:test_replays_matching_call_id_and_rejects_changed_effect`, `tests/test_coach_tool_replay.py:test_replays_successful_mutating_effect_with_different_call_id`, `tests/test_coach_tool_replay.py:test_does_not_replay_effect_for_read_only_tool`, `tests/test_coach_tool_replay.py:test_does_not_replay_failed_effect`, `tests/test_coach_tool_replay.py:test_does_not_replay_missing_or_stale_draft`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`.
 
 ### Requirement: CA8 Bounded execution and cancellation boundaries
 The system SHALL bound tool calls and rounds, count allowed mutations across resumed receipts, stop further writes on clarification/cancellation, and preserve completed effects when stopping.
