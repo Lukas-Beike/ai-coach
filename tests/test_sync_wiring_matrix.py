@@ -2,9 +2,9 @@
 
 The user and the Coach start sync jobs over ``POST /api/sync/jobs``; only the
 nutrition export is enqueued by the Coach card directly (#2137). This matrix
-drives each pair the registry declares through the real built-in runtime
-bindings, the real job queue and store, payload normalization, the real executor
-and the real outcome service, on a temporary SQLite database. Fakes stand in only
+drives each pair the registry declares through the real configured checks, the
+real job queue and store, payload normalization, the real executor assembly and
+the real outcome service, on a temporary SQLite database. Fakes stand in only
 for the provider services that talk to the outside world (their HTTP clients sit
 below them). Nothing here mocks the configured check or invents a provider.
 
@@ -45,6 +45,7 @@ from backend.sync.execution_assembly import (
     IntervalsJobDependencies,
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
+    WahooJobDependencies,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.job_outcomes import SyncJobOutcomeService
@@ -52,7 +53,6 @@ from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -282,6 +282,12 @@ class Harness:
             calendar_sync_service=lambda: service("calendar.sync"),
             weather_sync_service=lambda: service("weather.sync"),
         )
+        wahoo_deps = WahooJobDependencies(
+            sync_service=lambda: cast(Any, self.wahoo),
+            plan_push_service=lambda: service("wahoo.plan"),
+            resync_gate=ProviderResyncGate("Wahoo"),
+            stream_backfill_service=lambda: service("wahoo.streams"),
+        )
         dependencies = ProviderRuntimeDependencies(
             config=lambda: config,
             profile=lambda: mock.Mock(),
@@ -295,12 +301,7 @@ class Harness:
             intervals=intervals,
             garmin=garmin_deps,
             calendar_weather=calendar_weather,
-            wahoo=WahooRuntimeDependencies(
-                sync_service=lambda: cast(Any, self.wahoo),
-                plan_push_service=lambda: service("wahoo.plan"),
-                resync_gate=ProviderResyncGate("Wahoo"),
-                stream_backfill_service=lambda: service("wahoo.streams"),
-            ),
+            wahoo=wahoo_deps,
         )
         self.runtime = build_provider_runtime(
             DEFAULT_PROVIDER_REGISTRY, builtin_bindings(dependencies)
@@ -312,8 +313,8 @@ class Harness:
                 intervals=intervals,
                 garmin=garmin_deps,
                 calendar_weather=calendar_weather,
+                wahoo=wahoo_deps,
             ),
-            provider_runtime=lambda: self.runtime,
         ).executor()
         self.endpoint = SyncCommandEndpoint(
             self.queue,

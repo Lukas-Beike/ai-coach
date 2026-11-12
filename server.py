@@ -356,6 +356,7 @@ from backend.sync.execution_assembly import (
     IntervalsJobDependencies,
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
+    WahooJobDependencies,
 )
 from backend.sync.executor import chained_after_job
 from backend.sync.external_calendar_assembly import (
@@ -425,7 +426,6 @@ from backend.sync.provider_resync_assembly import (
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -626,12 +626,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 intervals=jobs.intervals,
                 garmin=jobs.garmin,
                 calendar_weather=jobs.calendar_weather,
-                wahoo=WahooRuntimeDependencies(
-                    sync_service=WAHOO_SYNC.sync_service,
-                    plan_push_service=WAHOO_SYNC.plan_push_service,
-                    resync_gate=WAHOO_RESYNC_GATE,
-                    stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
-                ),
+                wahoo=jobs.wahoo,
             )
         ),
     )
@@ -1673,11 +1668,16 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
         weather_sync_service=WEATHER_ASSEMBLY.sync_service,
     ),
+    wahoo=WahooJobDependencies(
+        sync_service=WAHOO_SYNC.sync_service,
+        plan_push_service=WAHOO_SYNC.plan_push_service,
+        resync_gate=WAHOO_RESYNC_GATE,
+        stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
+    ),
 )
 
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
-    provider_runtime=provider_runtime,
     after_job=DERIVED_PASS_HOOK,
 )
 

@@ -31,6 +31,7 @@ from backend.sync.execution_assembly import (
     IntervalsJobDependencies,
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
+    WahooJobDependencies,
 )
 
 
@@ -66,6 +67,11 @@ class ServerProvidersTests(ServerTestCase):
                 calendar_weather=CalendarWeatherJobDependencies(
                     calendar_sync_service=deferred,
                     weather_sync_service=deferred,
+                ),
+                wahoo=WahooJobDependencies(
+                    sync_service=deferred,
+                    plan_push_service=deferred,
+                    resync_gate=object(),
                 ),
             )
         )
