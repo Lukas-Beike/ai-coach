@@ -293,6 +293,8 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(archived.locator("summary strong")).toHaveText(["Retired chain", "Coach-only retired cassette", "Garmin retired chain"]);
   await expect(archived.locator("summary .connection-chip")).toHaveText(["Ausgemustert", "Ausgemustert", "Ausgemustert"]);
   await expect(archived.filter({ hasText: "Garmin retired chain" }).locator(".equipment-source-tag")).toHaveText("Garmin");
+  // An archived item over its target still says so to a screen reader.
+  await expect(archived.filter({ hasText: "Garmin retired chain" }).locator("summary .sr-only")).toHaveText("Lebensdauer, Ziel überschritten");
   const unlinkedLocal = archived.filter({ hasText: "Coach-only retired cassette" });
   await expect(unlinkedLocal).toContainText("Wartungsstand unklar");
   await expect(unlinkedLocal.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(0);
@@ -312,6 +314,7 @@ test("@responsive equipment keeps local authority and groups archived sources", 
     - text: Ziel überschritten 125 km · 125% Lebensdauer
   `);
   await expect(localCard.getByRole("progressbar")).toHaveCount(0);
+  await expect(localCard.locator("summary .equipment-card-line .sr-only")).toHaveText("Lebensdauer");
   await expect(localCard.locator(".equipment-source-tag")).toHaveCount(0);
   await expect(garminCard.locator("summary .equipment-source-tag")).toHaveText("Garmin");
   await expect(garminCard.locator("summary progress")).toHaveAttribute("value", "50");
