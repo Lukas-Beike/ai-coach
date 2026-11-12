@@ -14,13 +14,6 @@ class CoachStructuredToolRoundJournal:
     def __init__(self, job_store: CoachJobStore) -> None:
         self._job_store = job_store
 
-    def function_calls(self, response: dict[str, Any]) -> list[dict[str, Any]]:
-        return [
-            item
-            for item in response.get("output", [])
-            if isinstance(item, dict) and item.get("type") == "function_call"
-        ]
-
     def start_round(
         self, client_turn_id: str, calls: list[dict[str, Any]]
     ) -> list[dict[str, str]]:
@@ -47,18 +40,14 @@ class CoachStructuredToolRoundJournal:
         name: str,
         call_id: str,
         result: dict[str, Any],
-        outputs: list[dict[str, Any]],
+        outputs: list[dict[str, str]],
         pending: list[dict[str, str]],
         command_receipts: list[dict[str, Any]],
         question: str,
         cancelled: bool,
     ) -> tuple[str, bool, list[dict[str, str]]]:
         outputs.append(
-            {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": json.dumps(result, ensure_ascii=False),
-            }
+            {"call_id": call_id, "output": json.dumps(result, ensure_ascii=False)}
         )
         pending = [entry for entry in pending if entry["call_id"] != call_id]
         self._job_store.merge_receipt(

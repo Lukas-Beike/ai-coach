@@ -8,12 +8,31 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from backend import change_history
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import FoodDatabaseEntryRepository, database_origin
+from backend.db.repositories import (
+    MANUAL_ORIGIN,
+    NUTRIENT_COLUMNS,
+    FoodDatabaseEntryRepository,
+    database_origin,
+    fill_empty_nutrients,
+)
 from backend.errors import AppError
 
 # Nutrition values rarely change; older entries are re-checked online when used.
 MAX_AGE = timedelta(days=90)
+FOOD_ENTITY_TYPE = "food_database_entry"
+
+
+def food_history_value(entry: dict[str, Any]) -> dict[str, Any]:
+    """The nutrient values of a stored food as change history records them."""
+    return {
+        "id": entry["id"],
+        "basis_amount": entry["basis_amount"],
+        "basis_unit": entry["basis_unit"],
+        **{key: entry["per_100"].get(key) for key in NUTRIENT_COLUMNS},
+        "filled_fields": entry.get("filled_fields", {}),
+    }
 
 
 class FoodDatabaseMirror:
@@ -69,7 +88,8 @@ class FoodDatabaseMirror:
 
         A fresh record takes every value it has. A value it lacks is kept
         from the stored record when both count on the same basis unit, so a
-        re-check fills gaps and never empties a known field.
+        re-check fills gaps and never empties a known field. A value the
+        athlete edited stays even when the fresh record has one.
         """
         if not foods:
             return []
@@ -94,24 +114,51 @@ class FoodDatabaseMirror:
             if entry is None or not _same_basis(entry, source):
                 return entry
             values = source["per_100"]
-            gaps = {
-                key: values[key]
-                for key, value in entry["per_100"].items()
-                if value is None and values.get(key) is not None
-            }
-            if gaps:
-                origin = database_origin(str(source["id"]))
-                fetched_at = entry.pop("fetched_at")
-                entry["per_100"].update(gaps)
-                entry["filled_fields"] = {
-                    **entry.get("filled_fields", {}),
-                    **{
-                        key: {"origin": origin, "fetched_at": self._utc_now()}
-                        for key in gaps
-                    },
-                }
-                self._entries.upsert(db, entry, fetched_at)
+            fill_empty_nutrients(
+                db,
+                food_id,
+                {
+                    key: values[key]
+                    for key in NUTRIENT_COLUMNS
+                    if values.get(key) is not None
+                },
+                origin=database_origin(str(source["id"])),
+                fetched_at=self._utc_now(),
+            )
             return self._entries.get(db, food_id)
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored food of one recorded change, for change history."""
+        entry = self._entries.get(db, entity_id)
+        value = None if entry is None else food_history_value(entry)
+        return value, change_history.audit_projection(FOOD_ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Empty the nutrient fields a gap fill wrote; other values stay as they are."""
+        entry = self._entries.get(db, entity_id)
+        if current is None or target is None or entry is None:
+            raise AppError(409, "Der Datenbankeintrag ist nicht mehr verfügbar.")
+        # Only the fields the undone change wrote: others keep value and origin.
+        self._entries.restore_nutrients(
+            db,
+            entity_id,
+            {
+                key: value
+                for key, value in target.items()
+                if key in NUTRIENT_COLUMNS and current.get(key) != value
+            },
+            target.get("filled_fields"),
+        )
+        restored = self._entries.get(db, entity_id)
+        return food_history_value(restored) if restored else {}
 
     def delete(self, food_id: str) -> None:
         with self._db_lock, self._database_manager().unit_of_work() as db:
@@ -139,20 +186,29 @@ def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, An
     per_100 = food.get("per_100")
     fresh: dict[str, Any] = per_100 if isinstance(per_100, dict) else {}
     same_basis = _same_basis(food, stored)
+    # The athlete's edits win over the database while the basis is the same.
+    edited = {
+        key
+        for key, origin in stored.get("filled_fields", {}).items()
+        if same_basis and origin.get("origin") == MANUAL_ORIGIN
+    }
     # A filled value stays filled only while it is carried over unchanged; a
     # fresh value or another basis ends its origin.
     if "filled_fields" in filled:
         filled["filled_fields"] = {
             key: origin
-            for key, origin in filled["filled_fields"].items()
-            if same_basis and fresh.get(key) is None
+            for key, origin in {
+                **filled["filled_fields"],
+                **{key: stored["filled_fields"][key] for key in edited},
+            }.items()
+            if same_basis and (fresh.get(key) is None or key in edited)
         }
     filled["per_100"] = {
         **fresh,
         **{
             key: value
             for key, value in (stored["per_100"].items() if same_basis else ())
-            if value is not None and fresh.get(key) is None
+            if value is not None and (fresh.get(key) is None or key in edited)
         },
     }
     return filled

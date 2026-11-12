@@ -214,3 +214,56 @@ def _observations(case: Case) -> tuple[Observation, ...]:
         case.garmin, zone=ZONE, retrieved_at=RETRIEVED_AT
     )
     return (*intervals.records, *garmin.records)
+
+
+# #2345: the recorded shape of Garmin's maxmet daily range (one row per day): the row
+# is undated, each sport object carries its own calendarDate, cycling is null on days
+# without a cycling value, and generic is the running VO2max. Synthetic values.
+MAX_METRICS_DAILY: Final = [
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-10",
+            "vo2MaxPreciseValue": 53.9,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": None,
+        "heatAltitudeAcclimation": {
+            "acclimationPercentage": 0,
+            "altitudeAcclimation": 0,
+            "heatAcclimationPercentage": 0,
+        },
+    },
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-11",
+            "vo2MaxPreciseValue": 54.1,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": {
+            "calendarDate": "2026-11-11",
+            "vo2MaxPreciseValue": 58.6,
+            "vo2MaxValue": 59.0,
+            "fitnessAge": None,
+            "maxMetCategory": 1,
+        },
+        "heatAltitudeAcclimation": None,
+    },
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-12",
+            "vo2MaxPreciseValue": 54.3,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": None,
+        "heatAltitudeAcclimation": None,
+    },
+]

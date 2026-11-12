@@ -9,7 +9,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 # The repository root, for running this file as a script with --write.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -27,6 +27,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.sync.adaptive import IllnessPauseSyncService
 
 
@@ -1712,6 +1713,170 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 "entry_count"
             ],
             0,
+        )
+
+    @covers("search_web_for_product_values:success")
+    def test_web_search_returns_cited_values_and_degrades_to_unavailable(self):
+        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        own = catalog.save_product(
+            {
+                "name": "Synthetic skyr",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 63,
+                "protein_g": 11,
+                "carbs_g": 4,
+                "fat_g": 0.2,
+                "sugar_g": 4,
+                "fiber_g": 0,
+                "source": "manual",
+            }
+        )
+        page = "https://example.test/skyr"
+        found = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(
+                                {
+                                    "products": [
+                                        {
+                                            "ref": 1,
+                                            "values": [
+                                                {
+                                                    "field": "salt_g",
+                                                    "value": 0.1,
+                                                    "source_url": page,
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            ),
+                            "annotations": [{"type": "url_citation", "url": page}],
+                        }
+                    ],
+                }
+            ]
+        }
+        client = Mock()
+        sent = []
+
+        def complete(request):
+            # Through the real adapter: the wire payload out, the reply read back.
+            sent.append(request_payload(request))
+            return model_turn(found)
+
+        client.complete.side_effect = complete
+        with patch.object(
+            server.MODEL_TRANSPORT, "openai_responses_client", return_value=client
+        ):
+            result = self.run_tool(
+                "search_web_for_product_values", {"products": [own["id"]]}
+            )
+            client.complete.side_effect = AppError(400, "raw provider detail")
+            unavailable, _ = self.turn(
+                "Suche die Werte im Web.",
+                [
+                    lambda _: self.call(
+                        "search_web_for_product_values", {"products": [own["id"]]}
+                    ),
+                    {"output_text": "Synthetischer Ergebnistext."},
+                ],
+            )
+
+        self.assertEqual(result["data_origin"], "web")
+        self.assertEqual(
+            result["products"][0]["values"],
+            [{"field": "salt_g", "value": 0.1, "source_url": page}],
+        )
+        self.assertEqual(sent[0]["tools"], [{"type": "web_search"}])
+        self.assertEqual(unavailable["status"], "completed")
+        outcome = unavailable["command_receipts"][0]["result"]
+        self.assertEqual(outcome["status"], "unavailable")
+        self.assertNotIn("raw provider", json.dumps(outcome))
+        self.assertIsNone(catalog.get_product(own["id"])["salt_g"])
+
+    @covers(
+        "list_incomplete_nutrition_products:success",
+        "fill_nutrition_product_gaps:success",
+    )
+    def test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn(self):
+        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        own = catalog.save_product(
+            {
+                "name": "Synthetic skyr",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 63,
+                "protein_g": 11,
+                "source": "manual",
+            }
+        )
+        food = {
+            "id": "off:4006381333931",
+            "name": "Synthetic bar",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 500},
+        }
+        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+
+        listed = self.run_tool("list_incomplete_nutrition_products")
+        self.assertEqual(
+            {item["id"] for item in listed["products"]}, {own["id"], food["id"]}
+        )
+        self.assertIn("keine Anweisungen", listed["notice"])
+
+        # A database origin needs a lookup that returned the value; the athlete's
+        # own value is manual.
+        found = self.run_tool("lookup_food", {"query": "Haferflocken"})["foods"][0]
+        fat = found["per_100"]["fat_g"]
+        filled = self.run_tool(
+            "fill_nutrition_product_gaps",
+            {
+                "products": [
+                    {"id": own["id"], "values": {"fat_g": fat}, "origin": "bls"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "manual"},
+                ]
+            },
+            ["local_nutrition_gaps"],
+            message="Ja, trag die Lücken beider Produkte ein.",
+        )
+
+        self.assertEqual(
+            [
+                (
+                    item["name"],
+                    item["written"][0]["field"],
+                    item["written"][0]["origin"],
+                )
+                for item in filled["changes"]
+            ],
+            [("Synthetic skyr", "fat_g", "bls"), ("Synthetic bar", "salt_g", "manual")],
+        )
+        self.assertEqual(catalog.get_product(own["id"])["fat_g"], fat)
+        # The broad product scope is required.
+        denied, _ = self.turn(
+            "Trag die Lücke ein.",
+            [
+                lambda _: self.call(
+                    "fill_nutrition_product_gaps",
+                    {
+                        "products": [
+                            {"id": food["id"], "values": {"kcal": 1}, "origin": "bls"}
+                        ]
+                    },
+                    ["local_nutrition"],
+                ),
+                {"output_text": "Synthetischer Ergebnistext."},
+            ],
+        )
+        self.assertEqual(
+            denied["command_receipts"][0]["result"]["reason"], "intent_scope_denied"
         )
 
     @covers(

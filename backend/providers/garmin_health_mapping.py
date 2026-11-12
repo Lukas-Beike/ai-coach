@@ -230,10 +230,14 @@ from backend.providers.garmin_weight_walk import (
 # Version 21: one readiness alias order (``score`` first), gear
 # ``maximumMeter`` beside ``maximumMeters``, and an endurance ``groupMap`` that
 # is a mapping keyed by day or a list of dated entries.
-MAPPER_VERSION: Final = 22
+# Version 23: maxmet sport objects are dated by their own ``calendarDate`` (the daily
+# range leaves the row undated), so the stored range re-projects every day, today
+# included, with its precise value (#2345).
+MAPPER_VERSION: Final = 23
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
+_MAX_METRICS: Final = "max_metrics"
 _DAY_TEXT_LENGTH: Final = 10  # "YYYY-MM-DD"
 _DEVICE: Final = SourceKind.DEVICE_MEASURED
 _PROVIDER: Final = SourceKind.PROVIDER_REPORTED
@@ -705,6 +709,11 @@ def _first_value(record: Mapping[str, object], names: tuple[str, ...]) -> object
     """Return the first present, non-empty alias, or None when none is present."""
     named = _named_value(record, names)
     return None if named is None else named[1]
+
+
+def _object_day(item: object) -> date | None:
+    """The ``calendarDate`` an object carries itself, or None."""
+    return _parse_day(item.get(_DATE_FIELD)) if isinstance(item, Mapping) else None
 
 
 def _parse_day(text: object) -> date | None:
@@ -1262,8 +1271,29 @@ class _HealthMapping:
         elif name == _BODY_BATTERY:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
             self._map_body_battery_levels(payload)
+        elif name == _MAX_METRICS:
+            self._map_max_metrics(payload)
         else:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
+
+    def _map_max_metrics(self, payload: object) -> None:
+        """Date each maxmet sport object by its own day, else by its row's (#2345).
+
+        Garmin's daily range leaves the row undated and dates each object
+        (``generic.calendarDate``; ``cycling`` is null on days without a value),
+        so the cycling and running readings of one row keep their own days.
+        """
+        for ref, record, index in self._records(_MAX_METRICS, payload):
+            row_day = _parse_day(record.get(_DATE_FIELD))
+            for group in _GROUPED_SECTIONS[_MAX_METRICS]:
+                item = None if group.key is None else record.get(group.key)
+                if item is None:
+                    continue
+                day = _object_day(item) or row_day
+                if day is None:
+                    self.issue(ref, _DATE_FIELD, IssueReason.MISSING)
+                else:
+                    self._map_group(_MAX_METRICS, record, group, ref, day, index=index)
 
     def _map_grouped(
         self, name: str, payload: object, groups: tuple[_Group, ...]

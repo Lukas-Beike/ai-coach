@@ -155,7 +155,7 @@ The system SHALL create a new diary entry when a saved meal is consumed, scale i
 Evidence: `backend/nutrition/diary.py::NutritionDiaryService.log_template`, `backend/nutrition/diary.py::NutritionDiaryService._scale_composite_basis`; `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_template_without_meal_time_stores_unknown_time_and_keeps_meal_type`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_component_replacement_metadata_and_template_portion_snapshots`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_restart_and_database_backup_keep_composite_entries_and_templates`.
 
 ### Requirement: Product UI separates review from recording consumption
-The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption. The athlete SHALL be able to mark saved products as favorites, which the product list shows first, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
+The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption. The athlete SHALL be able to mark any product as favorite, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
 
 #### Scenario: Use a saved product
 - **WHEN** the athlete selects a product and consumed quantity
@@ -166,8 +166,8 @@ The client SHALL present product and label candidates for review and explicit lo
 - **THEN** the draft stays intact and gains one line naming the quantity and product id, never the product name.
 
 #### Scenario: Favorite products
-- **WHEN** the athlete marks a saved product as a favorite
-- **THEN** the product list shows it before other products, open, while unmarked products stay together in one collapsed group, and saving or editing the product keeps the mark.
+- **WHEN** the athlete marks a product, own or from a database, as a favorite
+- **THEN** it is listed under "Favoriten" and still under "Alle Produkte", and saving, editing or re-checking the product keeps the mark.
 
 #### Scenario: Add a product to a logged meal
 - **WHEN** the athlete adds a saved product and quantity to a logged meal
@@ -179,9 +179,9 @@ The client SHALL present product and label candidates for review and explicit lo
 
 #### Scenario: Safe ingredient details
 - **WHEN** the diary displays a composite meal
-- **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations.
+- **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations, and a component from a database product is labelled as such.
 
-Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`. These browser scenarios were inspected, not executed by this worker.
+Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`.
 
 ### Requirement: Coach food reads preserve explicit source and batch results
 The system SHALL support explicit database source selection and bounded batched ingredient lookup through the Coach read interface. Source selection SHALL retain separately labelled matching saved products rather than hiding them or silently replacing the chosen database.
@@ -423,3 +423,107 @@ After a manual re-check of an Open Food Facts entry, still-empty core fields SHA
 - **THEN** Yazio is asked at most once, by the barcode chain itself.
 
 Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_yazio`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.fill_gaps`; `tests/test_food_lookup_chain.py::LookupChainTests.test_a_re_check_fills_remaining_gaps_from_yazio_by_ean`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_fills_nothing_without_a_match_on_the_same_basis`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_complete_re_check_does_not_ask_yazio`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_basis_change_ends_a_yazio_fill`, `tests/test_food_lookup_chain.py::LookupChainTests.test_lookups_and_calculations_ask_yazio_at_most_once`.
+
+### Requirement: Coach fills empty product fields
+The Coach SHALL list own products and stored database foods with empty core fields, and SHALL write values into named products only where the field is empty at write time, per the product's own basis, each with its origin, source page and time. Known values SHALL never be replaced. Every write SHALL be in the change history so the turn receipt names product, field, value and origin and whole-turn undo restores the empty fields.
+
+#### Scenario: Origin backed by a lookup
+- **WHEN** the Coach writes a value with origin Open Food Facts, Yazio, BLS or web
+- **THEN** it is accepted only if a database lookup or the web search returned that value (scaled to the product's basis) in the last hour; otherwise the item is rejected, and a value the athlete states is written with origin `manual`.
+
+#### Scenario: Implausible value for the basis
+- **WHEN** a value exceeds the product's basis in grams, or its energy exceeds that of pure fat
+- **THEN** the item is rejected without a write.
+
+#### Scenario: Incomplete products listed
+- **WHEN** the Coach lists incomplete products
+- **THEN** own products and stored database foods with empty core fields are returned with id, name, brand, EAN, basis, origin and their missing fields, and complete products are not.
+
+#### Scenario: Only empty fields written
+- **WHEN** the Coach writes salt and fat into a product whose fat is already known
+- **THEN** salt is written with its origin and source page, fat keeps its value and is reported as skipped.
+
+#### Scenario: Receipt and undo
+- **WHEN** a turn fills fields of an own product and a stored database food
+- **THEN** its receipt lists each product, field, value and origin, and whole-turn undo empties exactly those fields again.
+
+#### Scenario: Unknown or invalid input
+- **WHEN** a named product does not exist, a field is not a core field, or a value is not a finite number in range
+- **THEN** that item is rejected without writing it.
+
+Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`, `backend/nutrition/food_database.py::FoodDatabaseService.found_value`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`, `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`, `tests/test_nutrition_web_search.py::NutritionWebSearchCatalogTests.test_a_web_fill_needs_the_value_of_a_search_from_its_own_page`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
+
+### Requirement: Coach web search for missing product values
+The Coach SHALL be able to search the web for the still-empty core values of up to five named products through one Responses API request with the `web_search` tool, sending only product name, brand, EAN, basis and missing field names. Only finite, plausible values whose source page the search read or cited SHALL be returned, with origin `web`, the source page and an untrusted-data notice.
+
+#### Scenario: Value found and cited
+- **WHEN** the search returns salt per the product's basis with a source page it cited
+- **THEN** the result names the product, salt, the value, origin `web` and the source page, with the untrusted-data notice.
+
+#### Scenario: Uncited or implausible value
+- **WHEN** a returned value's source page was neither read nor cited, or is not a finite number in range, or is for a field that is not empty
+- **THEN** that value is dropped.
+
+#### Scenario: Only product data leaves the app
+- **WHEN** the search request is built
+- **THEN** it contains only the products' name, brand, EAN, basis and missing field names, and no athlete record, message or other context.
+
+#### Scenario: Endpoint without web search
+- **WHEN** the configured endpoint rejects the `web_search` tool, or the request fails
+- **THEN** the result says web search is not available, nothing is written, and the Coach turn continues.
+
+Evidence: `backend/nutrition/web_search.py::NutritionWebSearchService.search`, `backend/nutrition/catalog.py::ProductCatalogService.search_web_values`, `backend/coach/read_tools.py` (`search_web_for_product_values`); `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_request_carries_only_product_data`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_values_are_kept_only_when_cited_plausible_and_missing`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_a_page_the_search_read_counts_without_an_inline_citation`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_failures_give_unavailable_without_provider_text`, `tests/test_coach_tool_coverage.py` (`search_web_for_product_values:success`).
+
+### Requirement: One product list with equal actions
+The product API SHALL list own products and stored database foods together, sorted by name, with origin, fetch date, favourite flag and missing core fields, searchable by name, brand and EAN. Every product SHALL be usable, editable, re-checkable and removable, and SHALL be markable as favourite.
+
+#### Scenario: Merged list
+- **WHEN** the athlete lists all products
+- **THEN** own products and stored database foods appear together by name, a food whose EAN an own product holds appears only as that product, and each names its origin and missing fields.
+
+#### Scenario: Favourite database entry
+- **WHEN** the athlete marks a stored database food as favourite and it is later re-checked
+- **THEN** it stays a favourite.
+
+#### Scenario: Edited database entry
+- **WHEN** the athlete edits a stored database food's value and the food is later re-checked
+- **THEN** the edited value stays, is marked as the athlete's own, and the edit can be undone from the change history with its earlier marks.
+
+#### Scenario: Database-owned fields
+- **WHEN** an edit of a stored database food changes its name, brand, EAN, basis or status
+- **THEN** it is refused and nothing changes.
+
+#### Scenario: Re-check of an own product
+- **WHEN** the athlete re-checks an own product with an EAN
+- **THEN** the database lookup fills only its empty fields, falling back to the next stored source when one is unavailable; without an EAN, or for an archived product, the re-check is refused with a clear message.
+
+#### Scenario: Using a database entry
+- **WHEN** the athlete uses a stored database food for a meal
+- **THEN** it is recorded like an own product with its values at that time.
+
+Evidence: `backend/db/repositories.py::NutritionProductRepository.list_all`, `backend/nutrition/catalog.py::ProductCatalogService.update_product`, `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/nutrition/components.py`, `backend/http_api/nutrition.py` (`scope=all`); `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`, `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`, `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite).
+
+### Requirement: One product list with sections and incomplete markers
+The product page SHALL show "Favoriten (n)" and "Alle Produkte (n)" as collapsible sections, both collapsed when the page opens, each total followed by the number of incomplete entries. Every card SHALL show its origin and, when incomplete, the names of its missing fields, and SHALL offer Verwenden, Bearbeiten, Aktualisieren and Löschen.
+
+#### Scenario: Page opens
+- **WHEN** the athlete opens Ernährung › Produkte
+- **THEN** both sections are collapsed and each heading shows its total and its number of incomplete entries.
+
+#### Scenario: Incomplete product
+- **WHEN** a product lacks salt and sugar
+- **THEN** its card shows the incomplete symbol with an accessible label naming salt and sugar.
+
+#### Scenario: Search
+- **WHEN** the athlete searches by name, brand or EAN
+- **THEN** both own products and database entries are searched, and sections with hits open.
+
+#### Scenario: Database entry actions
+- **WHEN** the athlete edits a database entry, re-checks it, or deletes it
+- **THEN** only its nutrient values are editable, the re-check result is shown, and deleting removes it from the database after confirmation.
+
+#### Scenario: Own product without EAN
+- **WHEN** the athlete re-checks an own product without an EAN
+- **THEN** the page says an EAN is needed and the editor allows entering one.
+
+Evidence: `public/nutrition.js::renderNutritionProducts`, `public/nutrition.js::nutritionProductSection`, `public/nutrition.js::nutritionProductCard`, `public/nutrition.js::appendNutritionProductActions`, `public/nutrition.js::refreshNutritionProduct`, `public/nutrition.js::deleteNutritionProduct`, `public/nutrition.js::lockNutritionDatabaseFields`; `tests/nutrition-lookup-status.test.cjs` (sections, counters, search, cards, actions, unit and date cases), `e2e/nutrition.spec.js` (product list on mobile, tablet-landscape and desktop).

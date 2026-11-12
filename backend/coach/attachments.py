@@ -434,36 +434,35 @@ def validate_attachments(value):
     return attachments
 
 
-def model_input(text, attachments):
-    if not attachments:
-        return text
-    parts = [{"type": "input_text", "text": text}]
+def model_attachments(attachments):
+    """The provider-safe parts of validated attachments for a ModelRequest."""
+    parts = []
     for item in attachments:
-        summary_key = item["type"] if item["type"] in {"gpx", "fit"} else None
         evidence = {"untrusted_attachment_name": item["name"]}
-        if summary_key:
-            evidence[summary_key] = item.get("summary")
-        parts.append(
-            {"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)}
-        )
         if item["type"] in {"gpx", "fit"}:
+            evidence[item["type"]] = item.get("summary")
             data, mime = openai_attachment_data(item)
             parts.append(
                 {
-                    "type": "input_file",
+                    "evidence": evidence,
+                    "kind": "file",
                     "filename": item["name"] + ".json",
-                    "file_data": f"data:{mime};base64,{data}",
+                    "mime": mime,
+                    "data": data,
                 }
             )
         elif item["type"] == "image":
             parts.append(
                 {
-                    "type": "input_image",
-                    "image_url": f"data:{item['mime']};base64,{openai_attachment_data(item)[0]}",
-                    "detail": "auto",
+                    "evidence": evidence,
+                    "kind": "image",
+                    "mime": item["mime"],
+                    "data": openai_attachment_data(item)[0],
                 }
             )
-    return [{"role": "user", "content": parts}]
+        else:
+            parts.append({"evidence": evidence})
+    return parts
 
 
 def openai_attachment_data(item):

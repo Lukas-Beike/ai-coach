@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 54 tools currently offered to the conversational Coach.
+This matrix covers every tool currently offered to the conversational Coach.
 It measures execution through `chat_with_coach`, not the accuracy of a language
 model's interpretation.
 
@@ -38,11 +38,13 @@ generated from the `covers` declarations; regenerate it with
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `fill_nutrition_product_gaps` | `success` | `test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_training_report` | `success` | `test_training_report_returns_same_local_facts_without_mutation` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `list_incomplete_nutrition_products` | `success` | `test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn` |
 | `list_planned_workouts` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_recent_activities` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_training_plans` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
@@ -68,6 +70,7 @@ generated from the `covers` declarations; regenerate it with
 | `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `save_nutrition_product` | `success` | `test_confirmed_product_is_saved_locally_through_authorized_coach_receipt` |
 | `save_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `search_web_for_product_values` | `success` | `test_web_search_returns_cited_values_and_degrades_to_unavailable` |
 | `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
@@ -127,9 +130,9 @@ reusing it does not duplicate the dialogue tests.
 
 ## Validation results
 
-- `tests/test_coach_tool_coverage.py` runs 43 tests (`python -m unittest
-  tests.test_coach_tool_coverage` passes), including declared successful tool
-  variants for every tool in `TOOL_SPECS`, invalid-argument/reference cases and
-  missing-provenance checks for every write tool carrying `_request`.
+- `python -m unittest tests.test_coach_tool_coverage` passes. The module covers
+  declared successful tool variants for every tool in `TOOL_SPECS`,
+  invalid-argument/reference cases and missing-provenance checks for every write
+  tool carrying `_request`.
 - These are execution and conversation tests, not live language-model
   evaluations.

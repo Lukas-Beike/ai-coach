@@ -19,9 +19,7 @@ test("@responsive diary shows decimal commas and offers undo and delete for back
     ok: true, date: DAY, entry_count: entries.length, entries,
     total_kcal: entries.length ? 668 : 0, total_carbs_g: 102, total_protein_g: 27.2, total_fat_g: 14.8,
   } }));
-  await page.route("**/api/nutrition/products**", (route) => route.fulfill({
-    json: route.request().url().includes("source=database") ? { ok: true, foods: [] } : { ok: true, products: [PRODUCT] },
-  }));
+  await page.route("**/api/nutrition/products**", (route) => route.fulfill({ json: { ok: true, products: [{ ...PRODUCT, origin: "own", missing_fields: [] }] } }));
   await page.route("**/api/nutrition/entry/delete", (route) => {
     entries = [];
     return route.fulfill({ json: { ok: true, status: "ok", deleted_id: BOWL.id, change: change("delete", BOWL.id) } });
@@ -52,7 +50,8 @@ test("@responsive diary shows decimal commas and offers undo and delete for back
   expect(undone[0]).toMatchObject({ change_id: "change-delete-entry-bowl", expected_current_hash: "hash-entry-bowl" });
 
   await page.goto("/#nutrition/products");
-  await page.locator("#nutritionProducts .nutrition-product-card").getByRole("button", { name: "Verwenden" }).click();
+  await page.locator('#nutritionProducts details[data-section="favorites"] > summary').click();
+  await page.locator('#nutritionProducts details[data-section="favorites"] .nutrition-product-card').getByRole("button", { name: "Verwenden" }).click();
   await page.locator("#nutritionProductUseAmount").fill("50");
   await page.locator("#nutritionProductUseAdd").click();
   await expect(page.locator("#nutritionProductStatus")).toContainText("als Snack erfasst");

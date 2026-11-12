@@ -128,7 +128,7 @@ test("a failed image keeps the draft, shows the error and releases the loading s
 });
 
 // Composite meals, unknown values and the Coach draft of a product.
-const MEAL_FUNCTIONS = ["nutritionNumber", "nutritionComponentSource", "nutritionComponentDetails", "addNutritionProductToCoachDraft"];
+const MEAL_FUNCTIONS = ["nutritionNumber", "nutritionDatabaseLabel", "nutritionBasisLabel", "nutritionComponentSource", "nutritionComponentDetails", "addNutritionProductToCoachDraft"];
 
 // An element that refuses HTML, so a name can only reach the page as text.
 class TextOnlyElement extends FakeElement {
@@ -167,6 +167,17 @@ test("composite meal components are shown as text with unknown values and source
   assert.deepEqual(unknown, ["Unbenannte Zutat", "· –", " · – kcal · KH – g · Protein – g · Fett – g", "Quelle unbekannt"]);
   assert.equal(context.nutritionComponentDetails({ nutrition_basis: { kind: "composite", components: [] } }), null);
   assert.equal(context.nutritionComponentDetails({ nutrition_basis: { kind: "database", components: [{ name: "x" }] } }), null);
+});
+
+test("a diary component from a database product is labelled as such, an own product stays a saved product", () => {
+  const { context } = mealSetup(null);
+  const database = { kind: "local_product", amount: 50, unit: "ml", product: { name: "Haferdrink", origin: "open_food_facts", source: "open_food_facts" } };
+  const own = { kind: "local_product", amount: 50, unit: "ml", product: { name: "Whey", origin: "own", source: "packaging_label" } };
+  assert.equal(context.nutritionComponentSource(database), "Datenbankprodukt: Haferdrink · Open Food Facts");
+  assert.equal(context.nutritionComponentSource({ ...database, product: { ...database.product, origin: "yazio" } }), "Datenbankprodukt: Haferdrink · Yazio");
+  assert.equal(context.nutritionComponentSource(own), "Gespeichertes Produkt: Whey · Verpackungsangabe");
+  assert.equal(context.nutritionBasisLabel(database, {}, "Erfasst"), "Datenbankprodukt · Haferdrink (Open Food Facts) · 50 ml");
+  assert.equal(context.nutritionBasisLabel(own, {}, "Erfasst"), "Lokales Produkt · Whey (packaging_label) · 50 ml");
 });
 
 test("the Coach draft of a product names the product by id, never by name", () => {

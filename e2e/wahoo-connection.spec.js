@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 
 // The disposable fixture has no Wahoo credentials. Configured and connected
 // states are produced by rewriting the bootstrap JSON; no real account, token
@@ -19,11 +20,9 @@ async function withWahooState(page, wahoo, extra = {}) {
 async function openConnections(page, url = "/#more/connections") {
   await page.goto(url);
   await expect(page.locator("#appShell")).toBeVisible();
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  await expect(section).toBeVisible();
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
+  await expandConnections(page, ["wahoo"]);
   await expect(page.locator("#wahooConnectionStatus")).not.toHaveText("Status wird geprüft…");
-  return page.locator("#wahooConnectionStatus").locator("xpath=ancestor::article");
+  return page.locator("#connection-wahoo");
 }
 
 test("@responsive Wahoo without server credentials explains the missing configuration", async ({ page }, testInfo) => {
@@ -73,7 +72,7 @@ test("@responsive retrying a stale Wahoo entry starts one Wahoo sync", async ({ 
   });
   await page.route("**/api/sync/jobs/job-wahoo-retry", (route) => route.fulfill({ json: { id: "job-wahoo-retry", status: "completed", items: [] } }));
   await openConnections(page);
-  const retry = page.locator("#providerFreshnessTimeline").getByRole("button", { name: "Erneut versuchen" });
+  const retry = page.locator("#freshness-wahoo").getByRole("button", { name: "Erneut versuchen" });
   await retry.click();
   await expect.poll(() => posts.length).toBe(1);
   await expect(page.locator("#toast")).toContainText("Wahoo synchronisiert");
@@ -94,8 +93,7 @@ test("@responsive connected Wahoo shows its label everywhere and can be disconne
   const card = await openConnections(page);
   await expect(page.locator("#wahooConnectionStatus")).toHaveText("Verbunden");
   await expect(page.locator("#wahooConnectionDetail")).toContainText("Verbunden seit");
-  await expect(page.locator("#connectionsSummary")).toContainText("verbunden");
-  await expect(page.locator("#providerFreshnessTimeline")).toContainText("Wahoo");
+  await expect(page.locator("#freshness-wahoo")).toContainText("Wahoo");
   await expect(page.locator("#wahooConnectButton")).toBeHidden();
   await expect(card).not.toContainText("workouts_read");
   await card.scrollIntoViewIfNeeded();

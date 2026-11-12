@@ -23,16 +23,16 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
-from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
+from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
-from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.providers.wahoo_client import WahooReconnectRequiredError
 from backend.providers.wahoo_plan_mapping import comparable_plan
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."

@@ -15,7 +15,6 @@ from typing import Any
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.descriptors import FreshnessArea
 from backend.sync.freshness_sources import (
     DEFAULT_FRESHNESS_SOURCES,
     GARMIN_CORE_ERROR_SIGNAL,
@@ -23,6 +22,7 @@ from backend.sync.freshness_sources import (
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
+from backend.sync.provider_table import FreshnessArea
 from backend.sync.refresh import cleanup_refresh_history
 
 UTC_OFFSET_SUFFIX = "+00:00"

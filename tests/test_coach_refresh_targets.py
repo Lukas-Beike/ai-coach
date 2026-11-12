@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, Mock
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.coach.authorization import (
     REQUEST_SCHEMA,
     dialogue_tools,
@@ -19,16 +20,13 @@ from backend.coach.authorization import (
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.errors import AppError
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import (
+    CALENDAR_ID,
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    WEATHER_ID,
+)
 
 USER_MESSAGE_ID = 7
 DEFAULT_TARGETS = [

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from backend.athlete.profile import timezone_name
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.errors import COACH_ABORTED_ERROR, AppError
@@ -19,7 +20,6 @@ from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_adapter
 from backend.providers import garmin_morning
 from backend.providers import http as provider_http
-from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin import (
     ExternalCall,
     GarminClientFactory,
@@ -47,6 +47,7 @@ from backend.providers.garmin_wellness_history import (
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
+    DAYTIME_SOURCES,
     NUTRITION_SOURCES,
     GarminSnapshotWriter,
 )
@@ -54,6 +55,7 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
@@ -98,9 +100,7 @@ def refresh_morning_battery_after_sync(
     return morning_battery.refresh(cancel_event=cancel_event)
 
 
-GARMIN_MFA_REQUIRED_MESSAGE = (
-    "Garmin verlangt MFA. Bitte Garmin in den Zugangsdaten neu verbinden."
-)
+GARMIN_MFA_REQUIRED_MESSAGE = "Garmin verlangt MFA. Bitte Garmin in der Garmin-Karte unter Anbindungen neu verbinden."
 
 
 def _garmin_login_argument(config: Config, garmin_tokens: Any | None) -> str:
@@ -234,7 +234,7 @@ class GarminRemoteReader:
     def available(self) -> bool:
         return self._client_factory.available() or self._personal_configured()
 
-    def _personal(self) -> GarminPersonalClient | None:
+    def personal_client(self) -> GarminPersonalClient | None:
         """The cached Personal API client; a changed key builds a new one."""
         key = str(getattr(self._config, "garmin_personal_api_key", "") or "").strip()
         with self._personal_lock:
@@ -525,7 +525,7 @@ class GarminRemoteReader:
         exact cause.
         """
         tokens = self._garmin_tokens
-        personal = self._personal()
+        personal = self.personal_client()
         if personal is not None:
             self._check_personal_key(personal)
             # The accepted key starts without a pause from the rejected one.
@@ -607,7 +607,7 @@ class GarminRemoteReader:
         serves: with a key they never log the SDK in, so they cannot record a
         skipped SDK either.
         """
-        personal = self._personal()
+        personal = self.personal_client()
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
         if personal is not None and (personal_only or not self._sdk_configured()):
             return GarminTransportClient(personal, None), login_argument
@@ -746,6 +746,55 @@ class GarminNutritionRefreshService:
                     "records": len(records),
                     "synced_at": fetched_at,
                 }
+            finally:
+                self._coordination.release()
+
+    def store_daytime(
+        self, day: date, values: Mapping[str, list[dict[str, Any]]]
+    ) -> list[str]:
+        """Store the day's values that differ from the stored ones (#2303).
+
+        Skipped while another Garmin read holds the coordination; an unchanged
+        answer writes nothing. Returns the stored sections.
+        """
+        with self._coordination.operation():
+            if not self._coordination.acquire():
+                return []
+            try:
+                snapshot = self._payload_service.view(
+                    list(values), start=day.isoformat(), end=day.isoformat()
+                )
+                changed = {
+                    source: rows
+                    for source, rows in values.items()
+                    if rows and rows != _day_rows(snapshot.get(source), day)
+                }
+                if not changed:
+                    return []
+                fetched_at = self._utc_now()
+                for source, rows in changed.items():
+                    snapshot[source] = garmin_morning.merge_garmin_records(
+                        rows,
+                        [
+                            row
+                            for row in snapshot.get(source) or []
+                            if not _record_date_in_range(row, day, day)
+                        ],
+                    )
+                if "daily_stats" in changed:
+                    self._mark_nutrition_freshness(
+                        snapshot, "daily_stats", day, day, True, fetched_at
+                    )
+                with self._database_manager.unit_of_work() as db:
+                    self._snapshot_writer.write_refresh(
+                        db,
+                        fetched_at=fetched_at,
+                        sections={source: snapshot[source] for source in changed},
+                        view=snapshot,
+                        windows=dict.fromkeys(changed, (day, day)),
+                        allowed=DAYTIME_SOURCES,
+                    )
+                return sorted(changed)
             finally:
                 self._coordination.release()
 
@@ -1008,6 +1057,13 @@ class GarminAnalysisRefreshService:
             "window_start": start.isoformat(),
             "window_end": end.isoformat(),
         }
+
+
+def _day_rows(rows: Any, day: date) -> list[Any]:
+    """The stored rows of one day, to compare with a fresh answer."""
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if _record_date_in_range(row, day, day)]
 
 
 def _record_date_in_range(record: Any, start: date, end: date) -> bool:

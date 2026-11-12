@@ -40,9 +40,11 @@ from typing import Any
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.tool_specs import (
     APPROVAL_TOOLS,
+    BULK_FROM,
     CHECKIN,
     COMPETITION,
     DELETE_TOOLS,
+    DISTINCT_RECORD_TOOLS,
     NO_RECORD_TOOLS,
     NUTRITION,
     PLANNING,
@@ -117,7 +119,8 @@ def _words(text: str) -> list[str]:
 
 
 # Remote sync wording in normalized form; defense in depth for remote writes
-# only. A sync verb or the provider name asks for the sync on its own; planning
+# only. A sync verb or the provider name asks for the sync on its own (the bare
+# training term "Intervals" only as a target, see ``_names_sync``); planning
 # words such as "Kalender", "doppelt" or "Konflikt" never do ("Trag den Lauf in
 # den Kalender ein" asks for no write to Intervals.icu). A leading "^" anchors a
 # stem at a word start.
@@ -189,11 +192,60 @@ _POLITE_REQUEST = re.compile(
 )
 
 
+# "Synchronisieren mache ich selbst": the athlete keeps the action (#2341).
+_KEEP_VERBS = "|".join(
+    normalize(verb) for verb in _words("mach,erledig,übernehm,kümmer")
+)
+_SELF_KEPT = re.compile(
+    rf"(?<![a-z])(?:(?:{_KEEP_VERBS})[a-z]*\s+ich|"
+    rf"ich\s+(?:{_KEEP_VERBS}|sync|synchronisier|lad|schick|trag)[a-z]*)"
+    r"\s+(?:[a-z]+\s+){0,3}?(?:selbst|selber)(?![a-z])|"
+    r"(?<![a-z])i(?:'ll| will)?\s+(?:do|sync|upload|handle)\s+(?:it|that|this|them)"
+    r"\s+myself(?![a-z])"
+)
+# The training term ("5x4 min Intervals") names the provider only as the
+# target of a transfer verb ("Lade ... zu Intervals hoch", "Trag ... in Intervals
+# ein") or in a split "gleiche ... mit Intervals ab".
+_TRAINING_INTERVALS = re.compile(r"(?<![a-z])intervals(?!\.icu)(?![a-z])")
+_INTERVALS_TARGET = re.compile(
+    r"(?<![a-z])(?:an|in|ins|zu|zum|nach|to|into|on|onto)\s+"
+    r"(?:(?:den|dem|die|das|my|mein[a-z]*)\s+)?intervals(?![a-z])"
+)
+_TRANSFER_VERB = _compile(
+    "^" + stem for stem in _words("trag,übertrag,schick,send,push,lad,export")
+)
+_SPLIT_ABGLEICH = re.compile(
+    r"(?<![a-z])gleich(?:e|st|t)?\s+(?:[a-z0-9]+\s+){0,5}?mit\s+intervals\s+ab(?![a-z])"
+)
+
+
 def _negates(part: str) -> bool:
-    return bool(_NEGATION.search(part)) or any(
+    return bool(_NEGATION.search(part) or _SELF_KEPT.search(part)) or any(
         _SYNC_TARGET_PATTERN.search(_loose(normalize(phrase)))
         for phrase in _WITHOUT.findall(part)
     )
+
+
+def _names_sync(part: str) -> bool:
+    """Whether a part names the sync; the bare training term needs a transfer."""
+    return (
+        _mentions_remote(_TRAINING_INTERVALS.sub(" ", part))
+        or bool(_SPLIT_ABGLEICH.search(part))
+        or bool(_INTERVALS_TARGET.search(part) and _TRANSFER_VERB.search(_loose(part)))
+    )
+
+
+def _request_parts(text: str) -> Iterator[tuple[int, str]]:
+    """Each sentence part with its index after contrast words, skipping
+    information questions unless they address the coach with a request verb."""
+    for sentence in _SENTENCE.findall(normalize(text)):
+        if (
+            sentence.rstrip().endswith(("?", "？"))
+            and _INFORMATION_QUESTION.search(sentence)
+            and not _POLITE_REQUEST.search(sentence)
+        ):
+            continue
+        yield from enumerate(_CONTRAST.split(sentence))
 
 
 def remote_requested(text: str) -> bool:
@@ -207,23 +259,20 @@ def remote_requested(text: str) -> bool:
     ohne die Ruhetage" still asks for it. A part that names Garmin or Wahoo but
     not Intervals.icu ("Sync meine Garmin-Daten"), or that describes a past sync
     ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
+    A negated or self-kept sync ("Synchronisieren mache ich selbst") blocks the
+    whole message until a contrast part that names an unnegated sync, and the
+    training term "Intervals" names the provider only as a transfer target
+    ("zu Intervals hochladen") (#2341).
     """
-    for sentence in _SENTENCE.findall(normalize(text)):
-        if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
-        ):
+    requested = blocked = False
+    for index, part in _request_parts(text):
+        if not _names_sync(part) or _names_other_provider(part):
             continue
-        if any(
-            _mentions_remote(part)
-            and not _negates(part)
-            and not _names_other_provider(part)
-            and not _describes_past(part)
-            for part in _CONTRAST.split(sentence)
-        ):
-            return True
-    return False
+        if _negates(part):
+            requested, blocked = False, True
+        elif (index or not blocked) and not _describes_past(part):
+            requested, blocked = True, False
+    return requested
 
 
 # One group per provider, named by its id. Garmin is named as the provider or
@@ -260,24 +309,17 @@ def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
     information questions ask nothing, as for ``remote_requested``.
     """
     found: set[str] = set()
-    for sentence in _SENTENCE.findall(normalize(text)):
+    for _, part in _request_parts(text):
+        loose = _loose(part)
         if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
+            verbs.search(loose)
+            and _PROVIDER_OBJECT.search(loose)
+            and not _INTERVALS_NAME.search(part)
+            and not _negates(part)
         ):
-            continue
-        for part in _CONTRAST.split(sentence):
-            loose = _loose(part)
-            if (
-                verbs.search(loose)
-                and _PROVIDER_OBJECT.search(loose)
-                and not _INTERVALS_NAME.search(part)
-                and not _negates(part)
-            ):
-                found.update(
-                    str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
-                )
+            found.update(
+                str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
+            )
     return frozenset(found)
 
 
@@ -524,6 +566,10 @@ class TurnGateState:
 
     writes_count: int = 0
     records_count: int = 0
+    # Records per tool, for a tool's own bulk threshold.
+    tool_records: dict[str, int] = field(default_factory=dict)
+    # The record ids a distinct-record tool already touched in the turn.
+    tool_record_ids: dict[str, frozenset[str]] = field(default_factory=dict)
     verdict: ImpactVerdict | None = None
 
     @property
@@ -568,7 +614,35 @@ def record_count(tool_name: str, arguments: Mapping[str, Any] | None) -> int:
     keys = RECORD_LISTS.get(tool_name)
     if keys is None or not isinstance(arguments, Mapping):
         return 1
+    if tool_name in DISTINCT_RECORD_TOOLS:
+        return _new_records(tool_name, arguments, frozenset())
     return max(1, sum(len(_items(arguments, key)) for key in keys))
+
+
+def _record_keys(
+    tool_name: str, arguments: Mapping[str, Any] | None
+) -> tuple[frozenset[str], int]:
+    """The record ids a call names, and how many items name no id."""
+    items = (
+        [
+            item
+            for key in RECORD_LISTS.get(tool_name, ())
+            for item in _items(arguments, key)
+        ]
+        if isinstance(arguments, Mapping)
+        else []
+    )
+    ids = [
+        str(item["id"])
+        for item in items
+        if isinstance(item, Mapping) and item.get("id") not in (None, "")
+    ]
+    return frozenset(ids), len(items) - len(ids)
+
+
+def record_ids(tool_name: str, arguments: Mapping[str, Any] | None) -> frozenset[str]:
+    """The record ids a call names, as the receipt keeps them."""
+    return _record_keys(tool_name, arguments)[0]
 
 
 def _canonical(value: Any) -> str:
@@ -595,16 +669,66 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
     )
 
 
+def _new_records(
+    tool_name: str, arguments: Mapping[str, Any] | None, seen_ids: frozenset[str]
+) -> int:
+    """Records a call adds; a distinct-record tool skips ids already touched.
+
+    An item without an id is always a record of its own; a call naming only
+    touched ids adds none, any other call at least one.
+    """
+    if tool_name not in DISTINCT_RECORD_TOOLS:
+        return record_count(tool_name, arguments)
+    ids, anonymous = _record_keys(tool_name, arguments)
+    added = len(ids - seen_ids) + anonymous
+    return added if added or ids else 1
+
+
+def count_records(
+    state: TurnGateState, tool_name: str, records: int, ids: frozenset[str]
+) -> None:
+    """Add a call's records to the turn: live, and again when a turn resumes."""
+    state.records_count += records
+    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
+    if tool_name in DISTINCT_RECORD_TOOLS:
+        state.tool_record_ids[tool_name] = (
+            state.tool_record_ids.get(tool_name, frozenset()) | ids
+        )
+
+
+def resumed_records(
+    state: TurnGateState, tool_name: str, stored: int, ids: frozenset[str]
+) -> int:
+    """Records an earlier call of a resumed turn adds, counted as it was live."""
+    if tool_name not in DISTINCT_RECORD_TOOLS or not ids:
+        return stored
+    anonymous = max(0, stored - len(ids))
+    return len(ids - state.tool_record_ids.get(tool_name, frozenset())) + anonymous
+
+
 def call_impact(
-    tool_name: str, arguments: Mapping[str, Any] | None, records_so_far: int = 0
+    tool_name: str,
+    arguments: Mapping[str, Any] | None,
+    records_so_far: int = 0,
+    tool_records_so_far: int = 0,
+    seen_ids: frozenset[str] = frozenset(),
 ) -> frozenset[str]:
-    """The high-impact kinds of one local call: ``delete`` and/or ``bulk``."""
+    """The high-impact kinds of one local call: ``delete`` and/or ``bulk``.
+
+    ``tool_records_so_far`` counts the records this tool already touched in the
+    turn, for a tool that counts as bulk from fewer records than the rest;
+    ``seen_ids`` are those records, which a distinct-record tool counts once.
+    """
     impact = set()
     if _removes_records(tool_name, arguments):
         impact.add(DELETE)
-    records = record_count(tool_name, arguments)
-    if tool_name in WHOLE_PLAN_TOOLS or (
-        records and records_so_far + records > BULK_THRESHOLD
+    records = _new_records(tool_name, arguments, seen_ids)
+    # A tool may count as bulk from fewer records than the general threshold.
+    bulk_from = BULK_FROM.get(tool_name)
+    if (
+        tool_name in WHOLE_PLAN_TOOLS
+        or (records and records_so_far + records > BULK_THRESHOLD)
+        or (bulk_from and tool_records_so_far + records >= bulk_from)
     ):
         impact.add(BULK)
     return frozenset(impact)
@@ -784,11 +908,18 @@ def check_write(
         return GateDecision(
             False, domain, REMOTE_INTERVALS_DENIAL, state.classifier_used
         )
-    records = record_count(tool_name, arguments)
+    seen = state.tool_record_ids.get(tool_name, frozenset())
+    records = _new_records(tool_name, arguments, seen)
     impact = (
         frozenset()
         if domain == REMOTE_INTERVALS
-        else call_impact(tool_name, arguments, state.records_count)
+        else call_impact(
+            tool_name,
+            arguments,
+            state.records_count,
+            state.tool_records.get(tool_name, 0),
+            seen,
+        )
     )
     denied = _classifier_denial(
         tool_name,
@@ -799,7 +930,7 @@ def check_write(
     if denied:
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
-    state.records_count += records
+    count_records(state, tool_name, records, record_ids(tool_name, arguments))
     return GateDecision(True, domain, "ok", state.classifier_used)
 
 
@@ -815,7 +946,8 @@ CLASSIFIER_INSTRUCTIONS = (
     "area (domain) the athlete asks to change. delete: true only when the "
     "athlete asks to delete, remove, archive or cancel records of that domain. "
     "bulk: true only when the athlete asks to create, replace or rework a whole "
-    "plan, a period such as a week, or many records of that domain at once. "
+    "plan, a period such as a week, or many records of that domain at once; "
+    "filling missing values of two or more products is bulk in nutrition. "
     "Questions, discussion, advice, thanks and refusals such as 'don't delete "
     "anything' yield an empty list; a request phrased as a question ('Kannst "
     "du ...?') still counts. A reply that clearly accepts the change proposed "
@@ -861,27 +993,6 @@ CLASSIFIER_SCHEMA: dict[str, Any] = {
 }
 
 
-def _text_value(value: Any) -> str:
-    return value if isinstance(value, str) and value.strip() else ""
-
-
-def _item_texts(item: Any) -> Iterator[str]:
-    content = item.get("content") if isinstance(item, Mapping) else None
-    for part in content if isinstance(content, list) else ():
-        yield _text_value(part.get("text") if isinstance(part, Mapping) else None)
-
-
-def _response_text(response: Any) -> str:
-    if not isinstance(response, Mapping):
-        return ""
-    direct = _text_value(response.get("output_text"))
-    if direct:
-        return direct
-    output = response.get("output")
-    items = output if isinstance(output, list) else ()
-    return next((text for item in items for text in _item_texts(item) if text), "")
-
-
 def _verdict(parsed: Any) -> ImpactVerdict:
     if not isinstance(parsed, dict):
         return NO_IMPACT
@@ -905,48 +1016,22 @@ def _verdict(parsed: Any) -> ImpactVerdict:
     )
 
 
-def build_openai_impact_classifier(
-    create_response: Callable[[dict[str, Any]], Any],
-    *,
-    model: str,
-    reasoning_effort: str | None = None,
-) -> ImpactClassifier:
-    """Build a classifier over an injected Responses API call.
+def classifier_input(
+    current_text: str, previous_assistant_text: str, origin_text: str = ""
+) -> str:
+    """The bounded text the impact classifier reads, as compact JSON."""
+    message = {
+        "athlete_message": current_text[:_CLASSIFIER_TEXT_LIMIT],
+        "previous_assistant_message": previous_assistant_text[-_HISTORY_TAIL:],
+    }
+    if origin_text:
+        message["original_athlete_request"] = origin_text[:_CLASSIFIER_TEXT_LIMIT]
+    return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
 
-    ``create_response`` sends the payload and returns the parsed response.
-    Invalid output confirms nothing; transport errors propagate to
-    ``check_write``, which fails closed.
-    """
 
-    def classify(
-        current_text: str, previous_assistant_text: str, origin_text: str = ""
-    ) -> ImpactVerdict:
-        message = {
-            "athlete_message": current_text[:_CLASSIFIER_TEXT_LIMIT],
-            "previous_assistant_message": previous_assistant_text[-_HISTORY_TAIL:],
-        }
-        if origin_text:
-            message["original_athlete_request"] = origin_text[:_CLASSIFIER_TEXT_LIMIT]
-        payload: dict[str, Any] = {
-            "model": model,
-            "instructions": CLASSIFIER_INSTRUCTIONS,
-            "input": json.dumps(message, ensure_ascii=False, separators=(",", ":")),
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "write_impact",
-                    "strict": True,
-                    "schema": CLASSIFIER_SCHEMA,
-                }
-            },
-            "store": False,
-            "max_output_tokens": 1024,
-        }
-        if reasoning_effort:
-            payload["reasoning"] = {"effort": reasoning_effort}
-        try:
-            return _verdict(json.loads(_response_text(create_response(payload))))
-        except ValueError:
-            return NO_IMPACT
-
-    return classify
+def parse_verdict(text: str) -> ImpactVerdict:
+    """Read the classifier's answer; invalid output confirms nothing."""
+    try:
+        return _verdict(json.loads(text))
+    except ValueError:
+        return NO_IMPACT

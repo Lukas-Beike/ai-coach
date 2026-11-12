@@ -89,3 +89,13 @@ test("dateTime returns null for missing or invalid values", () => {
   assert.equal(AppFormat.dateTime(""), null);
   assert.equal(AppFormat.dateTime("garbage"), null);
 });
+
+test("a completed session's duration leads with the total time for strength only", () => {
+  // #2317: rest between sets is part of a strength session's work.
+  const durations = { elapsed_duration_s: 3480, moving_duration_s: 1860 };
+  assert.equal(AppFormat.sessionSeconds({ ...durations, sport: "strength" }), 3480);
+  assert.equal(AppFormat.sessionSeconds({ ...durations, sport: "run" }), 1860);
+  assert.equal(AppFormat.sessionSeconds(durations, "strength"), 3480, "the sport may come from the session");
+  assert.equal(AppFormat.sessionSeconds({ sport: "strength", moving_duration_s: 1860 }), 1860, "without a total time the moving time stands in");
+  assert.equal(AppFormat.sessionSeconds({ sport: "run", elapsed_duration_s: 3000 }), 3000, "without a moving time the total time stands in");
+});

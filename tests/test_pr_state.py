@@ -119,6 +119,28 @@ class PrStateTests(unittest.TestCase):
         snippet = next(ln for ln in out.splitlines() if "backend/a.py" in ln)
         self.assertLessEqual(len(snippet), len("  backend/a.py:4 @gitar: ") + 200)
 
+    def test_latest_top_level_comments_and_reviews_are_shown_redacted(self):
+        pr = pull()
+        pr["comments"] = [
+            {
+                "author": {"login": f"bot{i}"},
+                "body": f"note {i}",
+                "createdAt": f"2026-11-1{i}T08:00:00Z",
+            }
+            for i in range(7)
+        ]
+        pr["reviews"] = [
+            {"author": {"login": "gitar"}, "body": "Approved ghp_" + "b" * 36, "submittedAt": "2026-11-19T08:00:00Z"},
+            {"author": {"login": "empty"}, "body": "", "submittedAt": "2026-11-19T09:00:00Z"},
+        ]  # fmt: skip
+        code, out, _, _ = self.run_script(pr)
+        self.assertEqual(code, 3)
+        self.assertIn("latest top-level comments and reviews: 5 shown", out)
+        self.assertIn("@gitar: Approved [redacted]", out)
+        self.assertIn("@bot6: note 6", out)
+        self.assertNotIn("@bot2", out)
+        self.assertNotIn("@empty", out)
+
     def test_merged_pr_exits_0_and_closed_unmerged_exits_1(self):
         code, out, _, _ = self.run_script(pull(state="MERGED"))
         self.assertEqual(code, 0)

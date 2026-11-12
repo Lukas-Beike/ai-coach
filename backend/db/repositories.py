@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import builtins
 import json
-from collections.abc import Callable, Mapping
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
@@ -59,21 +60,68 @@ NUTRIENT_COLUMNS = (
     "fiber_g",
     "salt_g",
 )
-_DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
+_DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio", "bls": "bls"}
+# Origin of a field value the athlete entered; a re-check keeps it.
+MANUAL_ORIGIN = "manual"
+
+
+_UPDATE_PRODUCT = "UPDATE nutrition_products SET "
 
 
 def database_origin(food_id: str) -> str:
     return _DATABASE_ORIGINS[food_id.split(":", 1)[0]]
 
 
+def _store_fills(
+    db: Any,
+    product_id: str,
+    raw_details: str,
+    updates: Mapping[str, Any],
+    origin: str,
+    fetched_at: str,
+    source_url: str | None = None,
+    passed_on: Mapping[str, Any] | None = None,
+) -> None:
+    """Write filled fields and name each one's origin, source page and time.
+
+    A value the source itself took from another database keeps that origin
+    (``passed_on``, the source's own ``filled_fields``).
+    """
+    details = json.loads(raw_details)
+    details.setdefault("filled_fields", {}).update(
+        {
+            key: (passed_on or {}).get(key)
+            or {
+                "origin": origin,
+                "fetched_at": fetched_at,
+                **({"source_url": source_url} if source_url else {}),
+            }
+            for key in updates
+        }
+    )
+    db.execute(
+        _UPDATE_PRODUCT
+        + ", ".join(f"{key}=?" for key in updates)
+        + ", details=? WHERE id=?",
+        (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
+    )
+
+
 def fill_empty_product_fields(
-    db: Any, product_id: str, food: Mapping[str, Any], fetched_at: str
+    db: Any,
+    product_id: str,
+    food: Mapping[str, Any],
+    fetched_at: str,
+    *,
+    origin: str | None = None,
+    source_url: str | None = None,
 ) -> bool:
     """Fill the empty brand and nutrient fields of an own product from a database food.
 
     Existing values always win. Values per basis are scaled to the product's
     basis when both use the same unit; a product of another unit (a portion)
-    takes no nutrient values. ``details.filled_fields`` names each field's origin.
+    takes no nutrient values. ``details.filled_fields`` names each field's
+    origin, which defaults to the database of the food's id.
     """
     row = db.execute(
         "SELECT brand, basis_amount, basis_unit, details, "
@@ -99,23 +147,110 @@ def fill_empty_product_fields(
         updates["brand"] = str(food["brands"])
     if not updates:
         return False
-    details = json.loads(row["details"])
-    origin = database_origin(str(food["id"]))
-    # A value the food itself took from another database keeps that origin.
-    passed_on = food.get("filled_fields") or {}
-    details.setdefault("filled_fields", {}).update(
-        {
-            key: passed_on.get(key) or {"origin": origin, "fetched_at": fetched_at}
-            for key in updates
-        }
-    )
-    db.execute(
-        "UPDATE nutrition_products SET "
-        + ", ".join(f"{key}=?" for key in updates)
-        + ", details=? WHERE id=?",
-        (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
+    _store_fills(
+        db,
+        product_id,
+        row["details"],
+        updates,
+        origin or database_origin(str(food["id"])),
+        fetched_at,
+        source_url,
+        passed_on=food.get("filled_fields") or {},
     )
     return True
+
+
+def fill_empty_nutrients(
+    db: Any,
+    product_id: str,
+    values: Mapping[str, Any],
+    *,
+    origin: str,
+    fetched_at: str,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    """Write the given nutrient values into the product's empty columns.
+
+    The values count on the product's own basis. Any row of the products table
+    qualifies, an own product or a stored database food. Return the values
+    written; a column that already holds a value keeps it.
+    """
+    row = db.execute(
+        "SELECT details, "
+        + ", ".join(NUTRIENT_COLUMNS)
+        + " FROM nutrition_products WHERE id=?",
+        (product_id,),
+    ).fetchone()
+    updates = {key: value for key, value in values.items() if row[key] is None}
+    if updates:
+        _store_fills(
+            db, product_id, row["details"], updates, origin, fetched_at, source_url
+        )
+    return updates
+
+
+# A food whose EAN an own product holds is listed as that product only.
+_NOT_HELD_BY_OWN = (
+    "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
+    "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL))"
+)
+# Active own products and the database foods no active own product holds: an
+# archived product's food is listed again.
+_LISTED = (
+    "(CASE WHEN origin = 'own' THEN status = 'active' ELSE "
+    "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM nutrition_products "
+    "WHERE origin = 'own' AND status = 'active' AND barcode IS NOT NULL)) END)"
+)
+
+
+def _term_clauses(
+    query: str | None, *, barcodes: bool = False
+) -> tuple[list[str], list[Any]] | None:
+    """SQL conditions for a product search, or None when nothing can match.
+
+    Every word must appear in the name or brand (or equal an EAN with
+    ``barcodes``), so "Arla Skyr" finds the saved product "Skyr" of brand
+    "Arla". An empty query lists all; a whitespace-only or overlong query
+    matches nothing rather than a broader set. Words shorter than three
+    characters must start a word, so "Ei" finds "Eier" but not "Reisnudeln".
+    Separators around a word are ignored, so "Haferflocken, Banane" and
+    "Müsli (Bio)" still match.
+    """
+    terms = [
+        term for word in (query or "").split() if (term := word.strip(",.()/-!?:;+&"))
+    ]
+    if query and not 1 <= len(terms) <= 20:
+        return None
+    clauses: list[str] = []
+    params: list[Any] = []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        patterns = (
+            (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
+            if len(term) < 3
+            else (f"%{escaped}%",)
+        )
+        ean = barcodes and term.isdigit()
+        clauses.append(
+            "("
+            + " OR ".join(
+                f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
+                for column in ("name", "brand")
+                for _ in patterns
+            )
+            + (" OR barcode = ?" if ean else "")
+            + ")"
+        )
+        params.extend(patterns * 2)
+        if ean:
+            params.append(term)
+    return clauses, params
+
+
+def _name_key(name: str) -> str:
+    """A product name as German readers sort it: no case, umlauts as vowels."""
+    folded = unicodedata.normalize("NFKD", name.casefold().replace("ß", "ss"))
+    return "".join(c for c in folded if not unicodedata.combining(c))
 
 
 class NutritionProductRepository:
@@ -125,12 +260,14 @@ class NutritionProductRepository:
     a database lookup belong to FoodDatabaseEntryRepository.
     """
 
-    _SELECT = (
-        "SELECT id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
+    _COLUMNS = (
+        "id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
         "protein_g, fat_g, sugar_g, fiber_g, salt_g, source, source_url, external_id, "
-        "provenance, extraction_confidence, favorite, status, created_at, updated_at, details "
-        "FROM nutrition_products"
+        "provenance, extraction_confidence, favorite, status, created_at, updated_at, details"
     )
+    _SELECT = f"SELECT {_COLUMNS} FROM nutrition_products"
+    # Listings of own and database products name where each product comes from.
+    _LISTING_SELECT = f"SELECT {_COLUMNS}, origin, fetched_at FROM nutrition_products"
 
     @staticmethod
     def _row(row: Any) -> dict[str, Any]:
@@ -144,6 +281,40 @@ class NutritionProductRepository:
             "filled_fields", {}
         )
         return product
+
+    @staticmethod
+    def list_incomplete(
+        db: Any, limit: int = 50, ids: Sequence[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Active own products and stored database foods with an empty core field.
+
+        A food whose EAN an own product holds is listed as that product only.
+        Each row names its ``origin`` and the ``missing_fields``; ``ids`` narrows
+        the list to those products.
+        """
+        wanted = list(ids or ())
+        rows = db.execute(
+            "SELECT id, origin, name, brand, barcode, basis_amount, basis_unit, "
+            + ", ".join(NUTRIENT_COLUMNS)
+            + " FROM nutrition_products WHERE ("
+            + " OR ".join(f"{key} IS NULL" for key in NUTRIENT_COLUMNS)
+            + f") AND {_LISTED} "
+            + (f"AND id IN ({','.join('?' * len(wanted))}) " if ids is not None else "")
+            + "ORDER BY origin <> 'own', name COLLATE NOCASE, id LIMIT ?",
+            (*wanted, max(1, min(int(limit), 100))),
+        ).fetchall()
+        found = [dict(row) for row in rows]
+        return [
+            {
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if key not in NUTRIENT_COLUMNS
+                },
+                "missing_fields": [key for key in NUTRIENT_COLUMNS if row[key] is None],
+            }
+            for row in found
+        ]
 
     def list(
         self,
@@ -162,36 +333,10 @@ class NutritionProductRepository:
         if barcode:
             clauses.append("barcode = ?")
             params.append(barcode)
-        # Every word must appear in the name or brand, so "Arla Skyr" finds
-        # the saved product "Skyr" of brand "Arla". An empty query lists all;
-        # a whitespace-only or overlong query matches nothing rather than a
-        # broader set. Words shorter than three characters must start a word,
-        # so "Ei" finds "Eier" but not "Reisnudeln". Separators around a word
-        # are ignored, so "Haferflocken, Banane" and "Müsli (Bio)" still match.
-        terms = [
-            term
-            for word in (query or "").split()
-            if (term := word.strip(",.()/-!?:;+&"))
-        ]
-        if query and not 1 <= len(terms) <= 20:
+        if (found := _term_clauses(query)) is None:
             return []
-        for term in terms:
-            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            patterns = (
-                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
-                if len(term) < 3
-                else (f"%{escaped}%",)
-            )
-            clauses.append(
-                "("
-                + " OR ".join(
-                    f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
-                    for column in ("name", "brand")
-                    for _ in patterns
-                )
-                + ")"
-            )
-            params.extend(patterns * 2)
+        clauses.extend(found[0])
+        params.extend(found[1])
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
             self._SELECT
@@ -201,6 +346,47 @@ class NutritionProductRepository:
             (*params, max(1, min(int(limit), 100))),
         ).fetchall()
         return [self._row(row) for row in rows]
+
+    def list_all(
+        self, db: Any, *, query: str | None = None, limit: int = 1000
+    ) -> builtins.list[dict[str, Any]]:
+        """Active own products and stored database foods together, by name.
+
+        The search covers name, brand and EAN. Each product names its
+        ``origin``, ``fetched_at`` and ``missing_fields``.
+        """
+        if (found := _term_clauses(query, barcodes=True)) is None:
+            return []
+        rows = db.execute(
+            self._LISTING_SELECT
+            + f" WHERE {_LISTED}"
+            + "".join(f" AND {clause}" for clause in found[0]),
+            found[1],
+        ).fetchall()
+        # Sorted before the cut: SQLite folds ASCII case only, and "Äpfel"
+        # belongs under A, not after Z.
+        return sorted(
+            (self._listed(row) for row in rows),
+            key=lambda product: (_name_key(product["name"]), product["id"]),
+        )[: max(1, min(int(limit), 1000))]
+
+    def get_database(self, db: Any, product_id: str) -> dict[str, Any] | None:
+        """A stored database food as a product, or None for any other id."""
+        row = db.execute(
+            self._LISTING_SELECT + " WHERE id = ? AND origin <> 'own'", (product_id,)
+        ).fetchone()
+        return self._listed(row) if row else None
+
+    def get_any(self, db: Any, product_id: str) -> dict[str, Any] | None:
+        """An own product, else a stored database food."""
+        return self.get(db, product_id) or self.get_database(db, product_id)
+
+    def _listed(self, row: Any) -> dict[str, Any]:
+        product = self._row(row)
+        product["missing_fields"] = [
+            key for key in NUTRIENT_COLUMNS if product[key] is None
+        ]
+        return product
 
     def get(self, db: Any, product_id: str) -> dict[str, Any] | None:
         row = db.execute(
@@ -295,10 +481,11 @@ class NutritionProductRepository:
         return filled
 
     def set_favorite(self, db: Any, product_id: str, favorite: bool) -> bool:
-        # Only the flag changes: saving a product again never resets it.
+        # Only the flag changes: saving a product or re-checking a stored
+        # database food never resets it.
         return (
             db.execute(
-                "UPDATE nutrition_products SET favorite=? WHERE id=? AND origin = 'own'",
+                "UPDATE nutrition_products SET favorite=? WHERE id=?",
                 (int(favorite), product_id),
             ).rowcount
             > 0
@@ -360,7 +547,10 @@ class FoodDatabaseEntryRepository:
     def _entry(row: Any) -> dict[str, Any]:
         details = json.loads(row["details"])
         # Foods stored before sugar, fibre and salt were read lack those keys.
-        absent = set(details.pop("absent_nutrients", ()))
+        # A filled one is present; undo empties it, so it is absent again.
+        absent = {
+            key for key in details.pop("absent_nutrients", ()) if row[key] is None
+        }
         missing = details.pop("absent_fields", ())
         entry = {
             "id": row["id"],
@@ -431,10 +621,7 @@ class FoodDatabaseEntryRepository:
             )
             params.extend((f"%{escaped}%", f"%{escaped}%"))
         # A food whose EAN an own product holds is listed as that product.
-        clauses.append(
-            "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
-            "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL))"
-        )
+        clauses.append(_NOT_HELD_BY_OWN)
         rows = db.execute(
             self._SELECT
             + "".join(f" AND {clause}" for clause in clauses)
@@ -507,6 +694,69 @@ class FoodDatabaseEntryRepository:
                 tuple(values.values()),
             ).rowcount
             > 0
+        )
+
+    def restore_nutrients(
+        self,
+        db: Any,
+        food_id: str,
+        values: Mapping[str, Any],
+        marks: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Put nutrient values back, with the origin marks they had then.
+
+        ``marks`` are the recorded marks when the undone change altered them;
+        otherwise the marks stay, except that an emptied value has no origin.
+        """
+        row = db.execute(
+            "SELECT details FROM nutrition_products WHERE id=? AND origin <> 'own'",
+            (food_id,),
+        ).fetchone()
+        if row is None or not values:
+            return
+        details = json.loads(row["details"])
+        if marks is not None:
+            details["filled_fields"] = dict(marks)
+        for key, value in values.items() if marks is None else ():
+            if value is None:
+                details.get("filled_fields", {}).pop(key, None)
+        db.execute(
+            _UPDATE_PRODUCT
+            + ", ".join(f"{key}=?" for key in values)
+            + ", details=? WHERE id=?",
+            (*values.values(), json.dumps(details, ensure_ascii=False), food_id),
+        )
+
+    def edit_nutrients(
+        self, db: Any, food_id: str, values: Mapping[str, Any], edited_at: str
+    ) -> None:
+        """Write the athlete's nutrient values; each one is marked ``manual``.
+
+        An emptied value is no longer marked.
+        """
+        row = db.execute(
+            "SELECT details FROM nutrition_products WHERE id=? AND origin <> 'own'",
+            (food_id,),
+        ).fetchone()
+        if row is None or not values:
+            return
+        details = json.loads(row["details"])
+        marks = details.setdefault("filled_fields", {})
+        for key, value in values.items():
+            if value is None:
+                marks.pop(key, None)
+            else:
+                marks[key] = {"origin": MANUAL_ORIGIN, "fetched_at": edited_at}
+        db.execute(
+            _UPDATE_PRODUCT
+            + ", ".join(f"{key}=?" for key in values)
+            + ", details=?, updated_at=? WHERE id=?",
+            (
+                *values.values(),
+                json.dumps(details, ensure_ascii=False),
+                edited_at,
+                food_id,
+            ),
         )
 
     def delete(self, db: Any, food_id: str) -> bool:

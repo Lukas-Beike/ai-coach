@@ -93,10 +93,12 @@ PROVIDER_LITERALS = frozenset({"intervals", "garmin", "wahoo"})
 
 # Adapters and the canonical model may name providers and use provider keys.
 ADAPTER_PREFIXES = ("backend/providers/", "backend/canonical/")
-# Only these files may name providers as literals outside the adapters. The sync
-# provider registry (backend/sync/provider_registry.py) is literal-free and must
-# never be listed here; its provider data lives in backend/providers/descriptors.py.
-PROVIDER_LITERAL_ALLOWED_FILES = frozenset({"backend/db/migrations.py"})
+# Only these files may name providers as literals outside the adapters: the
+# migrations and the one provider table (labels such as "Garmin"). The provider
+# registry (backend/sync/provider_registry.py) reads the table and stays literal-free.
+PROVIDER_LITERAL_ALLOWED_FILES = frozenset(
+    {"backend/db/migrations.py", "backend/sync/provider_table.py"}
+)
 
 RULE_SNAPSHOT_KEY = "snapshot_key"
 RULE_LEGACY_READ = "legacy_read"

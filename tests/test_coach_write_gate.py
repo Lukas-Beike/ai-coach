@@ -15,7 +15,9 @@ from backend.coach.proposal_models import (
 )
 from backend.coach.tool_registry import build_tool_contracts
 from backend.coach.training_template_tools import TrainingTemplateToolService
-from backend.coach.turn_write_gate import CoachTurnWriteGate
+from backend.coach.turn_write_gate import CoachTurnWriteGate, build_impact_classifier
+from backend.providers.model_seam import ModelTurn
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 _DELETE_TOOLS = (
     "delete_competition",
@@ -531,6 +533,63 @@ class DestructiveTierTests(unittest.TestCase):
             gate.call_impact("apply_workout_library_plan", library), {"bulk"}
         )
 
+        # A tool may count as bulk from fewer records: two products, not one.
+        fill = "fill_nutrition_product_gaps"
+        for count, impact in ((1, set()), (2, {"bulk"}), (25, {"bulk"})):
+            with self.subTest(products=count):
+                self.assertEqual(
+                    gate.call_impact(fill, {"products": [{}] * count}), impact
+                )
+                self.assertEqual(
+                    _check(
+                        fill,
+                        "Trag die Lücken ein",
+                        arguments={"products": [{}] * count},
+                        classifier=_Classifier(_verdict(["nutrition"])),
+                    ).allowed,
+                    not impact,
+                )
+        self.assertTrue(
+            _check(
+                fill,
+                "Ja, trag sie ein",
+                arguments={"products": [{}] * 3},
+                classifier=_Classifier(_verdict(["nutrition"], bulk=True)),
+            ).allowed
+        )
+        # Only this tool's own earlier records count toward its threshold: a
+        # product saved earlier in the turn does not make one fill bulk.
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 0), set())
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 1), {"bulk"})
+        # Products count by id: one product with values from two origins is
+        # one product, also after an earlier attempt for it in the turn (#2336).
+        one_twice = {"products": [{"id": "p1"}, {"id": "p1"}]}
+        for arguments, seen, impact in (
+            (one_twice, frozenset(), set()),
+            ({"products": [{"id": "p1"}]}, frozenset({"p1"}), set()),
+            ({"products": [{"id": "p1"}, {"id": "p2"}]}, frozenset(), {"bulk"}),
+            ({"products": [{"id": "p2"}]}, frozenset({"p1"}), {"bulk"}),
+            # An item without an id is always a product of its own.
+            ({"products": [{}]}, frozenset({"p1"}), {"bulk"}),
+        ):
+            with self.subTest(arguments=arguments, seen=seen):
+                self.assertEqual(
+                    gate.call_impact(fill, arguments, len(seen), len(seen), seen),
+                    impact,
+                )
+        self.assertEqual(gate.record_count(fill, one_twice), 1)
+        state = gate.TurnGateState()
+        for _ in range(2):
+            self.assertTrue(
+                _check(
+                    fill,
+                    "Trag die Lücken von Skyr ein",
+                    arguments=one_twice,
+                    classifier=_Classifier(_verdict(["nutrition"])),
+                    state=state,
+                ).allowed
+            )
+
         # Small calls add up across the turn.
         authority = _authority("Verschieb alles")
         classifier = _Classifier()
@@ -697,6 +756,24 @@ class RemoteTierTests(unittest.TestCase):
             # and an "ohne" phrase that names the target negates its part.
             "Nein, synchronisiere den Plan mit Intervals.",
             "Lade die Woche ohne die Krafteinheiten zu Intervals hoch.",
+            # A negated or self-kept sync blocks the whole message, and the
+            # training term "Intervals" names no sync (#2341).
+            "Plane die Woche. Synchronisieren mache ich selbst.",
+            "Nicht synchronisieren! Nur lokal speichern. Der Sync kommt später.",
+            "Sync den Plan. Nein, doch nicht synchronisieren.",
+            "Mach mir 5x4 min Intervals am Dienstag.",
+            "Plane 6x800 m Intervals für Donnerstag und sync es nicht.",
+            "Pack 5x4 min Intervals in den Dienstag.",
+            "Plane die Intervals gleich ab Montag.",
+            "Plane gleich 5x4 min Intervals ab Montag.",
+            "Ändere den Dienstag zu Intervals.",
+            "Wandle den Lauf in Intervals um.",
+            "Nicht synchronisieren, aber plane die Woche neu. Der Sync kommt später.",
+            "Den Sync mache ich selber.",
+            "I'll sync it myself.",
+            # Accepted fail-closed limit: a negation that only narrows the
+            # scope still blocks the whole message.
+            "Sync den Plan zu Intervals.icu. Die Ruhetage nicht hochladen.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(gate.remote_requested(text))
@@ -713,6 +790,13 @@ class RemoteTierTests(unittest.TestCase):
             "Sync mit Intervals bitte.",
             "Nicht verschieben. Sync den Plan zu Intervals.",
             "Synchronisiere mit Intervals.icu.",
+            "Nicht synchronisieren. Aber den Plan danach zu Intervals hochladen.",
+            "Synchronisier den Plan bitte selbst mit Intervals.",
+            "Mach mir 5x4 min Intervals und schick sie zu Intervals.icu.",
+            "Keine Intervals diese Woche. Synchronisiere den Plan mit Intervals.icu.",
+            "Nicht zu Garmin synchronisieren. Sync den Plan zu Intervals.icu.",
+            "Trag die Woche in Intervals ein.",
+            "Ich möchte, dass du den Plan selbst zu Intervals.icu hochlädst.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(gate.remote_requested(text))
@@ -935,12 +1019,13 @@ class WriteCapTests(unittest.TestCase):
 
 class OpenAIClassifierTests(unittest.TestCase):
     def _classifier(self, response, calls):
-        def create_response(payload):
-            calls.append(payload)
-            return response
+        def complete(request):
+            # Assert what goes on the wire: the request through the OpenAI adapter.
+            calls.append(request_payload(request))
+            return model_turn(response)
 
-        return gate.build_openai_impact_classifier(
-            create_response, model="test-model", reasoning_effort="low"
+        return build_impact_classifier(
+            complete, model="test-model", reasoning_effort="low"
         )
 
     def test_payload_uses_strict_schema_without_remote_domain(self):
@@ -1003,8 +1088,8 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_reasoning_is_omitted_without_effort(self):
         calls = []
-        classify = gate.build_openai_impact_classifier(
-            lambda payload: calls.append(payload) or {"output_text": "{}"},
+        classify = build_impact_classifier(
+            lambda request: calls.append(request_payload(request)) or ModelTurn(),
             model="m",
         )
         classify("x", "y", "")
@@ -1012,9 +1097,11 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_output_items_are_parsed(self):
         text = '{"requests":[{"domain":"planning","delete":false,"bulk":true}]}'
+        # Only the message text is the verdict (#2073): a reasoning item's text,
+        # which the former parser could pick first, is never read.
         response = {
             "output": [
-                {"type": "reasoning", "summary": []},
+                {"type": "reasoning", "content": [{"type": "text", "text": "x"}]},
                 {"type": "message", "content": [{"type": "output_text", "text": text}]},
             ]
         }
@@ -1035,6 +1122,19 @@ class OpenAIClassifierTests(unittest.TestCase):
             {
                 "output_text": '{"requests":[{"domain":"remote_intervals",'
                 '"delete":true},{"domain":"admin"},{"domain":["profile"]},3]}'
+            },
+            # Two message text parts are one joined text, not a JSON verdict
+            # (#2073): the classifier confirms nothing.
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": '{"requests":[]}'},
+                            {"type": "output_text", "text": "{}"},
+                        ],
+                    }
+                ]
             },
         ):
             with self.subTest(response=response):
@@ -1068,7 +1168,7 @@ class OpenAIClassifierTests(unittest.TestCase):
         def broken(_payload):
             raise OSError("network down")
 
-        classify = gate.build_openai_impact_classifier(broken, model="m")
+        classify = build_impact_classifier(broken, model="m")
         decision = _check("delete_competition", "Lösch das", classifier=classify)
         self.assertFalse(decision.allowed)
 

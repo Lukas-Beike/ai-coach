@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from support import dispatch_route
 
@@ -65,6 +65,28 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             200, {"ok": True, "foods": [{"id": "off:1"}]}
         )
 
+    def test_get_products_scope_all_merges_own_products_and_stored_foods(self):
+        catalog = self.meal_library.product_catalog
+        catalog.list_all_products.return_value = [{"id": "off:1"}, {"id": "product-1"}]
+        for path, term in (
+            ("/api/nutrition/products?scope=all", None),
+            ("/api/nutrition/products?scope=all&q=Whey", "Whey"),
+        ):
+            with self.subTest(path=path):
+                self.handler.reset_mock()
+                self.handler.path = path
+                self.assertTrue(
+                    dispatch_route(
+                        self.get_routes, self.handler, "/api/nutrition/products"
+                    )
+                )
+                catalog.list_all_products.assert_called_with(term)
+                self.handler.send_json.assert_called_once_with(
+                    200,
+                    {"ok": True, "products": [{"id": "off:1"}, {"id": "product-1"}]},
+                )
+        catalog.list_products.assert_not_called()
+
     def test_database_entry_removal_requires_confirmation(self):
         self.handler.read_json.return_value = {"id": "off:1"}
 
@@ -90,7 +112,8 @@ class NutritionProductHttpContractTests(unittest.TestCase):
 
     def test_database_entry_refresh_names_the_entry(self):
         self.handler.read_json.return_value = {"id": "off:1"}
-        self.meal_library.refresh_database_food.return_value = {"ok": True}
+        result = {"ok": True, "product": {"id": "off:1"}, "notice": "n"}
+        self.meal_library.refresh_database_food.return_value = result
         dispatch_route(
             self.post_routes,
             self.handler,
@@ -98,6 +121,7 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             method="POST",
         )
         self.meal_library.refresh_database_food.assert_called_once_with("off:1")
+        self.handler.send_json.assert_called_once_with(200, result)
 
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
         self.handler.path = "/api/nutrition/products?barcode=4006381333931"
@@ -216,6 +240,27 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.handler.send_json.assert_called_once_with(
             200,
             {"ok": True, "product": {"id": "product-1", "status": "archived"}},
+        )
+
+    def test_editing_a_stored_database_food_returns_its_undo_reference(self):
+        change = {"entity_type": "food_database_entry", "entity_id": "off:1"}
+        self.handler.read_json.return_value = {
+            "id": "off:1",
+            "kcal": 52,
+            "confirmed": True,
+        }
+        self.meal_library.product_catalog.update_product.return_value = {"id": "off:1"}
+
+        with patch(
+            "backend.http_api.nutrition.change_history.collect_changes"
+        ) as collect:
+            collect.return_value.__enter__.return_value = [change]
+            dispatch_route(
+                self.put_routes, self.handler, "/api/nutrition/products", method="PUT"
+            )
+
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "product": {"id": "off:1"}, "change": change}
         )
 
     def test_favorite_and_add_to_meal_target_explicit_ids(self):

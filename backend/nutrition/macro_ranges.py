@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from backend.canonical.activity_summary import summary_leading_duration_s
+
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (float, int)):
@@ -65,11 +67,10 @@ def _session_totals(entry: dict[str, Any]) -> tuple[float, bool] | None:
     row = compliance.get("actual_activity") or entry
     if not isinstance(row, dict):
         return None
-    duration = None
-    for key in ("moving_duration_s", "elapsed_duration_s", "planned_duration_s"):
-        duration = _number(row.get(key))
-        if duration is not None:
-            break
+    # A completed strength session counts with its total time (#2317).
+    duration = _number(summary_leading_duration_s(row)) or _number(
+        row.get("planned_duration_s")
+    )
     high = _high_seconds(row)
     if duration is None or high is None:
         return None

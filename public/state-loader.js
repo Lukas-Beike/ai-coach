@@ -401,7 +401,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       renderLoadedState(payload, liveAreasOnly);
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
-      // The panel may already be open after a start or re-login, which fires no toggle.
+      // Anbindungen may already be shown after a start or re-login, before any route change read it.
       refreshOpenProviderChecks();
     }
     const current = () => sessionGeneration === state.sessionGeneration && requestSequence === state.loadSequence;

@@ -25,6 +25,8 @@ from backend.coach.write_gate import (
     WRITE_CAP,
     ImpactVerdict,
 )
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_responses_adapter import request_payload
 
 READ_ONLY = frozenset({"read_profile"})
 
@@ -170,6 +172,20 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertEqual(
             denied(gate, "update_profile", {})["gate_reason"], "impact_not_confirmed"
         )
+
+    def test_a_resumed_gap_fill_counts_each_product_once(self) -> None:
+        # Receipts keep the product ids: two calls for p1 are one product, so a
+        # further call for p1 is not bulk; a second product is (#2336).
+        fill = "fill_nutrition_product_gaps"
+        receipts = [
+            {"tool": fill, "record_count": 1, "record_ids": ["p1"]},
+            {"tool": fill, "record_count": 1, "record_ids": ["p1"]},
+        ]
+        for products, allowed in ((["p1"], True), (["p2"], False)):
+            with self.subTest(products=products):
+                gate, _factory = make_gate("Trag die Lücken ein", receipts=receipts)
+                arguments = {"products": [{"id": item} for item in products]}
+                self.assertEqual(gate.denial(fill, arguments) is None, allowed)
 
     def test_remote_writes_need_a_named_sync_and_never_the_classifier(self) -> None:
         classifier = Mock(return_value=verdict(sorted(DOMAINS), True, True))
@@ -468,7 +484,7 @@ class ChokePointTests(unittest.TestCase):
         self.failure = Mock()
         self.jobs = Mock()
         self.response = Mock()
-        self.response.respond.return_value = {"output": []}
+        self.response.respond.return_value = ModelTurn()
         self.classifier = Mock(return_value=verdict())
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachStructuredToolRoundService(
@@ -506,7 +522,7 @@ class ChokePointTests(unittest.TestCase):
             client_turn_id="synthetic-turn",
             session_csrf_hash="synthetic-session",
             cancel_event=None,
-            request_payload={"input": [], "model": "synthetic-model"},
+            request=ModelRequest(model="synthetic-model", instructions="synthetic"),
             model_instructions="synthetic-instructions",
             message=message,
             attachments=[],
@@ -642,17 +658,11 @@ class ChokePointTests(unittest.TestCase):
 
     def test_denied_round_completes_and_tells_model_nothing_was_saved(self) -> None:
         state = self.state("Wie war mein Schlaf?")
-        response = {
-            "id": "response-one",
-            "output": [
-                {
-                    "type": "function_call",
-                    "name": "delete_competition",
-                    "call_id": "call-one",
-                    "arguments": "{}",
-                }
-            ],
-        }
+        response = ModelTurn(
+            tool_calls=[
+                {"name": "delete_competition", "call_id": "call-one", "arguments": "{}"}
+            ]
+        )
         with patch(
             "backend.coach.structured_tool_round.structured_tool_call_metadata",
             return_value=self.metadata("delete_competition"),
@@ -662,7 +672,7 @@ class ChokePointTests(unittest.TestCase):
             )
 
         self.assertEqual(result[1:4], (1, "", False))
-        followup = self.response.respond.call_args.args[0]
+        followup = request_payload(self.response.respond.call_args.args[0])
         output = json.loads(latest_tool_outputs(followup)[0]["output"])
         self.assertEqual(output["status"], "not_performed")
         self.assertEqual(output["gate_reason"], "impact_not_confirmed")
@@ -676,7 +686,7 @@ class ChokePointTests(unittest.TestCase):
             "Trag meinen Wettkampf am 12.5. ein", command_receipts=receipts
         )
         self.service.run(
-            {"output": []}, rounds=0, question="", cancelled=False, state=state
+            ModelTurn(), rounds=0, question="", cancelled=False, state=state
         )
 
         result = self.execute(state, "save_competition")[2]

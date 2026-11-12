@@ -27,6 +27,7 @@ from typing import Any, Final
 from backend.canonical.activity_detail import ActivityStrengthSetSet
 from backend.canonical.mapping import MappingResult
 from backend.canonical.vocabulary import (
+    GARMIN_ID,
     ActivityRecordState,
     RecordingOrigin,
     StrengthSetSource,
@@ -48,12 +49,12 @@ from backend.db.canonical_store import (
 )
 from backend.errors import AppError
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin_activity_detail_mapping import (
     MAPPER_VERSION,
     map_garmin_activity_detail,
 )
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.stream_backfill import count_fit_file
 

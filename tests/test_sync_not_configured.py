@@ -13,11 +13,11 @@ from support import dispatch_route
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.providers.descriptors import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.provider_resync_assembly import full_resync_handlers
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import ProviderRefreshTracker, retry_at
 
 try:

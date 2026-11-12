@@ -182,7 +182,11 @@ Small synthetic provider probes may use the existing local CLIProxyAPI under the
 [proxy runbook](docs/cliproxyapi-probes.md): confirmed
 subscription/OAuth upstreams with paid API-key fallbacks disabled, no athlete
 data, never read the proxy's credential files, and no routing, provider, or
-billing changes. Normal tests stay mocked.
+billing changes. The one tracked live run is `tests/coach_live_eval.py`
+(#2221): started by hand with a dedicated evaluation key, the dialogue catalogue
+once per run, at most 150 model calls and 5 USD, tool calls only on temporary
+storage with unconfigured providers; never part of the suite, CI or pre-push.
+Normal tests stay mocked.
 
 CI and Docker use Python 3.14; change toolchain and CI together. Direct pins live
 in `requirements.in`/`requirements-dev.in`; regenerate the hash-locked `.txt`

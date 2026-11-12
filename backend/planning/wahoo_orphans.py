@@ -12,9 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final
 
-from backend.canonical.vocabulary import RemoteEntityKind
+from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind
 from backend.planning.leftovers import MAX_CLEANUP, cap
-from backend.providers.descriptors import WAHOO_ID
 
 # The plan's name is not stored once the entry is deleted.
 _UNKNOWN_NAME: Final = "Gelöschter Wahoo-Plan"

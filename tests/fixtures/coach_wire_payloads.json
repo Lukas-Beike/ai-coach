@@ -1,0 +1,604 @@
+{
+ "attachment_conversation": [
+  {
+   "conversation": "synthetic-conversation",
+   "input": [
+    {
+     "content": [
+      {
+       "text": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":11,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":9,\"role\":\"user\",\"content\":\"Noch mal lesen\"},{\"id\":10,\"role\":\"assistant\",\"content\":\"Fertig.\\nHinweis: Das Schrittlimit dieser Antwort wurde erreicht; möglicherweise ist nicht alles erledigt. Antworte mit „weiter“, um den Auftrag fortzusetzen.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-budget\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[{\"source_message_id\":11,\"type\":\"image\",\"untrusted_attachment_name\":\"chart.png\"}]},\"current_message\":\"Analysiere das\",\"confirmed_steps\":[]}",
+       "type": "input_text"
+      },
+      {
+       "text": "{\"untrusted_attachment_name\": \"chart.png\"}",
+       "type": "input_text"
+      },
+      {
+       "detail": "auto",
+       "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAASUVORK5CYII=",
+       "type": "input_image"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "<instructions#4>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": true,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "conversation": "synthetic-conversation",
+   "input": [
+    {
+     "call_id": "c-3",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#4>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": true,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "classifier_delete": [
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":5,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Den Giro entfernen\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "input": "{\"athlete_message\":\"Den Giro entfernen\",\"previous_assistant_message\":\"Fertig.\"}",
+   "instructions": "<instructions#2>",
+   "max_output_tokens": 1024,
+   "model": "gpt-6-luna",
+   "reasoning": {
+    "effort": "low"
+   },
+   "store": false,
+   "text": {
+    "format": {
+     "name": "write_impact",
+     "schema": {
+      "additionalProperties": false,
+      "properties": {
+       "accepts_illness_override": {
+        "type": "boolean"
+       },
+       "accepts_proposal": {
+        "type": "boolean"
+       },
+       "requests": {
+        "items": {
+         "additionalProperties": false,
+         "properties": {
+          "bulk": {
+           "type": "boolean"
+          },
+          "delete": {
+           "type": "boolean"
+          },
+          "domain": {
+           "enum": [
+            "checkin",
+            "competition",
+            "nutrition",
+            "planning",
+            "profile",
+            "undo"
+           ],
+           "type": "string"
+          }
+         },
+         "required": [
+          "domain",
+          "delete",
+          "bulk"
+         ],
+         "type": "object"
+        },
+        "type": "array"
+       }
+      },
+      "required": [
+       "requests",
+       "accepts_proposal",
+       "accepts_illness_override"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "json_schema"
+    }
+   }
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": [
+    {
+     "content": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":5,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Den Giro entfernen\",\"confirmed_steps\":[]}",
+     "role": "user"
+    },
+    {
+     "arguments": "{\"competition_id\": \"synthetic-competition\", \"_request\": {\"summary\": \"Synthetic current request\", \"source_message_ids\": [5], \"target\": \"local\", \"scope\": [\"competition:synthetic-competition\"], \"period\": null, \"constraints\": [], \"remote_write\": false, \"sync_scope\": null}}",
+     "call_id": "call-5",
+     "name": "delete_competition",
+     "type": "function_call"
+    },
+    {
+     "call_id": "call-5",
+     "output": "{\"ok\": true, \"status\": \"deleted\", \"competition_id\": \"synthetic-competition\", \"remote_sync_pending\": false, \"competitions\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "conversation_recovery": [
+  {
+   "conversation": "synthetic-conversation",
+   "input": [
+    {
+     "content": [
+      {
+       "text": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":13,\"messages\":[{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":9,\"role\":\"user\",\"content\":\"Noch mal lesen\"},{\"id\":10,\"role\":\"assistant\",\"content\":\"Fertig.\\nHinweis: Das Schrittlimit dieser Antwort wurde erreicht; möglicherweise ist nicht alles erledigt. Antworte mit „weiter“, um den Auftrag fortzusetzen.\"},{\"id\":11,\"role\":\"user\",\"content\":\"Analysiere das\"},{\"id\":12,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-image\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-budget\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[{\"source_message_id\":11,\"type\":\"image\",\"untrusted_attachment_name\":\"chart.png\"},{\"source_message_id\":13,\"type\":\"gpx\",\"untrusted_attachment_name\":\"route.gpx\",\"gpx\":{\"source\":\"uploaded_gpx\",\"point_count\":2,\"distance_km\":1.112,\"ascent_m_raw\":10,\"descent_m_raw\":0,\"elevation_point_count\":2,\"note\":\"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\",\"sampled_coordinates_lat_lon_ele\":[]}}]},\"current_message\":\"Und jetzt?\",\"confirmed_steps\":[]}",
+       "type": "input_text"
+      },
+      {
+       "text": "{\"untrusted_attachment_name\": \"route.gpx\", \"gpx\": {\"source\": \"uploaded_gpx\", \"point_count\": 2, \"distance_km\": 1.112, \"ascent_m_raw\": 10, \"descent_m_raw\": 0, \"elevation_point_count\": 2, \"note\": \"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\", \"sampled_coordinates_lat_lon_ele\": []}}",
+       "type": "input_text"
+      },
+      {
+       "file_data": "data:application/json;base64,eyJmb3JtYXQiOiJHUFgiLCJmaWxlbmFtZSI6InJvdXRlLmdweCIsIm5vdGUiOiJNZWFzdXJlbWVudHMgb25seS4gUG9zaXRpb25zIHdpdGhpbiA1MDAgbSBvZiB0aGUgc3RhcnQgYW5kIGVuZCBvZiB0aGUgdHJhY2sgYW5kIGZpbGUgbWV0YWRhdGEgYXJlIGxlZnQgb3V0LiIsImNvbHVtbnMiOlsibGF0IiwibG9uIiwiZWxlIl0sInBvaW50cyI6W1tudWxsLG51bGwsMTBdLFtudWxsLG51bGwsMjBdXX0=",
+       "filename": "route.gpx.json",
+       "type": "input_file"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "<instructions#5>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": true,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "{\"dialogue\": {\"local_date\": \"2026-09-07\", \"timezone\": \"Europe/Berlin\", \"current_user_message_id\": 13, \"messages\": [{\"id\": 6, \"role\": \"assistant\", \"content\": \"Fertig.\"}, {\"id\": 7, \"role\": \"user\", \"content\": \"Erkläre die Woche\"}, {\"id\": 8, \"role\": \"assistant\", \"content\": \"Fertig.\"}, {\"id\": 9, \"role\": \"user\", \"content\": \"Noch mal lesen\"}, {\"id\": 10, \"role\": \"assistant\", \"content\": \"Fertig.\\nHinweis: Das Schrittlimit dieser Antwort wurde erreicht; möglicherweise ist nicht alles erledigt. Antworte mit „weiter“, um den Auftrag fortzusetzen.\"}, {\"id\": 11, \"role\": \"user\", \"content\": \"Analysiere das\"}, {\"id\": 12, \"role\": \"assistant\", \"content\": \"Fertig.\"}], \"pending_request\": null, \"confirmed_results\": [{\"client_turn_id\": \"wire-image\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": [{\"tool\": \"read_training_state\", \"ok\": true, \"status\": null, \"reason\": null, \"scope\": [], \"scope_truncated\": false, \"artifact_id\": null}]}, {\"client_turn_id\": \"wire-budget\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": [{\"tool\": \"read_training_state\", \"ok\": true, \"status\": null, \"reason\": null, \"scope\": [], \"scope_truncated\": false, \"artifact_id\": null}]}, {\"client_turn_id\": \"wire-tokens\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": []}], \"attachment_evidence\": [{\"source_message_id\": 11, \"type\": \"image\", \"untrusted_attachment_name\": \"chart.png\"}, {\"source_message_id\": 13, \"type\": \"gpx\", \"untrusted_attachment_name\": \"route.gpx\", \"gpx\": {\"source\": \"uploaded_gpx\", \"point_count\": 2, \"distance_km\": 1.112, \"ascent_m_raw\": 10, \"descent_m_raw\": 0, \"elevation_point_count\": 2, \"note\": \"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\", \"sampled_coordinates_lat_lon_ele\": []}}]}, \"current_message\": \"Und jetzt?\", \"confirmed_steps\": []}",
+       "type": "input_text"
+      },
+      {
+       "text": "{\"untrusted_attachment_name\": \"route.gpx\", \"gpx\": {\"source\": \"uploaded_gpx\", \"point_count\": 2, \"distance_km\": 1.112, \"ascent_m_raw\": 10, \"descent_m_raw\": 0, \"elevation_point_count\": 2, \"note\": \"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\", \"sampled_coordinates_lat_lon_ele\": []}}",
+       "type": "input_text"
+      },
+      {
+       "file_data": "data:application/json;base64,eyJmb3JtYXQiOiJHUFgiLCJmaWxlbmFtZSI6InJvdXRlLmdweCIsIm5vdGUiOiJNZWFzdXJlbWVudHMgb25seS4gUG9zaXRpb25zIHdpdGhpbiA1MDAgbSBvZiB0aGUgc3RhcnQgYW5kIGVuZCBvZiB0aGUgdHJhY2sgYW5kIGZpbGUgbWV0YWRhdGEgYXJlIGxlZnQgb3V0LiIsImNvbHVtbnMiOlsibGF0IiwibG9uIiwiZWxlIl0sInBvaW50cyI6W1tudWxsLG51bGwsMTBdLFtudWxsLG51bGwsMjBdXX0=",
+       "filename": "route.gpx.json",
+       "type": "input_file"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "<instructions#6>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": true,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "{\"dialogue\": {\"local_date\": \"2026-09-07\", \"timezone\": \"Europe/Berlin\", \"current_user_message_id\": 13, \"messages\": [{\"id\": 6, \"role\": \"assistant\", \"content\": \"Fertig.\"}, {\"id\": 7, \"role\": \"user\", \"content\": \"Erkläre die Woche\"}, {\"id\": 8, \"role\": \"assistant\", \"content\": \"Fertig.\"}, {\"id\": 9, \"role\": \"user\", \"content\": \"Noch mal lesen\"}, {\"id\": 10, \"role\": \"assistant\", \"content\": \"Fertig.\\nHinweis: Das Schrittlimit dieser Antwort wurde erreicht; möglicherweise ist nicht alles erledigt. Antworte mit „weiter“, um den Auftrag fortzusetzen.\"}, {\"id\": 11, \"role\": \"user\", \"content\": \"Analysiere das\"}, {\"id\": 12, \"role\": \"assistant\", \"content\": \"Fertig.\"}], \"pending_request\": null, \"confirmed_results\": [{\"client_turn_id\": \"wire-image\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": [{\"tool\": \"read_training_state\", \"ok\": true, \"status\": null, \"reason\": null, \"scope\": [], \"scope_truncated\": false, \"artifact_id\": null}]}, {\"client_turn_id\": \"wire-budget\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": [{\"tool\": \"read_training_state\", \"ok\": true, \"status\": null, \"reason\": null, \"scope\": [], \"scope_truncated\": false, \"artifact_id\": null}]}, {\"client_turn_id\": \"wire-tokens\", \"status\": \"completed\", \"sync_job_ids\": [], \"steps\": []}], \"attachment_evidence\": [{\"source_message_id\": 11, \"type\": \"image\", \"untrusted_attachment_name\": \"chart.png\"}, {\"source_message_id\": 13, \"type\": \"gpx\", \"untrusted_attachment_name\": \"route.gpx\", \"gpx\": {\"source\": \"uploaded_gpx\", \"point_count\": 2, \"distance_km\": 1.112, \"ascent_m_raw\": 10, \"descent_m_raw\": 0, \"elevation_point_count\": 2, \"note\": \"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\", \"sampled_coordinates_lat_lon_ele\": []}}]}, \"current_message\": \"Und jetzt?\", \"confirmed_steps\": []}",
+       "type": "input_text"
+      },
+      {
+       "text": "{\"untrusted_attachment_name\": \"route.gpx\", \"gpx\": {\"source\": \"uploaded_gpx\", \"point_count\": 2, \"distance_km\": 1.112, \"ascent_m_raw\": 10, \"descent_m_raw\": 0, \"elevation_point_count\": 2, \"note\": \"Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.\", \"sampled_coordinates_lat_lon_ele\": []}}",
+       "type": "input_text"
+      },
+      {
+       "file_data": "data:application/json;base64,eyJmb3JtYXQiOiJHUFgiLCJmaWxlbmFtZSI6InJvdXRlLmdweCIsIm5vdGUiOiJNZWFzdXJlbWVudHMgb25seS4gUG9zaXRpb25zIHdpdGhpbiA1MDAgbSBvZiB0aGUgc3RhcnQgYW5kIGVuZCBvZiB0aGUgdHJhY2sgYW5kIGZpbGUgbWV0YWRhdGEgYXJlIGxlZnQgb3V0LiIsImNvbHVtbnMiOlsibGF0IiwibG9uIiwiZWxlIl0sInBvaW50cyI6W1tudWxsLG51bGwsMTBdLFtudWxsLG51bGwsMjBdXX0=",
+       "filename": "route.gpx.json",
+       "type": "input_file"
+      }
+     ],
+     "role": "user"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-4",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-4",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#5>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": true,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "nutrition_photo": [
+  {
+   "method": "POST",
+   "payload": {
+    "input": [
+     {
+      "content": [
+       {
+        "text": "Lies die deutsche Nährwerttabelle dieses Produktfotos. Antworte ausschließlich als JSON mit name, brand, barcode, basis_amount, basis_unit, kcal, carbs_g, protein_g, fat_g, sugar_g, fiber_g, salt_g und confidence. Unlesbare Werte sowie unbekannte basis_amount/basis_unit sind null; nicht raten. basis_unit ist g, ml oder portion. Der Produktname darf fehlen, wenn nur eine Nährwerttabelle sichtbar ist.",
+        "type": "input_text"
+       },
+       {
+        "image_url": "data:image/jpeg;base64,/9j/c3ludGhldGljLWltYWdl",
+        "type": "input_image"
+       }
+      ],
+      "role": "user"
+     }
+    ],
+    "model": "gpt-6-luna",
+    "reasoning": {
+     "effort": "medium"
+    },
+    "service_tier": "fast",
+    "text": {
+     "format": {
+      "type": "json_object"
+     }
+    }
+   },
+   "url": "https://api.openai.com/v1/responses"
+  }
+ ],
+ "plain": [
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":1,\"messages\":[],\"pending_request\":null,\"confirmed_results\":[],\"attachment_evidence\":[]},\"current_message\":\"Wie war meine Woche?\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "reasoning_escalation": [
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 32000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "tool_budget_exhausted": [
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": [
+    {
+     "content": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
+     "role": "user"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-5",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-5",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": [
+    {
+     "content": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
+     "role": "user"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-5",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-5",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-6",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-6",
+     "output": "{\"ok\": false, \"reason\": \"tool_step_limit_reached\", \"executed\": false}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#3>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "none",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ],
+ "tool_round": [
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": [
+    {
+     "content": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
+     "role": "user"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-1",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-1",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [{\"id\": \"synthetic-competition\", \"name\": \"Synthetic Giro\", \"event_date\": \"2026-10-03\", \"starts_at_local\": \"2026-10-03T00:00:00\", \"sport\": \"ride\", \"environment\": \"unknown\", \"sport_detail\": null, \"priority\": \"A\", \"category\": \"RACE_A\", \"distance\": \"\", \"target\": \"\", \"course_profile\": \"\", \"notes\": \"\", \"description\": \"\", \"planned_duration_s\": null, \"external_id\": null, \"intervals_event_id\": null, \"sync_dirty\": 1, \"sync_state\": \"local\", \"sync_conflict\": \"\", \"last_synced_at\": null}], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  },
+  {
+   "include": [
+    "reasoning.encrypted_content"
+   ],
+   "input": [
+    {
+     "content": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
+     "role": "user"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-1",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-1",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [{\"id\": \"synthetic-competition\", \"name\": \"Synthetic Giro\", \"event_date\": \"2026-10-03\", \"starts_at_local\": \"2026-10-03T00:00:00\", \"sport\": \"ride\", \"environment\": \"unknown\", \"sport_detail\": null, \"priority\": \"A\", \"category\": \"RACE_A\", \"distance\": \"\", \"target\": \"\", \"course_profile\": \"\", \"notes\": \"\", \"description\": \"\", \"planned_duration_s\": null, \"external_id\": null, \"intervals_event_id\": null, \"sync_dirty\": 1, \"sync_state\": \"local\", \"sync_conflict\": \"\", \"last_synced_at\": null}], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    },
+    {
+     "encrypted_content": "enc-1",
+     "id": "rs-1",
+     "type": "reasoning"
+    },
+    {
+     "arguments": "{}",
+     "call_id": "c-2",
+     "name": "read_training_state",
+     "type": "function_call"
+    },
+    {
+     "call_id": "c-2",
+     "output": "{\"ok\": true, \"planning_revision\": 0, \"artifact_refs\": [], \"competitions\": [{\"id\": \"synthetic-competition\", \"name\": \"Synthetic Giro\", \"event_date\": \"2026-10-03\", \"starts_at_local\": \"2026-10-03T00:00:00\", \"sport\": \"ride\", \"environment\": \"unknown\", \"sport_detail\": null, \"priority\": \"A\", \"category\": \"RACE_A\", \"distance\": \"\", \"target\": \"\", \"course_profile\": \"\", \"notes\": \"\", \"description\": \"\", \"planned_duration_s\": null, \"external_id\": null, \"intervals_event_id\": null, \"sync_dirty\": 1, \"sync_state\": \"local\", \"sync_conflict\": \"\", \"last_synced_at\": null}], \"training_plans\": [], \"planned_units\": [], \"planned_units_page\": {\"has_more\": false, \"next_cursor\": null, \"limit\": 366}, \"training_templates\": [], \"jobs\": []}",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "<instructions#1>",
+   "max_output_tokens": 16000,
+   "model": "gpt-6-luna",
+   "parallel_tool_calls": false,
+   "reasoning": {
+    "effort": "medium"
+   },
+   "store": false,
+   "tool_choice": "auto",
+   "tools": "<tools#1>",
+   "truncation": "auto"
+  }
+ ]
+}

@@ -130,7 +130,8 @@ class MealComponentCalculator:
             raise AppError(
                 400, "Lokale Produktkomponente enth\u00e4lt ung\u00fcltige Felder."
             )
-        product = self._products.get(db, item["product_id"])
+        # A stored database food is used like an own product.
+        product = self._products.get_any(db, item["product_id"])
         if not product:
             raise AppError(404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found")
         if product.get("status") != "active":

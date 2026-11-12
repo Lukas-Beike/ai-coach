@@ -15,8 +15,8 @@ from unittest.mock import Mock, patch
 
 from provider_runtime_fakes import ACME_ID, FakeJobOwner, acme_descriptor
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
 from backend.errors import AppError
-from backend.providers.descriptors import CALENDAR_ID, WEATHER_ID
 from backend.sync.executor import (
     CalendarWeatherJobAdapter,
     CalendarWeatherSyncJobOwner,
@@ -26,10 +26,10 @@ from backend.sync.executor import (
     IntervalsJobAdapter,
     IntervalsSyncJobOwner,
     SyncJobExecutor,
-    build_job_owners,
     dispatch_provider_job,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 
 
 class RecordingService:
@@ -213,27 +213,37 @@ class SyncJobExecutorTests(unittest.TestCase):
     def make_executor(self, after_job: Any = None) -> SyncJobExecutor:
         historical_sync = build_historical_sync(self.state, self.queue)
         self.after_job_calls: list[bool] = []
+        calendar_weather = CalendarWeatherSyncJobOwner(
+            external_calendar_sync_service=self.calendar,
+            weather_sync_service=self.weather,
+        )
         return SyncJobExecutor(
-            job_owners=build_job_owners(
-                nutrition_sync_service=self.nutrition,
-                intervals_jobs=IntervalsSyncJobOwner(
-                    selected_workout_sync_service=self.selected,
-                    competition_sync_service=self.competitions,
-                    sync_operation_observer=self.observer,
-                    intervals_resync_gate=self.gate,
+            job_owners={
+                INTERVALS_ID: IntervalsJobAdapter(
+                    jobs=IntervalsSyncJobOwner(
+                        selected_workout_sync_service=self.selected,
+                        competition_sync_service=self.competitions,
+                        sync_operation_observer=self.observer,
+                        intervals_resync_gate=self.gate,
+                    ),
+                    nutrition_sync_service=self.nutrition,
                 ),
-                garmin_jobs=GarminSyncJobOwner(
-                    historical_sync=historical_sync,
-                    garmin_sync_service=self.garmin,
-                    morning_body_battery_service=self.morning,
-                    garmin_fixture_loader=self.fixture,
-                    all_sync_days=-1,
+                GARMIN_ID: GarminJobAdapter(
+                    jobs=GarminSyncJobOwner(
+                        historical_sync=historical_sync,
+                        garmin_sync_service=self.garmin,
+                        morning_body_battery_service=self.morning,
+                        garmin_fixture_loader=self.fixture,
+                        all_sync_days=-1,
+                    )
                 ),
-                calendar_weather_jobs=CalendarWeatherSyncJobOwner(
-                    external_calendar_sync_service=self.calendar,
-                    weather_sync_service=self.weather,
+                CALENDAR_ID: CalendarWeatherJobAdapter(
+                    jobs=calendar_weather, provider_id=CALENDAR_ID
                 ),
-            ),
+                WEATHER_ID: CalendarWeatherJobAdapter(
+                    jobs=calendar_weather, provider_id=WEATHER_ID
+                ),
+            },
             historical_sync=historical_sync,
             outcome_service=self.outcomes,
             all_sync_days=-1,

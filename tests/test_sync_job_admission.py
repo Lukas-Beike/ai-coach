@@ -18,24 +18,20 @@ from unittest import mock
 
 from support import temp_database
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.providers.descriptors import (
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-)
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.execution_assembly import WahooJobDependencies
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -75,7 +71,7 @@ def _runtime_deps(
         intervals=mock.Mock(name="intervals"),
         garmin=garmin,
         calendar_weather=mock.Mock(name="calendar_weather"),
-        wahoo=WahooRuntimeDependencies(
+        wahoo=WahooJobDependencies(
             sync_service=lambda: wahoo_sync,
             plan_push_service=lambda: mock.Mock(name="plan_push"),
             resync_gate=ProviderResyncGate("Wahoo"),

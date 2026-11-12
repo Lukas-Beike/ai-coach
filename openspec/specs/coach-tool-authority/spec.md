@@ -86,8 +86,12 @@ The system SHALL require the athlete's named sync request for the step's own pro
 - **THEN** the step still needs the matching provider target, sync scope and remote-write declaration; its proposed effect is shown for explicit approval before dispatch.
 
 #### Scenario: Negated sync or classifier-only approval
-- **WHEN** sync is negated, merely discussed, or supplied only by an impact-classifier verdict
-- **THEN** the remote write is denied; a local or bulk confirmation cannot grant remote permission.
+- **WHEN** sync is negated or kept by the athlete ("Synchronisieren mache ich selbst"), merely discussed, or supplied only by an impact-classifier verdict
+- **THEN** the remote write is denied; a negated sync blocks the whole message until a later contrast word ("Nicht synchronisieren! Der Sync kommt später." asks nothing); a local or bulk confirmation cannot grant remote permission.
+
+#### Scenario: Training term Intervals
+- **WHEN** a message names "Intervals" without ".icu" and without a sync or push verb ("Mach mir 5x4 min Intervals am Dienstag")
+- **THEN** it names no Intervals.icu sync.
 
 #### Scenario: Another provider or a past sync
 - **WHEN** a sentence part names Garmin or Wahoo but not Intervals.icu ("Sync meine Garmin-Daten"), or describes a past sync with an auxiliary and only past participles ("Ich habe gestern synchronisiert", "Ich habe mit Intervals gesynct")
@@ -97,7 +101,7 @@ The system SHALL require the athlete's named sync request for the step's own pro
 - **WHEN** the athlete's own message names Garmin or the watch with a transfer verb, or accepts the directly preceding Garmin offer
 - **THEN** `push_strength_to_garmin` may propose the selected strength units with target `garmin` and scope `garmin_sync`; the card binds each unit's stored payload hash, and only its approval queues the Garmin `plan_push` job. Intervals.icu wording never grants it, a Garmin push or removal request never grants an Intervals.icu write, an upload entry needs the athlete's own push wording and a removal entry the athlete's own Garmin removal wording (no classifier is asked).
 
-Evidence: `backend/coach/write_gate.py:remote_requested`, `backend/coach/write_gate.py:build_turn_authority`, `backend/coach/write_gate.py:check_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`; `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`, `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`, `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`, `tests/test_coach_write_gate.py:GarminTierTests`; `backend/coach/write_gate.py:requested_providers`, `backend/coach/write_gate.py:garmin_removal_requested`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`; `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`.
+Evidence: `backend/coach/write_gate.py:remote_requested`, `backend/coach/write_gate.py:build_turn_authority`, `backend/coach/write_gate.py:check_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`; `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`, `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`, `tests/test_coach_write_gate.py:test_negation_covers_its_sentence_up_to_a_contrast_word`, `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`, `tests/test_coach_write_gate.py:GarminTierTests`; `backend/coach/write_gate.py:requested_providers`, `backend/coach/write_gate.py:garmin_removal_requested`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`; `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`.
 
 ### Requirement: CA6 Session-bound immutable approval contents
 The system SHALL bind a proposal to its session, bounded lifetime and stored payload identity, reject a supplied mismatching payload hash, consume its approval token once, and validate original athlete provenance and frozen remote selections before dispatch.
@@ -279,3 +283,16 @@ The Coach plan and template tools SHALL accept `strength_structure` (strict plan
 - **THEN** each week's `strength_intensity` is derived from its structure and the plan checks use it.
 
 Evidence: `backend/coach/tool_schemas.py`, `backend/coach/playbooks.py`; `tests/test_strength_structure.py`, `tests/test_coach_playbooks.py`.
+
+### Requirement: Tool-specific bulk threshold
+A Coach write tool MAY declare that it counts as a bulk change from a lower number of records than the general threshold; a call reaching that number SHALL need the athlete's confirmed bulk request in the tool's domain, failing closed like any bulk change. Filling product gaps counts as bulk from two products.
+
+#### Scenario: Several products filled
+- **WHEN** the Coach fills gaps of two or more products in one turn without a confirmed bulk request in the nutrition domain
+- **THEN** the call is denied before any write, and the Coach asks the athlete first.
+
+#### Scenario: One product filled
+- **WHEN** the Coach fills gaps of one product, also with values from several origins or in a second attempt within the turn
+- **THEN** no bulk confirmation is needed, because products count by id; the write still needs the athlete's own request and shows a receipt.
+
+Evidence: `backend/coach/tool_specs.py:ToolSpec.bulk_from`, `backend/coach/tool_specs.py:ToolSpec.distinct_records`, `backend/coach/write_gate.py:record_ids`, `backend/coach/write_gate.py:call_impact`, `backend/coach/turn_write_gate.py:CoachTurnWriteGate`, `backend/coach/dialogue_action.py` (`local_nutrition_gaps`); `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_dialogue.py` (gap scope cases).

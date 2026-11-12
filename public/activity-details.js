@@ -274,7 +274,7 @@
 
 
   function renderMetadata(session, metrics, content) {
-    const duration = metrics.moving_duration_s ?? metrics.duration_s;
+    const duration = AppFormat.sessionSeconds(metrics, session.sport);
     const values = [
       session.sport ? activitySportLabel(session) : null,
       session.started_at ? formatTime(session.started_at) : null,
@@ -363,6 +363,7 @@
         const hint = node("p", `${label} ist nicht konfiguriert. `, "muted provider-setup-hint");
         const link = node("a", "Anbindung einrichten");
         link.href = "#more/connections";
+        link.dataset.connection = entry.provider;
         link.addEventListener("click", onSetup);
         hint.append(link);
         actions.append(hint);

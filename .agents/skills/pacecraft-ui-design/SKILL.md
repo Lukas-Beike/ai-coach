@@ -25,6 +25,9 @@ plain JavaScript, athlete data, and local-action contracts; see
 
 ## Make the state and actions legible
 
+- Put a design or UI question to the athlete only with rendered mockups of the
+  options (an HTML page rendered in the session), never as a text description;
+  ask through AskUserQuestion with the recommendation first.
 - Give the primary decision visual priority. Group content by meaning, preserve
   reading order, and use spacing and typography before adding more cards, borders,
   decoration, or animation. Keep dense metrics readable on a narrow screen.

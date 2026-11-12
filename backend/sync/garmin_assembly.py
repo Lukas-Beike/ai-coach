@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
@@ -9,14 +10,16 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers import garmin as garmin_provider
-from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_personal import GarminPersonalClient
 from backend.sync import garmin, garmin_service
 from backend.sync.garmin_activity_details import GarminActivityDetailService
+from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
@@ -143,6 +146,11 @@ class GarminAssembly:
         self._lock_wait_seconds = control.lock_wait_seconds
         self._morning_body_battery_service = control.morning_body_battery_service
         self._metric_export = control.metric_export
+        # One change check and one reader per configuration, so the cadence
+        # state and the 24-hour Personal API token outlive each loop pass.
+        self._change_lock = threading.Lock()
+        self._change_check: GarminChangeCheck | None = None
+        self._change_reader: tuple[tuple[Any, Any], GarminRemoteReader] | None = None
 
     def fixture_loader(self) -> garmin.GarminFixtureLoader:
         """Create a fixture reader using the current configuration and clock."""
@@ -253,6 +261,46 @@ class GarminAssembly:
                     reason="provider_busy",
                 ) from error
             raise
+
+    def change_check(self) -> GarminChangeCheck:
+        """The process-wide light Garmin change check (#2303)."""
+        with self._change_lock:
+            if self._change_check is None:
+                self._change_check = GarminChangeCheck(
+                    personal=self._change_personal_client,
+                    known_activity_ids=lambda days: (
+                        self.payload_service().known_activity_ids(days)
+                    ),
+                    stored_sleep=lambda day: (
+                        self.payload_service()
+                        .view(["sleep"], start=day.isoformat(), end=day.isoformat())
+                        .get("sleep")
+                    ),
+                    last_refresh=lambda: self._daily_sync_marker_service().last_success(
+                        GARMIN_ID
+                    ),
+                    local_now=self._athlete_clock.now,
+                    logger=self._logger,
+                    store_daytime=lambda day, values: (
+                        self.nutrition_refresh_service().store_daytime(day, values)
+                    ),
+                )
+            return self._change_check
+
+    def _change_personal_client(self) -> GarminPersonalClient | None:
+        """The Personal API client of the current configuration and database.
+
+        None in fixture mode, which never reaches the real Garmin.
+        """
+        key = (self._config(), self._database_manager())
+        if self.fixture_loader().path() is not None:
+            return None
+        with self._change_lock:
+            cached = self._change_reader
+            if cached is None or any(a is not b for a, b in zip(cached[0], key)):
+                cached = (key, self.remote_reader())
+                self._change_reader = cached
+        return cached[1].personal_client()
 
     def sync_service(self) -> GarminSyncService:
         """Compose the Garmin synchronization use case."""

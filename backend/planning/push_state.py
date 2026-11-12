@@ -17,14 +17,13 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, Final
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
-from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
+from backend.canonical.vocabulary import WAHOO_ID, ProviderId, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import strength_structure
 from backend.planning.leftovers import nearest_first
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
-from backend.providers.descriptors import WAHOO_ID
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
     GarminExercise,

@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 
 const loads = (page) => page.evaluate(() => Number(sessionStorage.getItem("e2e-loads")));
 
@@ -64,16 +65,26 @@ async function openProfileForms(page) {
 async function openYazioForm(page) {
   await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
+  await expandConnections(page, ["yazio"]);
   await expect(page.locator("#cred-yazio_email")).toBeVisible();
 }
 
 const settle = (page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
 
-for (const [name, open, field, save, value] of [
-  ["zone form", openProfileForms, "#zoneLimits", "#zoneSaveButton", "55 75 90"],
-  ["Yazio form", openYazioForm, "#cred-yazio_email", "#cred-submit-yazio", "athlet@example.test"],
+// The press reaches the save: the rejected zone form keeps its value, the credential
+// form shows the server error and is emptied, so no credential lingers in the DOM.
+const zoneSaved = async (page, field, value) => {
+  await expect(page.locator("#toast")).toContainText("fixture");
+  await expect(page.locator(field)).toHaveValue(value);
+};
+const credentialSaved = async (page, field) => {
+  await expect(page.locator("#cred-error-yazio")).toHaveText("fixture");
+  await expect(page.locator(field)).toHaveValue("");
+};
+
+for (const [name, open, field, save, value, saved] of [
+  ["zone form", openProfileForms, "#zoneLimits", "#zoneSaveButton", "55 75 90", zoneSaved],
+  ["Yazio form", openYazioForm, "#cred-yazio_email", "#cred-submit-yazio", "athlet@example.test", credentialSaved],
 ]) {
   test(`@responsive a service worker update keeps a typed ${name} value while focus leaves and the save button is pressed`, async ({ page }) => {
     await controlledApp(page);
@@ -84,6 +95,8 @@ for (const [name, open, field, save, value] of [
     await page.locator(field).fill(value);
     await replaceWorker(page);
     // Pressing the save button moves focus away first; the click follows the press.
+    // Centred, so the press cannot land on the fixed navigation instead.
+    await page.locator(save).evaluate((button) => button.scrollIntoView({ block: "center" }));
     const box = await page.locator(save).boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
@@ -92,7 +105,7 @@ for (const [name, open, field, save, value] of [
     expect(await loads(page)).toBe(before);
     await page.mouse.up();
     await settle(page);
-    await expect(page.locator(field)).toHaveValue(value);
+    await saved(page, field, value);
     expect(await loads(page)).toBe(before);
   });
 }

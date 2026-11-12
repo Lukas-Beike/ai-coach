@@ -212,10 +212,10 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     }
     head.append(header); table.append(head);
     const body = reportNode("tbody");
-    for (const { label, metric } of predictions) {
+    for (const { label, metric, withSeconds } of predictions) {
       const row = reportNode("tr");
       const distance = reportNode("th", label); distance.scope = "row";
-      row.append(distance, reportNode("td", predictionTime(metric.value)));
+      row.append(distance, reportNode("td", predictionTime(metric.value, withSeconds)));
       body.append(row);
     }
     table.append(body);
@@ -225,18 +225,21 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   renderAnalysisSegments(state.route);
 }
 
-// Model estimates are shown in whole minutes: "25 min", "3:55 h".
-function predictionTime(seconds) {
-  const minutes = Math.round(Number(seconds) / 60);
-  if (minutes < 60) return `${minutes} min`;
+// Model estimates: 5 and 10 km as a clock with seconds ("21:47"), the longer races in hours
+// and minutes ("1:39 h"); an hour or more always carries "h".
+function predictionTime(seconds, withSeconds = false) {
+  const total = Number(seconds);
+  if (withSeconds) return total >= 3600 ? `${AppFormat.clock(total)} h` : AppFormat.clock(total);
+  const minutes = Math.round(total / 60);
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
 }
 
 function racePredictionRows(metrics) {
-  const distances = [["run_5k_seconds", "5 km"], ["run_10k_seconds", "10 km"],
-    ["run_half_marathon_seconds", "Halbmarathon"], ["run_marathon_seconds", "Marathon"]];
+  // 5 and 10 km keep their seconds (#2263); the longer races stay in hours and minutes.
+  const distances = [["run_5k_seconds", "5 km", true], ["run_10k_seconds", "10 km", true],
+    ["run_half_marathon_seconds", "Halbmarathon", false], ["run_marathon_seconds", "Marathon", false]];
   const values = metrics || {};
-  return distances.filter(([key]) => values[key]?.value != null).map(([key, label]) => ({ label, metric: values[key] }));
+  return distances.filter(([key]) => values[key]?.value != null).map(([key, label, withSeconds]) => ({ label, metric: values[key], withSeconds }));
 }
 
 function racePredictionEmptyReason(metrics) {

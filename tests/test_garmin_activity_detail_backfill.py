@@ -15,7 +15,7 @@ from canonical_detail_support import NOW, ZONE, open_manager, seed_intervals_act
 from support import make_config
 from test_garmin_activity_detail_job import _collected
 
-from backend.canonical.vocabulary import ActivityRecordState, RecordingOrigin
+from backend.canonical.vocabulary import GARMIN_ID, ActivityRecordState, RecordingOrigin
 from backend.db.activity_detail_store import (
     activity_detail_backfill_candidates,
     activity_detail_backfill_universe,
@@ -24,7 +24,6 @@ from backend.db.activity_detail_store import (
 from backend.errors import AppError
 from backend.providers import canonical_plans as plans
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_activity_details import (

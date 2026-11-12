@@ -16,6 +16,7 @@ from backend.nutrition.photo import (
     PHOTO_REQUEST_MAX_BYTES,
     NutritionPhotoExtractionService,
 )
+from backend.providers.model_seam import ModelTurn
 
 EXTRACT_PATH = f"{NUTRITION_PRODUCTS_PATH}/extract"
 
@@ -48,21 +49,19 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
     def test_openai_request_uses_selected_model_transient_image_and_json_candidate(
         self,
     ):
-        request = Mock(return_value={"output_text": self.candidate_json()})
+        request = Mock(return_value=ModelTurn(text=self.candidate_json()))
         service = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna",
-            openai_request=request,
+            complete=request,
         )
 
         result = service.extract(self.data_url())
 
         request.assert_called_once()
-        path, payload = request.call_args.args
-        self.assertEqual(path, "/v1/responses")
-        self.assertEqual(payload["model"], "gpt-6-luna")
-        image_input = payload["input"][0]["content"][1]
-        self.assertEqual(image_input["type"], "input_image")
-        self.assertTrue(image_input["image_url"].startswith("data:image/jpeg;base64,"))
+        (sent,) = request.call_args.args
+        self.assertEqual(sent.model, "gpt-6-luna")
+        self.assertEqual(sent.images[0]["mime"], "image/jpeg")
+        self.assertTrue(sent.json_output)
         self.assertEqual(result["provenance"], "packaging_label")
         self.assertTrue(result["requires_confirmation"])
         self.assertIsNone(result["candidate"]["fiber_g"])
@@ -74,9 +73,9 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
     ):
         service = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna",
-            openai_request=lambda _path, _payload: {
-                "output_text": "Synthetic secret provider response",
-            },
+            complete=lambda _request: ModelTurn(
+                text="Synthetic secret provider response"
+            ),
         )
 
         with self.assertRaises(AppError) as raised:
@@ -91,7 +90,7 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
         request = Mock()
         service = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna",
-            openai_request=request,
+            complete=request,
         )
         for data_url in (
             "https://example.test/photo.jpg",
@@ -117,9 +116,7 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
             }
             service = NutritionPhotoExtractionService(
                 selected_model=lambda: "gpt-6-luna",
-                openai_request=Mock(
-                    return_value={"output_text": json.dumps(candidate)}
-                ),
+                complete=Mock(return_value=ModelTurn(text=json.dumps(candidate))),
             )
             with self.subTest(kcal=kcal):
                 result = service.extract(self.data_url())["candidate"]
@@ -136,10 +133,10 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.request = Mock(
-            return_value={"output_text": NutritionPhotoExtractionTests.candidate_json()}
+            return_value=ModelTurn(text=NutritionPhotoExtractionTests.candidate_json())
         )
         extractor = NutritionPhotoExtractionService(
-            selected_model=lambda: "gpt-6-luna", openai_request=self.request
+            selected_model=lambda: "gpt-6-luna", complete=self.request
         )
         _, library = build_nutrition_services(
             Mock(), Mock(), Mock(), Mock(), photo_extractor=extractor

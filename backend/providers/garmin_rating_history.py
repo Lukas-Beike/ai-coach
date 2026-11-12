@@ -19,8 +19,8 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Final
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.providers import http as provider_http
-from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import ExternalCall
 
 CALL_DELAY_SECONDS: Final = 2.0

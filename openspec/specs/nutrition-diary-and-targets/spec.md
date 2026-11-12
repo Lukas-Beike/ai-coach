@@ -230,7 +230,7 @@ The diary SHALL subtly color complete macro totals outside athlete-specific dail
 
 #### Scenario: Planned and completed sessions
 - **WHEN** a completed activity is matched to a planned session
-- **THEN** its actual duration replaces the planned duration on the activity's actual date without double counting.
+- **THEN** its actual duration (a strength session's total time, other sports' moving time) replaces the planned duration on the activity's actual date without double counting.
 
 #### Scenario: Missed session
 - **WHEN** a planned session is marked missed

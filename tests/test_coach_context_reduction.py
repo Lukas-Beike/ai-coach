@@ -15,6 +15,7 @@ from backend.coach.read_tools import CoachReadToolService
 from backend.errors import AppError
 from backend.observability import JsonLogFormatter, Redactor
 from backend.performance.canonical_inputs import PENDING_PERFORMANCE_INPUTS
+from backend.providers.model_seam import ModelTurn
 from tests import test_coach_request_payload as payload_tests
 from tests import test_coach_structured_context as context_tests
 from tests import test_coach_structured_tool_round as round_tests
@@ -196,12 +197,12 @@ class CoachContextReductionTests(unittest.TestCase):
         fixture.setUp()
         state = fixture.state()
         state.tools = [{"name": "read_coach_context"}, {"name": "read_profile"}]
-        state.request_payload["tools"] = [{"name": "read_coach_context"}]
+        state.request.tools = [{"name": "read_coach_context"}]
         state.command_receipts = [
             {"tool": "read_coach_context", "result": {"ok": True}}
         ]
         fixture.service._followup_response(
-            {"id": "response-one"},
+            ModelTurn(),
             outputs=[],
             state=state,
             question="",
@@ -209,8 +210,7 @@ class CoachContextReductionTests(unittest.TestCase):
             rounds=0,
         )
         followup = fixture.response.respond.call_args.args[0]
-        self.assertEqual(followup["tools"], state.tools)
-        self.assertNotIn("previous_response_id", followup)
+        self.assertEqual(followup.tools, state.tools)
         self.assertFalse(state.allow_mutations)
 
     def test_topical_request_with_receipts_keeps_tools_and_dialogue_provenance(

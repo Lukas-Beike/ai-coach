@@ -1,11 +1,12 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 const { showCalendarEntry } = require("./helpers/ui");
 
 test("@responsive Garmin metric export sits in Anbindungen and shows its receipt", async ({ page }) => {
   await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
-  const panel = page.locator("details[data-more-segment-panel='connections']");
-  if (!await panel.evaluate((node) => node.open)) await panel.locator("summary").click();
+  await expandConnections(page, ["garmin"]);
+  const panel = page.locator("#connection-garmin");
   // The fixture runtime has no Garmin credentials, so the export block stays hidden until Garmin is connected.
   await expect(page.locator("#garmin-metric-export")).toBeHidden();
   await page.evaluate(() => {
@@ -205,13 +206,14 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(recordedProfile.first()).toBeAttached();
 
   await page.evaluate(async () => { await AppRouter.navigate("more/equipment", { historyMode: "replace" }); });
-  await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Fixture Garmin bike" })).toBeVisible();
-  await expect(page.locator("#equipmentItems").getByText("25 km von 100 km · 25%", { exact: true })).toBeVisible();
-  await expect(page.locator("#equipmentItems progress")).toHaveAttribute("value", "25");
-  const localGear = page.locator("#equipmentItems details");
+  const garminBike = page.locator("#equipmentItems .equipment-card").filter({ hasText: "Fixture Garmin bike" });
+  await expect(garminBike.locator("summary")).toBeVisible();
+  await expect(garminBike.locator("summary progress")).toHaveAttribute("value", "25");
+  await garminBike.locator("summary").click();
+  await expect(garminBike.getByText("25 km von 100 km · 25%", { exact: true })).toBeVisible();
+  const localGear = page.locator("#equipmentItems .equipment-card").filter({ hasText: "Fixture road bike" }).first();
   await localGear.locator("summary").click();
-  await expect(localGear.getByRole("heading", { name: "Fixture road bike" }).first()).toBeVisible();
-  await expect(localGear).toContainText("1 zugeordnete Einheit");
+  await expect(localGear.getByText("1 zugeordnete Einheit", { exact: false }).first()).toBeVisible();
   await expect(localGear).toContainText("Keine Wartung erfasst.");
 
   await page.evaluate(async () => { await AppRouter.navigate("more/profile", { historyMode: "replace" }); });
@@ -281,45 +283,67 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   const archive = bikePanel.locator("details.equipment-archive");
   await expect(archive).toHaveCount(1);
   await expect(archive).not.toHaveAttribute("open", "");
-  await expect(archive.locator("summary")).toContainText("3");
-  await archive.locator("summary").click();
+  await expect(archive.locator("> summary")).toHaveText("Ausgemustert (3)");
+  // Archived items live only in the archive group.
+  await expect(bikePanel.locator("> .equipment-card")).toHaveCount(0);
+  await archive.locator("> summary").click();
   await page.getByRole("tab", { name: "Fahrrad" }).click();
   await expect(archive).toHaveAttribute("open", "");
-  await expect(archive.getByRole("heading", { name: "Retired chain", exact: true })).toBeAttached();
-  await expect(archive.getByRole("heading", { name: "Garmin retired chain", exact: true })).toBeAttached();
-  const unlinkedLocal = archive.locator("section").filter({ hasText: "Coach-only retired cassette" });
+  const archived = archive.locator(".equipment-card");
+  await expect(archived.locator("summary strong")).toHaveText(["Retired chain", "Coach-only retired cassette", "Garmin retired chain"]);
+  await expect(archived.locator("summary .connection-chip")).toHaveText(["Ausgemustert", "Ausgemustert", "Ausgemustert"]);
+  await expect(archived.filter({ hasText: "Garmin retired chain" }).locator(".equipment-source-tag")).toHaveText("Garmin");
+  const unlinkedLocal = archived.filter({ hasText: "Coach-only retired cassette" });
   await expect(unlinkedLocal).toContainText("Wartungsstand unklar");
+  await expect(unlinkedLocal.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(0);
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   const runPanel = page.locator("#equipmentPanel-run");
-  const localEquipment = runPanel.locator("details.training-focus-details");
-  await localEquipment.locator("summary").click();
+  const localCard = runPanel.locator(".equipment-card").filter({ hasText: "Local running shoes" });
+  const garminCard = runPanel.locator(".equipment-card").filter({ hasText: "Garmin active shoes" });
+  // Closed: name, chip, one line and the bar only.
+  await expect(runPanel.locator(".equipment-card[open]")).toHaveCount(0);
+  await expect(localCard.locator(".connection-card-body")).toBeHidden();
+  await expect(localCard.locator("summary .connection-chip")).toHaveText("Ziel überschritten");
+  await expect(localCard.locator("summary .equipment-card-line")).toHaveText("125 km · 125%");
+  await expect(localCard.locator("summary progress")).toHaveAttribute("value", "100");
+  await expect(localCard.locator("summary progress")).toHaveAttribute("aria-label", "Local running shoes: 125% Lebensdauer, Ziel überschritten");
+  await expect(localCard.locator(".equipment-source-tag")).toHaveCount(0);
+  await expect(garminCard.locator("summary .equipment-source-tag")).toHaveText("Garmin");
+  await expect(garminCard.locator("summary progress")).toHaveAttribute("value", "50");
+  // Open: usage, maintenance, Garmin state and the action of this item only; it stays open across a re-render.
+  await localCard.locator("summary").click();
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
-  await expect(localEquipment).toHaveAttribute("open", "");
-  const localCard = localEquipment.locator(".garmin-equipment-card").filter({ hasText: "Local running shoes" });
-  const garminCard = runPanel.locator(".garmin-equipment-card").filter({ hasText: "Garmin active shoes" });
-  await expect(localCard.getByRole("heading", { name: "Local running shoes", exact: true })).toBeVisible();
-  await expect(localCard.locator("progress")).toHaveAttribute("value", "100");
-  await expect(localCard).toContainText("125%");
-  await expect(localCard).toContainText("Ziel überschritten");
+  await expect(localCard).toHaveAttribute("open", "");
+  await expect(localCard.locator(".connection-card-status h4")).toHaveText(["Nutzung", "Wartung", "Garmin"]);
+  await expect(localCard).toContainText("125 km von 100 km · 125% · Ziel überschritten");
   await expect(localCard).toContainText("Statuskonflikt");
-  await expect(localCard.locator("progress")).toHaveAttribute("aria-label", /Lebensdauer/);
-  await expect(garminCard.locator("progress")).toHaveAttribute("value", "50");
+  await expect(localCard.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);
+  await expect(garminCard.locator(".connection-card-body")).toBeHidden();
+  await expect(garminCard.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 
-test("@responsive active local gear offers a maintenance button, archived gear does not", async ({ page }) => {
-  const item = (id, status) => ({ id, name: `Gear ${id}`, sport: "Run", kind: "shoes", status, revision: 1, usage: { distance_km: 10, hours: 1, assigned_sessions: 1 } });
+test("@responsive active local gear offers a maintenance button with receipt and undo, archived gear does not", async ({ page }) => {
+  const item = (id, status) => ({ id, name: `Gear ${id}`, sport: "Run", kind: "shoes", status, revision: 1, usage: { distance_km: 10, hours: 1, assigned_sessions: 1, maintenance_due: true } });
   await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: { items: [item("a", "active"), item("b", "archived")], garmin_items: [] } } }));
   let posted = null;
-  await page.route("**/api/equipment/maintenance", (route) => { posted = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); });
+  let undone = null;
+  await page.route("**/api/equipment/maintenance", (route) => { posted = route.request().postDataJSON(); return route.fulfill({ json: { ok: true, change: { id: "change-a", after_hash: "hash-a" } } }); });
+  await page.route("**/api/change-history/undo", (route) => { undone = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); });
   await page.goto("/#more/equipment");
   await page.getByRole("tab", { name: "Laufschuhe" }).click();
   const runPanel = page.locator("#equipmentPanel-run");
-  const localEquipment = runPanel.locator("details.training-focus-details").first();
-  await localEquipment.locator("summary").click();
-  await page.getByRole("tab", { name: "Laufschuhe" }).click();
-  await expect(localEquipment).toHaveAttribute("open", "");
+  const active = runPanel.locator(".equipment-card").filter({ hasText: "Gear a" }).first();
+  await expect(active.locator("summary .connection-chip")).toHaveText("Wartung fällig");
+  await active.locator("summary").click();
   await expect(runPanel.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);
-  await runPanel.getByRole("button", { name: "Wartung erledigt" }).click();
+  await active.getByRole("button", { name: "Wartung erledigt" }).click();
   await expect.poll(() => posted?.equipment_id).toBe("a");
+  const receipt = page.locator("#equipmentItems [role='status']");
+  await expect(receipt).toContainText("Wartung erfasst.");
+  // Recording maintenance re-renders the list; the card the athlete opened stays open.
+  await expect(active).toHaveAttribute("open", "");
+  await receipt.getByRole("button", { name: "Rückgängig" }).click();
+  await expect.poll(() => undone).toEqual({ change_id: "change-a", expected_current_hash: "hash-a" });
+  await expect(page.locator("#equipmentItems [role='status']").filter({ hasText: "Zurückgenommen." })).toBeVisible();
 });

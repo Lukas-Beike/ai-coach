@@ -112,6 +112,7 @@ function frontend({ eventSource = false } = {}) {
   });
   extractFunctions("shared.js", SYNC_POLL_CONSTANTS, context);
   extractFunctions("coach.js", STATUS_POLL, context);
+  extractFunctions("connection-status.js", ["connectionsShown"], context);
   const state = vm.runInContext("state", context);
   context.render = (data) => { state.data = data; };
   state.data = { provider_ids: { garmin: "garmin" }, state_versions: {}, messages: [] };
@@ -133,11 +134,10 @@ function frontend({ eventSource = false } = {}) {
 
 const event = (type, payload = {}, lastEventId = "") => ({ type, data: JSON.stringify(payload), lastEventId });
 
-test("sync status refreshes Yazio only while the connections panel is open", () => {
+test("sync status refreshes Yazio only while the connections panel is shown", () => {
   const app = frontend();
   const panel = { open: true };
-  const originalSelector = app.context.$;
-  app.context.$ = (selector) => selector === 'details[data-more-segment-panel="connections"]' ? panel : originalSelector(selector);
+  app.context.connectionsShown = () => panel.open;
   let checks = 0;
   app.context.loadYazioStatus = async () => { checks += 1; };
   app.context.handleSyncStatus({ running: false });

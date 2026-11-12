@@ -24,7 +24,7 @@ subagents.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
-without your approval. `/pr`, `/next-issue`, and `/pacecraft-release-unraid` are user-only Claude Code
+without your approval. `/pr`, `/next-issue`, `/pacecraft-release-unraid`, and `/pacecraft-post-release-check` are user-only Claude Code
 commands (`disable-model-invocation: true`); `/deliver-issue` is also model-invocable,
 so agents deliver queued issues through it (#2274). All load the canonical
 workflows in `.agents/skills/`.

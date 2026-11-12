@@ -1,6 +1,6 @@
 # Nutrition
 
-The diary subtly flags complete macro values that fall outside the personal daily ranges: protein 2 g/kg current body weight with a 15 % tolerance, fat 20–30 % of the recorded calories, and carbohydrates depending on weight, training duration and intensity. From 90 minutes the range is 5–7 g/kg, from 120 minutes 6–10 g/kg, otherwise 3–5 g/kg. At least ten minutes in zone 4 or higher within a session raise the carbohydrate range by one step. Completed sessions replace the planned sessions they are matched to. If training or intensity data are missing, 3–5 g/kg serves as the starting range for light load; the actual need may be higher. If weight or macro values are missing, the respective comparison is omitted; low values are not flagged on the current day.
+The diary subtly flags complete macro values that fall outside the personal daily ranges: protein 2 g/kg current body weight with a 15 % tolerance, fat 20–30 % of the recorded calories, and carbohydrates depending on weight, training duration and intensity. From 90 minutes the range is 5–7 g/kg, from 120 minutes 6–10 g/kg, otherwise 3–5 g/kg. At least ten minutes in zone 4 or higher within a session raise the carbohydrate range by one step. Completed sessions replace the planned sessions they are matched to; a completed strength session counts with its total time, other sports with their moving time. If training or intensity data are missing, 3–5 g/kg serves as the starting range for light load; the actual need may be higher. If weight or macro values are missing, the respective comparison is omitted; low values are not flagged on the current day.
 
 Besides calories, carbohydrates, protein and fat, the daily overview also shows consumed sugar and salt in grams. Both values are calculated from the stored product and food data with the amount eaten; later product changes do not change what was eaten. Missing values stay unknown, and known partial sums are labelled "unvollständig" (incomplete). The history shows averages for sugar and salt with the number of fully recorded days. The diary shows each composite meal as one entry; ingredients can be expanded in the card. Stored product and database snapshots keep the origin that was used, even after later product changes. Unknown nutrient values stay unknown and are not shown as zero in cards and daily totals. The entry stays local; synchronization to Intervals.icu happens only after explicit approval.
 
@@ -20,7 +20,7 @@ Nutrition entries stay local; a transfer of the daily totals to Intervals.icu ha
 
 Garmin's daily expenditure (provisional for today) with active calories and basal metabolic rate is shown for the selected diary date, separately from the recorded food intake. Date, source and freshness stay visible; values for today are provisional while Garmin's daily record is still being completed. Missing components stay unknown and are not added up to an invented total. Garmin's own daily-expenditure forecast value cannot be retrieved through the API; for today, the app therefore additionally shows its own estimate, clearly labelled "Prognose Tagesverbrauch (abgeleitet)" (daily expenditure forecast, derived): the basal metabolic rate of the last completed day (at most seven days back) plus the active calories so far, with the calculation shown. It typically deviates from Garmin Connect by a few kcal and is omitted when active calories or a plausible reference day are missing.
 
-The nutrition navigation contains Tagebuch, Verlauf, Körper and Produkte. The Verlauf shows 14 completed days or 12 weeks up to yesterday, with daily values or weekly averages in the chart and an expandable table of daily values. Missing values stay unknown; sums and averages state their data coverage. Body has moved from Analysis into the nutrition area. In the "Produkte" tab, stored products can be marked as favorites with the star; favorites are listed on top and visible, and all other products are collapsed together under "Weitere Produkte" (more products; opened during a search). "Löschen" (delete) removes a product from the list after confirmation; meals already recorded stay unchanged. "Verwenden" (use) asks for the amount and either adds to the Coach message (an existing draft is kept and extended by one line; nothing is sent automatically) or, directly without the Coach, adds to an existing meal of the selected day; without a selected meal, the product is recorded as a new snack. A meal extended this way becomes a composition of its previous values and the product, with the product's nutrient values fixed at the time of the addition. Coach requests remain available through the main navigation.
+The nutrition navigation contains Tagebuch, Verlauf, Körper and Produkte. The Verlauf shows 14 completed days or 12 weeks up to yesterday, with daily values or weekly averages in the chart and an expandable table of daily values. Missing values stay unknown; sums and averages state their data coverage. Body has moved from Analysis into the nutrition area. The "Produkte" tab is one list in two collapsible sections, "Favoriten (n)" and "Alle Produkte (n)" (all products, own and from a database, favorites included, sorted by name); both are collapsed whenever the page is opened, and a search by name, brand or EAN covers all products and opens the sections with hits once; ending the search restores what was open before. Next to each total, "⚠ k" counts the incomplete entries of that section. Every card shows its origin ("eigen" with the source of its values, for example "eigen · Verpackungsangabe", or "Datenbank · Stand <local date>" for a database entry), the "⚠ fehlt:" line with the names of missing nutrients, the star for favorites, and the same four actions: "Verwenden", "Bearbeiten", "Aktualisieren" and "Löschen". "Bearbeiten" (edit) opens the editor; for a database entry only the nutrient values are editable, for an own product an EAN can be entered so that "Aktualisieren" (re-check online) works. "Löschen" (delete) archives an own product or removes a database entry from the database, each after confirmation; meals already recorded stay unchanged. "Verwenden" (use; not offered while the basis unit is unknown) asks for the amount and either adds to the Coach message (an existing draft is kept and extended by one line; nothing is sent automatically) or, directly without the Coach, adds to an existing meal of the selected day; without a selected meal, the product is recorded as a new snack. A meal extended this way becomes a composition of its previous values and the product, with the product's nutrient values fixed at the time of the addition. Coach requests remain available through the main navigation.
 
 ## Local product database (mirror)
 
@@ -46,21 +46,61 @@ product on the same basis; each filled field names `yazio` and its fetch time
 under `filled_fields`, and a later Open Food Facts value or a change of basis
 ends it. A Yazio failure is named in the status line; lookups and calculations
 make no extra Yazio request.
+The Coach helps complete products: `list_incomplete_nutrition_products` lists
+own products and stored database foods with empty core fields (at most 50), and
+`fill_nutrition_product_gaps` writes values it looked up, per the product's own
+basis, into named products. Only fields that are empty at write time are
+written; a known value is reported as skipped, never replaced. An invalid item
+(unknown product, non-core field, negative or implausible value) is rejected
+whole. Each written field records its origin (`open_food_facts`, `yazio`, `bls`
+or `web`, a web value with its source page; `manual` for a value you state) and
+time under `filled_fields`. A database or web origin is accepted only for a value
+that a lookup or web search returned in the last hour, scaled to the product's
+basis; otherwise the item is rejected. A value above the basis in grams, or with
+more energy than pure fat, is rejected for every origin.
+Filling two or more products is a bulk change: the Coach asks first and needs
+your yes. The turn's change line in the chat lists each product, field, value and origin, and
+undo of the turn empties exactly those fields again (change history entity
+`food_database_entry` for stored database foods).
+Missing values can also come from the web: `search_web_for_product_values`
+(up to five named products) sends one separate OpenAI Responses request with the
+`web_search` tool and the selected model. The request carries only each
+product's name, brand, EAN, basis and missing field names, never an athlete
+record or message; it runs at low reasoning effort and the default service tier.
+A value is returned only when it is a plausible number for a still-empty core
+field (no more than the product's basis in grams, no more energy than pure fat)
+and its source page is one the search read or cited; it carries origin `web` and
+that page, and web text is treated as untrusted data. The Coach shows the values
+before writing them with `fill_nutrition_product_gaps`, each with its own source
+page (`source_urls`). If the
+endpoint rejects the tool or the request fails, the result says web search is
+not available and nothing is written.
 For the Coach, matches carry the origin `data_origin` (`live`,
-`local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
-section lists the stored entries; "Lokal speichern" (save locally) takes over an
-entry as an own product after review, "Aktualisieren" (refresh) re-checks one
-entry online now with the same gap-filling rule and leaves it unchanged if the
-database cannot be reached, "Aus Datenbank entfernen" (remove from database) deletes only
+`local_database`, `local_database_stale`). In the "Produkte" tab, the stored entries are part of the
+list: "Aktualisieren" (refresh) re-checks one entry online now with the same
+gap-filling rule and leaves it unchanged if the database cannot be reached,
+"Löschen" of a database entry (remove from database) deletes only
 the mirror entry. The mirror is part of backup, export and data deletion. The upgrade to
 schema v27 moves every former mirror row into the product table without loss.
+
+`GET /api/nutrition/products?scope=all` lists own products and stored database
+foods together, sorted by name, each with its `origin`, `fetched_at`, favourite
+flag, `missing_fields` and `filled_fields`; `q` searches name, brand and EAN. A
+food whose EAN an own product holds appears only as that product. Every entry
+has the same actions: a stored food can be a favourite (kept across re-checks),
+be used for a meal like an own product, and be edited. An edit changes only the
+nutrient values; each edited field is marked `manual`, a re-check keeps it
+instead of the database's value, and the edit is in the change history and can
+be undone. "Aktualisieren" of an own product with an EAN checks the databases
+again and fills only its empty fields (undoable); without an EAN it is refused
+and asks for one.
 
 ## Yazio product search (optional)
 
 Under **Mehr > Anbindungen** (More > Connections), "Verbindung prüfen" (check connection) explicitly checks the login. The status shows the last check result and its time; after a restart or a change of credentials, a new check is needed. Rejected logins can concern account or app credentials; the exact cause is not always known. On rate limiting or outage, try again later. Loading the status makes no request to Yazio.
 
-With Yazio credentials set up (`YAZIO_*` or **Mehr > Anbindungen >
-Zugangsdaten**, i.e. More > Connections > Credentials), product searches without an explicit source use this
+With Yazio credentials set up (`YAZIO_*` or the Yazio card under **Mehr >
+Anbindungen**, i.e. More > Connections), product searches without an explicit source use this
 order: own stored products, local database (mirror), Yazio,
 Open Food Facts, BLS. The next source is queried if the previous one
 has no matching result (every search word in the name, known calorie value),

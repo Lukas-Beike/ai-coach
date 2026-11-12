@@ -114,10 +114,18 @@ function ensureRouteData(route = state.route) {
   if (panelRoute === "plan") requested.push(...["plan", "library"].filter((area) => !state.loadedAreas.has(area) && !areaLoading(area)));
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
+  refreshOpenProviderChecks();
   if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
 }
 
+// Connection and equipment cards start collapsed on every visit to their segment (#2301, #2302),
+// but stay as they are when the shown segment is navigated to again (re-login, active segment link).
+let shownMoreSegment = null;
+
 function renderActiveRoute(mainRoute, panelRoute) {
+  const moreSegment = mainRoute === "more" ? AppRouter.moreSegmentFromRoute(panelRoute) : null;
+  if (moreSegment && moreSegment !== shownMoreSegment) document.querySelectorAll(".connection-card[open], #equipmentItems details[open]").forEach((card) => { card.open = false; });
+  shownMoreSegment = moreSegment;
   document.dispatchEvent(new CustomEvent("app:route-rendered", { detail: { route: mainRoute } }));
   AppNutrition.handleRoute(panelRoute);
   if (mainRoute === "analysis") renderAnalysisSegments(panelRoute);
@@ -314,13 +322,13 @@ function renderStatus(data) {
   updateStatusSources({
     loading: null,
     load_failure: null,
-    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: connections },
+    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...connections, connection: "openai" } },
     coach_error: error && activePanel !== "settingsPanel" ? { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: error } : null,
     thresholds: thresholdStatusItem(data.threshold_warnings),
     intervals_key: configured.intervals || intervalsHintDismissed() ? null : {
       level: "info",
       title: "Intervals.icu-API-Schlüssel fehlt",
-      action: { href: "#more/connections", label: "Jetzt einrichten" },
+      action: { href: "#more/connections", label: "Jetzt einrichten", connection: providerIds().intervals },
       dismiss: dismissIntervalsHint,
     },
   });

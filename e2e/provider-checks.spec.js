@@ -32,7 +32,7 @@ test("@responsive provider cards run an explicit check and keep it separate from
   await button(page, "intervals").click();
   await expect(result(page, "intervals")).toContainText("Anmeldung abgelehnt");
   expect(checks).toEqual(["openai", "intervals"]);
-  await result(page, "openai").locator("xpath=ancestor::article").screenshot({ path: testInfo.outputPath("provider-check.png") });
+  await result(page, "openai").locator("xpath=ancestor::details[1]").screenshot({ path: testInfo.outputPath("provider-check.png") });
   providers.openai = { status: "unchecked", checked_at: null };
   await page.evaluate(() => loadProviderChecks());
   await expect(result(page, "openai")).toHaveText("Verbindung: nicht geprüft");

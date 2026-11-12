@@ -71,6 +71,10 @@ class ToolSpec:
     whole_plan: bool = False  # creates, replaces or archives a whole plan
     no_record: bool = False  # a draft or preview; changes no record
     record_lists: tuple[str, ...] = ()  # argument lists with one record per item
+    bulk_from: int | None = None  # a call reaching this many records counts as bulk
+    # Items naming the same record id count once (values of one product
+    # from several origins are one product).
+    distinct_records: bool = False
     needs_approval: bool = False  # the classifier confirms an approved preview
     plan_checked: bool = False  # the resulting plan is checked
     self_guarded: bool = False  # the plan check runs inside the tool
@@ -142,6 +146,21 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     _read(
         "read_nutrition",
         requirements=(CA1, CA2),
+    ),
+    _read(
+        "list_incomplete_nutrition_products",
+        requirements=(
+            "food-catalog-and-meal-library/Coach fills empty product fields",
+            CA1,
+        ),
+    ),
+    _read(
+        "search_web_for_product_values",
+        external_food_lookup=True,
+        requirements=(
+            "food-catalog-and-meal-library/Coach web search for missing product values",
+            CA1,
+        ),
     ),
     _read(
         "lookup_food",
@@ -225,6 +244,21 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Produkt lokal speichern",
         external_food_lookup=True,
         requirements=(CA6, "coach-tool-authority/CA10"),
+    ),
+    ToolSpec(
+        "fill_nutrition_product_gaps",
+        ATHLETE_RECORDS,
+        domain=NUTRITION,
+        done="Produktlücken gefüllt",
+        action="Produktlücken füllen",
+        record_lists=("products",),
+        bulk_from=2,
+        distinct_records=True,
+        requirements=(
+            "food-catalog-and-meal-library/Coach fills empty product fields",
+            "coach-tool-authority/Tool-specific bulk threshold",
+            CA4,
+        ),
     ),
     ToolSpec(
         "delete_nutrition_template",
@@ -556,6 +590,8 @@ RECORD_LISTS = {
     spec.name: spec.record_lists for spec in TOOL_SPECS if spec.record_lists
 }
 APPROVAL_TOOLS = _names(lambda spec: spec.needs_approval)
+BULK_FROM = {spec.name: spec.bulk_from for spec in TOOL_SPECS if spec.bulk_from}
+DISTINCT_RECORD_TOOLS = _names(lambda spec: spec.distinct_records)
 PLAN_CHECKED_TOOLS = _names(lambda spec: spec.plan_checked)
 SELF_GUARDED_TOOLS = _names(lambda spec: spec.self_guarded)
 PROFILE_MUTATING_TOOLS = _names(lambda spec: spec.mutates_profile)

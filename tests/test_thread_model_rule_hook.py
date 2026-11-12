@@ -43,10 +43,19 @@ OPUS_LOW = json.dumps({"allowed": {"opus": "low"}})
 
 
 class ThreadModelRuleHookTests(unittest.TestCase):
-    def test_repository_rule_is_opus_up_to_high(self):
+    def test_repository_rule_is_opus_and_fable_up_to_high(self):
         self.assertEqual(
-            json.loads(RULE.read_text(encoding="utf-8")), {"allowed": {"opus": "high"}}
+            json.loads(RULE.read_text(encoding="utf-8")),
+            {"allowed": {"opus": "high", "fable": "high"}},
         )
+        rule = RULE.read_text(encoding="utf-8")
+        for payload, code in (
+            (launch("claude-fable-5-2", "high"), 0),
+            (launch("claude-fable-5-2", "xhigh"), 2),
+            (launch("claude-sonnet-5-5", "high"), 2),
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(run_hook(payload, rule).returncode, code)
 
     def test_matching_launch_is_allowed(self):
         for payload in (launch("claude-opus-5-5", "low"), launch(), launch("opus")):

@@ -9,6 +9,8 @@ from typing import Any
 from backend.coach.context_selection import request_chain_ids, select_coach_context
 from backend.coach.tool_specs import TOOL_DOMAIN, UNGATED_TOOLS
 from backend.coach.write_gate import (
+    CLASSIFIER_INSTRUCTIONS,
+    CLASSIFIER_SCHEMA,
     REMOTE_DENIALS,
     REMOTE_GARMIN,
     REMOTE_INTERVALS,
@@ -20,8 +22,47 @@ from backend.coach.write_gate import (
     TurnGateState,
     build_turn_authority,
     check_write,
+    classifier_input,
+    count_records,
     illness_override_confirmed,
+    parse_verdict,
+    resumed_records,
 )
+from backend.providers.model_seam import ModelRequest, ModelTurn
+
+
+def build_impact_classifier(
+    complete: Callable[[ModelRequest], ModelTurn],
+    *,
+    model: str,
+    reasoning_effort: str | None = None,
+) -> ImpactClassifier:
+    """Build a classifier over an injected one-shot model call.
+
+    ``complete`` sends the request and returns the model's turn. Invalid output
+    confirms nothing; transport errors propagate to ``check_write``, which fails
+    closed.
+    """
+
+    def classify(
+        current_text: str, previous_assistant_text: str, origin_text: str = ""
+    ) -> ImpactVerdict:
+        turn = complete(
+            ModelRequest(
+                model=model,
+                instructions=CLASSIFIER_INSTRUCTIONS,
+                input=classifier_input(
+                    current_text, previous_assistant_text, origin_text
+                ),
+                reasoning_effort=reasoning_effort,
+                max_output_tokens=1024,
+                output_schema={"name": "write_impact", "schema": CLASSIFIER_SCHEMA},
+            )
+        )
+        return parse_verdict(turn.text)
+
+    return classify
+
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
 _NOT_PERFORMED = (
@@ -160,10 +201,16 @@ class CoachTurnWriteGate:
         writes = [
             entry for entry in command_receipts if entry.get("tool") in TOOL_DOMAIN
         ]
-        self._state = TurnGateState(
-            writes_count=len(writes),
-            records_count=sum(_entry_records(entry) for entry in writes),
-        )
+        self._state = TurnGateState(writes_count=len(writes))
+        for entry in writes:
+            tool = str(entry["tool"])
+            ids = frozenset(str(item) for item in entry.get("record_ids") or ())
+            count_records(
+                self._state,
+                tool,
+                resumed_records(self._state, tool, _entry_records(entry), ids),
+                ids,
+            )
         self._model = model
         self._read_only_tools = read_only_tools
         self._classifier_factory = classifier_factory

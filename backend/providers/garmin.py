@@ -18,7 +18,7 @@ from typing import Any
 
 from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
 from backend.canonical.section_items import record_day
-from backend.providers.descriptors import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
     GARMIN_RESTING_KCAL_ALIASES,
@@ -606,6 +606,25 @@ def fetch_targeted_nutrition(
     return _with_resting_energy(client, bounded, external_call), complete
 
 
+def fetch_daytime_values(client: Any, day: date) -> dict[str, list[dict[str, Any]]]:
+    """Read one day's summary and Body Battery report, the values of the day (#2303).
+
+    Errors propagate, so the caller's backoff and ``Retry-After`` apply.
+    """
+    stats, _complete = fetch_targeted_nutrition(
+        client,
+        "daily_stats",
+        day,
+        day,
+        external_call=lambda _provider, _source, call, _context: call(),
+    )
+    battery = client.get_body_battery(day.isoformat(), day.isoformat())
+    return {
+        "daily_stats": stats,
+        "body_battery": normalize_range_records("body_battery", battery or []),
+    }
+
+
 def _normalize_targeted_analysis_response(source: str, value: Any) -> Any:
     if not isinstance(value, (dict, list)):
         raise TypeError(f"Invalid Garmin {source} response")
@@ -1141,7 +1160,9 @@ def _collect_current_metrics(
         (
             "max_metrics",
             "get_max_metrics_range",
-            lambda fetch: fetch(max_metrics_start.isoformat(), today.isoformat()),
+            lambda fetch: _dated_max_metrics(
+                fetch(max_metrics_start.isoformat(), today.isoformat())
+            ),
             {
                 "window_start": max_metrics_start.isoformat(),
                 "window_end": today.isoformat(),
@@ -1425,6 +1446,34 @@ def _gear_activity_ids(
     if len(result) >= GEAR_ACTIVITIES_LIMIT:
         linked["activity_ids_truncated"] = True
     return linked
+
+
+def _dated_max_metrics(rows: Any) -> Any:
+    """Date each maxmet daily row by its sport objects' day (#2345).
+
+    The range leaves the row undated and dates ``generic`` and ``cycling``; the
+    row's day keeps a stored element keyed by its day, so a changed value of the
+    day replaces it instead of adding one.
+    """
+    if not isinstance(rows, list):
+        return rows
+    dated = []
+    for row in rows:
+        if isinstance(row, dict) and not row.get("calendarDate"):
+            day = next(
+                (
+                    item["calendarDate"]
+                    for item in row.values()
+                    if isinstance(item, dict)
+                    and isinstance(item.get("calendarDate"), str)
+                    and item["calendarDate"]
+                ),
+                None,
+            )
+            if day:
+                row = {**row, "calendarDate": day}
+        dated.append(row)
+    return dated
 
 
 def _collect_optional_metric(

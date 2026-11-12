@@ -11,8 +11,8 @@ from backend.http_api.sync_commands import (
     needs_sync_body,
 )
 from backend.nutrition.contracts import nutrition_approval_item
-from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 
 
 class SyncCommandEndpointTests(unittest.TestCase):

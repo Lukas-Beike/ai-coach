@@ -1704,6 +1704,24 @@ class ServerSyncTests(ServerTestCase):
         state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])
 
+    def test_one_garmin_change_check_follows_the_personal_key(self):
+        # One check per process keeps its cadence and one Personal API client
+        # per key, so the 24-hour token is reused across loop passes (#2303).
+        check = server.GARMIN_ASSEMBLY.change_check()
+        self.assertIs(check, server.GARMIN_ASSEMBLY.change_check())
+        policy = server.provider_runtime().schedule_policies()["daily"]["garmin"]
+        self.assertIs(check, policy._change_check)
+        for key, active in (("", False), ("synthetic-personal-key", True)):
+            config = replace(
+                server.CONFIG, garmin_personal_api_key=key, garmin_fixture_path=""
+            )
+            with self.subTest(key=bool(key)), patch.object(server, "CONFIG", config):
+                self.assertEqual(active, check.active())
+                self.assertIs(
+                    server.GARMIN_ASSEMBLY._change_personal_client(),
+                    server.GARMIN_ASSEMBLY._change_personal_client(),
+                )
+
     def test_daily_sync_markers_are_separate_per_provider(self):
         local_day = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
         markers = server.SYNC_PERSISTENCE.daily_markers()

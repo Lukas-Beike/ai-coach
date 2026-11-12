@@ -8,14 +8,9 @@ from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WEATHER_ID,
-)
 from backend.sync.competitions import CompetitionSyncService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import GarminFixtureLoader
@@ -37,7 +32,7 @@ from backend.sync.jobs import (
 )
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import ProviderJobOwner
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
@@ -608,12 +603,26 @@ class CalendarWeatherJobAdapter:
         return self._jobs.execute(self._provider_id, job, payload, reason)
 
 
+class ProviderJobOwner(Protocol):
+    """Executes the provider's queued sync jobs."""
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        """Run one queued job and return its outcome."""
+
+
 class PerJobOwner:
     """Resolve a provider owner for each job, so it reads the live configuration.
 
-    Owners copy the runtime configuration when they are built; a registry caches
-    them for the worker's lifetime. Building per job lets credentials saved or
-    removed in the app apply to the next job without a restart.
+    Owners copy the runtime configuration when they are built, and the worker
+    keeps its executor for its lifetime. Building per job lets credentials saved
+    or removed in the app apply to the next job without a restart.
     """
 
     def __init__(self, build: Callable[[], ProviderJobOwner]) -> None:
@@ -645,28 +654,6 @@ def dispatch_provider_job(
         _reject_plan_push(job_type)
         raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
     return owner.execute(job, payload, reason, job_type=job_type)
-
-
-def build_job_owners(
-    *,
-    intervals_jobs: IntervalsSyncJobOwner,
-    nutrition_sync_service: Any,
-    garmin_jobs: GarminSyncJobOwner,
-    calendar_weather_jobs: CalendarWeatherSyncJobOwner,
-) -> dict[str, ProviderJobOwner]:
-    """Return the provider-to-owner mapping for the built-in providers."""
-    return {
-        INTERVALS_ID: IntervalsJobAdapter(
-            jobs=intervals_jobs, nutrition_sync_service=nutrition_sync_service
-        ),
-        GARMIN_ID: GarminJobAdapter(jobs=garmin_jobs),
-        CALENDAR_ID: CalendarWeatherJobAdapter(
-            jobs=calendar_weather_jobs, provider_id=CALENDAR_ID
-        ),
-        WEATHER_ID: CalendarWeatherJobAdapter(
-            jobs=calendar_weather_jobs, provider_id=WEATHER_ID
-        ),
-    }
 
 
 # Job types the Intervals.icu ingest queued before it was removed (#1728). A

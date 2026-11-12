@@ -12,6 +12,7 @@ from backend.coach.request_payload import (
     RESUMED_STEPS_NOTICE,
     CoachRequestPayloadService,
 )
+from backend.providers.openai_responses_adapter import request_payload
 
 PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
@@ -52,7 +53,9 @@ class CoachRequestPayloadTests(unittest.TestCase):
             "has_prior_openai_attachments": False,
         }
         arguments.update(overrides)
-        return self.service.build(**arguments)
+        instructions, request = self.service.build(**arguments)
+        # Assert what goes on the wire: the request through the OpenAI adapter.
+        return instructions, request_payload(request)
 
     def test_requeued_turn_tells_the_model_its_confirmed_steps_already_ran(
         self,

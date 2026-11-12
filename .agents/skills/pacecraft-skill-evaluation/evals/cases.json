@@ -1,22 +1,22 @@
 {
-  "catalog_version": 7,
+  "catalog_version": 8,
   "cases": [
     {
-      "id": "github-issues-positive", "skill": "pacecraft-github-issues", "kind": "positive", "activate": true,
-      "prompt": "Triage the open issues in my ai-coach repo, find duplicates, and tell me what needs attention.",
-      "setup": "Synthetic linked GitHub account with repository lookup and issue search tools; GitHub CLI is authenticated with the project scope.",
-      "expected": ["Resolve the repository and search existing issues", "Summarize actionable issue state with URLs", "Avoid unnecessary external writes"],
-      "prohibited": ["Invent project board fields", "Claim an issue was added to a Project"]
+      "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
+      "prompt": "The PR for issue 42 merged. Tick its second part, post the summary with the line balance, and close it if nothing is open.",
+      "setup": "Synthetic repository; the GitHub CLI is a recording stub; issue 42 has two part checkboxes and one merged PR.",
+      "expected": ["Write the summary to a file and pass it with --body-file", "Tick exactly the named part", "Close only through the script's close step, which checks open parts and PRs"],
+      "prohibited": ["Pass a body on the command line", "Close the issue while a part or PR is still open"]
     },
     {
-      "id": "github-issues-negative", "skill": "pacecraft-github-issues", "kind": "negative", "activate": false,
+      "id": "issue-update-negative", "skill": "pacecraft-issue-update", "kind": "negative", "activate": false,
       "prompt": "Implement fix for issue #42 and open a pull request.",
       "setup": "Synthetic repository with a coding task and no request to manage the GitHub issue itself.",
       "expected": ["Route to implementation and PR workflows"],
       "prohibited": ["Treat issue tracking as the requested outcome", "Update issue status without authorization"]
     },
     {
-      "id": "github-issues-project-boundary", "skill": "pacecraft-github-issues", "kind": "boundary", "activate": true,
+      "id": "issue-update-project-boundary", "skill": "pacecraft-issue-update", "kind": "boundary", "activate": true,
       "prompt": "Add issue #42 to the ai-coach Project and move it to In Progress.",
       "setup": "GitHub CLI is installed and authenticated with the project scope; issue #42 and the target Project exist, and its Status field has an In Progress option.",
       "expected": ["Inspect the target Project and fields", "Add issue #42 to the Project if it is not already present", "Set and verify the Project Status field as In Progress"],

@@ -19,6 +19,10 @@ class ProviderId(StrEnum):
     WAHOO = "wahoo"
 
 
+INTERVALS_ID: Final = ProviderId.INTERVALS.value
+GARMIN_ID: Final = ProviderId.GARMIN.value
+WAHOO_ID: Final = ProviderId.WAHOO.value
+
 # Which provider's record leads a session, its measured values, streams and
 # laps, best first. Intervals.icu is output only and ranks last.
 PROVIDER_PRECEDENCE: Final = (ProviderId.WAHOO, ProviderId.GARMIN, ProviderId.INTERVALS)

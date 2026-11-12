@@ -33,6 +33,7 @@ from backend.backup.assembly import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
@@ -224,6 +225,7 @@ from backend.nutrition.assembly import (
     NutritionRuntime,
 )
 from backend.nutrition.photo import NutritionPhotoExtractionService
+from backend.nutrition.web_search import NutritionWebSearchService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
@@ -304,7 +306,6 @@ from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
-from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelEndpointSettings,
@@ -355,6 +356,7 @@ from backend.sync.execution_assembly import (
     IntervalsJobDependencies,
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
+    WahooJobDependencies,
 )
 from backend.sync.executor import chained_after_job
 from backend.sync.external_calendar_assembly import (
@@ -424,7 +426,6 @@ from backend.sync.provider_resync_assembly import (
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
 )
@@ -487,7 +488,7 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -625,12 +626,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 intervals=jobs.intervals,
                 garmin=jobs.garmin,
                 calendar_weather=jobs.calendar_weather,
-                wahoo=WahooRuntimeDependencies(
-                    sync_service=WAHOO_SYNC.sync_service,
-                    plan_push_service=WAHOO_SYNC.plan_push_service,
-                    resync_gate=WAHOO_RESYNC_GATE,
-                    stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
-                ),
+                wahoo=jobs.wahoo,
             )
         ),
     )
@@ -854,6 +850,7 @@ HISTORY = HistoryAssembly(
             checkin_service=ATHLETE_DATA.checkin,
             meal_library=lambda: NUTRITION_ASSEMBLY.meal_library_service(),
             product_catalog=lambda: NUTRITION_ASSEMBLY.product_catalog_service(),
+            food_database_entries=lambda: NUTRITION_ASSEMBLY.food_mirror(),
             equipment_history=ATHLETE_DATA.equipment_history,
         ),
         planning=HistoryPlanningServices(
@@ -1273,6 +1270,8 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
+# The nutrition photo and web search share this one OpenAI client.
+nutrition_openai_client = lambda: MODEL_TRANSPORT.openai_responses_client()
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
@@ -1285,10 +1284,11 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             photo_extractor=lambda: NutritionPhotoExtractionService(
                 selected_model=SETTINGS.selected_model,
-                openai_request=lambda path, payload: (
-                    MODEL_TRANSPORT.openai_responses_client().request(path, payload)
-                ),
-                openai_path=OPENAI_RESPONSES_PATH,
+                complete=lambda request: nutrition_openai_client().complete(request),
+            ),
+            web_searcher=lambda: NutritionWebSearchService(
+                selected_model=SETTINGS.selected_model,
+                complete=lambda request: nutrition_openai_client().complete(request),
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
             observed_opener=observed_provider_opener,
@@ -1633,7 +1633,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
 )
 
 
-# Shared with provider_runtime() so the lazy registry reuses the same live owners.
+# Shared with provider_runtime() so both read the same live owners.
 SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     historical=HistoricalSyncDependencies(
         local_now=ATHLETE_CLOCK.now,
@@ -1662,16 +1662,22 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
         stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
+        change_check=GARMIN_ASSEMBLY.change_check,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
         weather_sync_service=WEATHER_ASSEMBLY.sync_service,
     ),
+    wahoo=WahooJobDependencies(
+        sync_service=WAHOO_SYNC.sync_service,
+        plan_push_service=WAHOO_SYNC.plan_push_service,
+        resync_gate=WAHOO_RESYNC_GATE,
+        stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
+    ),
 )
 
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
-    provider_runtime=provider_runtime,
     after_job=DERIVED_PASS_HOOK,
 )
 
@@ -1727,6 +1733,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
             database_manager=database_manager,
+            morning_due=lambda: GARMIN_ASSEMBLY.change_check().morning_due(),
         ),
     ),
     provider_runtime=provider_runtime,

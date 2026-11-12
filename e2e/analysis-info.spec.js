@@ -539,7 +539,7 @@ test("@responsive performance keeps predictions in the dedicated table", async (
     run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect", note: "Garmin Connect Laufprognose" },
   } });
   await expect(page.locator("#performancePredictions")).toContainText("Laufprognosen");
-  await expect(page.locator("#performancePredictions")).toContainText("20 min");
+  await expect(page.locator("#performancePredictions")).toContainText("20:00");
   await expect(page.locator("#performanceSummary")).toBeHidden();
 });
 
@@ -550,7 +550,7 @@ test("@responsive historical race estimates never create duplicate charts", asyn
       run_5k_seconds: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 1250 }, { date: "2026-09-15", value: 1200 }] }],
     } },
   });
-  await expect(page.locator("#performancePredictions")).toContainText("20 min");
+  await expect(page.locator("#performancePredictions")).toContainText("20:00");
   await expect(page.locator("#performancePredictions")).not.toContainText("Garmin");
   await expect(page.locator("#analysisHistoryCharts svg")).toHaveCount(0);
   await expect(page.locator("[data-race-distance]")).toHaveCount(0);

@@ -28,17 +28,9 @@ from provider_runtime_fakes import (
     fake_binding,
 )
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-    SchedulePolicy,
-)
 from backend.sync.assembly import (
     ProviderRefreshRetryPolicy,
     ProviderSyncAssembly,
@@ -50,7 +42,9 @@ from backend.sync.command_assembly import (
     SyncCommandAssembly,
     SyncCommandCore,
 )
-from backend.sync.execution_assembly import SyncJobExecutionAssembly
+from backend.sync.execution_assembly import (
+    WahooJobDependencies,
+)
 from backend.sync.executor import dispatch_provider_job
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
@@ -61,9 +55,14 @@ from backend.sync.provider_runtime import (
 )
 from backend.sync.provider_runtime_assembly import (
     ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
+)
+from backend.sync.provider_table import (
+    CALENDAR_ID,
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    WEATHER_ID,
+    SchedulePolicy,
 )
 
 BUILTIN_IDS = frozenset({INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID})
@@ -158,11 +157,10 @@ class _KeyValuesFake:
 
 def _acme_binding(
     *,
-    owner: FakeJobOwner | None = None,
     policy: FakeSchedulePolicy | None = None,
     refresh: _SynchronousRefreshFake | None = None,
 ) -> ProviderRuntimeBinding:
-    binding = fake_binding(ACME_ID, owner=owner, policy=policy)
+    binding = fake_binding(ACME_ID, policy=policy)
     if refresh is None:
         return binding
     return dataclasses.replace(binding, synchronous_refresh=lambda: refresh)
@@ -223,7 +221,6 @@ class BuiltinBindingTests(unittest.TestCase):
             DEFAULT_PROVIDER_REGISTRY, builtin_bindings(_builtin_deps())
         )
 
-        self.assertEqual(set(runtime.job_owners()), BUILTIN_IDS)
         self.assertEqual(set(runtime.resync_handlers()), {GARMIN_ID, WAHOO_ID})
         self.assertEqual(set(runtime.synchronous_refreshes()), {GARMIN_ID, WAHOO_ID})
         self.assertEqual(set(runtime.running_probes()), {WAHOO_ID})
@@ -404,11 +401,8 @@ class AcmeAssemblyTests(unittest.TestCase):
 
 
 class DispatchRoutingTests(unittest.TestCase):
-    def test_dispatch_routes_acme_job_through_its_registered_owner(self) -> None:
+    def test_dispatch_routes_a_job_through_its_provider_owner(self) -> None:
         owner = FakeJobOwner({"status": "completed", "count": 2})
-        runtime = ProviderRuntimeRegistry(
-            ACME_ONLY_STATIC, [_acme_binding(owner=owner)]
-        )
         job = {"id": 9, "provider": ACME_ID, "type": "refresh", "payload": {}}
         envelope = {
             "provider": ACME_ID,
@@ -416,48 +410,20 @@ class DispatchRoutingTests(unittest.TestCase):
             "payload": {"reason": "Coach"},
         }
 
-        result = dispatch_provider_job(runtime.job_owners(), job, envelope)
+        result = dispatch_provider_job({ACME_ID: owner}, job, envelope)
 
         self.assertEqual(result, {"status": "completed", "count": 2})
         self.assertEqual(owner.calls[0]["reason"], "Coach")
         self.assertEqual(owner.calls[0]["job_type"], "refresh")
 
-    def test_dispatch_rejects_provider_without_registered_owner(self) -> None:
-        runtime = ProviderRuntimeRegistry(ACME_ONLY_STATIC, [_acme_binding()])
+    def test_dispatch_rejects_provider_without_an_owner(self) -> None:
         job = {"id": 9, "provider": INTERVALS_ID, "type": "refresh", "payload": {}}
         envelope = {"provider": INTERVALS_ID, "type": "refresh", "payload": {}}
 
         with self.assertRaises(AppError) as ctx:
-            dispatch_provider_job(runtime.job_owners(), job, envelope)
+            dispatch_provider_job({ACME_ID: FakeJobOwner()}, job, envelope)
 
         self.assertEqual(ctx.exception.reason, "invalid_job_request")
-
-    def test_executor_built_from_runtime_routes_to_acme_owner(self) -> None:
-        owner = FakeJobOwner({"status": "completed"})
-        runtime = ProviderRuntimeRegistry(
-            ACME_ONLY_STATIC, [_acme_binding(owner=owner)]
-        )
-        assembly = SyncJobExecutionAssembly(
-            dependencies=SyncJobExecutionAssembly.Inputs(
-                historical=mock.Mock(all_sync_days=60),
-                state=mock.Mock(),
-                intervals=mock.Mock(),
-                garmin=mock.Mock(),
-                calendar_weather=mock.Mock(),
-            ),
-            provider_runtime=lambda: runtime,
-        )
-        job = {
-            "id": 7,
-            "provider": ACME_ID,
-            "type": "refresh",
-            "payload": {"reason": "Coach"},
-        }
-
-        result = assembly.executor().execute(job)
-
-        self.assertEqual(result, {"status": "completed"})
-        self.assertEqual(owner.calls[0]["reason"], "Coach")
 
 
 class PlanPushAdmissionTests(unittest.TestCase):
@@ -467,7 +433,7 @@ class PlanPushAdmissionTests(unittest.TestCase):
         wahoo_sync = mock.Mock(name="wahoo_sync")
         wahoo_sync.configured.return_value = connected
         wahoo_sync.running.return_value = False
-        wahoo = WahooRuntimeDependencies(
+        wahoo = WahooJobDependencies(
             sync_service=lambda: wahoo_sync,
             plan_push_service=lambda: mock.Mock(name="plan_push"),
             resync_gate=ProviderResyncGate("Wahoo"),

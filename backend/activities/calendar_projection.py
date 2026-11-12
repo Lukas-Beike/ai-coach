@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime
 from backend.activities.matching import (
     PLANNED_LOAD_FIELDS,
@@ -14,6 +13,7 @@ from backend.activities.matching import (
 )
 from backend.activities.strength_sets import STRENGTH_KEY, plan_comparison
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.activity_summary import summary_leading_duration_s
 from backend.canonical.decimal_text import provider_number as _as_number
 
 CALENDAR_ACTIVITY_FIELDS = (
@@ -113,8 +113,8 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
 def _workout_duration(record: Any) -> float | int | None:
     if not isinstance(record, dict):
         return None
-    duration = summary_duration_s(record)
-    return duration if duration is not None and duration >= 0 else None
+    # A strength session counts with its total time, like its calendar card (#2317).
+    return summary_leading_duration_s(record)
 
 
 def _planned_duration(record: Any) -> float | int | None:

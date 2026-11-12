@@ -25,7 +25,7 @@ test("@responsive provider sync actions are disabled with a setup hint without c
   await expect(intervalsHint).toContainText("INTERVALS_API_KEY");
   await expect(page.locator("#garminSetupHint")).toBeVisible();
   // A-043: the hint names both in-app ways to connect Garmin.
-  await expect(page.locator("#garminSetupHint")).toHaveText("Garmin ist nicht verbunden. Melde dich unter „Zugangsdaten“ an oder hinterlege dort einen Schlüssel der Garmin Personal API.");
+  await expect(page.locator("#garminSetupHint")).toHaveText("Garmin ist nicht verbunden. Melde dich unter „Garmin-Konto“ an oder hinterlege unter „Personal API“ einen Schlüssel.");
 });
 
 test("@responsive the missing Intervals.icu key is one slim line that can be dismissed for the session", async ({ page }) => {
@@ -48,7 +48,7 @@ test("@responsive the missing Intervals.icu key is one slim line that can be dis
   await expect(page.locator("#intervalsSetupHint")).toBeVisible();
 });
 
-test("@responsive the setup line is shown on every tab and Jetzt einrichten opens the connections segment", async ({ page }) => {
+test("@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card", async ({ page }) => {
   await tallScreen(page);
   await page.goto("/#plan/overview");
   const strip = page.locator("#statusStrip");
@@ -57,7 +57,9 @@ test("@responsive the setup line is shown on every tab and Jetzt einrichten open
   await expect(strip).toBeVisible();
   await strip.getByRole("link", { name: "Jetzt einrichten" }).click();
   await expect(page).toHaveURL(/#more\/connections$/);
-  await expect(page.locator('details[data-more-segment-panel="connections"]')).toHaveAttribute("open", "");
+  await expect(page.locator("#connection-intervals")).toHaveAttribute("open", "");
+  await expect(page.locator(".connection-card[open]")).toHaveCount(1);
+  await expect(page.locator("#connection-intervals > summary")).toBeInViewport();
   await expect(page.locator("#intervalsSetupHint")).toBeVisible();
 });
 

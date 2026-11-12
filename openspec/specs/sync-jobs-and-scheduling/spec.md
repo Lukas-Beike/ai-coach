@@ -19,7 +19,7 @@ The system SHALL validate provider and job type together using the configured re
 
 Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, and stream backfill; Wahoo supports refresh, plan push, and stream backfill; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
 
-Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
+Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
 ### Requirement: Durable jobs and duplicate suppression
 The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active refresh and backfill jobs requested by `scheduler`, `startup` or `connection`. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. Requests by `user`, `coach` or `backfill` (the continuation of a chain, which carries its own cursor) always create their own job.
@@ -45,14 +45,19 @@ The system SHALL schedule configured startup refreshes in calendar, Garmin, weat
 - **WHEN** a provider already has an active refresh or historical-backfill job
 - **THEN** startup does not duplicate that operation; disabled or unconnected providers are skipped.
 
-Evidence: `backend/sync/scheduler.py:StartupSyncScheduler.schedule`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_startup_sync_scheduler.py:test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`, `tests/test_wahoo_runtime_acceptance.py:test_connected_account_flows_from_the_scheduler_to_the_status`.
+Evidence: `backend/sync/scheduler.py:StartupSyncScheduler.schedule`, `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_startup_sync_scheduler.py:test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`, `tests/test_wahoo_runtime_acceptance.py:test_connected_account_flows_from_the_scheduler_to_the_status`.
 
 ### Requirement: Automatic cadence and eligibility
-The system SHALL wait 300 seconds before each automatic loop pass, schedule eligible providers in weather, calendar, Garmin, Wahoo order, and then attempt the morning Body Battery refresh. Calendar, Garmin, and Wahoo SHALL use the latest parseable attempt or success marker with a 3600-second due interval. Weather SHALL use forecast cache expiry and retry backoff instead of a daily marker.
+The system SHALL wait 300 seconds before each automatic loop pass, schedule eligible providers in weather, calendar, Garmin, Wahoo order, and then attempt the morning Body Battery refresh. Calendar, Wahoo, and Garmin without a Personal API key SHALL use the latest parseable attempt or success marker with a 3600-second due interval. With a key, Garmin SHALL follow its change check. Weather SHALL use forecast cache expiry and retry backoff instead of a daily marker.
 
 #### Scenario: Due automatic pass
 - **WHEN** a configured provider has no recent valid attempt or success marker and is not blocked
 - **THEN** its refresh is queued and a scheduled refresh attempt marker is recorded.
+
+#### Scenario: Garmin change check
+- **WHEN** a Personal API key is configured and Garmin is neither blocked, active nor held by a retry
+- **THEN** Garmin is due when the check finds a new activity or a newly published night, or, at most hourly, from 12:00 athlete-local time when no Garmin refresh succeeded that day
+- **AND** the check reads the newest activity ids of today and yesterday and, until today's night is stored, today's sleep entry through the Personal API, every 10 minutes and every 30 minutes between 23:00 and 05:00 athlete-local time; an unchanged result queues nothing and, by day, stores today's daily summary and Body Battery report only when they differ from the stored values (no sync job, skipped while another Garmin read runs), a change a successful refresh did not store is held back for an hour, a failure doubles the wait up to eight times and never undercuts a `Retry-After` wait, a rejected key or endpoint makes the refresh due at that pace so its failure surfaces, and the morning reading waits for the stored night or 12:00.
 
 #### Scenario: Loop failure and shutdown
 - **WHEN** scheduling raises an error or the stop event is set during its wait
@@ -60,7 +65,7 @@ The system SHALL wait 300 seconds before each automatic loop pass, schedule elig
 
 Detailed contract: Maintenance, provider-specific blocking, active refresh jobs, and missing configuration SHALL prevent enqueueing where applicable.
 
-Evidence: `backend/sync/scheduler.py:DailySyncLoop.run`, `backend/sync/scheduler.py:DailySyncScheduler._schedule_provider`, `backend/sync/daily.py:daily_sync_is_due`; `tests/test_daily_sync_loop.py:test_sleeps_before_scheduling_then_refreshes_each_iteration`, `tests/test_daily_sync_scheduler.py:test_skips_active_jobs_and_not_due_markers`, `tests/test_wahoo_runtime_acceptance.py:test_daily_scheduler_honours_the_marker_interval`.
+Evidence: `backend/sync/scheduler.py:DailySyncLoop.run`, `backend/sync/scheduler.py:DailySyncScheduler._schedule_provider`, `backend/sync/daily.py:daily_sync_is_due`, `backend/sync/garmin_change_check.py:GarminChangeCheck`; `tests/test_daily_sync_loop.py:test_sleeps_before_scheduling_then_refreshes_each_iteration`, `tests/test_daily_sync_scheduler.py:test_skips_active_jobs_and_not_due_markers`, `tests/test_wahoo_runtime_acceptance.py:test_daily_scheduler_honours_the_marker_interval`, `tests/test_garmin_change_check.py`.
 
 ### Requirement: Provider-specific current refresh windows
 The system SHALL keep automatic provider windows distinct. Garmin SHALL initially cover 84 days, catch up from the oldest required collection coverage in contiguous windows of at most 90 days, and widen the first daily read to at least seven days for late corrections.
@@ -86,7 +91,7 @@ The system SHALL NOT read Intervals.icu activities, wellness history, athlete re
 
 Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records of a database restored from a release before 2.0.0 are not read. The competition push reconciles linked events and never imports new competitions from Intervals.icu.
 
-Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
+Evidence: `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
 
 ### Requirement: Bounded resumable historical backfill
 The system SHALL walk Garmin history in inclusive chunks of at most 90 days down to the configured history floor. A restart SHALL resume before the persisted historical cursor. Complete chunks may schedule their next chunk after 15 seconds; partial chunks SHALL stop continuation. Two consecutive completely empty chunks SHALL end the walk and persist the floor.

@@ -1,6 +1,6 @@
-"""Registry of configured provider descriptors for synchronization.
+"""Queries over the provider table for synchronization.
 
-Provider data lives in backend/providers/descriptors.py. This module names no
+Provider data lives in backend/sync/provider_table.py. This module names no
 provider, so it stays free of the provider literals the coupling guard
 forbids. Lookups take provider identifiers from the caller.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
-from backend.providers.descriptors import (
+from backend.sync.provider_table import (
     DEFAULT_MAX_SYNC_DAYS,
     DEFAULT_PROVIDER_DESCRIPTORS,
     Capability,
@@ -18,47 +18,17 @@ from backend.providers.descriptors import (
 )
 
 
-def _reject_duplicate_routes(descriptors: tuple[ProviderDescriptor, ...]) -> None:
-    manual = [
-        descriptor.manual_sync.path
-        for descriptor in descriptors
-        if descriptor.manual_sync is not None
-    ]
-    if len(set(manual)) != len(manual):
-        raise ValueError("duplicate manual sync route")
-    full_resync = [
-        descriptor.full_resync_path
-        for descriptor in descriptors
-        if descriptor.full_resync_path is not None
-    ]
-    if len(set(full_resync)) != len(full_resync):
-        raise ValueError("duplicate full resync route")
-
-
 class ProviderRegistry:
     """Immutable, ordered view over provider descriptors."""
 
     def __init__(self, descriptors: Iterable[ProviderDescriptor]) -> None:
-        ordered = tuple(descriptors)
-        by_id: dict[str, ProviderDescriptor] = {}
-        freshness_areas: list[tuple[str, FreshnessArea]] = []
-        seen_areas: set[tuple[str, str]] = set()
-        for descriptor in ordered:
-            if descriptor.provider_id in by_id:
-                raise ValueError(
-                    f"duplicate provider descriptor: {descriptor.provider_id}"
-                )
-            by_id[descriptor.provider_id] = descriptor
-            for area in descriptor.freshness_areas:
-                key = (descriptor.provider_id, area.area)
-                if key in seen_areas:
-                    raise ValueError(f"duplicate freshness area: {key[0]} {key[1]}")
-                seen_areas.add(key)
-                freshness_areas.append((descriptor.provider_id, area))
-        _reject_duplicate_routes(ordered)
-        self._descriptors = ordered
-        self._by_id = by_id
-        self._freshness_areas = tuple(freshness_areas)
+        self._descriptors = tuple(descriptors)
+        self._by_id = {d.provider_id: d for d in self._descriptors}
+        self._freshness_areas = tuple(
+            (d.provider_id, area)
+            for d in self._descriptors
+            for area in d.freshness_areas
+        )
 
     def get(self, provider_id: str) -> ProviderDescriptor:
         """Return a descriptor; an unknown provider raises KeyError."""

@@ -68,6 +68,7 @@ from backend.providers.canonical_plans import (
     IngestPlan,
     RawRecord,
 )
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -377,21 +378,23 @@ def _fixture_simulate_openai_mode():
 class FixtureResponseTransport:
     """Provider-free adapter for the canned browser conversation fixture."""
 
-    def request(self, payload):
+    def request(self, request):
         _fixture_simulate_openai_mode()
-        return fixture_coach_response(payload)
+        return model_turn(fixture_coach_response(request_payload(request)))
 
     def stream_request(
-        self, payload, on_text_delta, cancel_event=None, on_response_id=None
+        self, request, on_text_delta, cancel_event=None, on_response_id=None
     ):
         # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
         # every other message keeps the previous no-delta behavior.
         _fixture_simulate_openai_mode()
-        return fixture_coach_response(
-            payload,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            on_response_id=on_response_id,
+        return model_turn(
+            fixture_coach_response(
+                request_payload(request),
+                on_text_delta=on_text_delta,
+                cancel_event=cancel_event,
+                on_response_id=on_response_id,
+            )
         )
 
 

@@ -59,31 +59,21 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.save("openai_conversation_id", "conv-existing")
 
         self.assertEqual(self.service.ensure(), "conv-existing")
-        self.openai.request.assert_not_called()
+        self.openai.create_conversation.assert_not_called()
 
     def test_openai_creates_id_with_existing_metadata_contract(self):
-        self.openai.request.return_value = {"id": "conv-created"}
+        self.openai.create_conversation.return_value = "conv-created"
 
         self.assertEqual(self.service.ensure(), "conv-created")
         self.assertEqual(self.stored("openai_conversation_id"), "conv-created")
-        self.openai.request.assert_called_once_with(
-            "/conversations",
-            {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
+        self.openai.create_conversation.assert_called_once_with(
+            {"app": "intervals-coach", "purpose": "personal-coach"}
         )
 
     def test_openai_request_holds_neither_database_transaction_nor_db_lock(self):
         lock = _TrackingLock()
         with self.outside_lock(lock) as service:
             self.assertEqual(service.ensure(), "conv-outside-lock")
-
-    def test_openai_invalid_id_is_502_and_not_persisted(self):
-        self.openai.request.return_value = {"id": None}
-
-        with self.assertRaises(AppError) as raised:
-            self.service.ensure()
-
-        self.assertEqual(raised.exception.status, 502)
-        self.assertIsNone(self.stored("openai_conversation_id"))
 
     def _command(self, client_turn_id, conversation_id):
         with self.database_manager.unit_of_work() as db:
@@ -121,7 +111,7 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.save("openai_conversation_id", "conv-old")
         self._command("earlier", "conv-old")
         self._command("turn-1", "conv-old")
-        self.openai.request.return_value = {"id": "conv-new"}
+        self.openai.create_conversation.return_value = "conv-new"
 
     @contextmanager
     def outside_lock(self, lock):
@@ -142,9 +132,9 @@ class CoachConversationProvisionTests(unittest.TestCase):
         def create_conversation(*_args):
             self.assertFalse(lock.held)
             self.assertEqual(transaction_depth, 0)
-            return {"id": "conv-outside-lock"}
+            return "conv-outside-lock"
 
-        self.openai.request.side_effect = create_conversation
+        self.openai.create_conversation.side_effect = create_conversation
         with patch.object(self.database_manager, "unit_of_work", tracked_unit_of_work):
             yield self._service(lock)
         self.assertEqual(transaction_depth, 0)
@@ -154,18 +144,18 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.save("chat_generation", "gen-two")
 
         self.assertEqual(self.service.binding(), "local-gen-two")
-        self.openai.request.assert_not_called()
+        self.openai.create_conversation.assert_not_called()
         self.assertIsNone(self.stored("openai_conversation_id"))
 
     def test_binding_prefers_the_stored_remote_conversation(self):
         self.save("openai_conversation_id", "conv-existing")
 
         self.assertEqual(self.service.binding(), "conv-existing")
-        self.openai.request.assert_not_called()
+        self.openai.create_conversation.assert_not_called()
 
     def test_bind_remote_creates_conversation_and_rebinds_the_turn(self):
         self._command("turn-1", "local-initial")
-        self.openai.request.return_value = {"id": "conv-created"}
+        self.openai.create_conversation.return_value = "conv-created"
 
         self.assertEqual(
             self.service.bind_remote("turn-1", "local-initial"), "conv-created"
@@ -176,11 +166,11 @@ class CoachConversationProvisionTests(unittest.TestCase):
 
     def test_bind_remote_keeps_a_remote_binding_without_provider_call(self):
         self.assertEqual(self.service.bind_remote("turn-1", "conv-old"), "conv-old")
-        self.openai.request.assert_not_called()
+        self.openai.create_conversation.assert_not_called()
 
     def test_rotate_from_local_binding_creates_remote_without_deleting(self):
         self._command("turn-1", "local-initial")
-        self.openai.request.return_value = {"id": "conv-new"}
+        self.openai.create_conversation.return_value = "conv-new"
 
         self.assertEqual(self.service.rotate("turn-1", "local-initial"), "conv-new")
 
@@ -194,7 +184,7 @@ class CoachConversationProvisionTests(unittest.TestCase):
 
         self.assertEqual(self.service.rotate("turn-1", "conv-current"), "conv-current")
 
-        self.openai.request.assert_not_called()
+        self.openai.create_conversation.assert_not_called()
         self.openai.delete_conversation.assert_not_called()
         self.assertEqual(self._receipt_flag("turn-1"), (1, "conv-current"))
         self.assertEqual(self.stored("openai_conversation_id"), "conv-current")
@@ -205,9 +195,8 @@ class CoachConversationProvisionTests(unittest.TestCase):
         self.assertEqual(self.service.rotate("turn-1", "conv-old"), "conv-new")
         self.service.remote_delete_thread.join(timeout=5)
 
-        self.openai.request.assert_called_once_with(
-            "/conversations",
-            {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
+        self.openai.create_conversation.assert_called_once_with(
+            {"app": "intervals-coach", "purpose": "personal-coach"}
         )
         self.openai.delete_conversation.assert_called_once_with("conv-old")
         self.assertEqual(self.stored("openai_conversation_id"), "conv-new")
@@ -232,7 +221,7 @@ class CoachConversationProvisionTests(unittest.TestCase):
 
     def test_rotate_invalid_id_is_502_and_persists_nothing(self):
         self._used_conversation()
-        self.openai.request.return_value = {"id": None}
+        self.openai.create_conversation.side_effect = AppError(502, "synthetic")
 
         with self.assertRaises(AppError) as raised:
             self.service.rotate("turn-1", "conv-old")

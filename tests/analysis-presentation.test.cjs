@@ -27,6 +27,9 @@ test("ratio units such as W/bpm keep significant digits and small efficiencies a
   assert.equal(analysisValue(1.5, "W/bpm"), "1,5 W/bpm");
   assert.equal(analysisValue(12.34, "W"), "12,3 W", "other units keep one decimal");
   assert.equal(analysisValue(10.123456789, ""), "10,1");
+  // A precise VO2max keeps its decimal; a whole value stays whole (#2263).
+  assert.equal(analysisValue(54.3, "ml/kg/min"), "54,3 ml/kg/min");
+  assert.equal(analysisValue(54, "ml/kg/min"), "54 ml/kg/min");
   assert.equal(analysisValue(null, "W/bpm"), "unbekannt");
 });
 
@@ -50,6 +53,13 @@ test("race prediction rows exclude body weight and empty states give a reason", 
   });
   assert.deepEqual(Array.from(rows, (row) => row.label), ["5 km"]);
   assert.equal(racePredictionRows(undefined).length, 0);
+  // 5 and 10 km show seconds, the half and full marathon hours and minutes (#2263).
+  const { predictionTime } = extractFunctions("performance-view.js", ["predictionTime"], { AppFormat: require("../public/format.js") });
+  const shown = Object.fromEntries(racePredictionRows({
+    run_5k_seconds: { value: 1307 }, run_10k_seconds: { value: 2741.4 }, run_half_marathon_seconds: { value: 5960 }, run_marathon_seconds: { value: 12_310 },
+  }).map(({ label, metric, withSeconds }) => [label, predictionTime(metric.value, withSeconds)]));
+  assert.deepEqual(shown, { "5 km": "21:47", "10 km": "45:41", Halbmarathon: "1:39 h", Marathon: "3:25 h" });
+  assert.equal(predictionTime(3735, true), "1:02:15 h", "an hour or more carries h like the longer races");
 
   assert.equal(
     racePredictionEmptyReason({ weight_kg: { value: 72.4 } }),

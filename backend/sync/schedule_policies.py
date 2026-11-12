@@ -21,15 +21,12 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from backend.athlete.profile import ProfileService
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
+from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_runtime import ProviderSchedulePolicy
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.state import SyncStateRepository
 
 ScheduleTrigger = Literal["daily", "startup"]
@@ -79,7 +76,9 @@ class CalendarSchedulePolicy:
 class GarminSchedulePolicy:
     """Scheduled when Garmin is configured, with its automatic sync window.
 
-    ``blocked`` reports a Garmin resync reset when the gate is given.
+    ``blocked`` reports a Garmin resync reset when the gate is given. With an
+    active change check (a Personal API key) the check decides when the refresh
+    is due instead of the hourly marker (#2303).
     """
 
     def __init__(
@@ -87,10 +86,18 @@ class GarminSchedulePolicy:
         garmin: GarminSyncService,
         automatic_sync_days: int,
         resync_gate: ProviderResyncGate | None = None,
+        change_check: GarminChangeCheck | None = None,
     ) -> None:
         self._garmin = garmin
         self._automatic_sync_days = automatic_sync_days
         self._resync_gate = resync_gate
+        self._change_check = change_check
+
+    def refresh_due(self, marker_due: Callable[[], bool]) -> bool:
+        """The change check's answer, or the hourly marker without one."""
+        if self._change_check is None or not self._change_check.active():
+            return marker_due()
+        return self._change_check.refresh_due(marker_due)
 
     def configured(self) -> bool:
         return self._garmin.configured()

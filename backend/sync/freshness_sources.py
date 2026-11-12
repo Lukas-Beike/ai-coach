@@ -14,15 +14,10 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.provider_credentials import WAHOO_TOKENS_KEY
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
 from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
 

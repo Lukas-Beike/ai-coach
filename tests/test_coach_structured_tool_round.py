@@ -21,6 +21,8 @@ from backend.coach.structured_tool_round import (
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.errors import AppError
 from backend.observability import JsonLogFormatter, Redactor
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_responses_adapter import request_payload
 from tests import test_observability as observability_tests
 
 
@@ -41,7 +43,7 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.failure = Mock()
         self.jobs = Mock()
         self.response = Mock()
-        self.response.respond.return_value = {"output": []}
+        self.response.respond.return_value = ModelTurn()
         self.write_gate = Mock()
         self.write_gate.open_turn.return_value.denial.return_value = None
         self.service = CoachStructuredToolRoundService(
@@ -79,7 +81,7 @@ class StructuredToolRoundTests(unittest.TestCase):
             client_turn_id="synthetic-turn",
             session_csrf_hash="synthetic-session",
             cancel_event=cancelled_event,
-            request_payload={"input": []},
+            request=ModelRequest(model="synthetic-model", instructions="synthetic"),
             model_instructions="synthetic-instructions",
             message="synthetic-message",
             attachments=[],
@@ -272,7 +274,7 @@ class StructuredToolRoundTests(unittest.TestCase):
         self,
     ) -> None:
         state = self.state()
-        first_response = {"id": "response-one", "output": [self.call()]}
+        first_response = ModelTurn(tool_calls=[self.call()])
 
         with patch.object(
             self.service,
@@ -288,11 +290,11 @@ class StructuredToolRoundTests(unittest.TestCase):
                 first_response, rounds=0, question="", cancelled=False, state=state
             )
 
-        self.assertEqual(result[:4], ({"output": []}, 1, "", False))
+        self.assertEqual(result[:4], (ModelTurn(), 1, "", False))
         # The model may still answer without tools; that is not exhaustion.
         self.response.respond.assert_called_once()
         self.assertFalse(state.budget_exhausted)
-        followup = self.response.respond.call_args.args[0]
+        followup = request_payload(self.response.respond.call_args.args[0])
         self.assertEqual(followup["tool_choice"], "auto")
         self.assertNotIn("previous_response_id", followup)
         self.assertEqual(followup["input"][-1]["call_id"], "call-one")
@@ -306,7 +308,11 @@ class StructuredToolRoundTests(unittest.TestCase):
         self,
     ) -> None:
         state = self.state()
-        state.request_payload = {"input": '{"current_message":"hi"}', "store": False}
+        state.request = ModelRequest(
+            model="synthetic-model",
+            instructions="synthetic",
+            input='{"current_message":"hi"}',
+        )
         self.service._limits = CoachStructuredToolRoundLimits(
             max_rounds=3,
             background_horizon_days=7,
@@ -314,12 +320,11 @@ class StructuredToolRoundTests(unittest.TestCase):
             long_plan_max_output_tokens=32000,
         )
         reasoning = {"type": "reasoning", "id": "rs-1", "encrypted_content": "enc-1"}
-        unusable = {"type": "reasoning", "id": "rs-2"}
         first_call = self.call()
         second_call = {**self.call(), "call_id": "call-two"}
         self.response.respond.side_effect = [
-            {"id": "response-two", "output": [second_call]},
-            {"id": "response-three", "output": []},
+            ModelTurn(tool_calls=[second_call], opaque_state=[second_call]),
+            ModelTurn(),
         ]
 
         with patch.object(
@@ -333,14 +338,19 @@ class StructuredToolRoundTests(unittest.TestCase):
             ),
         ):
             self.service.run(
-                {"id": "response-one", "output": [reasoning, unusable, first_call]},
+                ModelTurn(
+                    tool_calls=[first_call], opaque_state=[reasoning, first_call]
+                ),
                 rounds=0,
                 question="",
                 cancelled=False,
                 state=state,
             )
 
-        first, second = (call.args[0] for call in self.response.respond.call_args_list)
+        first, second = (
+            request_payload(call.args[0])
+            for call in self.response.respond.call_args_list
+        )
         answer = {"type": "function_call_output", "output": '{"ok": true}'}
         expected_first = [
             {"role": "user", "content": '{"current_message":"hi"}'},
@@ -359,7 +369,12 @@ class StructuredToolRoundTests(unittest.TestCase):
 
     def test_attachment_conversation_follows_up_with_outputs_only(self) -> None:
         state = self.state()
-        state.request_payload = {"conversation": "conv-1", "input": "text"}
+        state.request = ModelRequest(
+            model="synthetic-model",
+            instructions="synthetic",
+            input="text",
+            conversation_id="conv-1",
+        )
 
         with patch.object(
             self.service,
@@ -367,14 +382,14 @@ class StructuredToolRoundTests(unittest.TestCase):
             return_value=("read_profile", "call-one", {"ok": True}, {}),
         ):
             self.service.run(
-                {"id": "response-one", "output": [self.call()]},
+                ModelTurn(tool_calls=[self.call()]),
                 rounds=0,
                 question="",
                 cancelled=False,
                 state=state,
             )
 
-        followup = self.response.respond.call_args.args[0]
+        followup = request_payload(self.response.respond.call_args.args[0])
         self.assertNotIn("previous_response_id", followup)
         self.assertEqual([item["call_id"] for item in followup["input"]], ["call-one"])
 
@@ -386,8 +401,8 @@ class StructuredToolRoundTests(unittest.TestCase):
             + [{"tool": "synthetic-secret-name", "result": {"ok": False}}]
         )
         self.response.respond.side_effect = [
-            {"id": "response-two", "output": [self.call()]},
-            {"output": []},
+            ModelTurn(tool_calls=[self.call()], opaque_state=[self.call()]),
+            ModelTurn(),
         ]
 
         with (
@@ -399,14 +414,17 @@ class StructuredToolRoundTests(unittest.TestCase):
             self.assertLogs("intervals_coach", level="WARNING") as logs,
         ):
             self.service.run(
-                {"output": [self.call()]},
+                ModelTurn(tool_calls=[self.call()]),
                 rounds=0,
                 question="",
                 cancelled=False,
                 state=state,
             )
 
-        last, final = (call.args[0] for call in self.response.respond.call_args_list)
+        last, final = (
+            request_payload(call.args[0])
+            for call in self.response.respond.call_args_list
+        )
         self.assertEqual(last["tool_choice"], "auto")
         self.assertNotIn("Tool step limit reached", last["instructions"])
         self.assertEqual(final["tool_choice"], "none")
@@ -436,7 +454,7 @@ class StructuredToolRoundTests(unittest.TestCase):
             self.assertRaises(AppError),
         ):
             self.service.run(
-                {"output": [self.call()]},
+                ModelTurn(tool_calls=[self.call()]),
                 rounds=0,
                 question="",
                 cancelled=False,
@@ -515,7 +533,7 @@ class StructuredToolRoundTests(unittest.TestCase):
         state = self.state()
         state.message = "How is recovery?"
         state.attachments = []
-        state.request_payload["conversation"] = "synthetic-attachment-conversation"
+        state.request.conversation_id = "synthetic-attachment-conversation"
         self.execution.execute.return_value = {
             "ok": True,
             "synchronous_refresh": True,
@@ -565,7 +583,7 @@ class StructuredToolRoundTests(unittest.TestCase):
     def test_successful_context_reload_logs_counts_without_content(self) -> None:
         state = self.reload_state()
         self.execution.execute.return_value = self.reload_result()
-        response = {"id": "response-one", "output": [self.reload_call()]}
+        response = ModelTurn(tool_calls=[self.reload_call()])
 
         with self.assertLogs("intervals_coach", level="INFO") as logs:
             self.service.run(
@@ -591,7 +609,7 @@ class StructuredToolRoundTests(unittest.TestCase):
     def test_formatted_context_reload_keeps_counts_in_context(self) -> None:
         state = self.reload_state()
         self.execution.execute.return_value = self.reload_result()
-        response = {"id": "response-one", "output": [self.reload_call()]}
+        response = ModelTurn(tool_calls=[self.reload_call()])
 
         with self.assertLogs("intervals_coach", level="INFO") as logs:
             self.service.run(

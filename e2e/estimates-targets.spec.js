@@ -34,14 +34,15 @@ test("@responsive light analysis load has no axe violation and no control below 
   expect(await smallControls(page)).toEqual([]);
 });
 
-test("@responsive derived values carry the chip and race predictions are whole minutes", async ({ page }) => {
+test("@responsive derived values carry the chip and race predictions show seconds only for 5 and 10 km", async ({ page }) => {
   test.setTimeout(120_000);
   await open(page, "analysis/running", "#performancePredictions .race-predictions-table");
   const predictions = page.locator("#performancePredictions");
   await expect(predictions.getByRole("heading", { name: /^Laufprognosen/ }).locator(".estimate-chip")).toHaveText("Schätzung");
-  const times = await predictions.locator("tbody td").allTextContents();
-  expect(times.length).toBeGreaterThan(0);
-  for (const time of times) expect(time).toMatch(/^(\d{1,2} min|\d{1,2}:\d{2} h)$/);
+  const rows = await predictions.locator("tbody tr").evaluateAll((items) => items.map((row) => [row.querySelector("th").textContent, row.querySelector("td").textContent]));
+  expect(rows.length).toBeGreaterThan(0);
+  // #2263: 5 and 10 km as m:ss, the longer races in hours and minutes.
+  for (const [distance, time] of rows) expect(time).toMatch(["5 km", "10 km"].includes(distance) ? /^(\d{1,2}:\d{2}|\d:\d{2}:\d{2} h)$/ : /^\d{1,2}:\d{2} h$/);
   await open(page, "analysis/load", "#sessionPerformance h3");
   for (const title of [/^Session-RPE-Last/, /^Kurz-\/Langzeitbelastung/]) {
     await expect(page.getByRole("heading", { name: title }).first().locator(".estimate-chip")).toHaveText("Schätzung");

@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
 from backend.canonical.local_time import local_date
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import WAHOO_ID, ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -36,7 +36,6 @@ from backend.providers.canonical_plans import (
     WAHOO_WORKOUTS_KEY,
     wahoo_ingest_plan,
 )
-from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.providers.wahoo_client import (
     POWER_ZONES_SCOPE,
     USER_SCOPE,
@@ -51,6 +50,7 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 
 FRESHNESS_AREA: Final = "activities"

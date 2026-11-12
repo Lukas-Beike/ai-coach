@@ -29,6 +29,7 @@ ENTITY_TYPES = {
     "nutrition_entry",
     "nutrition_template",
     "nutrition_product",
+    "food_database_entry",
     "checkin",
     "equipment",
     "equipment_assignment",
@@ -228,6 +229,23 @@ NUTRITION_PRODUCT_FIELDS = (
     "extraction_confidence",
     "status",
 )
+# A stored database food: its nutrient values and the basis they count on. Only
+# a gap fill and the athlete's edit record it; a refetch replaces the values and
+# so ends undo.
+FOOD_DATABASE_ENTRY_FIELDS = (
+    "id",
+    "basis_amount",
+    "basis_unit",
+    # Where each filled or edited value came from; undo puts it back.
+    "filled_fields",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "sugar_g",
+    "fiber_g",
+    "salt_g",
+)
 # One daily check-in; its entity id is the check-in date. The day status and the
 # tag answers live beside the row and are present only once the athlete set them.
 CHECKIN_FIELDS = (
@@ -319,6 +337,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
         "nutrition_template": set(NUTRITION_TEMPLATE_FIELDS),
         "nutrition_product": set(NUTRITION_PRODUCT_FIELDS),
+        "food_database_entry": set(FOOD_DATABASE_ENTRY_FIELDS),
         "checkin": set(CHECKIN_FIELDS),
         "equipment": set(EQUIPMENT_FIELDS),
         "equipment_assignment": set(EQUIPMENT_ASSIGNMENT_FIELDS),
@@ -411,6 +430,8 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
     ),
     "planned_unit": (("starts_at_local",), FOCUS_KEYS),
     "workout_library": (FOCUS_KEYS,),
+    # Gap fills of stored foods were recorded before the origin marks were.
+    "food_database_entry": (("filled_fields",),),
 }
 
 
