@@ -23,7 +23,6 @@ from tests import canonical_field_map_support as support
 # Provider modules that name canonical enum members without mapping provider payloads.
 NOT_MAPPERS: Final[dict[str, str]] = {
     "canonical_plans": "versioned observation/plan projections of stored rows",
-    "descriptors": "provider capability and sync descriptors",
     "source_labels": "display labels for provider ids and source kinds",
     "intervals_workouts": "outbound workout payloads for the output target",
 }

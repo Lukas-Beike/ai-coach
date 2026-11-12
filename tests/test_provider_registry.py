@@ -231,6 +231,25 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             descriptor.max_sync_days = 1  # type: ignore[misc]
 
+    def test_table_entries_are_unique_and_consistent(self) -> None:
+        # The table is fixed data; this replaces the former runtime validation.
+        table = DEFAULT_PROVIDER_DESCRIPTORS
+        ids = [entry.provider_id for entry in table]
+        areas = [(e.provider_id, a.area) for e in table for a in e.freshness_areas]
+        routes = [e.manual_sync.path for e in table if e.manual_sync is not None]
+        routes += [e.full_resync_path for e in table if e.full_resync_path]
+        for values in (ids, areas, routes):
+            self.assertEqual(len(values), len(set(values)), values)
+        self.assertTrue(all(route.startswith("/") for route in routes), routes)
+        for entry in table:
+            with self.subTest(provider=entry.provider_id):
+                self.assertEqual(
+                    bool(entry.metric_exports),
+                    Capability.METRIC_EXPORT in entry.capabilities,
+                )
+                self.assertLessEqual(entry.default_sync_days or 0, entry.max_sync_days)
+                self.assertIn(len(entry.resync_keys), (0, 4))
+
 
 class RegistryContractTests(unittest.TestCase):
     def test_mock_provider_flows_through_every_lookup(self) -> None:

@@ -7,6 +7,10 @@ routes). A further provider is a new entry. This is the one sync module that
 names providers; ``ProviderRegistry`` (backend/sync/provider_registry.py) reads
 the table and names none.
 
+The Garmin, Wahoo and Intervals.icu identifiers are canonical provider ids
+(backend/canonical/vocabulary.py); weather and calendar are sync-only ids
+defined here.
+
 Capabilities describe what each provider can supply. ``ProviderRegistry.ids_with``
 reads them, and the explicit library and metric exports check that their target
 declares the export capability.
