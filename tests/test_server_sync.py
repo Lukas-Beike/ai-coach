@@ -666,9 +666,12 @@ class ServerSyncTests(ServerTestCase):
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
             ),
             patch.object(
-                server.PROVIDER_TRANSPORT,
-                "intervals_client",
-                return_value=FakeIntervalsClient(),
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT,
+                    intervals_client=Mock(return_value=FakeIntervalsClient()),
+                ),
             ),
         ):
             result = server.SYNC_COMMANDS.illness_pause().apply(
@@ -1337,7 +1340,12 @@ class ServerSyncTests(ServerTestCase):
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
             ),
             patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT,
+                    intervals_client=Mock(return_value=client),
+                ),
             ),
         ):
             created = server.PROVIDER_RESYNC.competition_sync_service().sync(
@@ -1464,7 +1472,11 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
+                ),
             ),
             patch.object(
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
@@ -1510,7 +1522,11 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
+                ),
             ),
             patch.object(
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")

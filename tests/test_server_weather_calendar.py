@@ -1150,7 +1150,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
             **parsed_workout_fixture(3600, value=65),
         }
         with patch.object(
-            server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
+            server,
+            "PROVIDER_TRANSPORT",
+            replace(
+                server.PROVIDER_TRANSPORT,
+                intervals_client=Mock(return_value=client),
+            ),
         ):
             result = server.WORKOUT_LIBRARY_SYNC.sync_service().plan_remote(
                 "remote-workout-1",

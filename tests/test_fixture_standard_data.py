@@ -37,6 +37,7 @@ from backend.performance.body import body_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.freshness import GarminSyncStatus
+from backend.providers import http as provider_http
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.model_seam import ModelRequest
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
@@ -45,7 +46,7 @@ from backend.sync.garmin_payload_metrics import garmin_payload_performance_metri
 # callables. Capture those replacements, restore the process state at once, and let
 # setUp re-apply the replacements for this module's tests only.
 _SERVER_HOOKS = (
-    (server.provider_http.JsonHttpClient, "request"),
+    (provider_http.JsonHttpClient, "request"),
     (server.COACH_CONVERSATION, "provision_service"),
     (server.COACH_CONVERSATION, "response_transport"),
     (server, "initialise_database"),

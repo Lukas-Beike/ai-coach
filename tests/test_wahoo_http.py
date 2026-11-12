@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 from server_test_support import ServerTestCase, create_test_session, server
 
 from backend.http_api import server as http_server_module
+from backend.providers import http as provider_http
 
 REDIRECT = "https://coach.example.invalid/api/wahoo/callback"
 ACCESS = "tok-access-SENTINEL"
@@ -46,11 +47,7 @@ class WahooHttpTests(ServerTestCase):
             patch.object(
                 server.app_config, "security_configuration_error", return_value=None
             ),
-            patch.object(
-                server.PROVIDER_TRANSPORT,
-                "json_http_client",
-                return_value=Mock(request=self.transport),
-            ),
+            patch.object(provider_http.JsonHttpClient, "request", self.transport),
         )
         for item in patches:
             item.start()

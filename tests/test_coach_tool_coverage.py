@@ -27,6 +27,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
+from backend.providers import openai_requests
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.sync.adaptive import IllnessPauseSyncService
 
@@ -2156,7 +2157,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
         client.complete.side_effect = complete
         with patch.object(
-            server.MODEL_TRANSPORT, "openai_responses_client", return_value=client
+            openai_requests, "OpenAIResponsesClient", return_value=client
         ):
             result = self.run_tool(
                 "search_web_for_product_values", {"products": [own["id"]]}
