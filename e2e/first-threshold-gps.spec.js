@@ -80,15 +80,43 @@ test("the GPS-tracks switch persists across a reload", async ({ page }) => {
   await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: before });
 });
 
-test("a failed GPS-tracks save restores the previous switch state", async ({ page }) => {
-  const before = await openPrivacy(page);
+test("the GPS-tracks switch takes clicks once loaded and a failed save restores the confirmed state", async ({ page }) => {
+  // #2418: no click before the stored state is shown.
+  const isGet = (response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET";
+  let releaseLoad;
+  const loadHeld = new Promise((resolve) => { releaseLoad = resolve; });
+  await page.route("**/api/privacy/gps", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await loadHeld;
+    return route.continue();
+  });
+  await openMore(page, "operations");
+  const summary = page.locator("#privacySection summary");
   const toggle = page.locator("#gpsTracksToggle");
-  await page.route("**/api/privacy/gps", (route) => (
-    route.request().method() === "POST"
-      ? route.fulfill({ status: 500, json: { error: "Synthetischer Fehler" } })
-      : route.continue()
-  ));
+  const loaded = page.waitForResponse(isGet);
+  await summary.click();
+  await expect(toggle).toBeDisabled();
+  releaseLoad();
+  const before = Boolean((await (await loaded).json()).enabled);
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeChecked({ checked: before });
+
+  // A failed save restores the server-confirmed state, also when a reload rendered it meanwhile.
+  let failSave;
+  const saveHeld = new Promise((resolve) => { failSave = resolve; });
+  await page.route("**/api/privacy/gps", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await saveHeld;
+    return route.fulfill({ status: 500, json: { error: "Synthetischer Fehler" } });
+  });
   await toggle.click();
+  await expect(toggle).toBeChecked({ checked: !before });
+  const reloaded = page.waitForResponse(isGet);
+  await summary.click();
+  await summary.click();
+  await reloaded;
+  await expect(toggle).toBeChecked({ checked: before });
+  failSave();
   await expect(page.locator("#toast")).toBeVisible();
   await expect(toggle).toBeChecked({ checked: before });
 });

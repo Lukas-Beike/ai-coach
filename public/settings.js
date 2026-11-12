@@ -323,7 +323,10 @@ function renderGpsTracks(gps) {
 }
 
 async function loadGpsTracks() {
-  try { renderGpsTracks(await api("/api/privacy/gps")); } catch (error) { toast(error.message, true); }
+  // #2418: no click while the stored state loads, so a late load cannot overwrite it.
+  const toggle = $("#gpsTracksToggle");
+  toggle.disabled = true;
+  try { renderGpsTracks(await api("/api/privacy/gps")); } catch (error) { toast(error.message, true); } finally { toggle.disabled = false; }
 }
 
 async function saveGpsTracks(event) {
@@ -331,7 +334,7 @@ async function saveGpsTracks(event) {
   try {
     renderGpsTracks(await api("/api/privacy/gps", { method: "POST", body: JSON.stringify({ enabled: toggle.checked }) }));
   } catch (error) {
-    toggle.checked = !toggle.checked;
+    toggle.checked = Boolean(gpsTracksState.enabled);
     toast(error.message, true);
   }
 }
