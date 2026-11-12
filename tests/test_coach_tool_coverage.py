@@ -6,9 +6,13 @@ Each coverage claim must be observed as a successful tool receipt at runtime.
 
 import functools
 import json
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+# The repository root, for running this file as a script with --write.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
@@ -117,6 +121,92 @@ def variants(name, arguments, result):
             for entry in arguments["entries"]
         }
     return {"success"}
+
+
+ROOT = Path(__file__).resolve().parents[1]
+COVERAGE_DOC = ROOT / "docs/coach-tool-coverage.md"
+TOOL_MAP_DOC = ROOT / "openspec/COACH_TOOLS.md"
+SPECS_DIR = ROOT / "openspec/specs"
+BEGIN = "<!-- BEGIN GENERATED TOOL TABLE -->\n"
+END = "<!-- END GENERATED TOOL TABLE -->\n"
+
+
+def declared_cases() -> dict[str, dict[str, set[str]]]:
+    """Tool -> successful variant -> the tests that declare it with ``covers``."""
+    cases: dict[str, dict[str, set[str]]] = {}
+    for name in dir(CoachToolCoverageTests):
+        for case in getattr(getattr(CoachToolCoverageTests, name), "tool_cases", ()):
+            tool, variant = case.split(":", 1)
+            cases.setdefault(tool, {}).setdefault(variant, set()).add(name)
+    return cases
+
+
+def coverage_table() -> str:
+    lines = [
+        "| Tool | Successful variants | Scenario tests |",
+        "| --- | --- | --- |",
+    ]
+    for tool, variants in sorted(declared_cases().items()):
+        tests = sorted(set().union(*variants.values()))
+        lines.append(
+            f"| `{tool}` | {', '.join(f'`{v}`' for v in sorted(variants))} "
+            f"| {', '.join(f'`{test}`' for test in tests)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def requirement_headings() -> dict[str, str]:
+    """``capability/<id or title>`` -> ``capability / <full requirement heading>``."""
+    headings: dict[str, str] = {}
+    for spec in sorted(SPECS_DIR.glob("*/spec.md")):
+        capability = spec.parent.name
+        for line in spec.read_text(encoding="utf-8").splitlines():
+            if line.startswith("### Requirement: "):
+                heading = line.removeprefix("### Requirement: ").strip()
+                full = f"{capability} / {heading}"
+                headings[f"{capability}/{heading}"] = full
+                headings.setdefault(f"{capability}/{heading.split(' ', 1)[0]}", full)
+    return headings
+
+
+def tool_map_table() -> str:
+    from backend.coach.tool_specs import TOOL_SPECS
+
+    catalog = server.COACH_TOOL_CAPABILITIES
+    headings = requirement_headings()
+    cases = declared_cases()
+    lines = [
+        "| Tool | Surface / effect | Gate domain | Owner | Requirements | Scenario tests |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for spec in sorted(TOOL_SPECS, key=lambda item: item.name):
+        item = catalog[spec.name]
+        requirements = "; ".join(
+            f"`{headings.get(ref, 'MISSING ' + ref)}`" for ref in spec.requirements
+        )
+        tests = sorted(set().union(*cases.get(spec.name, {}).values()))
+        lines.append(
+            f"| `{spec.name}` | {item['surface']} / {spec.effect} "
+            f"| {'read' if spec.effect == 'read' else spec.domain or 'ungated'} "
+            f"| {spec.owner} | {requirements} "
+            f"| {', '.join(f'`{test}`' for test in tests)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _generated(path: Path) -> str:
+    return path.read_text(encoding="utf-8").split(BEGIN, 1)[1].split(END, 1)[0]
+
+
+def write_generated_tables() -> None:
+    for path, table in (
+        (COVERAGE_DOC, coverage_table()),
+        (TOOL_MAP_DOC, tool_map_table()),
+    ):
+        before, rest = path.read_text(encoding="utf-8").split(BEGIN, 1)
+        path.write_text(
+            before + BEGIN + table + END + rest.split(END, 1)[1], encoding="utf-8"
+        )
 
 
 class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
@@ -1225,18 +1315,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertLessEqual(
                 {tool + ":" + variant for variant in required}, declared, tool
             )
-        document = (
-            Path(__file__).resolve().parents[1] / "docs" / "coach-tool-coverage.md"
-        ).read_text(encoding="utf-8")
-        documented = set()
-        for line in document.splitlines():
-            if line.startswith("| `"):
-                name, variants_text, _ = line.split("|")[1:4]
-                documented.update(
-                    name.strip().strip("`") + ":" + value.strip().strip("`")
-                    for value in variants_text.split(",")
-                )
-        self.assertEqual(documented, declared)
+        self.assertEqual(
+            _generated(COVERAGE_DOC),
+            coverage_table(),
+            "Regenerate with: python tests/test_coach_tool_coverage.py --write",
+        )
 
     def test_capability_catalog_covers_each_schema_dispatch_owner_and_effect_policy(
         self,
@@ -1276,6 +1359,28 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(catalog["apply_training_patch"]["surface"], "dialogue_only")
         self.assertIn("apply_training_changes", server.COACH_CANONICAL_TOOL_NAMES)
         self.assertEqual(catalog["apply_training_changes"]["surface"], "canonical_only")
+
+    def test_tool_map_is_current_and_every_requirement_exists(self):
+        from backend.coach.tool_specs import TOOL_SPECS
+
+        headings = requirement_headings()
+        self.assertEqual(
+            [
+                f"{spec.name}: {ref}"
+                for spec in TOOL_SPECS
+                for ref in spec.requirements
+                if ref not in headings
+            ],
+            [],
+        )
+        self.assertEqual(
+            [spec.name for spec in TOOL_SPECS if not spec.requirements], []
+        )
+        self.assertEqual(
+            _generated(TOOL_MAP_DOC),
+            tool_map_table(),
+            "Regenerate with: python tests/test_coach_tool_coverage.py --write",
+        )
 
     def test_tool_specs_describe_every_catalog_tool_with_a_real_owner(self):
         # backend/coach/tool_specs.py is the one source of the tool tables
@@ -2535,4 +2640,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if "--write" in sys.argv:
+        write_generated_tables()
+    else:
+        unittest.main()

@@ -44,6 +44,19 @@ CLARIFICATION = "CoachClarificationService"
 EXECUTION = "CoachStructuredToolExecutionService"
 
 
+# Requirements several tools serve.
+ATHLETE_SESSION_CORRECTIONS = (
+    "activity-ingestion-and-storage/Athlete session corrections"
+)
+CA1 = "coach-tool-authority/CA1"
+CA2 = "coach-tool-authority/CA2"
+CA4 = "coach-tool-authority/CA4"
+CA5 = "coach-tool-authority/CA5"
+CA6 = "coach-tool-authority/CA6"
+CP7 = "coach-context-and-provenance/CP7"
+TL6 = "training-library/TL6"
+
+
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
     name: str
@@ -63,31 +76,83 @@ class ToolSpec:
     self_guarded: bool = False  # the plan check runs inside the tool
     mutates_profile: bool = False  # runs under the profile coordinator
     external_food_lookup: bool = False  # may call the food database
+    # The specification requirements the tool serves, as
+    # "<capability>/<requirement id>" or "<capability>/<requirement title>".
+    requirements: tuple[str, ...] = ()
 
 
 def _read(
-    name: str, owner: str = READS, *, external_food_lookup: bool = False
+    name: str,
+    owner: str = READS,
+    *,
+    external_food_lookup: bool = False,
+    requirements: tuple[str, ...] = (),
 ) -> ToolSpec:
-    return ToolSpec(name, owner, READ, external_food_lookup=external_food_lookup)
+    return ToolSpec(
+        name,
+        owner,
+        READ,
+        external_food_lookup=external_food_lookup,
+        requirements=requirements,
+    )
 
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
-    _read("read_coach_context"),
-    _read("read_profile"),
-    _read("read_training_state"),
-    _read("list_recent_activities"),
-    _read("get_activity_details"),
-    _read("get_training_report"),
-    _read("read_training_records"),
-    _read("list_workout_library"),
-    _read("list_planned_workouts"),
-    _read("list_change_history"),
-    _read("list_competitions"),
-    _read("list_training_plans"),
-    _read("get_sync_job", SYNC),
-    _read("read_nutrition"),
-    _read("lookup_food", external_food_lookup=True),
-    _read("calculate_food_nutrition", external_food_lookup=True),
+    _read("read_coach_context", requirements=("coach-context-and-provenance/CP4",)),
+    _read(
+        "read_profile",
+        requirements=(
+            "athlete-profile-and-checkins/AP1",
+            "athlete-profile-and-checkins/AP2",
+        ),
+    ),
+    _read("read_training_state", requirements=(TL6,)),
+    _read("list_recent_activities", requirements=(CP7,)),
+    _read("get_activity_details", requirements=(CP7,)),
+    _read(
+        "get_training_report",
+        requirements=(
+            CP7,
+            "competitions-and-seasons/CS7",
+        ),
+    ),
+    _read(
+        "read_training_records",
+        requirements=(
+            "athlete-profile-and-checkins/AP8",
+            "athlete-profile-and-checkins/AP9",
+            "athlete-profile-and-checkins/AP10",
+        ),
+    ),
+    _read("list_workout_library", requirements=(TL6,)),
+    _read(
+        "list_planned_workouts",
+        requirements=("training-library/TL5", TL6),
+    ),
+    _read("list_change_history", requirements=("change-history-and-undo/HU2",)),
+    _read(
+        "list_competitions",
+        requirements=(
+            "competitions-and-seasons/CS2",
+            "coach-context-and-provenance/CP1",
+        ),
+    ),
+    _read("list_training_plans", requirements=("training-plans-and-adaptation/TP4",)),
+    _read("get_sync_job", SYNC, requirements=("coach-context-and-provenance/CP6",)),
+    _read(
+        "read_nutrition",
+        requirements=(CA1, CA2),
+    ),
+    _read(
+        "lookup_food",
+        external_food_lookup=True,
+        requirements=(CA1, "coach-context-and-provenance/CP8"),
+    ),
+    _read(
+        "calculate_food_nutrition",
+        external_food_lookup=True,
+        requirements=(CA1, CA2),
+    ),
     ToolSpec(
         "update_profile",
         PROFILE_UPDATE,
@@ -95,6 +160,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Profil aktualisiert",
         action="Profil aktualisieren",
         mutates_profile=True,
+        requirements=("athlete-profile-and-checkins/AP2",),
     ),
     ToolSpec(
         "save_checkin",
@@ -102,6 +168,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=CHECKIN,
         done="Tages-Check-in gespeichert",
         action="Tages-Check-in speichern",
+        requirements=(
+            "athlete-profile-and-checkins/AP4",
+            "athlete-profile-and-checkins/AP5",
+            "athlete-profile-and-checkins/AP6",
+        ),
     ),
     ToolSpec(
         "save_activity_feedback",
@@ -109,6 +180,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=CHECKIN,
         done="Aktivitätsfeedback gespeichert",
         action="Aktivitätsfeedback speichern",
+        requirements=("athlete-profile-and-checkins/AP7",),
     ),
     ToolSpec(
         "delete_activity_feedback",
@@ -117,6 +189,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Aktivitätsfeedback entfernt",
         action="Aktivitätsfeedback entfernen",
         deletes=True,
+        requirements=("athlete-profile-and-checkins/AP7", CA4),
     ),
     ToolSpec(
         "save_competition",
@@ -124,6 +197,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=COMPETITION,
         done="Wettkampf gespeichert",
         action="Wettkampf speichern",
+        requirements=("competitions-and-seasons/CS1", "competitions-and-seasons/CS2"),
     ),
     ToolSpec(
         "delete_competition",
@@ -132,6 +206,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Wettkampf entfernt",
         action="Wettkampf entfernen",
         deletes=True,
+        requirements=("competitions-and-seasons/CS4", CA4),
     ),
     ToolSpec(
         "save_nutrition_template",
@@ -140,6 +215,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Mahlzeitvorlage gespeichert",
         action="Mahlzeitvorlage speichern",
         external_food_lookup=True,
+        requirements=(CA6, "coach-tool-authority/CA10"),
     ),
     ToolSpec(
         "save_nutrition_product",
@@ -148,6 +224,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Produkt lokal gespeichert",
         action="Produkt lokal speichern",
         external_food_lookup=True,
+        requirements=(CA6, "coach-tool-authority/CA10"),
     ),
     ToolSpec(
         "delete_nutrition_template",
@@ -156,6 +233,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Mahlzeitvorlage entfernt",
         action="Mahlzeitvorlage entfernen",
         deletes=True,
+        requirements=(CA2, CA4),
     ),
     ToolSpec(
         "log_nutrition_template",
@@ -163,6 +241,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=NUTRITION,
         done="Verzehr gespeichert",
         action="Verzehr erfassen",
+        requirements=(CA2, "coach-tool-authority/CA9"),
     ),
     ToolSpec(
         "save_nutrition_entry",
@@ -170,6 +249,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=NUTRITION,
         done="Ernährungseintrag gespeichert",
         action="Ernährungseintrag speichern",
+        requirements=(
+            CA2,
+            "coach-tool-authority/CA3",
+            "coach-tool-authority/CA9",
+        ),
     ),
     ToolSpec(
         "update_nutrition_entry",
@@ -177,6 +261,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=NUTRITION,
         done="Ernährungseintrag korrigiert",
         action="Ernährungseintrag korrigieren",
+        requirements=(CA2, "coach-tool-authority/CA3"),
     ),
     ToolSpec(
         "delete_nutrition_entry",
@@ -185,6 +270,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Ernährungseintrag entfernt",
         action="Ernährungseintrag entfernen",
         deletes=True,
+        requirements=(CA2, CA4),
     ),
     ToolSpec(
         "save_equipment",
@@ -192,6 +278,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Ausrüstung lokal gespeichert",
         action="Ausrüstung speichern",
+        requirements=("athlete-profile-and-checkins/AP8", CA4),
     ),
     ToolSpec(
         "assign_activity_equipment",
@@ -199,6 +286,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Ausrüstung zugeordnet",
         action="Ausrüstung zuordnen",
+        requirements=("athlete-profile-and-checkins/AP9", CA2),
     ),
     ToolSpec(
         "confirm_activity_session",
@@ -206,6 +294,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Aufzeichnungen bestätigt",
         action="Aufzeichnungen bestätigen",
+        requirements=(
+            ATHLETE_SESSION_CORRECTIONS,
+            CA2,
+        ),
     ),
     ToolSpec(
         "split_activity_session",
@@ -213,6 +305,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Aufzeichnung getrennt",
         action="Aufzeichnung trennen",
+        requirements=(
+            ATHLETE_SESSION_CORRECTIONS,
+            CA2,
+        ),
     ),
     ToolSpec(
         "merge_activity_sessions",
@@ -220,6 +316,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Aktivitäten zusammengeführt",
         action="Aktivitäten zusammenführen",
+        requirements=(
+            ATHLETE_SESSION_CORRECTIONS,
+            CA2,
+        ),
     ),
     ToolSpec(
         "log_equipment_maintenance",
@@ -227,6 +327,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PROFILE,
         done="Wartung lokal erfasst",
         action="Wartung erfassen",
+        requirements=("athlete-profile-and-checkins/AP10", CA2),
     ),
     ToolSpec(
         "stage_training_plan",
@@ -235,6 +336,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Planentwurf gespeichert",
         action="Planentwurf erstellen",
         no_record=True,
+        requirements=("training-plans-and-adaptation/TP1",),
     ),
     ToolSpec(
         "commit_training_plan",
@@ -244,6 +346,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Trainingsplan speichern",
         whole_plan=True,
         plan_checked=True,
+        requirements=("training-plans-and-adaptation/TP2", CA4),
     ),
     ToolSpec(
         "replace_training_plan",
@@ -253,6 +356,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Trainingsplan vollständig ersetzen",
         whole_plan=True,
         plan_checked=True,
+        requirements=("training-plans-and-adaptation/TP6", CA4),
     ),
     ToolSpec(
         "apply_training_changes",
@@ -262,6 +366,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Geplante Einheiten bearbeiten",
         record_lists=("changes",),
         plan_checked=True,
+        requirements=("training-plans-and-adaptation/TP5", CA2),
     ),
     ToolSpec(
         "apply_training_patch",
@@ -271,6 +376,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Geplante Einheiten anpassen",
         record_lists=("changes", "workouts"),
         plan_checked=True,
+        requirements=("training-plans-and-adaptation/TP5", CA2),
     ),
     ToolSpec(
         "manage_training_templates",
@@ -279,6 +385,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Trainingsvorlagen bearbeitet",
         action="Trainingsvorlagen bearbeiten",
         record_lists=("templates",),
+        requirements=(
+            "training-library/TL1",
+            "training-library/TL2",
+            CA4,
+        ),
     ),
     ToolSpec(
         "apply_workout_library_plan",
@@ -288,6 +399,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Vorlagen einplanen",
         record_lists=("entries",),
         plan_checked=True,
+        requirements=("training-library/TL3", "training-library/TL4"),
     ),
     ToolSpec(
         "start_provider_refresh",
@@ -295,6 +407,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         PROVIDER_READ_JOB,
         done="Datenabruf beauftragt",
         action="Datenabruf starten",
+        requirements=("coach-context-and-provenance/CP6",),
     ),
     ToolSpec(
         "start_intervals_plan_sync",
@@ -303,6 +416,16 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         REMOTE_INTERVALS,
         done="Plansynchronisierung beauftragt",
         action="Plan synchronisieren",
+        requirements=(
+            "training-library/TL10",
+            "training-library/TL11",
+            "training-library/TL12",
+            "training-library/TL13",
+            "training-library/TL14",
+            "training-library/TL15",
+            CA5,
+            CA6,
+        ),
     ),
     ToolSpec(
         "push_strength_to_garmin",
@@ -311,6 +434,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         REMOTE_GARMIN,
         done="Garmin-Krafteinheiten beauftragt",
         action="Krafteinheiten an Garmin senden",
+        requirements=(
+            "garmin-strength-workout-push/Explicit Garmin strength push",
+            CA5,
+        ),
     ),
     ToolSpec(
         "sync_competitions",
@@ -319,6 +446,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         REMOTE_INTERVALS,
         done="Wettkampfsynchronisierung beauftragt",
         action="Wettkämpfe synchronisieren",
+        requirements=(
+            "competitions-and-seasons/CS5",
+            CA5,
+            CA6,
+        ),
     ),
     ToolSpec(
         "resolve_training_sync_conflict",
@@ -327,6 +459,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         REMOTE_INTERVALS,
         done="Synchronisierungskonflikt bearbeitet",
         action="Synchronisierungskonflikt bearbeiten",
+        requirements=("training-library/TL10", CA5),
     ),
     ToolSpec(
         "sync_nutrition",
@@ -335,6 +468,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         REMOTE_INTERVALS,
         done="Ernährungssynchronisierung beauftragt",
         action="Ernährung synchronisieren",
+        requirements=(CA5, CA6),
     ),
     ToolSpec(
         "preview_adaptive_replan",
@@ -343,6 +477,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Plananpassung vorgeschlagen",
         action="Plananpassung vorschlagen",
         no_record=True,
+        requirements=("training-plans-and-adaptation/TP8",),
     ),
     ToolSpec(
         "apply_adaptive_replan",
@@ -357,6 +492,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         needs_approval=True,
         plan_checked=True,
         self_guarded=True,
+        requirements=(
+            "training-plans-and-adaptation/TP9",
+            "training-plans-and-adaptation/TP10",
+            "training-plans-and-adaptation/TP11",
+            CA6,
+        ),
     ),
     ToolSpec(
         "update_training_plan",
@@ -364,6 +505,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         domain=PLANNING,
         done="Planinformationen bearbeitet",
         action="Planinformationen bearbeiten",
+        requirements=("training-plans-and-adaptation/TP4", CA4),
     ),
     ToolSpec(
         "undo_training_change",
@@ -372,9 +514,24 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         done="Rückgängig-Vorschau vorbereitet",
         action="Rückgängig-Vorschau erstellen",
         mutates_profile=True,
+        requirements=(
+            "change-history-and-undo/HU3",
+            "change-history-and-undo/HU4",
+            "change-history-and-undo/HU6",
+        ),
     ),
-    ToolSpec("clarify_coach_request", CLARIFICATION, CONTROL),
-    ToolSpec("cancel_coach_request", EXECUTION, CONTROL),
+    ToolSpec(
+        "clarify_coach_request",
+        CLARIFICATION,
+        CONTROL,
+        requirements=("coach-conversation/CC6", "coach-tool-authority/CA8"),
+    ),
+    ToolSpec(
+        "cancel_coach_request",
+        EXECUTION,
+        CONTROL,
+        requirements=("coach-conversation/CC6", "coach-tool-authority/CA8"),
+    ),
 )
 SPECS = {spec.name: spec for spec in TOOL_SPECS}
 
