@@ -122,6 +122,13 @@ def _gap_fill_lines(tool: Any, entry: dict[str, Any]) -> list[str]:
     ]
 
 
+def _append_new(target: list[Any], items: list[Any]) -> None:
+    """Add each item once, keeping the order of first appearance."""
+    for item in items:
+        if item not in target:
+            target.append(item)
+
+
 def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Summarize a turn's applied writes for the chat, or ``None`` without any.
 
@@ -138,12 +145,8 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
         undoable = (
             undoable and tool in _FULLY_TRACKED_TOOLS and bool(entry.get("changes"))
         )
-        for label in (coach_effect_label(entry), *_gap_fill_lines(tool, entry)):
-            if label not in labels:
-                labels.append(label)
-        for note in _plan_notes(entry["result"]):
-            if note not in notes:
-                notes.append(note)
+        _append_new(labels, [coach_effect_label(entry), *_gap_fill_lines(tool, entry)])
+        _append_new(notes, _plan_notes(entry["result"]))
     if not labels:
         return None
     summary = {"labels": labels, "undoable": undoable, "undone_at": None}
