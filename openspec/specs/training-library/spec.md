@@ -85,6 +85,10 @@ The system SHALL keep dated local planned units distinct from templates, preserv
 - **WHEN** an authorized local action changes content, sport or date
 - **THEN** the existing planned-unit identity and supported metadata are retained, content is normalized, its revision advances and the record is locally dirty.
 
+#### Scenario: Athlete moves a planned unit to another day
+- **WHEN** the athlete moves a planned unit with `POST /api/planned-units/{id}/date` and the content hash of the read the move was made on
+- **THEN** a day from today on is applied through the same edit and conflict checks, the start keeps its time of day, the response carries the undo reference, a sent unit shows its pending sync and no provider is written; a past day, an invalid date or an outdated hash leaves the unit unchanged.
+
 #### Scenario: Archive, restore or delete
 - **WHEN** the athlete authorizes a visibility change
 - **THEN** archive/restore changes visibility; delete marks archived/local_deleted with audit history rather than issuing an immediate provider delete.
@@ -93,7 +97,7 @@ The system SHALL keep dated local planned units distinct from templates, preserv
 - **WHEN** the ID is missing, payload is corrupt, or the target is not a dated planned unit
 - **THEN** mutation fails with the applicable not-found, corrupt-data or forbidden-target response.
 
-Evidence: `backend/planning/planned_unit_service.py:PlannedUnitService.update`, `backend/planning/planned_unit_service.py:PlannedUnitService._load_for_update`, `backend/planning/planned_unit_service.py:PlannedUnitService._save_update`; `backend/planning/planned_units.py:planned_workout_update_candidate`; `tests/test_coach_tool_coverage.py:test_planned_unit_lifecycle_keeps_identity_until_deleted`; `tests/test_planning_planned_units.py:test_candidate_supports_update_archive_and_restore`, `tests/test_planning_planned_units.py:test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved`; `tests/test_planning_planned_mutations.py:test_corrupt_json_and_non_object_payloads_are_rejected`.
+Evidence: `backend/planning/planned_unit_service.py:PlannedUnitService.update`, `backend/planning/planned_unit_service.py:PlannedUnitService.move`, `backend/http_api/planned_unit_focus_post.py`, `backend/planning/planned_unit_service.py:PlannedUnitService._load_for_update`, `backend/planning/planned_unit_service.py:PlannedUnitService._save_update`; `backend/planning/planned_units.py:planned_workout_update_candidate`; `tests/test_coach_tool_coverage.py:test_planned_unit_lifecycle_keeps_identity_until_deleted`; `tests/test_planning_planned_units.py:test_candidate_supports_update_archive_and_restore`, `tests/test_planning_planned_units.py:test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved`; `tests/test_planning_planned_mutations.py:test_corrupt_json_and_non_object_payloads_are_rejected`; `tests/test_planned_unit_service.py:test_athlete_moves_a_sent_unit_to_another_day_from_today_on`, `tests/test_http_planned_unit_focus_post.py:test_date_route_moves_the_unit_and_returns_the_undo_reference`.
 
 ### Requirement: TL6 Bounded library browsing and revision-bound plan enumeration
 The system SHALL expose active undated library pages and separately enumerate future planned-unit references with current hashes, inactive flags and revision-bound cursors.

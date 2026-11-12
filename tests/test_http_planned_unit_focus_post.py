@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from support import dispatch_route
 
+from backend import change_history
 from backend.errors import AppError
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 
@@ -64,6 +65,37 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
                 method="POST",
             )
         self.service.update.assert_not_called()
+
+    def test_date_route_moves_the_unit_and_returns_the_undo_reference(self) -> None:
+        change = {"id": "c1", "entity_type": "planned_unit", "after_hash": "h"}
+
+        def move(*_args):
+            change_history._collected_changes.get().append(change)
+            return {"status": "local", "local_id": LOCAL_ID}
+
+        self.service.move.side_effect = move
+        handler = self.handler(
+            {"date": "2026-11-14", "expected_payload_hash": "abc", "name": "x"}
+        )
+        self.assertTrue(
+            dispatch_route(
+                self.routes,
+                handler,
+                f"/api/planned-units/{LOCAL_ID}/date",
+                method="POST",
+            )
+        )
+        self.service.move.assert_called_once_with(LOCAL_ID, "2026-11-14", "abc")
+        handler.send_json.assert_called_once_with(
+            200, {"status": "local", "local_id": LOCAL_ID, "change": change}
+        )
+        with self.assertRaises(AppError):
+            dispatch_route(
+                self.routes,
+                self.handler([]),
+                f"/api/planned-units/{LOCAL_ID}/date",
+                method="POST",
+            )
 
     def test_garmin_exercise_route_passes_the_pick_to_the_service(self) -> None:
         self.service.assign_garmin_exercise.return_value = {"status": "local"}

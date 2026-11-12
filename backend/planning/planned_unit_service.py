@@ -21,7 +21,7 @@ from backend.canonical.planning_fields import (
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
-from backend.errors import CORRUPT_PLANNING_ERROR, AppError
+from backend.errors import CORRUPT_PLANNING_ERROR, INVALID_PLANNING_DATE_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
@@ -632,19 +632,7 @@ class PlannedUnitService:
         it is refused.
         """
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload, sync_state FROM planned_units "
-                "WHERE local_id=? AND tombstone=0",
-                (str(local_id),),
-            ).fetchone()
-            if row is None:
-                raise AppError(404, "Einheit nicht gefunden.")
-            if not planned_units.plan_push_hash_matches(row["payload"], expected_hash):
-                raise AppError(
-                    409,
-                    "Die Einheit wurde inzwischen geändert.",
-                    reason="planning_revision_conflict",
-                )
+            row = _unchanged_row(db, local_id, expected_hash)
             structure = json.loads(row["payload"] or "{}").get(STRENGTH_STRUCTURE)
             if (
                 not isinstance(structure, list)
@@ -665,6 +653,45 @@ class PlannedUnitService:
                 skip_calendar_conflict=True,
                 bump_planning_revision=True,
                 remote_neutral=True,
+            )
+        self._publish_change()
+        return result
+
+    def move(
+        self, local_id: str, target_date: Any, expected_hash: Any
+    ) -> dict[str, Any]:
+        """Move a unit to another day from today on, without a remote write.
+
+        It is an ordinary local edit: the calendar conflict checks apply, the
+        change history records it for undo, and a unit already sent to a
+        provider shows its pending sync. A unit changed since the browser read
+        it, or archived or deleted, is refused; its own day changes nothing.
+        """
+        normalized_id = planned_units.planned_workout_update_request(local_id, {})[0]
+        try:
+            day = LocalDate.parse(target_date, allow_datetime=False).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
+        if day < self._today().isoformat():
+            raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht geplant.")
+        with self._database_manager.unit_of_work() as db:
+            current = json.loads(
+                _unchanged_row(db, normalized_id, expected_hash)["payload"] or "{}"
+            )
+            if current.get("archived") or current.get("local_deleted"):
+                raise AppError(404, "Einheit nicht gefunden.")
+            if current.get("date") == day:
+                return {
+                    "status": "local",
+                    "local_id": normalized_id,
+                    "library_entry": current,
+                }
+            result = self._update_in_db(
+                db,
+                normalized_id,
+                {"date": day},
+                skip_calendar_conflict=False,
+                bump_planning_revision=True,
             )
         self._publish_change()
         return result
@@ -697,3 +724,20 @@ class PlannedUnitService:
             )
         self._publish_change()
         return result
+
+
+def _unchanged_row(db: Any, local_id: Any, expected_hash: Any) -> Any:
+    """The stored unit, if its content hash still matches the browser's read."""
+    row = db.execute(
+        "SELECT payload, sync_state FROM planned_units WHERE local_id=? AND tombstone=0",
+        (str(local_id),),
+    ).fetchone()
+    if row is None:
+        raise AppError(404, "Einheit nicht gefunden.")
+    if not planned_units.plan_push_hash_matches(row["payload"], expected_hash):
+        raise AppError(
+            409,
+            "Die Einheit wurde inzwischen geändert.",
+            reason="planning_revision_conflict",
+        )
+    return row

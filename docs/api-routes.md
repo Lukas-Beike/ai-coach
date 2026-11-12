@@ -91,6 +91,7 @@ handler's docstring. Regenerate it with
 | GET | `/api/nutrition/yazio/status` | Session | no | Last local Yazio authentication check, without contacting Yazio. |
 | GET | `/api/performance` | Session | no | Performance projection. |
 | GET | `/api/plan` | Session | no | Planning projection. |
+| POST | `/api/planned-units/{id}/date` | Session + CSRF | after access | Move a planned unit to another day without a remote write. |
 | POST | `/api/planned-units/{id}/focus` | Session + CSRF | after access | Set or clear the focus of a planned unit without a remote write. |
 | POST | `/api/planned-units/{id}/garmin-exercise` | Session + CSRF | after access | Assign the Garmin catalogue exercise of one strength exercise of a unit. |
 | GET | `/api/privacy/backup` | Session | no | Download the encrypted database backup. |
@@ -1033,6 +1034,28 @@ Response: 200 with `plans`, `planned`, `training_calendar`, `calendar`,
 from one database snapshot.
 
 Errors: none beyond the common ones.
+
+### `POST /api/planned-units/{id}/date`
+
+Request: path `{id}`, the local unit id; JSON body `{"date": "YYYY-MM-DD",
+"expected_payload_hash": string}`. The date is today or later in the
+athlete's time zone; the start time keeps its time of day. The hash is the
+unit's content hash from the read the move was made on.
+
+Response: 200 `{"status": "local", "local_id", "library_entry", "change"}`
+with the moved unit and the undo reference (`change` is missing when the
+date did not change; the unit is then left as it is). A unit already sent
+to a provider shows its pending sync; nothing is written remotely.
+
+Errors: 400 "Ungültige lokale Planungs-ID." for an id that is no UUID; 404
+"Einheit nicht gefunden." for an unknown, archived or deleted unit; 409
+`planning_revision_conflict` "Die Einheit wurde inzwischen geändert." for a
+missing or outdated `expected_payload_hash`; 400 "Das Planungsdatum muss das
+Format JJJJ-MM-TT haben."; 400 "Eine Einheit in der Vergangenheit wird nicht
+geplant." for a day before today; 409 `plan_date_conflict` when an external
+calendar marker rules out the day; 409 "Die lokale Einheit kann wegen einer
+bestehenden Kalendereinheit nicht verschoben werden." for an overlapping
+calendar entry.
 
 ### `POST /api/planned-units/{id}/focus`
 
