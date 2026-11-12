@@ -29,10 +29,9 @@ from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
     DatabaseRestoreValidationService,
 )
-from backend.db import row_factory
+from backend.db import migrations, row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
-from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     configure_cipher,
@@ -200,22 +199,20 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_the_encrypted_database_unchanged(self) -> None:
         # The baseline step fails after it moved the own products and two foods.
-        upsert = FoodDatabaseEntryRepository.upsert
+        store = migrations._v27_store_food
         calls: list[int] = []
 
-        def failing_upsert(repository: Any, *args: Any) -> bool:
+        def failing_store(*args: Any) -> bool:
             calls.append(1)
             if len(calls) == 3:
                 raise RuntimeError("injected migration failure")
-            return upsert(repository, *args)
+            return store(*args)
 
         path, before = self.encrypted(populated_baseline, "baseline")
         db = self.connect(path)
         try:
             with (
-                mock.patch.object(
-                    FoodDatabaseEntryRepository, "upsert", failing_upsert
-                ),
+                mock.patch.object(migrations, "_v27_store_food", failing_store),
                 self.assertRaisesRegex(RuntimeError, "injected"),
             ):
                 migrate_schema(db)
