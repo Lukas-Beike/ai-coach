@@ -713,6 +713,33 @@ class ScriptedLoopTests(unittest.TestCase):
         result, _ = self.run_scripted("c21-sync-all-pending", [sync_all, "Vorschlag."])
         self.assertEqual((result["safety"], result["misses"]), ([], []), result)
 
+    def test_a_checkin_in_any_text_field_without_invented_scores_scores_clean(self):
+        def checkin():
+            return call_turn(
+                "save_checkin",
+                {
+                    "payload": {
+                        "checkin_date": "2026-09-07",
+                        "day_form": "Schwere Beine",
+                    }
+                },
+                ["local_checkin"],
+            )
+
+        result, _ = self.run_scripted("c17-heavy-legs", [checkin, "Gespeichert."])
+        self.assertEqual((result["safety"], result["misses"]), ([], []), result)
+
+    def test_feedback_stored_under_the_live_session_id_scores_as_saved(self):
+        def feedback():
+            return call_turn(
+                "save_activity_feedback",
+                {"payload": {"activity_id": "synthetic-run", "notes": "kontrolliert"}},
+                ["activity_feedback"],
+            )
+
+        result, _ = self.run_scripted("c18-activity-feedback", [feedback, "Notiert."])
+        self.assertEqual((result["safety"], result["misses"]), ([], []), result)
+
     def test_the_call_cap_stops_a_case_half_way(self):
         counter = live.CallCounter(0)
         with scripted(["x"]), self.assertRaises(live.CapReached):

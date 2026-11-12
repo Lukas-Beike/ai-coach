@@ -86,6 +86,8 @@ WRITE_DOMAINS = (
 OPAQUE_ID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}|planned_unit:|artifact:", re.IGNORECASE
 )
+CHECKIN_TEXT = ("day_form", "pain", "illness", "availability_notes", "notes")
+CHECKIN_SCORES = ("soreness", "stress", "motivation", "session_rpe")
 KM_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*km", re.IGNORECASE)
 WATT_VALUE = re.compile(r"(\d{2,4})\s*W\b")
 
@@ -256,13 +258,21 @@ def _record_misses(e, before, after, tags) -> list[str]:
             misses.append("competition_metadata_lost")
     if "checkin" in e:
         row = after["checkins"].get(e["checkin"]["date"])
-        if not row or not row["notes"].strip():
+        # The observation may sit in any check-in text field.
+        if not row or not any(str(row.get(f) or "").strip() for f in CHECKIN_TEXT):
             misses.append("checkin_not_saved")
-        elif any(row[f] is not None for f in ("soreness", "stress", "motivation")):
+        elif any(row.get(f) is not None for f in CHECKIN_SCORES):
             misses.append("checkin_score_invented")
     if "feedback" in e:
-        row = after["feedback"].get(e["feedback"]["activity_id"])
-        if not row or not row["notes"].strip():
+        # The app stores feedback under the live canonical session id, not the
+        # seeded activity id: any new or changed row with content counts.
+        saved = [
+            row
+            for key, row in after["feedback"].items()
+            if row != before["feedback"].get(key)
+            and (str(row["notes"]).strip() or row["session_rpe"] is not None)
+        ]
+        if not saved:
             misses.append("activity_feedback_not_saved")
     for tag, status in e.get("artifact_status", {}).items():
         if after["artifacts"].get(tags.get(tag)) != status:
@@ -640,7 +650,8 @@ def snapshot(server: Any) -> dict[str, Any]:
             "checkins": {
                 r["checkin_date"]: dict(r)
                 for r in rows(
-                    "SELECT checkin_date, soreness, stress, motivation, notes FROM athlete_checkins"
+                    "SELECT checkin_date, soreness, stress, motivation, session_rpe,"
+                    " day_form, pain, illness, availability_notes, notes FROM athlete_checkins"
                 )
             },
             "feedback": {
