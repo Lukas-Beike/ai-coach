@@ -316,6 +316,10 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 - **WHEN** Garmin reports heart-rate zone sets (`DEFAULT`, `RUNNING`, `CYCLING`) on any calculation basis, such as percent of the lactate threshold HR, heart-rate reserve or maximum HR
 - **THEN** each set becomes a canonical heart-rate zone configuration valid from the local day it was first fetched, with Garmin's absolute bpm floors taken as they are (zone N ends one bpm below the floor of zone N + 1, the top zone at the maximum HR) and the basis kept as its model; a changed set of one sport is a new configuration (an unchanged set is not stored again) and the earlier ones stay valid for their days; Garmin leads Wahoo, a confirmed local configuration still wins, a sport's own set precedes Garmin's default set, a day before the first fetch takes the earliest later set within 90 days, and the standard limits apply only without any configuration.
 
+#### Scenario: Target range of planned steps
+- **WHEN** a planned unit's step targets a zone, a percent of a threshold, or absolute bpm or watts
+- **THEN** its profile segment carries the range in bpm, W or s/km from the zones and thresholds in effect on the unit's day (a zone starts one above the zone below it, the lowest zone has no lower end, the open top zone no upper end); a zone step without the athlete's own zones of that signal, or any step without its threshold, carries no range.
+
 #### Scenario: Thresholds without a zone configuration
 - **WHEN** a planned workout's sport has no configuration for a metric
 - **THEN** its FTP, threshold HR and maximum HR come from the source-policy provider winners (Garmin, Wahoo) with the default limits, never from Intervals.icu or the stored snapshot, and nothing is served before the first completed backfill.
@@ -324,7 +328,7 @@ Detailed contract (#1851): the watch zones are projected by `garmin_zone_mapping
 
 Detailed contract (#1416): indoor and virtual workouts use the INDOOR power configuration's threshold, else the sport's FTP (no provider indoor FTP is read); the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
 
-Evidence: `backend/performance/canonical_current.py:read_zone_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`; `backend/providers/garmin_zone_mapping.py:map_garmin_heart_rate_zones`, `backend/activities/zone_settings.py:effective_zone_configuration`; `tests/test_garmin_zone_mapping.py`.
+Evidence: `backend/performance/canonical_current.py:read_zone_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`, `backend/activities/workout_profile.py:planned_profile`; `tests/test_workout_profile.py:test_planned_steps_carry_their_target_range_from_the_zones_of_the_day`, `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`; `backend/providers/garmin_zone_mapping.py:map_garmin_heart_rate_zones`, `backend/activities/zone_settings.py:effective_zone_configuration`; `tests/test_garmin_zone_mapping.py`.
 
 ### Requirement: Retained provider domains and equipment links
 Training status and load balance, running tolerance, readiness history, endurance score details/history, performance history, Body Battery, stress, resting energy, subjective provider wellness and equipment SHALL have canonical representations. Their affected consumers SHALL read canonical values with provider labels. Proprietary scores SHALL not be rebuilt locally; equipment links SHALL resolve to canonical sessions.
