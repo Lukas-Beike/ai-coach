@@ -1,9 +1,13 @@
 import contextlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+# check_push_secrets imports its sibling sonar_check by name, as the hook runs it.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from scripts import check_push_secrets as scan
 
@@ -44,7 +48,7 @@ class PushSecretTests(unittest.TestCase):
             return run(command, **kwargs)
 
         with (
-            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
+            patch.object(scan, "find_sonar", return_value="synthetic-sonar"),
             patch.object(scan.subprocess, "run", side_effect=scanner),
             self.assertRaises(RuntimeError),
         ):
@@ -63,7 +67,7 @@ class PushSecretTests(unittest.TestCase):
     def test_missing_scanner_blocks_push(self):
         tip = self.commit("clean")
         with (
-            patch.object(scan.shutil, "which", return_value=None),
+            patch.object(scan, "find_sonar", return_value=None),
             self.assertRaises(RuntimeError),
         ):
             scan.check(self.update(tip))
@@ -100,7 +104,7 @@ class PushSecretTests(unittest.TestCase):
 
     def test_deleted_ref_and_noop_do_not_require_scanner(self):
         tip = self.commit("clean")
-        with patch.object(scan.shutil, "which", side_effect=AssertionError("scanner")):
+        with patch.object(scan, "find_sonar", side_effect=AssertionError("scanner")):
             self.assertEqual(scan.check(self.update("0" * 40, tip)), 0)
             self.assertEqual(scan.check(self.update(tip, tip)), 0)
 
@@ -122,7 +126,7 @@ class PushSecretTests(unittest.TestCase):
             return run(command, **kwargs)
 
         with (
-            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
+            patch.object(scan, "find_sonar", return_value="synthetic-sonar"),
             patch.object(scan.subprocess, "run", side_effect=scanner),
         ):
             scan.check(updates)
