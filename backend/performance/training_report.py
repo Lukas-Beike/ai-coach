@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -33,8 +33,12 @@ def _planned_day(row: Mapping[str, Any]) -> str:
     return iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
 
 
-def metric_sum(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
-    measured = [value for row in rows if (value := number(row.get(key))) is not None]
+def metric_sum(
+    rows: Sequence[Mapping[str, Any]],
+    key: str | Callable[[Mapping[str, Any]], Any],
+) -> dict[str, Any]:
+    read = key if callable(key) else (lambda row: row.get(key))
+    measured = [value for row in rows if (value := number(read(row))) is not None]
     return {
         "value": round(sum(measured), 2) if measured else None,
         "measured_sessions": len(measured),

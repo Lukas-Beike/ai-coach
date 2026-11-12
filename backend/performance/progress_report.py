@@ -21,6 +21,7 @@ from backend.activities.activity_summary import (
 from backend.activities.session_purpose import summary_is_commute
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.activity_summary import summary_leading_duration_s
 from backend.performance.comparable_sessions import equal_effort_trend
 from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_window
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
@@ -163,7 +164,11 @@ def _bucket(
 ) -> dict[str, Any]:
     bucket = {
         "sessions": len(sessions),
-        "duration_s": metric_sum(sessions, "moving_duration_s"),
+        # A strength week counts its sessions' total time (#2317).
+        "duration_s": metric_sum(
+            sessions,
+            summary_leading_duration_s if sport == "strength" else "moving_duration_s",
+        ),
         "training_load": _load(sessions),
         "session_rpe_load": _rpe(sessions, feedback, timezone),
         "intensity_3zone": intensity_3zone(sessions),

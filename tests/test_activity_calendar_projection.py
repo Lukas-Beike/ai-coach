@@ -177,6 +177,13 @@ class PlanningComplianceTests(unittest.TestCase):
         )
 
         self.assertEqual((duration["basis"], duration["percentage"]), ("duration", 75))
+        # A strength session's compliance counts its total time, like its card (#2317).
+        strength = workout_compliance(
+            {"starts_at_local": today.isoformat(), "planned_duration_s": 3600},
+            {**activity, "sport": "strength", "elapsed_duration_s": 3480},
+            today,
+        )
+        self.assertEqual(97, strength["percentage"])
         self.assertEqual(
             (unavailable["basis"], unavailable["percentage"]),
             ("unavailable", 100),

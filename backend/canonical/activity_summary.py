@@ -164,11 +164,25 @@ def summary_leading_duration_s(summary: Mapping[str, Any]) -> float | None:
     Strength leads with the positive elapsed time, because rest between sets is
     part of the work; every other sport with the moving time first.
     """
+    keys = ("moving_duration_s", "elapsed_duration_s")
     if summary.get("sport") == Sport.STRENGTH.value:
-        elapsed = summary.get("elapsed_duration_s")
-        if elapsed is not None and float(elapsed) > 0:
-            return float(elapsed)
-    return summary_duration_s(summary)
+        keys = keys[::-1]
+    for key in keys:
+        seconds = _positive_seconds(summary.get(key))
+        if seconds is not None:
+            return seconds
+    return None
+
+
+def _positive_seconds(value: Any) -> float | None:
+    """A finite positive number of seconds; anything else falls back to the other time."""
+    if isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except TypeError, ValueError:
+        return None
+    return seconds if 0 < seconds < float("inf") else None
 
 
 def summary_is_indoor(summary: Mapping[str, Any]) -> bool:

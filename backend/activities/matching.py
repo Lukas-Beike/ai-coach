@@ -9,12 +9,12 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_sport as _activity_sport
 from backend.activities.identity import summary_sport as _summary_sport
 from backend.activities.session_purpose import summary_is_not_training
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.activity_summary import summary_leading_duration_s
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.canonical.vocabulary import Sport
@@ -156,7 +156,7 @@ def _start_distance(activity: dict[str, Any], event_start: datetime | None) -> f
 def _duration_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
     """Relative duration difference from the planned duration."""
     planned = _number_field(unit, _UNIT_DURATION_FIELDS)
-    actual = summary_duration_s(activity)
+    actual = summary_leading_duration_s(activity)
     if planned is None or actual is None or planned <= 0:
         return math.inf
     return abs(actual - planned) / planned

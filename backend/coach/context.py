@@ -17,7 +17,10 @@ from backend.activities.zone_settings import (
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.zones import EDITABLE_SPORTS, public_configuration
 from backend.calendar import local as calendar_local
-from backend.canonical.activity_summary import ActivitySummary
+from backend.canonical.activity_summary import (
+    ActivitySummary,
+    summary_leading_duration_s,
+)
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.labels import PURPOSE_LABELS_DE
 from backend.canonical.planning_fields import PLANNED_INTENSITY as INTENSITY
@@ -278,7 +281,7 @@ def compact_coach_activity(
     # elapsed time instead of the moving time; the session details carry both.
     if compacted.get("sport") == Sport.STRENGTH.value and isinstance(activity, Mapping):
         elapsed = activity.get("elapsed_duration_s")
-        if elapsed is not None:
+        if summary_leading_duration_s(activity) == elapsed:
             compacted.pop("moving_duration_s", None)
             compacted["elapsed_duration_s"] = elapsed
     purpose = compacted.get("purpose")

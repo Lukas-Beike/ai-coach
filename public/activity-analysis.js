@@ -227,15 +227,19 @@
     return metrics;
   }
 
+  // Strength leads with the total time, the moving time follows (#2317).
+  function sessionTimes(activity, metrics) {
+    const times = [["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)], ["Gesamtzeit", duration(metrics.elapsed_duration_s)]];
+    return activity?.sport === "strength" ? times.reverse() : times;
+  }
+
   function overview(activity, metrics) {
     const speed = speedChannel(activity);
     const averageSpeed = speedText(speed, metrics.avg_speed_mps);
     const cadence = cadenceChannel(activity, metrics);
     const values = [
       ["Distanz", AppFormat.distance(metrics.distance_m)],
-      // Strength leads with the total time, the moving time follows (#2317).
-      ...(activity?.sport === "strength" ? [["Gesamtzeit", duration(metrics.elapsed_duration_s)], ["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)]]
-        : [["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)], ["Gesamtzeit", duration(metrics.elapsed_duration_s)]]),
+      ...sessionTimes(activity, metrics),
       [speed.invert ? "Ø Pace" : "Ø Geschwindigkeit", averageSpeed && `${averageSpeed} ${speed.unit}`],
       ["Ø Herzfrequenz", measure(metrics.avg_hr, "bpm")],
       ["Max. Herzfrequenz", measure(metrics.max_hr, "bpm")],
