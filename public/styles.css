@@ -1107,9 +1107,8 @@ h2 {
 .connection-card-status > :empty:not(ul) { display: none; }
 .connection-card-status:not(:has(> :not(:empty, [hidden]))) { display: none; }
 .connection-card-status:not(:has(> :not(:empty, [hidden]))) + * { padding-top: 0; border-top: 0; }
-.connection-card strong { flex: 1 1 auto; min-width: 0; color: var(--ink); font-size: .8rem; }
-.connection-card span { color: var(--subtle); font-size: .72rem; }
-.connection-card small { color: var(--subtle); font-size: .72rem; }
+.connection-card > summary strong { flex: 1 1 auto; min-width: 0; color: var(--ink); font-size: .8rem; }
+.connection-card > summary span, .connection-card-status > span, .connection-card :is(.connection-card-status, .connection-card-body) > small { color: var(--subtle); font-size: .72rem; }
 .connection-card .fine-print { margin: 0; }
 .connection-card .connection-chip { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; color: var(--ink); font-size: .72rem; font-weight: 700; }
 .connection-chip::before { content: ""; flex: none; width: .55rem; height: .55rem; border-radius: 50%; background: var(--subtle); }
@@ -1117,9 +1116,9 @@ h2 {
 .connection-chip.is-error::before { background: var(--danger); }
 .connection-chip.is-unchecked::before { background: var(--orange); }
 .connection-lines { display: grid; gap: 2px; margin: 0; padding: 0; color: var(--muted); font-size: .72rem; list-style: none; }
-.connection-card .secondary-button { width: 100%; min-height: 44px; display: grid; place-items: center; text-align: center; }
+.connection-actions .secondary-button { width: 100%; min-height: 44px; display: grid; place-items: center; text-align: center; }
 .connection-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.connection-actions[hidden], .connection-card .sync-period[hidden], .connection-card .secondary-button[hidden] { display: none; }
+.connection-actions[hidden], .connection-card .sync-period[hidden], .connection-actions .secondary-button[hidden] { display: none; }
 .connection-actions [data-check-button] { grid-column: 1 / -1; }
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .72rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
@@ -1386,7 +1385,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .calendar-display-fields { grid-template-columns: 1fr; }
   .calendar-display-form > .secondary-button { width: 100%; }
   .connection-card .connection-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .connection-card .secondary-button { min-width: 0; padding-right: 10px; padding-left: 10px; white-space: normal; }
+  .connection-actions .secondary-button { min-width: 0; padding-right: 10px; padding-left: 10px; white-space: normal; }
   .connection-card .sync-period input { width: 82px; }
   .settings-message { overflow-wrap: anywhere; }
   .settings-message code { overflow-wrap: anywhere; }

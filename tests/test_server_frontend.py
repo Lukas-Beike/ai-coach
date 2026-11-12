@@ -937,6 +937,8 @@ class ServerFrontendTests(ServerTestCase):
         index = served_page("index.html")
         for provider in ("garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"):
             self.assertIn(f'<details id="connection-{provider}" class="connection-card">', index)
+        # Only the registered providers have freshness and retry entries.
+        for provider in ("garmin", "wahoo", "intervals", "calendar", "weather"):
             self.assertIn(f'id="freshness-{provider}"', index)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)

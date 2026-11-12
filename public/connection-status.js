@@ -14,11 +14,12 @@ function connectionsShown() {
   return globalThis.AppRouter?.baseRoute() === "more" && AppRouter.moreSegmentFromRoute() === "connections";
 }
 
-// Opens one provider card and brings it into view after the route has scrolled to the top.
+// Opens one provider card, focuses its summary and brings it into view after the route has scrolled to the top.
 function openConnectionCard(provider) {
   const card = document.getElementById(`connection-${provider}`);
   if (!card) return;
   card.open = true;
+  card.querySelector("summary")?.focus({ preventScroll: true });
   requestAnimationFrame(() => card.scrollIntoView({ block: "start" }));
 }
 

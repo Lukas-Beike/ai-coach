@@ -146,7 +146,9 @@ function showWahooReturnOutcome() {
   const [message, isError] = WAHOO_RETURN_OUTCOMES[pendingWahooReturn];
   pendingWahooReturn = null;
   toast(message, isError);
-  openConnectionCard(providerIds().wahoo);
+  // The address was rewritten without a hashchange, so the shown route follows it here.
+  if (globalThis.location.hash !== "#more/connections") return;
+  void AppRouter.navigate("more/connections").then((shown) => { if (shown) openConnectionCard(providerIds().wahoo); });
 }
 
 function safeWahooAuthorizeUrl(value) {
