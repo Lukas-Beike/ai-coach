@@ -279,17 +279,19 @@ test("leaving a field during a pointer press waits for the click", () => {
 });
 
 // Drives the worker's fetch handler with a recorded cache and a scripted network.
-function fetching(networkStatus, { shell = true } = {}) {
+function fetching(networkStatus, { shell = true, cached = [] } = {}) {
   const handlers = {};
-  const stored = new Map(shell ? [["/", { shell: true, status: 200 }]] : []);
+  const stored = new Map([...(shell ? [["/", { shell: true, status: 200 }]] : []), ...cached]);
   const puts = [];
+  const network = [];
   const context = loadPublicScript("service-worker.js", {
     URL,
     setTimeout,
     clearTimeout,
     TypeError,
     addEventListener: (type, handler) => { handlers[type] = handler; },
-    fetch: async () => {
+    fetch: async (request) => {
+      network.push(request.url);
       if (networkStatus === "offline") throw new TypeError("offline");
       const response = { status: networkStatus, ok: networkStatus < 400, clone: () => ({ copy: true }) };
       return response;
@@ -301,13 +303,13 @@ function fetching(networkStatus, { shell = true } = {}) {
       }),
     },
   });
-  return async (url, mode = "navigate") => {
+  return async (url, mode = "navigate", method = "GET") => {
     let answer;
     const waits = [];
-    handlers.fetch({ request: { url: `http://localhost${url}`, method: "GET", mode }, respondWith: (promise) => { answer = promise; }, waitUntil: (promise) => waits.push(promise) });
-    const response = await answer.catch((error) => error);
+    handlers.fetch({ request: { url: `http://localhost${url}`, method, mode }, respondWith: (promise) => { answer = promise; }, waitUntil: (promise) => waits.push(promise) });
+    const response = await answer?.catch((error) => error);
     await Promise.all(waits);
-    return { response, puts };
+    return { response, puts, network, answered: Boolean(answer) };
   };
 }
 
@@ -331,4 +333,22 @@ test("navigations are cached under the app shell key only", async () => {
 test("only precached files are stored for other requests", async () => {
   assert.deepEqual((await fetching(200)("/app.js", "no-cors")).puts, ["http://localhost/app.js"]);
   assert.deepEqual((await fetching(200)("/unknown.json", "no-cors")).puts, []);
+});
+
+test("API calls and writes pass through the worker untouched", async () => {
+  for (const [url, method] of [["/api/bootstrap", "GET"], ["/api/chat", "POST"], ["/app.js?v=abc", "POST"]]) {
+    const { answered, puts, network } = await fetching(200)(url, "no-cors", method);
+    assert.deepEqual([answered, puts, network], [false, [], []], `${method} ${url}`);
+  }
+});
+
+test("a versioned asset is served from the cache without the network and fetched once when missing", async () => {
+  const hit = { cachedAsset: true, status: 200 };
+  const cached = await fetching(200, { cached: [["http://localhost/app.js?v=abc", hit]] })("/app.js?v=abc", "no-cors");
+  assert.equal(cached.response, hit);
+  assert.deepEqual(cached.network, []);
+  const missing = await fetching(200)("/app.js?v=abc", "no-cors");
+  assert.deepEqual([missing.network, missing.puts], [["http://localhost/app.js?v=abc"], ["http://localhost/app.js?v=abc"]]);
+  const failed = await fetching(404)("/app.js?v=abc", "no-cors");
+  assert.deepEqual(failed.puts, []);
 });

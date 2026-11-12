@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const { test } = require("node:test");
-const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
+const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 const PROVIDER_ERRORS = ["NON_RETRYABLE_PROVIDER_ERRORS", "TRANSIENT_LOCAL_PROVIDER_ERRORS", "providerErrorIsNonRetryable"];
 
@@ -112,9 +112,65 @@ test("retrying a stale Wahoo entry starts the Wahoo sync", async () => {
   assert.deepEqual(posts, ["/api/wahoo/sync"]);
 });
 
+test("retrying a stale weather or calendar entry starts that sync", async () => {
+  for (const [provider, url] of [["weather", "/api/weather/sync"], ["calendar", "/api/external-calendar/sync"]]) {
+    const { context, posts } = syncHarness([{ id: "job-1", status: "completed", items: [] }]);
+    await vm.runInContext(`retryProvider('${provider}', null)`, context);
+    assert.deepEqual(posts, [url], provider);
+  }
+});
+
 test("the retry is skipped while that provider's sync is running", async () => {
   const { context, posts } = syncHarness([{ id: "job-1", status: "completed", items: [] }]);
   context.state.localSync.garmin = true;
   await vm.runInContext("retryProvider('garmin', null)", context);
   assert.equal(posts.length, 0);
+});
+
+test("provider labels come from the bootstrap and fall back to a neutral word", () => {
+  const labelled = extractFunctions("sync-status.js", ["coachProviderLabel"], { state: { data: { provider_labels: { garmin: "Garmin Connect" } } } });
+  assert.equal(labelled.coachProviderLabel(" Garmin "), "Garmin Connect");
+  assert.equal(labelled.coachProviderLabel("wahoo"), "Provider");
+  const unloaded = extractFunctions("sync-status.js", ["coachProviderLabel"], { state: { data: null } });
+  assert.equal(unloaded.coachProviderLabel("garmin"), "Provider");
+});
+
+// Runs the real connection progress list against one bootstrap payload.
+function connectionProgress(data, localSync = {}) {
+  const document = fakeDocument();
+  const root = document.querySelector("#connectionsSyncProgress");
+  document.createElement = (tag) => Object.assign(new FakeElement(tag), { removeAttribute(name) { delete this.attributes[name]; } });
+  extractFunctions("sync-status.js", ["connectionProgressEntry", "coachProviderLabel", "renderConnectionsSyncProgress"], {
+    document,
+    $: (selector) => document.querySelector(selector),
+    state: { localSync, data: { provider_labels: { garmin: "Garmin", wahoo: "Wahoo" } } },
+    providerIds: () => ({ garmin: "garmin", wahoo: "wahoo" }),
+    garminWindowProgress: () => null,
+  }).renderConnectionsSyncProgress(data);
+  return root;
+}
+
+const itemText = (item) => item.children[0].children.map((node) => node.textContent).join(" | ");
+
+test("the connection progress list stays hidden while nothing syncs", () => {
+  assert.equal(connectionProgress({}).hidden, true);
+});
+
+test("a queued job waits without a percentage and a running job shows its completed steps", () => {
+  const root = connectionProgress({ sync: { jobs: [
+    { status: "queued", provider: "garmin" },
+    { status: "running", provider: "wahoo", progress: { completed: 1, total: 4 } },
+    { status: "completed", provider: "weather" },
+  ] } });
+  assert.equal(root.hidden, false);
+  assert.deepEqual(root.children.map(itemText), ["Garmin | Wartet auf den Start der Synchronisierung…", "Wahoo | 1/4 Arbeitsschritte abgeschlossen"]);
+  const [queued, running] = root.children.map((item) => item.children[1]);
+  assert.match(queued.className, /is-indeterminate/);
+  assert.equal(queued.attributes["aria-label"], "Garmin: Fortschritt wird ermittelt");
+  assert.deepEqual([running.value, running.attributes["aria-label"]], [25, "Wahoo: 25%"]);
+});
+
+test("a local sync is listed once even when its job is also running", () => {
+  const root = connectionProgress({ sync: { jobs: [{ status: "running", provider: "weather" }] } }, { weather: true });
+  assert.deepEqual(root.children.map(itemText), ["Open-Meteo | Wetter wird aktualisiert…"]);
 });

@@ -89,3 +89,33 @@ test("a failed log download reports the error and re-enables the button", async 
   assert.deepEqual(toasts, [["Der Server antwortet nicht.", true]]);
   assert.equal(document.querySelector("#logsDownloadButton").disabled, false);
 });
+
+// The backup and the privacy export keep their file URL alive for a second after the click.
+function settingsDownloads() {
+  const events = [];
+  const timers = [];
+  const document = fakeDocument();
+  document.createElement = (tag) => Object.assign(new FakeElement(tag), { click() { events.push(["click", this.download]); } });
+  const context = extractFunctions("settings.js", ["privacyInFlight", "downloadDatabaseBackup", "downloadPrivacyExport"], {
+    document,
+    $: (selector) => document.querySelector(selector),
+    downloadRequest: async () => new Blob(["x"]),
+    URL: { createObjectURL: () => "blob:fixture", revokeObjectURL: (url) => events.push(["revoke", url]) },
+    setTimeout: (handler, delay) => timers.push({ handler, delay }),
+    toast() {},
+    setPrivacyButtonBusy() {},
+    todayIso: () => "2026-11-11",
+  });
+  return { context, events, timers };
+}
+
+test("the backup and the export revoke their file URL one second after the click", async () => {
+  for (const [action, file] of [["downloadDatabaseBackup", "pacecraft-database-2026-11-11.backup"], ["downloadPrivacyExport", "pacecraft-export-2026-11-11.zip"]]) {
+    const { context, events, timers } = settingsDownloads();
+    await context[action]();
+    assert.deepEqual(events, [["click", file]], action);
+    assert.deepEqual(timers.map((timer) => timer.delay), [1000]);
+    timers[0].handler();
+    assert.deepEqual(events.at(-1), ["revoke", "blob:fixture"]);
+  }
+});

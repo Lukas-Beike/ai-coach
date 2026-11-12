@@ -8,11 +8,11 @@ function text(node) {
   return [node.textContent, ...(node.children || []).map(text)].join(" ");
 }
 
-function loadDetailRenderer() {
+function loadDetailRenderer(makeScrollRegionFocusable = (region) => region) {
   return extractFunctions("activity-details.js", ["node", "STRENGTH_SOURCES", "strengthExerciseLabel", "strengthNumber", "strengthSeconds", "strengthAmount", "renderStrengthSets"], {
     AppFormat: require("../public/format.js"),
     document: fakeDocument(),
-    makeScrollRegionFocusable: (region) => region,
+    makeScrollRegionFocusable,
   }).renderStrengthSets;
 }
 
@@ -63,6 +63,14 @@ test("one exercise header spans all of its set rows", () => {
   assert.equal(first.children[0].scope, "rowgroup");
   assert.equal(first.children[0].rowSpan, 2);
   assert.equal(second.children[0].tag, "td");
+});
+
+test("the set table scrolls in a named region that the keyboard can reach", () => {
+  const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
+  const content = new FakeElement("div");
+  loadDetailRenderer(makeScrollRegionFocusable)(STRENGTH, content);
+  const region = content.children.find((child) => child.className === "analysis-chart-table");
+  assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Kraftsätze"]);
 });
 
 test("one set and one omitted exercise use the singular", () => {

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
 
 const context = extractFunctions("auth.js", ["loginErrorMessage"]);
 
@@ -37,4 +37,20 @@ test("a wrong password, a timeout and a missing connection keep their own text",
   const timeout = new Error("Der Server antwortet nicht innerhalb von 25 Sekunden.");
   assert.equal(context.loginErrorMessage(timeout), timeout.message);
   assert.equal(context.loginErrorMessage(failure(0, "Keine Verbindung zum Coach-Server.")), "Keine Verbindung zum Coach-Server.");
+});
+
+test("the loading screen names the start with a real ellipsis, or the processed update", () => {
+  const document = fakeDocument();
+  const sources = [];
+  const { showAppShellLoading } = extractFunctions("auth.js", ["showAppShellLoading"], {
+    $: (selector) => document.querySelector(selector),
+    updateStatusSources: (update) => sources.push(update.loading),
+  });
+  showAppShellLoading();
+  assert.equal(document.querySelector("#authLoading").textContent, "Trainingsbereich wird geladen…");
+  showAppShellLoading({ updated: true });
+  assert.equal(document.querySelector("#authLoading").textContent, "Update wird verarbeitet…");
+  assert.deepEqual(sources.map((source) => source.title), ["Trainingsbereich wird geladen…", "Update wird verarbeitet…"]);
+  assert.equal(document.querySelector("#appShell").hidden, true);
+  assert.equal(document.querySelector("#appShell").attributes["aria-busy"], "true");
 });

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
 
 const RETRY_DELAY_MS = 30000;
 
@@ -67,4 +67,31 @@ test("a transient failure followed by success is delivered once", async () => {
   await context.showPwaNotification("Titel", { body: "Text" }, "error:transient");
   assert.equal(calls, 2);
   assert.equal(context.state.notificationKeys.has("error:transient"), true);
+});
+
+test("a competition notification names the day without the competition's name", () => {
+  const { competitionCountdownText } = extractFunctions("notifications.js", ["competitionCountdownText"]);
+  assert.equal(competitionCountdownText(0), "Der Wettkampf ist heute.");
+  assert.equal(competitionCountdownText(1), "Der Wettkampf ist morgen.");
+  assert.equal(competitionCountdownText(3), "Der Wettkampf ist in 3 Tagen.");
+});
+
+test("notifications stay opt-in: the status names the permission and an unsupported browser disables the button", () => {
+  const document = fakeDocument();
+  const context = extractFunctions("notifications.js", ["notificationPermission", "renderNotificationStatus"], {
+    $: (selector) => document.querySelector(selector),
+    Notification: { permission: "default" },
+  });
+  const status = document.querySelector("#notificationStatus");
+  const button = document.querySelector("#notificationEnableButton");
+  const shown = [];
+  for (const permission of ["default", "granted", "denied"]) {
+    context.Notification.permission = permission;
+    context.renderNotificationStatus();
+    shown.push([status.textContent, button.hidden, button.disabled]);
+  }
+  assert.deepEqual(shown, [["Noch nicht aktiviert", false, false], ["Aktiv", true, false], ["Im Browser blockiert", false, false]]);
+  const unsupported = extractFunctions("notifications.js", ["notificationPermission", "renderNotificationStatus"], { $: (selector) => document.querySelector(selector) });
+  unsupported.renderNotificationStatus();
+  assert.deepEqual([status.textContent, button.disabled], ["Von diesem Browser nicht unterstützt", true]);
 });
