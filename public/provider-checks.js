@@ -36,6 +36,14 @@ function providerCheckView(result, busy = false) {
   };
 }
 
+// Pure: a chip its own state leaves unchecked shows the last explicit check:
+// connected after a success, an error after a failure.
+function checkedConnectionKind(kind, result) {
+  if (kind !== "unchecked") return kind;
+  if (result?.status === "success") return "ok";
+  return PROVIDER_CHECK_FAILURES.has(result?.status) ? "error" : kind;
+}
+
 const PROVIDER_CHECK_POLL_MS = 3000;
 // One pending poll at a time, however many loads complete meanwhile.
 let providerCheckPoll = null;
@@ -68,6 +76,8 @@ function renderProviderCheck(provider) {
   }
   const button = document.querySelector(`[data-check-button="${provider}"]`);
   if (button) button.disabled = view.disabled;
+  const chip = button?.closest(".connection-card")?.querySelector(".connection-chip");
+  if (chip?.dataset.base) setConnectionChip(`#${chip.id}`, chip.dataset.base);
 }
 
 function renderProviderChecks() {
@@ -168,4 +178,4 @@ function bindProviderChecks() {
   }
 }
 
-if (typeof module !== "undefined") module.exports = { providerCheckView };
+if (typeof module !== "undefined") module.exports = { providerCheckView, checkedConnectionKind };
