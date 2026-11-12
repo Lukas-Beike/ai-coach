@@ -74,7 +74,8 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   `activities/` (feedback/reads/workout text), `calendar/` (external calendars),
   `diagnostics/` (safe diagnostics), `history/` (changes/undo), `nutrition/`,
   `performance/` (derived/readiness), `runtime/` (lifecycle/maintenance),
-  `weather/` (weather/cache), and `canonical/` (stdlib-only vocabulary/records).
+  `weather/` (weather/cache), `app/` (application context and composition),
+  and `canonical/` (stdlib-only vocabulary/records).
   Cross-cutting owners: `config.py`, `privacy.py`, `settings.py`,
   `change_history.py`, `observability.py`, `errors.py`, `pagination.py`,
   `provider_credentials.py`. Extend a cohesive owner first.

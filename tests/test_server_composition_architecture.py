@@ -634,16 +634,14 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         )
         self.assertIn("weather.WEATHER_SERVICE_CACHE.get", ast.unparse(builder))
         server_tree = _parse(SERVER_PATH)
-        weather_assembly = next(
+        weather = next(
             node
             for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "WEATHER"
-                for target in node.targets
-            )
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "WEATHER"
         )
-        self.assertIn("build_weather", ast.unparse(weather_assembly.value))
+        self.assertIn("build_weather", ast.unparse(weather))
         self.assertFalse(
             any(
                 isinstance(node, ast.FunctionDef)
