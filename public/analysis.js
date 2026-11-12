@@ -1588,8 +1588,13 @@ function equipmentCard(item, source, parents, place) {
   if (!local && garmin) summary.append(h("span", "equipment-source-tag", garmin));
   summary.append(h("span", `connection-chip is-${kind}`, label));
   const line = [equipmentParent(item, local, parents), Number.isFinite(Number(distance ?? Number.NaN)) ? analysisValue(distance, "km") : "", life.percent == null ? "" : analysisPercent(life.percent)];
-  if (line.some(Boolean)) summary.append(h("span", "equipment-card-line", line.filter(Boolean).join(" · ")));
-  if (life.percent != null) summary.append(equipmentBar(item.name, life));
+  if (line.some(Boolean)) {
+    // #2358: the percent is read once, with its meaning; the bar below is decorative.
+    const text = h("span", "equipment-card-line", line.filter(Boolean).join(" · "));
+    if (life.percent != null) text.append(h("span", "sr-only", " Lebensdauer"));
+    summary.append(text);
+  }
+  if (life.percent != null) summary.append(equipmentBar(life));
   const body = h("div", "connection-card-body");
   body.append(equipmentSection("Nutzung", equipmentUsage(item, local, life)));
   if (local) body.append(equipmentSection("Wartung", equipmentMaintenance(item)));
@@ -1616,12 +1621,13 @@ function equipmentGarmin(item, local, title) {
   ]);
 }
 
-// The slim lifetime bar of a closed card; its colour follows the card's state.
-function equipmentBar(name, life) {
+// The slim lifetime bar of a closed card; its colour follows the card's state. The card
+// line already says the percent and the chip the state, so the bar stays out of the tree.
+function equipmentBar(life) {
   const progress = h("progress", "connection-sync-progress-bar");
   progress.max = 100;
   progress.value = life.progress;
-  progress.setAttribute("aria-label", `${name}: ${analysisPercent(life.percent)} Lebensdauer${life.over ? ", Ziel überschritten" : ""}`);
+  progress.setAttribute("aria-hidden", "true");
   return progress;
 }
 

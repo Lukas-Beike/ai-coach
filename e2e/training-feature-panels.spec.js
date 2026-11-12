@@ -304,9 +304,14 @@ test("@responsive equipment keeps local authority and groups archived sources", 
   await expect(runPanel.locator(".equipment-card[open]")).toHaveCount(0);
   await expect(localCard.locator(".connection-card-body")).toBeHidden();
   await expect(localCard.locator("summary .connection-chip")).toHaveText("Ziel überschritten");
-  await expect(localCard.locator("summary .equipment-card-line")).toHaveText("125 km · 125%");
+  await expect(localCard.locator("summary .equipment-card-line")).toHaveText("125 km · 125% Lebensdauer");
   await expect(localCard.locator("summary progress")).toHaveAttribute("value", "100");
-  await expect(localCard.locator("summary progress")).toHaveAttribute("aria-label", "Local running shoes: 125% Lebensdauer, Ziel überschritten");
+  // #2358: a closed card names the item, its state and its lifetime percent once; the bar is decorative.
+  await expect(localCard.locator("summary")).toMatchAriaSnapshot(`
+    - strong: Local running shoes
+    - text: Ziel überschritten 125 km · 125% Lebensdauer
+  `);
+  await expect(localCard.getByRole("progressbar")).toHaveCount(0);
   await expect(localCard.locator(".equipment-source-tag")).toHaveCount(0);
   await expect(garminCard.locator("summary .equipment-source-tag")).toHaveText("Garmin");
   await expect(garminCard.locator("summary progress")).toHaveAttribute("value", "50");

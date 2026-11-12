@@ -138,7 +138,7 @@ test("@responsive collapsible sections share one chevron and the page passes the
   expect(await summary.evaluate((node) => getComputedStyle(node, "::after").content)).not.toBe("none");
   expect(await summary.evaluate((node) => getComputedStyle(node).listStyleType)).toBe("none");
   await expandConnections(page);
-  for (const segment of ["connections", "profile"]) {
+  for (const segment of ["connections", "profile", "equipment"]) {
     await page.goto(`/#more/${segment}`);
     const results = await new AxeBuilder({ page }).include(".panel.active").withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(results.violations, `${segment} accessibility violations`).toEqual([]);
