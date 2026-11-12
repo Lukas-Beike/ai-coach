@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { extractFunctions, FakeElement } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement, textOf } = require("./frontend-harness.cjs");
 
 function harness(apiImpl) {
   const elements = {
@@ -88,14 +88,14 @@ const LIST_FUNCTIONS = ["NUTRITION_FIELD_NAMES", "NUTRITION_SOURCE_NAMES", "NUTR
 const OWN = { id: "own-1", name: "Whey", brand: "Fixture", barcode: "4000000000017", basis_amount: 100, basis_unit: "g", origin: "own", fetched_at: null, favorite: 1, kcal: 380, carbs_g: 5, protein_g: 72, fat_g: 6, sugar_g: 2, fiber_g: 1, salt_g: 0.1, missing_fields: [] };
 const FOOD = { id: "off:4006381333931", name: "Haferdrink", brand: "Beispiel", barcode: "4006381333931", basis_amount: 100, basis_unit: "ml", origin: "open_food_facts", source: "open_food_facts", fetched_at: "2026-10-01T08:00:00+00:00", favorite: 0, kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: null, fiber_g: 0, salt_g: null, missing_fields: ["sugar_g", "salt_g"] };
 
-const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
 const descendants = (node) => node.children.filter((child) => typeof child !== "string").flatMap((child) => [child, ...descendants(child)]);
 const withClass = (node, name) => descendants(node).filter((child) => child.className.split(" ").includes(name));
 
 function listContext() {
   const targets = { "#nutritionProducts": new FakeElement(), "#nutritionLookupResult": new FakeElement() };
+  const document = { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null };
   const context = extractFunctions("nutrition.js", LIST_FUNCTIONS, {
-    document: { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null },
+    document,
     api: async () => ({}),
     useNutritionProduct() {}, saveNutritionProduct() {}, refreshNutritionProduct() {}, deleteNutritionProduct() {}, reloadNutritionProducts() {},
     showNutritionProductError() {},
@@ -148,11 +148,11 @@ test("every card shows its origin, its missing fields and the same actions and s
   assert.equal(textOf(withClass(food, "nutrition-origin")[0]), "Datenbank · Stand 01.10.2026");
   assert.equal(withClass(own, "nutrition-incomplete").length, 0);
   const missing = withClass(food, "nutrition-incomplete")[0];
-  assert.equal(missing.textContent, "⚠ fehlt: Zucker, Salz");
+  assert.equal(textOf(missing), "⚠ fehlt: Zucker, Salz");
   assert.equal(missing.attributes["aria-label"], "Unvollständig, es fehlen: Zucker, Salz");
   assert.match(textOf(food), /EAN 4006381333931 · Basis: 100 ml/);
   for (const card of [own, food]) {
-    assert.deepEqual(withClass(card, "nutrition-actions")[0].children.map((button) => button.textContent), ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]);
+    assert.deepEqual(withClass(card, "nutrition-actions")[0].children.map(textOf), ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]);
     assert.equal(withClass(card, "nutrition-favorite").length, 1);
   }
   assert.equal(withClass(food, "nutrition-favorite")[0].attributes["aria-pressed"], "false");
@@ -175,7 +175,7 @@ test("a live lookup hit is not a stored product: it only offers saving it locall
   const { context, lookup } = listContext();
   context.renderNutritionProducts([{ id: "off:4006381333931", name: "Bio Haferdrink", brands: "Beispiel", source: "open_food_facts", local: false, per_100: { kcal: 46 } }], { local: false, targetId: "#nutritionLookupResult" });
   const [card] = lookup.children;
-  assert.deepEqual(card.children.filter((child) => child.tag === "button").map((button) => button.textContent), ["Lokal speichern"]);
+  assert.deepEqual(card.children.filter((child) => child.tag === "button").map(textOf), ["Lokal speichern"]);
   assert.equal(withClass(card, "nutrition-favorite").length, 0);
   assert.equal(textOf(withClass(card, "nutrition-origin")[0]), "Datenbank");
 });

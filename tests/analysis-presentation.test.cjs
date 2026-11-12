@@ -373,7 +373,6 @@ test("the table behind a chart scrolls in a named region that the keyboard can r
   const document = fakeDocument();
   const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "analysisValidPoint", "analysisAxisCaption"], {
     document,
-    ...(({ h, table }) => ({ h, table }))(extractFunctions("components.js", ["h", "table"], { document })),
     makeScrollRegionFocusable,
     dateLabel: (date) => date,
     analysisPointValue: (_item, point) => String(point.value),

@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, textOf } = require("./frontend-harness.cjs");
+
 
 const WEEK = ["nutritionChartDays", "nutritionChartRows", "nutritionEmptyRunRow", "nutritionChartDayRow", "nutritionWeekValue", "renderNutritionWeek"];
 const context = extractFunctions("nutrition.js", WEEK);
@@ -36,8 +37,8 @@ test("history displays daily balance from paired days alongside the total", () =
     ctx.renderNutritionWeek({ days: Array(count).fill({ date: "2026-01-01" }), start_date: "start", end_date: "end", balance_kcal: balance, balance_days: paired, averages });
     const tiles = document.nodes.get("#nutritionWeekTotals").children;
     assert.equal(tiles[1].children[0].textContent, expected);
-    assert.equal(tiles[1].children[1].textContent, "Ø Kalorienbilanz pro Tag");
-    assert.match(tiles[1].children[2].textContent, new RegExp(`^${paired} von ${count} Tagen`));
+    assert.equal(textOf(tiles[1].children[1]), "Ø Kalorienbilanz pro Tag");
+    assert.match(textOf(tiles[1].children[2]), new RegExp(`^${paired} von ${count} Tagen`));
     assert.equal(tiles[0].style.gridColumn, undefined);
   }
 });

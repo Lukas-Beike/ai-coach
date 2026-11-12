@@ -24,7 +24,12 @@ function loadPublicScript(files, globals = {}) {
 
 // Runs only the named function declarations or consts of a public file (top level, or directly
 // inside a wrapping IIFE) and publishes each name as a property of the returned context.
+// Scripts that render get the element helpers of components.js unless the test stubs them.
 function extractFunctions(file, names, globals = {}) {
+  if (file !== "components.js" && globals.document && !("h" in globals)) {
+    const { h, table } = extractFunctions("components.js", ["h", "table"], { document: globals.document });
+    Object.assign(globals, { h, table });
+  }
   const source = readPublic(file);
   const found = new Map();
   const outer = (item) => !item.parentPath.scope.parent?.parent;
@@ -68,4 +73,7 @@ function fakeDocument() {
   };
 }
 
-module.exports = { loadPublicScript, extractFunctions, FakeElement, fakeDocument };
+// Text of a fake node and its descendants; the element helper appends text as string children.
+const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
+
+module.exports = { loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
