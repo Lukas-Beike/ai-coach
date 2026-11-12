@@ -2,8 +2,7 @@
 
 import unittest
 from copy import deepcopy
-from datetime import datetime, timedelta
-from datetime import datetime as _local_datetime
+from datetime import timedelta
 from unittest.mock import patch
 
 from server_test_support import ServerTestCase, server
@@ -19,15 +18,13 @@ class WorkoutTextTests(ServerTestCase):
         super().setUp()
         self.enterContext(
             patch.object(
-                server.ATHLETE_CLOCK, "now", return_value=datetime.now().astimezone()
+                server.ATHLETE_CLOCK, "now", return_value=server.ATHLETE_CLOCK.now()
             )
         )
 
     def workout(self, description, minutes=61, **extra):
         return {
-            "date": (
-                _local_datetime.now().astimezone().date() + timedelta(days=1)
-            ).isoformat(),
+            "date": (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
             "sport": "Ride",
             "name": "Synthetic workout",
             "description": description,

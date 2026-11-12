@@ -5,7 +5,6 @@ import unittest
 import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
-from datetime import datetime as _local_datetime
 from unittest.mock import patch
 
 import remote_reconcilers
@@ -43,7 +42,7 @@ class ServerPlanningTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Synthetic selected run",
@@ -148,8 +147,7 @@ class ServerPlanningTests(ServerTestCase):
                         {
                             "action": "create",
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=4)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=4)
                             ).isoformat(),
                             "sport": "Run",
                             "name": "Bad target",
@@ -170,7 +168,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_mixed_create_recomputes_attached_plan_bounds(self):
         original_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=5)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=5)
         ).isoformat()
         created = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
@@ -194,7 +192,7 @@ class ServerPlanningTests(ServerTestCase):
             item for item in state["planned_units"] if item["local_id"] == existing_id
         )
         later_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=12)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=12)
         ).isoformat()
         intent = {
             "intent": "local_action",
@@ -243,7 +241,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_non_date_plan_edit_does_not_overwrite_metadata_bounds(self):
         original_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=8)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=8)
         ).isoformat()
         created = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
@@ -439,9 +437,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -505,9 +501,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_adaptive_preview_rejects_changed_target_and_is_idempotent(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -538,9 +532,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(repeated["status"], "already_stale")
 
     def test_adaptive_preview_reports_missing_target_and_repeat_apply_is_safe(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -736,9 +728,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(enriched[0]["compliance"]["percentage"], 83)
 
     def test_remote_planned_units_import_idempotently_and_record_conflicts(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         event = {
             "id": "remote-event-1",
             "external_id": "intervals-event-1",
@@ -779,9 +769,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_remote_pull_preserves_local_only_planned_changes(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         event = {
             "id": "remote-local-only",
             "external_id": "intervals-event-local-only",
@@ -804,9 +792,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(current["sync_status"], "local")
 
     def test_remote_planned_import_and_payload_preserve_sport(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
@@ -836,12 +822,8 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(payload["type"], "Run")
 
     def test_local_planned_workout_can_be_edited_moved_and_removed(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        day_after = (
-            _local_datetime.now().astimezone().date() + timedelta(days=2)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
+        day_after = (server.ATHLETE_CLOCK.now().date() + timedelta(days=2)).isoformat()
         local = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": tomorrow,
@@ -884,7 +866,7 @@ class ServerPlanningTests(ServerTestCase):
         local = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Archived",
@@ -981,9 +963,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_past_workout_is_rejected(self):
-        old = (
-            _local_datetime.now().astimezone().date() - timedelta(days=4)
-        ).isoformat()
+        old = (server.ATHLETE_CLOCK.now().date() - timedelta(days=4)).isoformat()
         with self.assertRaises(AppError):
             planning_workouts.workout_event_payload(
                 "abc",
@@ -1091,7 +1071,7 @@ class ServerPlanningTests(ServerTestCase):
         normalized = planning_workouts.normalize_workout(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Running",
                 "name": "Easy run",
@@ -1104,9 +1084,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_recovery_extension_bullet_is_rejected_before_plan_storage(self):
         workout = {
-            "date": (
-                _local_datetime.now().astimezone().date() + timedelta(days=1)
-            ).isoformat(),
+            "date": (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
             "sport": "Run",
             "name": "Optionaler Recovery Run - 6 bis 8 km",
             "description": (
@@ -1154,8 +1132,7 @@ class ServerPlanningTests(ServerTestCase):
                 workout = planning_workouts.normalize_workout(
                     {
                         "date": (
-                            _local_datetime.now().astimezone().date()
-                            + timedelta(days=1)
+                            server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                         ).isoformat(),
                         "sport": "Run",
                         "description": description,
@@ -1174,9 +1151,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
         client = server.PROVIDER_TRANSPORT.intervals_client()
         workout = {
-            "date": (
-                _local_datetime.now().astimezone().date() + timedelta(days=1)
-            ).isoformat(),
+            "date": (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
             "type": "Run",
             "description": "- 6km Z1 HR\n- Optional bis insgesamt 8km",
             "duration_minutes": 40,
@@ -1229,7 +1204,7 @@ class ServerPlanningTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Run",
                     "name": "Recovery",
@@ -1287,9 +1262,7 @@ class ServerPlanningTests(ServerTestCase):
             self.assertEqual(update.call_args.args[0], "synthetic-remote")
 
     def test_invalid_workout_totals_cannot_be_saved_or_partially_applied(self):
-        day = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         valid = {
             "date": day,
             "sport": "Ride",
@@ -1304,8 +1277,7 @@ class ServerPlanningTests(ServerTestCase):
                     {
                         **valid,
                         "date": (
-                            _local_datetime.now().astimezone().date()
-                            + timedelta(days=2)
+                            server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                         ).isoformat(),
                         "duration_minutes": 65,
                     },
@@ -1329,8 +1301,7 @@ class ServerPlanningTests(ServerTestCase):
                 [
                     {
                         "date": (
-                            _local_datetime.now().astimezone().date()
-                            + timedelta(days=1)
+                            server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                         ).isoformat(),
                         "sport": "Ride",
                         "name": "Coach Tempo",
@@ -1360,9 +1331,7 @@ class ServerPlanningTests(ServerTestCase):
             ]
         )
         library = server.PLANNING_DATA.workout_library().list()[0]
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         result = server.PLANNING_WORKFLOWS.workout_library_plan_service().apply(
             [
                 {
@@ -1390,9 +1359,7 @@ class ServerPlanningTests(ServerTestCase):
             ]
         )
         library = server.PLANNING_DATA.workout_library().list()[0]
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.workout_library_plan_service().apply(
                 [
@@ -1416,9 +1383,7 @@ class ServerPlanningTests(ServerTestCase):
             ]
         )
         library = server.PLANNING_DATA.workout_library().list()[0]
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         result = server.PLANNING_WORKFLOWS.workout_library_plan_service().apply(
             [
                 {
@@ -1510,12 +1475,8 @@ class ServerPlanningTests(ServerTestCase):
                     )
 
     def test_structured_training_changes_move_and_create_in_one_atomic_batch(self):
-        wednesday = (
-            _local_datetime.now().astimezone().date() + timedelta(days=20)
-        ).isoformat()
-        tuesday = (
-            _local_datetime.now().astimezone().date() + timedelta(days=19)
-        ).isoformat()
+        wednesday = (server.ATHLETE_CLOCK.now().date() + timedelta(days=20)).isoformat()
+        tuesday = (server.ATHLETE_CLOCK.now().date() + timedelta(days=19)).isoformat()
         upper_body = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": wednesday,
@@ -1566,7 +1527,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_structured_training_create_strips_protected_identity_fields(self):
         workout_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=21)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=21)
         ).isoformat()
         result = server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
             {
@@ -1614,8 +1575,7 @@ class ServerPlanningTests(ServerTestCase):
                         {
                             "action": "create",
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=22)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=22)
                             ).isoformat(),
                             "sport": "Run",
                             "name": "Missing rationale",
@@ -1632,7 +1592,7 @@ class ServerPlanningTests(ServerTestCase):
         workout = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=23)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=23)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Repeated update",
@@ -1663,7 +1623,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_structured_training_folds_repeated_updates_before_create_date_check(self):
-        original_date = _local_datetime.now().astimezone().date() + timedelta(days=24)
+        original_date = server.ATHLETE_CLOCK.now().date() + timedelta(days=24)
         moved_date = original_date + timedelta(days=1)
         workout = server.PLANNING_DATA.planned_unit().create(
             {
@@ -1706,7 +1666,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_structured_training_folds_inactive_repeated_changes_before_create_date_check(
         self,
     ):
-        original_date = _local_datetime.now().astimezone().date() + timedelta(days=26)
+        original_date = server.ATHLETE_CLOCK.now().date() + timedelta(days=26)
         workout = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": original_date.isoformat(),
@@ -1757,7 +1717,7 @@ class ServerPlanningTests(ServerTestCase):
         workout = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=25)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=25)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Restore conflict",
@@ -2254,7 +2214,7 @@ class ServerPlanningTests(ServerTestCase):
         archived = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=2)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Archived",
@@ -2314,7 +2274,7 @@ class ServerPlanningTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Metadata",
@@ -2349,7 +2309,7 @@ class ServerPlanningTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Metadata",
@@ -2412,7 +2372,7 @@ class ServerPlanningTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Old",
@@ -2444,7 +2404,7 @@ class ServerPlanningTests(ServerTestCase):
                         "workouts": [
                             {
                                 "date": (
-                                    _local_datetime.now().astimezone().date()
+                                    server.ATHLETE_CLOCK.now().date()
                                     + timedelta(days=2)
                                 ).isoformat(),
                                 "sport": "Ride",
@@ -2471,9 +2431,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())
-        past = (
-            _local_datetime.now().astimezone().date() - timedelta(days=10)
-        ).isoformat()
+        past = (server.ATHLETE_CLOCK.now().date() - timedelta(days=10)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db,
@@ -2505,8 +2463,7 @@ class ServerPlanningTests(ServerTestCase):
                     "workouts": [
                         {
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=1)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                             ).isoformat(),
                             "sport": "Ride",
                             "name": "New",
@@ -2538,12 +2495,8 @@ class ServerPlanningTests(ServerTestCase):
         self,
     ):
         empty_plan_id = str(uuid.uuid4())
-        starts = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        ends = (
-            _local_datetime.now().astimezone().date() + timedelta(days=7)
-        ).isoformat()
+        starts = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
+        ends = (server.ATHLETE_CLOCK.now().date() + timedelta(days=7)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db,
@@ -2566,8 +2519,7 @@ class ServerPlanningTests(ServerTestCase):
                     "workouts": [
                         {
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=2)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                             ).isoformat(),
                             "sport": "Ride",
                             "name": "New",
@@ -2601,7 +2553,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_broad_plan_replace_archives_imported_local_units_on_same_date(self):
         remote_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=2)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
         ).isoformat()
         remote_reconcilers.planned_reconciler(server).reconcile(
             [
@@ -2649,10 +2601,10 @@ class ServerPlanningTests(ServerTestCase):
         old = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "starts_at_local": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat()
                 + "T07:30:00",
                 "sport": "Ride",
@@ -2681,8 +2633,7 @@ class ServerPlanningTests(ServerTestCase):
                         {
                             "date": old["date"],
                             "starts_at_local": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=1)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                             ).isoformat()
                             + "T07:45:00",
                             "sport": "Ride",
@@ -2764,7 +2715,7 @@ class ServerPlanningTests(ServerTestCase):
             archived = server.PLANNING_DATA.planned_unit().create(
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Archived",
@@ -2778,8 +2729,7 @@ class ServerPlanningTests(ServerTestCase):
                 server.PLANNING_DATA.planned_unit().create(
                     {
                         "date": (
-                            _local_datetime.now().astimezone().date()
-                            + timedelta(days=index)
+                            server.ATHLETE_CLOCK.now().date() + timedelta(days=index)
                         ).isoformat(),
                         "sport": "Ride",
                         "name": f"Active {index}",
@@ -2802,7 +2752,7 @@ class ServerPlanningTests(ServerTestCase):
             server.PLANNING_DATA.planned_unit().create(
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "First",
@@ -2812,7 +2762,7 @@ class ServerPlanningTests(ServerTestCase):
             server.PLANNING_DATA.planned_unit().create(
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=2)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Second",
@@ -2825,7 +2775,7 @@ class ServerPlanningTests(ServerTestCase):
             server.PLANNING_DATA.planned_unit().create(
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=3)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Changed",
@@ -2842,7 +2792,7 @@ class ServerPlanningTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Bulk target",
@@ -2869,8 +2819,8 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(raised.exception.reason, "planning_revision_required")
 
     def test_bulk_training_changes_validate_final_schedule_before_writes(self):
-        first_date = _local_datetime.now().astimezone().date() + timedelta(days=1)
-        second_date = _local_datetime.now().astimezone().date() + timedelta(days=2)
+        first_date = server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+        second_date = server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
         first = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": first_date.isoformat(),
@@ -2937,7 +2887,7 @@ class ServerPlanningTests(ServerTestCase):
         existing = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=4)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=4)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Before",
@@ -2967,7 +2917,7 @@ class ServerPlanningTests(ServerTestCase):
             "workouts": [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=5)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=5)
                     ).isoformat(),
                     "sport": "Run",
                     "name": "New",
@@ -3006,7 +2956,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_structured_athlete_context_persists_competitions(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=60)
         ).isoformat()
         profile = server.ATHLETE_DATA.profile().save(
             {
@@ -3035,7 +2985,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_competition_removal_creates_remote_delete_tombstone(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=60)
         ).isoformat()
         saved = server.PLANNING_DATA.competition().save(
             {"name": "Delete Race", "event_date": event_date}
@@ -3082,7 +3032,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertNotEqual(local_id, "")
 
     def test_current_performance_includes_health_and_training_comparisons(self):
-        today = _local_datetime.now().astimezone().date()
+        today = server.ATHLETE_CLOCK.now().date()
         days = [(today - timedelta(days=offset)).isoformat() for offset in range(7)]
         garmin = {
             "sleep": [

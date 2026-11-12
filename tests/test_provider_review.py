@@ -5,7 +5,6 @@ import threading
 import unittest
 from dataclasses import replace
 from datetime import date
-from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -545,7 +544,7 @@ class ProviderReviewTests(unittest.TestCase):
                 payload = {
                     "synced_at": "2026-09-05T00:00:00+00:00",
                     "start": "2026-09-04",
-                    "end": _local_datetime.now().astimezone().date().isoformat(),
+                    "end": server.ATHLETE_CLOCK.now().date().isoformat(),
                     "activities": [dict(original)],
                     "errors": [],
                     "provider_sync": {"pagination": {"activities": {"complete": True}}},

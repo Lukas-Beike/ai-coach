@@ -9,7 +9,6 @@ import tempfile
 import threading
 import unittest
 from dataclasses import replace
-from datetime import datetime as _local_datetime
 from datetime import timedelta
 from http.server import ThreadingHTTPServer
 from io import BytesIO
@@ -401,7 +400,7 @@ class ServerHttpTests(ServerTestCase):
         first = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "First",
@@ -411,7 +410,7 @@ class ServerHttpTests(ServerTestCase):
         second = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=2)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Second",
@@ -435,8 +434,7 @@ class ServerHttpTests(ServerTestCase):
                         {
                             "action": "create",
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=3)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
                             ).isoformat(),
                             "sport": "Run",
                             "name": "Recovery",
@@ -1495,7 +1493,7 @@ class ServerHttpTests(ServerTestCase):
         old = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Old",
@@ -1522,8 +1520,7 @@ class ServerHttpTests(ServerTestCase):
                     "workouts": [
                         {
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=2)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=2)
                             ).isoformat(),
                             "sport": "Ride",
                             "name": "New 1",
@@ -1534,8 +1531,7 @@ class ServerHttpTests(ServerTestCase):
                         },
                         {
                             "date": (
-                                _local_datetime.now().astimezone().date()
-                                + timedelta(days=3)
+                                server.ATHLETE_CLOCK.now().date() + timedelta(days=3)
                             ).isoformat(),
                             "sport": "Run",
                             "name": "New 2",
@@ -1667,7 +1663,7 @@ class ServerHttpTests(ServerTestCase):
         server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Intervalle",

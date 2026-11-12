@@ -6,7 +6,6 @@ import shutil
 import struct
 import tempfile
 import unittest
-from datetime import datetime as _local_datetime
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock
@@ -194,7 +193,7 @@ class ServerFrontendTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Remove me",
@@ -937,8 +936,18 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_provider_refresh_markup_and_versioned_icon(self):
         index = served_page("index.html")
-        for provider in ("garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"):
-            self.assertIn(f'<details id="connection-{provider}" class="connection-card">', index)
+        for provider in (
+            "garmin",
+            "wahoo",
+            "intervals",
+            "openai",
+            "yazio",
+            "calendar",
+            "weather",
+        ):
+            self.assertIn(
+                f'<details id="connection-{provider}" class="connection-card">', index
+            )
         # Only the registered providers have freshness and retry entries.
         for provider in ("garmin", "wahoo", "intervals", "calendar", "weather"):
             self.assertIn(f'id="freshness-{provider}"', index)

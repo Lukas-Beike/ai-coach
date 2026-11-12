@@ -1,6 +1,8 @@
+import re
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from backend.athlete.clock import AthleteLocalClock
 from backend.db.manager import DATABASE_LOCK
@@ -124,6 +126,24 @@ class AthleteLocalClockTests(unittest.TestCase):
         self.assertEqual(clock.now().isoformat(), "2026-10-24T23:59:00+02:00")
         self.assertEqual(clock.now().isoformat(), "2026-10-25T00:00:00+02:00")
         self.assertEqual(clock.now().isoformat(), "2026-10-25T02:00:00+01:00")
+
+    def test_tests_take_today_from_the_athlete_clock_not_the_runner_zone(self):
+        # #2310: the runner (UTC in CI) and the athlete clock (Europe/Berlin by
+        # default) are on different days for an hour each night.
+        runner_today = re.compile(
+            r"\.now\(\)\.astimezone\(\)|\bdate\.today\(\)|datetime\.now\(\)\.date\(\)"
+        )
+        found = [
+            f"{path.name}:{number}"
+            for path in sorted(Path(__file__).parent.rglob("*.py"))
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            )
+            if runner_today.search(line)
+        ]
+        self.assertEqual(
+            found, [], "use server.ATHLETE_CLOCK.now().date() or a pinned clock"
+        )
 
 
 if __name__ == "__main__":
