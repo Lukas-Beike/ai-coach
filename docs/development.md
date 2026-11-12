@@ -81,8 +81,9 @@ ratchet reports a function above Sonar's cognitive complexity 15 (rule
 `python:S3776`) as a `cognitive` finding named by function, not score. It
 also checks `public/*.js` for Sonar's cognitive complexity above 15
 (S3776) and nested ternaries (S3358) through `eslint-plugin-sonarjs`, using the
-clone's `node_modules` (`npm ci`); without them it prints that it skipped the
-check, as in CI's `quality` job, and a `NOSONAR` comment on the reported line
+clone's `node_modules` (`npm ci`). In the pre-push hook a clone without
+ESLint blocks the push (run `npm ci`); elsewhere, as in CI's `quality` job, it
+prints that it skipped the check. A `NOSONAR` comment on the reported line
 suppresses a finding as it does in Sonar. Do not use `--no-verify`.
 
 Enable the hook in each clone (the relative path also works in its worktrees):
