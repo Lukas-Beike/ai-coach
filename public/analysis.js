@@ -1242,14 +1242,21 @@ async function renderTrainingRecords() { // NOSONAR
   try {
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
-    const openDetails = new Set([...gear.querySelectorAll("details[open]")]
-      .map((details) => `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`));
+    const openDetails = new Set([...gear.querySelectorAll("details[open]")].map((details) => details.dataset.key));
     gear.replaceChildren(heading());
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = reportNode("div", null, "segmented-control equipment-tabs");
     tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Ausrüstung nach Sportart");
     const localItems = equipment.items || [];
+    const parents = new Map(localItems.map((item) => [item.id, item.name]));
+    const card = (place) => ({ item, source }) => equipmentCard(item, source, parents, place);
+    const archive = (key, entries) => {
+      const archived = reportNode("details", null, "training-focus-details equipment-archive");
+      archived.dataset.key = `archive:${key}`;
+      archived.append(reportNode("summary", `Ausgemustert (${entries.length})`), ...entries.map(card(key)));
+      return archived;
+    };
     const isArchivedEquipment = (item) => item.status === "archived";
     const activeLocalItems = localItems.filter((item) => !isArchivedEquipment(item));
     const archivedLocalItems = localItems.filter(isArchivedEquipment);
@@ -1287,19 +1294,9 @@ async function renderTrainingRecords() { // NOSONAR
       panel.id = `equipmentPanel-${key}`; panel.setAttribute("role", "tabpanel");
       panel.setAttribute("aria-labelledby", tab.id); panel.tabIndex = 0;
       panel.hidden = equipmentTab !== key;
-      if (groups[key].items.length) {
-        const local = reportNode("details", null, "training-focus-details");
-        local.append(reportNode("summary", "Lokale Ausrüstung und Wartung"));
-        for (const item of groups[key].items) local.append(localEquipmentCard(item));
-        panel.append(local);
-      }
-      for (const item of garminGroups[key]) panel.append(garminEquipmentCard(item));
-      if (archivedGroups[key].length) {
-        const archived = reportNode("details", null, "training-focus-details equipment-archive");
-        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedGroups[key].length})`));
-        for (const { item, source } of archivedGroups[key]) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
-        panel.append(archived);
-      }
+      for (const item of groups[key].items) panel.append(card(key)({ item, source: "local" }));
+      for (const item of garminGroups[key]) panel.append(card(key)({ item, source: "provider" }));
+      if (archivedGroups[key].length) panel.append(archive(key, archivedGroups[key]));
       if (!groups[key].items.length && !garminGroups[key].length && !archivedGroups[key].length) {
         panel.append(reportNode("p", key === "bike" ? "Noch keine Fahrräder oder Komponenten erfasst." : "Noch keine Laufschuhe erfasst.", "muted"));
       }
@@ -1317,25 +1314,18 @@ async function renderTrainingRecords() { // NOSONAR
     if (uncategorizedItems.length || uncategorizedGarminItems.length || archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
       const other = reportNode("section", null, "equipment-uncategorized");
       other.append(reportNode("h4", "Weitere Ausrüstung"));
-      for (const item of uncategorizedItems) other.append(localEquipmentCard(item));
-      for (const item of uncategorizedGarminItems) other.append(garminEquipmentCard(item));
+      for (const item of uncategorizedItems) other.append(card("other")({ item, source: "local" }));
+      for (const item of uncategorizedGarminItems) other.append(card("other")({ item, source: "provider" }));
       if (archivedUncategorizedItems.length || archivedUncategorizedGarminItems.length) {
-        const archived = reportNode("details", null, "training-focus-details equipment-archive");
-        const archivedItems = [
+        other.append(archive("other", [
           ...archivedUncategorizedItems.map((item) => ({ item, source: "local" })),
           ...archivedUncategorizedGarminItems.map((item) => ({ item, source: "provider" })),
-        ];
-        archived.append(reportNode("summary", `Archivierte Ausr\u00fcstung (${archivedItems.length})`));
-        for (const { item, source } of archivedItems) archived.append(source === "local" ? localEquipmentCard(item) : garminEquipmentCard(item));
-        other.append(archived);
+        ]));
       }
       gear.append(other);
     }
     gear.prepend(tabs);
-    gear.querySelectorAll("details").forEach((details) => {
-      const key = `${details.closest(".equipment-tab-panel")?.id || "other"}:${details.querySelector("summary")?.textContent || ""}`;
-      details.open = openDetails.has(key);
-    });
+    gear.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.dataset.key); });
     if (equipment.garmin_synced_at) gear.append(reportNode("p", `Garmin \u00b7 Stand ${new Date(equipment.garmin_synced_at).toLocaleString("de-DE")}${equipment.garmin_freshness === "stale" ? " \u00b7 letzter erfolgreicher Abruf" : ""}`, "muted"));
   } catch (error) {
     if (generation === trainingRecordsGeneration && session === state.sessionGeneration) {
@@ -1609,29 +1599,105 @@ function renderTrainingFocus(report) {
   renderAnalysisSegmentsIfActive();
 }
 
-function localEquipmentCard(item) {
-  const card = reportNode("section", null, "garmin-equipment-card");
-  const usage = item.usage || {};
-  card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.sport_pending ? "Sportart offen" : equipmentSportLabel(item), item.parent_pending ? "Fahrrad offen" : "", item.status === "archived" ? "ausgemustert" : "aktiv"].filter(Boolean).join(" \u00b7 ")));
-  card.append(reportNode("p", `${analysisValue(usage.distance_km, "km")} \u00b7 ${analysisValue(usage.hours, "h")} \u00b7 ${analysisCountLabel(usage.assigned_sessions, "zugeordnete Einheit", "zugeordnete Einheiten")}`));
-  const garminStatus = String(item.garmin_status || "").trim();
-  if (garminStatus && normalizeEquipmentStatus(garminStatus) !== item.status) {
-    card.append(reportNode("p", `Statuskonflikt \u00b7 Coach: ${item.status === "archived" ? "archiviert" : "aktiv"} \u00b7 Garmin: ${garminStatus}`, "muted"));
+// One collapsible card per item (#2302): name, status chip, one line and the lifetime bar when
+// closed; usage, maintenance, Garmin state and the action when open. Garmin-only items carry a tag.
+function equipmentCard(item, source, parents, place) {
+  const local = source === "local";
+  const distance = local ? item.usage?.distance_km : item.distance_km;
+  const life = equipmentLifetime(item.lifetime, distance, local ? item.lifetime_target_km : item.goal_km);
+  const [kind, label] = equipmentState(item, local, life);
+  // The provider's name comes from the bootstrap labels, never from a literal here.
+  const garmin = state.data?.provider_labels?.[providerIds().garmin] || "";
+  const card = reportNode("details", null, "connection-card equipment-card");
+  card.dataset.key = `${place}:${source}:${item.id}`;
+  card.dataset.state = kind;
+  const summary = reportNode("summary");
+  summary.append(reportNode("strong", item.name));
+  if (!local && garmin) summary.append(reportNode("span", garmin, "equipment-source-tag"));
+  summary.append(reportNode("span", label, `connection-chip is-${kind}`));
+  const line = [equipmentParent(item, local, parents), Number.isFinite(Number(distance ?? Number.NaN)) ? analysisValue(distance, "km") : "", life.percent == null ? "" : analysisPercent(life.percent)];
+  if (line.some(Boolean)) summary.append(reportNode("span", line.filter(Boolean).join(" · "), "equipment-card-line"));
+  if (life.percent != null) summary.append(equipmentBar(item.name, life));
+  const body = reportNode("div", null, "connection-card-body");
+  body.append(equipmentSection("Nutzung", equipmentUsage(item, local, life)));
+  if (local) body.append(equipmentSection("Wartung", equipmentMaintenance(item)));
+  const provider = equipmentGarmin(item, local, garmin);
+  if (provider) body.append(provider);
+  if (local && item.status !== "archived") {
+    const actions = reportNode("div", null, "connection-actions");
+    actions.append(maintenanceButton(item));
+    body.append(actions);
   }
-  appendEquipmentLifetime(card, item.lifetime, usage.distance_km, item.lifetime_target_km);
-  if (Number.isFinite(Number(usage.maintenance_distance_km ?? Number.NaN)) || Number.isFinite(Number(usage.maintenance_hours ?? Number.NaN))) {
-    card.append(reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} \u00b7 ${analysisValue(usage.maintenance_hours, "h")}`));
-  }
-  const status = new Map([[true, "Wartung f\u00e4llig"], [false, "Wartung nicht f\u00e4llig"]]);
-  card.append(reportNode("p", status.get(usage.maintenance_due) || "Wartungsstand unklar"));
-  if (usage.maintenance_coverage === "partial") card.append(reportNode("p", "Nutzung unvollst\u00e4ndig bekannt.", "muted"));
-  const history = reportNode("ul");
-  for (const event of item.maintenance || []) history.append(reportNode("li", `${dateLabel(event.date)} \u00b7 ${event.notes || "Wartung erfasst"}`));
-  if (history.childElementCount) card.append(history);
-  else card.append(reportNode("p", "Keine Wartung erfasst.", "muted"));
-  if (item.status !== "archived") card.append(maintenanceButton(item));
+  card.append(summary, body);
   return card;
+}
+
+// Garmin's status of the item and the conflict with the local status; none for a local item Garmin does not know.
+function equipmentGarmin(item, local, title) {
+  const garminStatus = String(item.garmin_status || "").trim();
+  if (!garminStatus && local) return null;
+  const conflict = local && normalizeEquipmentStatus(garminStatus) !== item.status;
+  const coach = item.status === "archived" ? "archiviert" : "aktiv";
+  return equipmentSection(title, [
+    reportNode("p", garminStatus || "Unbekannter Garmin-Status"),
+    conflict ? reportNode("p", `Statuskonflikt · Coach: ${coach} · Garmin: ${garminStatus}`, "muted") : null,
+  ]);
+}
+
+// The slim lifetime bar of a closed card; its colour follows the card's state.
+function equipmentBar(name, life) {
+  const progress = reportNode("progress", null, "connection-sync-progress-bar");
+  progress.max = 100;
+  progress.value = life.progress;
+  progress.setAttribute("aria-label", `${name}: ${analysisPercent(life.percent)} Lebensdauer${life.over ? ", Ziel überschritten" : ""}`);
+  return progress;
+}
+
+// The parent bike of a component, or that it is still open; empty for other items.
+function equipmentParent(item, local, parents) {
+  if (!local || item.kind !== "component") return "";
+  return item.parent_pending ? "Fahrrad offen" : parents.get(item.parent_id);
+}
+
+function equipmentSection(title, nodes) {
+  const section = reportNode("div", null, "connection-card-status");
+  section.append(reportNode("h4", title), ...nodes.filter(Boolean));
+  return section;
+}
+
+function equipmentUsage(item, local, life) {
+  const usage = item.usage || {};
+  const sport = item.sport_pending ? "Sportart offen" : equipmentSportLabel(item);
+  const status = item.status === "archived" ? "ausgemustert" : "aktiv";
+  const facts = local ? [KIND_LABELS[item.kind] || item.kind, sport, status] : [KIND_LABELS[item.kind] || item.kind];
+  return [
+    reportNode("p", facts.filter(Boolean).join(" · ")),
+    local ? reportNode("p", `${analysisValue(usage.distance_km, "km")} · ${analysisValue(usage.hours, "h")} · ${analysisCountLabel(usage.assigned_sessions, "zugeordnete Einheit", "zugeordnete Einheiten")}`) : null,
+    !local && item.sessions != null ? reportNode("p", analysisCountLabel(item.sessions, "Einheit", "Einheiten")) : null,
+    reportNode("p", life.text, life.percent == null ? "muted" : null),
+  ];
+}
+
+function equipmentMaintenance(item) {
+  const usage = item.usage || {};
+  const history = reportNode("ul");
+  for (const event of item.maintenance || []) history.append(reportNode("li", `${dateLabel(event.date)} · ${event.notes || "Wartung erfasst"}`));
+  const since = Number.isFinite(Number(usage.maintenance_distance_km ?? Number.NaN)) || Number.isFinite(Number(usage.maintenance_hours ?? Number.NaN));
+  return [
+    since ? reportNode("p", `Seit letzter Wartung: ${analysisValue(usage.maintenance_distance_km, "km")} · ${analysisValue(usage.maintenance_hours, "h")}`) : null,
+    reportNode("p", new Map([[true, "Wartung fällig"], [false, "Wartung nicht fällig"]]).get(usage.maintenance_due) || "Wartungsstand unklar"),
+    usage.maintenance_coverage === "partial" ? reportNode("p", "Nutzung unvollständig bekannt.", "muted") : null,
+    history.childElementCount ? history : reportNode("p", "Keine Wartung erfasst.", "muted"),
+  ];
+}
+
+// Pure: the closed card's chip as [kind, text]; the kinds reuse the connection chip colours.
+function equipmentState(item, local, life) {
+  if (item.status === "archived") return ["off", "Ausgemustert"];
+  if (life.over) return ["error", "Ziel \u00fcberschritten"];
+  if (local && item.usage?.maintenance_due === true) return ["unchecked", "Wartung f\u00e4llig"];
+  if (local && item.usage?.maintenance_due === false) return ["ok", "Wartung ok"];
+  return life.percent == null ? ["off", "Ziel unbekannt"] : ["ok", "Ziel ok"];
 }
 
 function maintenanceButton(item) {
@@ -1675,39 +1741,26 @@ function showMaintenanceReceipt(change, message = "Wartung erfasst. ") {
   status.append(undo);
 }
 
-function garminEquipmentCard(item) {
-  const card = reportNode("section", null, "garmin-equipment-card");
-  card.append(reportNode("h4", item.name));
-  card.append(reportNode("p", [KIND_LABELS[item.kind] || item.kind, item.garmin_status || "Unbekannter Garmin-Status"].filter(Boolean).join(" \u00b7 ")));
-  if (item.sessions != null) card.append(reportNode("p", `${analysisCountLabel(item.sessions, "Einheit", "Einheiten")}`));
-  appendEquipmentLifetime(card, item.lifetime, item.distance_km, item.goal_km);
-  return card;
-}
-
 function normalizeEquipmentStatus(value) {
   return /retir|archiv|inactive|inaktiv|ausgemustert/i.test(value || "") ? "archived" : "active";
 }
 
-function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
+// Pure: lifetime text, percent and bar value; percent stays null while usage or target is unknown.
+function equipmentLifetime(lifetime, usageKm, targetKm) {
   const usage = lifetime?.usage_km ?? usageKm;
   const target = lifetime?.target_km ?? targetKm;
+  const knownTarget = Number.isFinite(target) && target > 0;
   if (!Number.isFinite(usage) || usage < 0) {
-    card.append(reportNode("p", Number.isFinite(target) && target > 0
-      ? `Nutzung unbekannt \u00b7 Ziel ${analysisValue(target, "km")}`
-      : "Nutzung und Lebensdauerziel unbekannt", "muted"));
-    return;
+    return { percent: null, text: knownTarget ? `Nutzung unbekannt \u00b7 Ziel ${analysisValue(target, "km")}` : "Nutzung und Lebensdauerziel unbekannt" };
   }
-  if (!Number.isFinite(target) || target <= 0) {
-    card.append(reportNode("p", `${analysisValue(usage, "km")} Nutzung \u00b7 Lebensdauerziel unbekannt`, "muted"));
-    return;
-  }
+  if (!knownTarget) return { percent: null, text: `${analysisValue(usage, "km")} Nutzung \u00b7 Lebensdauerziel unbekannt` };
   const percent = Number.isFinite(lifetime?.percent) ? lifetime.percent : Math.round(usage / target * 1000) / 10;
-  const progress = reportNode("progress");
-  progress.max = 100;
-  progress.value = Math.min(100, Math.max(0, Number.isFinite(lifetime?.progress_percent) ? lifetime.progress_percent : percent));
-  const overage = percent > 100;
-  progress.setAttribute("aria-label", `${card.querySelector("h4")?.textContent || "Ausr\u00fcstung"}: ${analysisPercent(percent)} Lebensdauer${overage ? ", Ziel \u00fcberschritten" : ""}`);
-  card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${analysisPercent(percent)}${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
+  const over = percent > 100;
+  return {
+    percent, over,
+    progress: Math.min(100, Math.max(0, Number.isFinite(lifetime?.progress_percent) ? lifetime.progress_percent : percent)),
+    text: `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${analysisPercent(percent)}${over ? " \u00b7 Ziel \u00fcberschritten" : ""}`,
+  };
 }
 
 // One bucket per seven days from `start`, the last one cut at `end`. `summarize` turns a week's valid
