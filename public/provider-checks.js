@@ -36,6 +36,14 @@ function providerCheckView(result, busy = false) {
   };
 }
 
+// Pure: a successful check marks a not yet checked chip connected; a failed one marks it an error.
+function checkedConnectionKind(kind, result) {
+  const status = result?.status;
+  if (kind === "off") return kind;
+  if (status === "success") return kind === "unchecked" ? "ok" : kind;
+  return PROVIDER_CHECK_FAILURES.has(status) ? "error" : kind;
+}
+
 const PROVIDER_CHECK_POLL_MS = 3000;
 // One pending poll at a time, however many loads complete meanwhile.
 let providerCheckPoll = null;
@@ -68,6 +76,9 @@ function renderProviderCheck(provider) {
   }
   const button = document.querySelector(`[data-check-button="${provider}"]`);
   if (button) button.disabled = view.disabled;
+  const chip = CHECKED_CONNECTION_CHIPS[provider];
+  const base = chip && document.querySelector(chip)?.dataset.base;
+  if (base) setConnectionChip(chip, base);
 }
 
 function renderProviderChecks() {
@@ -168,4 +179,4 @@ function bindProviderChecks() {
   }
 }
 
-if (typeof module !== "undefined") module.exports = { providerCheckView };
+if (typeof module !== "undefined") module.exports = { providerCheckView, checkedConnectionKind };
