@@ -184,7 +184,7 @@ The system SHALL persist actual tool outcomes and confirmed change references, d
 Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`, `backend/coach/change_receipts.py:_FULLY_TRACKED_TOOLS`; `backend/coach/final_receipt.py:CoachFinalReceiptService`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_final_receipt.py:test_turn_changes_are_summarized_on_the_receipt_and_the_answer`; `tests/test_coach_dialogue.py:test_success_on_other_object_does_not_hide_failed_step`, `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`; `tests/test_coach_change_receipts.py` (complete-effect undo eligibility contracts).
 
 ### Requirement: CA10 Validated repair dependencies and exceptional approvals
-The system SHALL reject malformed tools without partial effects, permit repairs within original authority, prevent remote steps from overtaking unresolved local failures, and retain explicit proposals for saved meal/product definitions and the separate undo-preview flow.
+The system SHALL reject malformed tools without partial effects, permit repairs within original authority, prevent remote steps from overtaking unresolved local failures, save meal/product definitions directly with a receipt, and retain the separate undo-preview flow.
 
 #### Scenario: Repairable local validation failure
 - **WHEN** a model corrects invalid arguments or stale local state after rereading current references
@@ -194,9 +194,9 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 - **WHEN** a requested local plan has not committed successfully
 - **THEN** a dependent created/all-pending push is blocked instead of synchronizing a partial or unintended plan.
 
-#### Scenario: Meal/product definition proposal
-- **WHEN** the Coach saves a reusable meal/product definition
-- **THEN** it returns approval-required and the explicit proposal path; creating the proposal does not itself execute the athlete-data effect.
+#### Scenario: Meal/product definition save
+- **WHEN** the athlete's own message asks the Coach to save a reusable meal or product definition
+- **THEN** it is saved directly without an approval card, shown as a receipt with whole-turn undo (athlete decision on #2339); an unclear request gets a clarification question instead. A card created before this change can still be confirmed until it expires.
 
 #### Scenario: Undo of a change
 - **WHEN** the Coach calls `undo_training_change`

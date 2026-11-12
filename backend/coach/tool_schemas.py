@@ -1383,7 +1383,7 @@ def build_structured_tool_schemas(
         [
             _canonical_coach_tool(
                 "save_nutrition_template",
-                "Save or update a reusable meal for ONE portion, only after the athlete confirms its shown ingredients, quantities and nutrition. This does NOT log consumption. Read templates first; use id for updates. Ingredients and quantities belong in description.",
+                "Save or update a reusable meal for ONE portion when the athlete's own message asks to save it and its ingredients, quantities and nutrition are clear; otherwise ask first. This does NOT log consumption. Read templates first; use id for updates. Ingredients and quantities belong in description.",
                 {
                     "payload": {
                         "type": "object",
@@ -1454,7 +1454,7 @@ def build_structured_tool_schemas(
     COACH_STRUCTURED_TOOLS.append(
         _canonical_coach_tool(
             "save_nutrition_product",
-            "Save or update one reusable local food product after the athlete has reviewed and confirmed its displayed name, source, basis and nutrients. This does not record consumption. Preserve source provenance; use id only for the exact product read first.",
+            "Save or update one reusable local food product when the athlete asks to save it and its name, source, basis and nutrients are known; values from a photo or online source need the athlete's review first. This does not record consumption. Preserve source provenance; use id only for the exact product read first.",
             {
                 "payload": {
                     "type": "object",

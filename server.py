@@ -1548,7 +1548,6 @@ COACH_PROPOSALS = CoachProposalAssembly(
         persistence=ProposalPersistence(
             database_manager=database_manager,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
-            nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         execution=ProposalExecutionOwners(
             history_undo_service=HISTORY.undo_service,

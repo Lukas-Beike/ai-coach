@@ -1,4 +1,4 @@
-"""Create local Coach action previews and approval manifests."""
+"""Create Coach action previews and approval manifests."""
 
 from __future__ import annotations
 
@@ -14,14 +14,12 @@ from backend.athlete.local_date import LocalDate
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
-    _preview_nutrient,
     _utc_now,
     coach_action_hash,
     coach_action_view,
     prune_expired_coach_proposals,
 )
 from backend.coach.proposal_validation import (
-    _validate_local_coach_write,
     _validate_remote_coach_write,
     remote_coach_write_diff,
     remote_write_target,
@@ -69,7 +67,6 @@ class CoachProposalCreationService:
         utc_now: Callable[[], str] = _utc_now,
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
-        nutrition_meal_library_service: Callable[[], Any] | None = None,
         today: Callable[[], date] | None = None,
     ) -> None:
         self._today = today or _utc_today
@@ -79,7 +76,6 @@ class CoachProposalCreationService:
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
         self._nutrition_diary_service = nutrition_diary_service
-        self._nutrition_meal_library_service = nutrition_meal_library_service
 
     def create(self, values: Any, session_csrf_hash: str) -> dict[str, Any]:
         action_type, target_system, object_ids, diff, payload = (
@@ -267,139 +263,6 @@ class CoachProposalCreationService:
             },
             session_csrf_hash,
         )
-
-    def create_local_write(
-        self,
-        tool: str,
-        arguments: dict[str, Any],
-        intent: dict[str, Any],
-        *,
-        conversation_id: str,
-        client_turn_id: str,
-        session_csrf_hash: str,
-    ) -> dict[str, Any]:
-        if not conversation_id or not client_turn_id or not session_csrf_hash:
-            raise AppError(
-                403, "Die lokale Aktion ist nicht an eine Coach-Sitzung gebunden."
-            )
-        payload: dict[str, Any] = {
-            "tool": tool,
-            "arguments": dict(arguments),
-            "intent": intent,
-            "conversation_id": str(conversation_id)[:160],
-            "client_turn_id": str(client_turn_id)[:160],
-        }
-        _validate_local_coach_write(payload)
-        values = arguments["payload"]
-        preview_values = self._local_write_preview_values(values, payload)
-        diff = [self._local_write_preview_diff(preview_values)]
-        return self.create(
-            {
-                "action_type": "local_coach_write",
-                "target_system": "local",
-                "object_ids": {"operation": tool, "template_id": values.get("id")},
-                "diff": diff,
-                "payload": payload,
-            },
-            session_csrf_hash,
-        )
-
-    def _local_write_preview_values(
-        self, values: dict[str, Any], payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        preview_values = dict(values)
-        preview_values = self._merge_existing_local_write(
-            preview_values, values, payload
-        )
-        self._calculate_local_write_preview(preview_values, values, payload)
-        return preview_values
-
-    def _merge_existing_local_write(
-        self,
-        preview_values: dict[str, Any],
-        values: dict[str, Any],
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        template_id = str(values.get("id") or "").strip()
-        if template_id and self._nutrition_meal_library_service:
-            nutrition = self._nutrition_meal_library_service()
-            if payload.get("tool") == "save_nutrition_product":
-                try:
-                    existing = nutrition.product_catalog.get_product(template_id)
-                except AppError:
-                    existing = None
-            else:
-                existing = next(
-                    (
-                        template
-                        for template in nutrition.list_templates()
-                        if template.get("id") == template_id
-                    ),
-                    None,
-                )
-            if existing:
-                preview_values = {**existing, **preview_values}
-        return preview_values
-
-    def _calculate_local_write_preview(
-        self,
-        preview_values: dict[str, Any],
-        values: dict[str, Any],
-        payload: dict[str, Any],
-    ) -> None:
-        if "components" in values:
-            if self._nutrition_meal_library_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = self._nutrition_meal_library_service().product_catalog.calculate_components(
-                values["components"]
-            )
-            preview_values.update(calculation)
-            payload["arguments"]["_food_calculation"] = calculation
-        elif "food_ingredients" in values:
-            if self._nutrition_meal_library_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = (
-                self._nutrition_meal_library_service().food_database.calculate(
-                    values["food_ingredients"]
-                )
-            )
-            preview_values.update(calculation)
-            payload["arguments"]["_food_calculation"] = calculation
-        elif (
-            set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}
-            and self._nutrition_meal_library_service is not None
-        ):
-            preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(preview_values)
-            )
-
-    @staticmethod
-    def _local_write_preview_diff(preview_values: dict[str, Any]) -> dict[str, str]:
-        diff = {
-            "name": preview_values.get("name", ""),
-            "description": str(preview_values.get("description") or "")[:500],
-            "kcal": _preview_nutrient(preview_values.get("kcal")),
-            "carbs": _preview_nutrient(preview_values.get("carbs_g")),
-            "protein": _preview_nutrient(preview_values.get("protein_g")),
-            "fat": _preview_nutrient(preview_values.get("fat_g")),
-        }
-        if preview_values.get("nutrition_basis", {}).get("kind") == "database":
-            diff["source"] = "; ".join(
-                f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
-                for item in preview_values["nutrition_basis"]["ingredients"]
-            )
-        elif preview_values.get("nutrition_basis", {}).get("kind") == "composite":
-            diff["source"] = "; ".join(
-                f"{item['kind']}: {item['name']}, {item['amount']:g} {item['unit']}"
-                for item in preview_values["nutrition_basis"].get("components", [])
-            )
-        if preview_values.get("basis_amount") and preview_values.get("source"):
-            diff["source"] = str(preview_values["source"])
-        if preview_values.get("basis_amount") and preview_values.get("basis_unit"):
-            diff["basis"] = (
-                f"pro {preview_values['basis_amount']:g} {preview_values['basis_unit']}"
-            )
-        return diff
 
 
 # Card rows of what a sync deletes at the provider; the receipt lists them too.

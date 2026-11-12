@@ -110,16 +110,6 @@ class CoachStructuredToolExecutionService:
                 return {"ok": True, "status": "cancelled"}
             if name == "apply_training_patch":
                 return self._training_patch.apply(arguments, action)
-            if name in {"save_nutrition_template", "save_nutrition_product"}:
-                proposal = self._proposal_creation.create_local_write(
-                    name,
-                    arguments,
-                    action,
-                    conversation_id=conversation_id,
-                    client_turn_id=client_turn_id,
-                    session_csrf_hash=session_csrf_hash,
-                )
-                return {**proposal, "ok": True, "status": "approval_required"}
             removals: list[str] = []
             if (
                 action.get("intent") == "remote_sync"
