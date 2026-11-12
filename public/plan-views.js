@@ -51,6 +51,7 @@ function plannedWeekSyncSummary(done, ids, providerLabel) {
 function rememberPlannedEntryState(root) {
   openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
   for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+  for (const key of plannedMoveReceipts.keys()) if (!openPlannedEntries.has(key)) plannedMoveReceipts.delete(key);
   const active = document.activeElement;
   const card = active?.closest?.(".planned-entry[data-entry-key]");
   if (!card || !root.contains(card)) return null;
@@ -633,6 +634,10 @@ function completedSessionIds(calendar) {
   return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
 }
 const plannedFocusStatuses = new Map();
+// The receipt of a moved unit by card key ({ text, change, from }); the open card shows it after the re-render.
+const plannedMoveReceipts = new Map();
+const MOVE_DAY_FORMAT = new Intl.DateTimeFormat("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+const MOVE_WEEKDAY_FORMAT = new Intl.DateTimeFormat("de-DE", { weekday: "short" });
 
 // The summary chip follows the saved focus without waiting for the next reload.
 function refreshFocusChip(card, entry) {
@@ -1212,6 +1217,78 @@ function plannedActivityActions(actual, dateKey, title, entryKey) {
   return [more, h("div", "planned-activity-actions", coach, feedback)];
 }
 
+// "Verschieben" (#2194): the next seven days from today with the unit's own day dimmed, and "…" for a
+// later date. One tap moves the local unit; its open card follows it to the new week with the receipt.
+function plannedUnitActions(entry, dateKey, todayKey) {
+  if (!entry.local_id || !entry.payload_hash || entry.is_completed_activity) return [];
+  const key = plannedEntryKey(entry, dateKey);
+  const toggle = h("button", { type: "button", className: "secondary-button", "aria-expanded": "false" }, "Verschieben");
+  const days = h("div", { className: "planned-move-days", role: "group", "aria-label": "Neuer Tag", hidden: true });
+  const status = h("p", { className: "planned-focus-status planned-move-status", role: "status" });
+  toggle.addEventListener("click", () => {
+    days.hidden = !days.hidden;
+    toggle.setAttribute("aria-expanded", String(!days.hidden));
+  });
+  const move = async (target) => {
+    if (!target || target === dateKey) return;
+    const buttons = [...days.querySelectorAll("button, input")];
+    buttons.forEach((item) => { item.disabled = true; });
+    status.replaceChildren();
+    try {
+      const result = await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/date`, { method: "POST", body: JSON.stringify({ date: target, expected_payload_hash: entry.payload_hash }) });
+      plannedMoveReceipts.set(key, { text: `Verschoben auf ${MOVE_DAY_FORMAT.format(dateFromKey(target))}`, change: result.change, from: dateKey });
+      showPlannedDay(target);
+      await globalThis.load?.();
+      announcePlanChange(`Verschoben auf ${MOVE_DAY_FORMAT.format(dateFromKey(target))}`);
+    } catch (error) {
+      buttons.forEach((item) => { item.disabled = item.dataset.day === dateKey; });
+      status.textContent = error.message;
+    }
+  };
+  for (let offset = 0; offset < 7; offset += 1) {
+    const day = addDateKey(todayKey, offset);
+    const date = dateFromKey(day);
+    const button = h("button", { type: "button", className: "planned-move-day", disabled: day === dateKey, dataset: { day }, "aria-label": DETAIL_DATE_FORMAT.format(date) },
+      h("span", null, MOVE_WEEKDAY_FORMAT.format(date)), h("b", null, String(date.getDate())));
+    button.addEventListener("click", () => void move(day));
+    days.append(button);
+  }
+  // The system date picker opens from "…"; without showPicker the field itself is shown.
+  const picker = h("input", { type: "date", className: "planned-move-picker", min: todayKey, tabIndex: -1, "aria-label": "Anderes Datum" });
+  picker.addEventListener("change", () => void move(picker.value));
+  const later = h("button", { type: "button", className: "planned-move-day", "aria-label": "Anderes Datum" }, "…");
+  later.addEventListener("click", () => {
+    try { picker.showPicker(); } catch { picker.classList.add("is-shown"); picker.tabIndex = 0; picker.focus(); }
+  });
+  days.append(later, picker);
+  const receipt = plannedMoveReceipts.get(key);
+  if (receipt) status.append(receipt.text, ...(receipt.change?.id ? plannedMoveUndo(key, receipt, status) : []));
+  return [h("div", "planned-activity-actions", toggle), days, status];
+}
+
+// "Rückgängig" puts the unit back on its earlier day and shows that week again.
+function plannedMoveUndo(key, receipt, status) {
+  const undo = h("button", { type: "button", className: "message-undo" }, "Rückgängig");
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: receipt.change.id, expected_current_hash: receipt.change.after_hash }) });
+      plannedMoveReceipts.set(key, { text: "Zurückgenommen." });
+      showPlannedDay(receipt.from);
+      await globalThis.load?.();
+    } catch (error) {
+      undo.disabled = false;
+      status.firstChild.textContent = `${error.message} `;
+    }
+  });
+  return [" ", undo];
+}
+
+function showPlannedDay(dateKey) {
+  selectedWeekKey = planWeekStart(dateKey);
+  if (calendarView === "month") selectedDayKey = dateKey;
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
   const actual = calendarActualActivity(entry);
   const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1252,6 +1329,7 @@ function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPl
   });
   const metrics = actual ? null : plannedSessionMetrics(entry);
   if (metrics) details.append(metrics);
+  if (!actual) details.append(...plannedUnitActions(entry, dateKey, todayKey));
   appendActualCalendarDetails(details, actual);
   if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
   appendPlannedCalendarComparison(details, entry, actual);
