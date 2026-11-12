@@ -59,8 +59,9 @@ test("@responsive each sport shows LT1 and LT2 and its zone kinds, and Bearbeite
   await expect(thresholds.locator('[data-threshold="lt1-hr"]')).toHaveText("142 bpm");
   // Without power zones LT1 power is the server's fixed share of the FTP.
   await expect(thresholds.locator('[data-threshold="lt1-main"]')).toHaveText("214 W");
-  await expect(thresholds).toContainText("LT1 aus der Herzfrequenzvariabilität (App), Leistung Schätzung");
-  await expect(thresholds).toContainText("LT2 von Garmin Connect");
+  // The box names the thresholds and no origin (#2427).
+  await expect(thresholds.locator(".zone-thresholds > .zone-muted")).toHaveText(["Leistung", "Puls", "Aerob (LT1)", "Anaerob (LT2) / FTP"]);
+  await expect(thresholds.locator(".zone-source")).toHaveText("Bearbeiten");
   const heart = overview.locator('[data-zone-box="heart_rate"]');
   await expect(heart.locator(".zone-list li")).toHaveCount(5);
   await expect(heart).toContainText("Garmin, gilt für alle Sportarten");
@@ -106,6 +107,7 @@ test("@responsive Analyse shows LT1 like the zones page", async ({ page }) => {
   const cycling = page.locator("#currentPerformance table[data-analysis-sport='ride']");
   await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] td')).toHaveText("142 bpm");
   await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] .estimate-chip')).toHaveCount(0);
+  await expect(cycling.locator('[data-metric="cycling_lt1_watts"] th')).toContainText("Aerobe Schwelle (LT1) · Leistung");
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"] td')).toHaveText("214 W");
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"] .estimate-chip')).toHaveText("Schätzung");
 });
