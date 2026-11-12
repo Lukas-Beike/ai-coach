@@ -820,7 +820,7 @@ h2 {
 .profile-estimate { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .profile-estimate output { flex: 1 1 12rem; font-size: .8rem; line-height: 1.4; }
 /* Zonen & Schwellen: one page per sport with LT1/LT2 and every zone kind (#2262). */
-.zone-sport-tabs { margin: 12px 0; }
+.zone-sport-tabs { min-width: 0; margin: 12px 0; }
 .zone-overview { display: grid; gap: 10px; }
 .zone-box { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
 .zone-box h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: .95rem; }

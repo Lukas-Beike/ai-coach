@@ -94,10 +94,8 @@ test("@responsive each sport shows LT1 and LT2 and its zone kinds, and Bearbeite
 
 test("@responsive Analyse shows LT1 like the zones page", async ({ page }) => {
   await openProfile(page);
-  await page.evaluate(async () => {
-    await AppRouter.navigate("analysis/cycling", { historyMode: "replace" });
-    renderCurrentPerformance(state.data.performance.metrics, state.data.performance.history);
-  });
+  // Opened after startup, the route itself reads the zones and redraws the current values.
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/cycling", { historyMode: "replace" }); });
   const cycling = page.locator("#currentPerformance table[data-analysis-sport='ride']");
   await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] td')).toHaveText("142 bpm");
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"]')).toHaveCount(0);

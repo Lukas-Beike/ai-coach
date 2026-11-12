@@ -505,7 +505,8 @@ function renderZoneSummary(warnings) {
   const node = $("#zoneSummary");
   if (!node) return;
   const count = Array.isArray(warnings?.items) ? warnings.items.length : 0;
-  node.textContent = count ? `${count} ${count === 1 ? "Wert" : "Werte"} veraltet` : "";
+  const noun = count === 1 ? "Wert" : "Werte";
+  node.textContent = count ? `${count} ${noun} veraltet` : "";
   node.classList.toggle("is-warning", count > 0);
 }
 
@@ -542,7 +543,7 @@ function zoneLimitsText(item) {
 }
 
 function zoneMetricValue(key, metrics = state.data?.performance?.metrics) {
-  const value = key ? Number(metrics?.[key]?.value) : NaN;
+  const value = key ? Number(metrics?.[key]?.value) : Number.NaN;
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
@@ -575,20 +576,32 @@ function zoneRows(item, thresholdPace = null) {
   };
   const last = limits.length - 1;
   return limits.map((limit, index) => {
-    const name = `Z${index + 1}${item.metric === "power" && POWER_ZONE_NAMES[index] ? ` ${POWER_ZONE_NAMES[index]}` : ""}`;
-    let range;
-    if (pace) range = index === 0 ? `langsamer als ${text(0)}` : index === last ? `schneller als ${text(index - 1)}` : `${text(index - 1)}–${text(index)}`;
-    else if (index === 0) range = `bis ${text(0)}`;
-    else if (index === last) range = `ab ${text(index - 1, 1)}${item.metric === "heart_rate" && item.maximum ? ` · max ${Math.round(item.maximum)}` : ""}`;
-    else range = `${text(index - 1, 1).replace(/ W$/, "")}–${text(index)}`;
+    const label = item.metric === "power" ? POWER_ZONE_NAMES[index] : null;
+    const name = label ? `Z${index + 1} ${label}` : `Z${index + 1}`;
     const share = percent && index < last && zoneLimitValue(item, limit, thresholdPace) != null ? ` · ${AppFormat.number(limit)} %` : "";
-    return { zone: `Z${Math.min(index + 1, 5)}`, name, range: `${range}${share}` };
+    return { zone: `Z${Math.min(index + 1, 5)}`, name, range: zoneRange(item, index, last, text) + share };
   });
+}
+
+// The range of one zone: pace zones run from slower to faster, the others from low to high.
+function zoneRange(item, index, last, text) {
+  if (item.metric === "pace") {
+    if (index === 0) return `langsamer als ${text(0)}`;
+    if (index === last) return `schneller als ${text(index - 1)}`;
+    return `${text(index - 1)}–${text(index)}`;
+  }
+  if (index === 0) return `bis ${text(0)}`;
+  if (index === last) {
+    const maximum = item.metric === "heart_rate" && item.maximum ? ` · max ${Math.round(item.maximum)}` : "";
+    return `ab ${text(index - 1, 1)}${maximum}`;
+  }
+  return `${text(index - 1, 1).replace(/ W$/, "")}–${text(index)}`;
 }
 
 function zoneSourceText(item) {
   if (item.source === "local") return "Lokal gespeichert";
-  const provider = item.label || "Garmin";
+  // The configuration names its provider; the source key stands in without a label.
+  const provider = item.label || item.source;
   return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
 }
 
@@ -607,11 +620,19 @@ function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, 
     metric,
     lt1,
     lt2,
-    lt1Source: share > 0 ? (profile.first_threshold_origin === "estimated" ? "LT1 aus der Herzfrequenzvariabilität (App)" : "LT1 gemessen") : null,
+    lt1Source: share > 0 ? firstThresholdSource(profile) : null,
     lt1Derived: zoneTwo != null,
     lt2Source: sources[0]?.source || null,
-    validFrom: sources.map((item) => item.observed_at).filter(Boolean).sort().at(-1) || null,
+    validFrom: sources.map((item) => String(item.observed_at || "")).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) || null,
   };
+}
+
+function firstThresholdSource(profile) {
+  return profile.first_threshold_origin === "estimated" ? "LT1 aus der Herzfrequenzvariabilität (App)" : "LT1 gemessen";
+}
+
+function thresholdMainText(metric, value) {
+  return metric === "pace" && value != null ? `${zoneValueText("pace", value)} /km` : zoneValueText(metric, value);
 }
 
 function zoneEditButton(label, attributes) {
@@ -629,13 +650,18 @@ function thresholdBox(sport) {
   if (rows.validFrom) heading.append(reportNode("small", `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`));
   const grid = reportNode("div", null, "zone-thresholds");
   grid.append(reportNode("span"), reportNode("span", rows.metric === "power" ? "Leistung" : "Pace", "zone-muted"), reportNode("span", "Puls", "zone-muted"));
-  for (const [label, values, key] of [["LT1", rows.lt1, "lt1"], [sport === "ride" ? "LT2 / FTP" : "LT2", rows.lt2, "lt2"]]) {
-    const main = rows.metric === "pace" && values.main != null ? `${zoneValueText("pace", values.main)} /km` : zoneValueText(rows.metric, values.main);
-    grid.append(reportNode("span", label, "zone-muted"), reportNode("b", main), reportNode("b", values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
-    grid.lastElementChild.dataset.threshold = `${key}-hr`;
-    grid.children[grid.children.length - 2].dataset.threshold = `${key}-main`;
+  const lt2Label = sport === "ride" ? "LT2 / FTP" : "LT2";
+  const lines = [{ label: "LT1", values: rows.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, main: "lt2-main", hr: "lt2-hr" }];
+  for (const { label, values, ...names } of lines) {
+    const main = reportNode("b", thresholdMainText(rows.metric, values.main));
+    const hr = reportNode("b", values.hr == null ? "—" : `${Math.round(values.hr)} bpm`);
+    main.dataset.threshold = names.main;
+    hr.dataset.threshold = names.hr;
+    grid.append(reportNode("span", label, "zone-muted"), main, hr);
   }
-  const source = [rows.lt1Source && `${rows.lt1Source}${rows.lt1Derived ? `, ${rows.metric === "power" ? "Leistung" : "Pace"} aus Zone 2` : ""}`, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
+  const derived = rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
+  const lt1Line = rows.lt1Source ? rows.lt1Source + (rows.lt1Derived ? derived : "") : null;
+  const source = [lt1Line, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
   const foot = reportNode("p", source || null, "zone-source");
   foot.append(zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
   box.append(heading, grid, foot);
@@ -645,8 +671,8 @@ function thresholdBox(sport) {
 function zoneKindBox(sport, metric, environment = null) {
   const item = zoneConfigurationFor(sport, metric, environment);
   const box = reportNode("section", null, "zone-box");
-  box.dataset.zoneBox = `${metric}${environment ? `-${environment}` : ""}`;
-  const heading = reportNode("h3", `${ZONE_KIND_TITLES[metric]}${environment ? " · Indoor" : ""}`);
+  box.dataset.zoneBox = environment ? `${metric}-${environment}` : metric;
+  const heading = reportNode("h3", environment ? `${ZONE_KIND_TITLES[metric]} · Indoor` : ZONE_KIND_TITLES[metric]);
   const basis = { power: sport === "run" ? "% der Schwellenleistung" : "% der FTP", heart_rate: "bpm", pace: "% der Schwellenpace" }[metric];
   heading.append(reportNode("small", basis));
   box.append(heading);
