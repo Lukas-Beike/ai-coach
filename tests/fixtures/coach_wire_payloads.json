@@ -22,7 +22,7 @@
      "role": "user"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#4>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -31,7 +31,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -43,7 +43,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#4>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -52,7 +52,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -62,7 +62,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":5,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Den Giro entfernen\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -71,12 +71,12 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
    "input": "{\"athlete_message\":\"Den Giro entfernen\",\"previous_assistant_message\":\"Fertig.\"}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#2>",
    "max_output_tokens": 1024,
    "model": "gpt-6-luna",
    "reasoning": {
@@ -160,7 +160,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -169,7 +169,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -196,7 +196,7 @@
      "role": "user"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#5>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -205,7 +205,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -229,7 +229,7 @@
      "role": "user"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#6>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -238,7 +238,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -278,7 +278,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#5>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -287,7 +287,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -330,7 +330,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":1,\"messages\":[],\"pending_request\":null,\"confirmed_results\":[],\"attachment_evidence\":[]},\"current_message\":\"Wie war meine Woche?\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -339,7 +339,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -349,7 +349,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -358,7 +358,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -366,7 +366,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 32000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -375,7 +375,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -385,7 +385,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -394,7 +394,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -423,7 +423,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -432,7 +432,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -477,7 +477,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#3>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -486,7 +486,7 @@
    },
    "store": false,
    "tool_choice": "none",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ],
@@ -496,7 +496,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -505,7 +505,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -534,7 +534,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -543,7 +543,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   },
   {
@@ -588,7 +588,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": "<instructions>",
+   "instructions": "<instructions#1>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -597,7 +597,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": "<tools>",
+   "tools": "<tools#1>",
    "truncation": "auto"
   }
  ]

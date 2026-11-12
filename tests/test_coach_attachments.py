@@ -300,16 +300,28 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 session_csrf_hash="synthetic-session",
                 background_job=True,
             )
-        # Instructions and tool schemas are built by code this golden does not
-        # cover; they were compared by hash across the model seam (#2073) and
-        # change with every prompt or tool edit, so only their presence counts.
+        # Instructions and tool schemas change with every prompt or tool edit:
+        # pin which requests share a value and which differ, not the text.
         return [
             {
-                key: (f"<{key}>" if key in {"instructions", "tools"} else value)
+                key: (
+                    self._label(key, value)
+                    if key in {"instructions", "tools"}
+                    else value
+                )
                 for key, value in json.loads(payload).items()
             }
             for payload in sent
         ]
+
+    def _label(self, key, value):
+        """``<key#n>`` numbered by first appearance; a missing value stays visible."""
+        if not value:
+            return f"<{key}:missing>"
+        seen = self._labels.setdefault(key, {})
+        return seen.setdefault(
+            json.dumps(value, sort_keys=True), f"<{key}#{len(seen) + 1}>"
+        )
 
     def _photo_wire(self):
         """Run a packaging-photo extraction; return the POSTs that reach OpenAI."""
@@ -390,6 +402,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             "incomplete_details": {"reason": "max_output_tokens"},
             "output": [reasoning],
         }
+        self._labels = {}
         actual = {
             "plain": self._wire("wire-plain", "Wie war meine Woche?", [text]),
             "tool_round": self._wire(
