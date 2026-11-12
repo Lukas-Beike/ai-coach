@@ -444,3 +444,24 @@ The Coach SHALL list own products and stored database foods with empty core fiel
 - **THEN** that item is rejected without writing it.
 
 Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
+
+### Requirement: Coach web search for missing product values
+The Coach SHALL be able to search the web for the still-empty core values of up to five named products through one Responses API request with the `web_search` tool, sending only product name, brand, EAN, basis and missing field names. Only finite, plausible values whose source page the search read or cited SHALL be returned, with origin `web`, the source page and an untrusted-data notice.
+
+#### Scenario: Value found and cited
+- **WHEN** the search returns salt per the product's basis with a source page it cited
+- **THEN** the result names the product, salt, the value, origin `web` and the source page, with the untrusted-data notice.
+
+#### Scenario: Uncited or implausible value
+- **WHEN** a returned value's source page was neither read nor cited, or is not a finite number in range, or is for a field that is not empty
+- **THEN** that value is dropped.
+
+#### Scenario: Only product data leaves the app
+- **WHEN** the search request is built
+- **THEN** it contains only the products' name, brand, EAN, basis and missing field names, and no athlete record, message or other context.
+
+#### Scenario: Endpoint without web search
+- **WHEN** the configured endpoint rejects the `web_search` tool, or the request fails
+- **THEN** the result says web search is not available, nothing is written, and the Coach turn continues.
+
+Evidence: `backend/nutrition/web_search.py::NutritionWebSearchService.search`, `backend/nutrition/catalog.py::ProductCatalogService.search_web_values`, `backend/coach/read_tools.py` (`search_web_for_product_values`); `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_request_carries_only_product_data`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_values_are_kept_only_when_cited_plausible_and_missing`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_a_page_the_search_read_counts_without_an_inline_citation`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_failures_give_unavailable_without_provider_text`, `tests/test_coach_tool_coverage.py` (`search_web_for_product_values:success`).

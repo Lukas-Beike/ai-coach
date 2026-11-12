@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 56 tools currently offered to the conversational Coach.
+This matrix covers the 57 tools currently offered to the conversational Coach.
 It measures execution through `chat_with_coach`, not the accuracy of a language
 model's interpretation.
 
@@ -70,6 +70,7 @@ generated from the `covers` declarations; regenerate it with
 | `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `save_nutrition_product` | `success` | `test_confirmed_product_is_saved_locally_through_authorized_coach_receipt` |
 | `save_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `search_web_for_product_values` | `success` | `test_web_search_returns_cited_values_and_degrades_to_unavailable` |
 | `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |

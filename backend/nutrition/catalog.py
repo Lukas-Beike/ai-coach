@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
@@ -34,6 +35,9 @@ GAP_ORIGINS = frozenset({"open_food_facts", "yazio", "bls", "web"})
 MAX_GAP_PRODUCTS = 25
 MAX_GAP_KCAL = 9000
 MAX_GAP_GRAMS = 1000
+# The source page of a web value: an http(s) address without whitespace.
+SOURCE_URL = re.compile(r"https?://\S{1,490}")
+MAX_WEB_SEARCH_PRODUCTS = 5
 
 
 class ProductCatalogService:
@@ -45,7 +49,9 @@ class ProductCatalogService:
         utc_now: Any,
         food_database: FoodDatabaseService,
         component_calculator: MealComponentCalculator,
+        web_search: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
     ) -> None:
+        self._web_search = web_search
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._products = products
@@ -93,6 +99,37 @@ class ProductCatalogService:
     def list_incomplete_products(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             return self._products.list_incomplete(db, limit)
+
+    def search_web_values(self, ids: Any) -> dict[str, Any]:
+        """Web values for the empty core fields of up to five named products."""
+        wanted = (
+            list(dict.fromkeys(str(item).strip() for item in ids))
+            if isinstance(ids, list) and all(isinstance(item, str) for item in ids)
+            else []
+        )
+        if not 1 <= len(wanted) <= MAX_WEB_SEARCH_PRODUCTS or "" in wanted:
+            raise AppError(
+                400,
+                f"products muss 1 bis {MAX_WEB_SEARCH_PRODUCTS} Produkt-IDs enthalten.",
+                reason="tool_arguments_invalid",
+            )
+        if self._web_search is None:
+            raise AppError(503, "Die Websuche ist nicht verfügbar.")
+        with self._database_manager.reader() as db:
+            found = self._products.list_incomplete(db, ids=wanted)
+        known = {product["id"] for product in found}
+        # The search runs after the read: no database lock is held for the request.
+        result = (
+            self._web_search(found)
+            if found
+            else {
+                "ok": True,
+                "products": [],
+                "notice": "Keines der Produkte hat leere Kernwerte.",
+            }
+        )
+        skipped = [item for item in wanted if item not in known]
+        return {**result, **({"skipped": skipped} if skipped else {})}
 
     def get_product(self, product_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
@@ -185,27 +222,15 @@ class ProductCatalogService:
             }
         return {"ok": True, "changes": changes, "unchanged": unchanged}
 
-    def _fill_one(self, db: Any, item: Any, fetched_at: str) -> dict[str, Any]:
-        product_id = str(item.get("id") or "") if isinstance(item, dict) else ""
-        try:
-            values, origin, source_url = _gap_values(item)
-        except (TypeError, ValueError) as exc:
-            return {"id": product_id, "rejected": str(exc)}
-        previous = self._products.get(db, product_id)
-        entry = None if previous else FoodDatabaseEntryRepository().get(db, product_id)
-        if (previous is None and entry is None) or (
-            previous and previous.get("status") != "active"
-        ):
-            return {"id": product_id, "rejected": PRODUCT_NOT_FOUND}
-        written = fill_empty_nutrients(
-            db,
-            product_id,
-            values,
-            origin=origin,
-            fetched_at=fetched_at,
-            source_url=source_url,
-        )
-        if written and previous:
+    def _record_fill(
+        self,
+        db: Any,
+        product_id: str,
+        previous: dict[str, Any] | None,
+        entry: dict[str, Any] | None,
+    ) -> None:
+        """Record a gap fill of an own product or a stored food for undo."""
+        if previous:
             change_history.record_change(
                 db,
                 PRODUCT_ENTITY_TYPE,
@@ -214,7 +239,7 @@ class ProductCatalogService:
                 previous,
                 self._products.get(db, product_id),
             )
-        elif written and entry:
+        elif entry:
             filled = FoodDatabaseEntryRepository().get(db, product_id) or entry
             change_history.record_change(
                 db,
@@ -224,6 +249,32 @@ class ProductCatalogService:
                 food_history_value(entry),
                 food_history_value(filled),
             )
+
+    def _fill_one(self, db: Any, item: Any, fetched_at: str) -> dict[str, Any]:
+        product_id = str(item.get("id") or "") if isinstance(item, dict) else ""
+        try:
+            values, origin, sources = _gap_values(item)
+        except (TypeError, ValueError) as exc:
+            return {"id": product_id, "rejected": str(exc)}
+        previous = self._products.get(db, product_id)
+        entry = None if previous else FoodDatabaseEntryRepository().get(db, product_id)
+        if (previous is None and entry is None) or (
+            previous and previous.get("status") != "active"
+        ):
+            return {"id": product_id, "rejected": PRODUCT_NOT_FOUND}
+        written: dict[str, Any] = {}
+        # One write per source page, so each value names its own page.
+        for page in dict.fromkeys(sources.values()):
+            written |= fill_empty_nutrients(
+                db,
+                product_id,
+                {key: value for key, value in values.items() if sources[key] == page},
+                origin=origin,
+                fetched_at=fetched_at,
+                source_url=page or None,
+            )
+        if written:
+            self._record_fill(db, product_id, previous, entry)
         return {
             "id": product_id,
             "name": (previous or entry or {}).get("name"),
@@ -232,7 +283,7 @@ class ProductCatalogService:
                     "field": field,
                     "value": value,
                     "origin": origin,
-                    **({"source_url": source_url} if source_url else {}),
+                    **({"source_url": sources[field]} if sources[field] else {}),
                 }
                 for field, value in written.items()
             ],
@@ -456,31 +507,52 @@ class ProductCatalogService:
         return self._products.save(db, restored)
 
 
-def _gap_values(item: Any) -> tuple[dict[str, float], str, str]:
-    """The values, origin and source page of one gap-fill item, or a rejection."""
+def _gap_values(item: Any) -> tuple[dict[str, float], str, dict[str, str]]:
+    """The values, origin and each value's source page of one gap-fill item.
+
+    ``source_urls`` names a page per field; ``source_url`` is the page of the
+    others. Raise on a rejection.
+    """
     if not isinstance(item, dict):
         raise TypeError("Der Eintrag muss ein Objekt sein.")
     origin = item.get("origin")
-    source_url = str(item.get("source_url") or "").strip()
     if origin not in GAP_ORIGINS:
         raise ValueError("origin muss open_food_facts, yazio, bls oder web sein.")
-    if source_url and not re.fullmatch(r"https?://\S{1,490}", source_url):
-        raise ValueError("source_url muss eine http(s)-Adresse sein.")
-    if origin == "web" and not source_url:
-        raise ValueError("Webwerte brauchen die Quellseite source_url.")
+    per_field = item.get("source_urls") or {}
+    if not isinstance(per_field, dict):
+        raise TypeError("source_urls muss je Feld eine Adresse nennen.")
     raw = item.get("values")
     if not isinstance(raw, dict) or not raw:
         raise ValueError("values muss Kernfelder mit Zahlen enthalten.")
-    values: dict[str, float] = {}
-    for field, value in raw.items():
-        limit = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
-        if (
-            field not in NUTRIENT_COLUMNS
-            or isinstance(value, bool)
-            or not isinstance(value, int | float)
-            or not math.isfinite(value)
-            or not 0 <= value <= limit
-        ):
-            raise ValueError(f"Ungültiger Wert für {field}.")
-        values[field] = round(value, 3)
-    return values, str(origin), source_url
+    values = {field: _core_value(field, value) for field, value in raw.items()}
+    return values, str(origin), _gap_sources(item, per_field, values, origin)
+
+
+def _core_value(field: str, value: Any) -> float:
+    """A valid core nutrient value, rounded; raise ValueError otherwise."""
+    limit = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
+    if (
+        field not in NUTRIENT_COLUMNS
+        or isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or not 0 <= value <= limit
+    ):
+        raise ValueError(f"Ungültiger Wert für {field}.")
+    return round(value, 3)
+
+
+def _gap_sources(
+    item: dict[str, Any], per_field: dict[str, Any], values: Any, origin: Any
+) -> dict[str, str]:
+    """Each value's source page: its own in ``source_urls``, else ``source_url``."""
+    sources = {
+        field: str(per_field.get(field) or item.get("source_url") or "").strip()
+        for field in values
+    }
+    for field, page in sources.items():
+        if page and not SOURCE_URL.fullmatch(page):
+            raise ValueError(f"source_url für {field} muss eine http(s)-Adresse sein.")
+        if origin == "web" and not page:
+            raise ValueError(f"Webwerte brauchen eine source_url für {field}.")
+    return sources

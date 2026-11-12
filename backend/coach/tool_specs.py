@@ -152,6 +152,14 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ),
     ),
     _read(
+        "search_web_for_product_values",
+        external_food_lookup=True,
+        requirements=(
+            "food-catalog-and-meal-library/Coach web search for missing product values",
+            CA1,
+        ),
+    ),
+    _read(
         "lookup_food",
         external_food_lookup=True,
         requirements=(CA1, "coach-context-and-provenance/CP8"),
