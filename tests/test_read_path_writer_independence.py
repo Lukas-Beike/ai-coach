@@ -86,8 +86,8 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
     def read_calls(self) -> dict[str, Callable[[], object]]:
         """Every other moved GET read, as zero-argument callables."""
         public = server.PUBLIC_STATE
-        diary = server.NUTRITION_ASSEMBLY.diary_service
-        library = server.NUTRITION_ASSEMBLY.meal_library_service
+        diary = server.NUTRITION_SERVICES.diary_service
+        library = server.NUTRITION_SERVICES.meal_library_service
         day = "2026-01-05"
         today = date(2026, 1, 5)
         reports = server.HTTP_API.training_reports()

@@ -217,13 +217,7 @@ from backend.http_api.public_state_assembly import (
     PublicStateProjectionOwners,
 )
 from backend.http_api.response_transport import HttpResponseTransport
-from backend.nutrition.assembly import (
-    NutritionAssembly,
-    NutritionPersistence,
-    NutritionRuntime,
-)
-from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.nutrition.web_search import NutritionWebSearchService
+from backend.nutrition.wiring import NutritionServices, build_nutrition
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
@@ -506,8 +500,8 @@ WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
 
 
 def _nutrition_secret_values() -> tuple[str, ...]:
-    # Logging starts before NUTRITION_ASSEMBLY exists.
-    assembly = globals().get("NUTRITION_ASSEMBLY")
+    # Logging starts before NUTRITION_SERVICES exists.
+    assembly = globals().get("NUTRITION_SERVICES")
     return () if assembly is None else assembly.secret_values()
 
 
@@ -806,7 +800,11 @@ APP = AppContext(
     maintenance=runtime_maintenance.MAINTENANCE_GATE,
     redactor=REDACTOR,
     operation_context=sync_observation.OPERATION_CONTEXT,
+    database_lock=DB_LOCK,
+    # Defined below; looked up when a provider client is built.
+    observed_opener=lambda service: observed_provider_opener(service),
     athlete=ATHLETE_DATA,
+    athlete_profile=ATHLETE_PROFILE_SERVICE,
     planning=PLANNING_DATA,
     planning_workflows=PLANNING_WORKFLOWS,
     planning_revision=PLANNING_REVISION_SERVICE,
@@ -1222,30 +1220,9 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
-NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
-    dependencies=NutritionAssembly.Inputs(
-        persistence=NutritionPersistence(
-            database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ
-        ),
-        runtime=NutritionRuntime(
-            config=lambda: CONFIG,
-            utc_now=runtime_clock.utc_now,
-            local_now=ATHLETE_CLOCK.now,
-            intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-            photo_extractor=lambda: NutritionPhotoExtractionService(
-                selected_model=SETTINGS.selected_model,
-                complete=lambda request: MODEL_TRANSPORT.complete(request),
-            ),
-            web_searcher=lambda: NutritionWebSearchService(
-                selected_model=SETTINGS.selected_model,
-                complete=lambda request: MODEL_TRANSPORT.complete(request),
-            ),
-            athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
-            observed_opener=observed_provider_opener,
-        ),
-    )
-)
-APP.nutrition = NUTRITION_ASSEMBLY
+APP.settings = SETTINGS
+NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)
+APP.nutrition = NUTRITION_SERVICES
 MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
     dependencies=ModelTransportAssembly.Inputs(
         providers=ModelProviderOwners(
@@ -1278,6 +1255,7 @@ MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
         ),
     )
 )
+APP.model_transport = MODEL_TRANSPORT
 COACH_CONVERSATION = CoachConversationAssembly(
     persistence=ConversationPersistence(
         database_manager=database_manager,
@@ -1436,7 +1414,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             workout_library_service=PLANNING_DATA.workout_library,
-            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
+            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
             planning_brief=lambda: _plan_guard_service().brief(),
         ),
         dialogue=CoachContextDialogueSources(
@@ -1486,8 +1464,8 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             training_plan_service=PLANNING_DATA.training_plan,
         ),
         policy=CoachReadToolPolicy(
-            nutrition_diary=NUTRITION_ASSEMBLY.diary_service,
-            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
+            nutrition_diary=NUTRITION_SERVICES.diary_service,
+            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
             training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
             context_service=COACH_CONTEXT.structured_context_service,
         ),
@@ -1497,7 +1475,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_diary_service=NUTRITION_SERVICES.diary_service,
         ),
         execution=ProposalExecutionOwners(
             history_undo_service=HISTORY.undo_service,
@@ -1570,7 +1548,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     intervals=IntervalsJobDependencies(
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
-        nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
+        nutrition_sync_service=NUTRITION_SERVICES.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
     ),
@@ -1865,8 +1843,8 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         checkin_service=lambda: ATHLETE_DATA.checkin(),
         activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
         competition_service=lambda: PLANNING_DATA.competition(),
-        nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
-        nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
+        nutrition_diary_service=NUTRITION_SERVICES.diary_service,
+        nutrition_meal_library_service=NUTRITION_SERVICES.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
         session_corrections_service=ATHLETE_DATA.session_corrections,
     ),
@@ -2097,6 +2075,7 @@ CANONICAL_READ = build_canonical_read(
     key_values=KEY_VALUE_REPOSITORY,
     profile=ATHLETE_PROFILE_SERVICE,
 )
+APP.canonical_read = CANONICAL_READ
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,
     lambda: CANONICAL_READ,
@@ -2388,9 +2367,9 @@ HTTP_API = HttpApiAssembly(
                 uuid_factory=lambda: uuid.uuid4().hex,
             ),
             nutrition=HttpNutritionServices(
-                diary=NUTRITION_ASSEMBLY.diary_service,
-                meal_library=NUTRITION_ASSEMBLY.meal_library_service,
-                intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
+                diary=NUTRITION_SERVICES.diary_service,
+                meal_library=NUTRITION_SERVICES.meal_library_service,
+                intervals_sync=NUTRITION_SERVICES.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
                 refresh=GARMIN_ASSEMBLY.nutrition_refresh_service,
             ),

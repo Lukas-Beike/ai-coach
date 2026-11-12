@@ -26,6 +26,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.observability import Redactor
+from backend.providers.observed_opener import Opener
 from backend.runtime.maintenance import MaintenanceGate
 
 
@@ -41,10 +42,17 @@ class AppContext:
     redactor: Redactor
     # The current sync operation id, read by the provider refresh journals.
     operation_context: Any
+    database_lock: Any
+    # Observed opener for a raw provider request (log and diagnostic capture).
+    observed_opener: Callable[[str], Opener]
     athlete: Any = None
+    athlete_profile: Any = None
+    canonical_read: Any = None
     planning: Any = None
     planning_workflows: Any = None
     planning_revision: Any = None
     nutrition: Any = None
     provider_transport: Any = None
     provider_sync: Any = None
+    settings: Any = None
+    model_transport: Any = None

@@ -178,7 +178,7 @@ class DialogueHarness:
 
     @staticmethod
     def meal_count():
-        diary = server.NUTRITION_ASSEMBLY.diary_service()
+        diary = server.NUTRITION_SERVICES.diary_service()
         return diary.get_today_summary()["entry_count"]
 
     def confirm_impact(self, domain, *, delete=False, bulk=False, accepts=False):

@@ -16,6 +16,10 @@ from server_test_support import ServerTestCase, server
 
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
+from backend.nutrition.catalog import ProductCatalogService
+from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.meal_library import NutritionMealLibraryService
+from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.sync.weather import WeatherSyncService
 from backend.weather.service import WeatherService
 
@@ -30,6 +34,21 @@ class CompositionRootTests(ServerTestCase):
     def test_weather_services_resolve(self) -> None:
         self.assertIsInstance(server.WEATHER.service(), WeatherService)
         self.assertIsInstance(server.WEATHER_SYNC(), WeatherSyncService)
+
+    def test_nutrition_services_resolve(self) -> None:
+        nutrition = server.NUTRITION_SERVICES
+
+        self.assertIsInstance(nutrition.diary_service(), NutritionDiaryService)
+        self.assertIsInstance(
+            nutrition.meal_library_service(), NutritionMealLibraryService
+        )
+        self.assertIsInstance(
+            nutrition.product_catalog_service(), ProductCatalogService
+        )
+        self.assertIsInstance(
+            nutrition.intervals_sync_service(), IntervalsNutritionSyncService
+        )
+        self.assertIs(nutrition.food_mirror(), nutrition.food_mirror())
 
     def test_the_context_reads_the_live_configuration_and_database(self) -> None:
         replaced = replace(server.CONFIG, calendar_ical_url="https://example.invalid")

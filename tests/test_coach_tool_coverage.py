@@ -1833,7 +1833,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["kcal"], 174)
         self.assertEqual(result["nutrition_basis"]["kind"], "database")
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -1865,7 +1865,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(mixed["nutrition_basis"]["kind"], "composite")
         self.assertEqual(len(mixed["nutrition_basis"]["components"]), 2)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -2029,7 +2029,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Lösche diese Mahlzeitvorlage.",
         )
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_meal(entry["id"])["kcal"], 200
+            server.NUTRITION_SERVICES.diary_service().get_meal(entry["id"])["kcal"], 200
         )
 
     @covers("save_nutrition_product:success")
@@ -2087,13 +2087,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
         self.assertEqual(updated["kcal"], 380)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog.get_product(
+            server.NUTRITION_SERVICES.meal_library_service().product_catalog.get_product(
                 saved["id"]
             ),
             updated,
         )
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -2101,7 +2101,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("search_web_for_product_values:success")
     def test_web_search_returns_cited_values_and_degrades_to_unavailable(self):
-        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        catalog = server.NUTRITION_SERVICES.meal_library_service().product_catalog
         own = catalog.save_product(
             {
                 "name": "Synthetic skyr",
@@ -2189,7 +2189,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "fill_nutrition_product_gaps:success",
     )
     def test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn(self):
-        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        catalog = server.NUTRITION_SERVICES.meal_library_service().product_catalog
         own = catalog.save_product(
             {
                 "name": "Synthetic skyr",
@@ -2207,7 +2207,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "basis_unit": "g",
             "per_100": {"kcal": 500},
         }
-        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+        server.NUTRITION_SERVICES.food_mirror().refresh([food])
 
         listed = self.run_tool("list_incomplete_nutrition_products")
         self.assertEqual(
@@ -2317,7 +2317,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().sync_status.get_day_summary(
+            server.NUTRITION_SERVICES.diary_service().sync_status.get_day_summary(
                 "2026-09-07"
             )["entry_count"],
             0,
