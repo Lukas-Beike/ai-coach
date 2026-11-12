@@ -60,4 +60,18 @@ When an athlete saves a changed weight or body-fat value in the profile, the sys
 - **WHEN** a Coach, undo, import, or unrelated API action changes a profile value
 - **THEN** it does not implicitly write to Garmin.
 
-Evidence: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_profile_body_export.py:GarminProfileBodyExport`; `tests/test_garmin_profile_body_export.py::BodyExportTests`, `tests/test_garmin_profile_body_export.py::BodyExportMockTests`, `tests/test_garmin_sdk_body_transport.py::GarminSdkBodyTransportTests` (synthetic, mocked Garmin). Gap: live Garmin Connect compatibility is not established.
+#### Scenario: Outcome classification
+- **WHEN** Garmin's answer lists at least one success and no failure; lists failures and no success, or answers 4xx other than 408 and 429; or anything else happens after the upload started
+- **THEN** the outcome is `success`, `rejected` or `uncertain`.
+
+#### Scenario: Not available
+- **WHEN** the Garmin fixture is active, Garmin is not configured, the SDK login fails, only the Personal API key exists, or the Garmin sync lock or the profile lock is not free within the deadline
+- **THEN** the outcome is `unavailable` and no upload starts.
+
+#### Scenario: Retry is not bound to the earlier outcome
+- **WHEN** a request carries both `sync_body_to_garmin: true` and `retry_body_to_garmin: true`
+- **THEN** the server sends the saved valid pair once, whatever the earlier outcome was; offering the retry only after `unavailable`, `rejected` or `invalid` is the browser's rule, and the server keeps no retry state.
+
+Detailed contract: `PUT /api/profile` exports only with the JSON `true` of `sync_body_to_garmin`; both flags are removed before the profile is saved and the answer then carries `garmin_body_export` with one of `unchanged`, `success`, `superseded`, `invalid`, `unavailable`, `rejected` or `uncertain` (the contract of `docs/api-routes.md`). The whole request has 10 seconds from the moment it reaches the route, before its body is read; the upload gets at most the remaining time and never more than 15 seconds. A pair is valid with a weight of 20 to 300 kg and a body fat of 1 to 70 percent.
+
+Evidence: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_profile_body_export.py:GarminProfileBodyExport`; `tests/test_garmin_profile_body_export.py::BodyExportTests`, `tests/test_garmin_profile_body_export.py::BodyExportMockTests`, `tests/test_garmin_profile_body_export.py::test_explicit_retry_sends_unchanged_profile_once`, `tests/test_garmin_profile_body_export.py::test_route_opt_in_only_after_committed_change`, `tests/test_garmin_sdk_body_transport.py::GarminSdkBodyTransportTests` (synthetic, mocked Garmin). Gap: live Garmin Connect compatibility is not established.

@@ -38,6 +38,51 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 
 Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_any_job_is_stored`, `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
+### Requirement: Intervals.icu request contract
+The system SHALL call Intervals.icu only at `https://intervals.icu/api/v1`, with basic authentication (user `API_KEY`, password the stored key), and only for the explicit writes and read-backs of its output role. Collection reads SHALL page with `limit` 500 and an offset, read at most 100 pages, and fail on a page that is no list of objects or that repeats an earlier non-empty page.
+
+#### Scenario: Library workout without a stored remote id
+- **WHEN** a library workout is pushed and no remote id is stored, or the stored one answers 404
+- **THEN** the remote library is listed first and a matching workout is adopted; only without a match a workout is created in the folder `Pacecraft`, an existing folder `Intervals Coach` is reused, and the folder is created when neither exists.
+
+Detailed contract: the writes are workout folders, library workouts, planned events and competitions (bulk upsert by external id, single and bulk delete), the wellness day and the Ride and Run sport settings; the read-backs are the library workouts and folders, the events (competition push: today-365 to today+730; repair: its repair window), one event, the wellness day (404 means empty) and the sport settings; the connection check reads the athlete. No activity path and no wellness range is called. The call table belongs to the provider endpoint reference, not to this capability.
+
+Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals.py:fetch_paged_collection`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/sync/library.py:WorkoutLibrarySyncService._upsert_remote`; `tests/test_provider_intervals.py:test_pagination_page_limit_is_bounded`, `tests/test_server_sync.py:test_intervals_collection_rejects_repeated_full_page`, `tests/test_server_sync.py:test_pacecraft_folder_wins_over_the_legacy_folder`, `tests/test_server_sync.py:test_library_sync_reconciles_remote_template_before_creating`.
+
+### Requirement: Stored provider credentials
+The system SHALL store provider credentials from `PUT /api/settings/credentials` in the encrypted database for a fixed set of fields, let a non-empty stored value override the environment value, let a blank or `null` value remove only the stored one, validate the whole submission before writing, and apply changes without a restart. The fields, limits and errors are the contract of `docs/api-routes.md`.
+
+#### Scenario: Validation before any write
+- **WHEN** the body is no object, names an unknown field, or a value is no string, is longer than 4096 characters, holds a control character, is an unsafe base URL or, for the key expiry, no ISO date
+- **THEN** the answer is 400 and nothing is stored.
+
+#### Scenario: Clearing
+- **WHEN** a field is `null` or blank
+- **THEN** only the value stored in the app is removed and the environment value applies again.
+
+#### Scenario: Answer
+- **WHEN** a write succeeds
+- **THEN** the answer is the credential status: per field its `source` (`db`, `env`, `none`) and `configured`, a `value` only for the base URLs, the athlete id, the Wahoo client id and the key expiry, and the Garmin connection; no secret, e-mail address or submitted value is returned and the write is not recorded in the change history.
+
+#### Scenario: Applies without a restart
+- **WHEN** Intervals.icu or Garmin credentials are saved or removed
+- **THEN** the next job of that provider uses the live values, because its job owner is built per job.
+
+Evidence: `backend/provider_credentials.py:validated_changes`, `backend/provider_credentials.py:CREDENTIAL_FIELDS`, `backend/provider_credentials.py:ProviderCredentialService.update`, `backend/provider_credentials.py:credential_status`, `backend/http_api/credentials_put.py:CredentialsPutRoutes`, `backend/sync/executor.py:PerJobOwner`; `tests/test_provider_credentials.py`, `tests/test_sync_live_credentials.py:test_builds_a_fresh_owner_for_every_job`.
+
+### Requirement: Password re-entry for redirecting credentials
+Setting, not clearing, `openai_base_url`, `anthropic_base_url`, `wahoo_client_id` or `wahoo_client_secret` SHALL require the APP_PASSWORD again in the body field `app_password`, compared in constant time before anything is written and never stored. A session alone SHALL NOT redirect a model key or replace the Wahoo application.
+
+#### Scenario: Wrong or missing password
+- **WHEN** the password is absent or wrong
+- **THEN** the answer is 403 "Das App-Passwort fehlt oder ist falsch. Es wurde nichts geändert." and no field of the submission is stored.
+
+#### Scenario: Too many attempts
+- **WHEN** a client address makes more than 10 re-entries in 900 seconds
+- **THEN** the answer is 429 `rate_limited` with the seconds to wait, the limit of the authentication capability.
+
+Evidence: `backend/provider_credentials.py:requires_password`, `backend/provider_credentials.py:REAUTH_FIELDS`, `backend/http_api/credentials_put.py:CredentialsPutRoutes`, `backend/http_api/auth.py:SessionAuthService.require_password`; `tests/test_provider_credentials.py`, `tests/test_http_post_maintenance_reauth.py`, `e2e/credential-password.spec.js`.
+
 ### Requirement: Garmin login and MFA
 The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, a disconnect, or the local data purge SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.
 
@@ -49,11 +94,17 @@ The system SHALL support authenticated Garmin login with an optional MFA continu
 - **WHEN** a slow login returns after a disconnect or the local data purge
 - **THEN** its result is rejected instead of silently reconnecting the athlete.
 
+#### Scenario: Fifth wrong code
+- **WHEN** a wrong code is submitted for a pending login
+- **THEN** the answer is 422 and the login stays pending, except the fifth wrong code, which discards it and answers 409 "Zu viele falsche MFA-Codes. Bitte die Garmin-Anmeldung neu starten."
+
 #### Scenario: Cancel in the PWA
 - **WHEN** the athlete chooses "Abbrechen" on the code step
 - **THEN** only the form returns to the login step; no route cancels the server slot, so the pending login stays until a newer login, a disconnect or the purge replaces it, or it expires after 10 minutes.
 
-Evidence: `backend/sync/garmin_login.py:GarminLoginService.login`, `backend/sync/garmin_login.py:GarminLoginService.submit_mfa`, `backend/sync/garmin_login.py:GarminLoginService.cancel`; `tests/test_garmin_login.py:test_mfa_wrong_code_keeps_slot_then_correct_code_connects`, `tests/test_garmin_login.py:test_disconnect_during_login_discards_the_result`, `tests/test_sync_garmin_service.py:test_reader_mfa_and_cancellation_keep_collection_from_running`.
+Detailed contract: one pending MFA login exists at a time and expires 600 seconds after the challenge; `email` and `password` are non-blank strings of at most 512 characters, the MFA `code` has 4 to 10 digits, and the password is never stored. The answers and their German texts are the contract of `docs/api-routes.md`.
+
+Evidence: `backend/sync/garmin_login.py:GarminLoginService.login`, `backend/sync/garmin_login.py:GarminLoginService.submit_mfa`, `backend/sync/garmin_login.py:GarminLoginService.cancel`, `backend/sync/garmin_login.py:MFA_TTL_SECONDS`, `backend/sync/garmin_login.py:MAX_MFA_ATTEMPTS`; `tests/test_garmin_login.py:test_mfa_wrong_code_keeps_slot_then_correct_code_connects`, `tests/test_garmin_login.py:test_disconnect_during_login_discards_the_result`, `tests/test_sync_garmin_service.py:test_reader_mfa_and_cancellation_keep_collection_from_running`.
 
 ### Requirement: Garmin connection storage and safe status
 The system SHALL use the Garmin token-store owner for encrypted-database token persistence and supported configured-file compatibility, keep login/token contents server-side, and expose only connected/source/MFA-pending metadata. Remote reads SHALL persist updated token state through their cleanup path even if collection fails. Disconnect SHALL discard pending login and clear the owned connection state.
@@ -66,7 +117,19 @@ The system SHALL use the Garmin token-store owner for encrypted-database token p
 - **WHEN** the optional Garmin client is unavailable, or none of a login configuration, a supported token store and a Personal API key is present
 - **THEN** Garmin is reported unavailable or unconfigured and no data collection is attempted.
 
-Evidence: `backend/sync/garmin_login.py:GarminTokenStore`, `backend/sync/garmin_login.py:GarminLoginService.status`, `backend/sync/garmin_service.py:GarminRemoteReader`; `tests/test_sync_garmin_service.py:test_fetch_persists_tokens_even_when_the_read_fails`, `tests/test_garmin_login.py:test_login_success_stores_tokens_without_password`, `tests/test_garmin_login.py:test_disconnect_clears_tokens_and_blocks_legacy_file`.
+#### Scenario: Login sources
+- **WHEN** the sync needs the Garmin login
+- **THEN** it uses the login stored in the encrypted database, else a preserved legacy token file, else the environment e-mail and password; the reported source is `db`, `file`, `env` or `none`, and only `db` and `file` count as connected.
+
+#### Scenario: One-time import and refresh
+- **WHEN** a sync logged in from the legacy file or received refreshed login data
+- **THEN** the data is written to the database only while the stored login is still the one the sync started with, so a disconnect, purge or new login during the sync is never undone; the file stays in place.
+
+#### Scenario: After disconnect
+- **WHEN** the athlete disconnected Garmin
+- **THEN** the stored login is deleted and neither the legacy file nor the environment e-mail and password are used until a new login in the app, so Garmin counts as configured only through a Personal API key.
+
+Evidence: `backend/sync/garmin_login.py:GarminTokenStore`, `backend/sync/garmin_login.py:GarminTokenStore.write_back`, `backend/sync/garmin_service.py:_garmin_sync_configured`, `backend/sync/garmin_login.py:GarminLoginService.status`, `backend/sync/garmin_service.py:GarminRemoteReader`; `tests/test_sync_garmin_service.py:test_fetch_persists_tokens_even_when_the_read_fails`, `tests/test_garmin_login.py:test_login_success_stores_tokens_without_password`, `tests/test_garmin_login.py:test_disconnect_clears_tokens_and_blocks_legacy_file`.
 
 ### Requirement: Garmin Personal API key and SDK fallback
 The system SHALL read the Garmin families the official Personal API serves through it whenever a key is configured, and every other family only through the unofficial SDK login. The key is a server-side credential that the provider settings may also store. Public status SHALL expose only whether a key is set, its entered expiry date and a state, never the key.
@@ -79,6 +142,22 @@ The system SHALL read the Garmin families the official Personal API serves throu
 - **WHEN** a key is configured and the SDK login fails or needs MFA
 - **THEN** only the SDK-only families are dropped, the reason `login_failed` or `mfa_required` and its time are kept so the card asks for a new login, and the next successful SDK login clears it.
 
+#### Scenario: SDK threshold reads fail
+- **WHEN** an SDK login is configured and the reads of cycling FTP, FTP history or lactate threshold failed in three syncs in a row
+- **THEN** the sync reports `requests_failed` with its time, like `login_failed` and `mfa_required`, and one successful threshold read clears the count; without an SDK setup or in fixture mode nothing is reported.
+
+#### Scenario: One token for the process
+- **WHEN** several jobs read through the Personal API with the same key
+- **THEN** they share one client and one token exchange, and a changed key builds a new client.
+
+#### Scenario: History walks never log the SDK in
+- **WHEN** the wellness or stream backfill runs with a key
+- **THEN** it reads through the Personal API alone and records no skipped SDK login; the stream backfill without a key reads nothing.
+
+#### Scenario: Key check answers
+- **WHEN** the key exchange is refused with 401 or 403, or gives no usable answer
+- **THEN** the check fails with 401 `personal_key_rejected` "Der Garmin-Personal-API-Schlüssel wurde abgelehnt." or with 502 "Garmin Personal API nicht erreichbar."
+
 #### Scenario: Key state
 - **WHEN** the athlete entered an expiry date for the key
 - **THEN** the state is valid, expiring within 14 days, or expired; a missing date reads `expiry_missing`, a key Garmin refused (401 or 403 on the exchange) reads `rejected` above every expiry state, and an unreachable Garmin is no rejection.
@@ -87,7 +166,9 @@ The system SHALL read the Garmin families the official Personal API serves throu
 - **WHEN** the athlete saves or removes the key
 - **THEN** its stored expiry date and rejection are cleared and the environment expiry does not apply to a stored key.
 
-Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/sync/garmin_personal_status.py:personal_key_state`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`, `backend/sync/garmin_projection_service.py:GarminProjectionService._personal_api_state`, `backend/provider_credentials.py`; `tests/test_garmin_personal_key_status.py:test_state_follows_the_entered_expiry_date`, `tests/test_garmin_personal_key_status.py:test_a_rejected_key_wins_over_every_expiry_state`, `tests/test_garmin_personal_key_status.py:test_unreachable_personal_api_is_not_a_rejection`, `tests/test_garmin_personal_key_status.py:test_saving_or_removing_the_key_clears_its_expiry`, `tests/test_garmin_personal_transport.py:test_personal_key_alone_syncs_every_personal_family_without_errors`, `tests/test_garmin_personal_transport.py:test_failed_sdk_login_keeps_the_personal_families`, `tests/test_garmin_personal_transport.py:test_pending_mfa_keeps_the_personal_families`.
+Detailed contract (transport): the key is exchanged with `Authorization: ApiKey <key>` for a bearer token that is kept in memory until 600 seconds before its own expiry claim (else 24 hours) and exchanged once more after a 401. A request times out after 45 seconds and an answer above 10 MB is refused; an activity file may reach 50 MB and is a bare FIT file or the first `.fit` member of a zip, and a 404 or another format means no file. Activity lists come in pages of 20 and at most 500 pages, and sleep, daily-summary and Body Battery ranges in requests of at most 31 days. The method table belongs to the provider endpoint reference.
+
+Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:GarminPersonalClient`, `backend/providers/garmin_personal.py:fit_from_archive`, `backend/sync/garmin_service.py:_verify_personal_key`, `backend/sync/garmin_service.py:GarminRemoteReader.personal_client`, `backend/sync/garmin.py:GarminSyncStateService.sdk_threshold_failure`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/sync/garmin_personal_status.py:personal_key_state`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`, `backend/sync/garmin_projection_service.py:GarminProjectionService._personal_api_state`, `backend/provider_credentials.py`; `tests/test_garmin_personal_key_status.py:test_state_follows_the_entered_expiry_date`, `tests/test_garmin_personal_key_status.py:test_a_rejected_key_wins_over_every_expiry_state`, `tests/test_garmin_personal_key_status.py:test_unreachable_personal_api_is_not_a_rejection`, `tests/test_garmin_personal_key_status.py:test_saving_or_removing_the_key_clears_its_expiry`, `tests/test_garmin_personal_only_batches.py:test_two_personal_only_jobs_exchange_the_key_once`, `tests/test_garmin_personal_transport.py:test_ranges_are_split_into_the_personal_api_day_limits`, `tests/test_garmin_personal_transport.py:test_bare_fit_is_accepted_and_other_archives_are_rejected`, `tests/test_sync_garmin.py:test_sdk_threshold_failure_counts_syncs_in_a_row`, `tests/test_sync_garmin.py:test_skipped_sdk_login_freezes_thresholds_at_once`, `tests/test_garmin_personal_transport.py:test_personal_key_alone_syncs_every_personal_family_without_errors`, `tests/test_garmin_personal_transport.py:test_failed_sdk_login_keeps_the_personal_families`, `tests/test_garmin_personal_transport.py:test_pending_mfa_keeps_the_personal_families`.
 
 ### Requirement: Wahoo authorization state and callback
 The system SHALL initiate Wahoo OAuth only through an authenticated, CSRF-protected action, require a credential-free HTTPS redirect URI without a fragment, and persist only a digest of one pending authorization state with a ten-minute expiry. The cross-site callback SHALL use that single-use state instead of requiring a session cookie, exchange a bounded code only after state validation, and redirect to fixed connected/error targets without echoing callback values.
@@ -130,6 +211,29 @@ Detailed contract: Optional profile and power-zone import SHALL run only with gr
 
 Evidence: `backend/sync/wahoo_connection.py:connection_status`, `backend/sync/wahoo_connection.py:WahooConnectionService.disconnect`, `backend/sync/wahoo_sync.py:WahooSyncService._threshold_fetch`; `tests/test_wahoo_connection.py:test_disconnect_during_code_exchange_prevents_reconnect`, `tests/test_wahoo_connection.py:test_disconnect_succeeds_locally_when_remote_revoke_fails`, `tests/test_wahoo_sync.py:test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts`.
 
+### Requirement: Wahoo transport contract
+The system SHALL request the Wahoo scopes `user_read`, `workouts_read`, `workouts_write`, `plans_read`, `plans_write` and `power_zones_read`, send token requests form-encoded with a 20-second timeout and API requests with a bearer token and a 30-second timeout, and map every Wahoo failure to a typed error without provider text.
+
+#### Scenario: Rejected access token
+- **WHEN** Wahoo answers 401
+- **THEN** the token is refreshed once and the request repeated once; a second 401 drops the grant and raises 409 `wahoo_reconnect_required`.
+
+#### Scenario: Other failures
+- **WHEN** Wahoo answers 429, 408 or 5xx, another 4xx, or an unreadable body
+- **THEN** the error is 429 `wahoo_rate_limited` (with the wait Wahoo named), 503 `wahoo_unavailable`, 502 `wahoo_request_rejected` or 502 `wahoo_invalid_response`; a transport failure without an upstream status keeps its safe text under the reason `wahoo_request_failed` when it has none.
+
+#### Scenario: Workout list completeness
+- **WHEN** the workouts are listed
+- **THEN** the list is complete when a page reaches before the window start, or a page shorter than the page size Wahoo applied (1 to 50) arrives and the rows read reach Wahoo's `total`, and it is truncated when an empty page arrives below `total` or the page bound is reached; rows that are no objects are counted as skipped and a row without a readable start is kept.
+
+#### Scenario: Plan upload
+- **WHEN** a plan is written
+- **THEN** it is sent form-encoded as `plan[file]` (a `data:application/json;base64,` URI of the compact plan JSON), `plan[filename]` and `plan[provider_updated_at]` (UTC), plus `plan[external_id]` on create, and remote ids must be integers from 1 to 2^63-1.
+
+Detailed contract: the callback `state` and `code` are refused above 2048 characters and the callback always answers 302 to `/?wahoo=connected` or `/?wahoo=error`; the endpoint paths belong to the provider endpoint reference, the route answers to `docs/api-routes.md`.
+
+Evidence: `backend/providers/wahoo_oauth.py:WAHOO_SCOPES`, `backend/providers/wahoo_oauth.py:WahooOAuthClient`, `backend/providers/wahoo_client.py:WahooClient`, `backend/providers/wahoo_client.py:_translated`, `backend/providers/wahoo_client.py:_plan_fields`, `backend/http_api/wahoo.py:WahooGetRoutes`; `tests/test_wahoo_client.py:test_a_short_page_below_the_reported_total_continues_paging`, `tests/test_wahoo_client.py:test_an_empty_page_below_the_reported_total_is_truncated`, `tests/test_wahoo_client_plans.py:test_create_posts_a_form_with_the_base64_plan_and_external_id`, `tests/test_wahoo_connection.py`, `tests/test_wahoo_http.py`.
+
 ### Requirement: Credential-safe bounded transport
 The system SHALL keep external credentials and callback values out of public status, ordinary diagnostics, exports, request-target logs, and persisted activity download links. Provider transports SHALL reject redirects rather than forwarding authenticated requests to a redirect target. Wahoo FIT downloads SHALL use an allowlisted HTTPS CDN, no authorization header, and bounded time/body size; the calendar feed SHALL use its own bounded transport and weather the shared one.
 
@@ -141,7 +245,21 @@ The system SHALL keep external credentials and callback values out of public sta
 - **WHEN** a Wahoo summary contains a download link outside the accepted HTTPS host/port rules
 - **THEN** the downloader refuses it before network access and returns only a safe failure class.
 
-Evidence: `backend/providers/http.py:request_json`, `backend/providers/wahoo_fit_download.py:download_wahoo_fit`, `backend/http_api/wahoo.py:WahooGetRoutes`; `tests/test_provider_redirects.py:test_json_transport_rejects_same_and_cross_origin_redirects`, `tests/test_wahoo_http.py:test_callback_code_and_state_never_reach_logs`, `tests/test_wahoo_fit_download.py:test_request_is_a_plain_get_with_only_accept_and_user_agent`.
+#### Scenario: Shared limits
+- **WHEN** a JSON provider request is sent without its own limits
+- **THEN** it carries `Accept: application/json` and `User-Agent: Pacecraft/<version>`, times out after 45 seconds, is not retried, returns null for an empty answer, and an answer above 10,000,000 bytes is refused with 502 "Die Antwort des externen Dienstes ist zu groß."
+
+#### Scenario: Cancelled request
+- **WHEN** the caller's cancel signal is set before, during or after the request
+- **THEN** the request ends with 499 `chat_cancelled` and is not counted as a provider failure.
+
+#### Scenario: Intervals.icu rejection text
+- **WHEN** Intervals.icu rejects a request with an error body
+- **THEN** the message is "Intervals.icu weist die Anfrage zurück (<status>): <detail>", where the detail is the first of `error`, `error.message|detail|title` and `message|detail|title`, redacted and cut to 500 characters; any other provider error without a classified mapping gets "Anfrage an externen Dienst fehlgeschlagen (<status>).", and the status is kept as the upstream status.
+
+Detailed contract: redaction replaces URLs, e-mail addresses, `sk-` keys and `authorization: basic|bearer` values. The public status of an upstream error is the contract of the authentication capability.
+
+Evidence: `backend/providers/http.py:request_json`, `backend/providers/http.py:JsonHttpClient.request`, `backend/providers/http.py:redact_provider_text`, `backend/providers/http.py:error_detail`, `tests/test_provider_http.py:test_json_http_client_maps_size_invalid_network_and_client_errors`, `tests/test_provider_http.py:test_json_http_client_cancellation_and_cleanup`, `tests/test_server_sync.py:test_intervals_validation_error_includes_safe_provider_detail`, `backend/providers/wahoo_fit_download.py:download_wahoo_fit`, `backend/http_api/wahoo.py:WahooGetRoutes`; `tests/test_provider_redirects.py:test_json_transport_rejects_same_and_cross_origin_redirects`, `tests/test_wahoo_http.py:test_callback_code_and_state_never_reach_logs`, `tests/test_wahoo_fit_download.py:test_request_is_a_plain_get_with_only_accept_and_user_agent`.
 
 ### Requirement: Explicit metric export and stored automatic consent
 The system SHALL export metrics only to a capable target and only automatically; no HTTP route previews or sends a manual selection. Thresholds SHALL be the resolved local, else Garmin, else Wahoo values, never the target's own. Automatic export SHALL need stored per-field consent and stay idempotent. Every write SHALL be in the change history without undo; export failure SHALL keep the local import.
@@ -158,7 +276,15 @@ The system SHALL export metrics only to a capable target and only automatically;
 - **WHEN** the athlete enables the automatic export for the first time, or changes one field's consent with a confirmed request naming Intervals.icu
 - **THEN** a new consent covers threshold heart rate, maximum heart rate and running threshold pace; cycling FTP, running FTP and the wellness fields are opt-in; a consent stored before per-field consent keeps the fields of that time (all but running FTP) until a field is changed; the response lists each changed field as a receipt, and revoking the last field ends the automatic export.
 
-Evidence: `backend/sync/metric_export.py:MetricExportService.configure_automatic`, `backend/sync/metric_export.py:MetricExportService.sync_automatic`, `backend/sync/metric_export_consent.py:enabled_fields`, `backend/performance/canonical_current.py:read_export_thresholds`, `backend/sync/metric_export_runner.py:MetricExportRunner`, `backend/sync/garmin_service.py:GarminSyncService._execute`; `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`, `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`, `tests/test_metric_export.py:test_new_consent_starts_with_heart_rate_and_pace_thresholds_only`, `tests/test_metric_export.py:test_a_target_side_threshold_change_is_overwritten_after_restart`, `tests/test_metric_export.py:test_heart_rate_thresholds_recalculate_target_zones`, `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`, `tests/test_current_thresholds.py:test_local_then_garmin_then_wahoo_and_never_intervals`, `tests/test_metric_export_runner.py`, `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`, `tests/metric-export.test.cjs`.
+#### Scenario: Offered values
+- **WHEN** the automatic export builds its candidates
+- **THEN** body metrics are the newest Garmin observation per field of the last 90 days, values are compared with a relative tolerance of 0.001 and sent rounded (weight 2 decimals, body fat 1, threshold pace 4, others whole numbers).
+
+#### Scenario: Delayed automatic run
+- **WHEN** a local zone change or a finished Wahoo refresh asks for the automatic export
+- **THEN** one run starts 5 seconds later off the request thread, a request during a run causes exactly one more run, and the status line "Intervals.icu: <n> Werte gesendet, <n> Konflikte, <n> fehlgeschlagen." is stored.
+
+Evidence: `backend/sync/metric_export.py:MetricExportService.configure_automatic`, `backend/sync/metric_export.py:MetricExportService._candidates`, `backend/sync/intervals_metric_export.py:_remote_number`, `backend/sync/metric_export_runner.py:MetricExportRunner.request`, `backend/sync/metric_export.py:MetricExportService.sync_automatic`, `backend/sync/metric_export_consent.py:enabled_fields`, `backend/performance/canonical_current.py:read_export_thresholds`, `backend/sync/metric_export_runner.py:MetricExportRunner`, `backend/sync/garmin_service.py:GarminSyncService._execute`; `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`, `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`, `tests/test_metric_export.py:test_new_consent_starts_with_heart_rate_and_pace_thresholds_only`, `tests/test_metric_export.py:test_a_target_side_threshold_change_is_overwritten_after_restart`, `tests/test_metric_export.py:test_heart_rate_thresholds_recalculate_target_zones`, `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`, `tests/test_current_thresholds.py:test_local_then_garmin_then_wahoo_and_never_intervals`, `tests/test_metric_export_runner.py`, `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`, `tests/metric-export.test.cjs`.
 
 ### Requirement: Explicit Wahoo library-plan export
 The system SHALL export local library workouts to Wahoo only through an explicit Wahoo `plan_push` request with expected payload hashes. It SHALL serialize supported workouts before remote writes, retain Wahoo links separately from Intervals slots, verify readback, and reuse the existing remote plan or matching coach external identity on repeat export. It SHALL refuse Wahoo calendar scheduling and repair operations.
@@ -253,7 +379,29 @@ The system SHALL offer an explicit read-only connection check on the OpenAI, Int
 - **WHEN** the card is the shared calendar or Open Food Facts
 - **THEN** no check action is offered because a check would equal the full feed fetch or the provider needs no credentials.
 
-Evidence: `backend/providers/connection_checks.py:ProviderConnectionChecks`, `backend/providers/connection_check_probes.py:build_probes`, `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`; `tests/test_provider_connection_checks.py`, `tests/provider-connections.test.cjs`.
+#### Scenario: Probe per provider
+- **WHEN** a check runs
+- **THEN** it sends one request with a 15-second timeout: OpenAI and Claude list their models (404, 405 or 501 means `unsupported`), Intervals.icu reads the athlete (404 means `misconfigured`), Wahoo reads the user (a grant without `user_read` means `scope_missing` without a request), and Open-Meteo reads a forecast for fixed public coordinates.
+
+#### Scenario: Classification
+- **WHEN** the provider answers 429; 401 or 403; another 4xx except 408; or cannot be reached
+- **THEN** the result is `rate_limited`, `auth_failed`, `misconfigured` or `unavailable`; a local failure is `unknown`, shown neither as an outage nor stored.
+
+#### Scenario: Slow or repeated check
+- **WHEN** a check runs longer than 45 seconds, or the same check is requested again within 10 seconds of a stored success, rejection, rate limit, misconfiguration, unsupported or missing-scope result
+- **THEN** the answer is `checking` while the late result is still stored, or the stored result without a new request; an `unavailable` or `unknown` result is always retried.
+
+#### Scenario: Garmin busy or fixture
+- **WHEN** a Garmin sync or full resync runs, or the Garmin fixture is active
+- **THEN** the result is `busy` (the earlier result is kept) or `unsupported`.
+
+#### Scenario: Interrupted by a restore
+- **WHEN** a restore or privacy delete interrupts a check
+- **THEN** it reports `unknown` and stores nothing.
+
+Detailed contract: the route answers and the twelve statuses are the contract of `docs/api-routes.md`; results live in memory and are bound to a fingerprint of the effective credentials (Garmin: connection, login digest and key; Wahoo: client id, secret and connection time).
+
+Evidence: `backend/providers/connection_checks.py:ProviderConnectionChecks`, `backend/providers/connection_checks.py:classify_failure`, `backend/sync/garmin_assembly.py:GarminAssembly.check_stored_login`, `tests/test_provider_connection_checks.py:test_model_provider_listing_failures_are_classified`, `tests/test_provider_connection_checks.py:test_other_provider_404_is_a_misconfiguration_not_unsupported`, `tests/test_provider_connection_checks.py:test_unknown_intervals_athlete_is_a_misconfiguration`, `tests/test_provider_connection_checks.py:test_a_check_past_its_deadline_reports_checking_and_still_stores_its_result`, `tests/test_provider_connection_checks.py:test_running_resync_reports_busy_and_skips_the_login`, `tests/test_provider_connection_checks.py:test_local_failure_is_not_reported_as_a_provider_outage_and_not_stored`, `tests/test_provider_connection_checks.py:test_restore_during_the_check_is_not_stored_as_verified`, `backend/providers/connection_check_probes.py:build_probes`, `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`; `tests/test_provider_connection_checks.py`, `tests/provider-connections.test.cjs`.
 
 ### Requirement: Yazio connection status and explicit check
 The system SHALL present Yazio on the connections screen, distinguish missing configuration, an unchecked configuration, a successful check, and a safely classified failure, and provide an explicit authenticated connection check. Status SHALL describe the last check rather than promise current availability.
