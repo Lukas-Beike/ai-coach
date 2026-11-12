@@ -121,7 +121,7 @@ The client SHALL show at most one status strip above every screen: the most seve
 Evidence: `public/status-strip.js::statusStripItems`, `public/status-strip.js::renderStatusStrip`, `public/shared.js::renderStatus`, `public/sync-status.js::renderProviderAttention`, `public/settings.js::thresholdStatusItem`; `e2e/status-strip.spec.js::offline, a Coach error and the missing Intervals.icu key show one strip @responsive`, `tests/status-strip.test.cjs::the strip ranks notices by the athlete's order and shows only one as text`, `tests/status-strip.test.cjs::the loading notice stands alone`.
 
 ### Requirement: Mehr groups settings under one title with text status and a structured profile
-The client SHALL show the settings areas under the fixed title "Mehr" as one swipeable row whose active area is filled, state every provider connection as a text chip (Verbunden, Nicht eingerichtet, Fehler or Nicht geprüft) and let the athlete pick sports by touch. The profile SHALL be four collapsible sections with a one-line summary each and a save bar that stays above the navigation and shows the unsaved state.
+The client SHALL show the settings areas under the fixed title "Mehr" as one swipeable row whose active area is filled, show every provider connection as one collapsible card that states its status as a text chip (Verbunden, Nicht eingerichtet, Fehler or Nicht geprüft) and let the athlete pick sports by touch. The profile SHALL be four collapsible sections with a one-line summary each and a save bar that stays above the navigation and shows the unsaved state.
 
 #### Scenario: Sports without a hint
 - **WHEN** the athlete opens the profile
@@ -129,13 +129,17 @@ The client SHALL show the settings areas under the fixed title "Mehr" as one swi
 
 #### Scenario: Status without colour
 - **WHEN** the athlete opens Anbindungen
-- **THEN** every provider names its status as a text chip, the section header counts them (for example "5 verbunden · 1 Fehler") and the Garmin card names the Personal API key and the SDK login in words.
+- **THEN** the seven cards (Garmin, Wahoo, Intervals.icu, OpenAI, Yazio, Gemeinsamer Kalender, Open-Meteo) are collapsed and each shows only its name and a text chip with a coloured dot, and the Garmin card names the Personal API key and the SDK login in words.
+
+#### Scenario: One card per connection
+- **WHEN** the athlete opens a card or follows a setup link for one provider
+- **THEN** that card opens with its status, freshness and retry history, credentials, settings and actions and no other provider's fields; several cards can be open at once, and the Open-Meteo card keeps the CC BY 4.0 attribution.
 
 #### Scenario: Unsaved profile
 - **WHEN** a profile field changes
 - **THEN** the save bar shows "Ungespeichert" until the profile is saved, then "Gespeichert"; a closed section opens when it holds an invalid value.
 
-Evidence: `public/connection-status.js::connectionsSummaryText`, `public/connection-status.js::garminSourceLines`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `tests/settings-hub.test.cjs::the section header counts chips instead of listing providers`.
+Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`.
 
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.

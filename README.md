@@ -31,7 +31,7 @@ docker run -d --name pacecraft --restart unless-stopped \
   ghcr.io/lukas-beike/pacecraft:latest
 ```
 
-Open `http://localhost:8090`, log in with `APP_PASSWORD`, and add the OpenAI key and providers under **Mehr > Anbindungen > Zugangsdaten**. Browsers need HTTPS for installation and voice input. Compose, Unraid and reverse-proxy examples: [docs/setup.md](docs/setup.md). Never run `docker rm -v`: `/data` holds the encrypted database.
+Open `http://localhost:8090`, log in with `APP_PASSWORD`, and add the OpenAI key and providers in their cards under **Mehr > Anbindungen**. Browsers need HTTPS for installation and voice input. Compose, Unraid and reverse-proxy examples: [docs/setup.md](docs/setup.md). Never run `docker rm -v`: `/data` holds the encrypted database.
 
 ## Configuration
 

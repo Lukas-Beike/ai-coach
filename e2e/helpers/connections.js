@@ -2,11 +2,16 @@
 
 const { expect } = require("@playwright/test");
 
-async function expandConnections(page) {
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  await expect(section).toBeVisible();
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
-  await expect(section).toHaveAttribute("open", "");
+const CONNECTIONS = Object.freeze(["garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"]);
+
+// Opens the named provider cards in Mehr › Anbindungen (all of them by default).
+async function expandConnections(page, providers = CONNECTIONS) {
+  await expect(page.locator('[data-more-segment-panel="connections"]')).toBeVisible();
+  for (const provider of providers) {
+    const card = page.locator(`#connection-${provider}`);
+    if (!(await card.evaluate((element) => element.open))) await card.locator("summary").click();
+    await expect(card).toHaveAttribute("open", "");
+  }
 }
 
 module.exports = { expandConnections };

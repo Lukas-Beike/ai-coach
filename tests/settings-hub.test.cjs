@@ -3,7 +3,6 @@ const { test } = require("node:test");
 const { extractFunctions } = require("./frontend-harness.cjs");
 const {
   CONNECTION_CHIPS,
-  connectionsSummaryText,
   connectionKind,
   intervalsConnectionKind,
   yazioConnectionKind,
@@ -17,13 +16,6 @@ test("chips are words: connected, not set up, error or not checked", () => {
   assert.equal(connectionKind({ configured: true, error: true }), "error");
   assert.equal(connectionKind({ configured: true }), "ok");
   assert.equal(connectionKind({ configured: true, unchecked: true }), "unchecked");
-});
-
-test("the section header counts chips instead of listing providers", () => {
-  assert.equal(connectionsSummaryText({ ok: 5, error: 1, off: 1 }), "5 verbunden · 1 Fehler · 1 nicht eingerichtet");
-  assert.equal(connectionsSummaryText({ ok: 7 }), "7 verbunden");
-  assert.equal(connectionsSummaryText({ unchecked: 1 }), "1 nicht geprüft");
-  assert.equal(connectionsSummaryText({}), "");
 });
 
 test("Intervals.icu and Yazio map their states to chips", () => {

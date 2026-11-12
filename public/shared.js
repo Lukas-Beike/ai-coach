@@ -114,6 +114,7 @@ function ensureRouteData(route = state.route) {
   if (panelRoute === "plan") requested.push(...["plan", "library"].filter((area) => !state.loadedAreas.has(area) && !areaLoading(area)));
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
+  refreshOpenProviderChecks();
   if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
 }
 
@@ -314,13 +315,13 @@ function renderStatus(data) {
   updateStatusSources({
     loading: null,
     load_failure: null,
-    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: connections },
+    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...connections, connection: "openai" } },
     coach_error: error && activePanel !== "settingsPanel" ? { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: error } : null,
     thresholds: thresholdStatusItem(data.threshold_warnings),
     intervals_key: configured.intervals || intervalsHintDismissed() ? null : {
       level: "info",
       title: "Intervals.icu-API-Schlüssel fehlt",
-      action: { href: "#more/connections", label: "Jetzt einrichten" },
+      action: { href: "#more/connections", label: "Jetzt einrichten", connection: providerIds().intervals },
       dismiss: dismissIntervalsHint,
     },
   });

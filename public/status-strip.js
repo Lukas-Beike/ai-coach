@@ -77,6 +77,7 @@ function statusStripAction(item) {
   const link = document.createElement("a");
   link.className = "status-strip-action";
   link.href = item.action.href;
+  if (item.action.connection) link.dataset.connection = item.action.connection;
   link.textContent = item.action.label;
   return link;
 }
@@ -124,7 +125,7 @@ function renderStatusStrip() {
   const stand = statusStandLabel(statusStandAt());
   const expandedNow = strip.dataset.expanded === "true";
   // An unchanged strip is left alone, so assistive technology does not announce it again.
-  const signature = JSON.stringify([expandedNow, items.map((item) => [item.key, item.level, item.title, item.detail || "", item.stand ? stand : "", item.action?.href || "", item.action?.label || "", Boolean(item.dismiss)])]);
+  const signature = JSON.stringify([expandedNow, items.map((item) => [item.key, item.level, item.title, item.detail || "", item.stand ? stand : "", item.action?.href || "", item.action?.label || "", item.action?.connection || "", Boolean(item.dismiss)])]);
   if (items.some((item) => item.stand)) statusStandTimer = setTimeout(renderStatusStrip, STATUS_STAND_REFRESH_MS);
   if (strip.dataset.signature === signature) return;
   strip.dataset.signature = signature;

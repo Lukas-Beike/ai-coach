@@ -153,7 +153,7 @@ activity IDs no longer resolve.
 
 ## Provider credentials and Garmin login
 
-These routes are reached from **Mehr > Anbindungen > Zugangsdaten**. They never
+These routes are reached from the provider cards under **Mehr > Anbindungen**. They never
 return a secret: the response is the credential status only.
 
 - `PUT /api/settings/credentials` takes a JSON object whose keys are credential

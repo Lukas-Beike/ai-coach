@@ -17,7 +17,7 @@ test("@responsive Yazio shows a checked login and refreshes its local status", a
   await expect(page.locator("#yazioConnectionStatus")).toHaveText("Verbunden");
   await expect(page.locator("#yazioConnectionDetail")).toContainText("Anmeldung erfolgreich");
   await expect(page.locator("#yazioConnectionDetail")).toContainText("Geprüft:");
-  await page.locator("#yazioConnectionStatus").locator("xpath=ancestor::article").screenshot({ path: testInfo.outputPath("yazio-connection.png") });
+  await page.locator("#yazioConnectionStatus").locator("xpath=ancestor::details[1]").screenshot({ path: testInfo.outputPath("yazio-connection.png") });
   status = { status: "unchecked", checked_at: null };
   await page.evaluate(() => handleSyncStatus({ running: false }));
   await expect(page.locator("#yazioConnectionStatus")).toHaveText("Nicht geprüft");

@@ -1,13 +1,12 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 
 // The credential PUT is mocked: no value is stored and no provider is contacted.
 
 async function openCredentials(page) {
   await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  await expect(section).toBeVisible();
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
+  await expandConnections(page, ["openai", "wahoo"]);
   await expect(page.locator("#cred-form-openai")).toBeVisible();
 }
 

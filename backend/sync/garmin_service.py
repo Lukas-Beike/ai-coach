@@ -99,7 +99,7 @@ def refresh_morning_battery_after_sync(
 
 
 GARMIN_MFA_REQUIRED_MESSAGE = (
-    "Garmin verlangt MFA. Bitte Garmin in den Zugangsdaten neu verbinden."
+    "Garmin verlangt MFA. Bitte Garmin in der Garmin-Karte unter Anbindungen neu verbinden."
 )
 
 

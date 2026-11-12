@@ -363,6 +363,7 @@
         const hint = node("p", `${label} ist nicht konfiguriert. `, "muted provider-setup-hint");
         const link = node("a", "Anbindung einrichten");
         link.href = "#more/connections";
+        link.dataset.connection = entry.provider;
         link.addEventListener("click", onSetup);
         hint.append(link);
         actions.append(hint);
