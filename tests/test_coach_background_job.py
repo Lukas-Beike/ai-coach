@@ -250,18 +250,41 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         persisted = self.failures.persist.call_args.args[2]
         self.assertEqual(persisted.reason, "chat_cancelled")
 
-    def test_resumed_morning_turn_does_not_repeat_the_sync(self) -> None:
+    def test_rerequested_morning_turn_does_not_repeat_the_sync(self) -> None:
         self.completion.complete.return_value = {"status": "completed"}
         self.runner.run(
             self.job(
-                "op-resume",
+                "op-rerequest",
                 request_kind="morning_checkin",
-                openai_response_id="synthetic-response",
+                morning_checkin_date="2026-09-07",
             )
         )
 
         self.morning.prepare.assert_not_called()
         self.chat.run.assert_called_once()
+
+    def test_attached_stream_gets_deltas_until_the_turn_was_requested_once(
+        self,
+    ) -> None:
+        for reached in (False, True):
+            with self.subTest(reached=reached):
+                self.chat.run.reset_mock()
+                session = f"synthetic-session-{reached}"
+                self.sessions.restore_coach_session_csrf_hash.return_value = session
+                operation_id, _ = self.streams.register(session)
+
+                self.runner.run(self.job(operation_id, openai_reached=reached))
+
+                publish = self.chat.run.call_args.kwargs["on_text_delta"]
+                if reached:
+                    # The first attempt may have shown text already.
+                    self.assertIsNone(publish)
+                    continue
+                publish("Hallo")
+                events = self.streams.events(session, operation_id)
+                assert events is not None
+                self.assertEqual(events.get_nowait()[0], "completed")
+                self.assertEqual(events.get_nowait(), ("delta", {"text": "Hallo"}))
 
 
 if __name__ == "__main__":

@@ -130,6 +130,9 @@ class OpenAIStreamTelemetry:
                 "attempt": context.get("attempt"),
                 "request_sha256": context.get("request_sha256"),
                 "request_shape": _payload_shape(payload),
+                # Sanitized on capture, like the JSON client's OpenAI requests
+                # (athlete decision 2026-11-11, #2073).
+                "request": payload,
                 **optional_context,
             },
         )

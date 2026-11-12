@@ -8,7 +8,6 @@ from typing import Any
 
 from backend.coach.attachments import model_input
 from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
-from backend.coach.job_store import CoachJobStore
 from backend.coach.request_payload import model_confirmed_steps
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -16,20 +15,18 @@ from backend.errors import AppError
 
 
 class CoachConversationRecoveryService:
-    """Own the one-time local-context recovery and its durable checkpoint."""
+    """Own the one-time recovery from the local context."""
 
     def __init__(
         self,
         database_manager: DatabaseManager,
         database_lock: Any,
         key_values: KeyValueRepository,
-        jobs: CoachJobStore,
         logger: logging.Logger,
     ) -> None:
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._key_values = key_values
-        self._jobs = jobs
         self._logger = logger
 
     def recover_if_invalid(
@@ -42,7 +39,6 @@ class CoachConversationRecoveryService:
         message: str,
         command_receipts: list[dict[str, Any]],
         attachments: list[dict[str, Any]],
-        client_turn_id: str,
         recovery_state: dict[str, bool],
         request_delta_emitted: bool,
         attempt: int,
@@ -61,7 +57,6 @@ class CoachConversationRecoveryService:
                 self._key_values.set(db, "openai_conversation_id", "")
         for candidate in (request_payload, payload):
             candidate.pop("conversation", None)
-            candidate.pop("previous_response_id", None)
         payload["input"] = model_input(
             json.dumps(
                 {
@@ -89,15 +84,6 @@ class CoachConversationRecoveryService:
             "using local dialogue and confirmed_steps. Earlier image pixels may be "
             "unavailable; ask for missing evidence only if essential. Never invent "
             "attachment details."
-        )
-        self._jobs.merge_receipt(
-            client_turn_id,
-            {
-                "openai_response_id": None,
-                "previous_response_id": None,
-                "pending_tool_outputs": [],
-                "response_input": payload["input"],
-            },
         )
         self._logger.warning(
             "Coach conversation recovered from local context",

@@ -138,7 +138,6 @@ class CoachTurnAssembly:
             self._database_manager(),
             self._database_lock,
             self._key_value_repository,
-            self._job_store(),
             self._logger,
         )
 

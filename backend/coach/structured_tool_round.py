@@ -19,6 +19,7 @@ from backend.coach.job_store import CoachJobStore
 from backend.coach.proposal_models import coach_action_hash
 from backend.coach.request_payload import (
     LOCAL_ATTACHMENT_SUMMARY_NOTICE,
+    RESUMED_STEPS_NOTICE,
     compose_model_instructions,
 )
 from backend.coach.response_transport import raise_if_chat_cancelled
@@ -384,6 +385,7 @@ class CoachStructuredToolRoundService:
             in state.model_instructions,
             request_kind=selection.kind,
             nutrition="nutrition_products" in selection.sections,
+            resumed_steps=RESUMED_STEPS_NOTICE in state.model_instructions,
         )
 
     def _update_plan_scope(
@@ -451,12 +453,8 @@ class CoachStructuredToolRoundService:
         response: dict[str, Any],
         state: StructuredCoachRoundState,
     ) -> dict[str, Any]:
-        """Continue a turn: by response id where one is stored, else by items."""
+        """Continue a turn: the conversation holds its items, else resend them."""
         if request.get("conversation"):
-            return request
-        if state.background_owned:
-            if response.get("id"):
-                return {**request, "previous_response_id": response["id"]}
             return request
         # Nothing is stored remotely: resend the turn's items so far, the
         # model's calls and (encrypted) reasoning, and the new tool outputs.
@@ -543,7 +541,6 @@ class CoachStructuredToolRoundService:
                 cancelled=cancelled,
                 rounds=rounds,
             )
-            self._journal.clear_outputs(state.client_turn_id)
             if question or cancelled:
                 break
         return response, rounds, question, cancelled, state.model_instructions

@@ -997,7 +997,6 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
         state = Mock()
         calls = [
             lambda: transport.request({"input": "{}"}),
-            lambda: transport.background_request({"input": "{}"}),
             lambda: transport.stream_request({"input": "{}"}, lambda _delta: None),
         ]
         with (

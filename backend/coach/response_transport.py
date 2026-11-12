@@ -30,21 +30,6 @@ class CoachResponseTransport:
     def request(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._openai_responses().responses(payload)
 
-    def background_request(
-        self,
-        payload: dict[str, Any],
-        *,
-        response_id: str | None = None,
-        on_response_id: Callable[[str], None] | None = None,
-        cancel_event: threading.Event | None = None,
-    ) -> dict[str, Any]:
-        return self._openai_responses().background(
-            payload,
-            response_id=response_id,
-            on_response_id=on_response_id,
-            cancel_event=cancel_event,
-        )
-
     def stream_request(
         self,
         payload: dict[str, Any],

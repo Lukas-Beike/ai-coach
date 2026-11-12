@@ -8,7 +8,10 @@ from typing import Any
 from unittest.mock import Mock
 
 from backend.coach import dialogue
-from backend.coach.request_payload import CoachRequestPayloadService
+from backend.coach.request_payload import (
+    RESUMED_STEPS_NOTICE,
+    CoachRequestPayloadService,
+)
 
 PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
@@ -51,6 +54,17 @@ class CoachRequestPayloadTests(unittest.TestCase):
         arguments.update(overrides)
         return self.service.build(**arguments)
 
+    def test_requeued_turn_tells_the_model_its_confirmed_steps_already_ran(
+        self,
+    ) -> None:
+        step = {"tool": "save_checkin", "result": {"ok": True}}
+        instructions, _ = self.build(command_receipts=[step])
+        fresh, _ = self.build()
+
+        self.assertIn(RESUMED_STEPS_NOTICE, instructions)
+        self.assertIn("never repeat them", instructions)
+        self.assertNotIn(RESUMED_STEPS_NOTICE, fresh)
+
     def test_openai_keeps_conversation_only_for_attachment_continuity(self) -> None:
         _, retained = self.build(
             retain_openai_attachment_context=True,
@@ -72,13 +86,6 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self.assertIs(local["parallel_tool_calls"], False)
         self.assertIn("dialogue", json.loads(local["input"]))
         self.assertIn("Earlier image pixels are unavailable", local["instructions"])
-
-    def test_background_turn_stays_stored_for_polling_and_resume(self) -> None:
-        _, payload = self.build(background_owned=True)
-
-        self.assertIs(payload["store"], True)
-        self.assertNotIn("include", payload)
-        self.assertNotIn("conversation", payload)
 
     def _dialogue_text(self, payload: dict) -> str:
         """Dialogue JSON text of a payload whose input carries attachment parts."""

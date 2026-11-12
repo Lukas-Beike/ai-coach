@@ -49,7 +49,6 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
             {
                 "phase": "executing_tools",
                 "pending_tool_calls": pending,
-                "pending_tool_outputs": [],
             },
         )
 
@@ -82,7 +81,6 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
                 "command_receipts": receipts,
                 "pending_tool_calls": pending,
                 "phase": "executing_tools",
-                "pending_tool_outputs": [],
             },
         )
 
@@ -105,7 +103,6 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
                 "command_receipts": receipts,
                 "pending_tool_calls": [],
                 "phase": "waiting_final_response",
-                "pending_tool_outputs": outputs,
             },
         )
 
@@ -163,16 +160,11 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
         )
         self.assertEqual(failed_cancel[:2], ("", False))
 
-    def test_finish_and_clear_persist_in_order(self) -> None:
+    def test_finish_persists_the_round_count(self) -> None:
         self.journal.finish_round("turn-4", 3)
-        self.journal.clear_outputs("turn-4")
 
-        self.assertEqual(
-            self.job_store.merge_receipt.call_args_list,
-            [
-                unittest.mock.call("turn-4", {"tool_rounds": 3}),
-                unittest.mock.call("turn-4", {"pending_tool_outputs": []}),
-            ],
+        self.job_store.merge_receipt.assert_called_once_with(
+            "turn-4", {"tool_rounds": 3}
         )
 
 

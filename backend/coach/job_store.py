@@ -17,6 +17,13 @@ SELECT_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 # A job whose failure escapes its own error handling is retried this many times in
 # total, then ended; contention requeues are counted separately and never end a job.
 MAX_FAILED_ATTEMPTS = 3
+# Resume checkpoints that releases up to 2.1.1 wrote into a running job's receipt.
+LEGACY_RESUME_KEYS = (
+    "openai_response_id",
+    "response_input",
+    "previous_response_id",
+    "pending_tool_outputs",
+)
 
 
 class CoachJobStore:
@@ -257,9 +264,13 @@ class CoachJobStore:
                 if receipt.get("mode") != "background":
                     continue
                 receipt["status"] = "queued"
-                receipt["phase"] = (
-                    "resuming" if receipt.get("openai_response_id") else "queued"
-                )
+                receipt["phase"] = "queued"
+                # An older release resumed the provider response; the job is now
+                # requested again and only keeps that it had reached OpenAI.
+                if receipt.get("openai_response_id"):
+                    receipt["openai_reached"] = True
+                for key in LEGACY_RESUME_KEYS:
+                    receipt.pop(key, None)
                 db.execute(
                     "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
                     "WHERE client_turn_id=?",

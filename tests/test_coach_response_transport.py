@@ -31,29 +31,6 @@ class CoachResponseTransportTests(unittest.TestCase):
         openai_factory.assert_called_once_with()
         stream_factory.assert_not_called()
 
-    def test_background_forwards_resume_id_checkpoint_and_cancel_event(self) -> None:
-        payload = {}
-        cancel_event = threading.Event()
-        checkpoint = Mock()
-        expected = {"id": "resp_synthetic", "status": "completed"}
-        self.openai.background.return_value = expected
-
-        self.assertIs(
-            self.transport.background_request(
-                payload,
-                response_id="resp_resume",
-                on_response_id=checkpoint,
-                cancel_event=cancel_event,
-            ),
-            expected,
-        )
-        self.openai.background.assert_called_once_with(
-            payload,
-            response_id="resp_resume",
-            on_response_id=checkpoint,
-            cancel_event=cancel_event,
-        )
-
     def test_stream_forwards_delta_callback_cancel_and_response_id(self) -> None:
         payload = {}
         cancel_event = threading.Event()

@@ -77,7 +77,7 @@ class CoachTurnFailureTests(unittest.TestCase):
             ).fetchone()
         return row["status"], json.loads(row["receipt"])
 
-    def test_partial_failure_commits_pending_request_and_discards_provider_checkpoint(
+    def test_partial_failure_commits_pending_request_and_discards_open_tool_calls(
         self,
     ) -> None:
         with self.manager.unit_of_work() as db:
@@ -91,8 +91,7 @@ class CoachTurnFailureTests(unittest.TestCase):
                     {"tool": "save_checkin", "result": {"ok": True, "status": "saved"}}
                 ],
                 "pending_tool_calls": [{"tool": "apply_workout_library_plan"}],
-                "response_input": [{"image": "secret-image"}],
-                "openai_response_id": "provider-response",
+                "openai_reached": True,
             }
         )
 
@@ -108,9 +107,9 @@ class CoachTurnFailureTests(unittest.TestCase):
         status, stored = self._stored()
         self.assertEqual((status, result["status"]), ("completed", "partial"))
         self.assertEqual(stored["pending_operations"], ["apply_workout_library_plan"])
-        self.assertNotIn("response_input", stored)
         self.assertNotIn("pending_tool_calls", stored)
-        self.assertNotIn("openai_response_id", stored)
+        # A failed turn is no attachment anchor.
+        self.assertNotIn("openai_reached", stored)
         self.assertEqual(stored["error"], "[REDACTED]")
         self.assertIn("Bereits erfolgreich", stored["message"]["content"])
         with self.manager.reader() as db:
@@ -310,12 +309,6 @@ class CoachTurnFailureTests(unittest.TestCase):
     def test_provider_timeout_is_a_persisted_actionable_chat_message(self) -> None:
         self._assert_persisted_failure(
             "provider_timeout",
-            "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
-        )
-
-    def test_background_budget_exhaustion_uses_the_timeout_message(self) -> None:
-        self._assert_persisted_failure(
-            "background_budget_exceeded",
             "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
         )
 

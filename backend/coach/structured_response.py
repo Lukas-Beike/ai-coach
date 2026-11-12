@@ -17,13 +17,15 @@ from backend.coach.response_transport import (
     raise_if_chat_cancelled,
 )
 from backend.errors import AppError
-from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
 from backend.providers.openai_responses import response_text
+
+
+def _discard_delta(_delta: str) -> None:
+    """Drop streamed text while no client stream is attached."""
 
 
 @dataclass
 class _ResponseState:
-    resume_id: str
     request_delta_emitted: bool = False
 
     def emit_delta(
@@ -35,7 +37,7 @@ class _ResponseState:
 
 
 class CoachStructuredResponseService:
-    """Own provider dispatch, resume, recovery and retry for one response."""
+    """Own the streaming provider request, recovery and retry for one response."""
 
     def __init__(
         self,
@@ -66,77 +68,55 @@ class CoachStructuredResponseService:
         on_text_delta: Callable[[str], None] | None,
         cancel_event: threading.Event | None,
         recovery_state: dict[str, bool],
-        resume_id: str = "",
     ) -> dict[str, Any]:
-        state = _ResponseState(resume_id)
+        state = _ResponseState()
 
         on_delta = partial(state.emit_delta, on_text_delta=on_text_delta)
 
-        def checkpoint(response_id: str) -> None:
-            state.resume_id = response_id
-            self._jobs.merge_receipt(
-                client_turn_id,
-                {
-                    "status": "running",
-                    "phase": "waiting_openai",
-                    "openai_response_id": response_id,
-                    "pending_tool_outputs": [],
-                    "response_input": payload["input"]
-                    if isinstance(payload["input"], list)
-                    else None,
-                    "previous_response_id": payload.get("previous_response_id"),
-                },
-            )
+        def reached(_response_id: str) -> None:
+            # The id itself is not kept: a turn is re-requested, never resumed.
+            if background_owned:
+                self._jobs.merge_receipt(
+                    client_turn_id,
+                    {
+                        "status": "running",
+                        "phase": "waiting_openai",
+                        "openai_reached": True,
+                    },
+                )
 
         attempt = 0
         while attempt < 3:
             raise_if_chat_cancelled(cancel_event)
             try:
-                response = self._send(
+                response = self._transport.stream_request(
                     payload,
-                    resume_id=state.resume_id,
-                    checkpoint=checkpoint,
-                    on_delta=on_delta,
-                    on_text_delta=on_text_delta,
-                    cancel_event=cancel_event,
-                    background_owned=background_owned,
+                    on_delta if on_text_delta is not None else _discard_delta,
+                    cancel_event,
+                    on_response_id=reached,
                 )
             except AppError as exc:
-                resumed = self._resume_if_possible(
+                if not self._recovery.recover_if_invalid(
                     exc,
                     payload,
-                    state.resume_id,
-                    checkpoint,
-                    cancel_event,
-                    background_owned=background_owned,
-                )
-                if resumed is None:
-                    if not self._recovery.recover_if_invalid(
+                    request_payload,
+                    context=context,
+                    message=message,
+                    command_receipts=command_receipts,
+                    attachments=attachments,
+                    recovery_state=recovery_state,
+                    request_delta_emitted=state.request_delta_emitted,
+                    attempt=attempt,
+                ):
+                    self._wait_before_retry(
                         exc,
-                        payload,
-                        request_payload,
-                        context=context,
-                        message=message,
-                        command_receipts=command_receipts,
-                        attachments=attachments,
-                        client_turn_id=client_turn_id,
-                        recovery_state=recovery_state,
-                        request_delta_emitted=state.request_delta_emitted,
-                        attempt=attempt,
-                    ):
-                        self._wait_before_retry(
-                            exc,
-                            state,
-                            cancel_event,
-                            attempt,
-                            remote_conversation=bool(
-                                request_payload.get("conversation")
-                            ),
-                        )
-                    state.resume_id = ""
-                    attempt += 1
-                    continue
-                response = resumed
+                        state,
+                        cancel_event,
+                        attempt,
+                        remote_conversation=bool(request_payload.get("conversation")),
+                    )
+                attempt += 1
+                continue
             if not self._spent_on_reasoning(response, payload, state):
                 return response
             # Reasoning used the whole budget before any text or tool call, so
@@ -146,7 +126,6 @@ class CoachStructuredResponseService:
             limit = self._reasoning_retry_max_output_tokens
             payload = {**payload, "max_output_tokens": limit}
             request_payload["max_output_tokens"] = limit
-            state.resume_id = ""
         raise AppError(
             502,
             "Der KI-Dienst konnte die Antwort nicht fertigstellen.",
@@ -166,12 +145,10 @@ class CoachStructuredResponseService:
             exc,
             attempt=attempt,
             request_delta_emitted=state.request_delta_emitted,
-            response_id_exists=bool(state.resume_id),
             remote_conversation=remote_conversation,
         )
         if delay is None:
             raise exc
-        state.resume_id = ""
         self._retry_policy.wait(delay, cancel_event, attempt, exc.reason)
 
     def _spent_on_reasoning(
@@ -192,56 +169,4 @@ class CoachStructuredResponseService:
             )
             and (payload.get("max_output_tokens") or 0)
             < self._reasoning_retry_max_output_tokens
-        )
-
-    def _send(
-        self,
-        payload: dict[str, Any],
-        *,
-        resume_id: str,
-        checkpoint: Callable[[str], None],
-        on_delta: Callable[[str], None],
-        on_text_delta: Callable[[str], None] | None,
-        cancel_event: threading.Event | None,
-        background_owned: bool,
-    ) -> dict[str, Any]:
-        if background_owned and on_text_delta is None:
-            return self._transport.background_request(
-                payload,
-                response_id=resume_id or None,
-                on_response_id=checkpoint,
-                cancel_event=cancel_event,
-            )
-        if on_text_delta is None:
-            return self._transport.request(payload)
-        return self._transport.stream_request(
-            payload,
-            on_delta,
-            cancel_event,
-            on_response_id=checkpoint if background_owned else None,
-        )
-
-    def _resume_if_possible(
-        self,
-        exc: AppError,
-        payload: dict[str, Any],
-        resume_id: str,
-        checkpoint: Callable[[str], None],
-        cancel_event: threading.Event | None,
-        *,
-        background_owned: bool,
-    ) -> dict[str, Any] | None:
-        resumable = (
-            background_owned
-            and resume_id
-            and exc.reason in RESUMABLE_POLL_REASONS
-            and (cancel_event is None or not cancel_event.is_set())
-        )
-        if not resumable:
-            return None
-        return self._transport.background_request(
-            payload,
-            response_id=resume_id,
-            on_response_id=checkpoint,
-            cancel_event=cancel_event,
         )

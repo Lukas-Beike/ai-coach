@@ -244,18 +244,16 @@ class CoachJobStoreTests(unittest.TestCase):
         self.assertEqual(merged["pending_tool_calls"], [{"a": 1}])
 
     def test_receipt_merge_stores_null_and_nested_values_and_replaces_lists(self):
-        self._insert(
-            "active", {"openai_response_id": "r1", "pending_tool_outputs": [1]}
-        )
+        self._insert("active", {"retry_reason": "r1", "pending_tool_calls": [1]})
 
         self.store.merge_receipt(
             "active",
-            {"openai_response_id": None, "pending_tool_outputs": [], "k": {"x": "y"}},
+            {"retry_reason": None, "pending_tool_calls": [], "k": {"x": "y"}},
         )
 
         self.assertEqual(
             self._receipt("active"),
-            {"openai_response_id": None, "pending_tool_outputs": [], "k": {"x": "y"}},
+            {"retry_reason": None, "pending_tool_calls": [], "k": {"x": "y"}},
         )
 
     def test_receipt_merge_repairs_a_malformed_receipt_of_an_open_command(self):
@@ -281,6 +279,10 @@ class CoachJobStoreTests(unittest.TestCase):
                 "mode": "background",
                 "ai_provider": "openai",
                 "openai_response_id": "resp-1",
+                "response_input": [{"synthetic": "input"}],
+                "previous_response_id": "resp-0",
+                "pending_tool_outputs": [{"synthetic": "output"}],
+                "command_receipts": [{"tool": "save_checkin"}],
             },
             status="running",
         )
@@ -297,7 +299,19 @@ class CoachJobStoreTests(unittest.TestCase):
                 ).fetchall()
             }
         self.assertEqual(rows["openai"]["status"], "queued")
-        self.assertEqual(json.loads(rows["openai"]["receipt"])["phase"], "resuming")
+        # A receipt from an older release is requested again, not resumed: its
+        # resume checkpoints go, what the turn already did and reached stays.
+        self.assertEqual(
+            json.loads(rows["openai"]["receipt"]),
+            {
+                "mode": "background",
+                "ai_provider": "openai",
+                "status": "queued",
+                "phase": "queued",
+                "openai_reached": True,
+                "command_receipts": [{"tool": "save_checkin"}],
+            },
+        )
         self.assertEqual(rows["queued"]["status"], "queued")
         self.assertEqual(json.loads(rows["queued"]["receipt"])["phase"], "queued")
         self.assertTrue(self.wake.is_set())

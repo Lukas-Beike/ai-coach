@@ -467,7 +467,7 @@ with patch.object(Path, 'read_text', deny):
             ]
         )
 
-        def response(payload, **kwargs):
+        def response(payload, *_args, **kwargs):
             step = next(steps)
             return step(payload) if callable(step) else step
 
@@ -485,7 +485,7 @@ with patch.object(Path, 'read_text', deny):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.request.side_effect = response
+            transport_factory.return_value.stream_request.side_effect = response
             result = server.COACH_TURNS.chat_turn_service().run(
                 "Read refreshed data",
                 client_turn_id="refresh-context",
@@ -493,7 +493,7 @@ with patch.object(Path, 'read_text', deny):
             )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)
-        instructions = transport_factory.return_value.request.call_args.args[0][
+        instructions = transport_factory.return_value.stream_request.call_args.args[0][
             "instructions"
         ]
         # The refreshed context replaces the stale one; static rules lead for

@@ -1523,33 +1523,6 @@ class ServerHttpTests(ServerTestCase):
         self.assertTrue(archived["archived"])
         self.assertTrue(archived["local_deleted"])
 
-    def test_openai_background_request_routes_checkpoint_and_cancellation_to_provider_client(
-        self,
-    ):
-        checkpoints = []
-        checkpoint = checkpoints.append
-        expected = {
-            "id": "resp_background_1",
-            "status": "completed",
-            "output_text": "fertig",
-            "usage": {},
-        }
-        payload = {"model": "gpt-6-luna", "input": "fake"}
-        with patch.object(
-            openai_requests.OpenAIResponsesClient, "background", return_value=expected
-        ) as background:
-            result = server.COACH_CONVERSATION.response_transport().background_request(
-                payload, on_response_id=checkpoint
-            )
-
-        background.assert_called_once_with(
-            payload,
-            response_id=None,
-            on_response_id=checkpoint,
-            cancel_event=None,
-        )
-        self.assertEqual(result["status"], "completed")
-
     def test_background_coach_job_is_persisted_and_session_scoped(self):
         job = server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Erstelle einen Trainingsplan für die nächsten 2 Wochen.",

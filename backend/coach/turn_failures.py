@@ -134,14 +134,8 @@ class CoachTurnFailureService:
             summary = change_summary(commands)
             if summary:
                 receipt["change_summary"] = summary
-            # A terminal failure is not resumable and must not retain inline image data.
-            for key in (
-                "openai_response_id",
-                "pending_tool_outputs",
-                "pending_tool_calls",
-                "response_input",
-                "previous_response_id",
-            ):
+            # A failed turn is no attachment anchor and has no open tool calls.
+            for key in ("openai_reached", "pending_tool_calls"):
                 receipt.pop(key, None)
             receipt["message"] = deps.chat_repository.add(
                 db, "assistant", text, client_turn_id=client_turn_id
@@ -228,7 +222,6 @@ class CoachTurnFailureService:
             "organization_usage_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "database_busy": "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut.",
             "provider_timeout": OPENAI_TIMEOUT_MESSAGE,
-            "background_budget_exceeded": OPENAI_TIMEOUT_MESSAGE,
             "not_found": "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
             "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             "response_error": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",

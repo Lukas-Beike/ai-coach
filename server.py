@@ -307,10 +307,10 @@ from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
-    ModelBackgroundPolicy,
     ModelEndpointSettings,
     ModelProviderDiagnostics,
     ModelProviderOwners,
+    ModelResponseLimits,
     ModelTransportAssembly,
     ModelTransportClock,
 )
@@ -494,12 +494,12 @@ MAX_BACKUP_BYTES = 1_000_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-# The Responses API counts both visible output and reasoning tokens against
-# max_output_tokens. Keep ordinary replies bounded, but leave enough room for
-# an explicitly requested multi-week training plan.
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
-OPENAI_BACKGROUND_POLL_SECONDS = 2
-OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
+# The longest silence allowed between two parts of a streamed model response.
+# Long reasoning on a large plan may send nothing for minutes (athlete
+# decision 2026-11-11, #2073: 10 minutes instead of 3).
+OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
+# Plain OpenAI requests (impact classifier, remote conversation create/delete).
+OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -1309,6 +1309,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             openai_responses_path=OPENAI_RESPONSES_PATH,
             json_media_type=JSON_MEDIA_TYPE,
             response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
         ),
         audio=AudioTranscriptionSettings(max_audio_bytes=MAX_AUDIO_BODY_BYTES),
         diagnostics=ModelProviderDiagnostics(
@@ -1316,9 +1317,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             logger=LOGGER,
             app_version=APP_VERSION,
         ),
-        background=ModelBackgroundPolicy(
-            background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
-            background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
+        limits=ModelResponseLimits(
             max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
         ),
         clock=ModelTransportClock(

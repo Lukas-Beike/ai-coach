@@ -60,7 +60,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 1,
-                "openai_response_id": "resp-1",
+                "openai_reached": True,
             },
         )
 
@@ -93,7 +93,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 1,
-                "openai_response_id": "resp-1",
+                "openai_reached": True,
             },
         )
         for message_id in (2, 3, 4, 5):
@@ -105,7 +105,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 6,
-                "openai_response_id": "resp-6",
+                "openai_reached": True,
             },
         )
         self._message(7, [])
@@ -127,7 +127,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 1,
-                "openai_response_id": "resp-1",
+                "openai_reached": True,
             },
         )
         for message_id in (2, 3, 4, 5):
@@ -169,7 +169,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 3,
-                "openai_response_id": "resp-3",
+                "openai_reached": True,
             },
         )
         self._command("text-id", {"ai_provider": "openai", "user_message_id": "1"})
@@ -187,7 +187,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 1,
-                "openai_response_id": "resp-1",
+                "openai_reached": True,
             },
         )
         self.assertTrue(self.service.load_for_receipt({"user_message_id": 2})[1])
@@ -202,7 +202,7 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
             {
                 "ai_provider": "openai",
                 "user_message_id": 1,
-                "openai_response_id": "resp-1",
+                "openai_reached": True,
             },
         )
 
