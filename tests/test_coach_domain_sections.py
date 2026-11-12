@@ -153,6 +153,11 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
         self.assertIn(_label(ProviderId.GARMIN), policy["activities"])
         self.assertIn(_label(ProviderId.WAHOO), policy["activities"])
         self.assertIn(_label(ProviderId.GARMIN), policy["recovery"])
+        # Every LT1 stand-in is named an estimate (#2427).
+        self.assertIn(
+            "nenne zone_2 und fixed_share immer als Schätzung",
+            policy["current_performance"],
+        )
         for text in policy.values():
             self.assertNotIn("Intervals", text)
         self.assertEqual(

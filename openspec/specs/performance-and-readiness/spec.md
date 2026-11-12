@@ -32,13 +32,13 @@ The current performance thresholds SHALL carry `first_thresholds`: LT1 of runnin
 
 #### Scenario: No measured or adopted value and no zones
 - **WHEN** the profile holds no first threshold and the sport has no pace or power zones
-- **THEN** the heart rate is 85 % of the threshold HR, run pace 88 % of the threshold speed and ride power 75 % of the FTP, all `fixed_share` (LTHR 172 bpm, 4:30 /km and 280 W give 146 bpm, 5:07 /km and 210 W); a value with neither its LT2 nor a zone 2 is left out.
+- **THEN** the heart rate is 85 % of the threshold HR, run pace 88 % of the threshold speed and ride power 75 % of the FTP, all `fixed_share` (LTHR 172 bpm, 4:30 /km and 280 W give 146 bpm, 5:07 /km and 210 W); a value with neither its LT2 nor a zone 2 is left out, and a sport without any LT2 value has no LT1.
 
 #### Scenario: Measured value and zone 2
 - **WHEN** a measured or adopted share is stored, or heart-rate, pace or power zones are in effect
 - **THEN** the heart rate uses that share with its origin, else the top of the heart-rate zone 2, and the pace or power the top of their zone 2 (`zone_2`); the other values keep the fixed share.
 
-Evidence: `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`.
+Evidence: `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`, `tests/test_coach_domain_sections.py:test_source_policy_texts_are_built_from_labels`.
 
 ### Requirement: Load rollups and the local current load
 The system SHALL calculate current/previous 7- and 30-day completed-activity rollups from known completed loads. The current load block (`current_load` `ctl`, `atl`, `tsb`) SHALL be the latest valued day of the local fitness, fatigue and form (M7); stored Intervals.icu CTL, ATL and form SHALL NOT be shown. Activity-derived load SHALL not be presented as Garmin's device-reported acute load.

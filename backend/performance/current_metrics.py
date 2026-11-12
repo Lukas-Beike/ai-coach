@@ -126,7 +126,7 @@ def first_thresholds(
     Pace and power: the top of zone 2, else the fixed share of the threshold pace
     or the FTP. ``zone_two_tops`` holds the tops in effect by ``<sport>_hr``
     (bpm) and ``run_pace`` (s/km) or ``ride_power`` (W). A value with neither is
-    left out.
+    left out, and a sport without any LT2 value has no LT1.
     """
     tops = zone_two_tops or {}
     result: dict[str, dict[str, Any]] = {}
@@ -137,6 +137,9 @@ def first_thresholds(
          ("watts", "power_origin", "ride_power"), LT1_POWER_SHARE),
     ):  # fmt: skip
         lthr = as_number(metrics.get(lthr_key, {}).get("value"))
+        lt2 = as_number(metrics.get(lt2_key, {}).get("value"))
+        if not (lthr and lthr > 0) and not (lt2 and lt2 > 0):
+            continue
         hr_share = first_threshold_pct / 100 if first_threshold_pct else None
         values: dict[str, Any] = {}
         for value_key, origin_key, chosen in (
@@ -146,7 +149,7 @@ def first_thresholds(
              (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE)),
             (main[0], main[1],
              (tops[main[2]], 1, LT1_ZONE_TWO) if tops.get(main[2]) else
-             (as_number(metrics.get(lt2_key, {}).get("value")), share, LT1_FIXED_SHARE)),
+             (lt2, share, LT1_FIXED_SHARE)),
         ):  # fmt: skip
             base, factor, value_origin = chosen
             if base is not None and base > 0:

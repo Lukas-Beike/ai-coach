@@ -470,11 +470,15 @@ class FirstThresholdTests(unittest.TestCase):
             first_thresholds(metrics, None, ""),
         )
         self.assertEqual({}, first_thresholds({}, 86.0, "measured"))
-        # Heart-rate zones give LT1 even without a threshold HR.
+        # Garmin's all-sport heart-rate zones give no LT1 to a sport without LT2.
+        self.assertEqual({}, first_thresholds({}, 86.0, "measured", {"ride_hr": 131.4}))
+        # With an FTP but no threshold HR, the heart-rate zone still gives LT1.
         self.assertEqual(
-            {"ride": {"hr_bpm": 131, "hr_origin": "zone_2"}},
-            first_thresholds({}, 86.0, "measured", {"ride_hr": 131.4}),
-        )
+            {"ride": {"hr_bpm": 131, "hr_origin": "zone_2",
+                      "watts": 210, "power_origin": "fixed_share"}},
+            first_thresholds({"cycling_ftp_watts": {"value": 280}}, None, "",
+                             {"ride_hr": 131.4}),
+        )  # fmt: skip
 
     def test_zone_two_top_of_each_zone_kind(self) -> None:
         pace = {
