@@ -91,7 +91,6 @@
   --training-zone-3: #f2c53a;
   --training-zone-6: #a47cf5;
   --calendar-profile-ink: #8c9895;
-  --spinner-track: rgba(255, 255, 255, .35);
   --metric-border: rgba(255, 255, 255, .06);
   --card-hover-surface: rgba(255, 255, 255, .035);
   --metric-hover-surface: rgba(255, 255, 255, .08);
@@ -775,7 +774,7 @@ h2 {
 .login-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
 .auth-loading { position: fixed; z-index: 20; inset: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px; color: var(--subtle); background: var(--bg); font-size: .9rem; }
 #appShell.is-loading .composer, #appShell.is-loading .bottom-nav { visibility: hidden; }
-.button-spinner { display: none; width: 15px; height: 15px; border: 2px solid var(--spinner-track); border-top-color: var(--white); border-radius: 50%; }
+.button-spinner { display: none; width: 15px; height: 15px; border: 2px solid color-mix(in srgb, currentColor 35%, var(--transparent)); border-top-color: currentColor; border-radius: 50%; }
 .login-button.is-loading .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
 .voice-status { margin: 0 4px 9px; color: var(--muted); text-align: center; font-size: .72rem; }
 .voice-button .button-spinner { display: inline-block; animation: spin .7s linear infinite; }
