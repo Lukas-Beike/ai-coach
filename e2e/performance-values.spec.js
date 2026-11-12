@@ -80,7 +80,7 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(best.locator('[data-running-best="speed:60"] td')).toHaveText("3:20 min/km");
   await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText("19:48");
   await expect(best.locator('[data-running-best="speed:1200"] td')).toHaveText("nicht erfasst");
-  await expect(best.locator("tbody tr")).toHaveCount(8);
+  await expect(best.locator("tbody tr")).toHaveCount(3);
   await expect(page.locator("#currentPerformance table[data-analysis-sport='run']")).toBeVisible();
   await expect(page.locator("#currentPerformance table[data-analysis-sport='ride']")).toBeHidden();
   await expect(page.locator("#cyclingPowerProfile")).toBeHidden();

@@ -696,6 +696,8 @@ function clearAnalysisReportCache() {
 }
 
 let cyclingPowerProfileGeneration = 0;
+// One power-profile read fills the cycling profile and the running best efforts (#2265).
+const PROFILE_CARDS = [["cyclingPowerProfile", "Leistungsprofil"], ["runningBestEfforts", "Bestwerte · 90 Tage"]];
 const ANALYSIS_PERFORMANCE_ROUTES = new Set(["analysis", "analysis/running", "analysis/cycling"]);
 const CYCLING_POWER_PROFILE_DURATIONS = [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]];
 
@@ -733,10 +735,11 @@ function cyclingPowerProfileTable(result) {
 }
 
 // One sport's experimental estimate: CS/D′ under the running best efforts, CP/W′ under the power profile (#2265).
-function criticalPowerLine(result, sport) {
+// Beside measured bests it also names missing estimates; alone, a line of only missing ones is dropped.
+function criticalPowerLine(result, sport, hasValues) {
   const estimate = result?.critical_power;
   const fits = (estimate?.fits || []).filter((fit) => fit.sport === sport);
-  if (!fits.some((fit) => fit.status === "ok")) return null;
+  if (!fits.length || (!hasValues && !fits.some((fit) => fit.status === "ok"))) return null;
   const labels = { "ride:outdoor": "Rad outdoor", "ride:indoor": "Rad indoor", "run:outdoor": "Lauf" };
   const parts = fits.map((fit) => {
     const label = labels[`${fit.sport}:${fit.environment}`] || fit.sport;
@@ -759,7 +762,8 @@ async function renderCyclingPowerProfile() {
   const root = document.getElementById("cyclingPowerProfile");
   const generation = ++cyclingPowerProfileGeneration;
   const session = state.sessionGeneration;
-  for (const [target, title] of [[root, "Leistungsprofil"], [document.getElementById("runningBestEfforts"), "Bestwerte"]]) {
+  for (const [id, title] of PROFILE_CARDS) {
+    const target = document.getElementById(id);
     if (target.childElementCount && target.dataset.analysisEmpty !== "failed") continue;
     target.dataset.analysisEmpty = "loading";
     target.replaceChildren(reportNode("h4", title), createLoadingState(`${title} wird geladen…`));
@@ -779,14 +783,15 @@ async function renderCyclingPowerProfile() {
       gap.dataset.powerProfileGap = "true";
       root.append(gap);
     }
-    const criticalPower = criticalPowerLine(result, "ride");
+    const criticalPower = criticalPowerLine(result, "ride", hasValues);
     if (criticalPower) root.append(criticalPower);
     root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
     renderRunningBestEfforts(result);
     renderAnalysisSegmentsIfActive();
   } catch (error) {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
-      for (const [target, title] of [[root, "Leistungsprofil"], [document.getElementById("runningBestEfforts"), "Bestwerte"]]) {
+      for (const [id, title] of PROFILE_CARDS) {
+        const target = document.getElementById(id);
         target.dataset.analysisEmpty = "failed";
         target.replaceChildren(reportNode("h4", title), createErrorState(error?.message, () => void renderCyclingPowerProfile()));
       }
@@ -795,41 +800,40 @@ async function renderCyclingPowerProfile() {
   }
 }
 
-const RUNNING_BEST_EFFORTS = [
-  ["speed", "duration_seconds", 60, "1 Minute"], ["speed", "duration_seconds", 180, "3 Minuten"], ["speed", "duration_seconds", 300, "5 Minuten"],
-  ["speed", "duration_seconds", 420, "7 Minuten"], ["speed", "duration_seconds", 720, "12 Minuten"], ["speed", "duration_seconds", 1200, "20 Minuten"],
-  ["distance", "distance_meters", 1000, "1 km"], ["distance", "distance_meters", 5000, "5 km"],
-];
-
-// The fastest observed pace per duration and time per distance of the last 90 days (#2265).
-function runningBestEffortText(kind, point) {
-  if (kind === "speed") return point?.speed_mps > 0 ? formatPace(1000 / Number(point.speed_mps)) : null;
-  return point?.seconds > 0 ? AppFormat.clock(point.seconds) : null;
+// The fastest observed pace per duration and time per distance of the last 90 days (#2265),
+// in the targets and order the report returns.
+function runningBestEffortRow(kind, point) {
+  const minutes = point.duration_seconds / 60;
+  const label = kind === "speed" ? `${AppFormat.number(minutes)} ${minutes === 1 ? "Minute" : "Minuten"}` : `${AppFormat.number(point.distance_meters / 1000)} km`;
+  let text = null;
+  if (kind === "speed" && point.speed_mps > 0) text = formatPace(1000 / Number(point.speed_mps));
+  else if (kind === "distance" && point.seconds > 0) text = AppFormat.clock(point.seconds);
+  return { label, text, key: `${kind}:${kind === "speed" ? point.duration_seconds : point.distance_meters}` };
 }
 
 function renderRunningBestEfforts(result) {
   const root = document.getElementById("runningBestEfforts");
   const running = result?.windows?.["90"]?.running || {};
-  root.replaceChildren(reportNode("h4", "Bestwerte"));
-  const table = reportNode("table", null, "race-predictions-table");
+  root.replaceChildren(reportNode("h4", "Bestwerte · 90 Tage"));
   const body = reportNode("tbody");
   let values = 0;
-  for (const [kind, key, value, label] of RUNNING_BEST_EFFORTS) {
-    const point = (running[kind] || []).find((item) => item?.[key] === value);
-    const text = runningBestEffortText(kind, point);
-    const row = reportNode("tr"); row.dataset.runningBest = `${kind}:${value}`;
-    const heading = reportNode("th", label); heading.scope = "row";
-    const cell = reportNode("td", text);
-    if (text) { values += 1; cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · "); } else markValueMissing(cell);
-    row.append(heading, cell); body.append(row);
+  for (const kind of ["speed", "distance"]) {
+    for (const point of running[kind] || []) {
+      const { label, text, key } = runningBestEffortRow(kind, point);
+      const row = reportNode("tr"); row.dataset.runningBest = key;
+      const heading = reportNode("th", label); heading.scope = "row";
+      const cell = reportNode("td", text);
+      if (text) { values += 1; cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · "); } else markValueMissing(cell);
+      row.append(heading, cell); body.append(row);
+    }
   }
-  table.append(body);
   if (values) {
-    root.append(reportNode("p", "Schnellste gemessene Werte · letzte 90 Tage", "analysis-reference-note"));
+    const table = reportNode("table", null, "race-predictions-table");
+    table.append(body);
     const scroll = makeScrollRegionFocusable(reportNode("div", null, "table-scroll"), "Lauf-Bestwerte");
     scroll.append(table); root.append(scroll);
   } else root.append(reportNode("p", "Noch keine Lauf-Bestwerte.", "muted"));
-  const criticalSpeed = criticalPowerLine(result, "run");
+  const criticalSpeed = criticalPowerLine(result, "run", values > 0);
   if (criticalSpeed) root.append(criticalSpeed);
   root.dataset.analysisEmpty = String(!values && !criticalSpeed);
 }
@@ -950,7 +954,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   // The endurance score rates all sports' long-term training, so it sits in Belastung (#2265);
   // readiness is charted in Erholung and the weekly training status only repeats the acute load.
   const extra = document.createDocumentFragment();
-  renderProviderMetrics({ endurance_score: history.provider_metrics?.endurance_score }, extra, performanceStart, end, []);
+  renderProviderMetrics({ endurance_score: history.provider_metrics?.endurance_score }, extra, start, end, []);
   while (extra.firstElementChild) enduranceRoot.append(makeAnalysisSectionCollapsible(extra.firstElementChild, "endurance-score"));
   root.dataset.analysisEmpty = String(root.dataset.analysisEmptyRunning === "true" && root.dataset.analysisEmptyCycling === "true");
   loadRoot.dataset.analysisEmpty = String(!loadRoot.childElementCount);
@@ -1416,7 +1420,7 @@ function renderAnalysisSegments(route = state.route) {
   document.getElementById("analysisHistoryCharts").hidden = !sport;
   document.getElementById("currentPerformance").hidden = !sport;
   // Laufen and Radfahren share the containers; each part names its sport.
-  document.querySelectorAll("#dataPanel [data-analysis-sport]").forEach((part) => { part.hidden = part.dataset.analysisSport !== sport; });
+  document.querySelectorAll("#dataPanel [data-analysis-sport]").forEach((part) => { part.hidden = part.dataset.analysisSport !== sport || !part.childElementCount; });
   const endurance = document.getElementById("performanceEnduranceCharts");
   endurance.hidden = !load || !endurance.childElementCount;
   document.getElementById("analysisLoadPeriod").hidden = segment !== "load";
@@ -1452,7 +1456,11 @@ const analysisRefresh = AppViewRefresh.create({
     else {
       renderAnalysisHistory(performance.history);
       if (route === "analysis/load") renderTrainingFocus(performance.training_focus_periods?.[analysisHistoryPeriod] || performance.training_focus);
-      else renderPerformance(performance, { refreshCharts: false });
+      else {
+        renderPerformance(performance, { refreshCharts: false });
+        // The cleared report cache is read again for the power profile and the running best efforts.
+        void renderCyclingPowerProfile();
+      }
     }
   },
   button: document.getElementById("analysisRefreshButton"),
