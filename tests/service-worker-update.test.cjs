@@ -3,25 +3,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
-
-const read = (name) => fs.readFileSync(path.join(__dirname, "../public", name), "utf8").replace(/\r\n/g, "\n");
-const workerSource = read("service-worker.js");
-const notificationsSource = read("notifications.js");
-const sharedSource = read("shared.js");
-const coachSource = read("coach.js");
-
-function slice(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = endMarker ? source.indexOf(endMarker, start) : source.length;
-  assert.ok(start >= 0 && end > start, startMarker);
-  return source.slice(start, end);
-}
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
 // Runs public/service-worker.js with recorded cache and lifecycle calls.
 function worker() {
   const handlers = {};
   const calls = [];
-  const context = vm.createContext({
+  const context = loadPublicScript("service-worker.js", {
     URL,
     addEventListener: (type, handler) => { handlers[type] = handler; },
     skipWaiting: async () => { calls.push(["skipWaiting"]); },
@@ -32,7 +20,6 @@ function worker() {
       delete: async (key) => { calls.push(["delete", key]); return true; },
     },
   });
-  vm.runInContext(workerSource, context);
   const cacheName = vm.runInContext("CACHE", context);
   const run = async (type) => {
     const waits = [];
@@ -105,14 +92,9 @@ function page({ controlled = true } = {}) {
       },
     },
   });
-  vm.runInContext([
-    slice(sharedSource, "const $ =", "\n"),
-    slice(sharedSource, "function hasUnsavedChanges", "\n}\n") + "\n}\n",
-    slice(coachSource, "function chatStatusJobActive", "\nfunction chatStatusPollWanted"),
-    slice(coachSource, "function pendingChatTurn", "\nasync function pollPendingChatReceipt"),
-    slice(coachSource, "function voiceIsRecording", "\nfunction formatVoiceDuration"),
-    slice(notificationsSource, "function registerServiceWorker"),
-  ].join("\n"), context);
+  extractFunctions("shared.js", ["$", "hasUnsavedChanges"], context);
+  extractFunctions("coach.js", ["chatStatusJobActive", "pendingChatTurn", "voiceIsRecording"], context);
+  extractFunctions("notifications.js", ["registerServiceWorker", "serviceWorkerReplaced", "serviceWorkerReloaded", "pointerHeld", "trackUnsavedForms", "editedFormPending", "UPDATE_RELOAD_INPUT_FIELDS", "pageInputPending", "updateReloadIsSafe", "reloadForUpdateWhenSafe"], context);
   context.registerServiceWorker();
   return {
     context,
@@ -242,8 +224,8 @@ test("a hidden page keeps a draft instead of reloading", () => {
 
 // The chat states end with a control update; the state loads are checked in state-loader-startup.test.cjs.
 test("every chat control update checks a held update reload", () => {
-  const updateChatControls = slice(coachSource, "function updateChatControls", "\n}\n");
-  assert.match(updateChatControls, /\n {2}reloadForUpdateWhenSafe\(\);$/);
+  const { updateChatControls } = extractFunctions("coach.js", ["updateChatControls"]);
+  assert.match(updateChatControls.toString(), /\n {2}reloadForUpdateWhenSafe\(\);\n\}$/);
 });
 
 test("typing into a form marks it unsaved until a save is confirmed or the form is reset", () => {
@@ -299,17 +281,21 @@ test("leaving a field during a pointer press waits for the click", () => {
 });
 
 // Drives the worker's fetch handler with a recorded cache and a scripted network.
-function fetching(networkStatus, { shell = true } = {}) {
+function fetching(networkStatus, { shell = true, cached = [] } = {}) {
   const handlers = {};
-  const stored = new Map(shell ? [["/", { shell: true, status: 200 }]] : []);
+  const stored = new Map([...(shell ? [["/", { shell: true, status: 200 }]] : []), ...cached]);
   const puts = [];
+  const network = [];
+  // The server stamps "?v=<hash>" onto versioned precache entries; stamp app.js alike.
+  const source = fs.readFileSync(path.join(__dirname, "../public/service-worker.js"), "utf8").replace('"/app.js"', '"/app.js?v=abc"');
   const context = vm.createContext({
     URL,
     setTimeout,
     clearTimeout,
     TypeError,
     addEventListener: (type, handler) => { handlers[type] = handler; },
-    fetch: async () => {
+    fetch: async (request) => {
+      network.push(request.url);
       if (networkStatus === "offline") throw new TypeError("offline");
       const response = { status: networkStatus, ok: networkStatus < 400, clone: () => ({ copy: true }) };
       return response;
@@ -321,14 +307,14 @@ function fetching(networkStatus, { shell = true } = {}) {
       }),
     },
   });
-  vm.runInContext(workerSource, context);
-  return async (url, mode = "navigate") => {
+  new vm.Script(source, { filename: "service-worker.js" }).runInContext(context); // NOSONAR: test-only, runs the repository's own public/ worker.
+  return async (url, mode = "navigate", method = "GET") => {
     let answer;
     const waits = [];
-    handlers.fetch({ request: { url: `http://localhost${url}`, method: "GET", mode }, respondWith: (promise) => { answer = promise; }, waitUntil: (promise) => waits.push(promise) });
-    const response = await answer.catch((error) => error);
+    handlers.fetch({ request: { url: `http://localhost${url}`, method, mode }, respondWith: (promise) => { answer = promise; }, waitUntil: (promise) => waits.push(promise) });
+    const response = await answer?.catch((error) => error);
     await Promise.all(waits);
-    return { response, puts };
+    return { response, puts, network, answered: Boolean(answer) };
   };
 }
 
@@ -352,4 +338,22 @@ test("navigations are cached under the app shell key only", async () => {
 test("only precached files are stored for other requests", async () => {
   assert.deepEqual((await fetching(200)("/app.js", "no-cors")).puts, ["http://localhost/app.js"]);
   assert.deepEqual((await fetching(200)("/unknown.json", "no-cors")).puts, []);
+});
+
+test("API calls and writes pass through the worker untouched", async () => {
+  for (const [url, method] of [["/api/bootstrap", "GET"], ["/api/chat", "POST"], ["/app.js?v=abc", "POST"]]) {
+    const { answered, puts, network } = await fetching(200)(url, "no-cors", method);
+    assert.deepEqual([answered, puts, network], [false, [], []], `${method} ${url}`);
+  }
+});
+
+test("a versioned asset is served from the cache without the network and fetched once when missing", async () => {
+  const hit = { cachedAsset: true, status: 200 };
+  const cached = await fetching(200, { cached: [["http://localhost/app.js?v=abc", hit]] })("/app.js?v=abc", "no-cors");
+  assert.equal(cached.response, hit);
+  assert.deepEqual(cached.network, []);
+  const missing = await fetching(200)("/app.js?v=abc", "no-cors");
+  assert.deepEqual([missing.network, missing.puts], [["http://localhost/app.js?v=abc"], ["http://localhost/app.js?v=abc"]]);
+  const failed = await fetching(404)("/app.js?v=abc", "no-cors");
+  assert.deepEqual(failed.puts, []);
 });

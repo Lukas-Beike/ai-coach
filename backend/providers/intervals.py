@@ -1,4 +1,4 @@
-"""Dependency-light pagination for the Intervals.icu provider."""
+"""Dependency-light Intervals.icu transport and bounded collection reads."""
 
 from __future__ import annotations
 
@@ -13,12 +13,11 @@ from backend.errors import AppError
 
 JsonGetter = Callable[[str, dict[str, Any]], Any]
 ErrorFactory = Callable[[str], Exception]
-Request = Callable[..., Any]
 INTERVALS_API_BASE_URL = "https://intervals.icu/api/v1"
 
 
 class IntervalsApiClient:
-    """Own authenticated Intervals.icu transport and collection pagination state."""
+    """Own authenticated Intervals.icu transport and bounded collection reads."""
 
     def __init__(
         self,
@@ -28,19 +27,13 @@ class IntervalsApiClient:
         base_url: str = INTERVALS_API_BASE_URL,
     ):
         credentials = base64.b64encode(f"API_KEY:{api_key}".encode()).decode()
-        headers = {"Authorization": f"Basic {credentials}"}
-        base = base_url.rstrip("/")
-        self._read_transport = IntervalsReadTransport(base, headers, request)
-        self._write_transport = IntervalsWriteTransport(base, headers, request)
-        self._pagination: dict[str, dict[str, Any]] = {}
+        self._headers = {"Authorization": f"Basic {credentials}"}
+        self._base = base_url.rstrip("/")
+        self._request = request
 
-    @property
-    def pagination(self) -> Mapping[str, Mapping[str, Any]]:
-        """Return a JSON-serializable defensive snapshot of pagination metadata."""
-        return {
-            collection: metadata.copy()
-            for collection, metadata in self._pagination.items()
-        }
+    def _url(self, path: str, params: Mapping[str, Any] | None) -> str:
+        query = "?" + urlencode(params, doseq=True) if params else ""
+        return self._base + path + query
 
     def get(
         self,
@@ -49,9 +42,10 @@ class IntervalsApiClient:
         *,
         cancel_event: Any = None,
     ) -> Any:
-        if cancel_event is None:
-            return self._read_transport.get(path, params)
-        return self._read_transport.get(path, params, cancel_event=cancel_event)
+        request_kwargs = {"headers": self._headers, "service": "intervals"}
+        if cancel_event is not None:
+            request_kwargs["cancel_event"] = cancel_event
+        return self._request("GET", self._url(path, params), **request_kwargs)
 
     def get_paged_collection(
         self,
@@ -61,7 +55,7 @@ class IntervalsApiClient:
         page_size: int = 500,
         cancel_event: Any = None,
     ) -> list[dict[str, Any]]:
-        rows, page_metadata = fetch_paged_collection(
+        return fetch_paged_collection(
             self.get,
             path,
             params,
@@ -70,76 +64,13 @@ class IntervalsApiClient:
             page_size=page_size,
             cancel_event=cancel_event,
         )
-        previous = self._pagination.get(collection) or {
-            "pages": 0,
-            "records": 0,
-            "complete": True,
-        }
-        self._pagination[collection] = {
-            "pages": int(previous["pages"]) + int(page_metadata["pages"]),
-            "records": int(previous["records"]) + int(page_metadata["records"]),
-            "complete": bool(previous["complete"]) and bool(page_metadata["complete"]),
-        }
-        return rows
 
     def post(
         self, path: str, payload: Any, params: Mapping[str, Any] | None = None
     ) -> Any:
-        return self._write_transport.post(path, payload, params)
-
-    def put(
-        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
-    ) -> Any:
-        return self._write_transport.put(path, payload, params)
-
-    def delete(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
-        return self._write_transport.delete(path, params)
-
-
-class IntervalsReadTransport:
-    """Build authenticated read requests without owning application state."""
-
-    def __init__(self, base: str, headers: Mapping[str, str], request: Request):
-        self._base = base
-        self._headers = headers
-        self._request = request
-
-    def get(
-        self,
-        path: str,
-        params: Mapping[str, Any] | None = None,
-        *,
-        cancel_event: Any = None,
-    ) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
-        request_kwargs = {
-            "headers": self._headers,
-            "service": "intervals",
-        }
-        if cancel_event is not None:
-            request_kwargs["cancel_event"] = cancel_event
-        return self._request(
-            "GET",
-            self._base + path + query,
-            **request_kwargs,
-        )
-
-
-class IntervalsWriteTransport:
-    """Build explicit authenticated write requests without application state."""
-
-    def __init__(self, base: str, headers: Mapping[str, str], request: Request):
-        self._base = base
-        self._headers = headers
-        self._request = request
-
-    def post(
-        self, path: str, payload: Any, params: Mapping[str, Any] | None = None
-    ) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
         return self._request(
             "POST",
-            self._base + path + query,
+            self._url(path, params),
             payload,
             self._headers,
             service="intervals",
@@ -148,20 +79,18 @@ class IntervalsWriteTransport:
     def put(
         self, path: str, payload: Any, params: Mapping[str, Any] | None = None
     ) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
         return self._request(
             "PUT",
-            self._base + path + query,
+            self._url(path, params),
             payload,
             self._headers,
             service="intervals",
         )
 
     def delete(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
-        query = "?" + urlencode(params, doseq=True) if params else ""
         return self._request(
             "DELETE",
-            self._base + path + query,
+            self._url(path, params),
             headers=self._headers,
             service="intervals",
         )
@@ -224,7 +153,7 @@ def fetch_paged_collection(
     page_size: int = 500,
     max_pages: int = 100,
     cancel_event: Any = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Read and validate a bounded provider collection through pagination."""
     rows: list[dict[str, Any]] = []
     offset = 0
@@ -243,4 +172,4 @@ def fetch_paged_collection(
         offset += len(page_rows)
         if pages >= max_pages:
             raise error(f"Page limit exceeded for {collection}.")
-    return rows, {"pages": pages, "records": len(rows), "complete": True}
+    return rows

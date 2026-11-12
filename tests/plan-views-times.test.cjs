@@ -1,27 +1,10 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
-
-function functionSource(name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.ok(start >= 0, `${name} exists`);
-  const end = source.indexOf("\n}", start);
-  assert.ok(end > start, `${name} is closed`);
-  return source.slice(start, end + 2);
-}
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadHelpers() {
   // Marker stripping is covered elsewhere; these tests only exercise the time handling.
-  const context = vm.createContext({ stripCalendarMarkers: (text) => String(text || "") });
-  vm.runInContext(
-    ["plannedAppointmentLabel", "calendarStartTime", "plannedUnitStartTime"].map(functionSource).join("\n"),
-    context,
-  );
-  return context;
+  return extractFunctions("plan-views.js", ["plannedAppointmentLabel", "calendarStartTime", "plannedUnitStartTime"], { stripCalendarMarkers: (text) => String(text || "") });
 }
 
 test("external appointments keep a genuine midnight start time", () => {
@@ -50,4 +33,12 @@ test("date-only planned units at midnight show no start time", () => {
 test("completed activities keep their recorded midnight start time", () => {
   const { calendarStartTime } = loadHelpers();
   assert.equal(calendarStartTime("2026-10-12T00:00:00"), "00:00");
+});
+
+test("a date-only value keeps its day, a moment takes the local day and an invalid value has none", () => {
+  const { localDateKey } = extractFunctions("views.js", ["localDateKey"]);
+  assert.equal(localDateKey("2026-10-12"), "2026-10-12");
+  assert.equal(localDateKey(new Date(2026, 9, 12, 23, 30)), "2026-10-12");
+  assert.equal(localDateKey("2026-10-12T23:30:00"), "2026-10-12");
+  assert.equal(localDateKey("not a date"), "");
 });

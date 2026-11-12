@@ -1,28 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
-function slice(source, marker, terminator) {
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, `${marker} must exist`);
-  return source.slice(start, source.indexOf(terminator, start) + terminator.length);
-}
-
-function loadZoneWarnings() {
-  const source = fs.readFileSync(path.join(__dirname, "../public/settings.js"), "utf8").replace(/\r\n/g, "\n");
-  const code = [
-    slice(source, "const SDK_FAILURE_TEXT", "\n};\n"),
-    slice(source, "function zoneWarningLine(", "\n}\n"),
-    slice(source, "function zoneWarningTitle(", "\n}\n"),
-  ].join("");
-  const context = vm.createContext({});
-  vm.runInContext(`${code}\nthis.line = zoneWarningLine; this.title = zoneWarningTitle;`, context);
-  return context;
-}
-
-const { line, title } = loadZoneWarnings();
+const { zoneWarningLine: line, zoneWarningTitle: title } = extractFunctions("settings.js", ["SDK_FAILURE_TEXT", "zoneWarningLine", "zoneWarningTitle"]);
 const item = { label: "FTP Rad", value_text: "260 W", source_label: "Garmin", age_days: 98 };
 
 test("a stale threshold names value, source and age", () => {

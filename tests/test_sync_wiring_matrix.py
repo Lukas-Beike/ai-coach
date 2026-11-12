@@ -30,7 +30,7 @@ from unittest import mock
 
 from support import temp_database
 
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.contracts import nutrition_approval_item
@@ -86,7 +86,6 @@ EXPECTED_PAIRS: Final = frozenset(
         (GARMIN_ID, "refresh"),
         (GARMIN_ID, "historical_backfill"),
         (GARMIN_ID, "wellness_backfill"),
-        (GARMIN_ID, "rating_backfill"),
         (GARMIN_ID, "stream_backfill"),
         (GARMIN_ID, "activity_details"),
         (GARMIN_ID, "plan_push"),
@@ -122,7 +121,6 @@ CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
         {"days": 30, "end_date": BACKFILL_END},
         "garmin.wellness",
     ),
-    (GARMIN_ID, "rating_backfill"): ({"end_date": BACKFILL_END}, "garmin.ratings"),
     (GARMIN_ID, "stream_backfill"): ({"end_date": BACKFILL_END}, "garmin.streams"),
     (GARMIN_ID, "activity_details"): ({"activity_id": "act-1"}, "garmin.details"),
     (GARMIN_ID, "plan_push"): ({"entries": ENTRIES}, "garmin.plan"),
@@ -254,9 +252,7 @@ class Harness:
             retry_base_seconds=1,
             retry_max_seconds=60,
         )
-        state_repository = SyncStateRepository(
-            self.database, key_values, SnapshotRepository(), NOW.isoformat
-        )
+        state_repository = SyncStateRepository(self.database, key_values, NOW.isoformat)
         historical = HistoricalSyncDependencies(
             local_now=lambda: NOW,
             sync_period_defaults={GARMIN_ID: 7, WAHOO_ID: 7},
@@ -285,7 +281,6 @@ class Harness:
             activity_detail_service=lambda: service("garmin.details"),
             strength_push_service=lambda: service("garmin.plan"),
             wellness_history_service=lambda: service("garmin.wellness"),
-            rating_backfill_service=lambda: service("garmin.ratings"),
             stream_backfill_service=lambda: service("garmin.streams"),
         )
         calendar_weather = CalendarWeatherJobDependencies(

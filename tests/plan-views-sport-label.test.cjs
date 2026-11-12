@@ -1,17 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-function loadPublicScript(name) {
-  return fs.readFileSync(path.join(__dirname, "../public", name), "utf8").split("\r\n").join("\n");
-}
-
-const context = vm.createContext({});
-vm.runInContext(loadPublicScript("performance-view.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarSportType = calendarSportType;globalThis.calendarDisplayName = calendarDisplayName;`, context);
-const { calendarSportType, activitySportLabel, calendarDisplayName } = context;
+const { calendarSportType, activitySportLabel, calendarDisplayName } = loadPublicScript(["performance-view.js", "plan-views.js"]);
 const label = (item) => activitySportLabel(calendarSportType(item));
 
 test("completed activities are labelled from the canonical sport and environment", () => {

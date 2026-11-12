@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -20,9 +19,7 @@ __all__ = [
     "OPENAI_UNEXPECTED_RESPONSE_MESSAGE",
     "OpenAIResponsesClient",
     "endpoint",
-    "poll_background_response",
     "request_with_conversation_retry",
-    "response_id",
     "responses_payload",
 ]
 
@@ -61,7 +58,6 @@ _SAFE_LOG_REASONS = {
     "credit_balance_exhausted": "credit_balance_exhausted",
     "invalid_response": "invalid_response",
     "provider_timeout": "provider_timeout",
-    "background_budget_exceeded": "background_budget_exceeded",
     "request_failed": "request_failed",
     "response_error": "response_error",
     "response_failed": "response_failed",
@@ -76,109 +72,6 @@ _SAFE_LOG_REASONS = {
     "provider_unavailable": "provider_unavailable",
     "usage_limit_exceeded": "usage_limit_exceeded",
 }
-
-
-def response_id(value: Any) -> str:
-    """Normalize and validate an OpenAI Responses API response identifier."""
-    normalized = str(value or "").strip()
-    if not re.fullmatch(r"(?a:resp_[\w-]{1,200})", normalized):
-        raise AppError(
-            502,
-            "OpenAI hat keine gültige Response-ID zurückgegeben.",
-            reason="invalid_response",
-        )
-    return normalized
-
-
-_validate_response_id = response_id
-
-
-# Poll failures the Coach resumes against the same background response.
-RESUMABLE_POLL_REASONS = frozenset(
-    {"provider_unavailable", "provider_timeout", "invalid_response"}
-)
-
-
-def _cancel_best_effort(cancel: Callable[[str], Any], active_response_id: str) -> None:
-    try:
-        cancel(active_response_id)
-    except Exception:  # noqa: BLE001, S110 - remote cancellation is best effort
-        pass
-
-
-def _retrieve_or_cancel(
-    retrieve: Callable[[str], dict[str, Any]],
-    cancel: Callable[[str], Any],
-    active_response_id: str,
-) -> dict[str, Any]:
-    try:
-        return retrieve(active_response_id)
-    except AppError as exc:
-        # Transient failures keep the response running so the caller can resume it.
-        if exc.reason not in RESUMABLE_POLL_REASONS:
-            _cancel_best_effort(cancel, active_response_id)
-        raise
-    except Exception:
-        _cancel_best_effort(cancel, active_response_id)
-        raise
-
-
-# Short first polls catch fast responses (e.g. a tool-round follow-up); the
-# configured interval stays the upper bound for long-running responses.
-_POLL_BACKOFF_SECONDS = (0.25, 0.5, 1.0)
-
-
-def _poll_delay(attempt: int, poll_seconds: float) -> float:
-    """Delay before poll ``attempt`` (0-based), never above ``poll_seconds``."""
-    if attempt < len(_POLL_BACKOFF_SECONDS):
-        return min(_POLL_BACKOFF_SECONDS[attempt], poll_seconds)
-    return poll_seconds
-
-
-def _poll_wait_cancelled(
-    cancel_event: Any, wait: Callable[[float], Any], poll_seconds: float
-) -> bool:
-    if cancel_event is None:
-        wait(poll_seconds)
-        return False
-    return bool(
-        cancel_event.wait(poll_seconds)
-        or getattr(cancel_event, "is_set", lambda: False)()
-    )
-
-
-def poll_background_response(
-    initial_response: dict[str, Any],
-    *,
-    retrieve: Callable[[str], dict[str, Any]],
-    cancel: Callable[[str], Any],
-    cancel_event: Any = None,
-    poll_seconds: float,
-    max_seconds: float,
-    monotonic: Callable[[], float] = time.monotonic,
-    wait: Callable[[float], Any] | None = None,
-) -> dict[str, Any]:
-    """Poll one OpenAI background response until it reaches a terminal status."""
-    started = monotonic()
-    wait = time.sleep if wait is None else wait
-    active_response_id = response_id(initial_response.get("id"))
-    current = initial_response
-    attempt = 0
-    while str(current.get("status") or "").casefold() in {"queued", "in_progress"}:
-        delay = _poll_delay(attempt, poll_seconds)
-        attempt += 1
-        if _poll_wait_cancelled(cancel_event, wait, delay):
-            _cancel_best_effort(cancel, active_response_id)
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-        if monotonic() - started >= max_seconds:
-            _cancel_best_effort(cancel, active_response_id)
-            raise AppError(
-                504,
-                "Die Hintergrundplanung hat das Zeitlimit überschritten.",
-                reason="background_budget_exceeded",
-            )
-        current = _retrieve_or_cancel(retrieve, cancel, active_response_id)
-    return current
 
 
 def _conversation_retry_cancelled(cancel_event: Any) -> bool:
@@ -238,13 +131,8 @@ def request_with_conversation_retry(
     raise AssertionError("unreachable")
 
 
-# Best-effort usage lookup after a cancel; well below the 15 s reset wait.
-FINAL_USAGE_LOOKUP_TIMEOUT_SECONDS = 5
-
-
 @dataclass(frozen=True)
 class ResponsesClock:
-    monotonic: Callable[[], float] = time.monotonic
     wait: Callable[[float], Any] = time.sleep
 
 
@@ -259,8 +147,6 @@ class OpenAIResponsesClient:
         default_base_url: str,
         responses_path: str,
         response_timeout_seconds: int,
-        background_poll_seconds: float,
-        background_max_seconds: float,
         thinking_level: Callable[[], str],
         http_client: provider_http.JsonHttpClient,
         provider_state: ProviderStateService,
@@ -273,15 +159,12 @@ class OpenAIResponsesClient:
         self.default_base_url = default_base_url
         self.responses_path = responses_path
         self.response_timeout_seconds = response_timeout_seconds
-        self.background_poll_seconds = background_poll_seconds
-        self.background_max_seconds = background_max_seconds
         self.thinking_level = thinking_level
         self.service_tier = service_tier
         self.http_client = http_client
         self.provider_state = provider_state
         self.logger = logger
         clock = clock or ResponsesClock()
-        self.monotonic = clock.monotonic
         self.wait = clock.wait
 
     def _require_api_key(self) -> None:
@@ -323,15 +206,9 @@ class OpenAIResponsesClient:
             request_payload,
             **request_kwargs,  # type: ignore[arg-type]
         )
-        background_start = (
-            path == self.responses_path and request_payload.get("background") is True
-        )
-        operation = (
-            "responses_background" if background_start else path.strip("/") or "request"
-        )
+        operation = path.strip("/") or "request"
         result = self._validated(path, result, operation)
-        if not background_start:
-            self.provider_state.record_usage("openai", result, operation)
+        self.provider_state.record_usage("openai", result, operation)
         return result
 
     def _validated(self, path: str, result: Any, operation: str) -> dict[str, Any]:
@@ -351,17 +228,6 @@ class OpenAIResponsesClient:
         if isinstance(result, dict):
             self.provider_state.record_usage("openai", result, operation)
 
-    def _record_final_usage(self, active_response_id: str) -> None:
-        """Retrieve a cancelled or timed-out response once and record its usage."""
-        try:
-            # Short bound: the turn still holds the conversation lock here.
-            result = self._get_response(
-                active_response_id, timeout=FINAL_USAGE_LOOKUP_TIMEOUT_SECONDS
-            )
-        except Exception:  # noqa: BLE001 - usage lookup is best effort
-            return
-        self._record_terminal_usage(result, "responses_background")
-
     def request(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Send one OpenAI JSON request and observe its response."""
         return self._send(path, payload)
@@ -376,50 +242,6 @@ class OpenAIResponsesClient:
             service_tier=self.service_tier(str(payload.get("model", ""))),
         )
         return self._responses_prepared(request_payload, cancel_event=cancel_event)
-
-    def retrieve(self, response_id: str) -> dict[str, Any]:
-        """Retrieve one background response without exposing its identifier."""
-        result = self._get_response(response_id)
-        return self._validated(self.responses_path, result, "responses_background")
-
-    def _get_response(self, response_id: str, *, timeout: int | None = None) -> Any:
-        self._require_api_key()
-        normalized_id = _validate_response_id(response_id)
-        return self.http_client.request(
-            "GET",
-            endpoint(
-                self.base_url,
-                f"{self.responses_path}/{quote(normalized_id, safe='')}",
-                default_base_url=self.default_base_url,
-            ),
-            headers=self._headers(),
-            timeout=timeout or self.response_timeout_seconds,
-            service="openai",
-        )
-
-    def cancel(self, response_id: str) -> None:
-        """Best-effort cancellation for an active background response."""
-        if not self.api_key:
-            return
-        normalized_id = _validate_response_id(response_id)
-        try:
-            self.http_client.request(
-                "POST",
-                endpoint(
-                    self.base_url,
-                    f"{self.responses_path}/{quote(normalized_id, safe='')}/cancel",
-                    default_base_url=self.default_base_url,
-                ),
-                {},
-                headers=self._headers(),
-                timeout=self.response_timeout_seconds,
-                service="openai",
-            )
-        except Exception:  # noqa: BLE001 - remote cancellation is best effort
-            self.logger.warning(
-                "OpenAI background response cancellation failed",
-                extra={"event": "openai_background_cancel_failed"},
-            )
 
     def delete_conversation(self, conversation_id: str) -> bool:
         """Delete an explicitly identified remote conversation, when configured."""
@@ -437,54 +259,6 @@ class OpenAIResponsesClient:
             service="openai",
         )
         return True
-
-    def background(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        response_id: str | None = None,
-        on_response_id: Callable[[str], Any] | None = None,
-        cancel_event: Any = None,
-    ) -> dict[str, Any]:
-        """Create or resume a bounded background response and poll it."""
-        started = self.monotonic()
-        if response_id is not None:
-            current = self.retrieve(response_id)
-            active_response_id = _validate_response_id(current.get("id") or response_id)
-        else:
-            request_payload = responses_payload(
-                payload,
-                thinking_level=self.thinking_level(),
-                service_tier=self.service_tier(str(payload.get("model", ""))),
-                background=True,
-            )
-            current = self._responses_prepared(
-                request_payload, cancel_event=cancel_event
-            )
-            active_response_id = _validate_response_id(current.get("id"))
-            if on_response_id is not None:
-                on_response_id(active_response_id)
-        remaining_seconds = max(
-            0.0, self.background_max_seconds - (self.monotonic() - started)
-        )
-        try:
-            current = poll_background_response(
-                {**current, "id": active_response_id},
-                retrieve=self.retrieve,
-                cancel=self.cancel,
-                cancel_event=cancel_event,
-                poll_seconds=self.background_poll_seconds,
-                max_seconds=remaining_seconds,
-                monotonic=self.monotonic,
-                wait=self.wait,
-            )
-        except AppError as exc:
-            if exc.reason in {"chat_cancelled", "background_budget_exceeded"}:
-                self._record_final_usage(active_response_id)
-            raise
-        current = self._validated(self.responses_path, current, "responses_background")
-        self.provider_state.record_usage("openai", current, "responses_background")
-        return current
 
     def _responses_prepared(
         self, payload: Mapping[str, Any], *, cancel_event: Any = None
@@ -517,7 +291,6 @@ def responses_payload(
     thinking_level: str,
     service_tier: str | None = None,
     stream: bool = False,
-    background: bool = False,
 ) -> dict[str, Any]:
     """Build an OpenAI Responses API payload without mutating caller state."""
     request_payload = dict(payload)
@@ -526,9 +299,6 @@ def responses_payload(
         request_payload.setdefault("service_tier", service_tier)
     if stream:
         request_payload["stream"] = True
-    if background:
-        request_payload["background"] = True
-        request_payload["store"] = True
     return request_payload
 
 

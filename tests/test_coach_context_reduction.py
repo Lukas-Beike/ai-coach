@@ -210,7 +210,7 @@ class CoachContextReductionTests(unittest.TestCase):
         )
         followup = fixture.response.respond.call_args.args[0]
         self.assertEqual(followup["tools"], state.tools)
-        self.assertEqual(followup["previous_response_id"], "response-one")
+        self.assertNotIn("previous_response_id", followup)
         self.assertFalse(state.allow_mutations)
 
     def test_topical_request_with_receipts_keeps_tools_and_dialogue_provenance(

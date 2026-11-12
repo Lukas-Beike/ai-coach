@@ -15,7 +15,7 @@ from typing import Any
 from support import temp_database
 
 from backend.db import garmin_store
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.providers.garmin import GarminCollectionOptions, collect_garmin_data
 from backend.sync.garmin import GarminPayloadService
@@ -222,9 +222,7 @@ class StoredReconciliationTests(unittest.TestCase):
         self.database = temp_database(self, "test.sqlite3", row_factory=sqlite3.Row)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.today = TODAY
-        sync_state = SyncStateRepository(
-            self.database, self.key_values, SnapshotRepository(), lambda: NOW
-        )
+        sync_state = SyncStateRepository(self.database, self.key_values, lambda: NOW)
         with self.database.unit_of_work() as db:
             initialize_schema(db)
         self.service = GarminPayloadService(

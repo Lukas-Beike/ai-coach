@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Coach Full Codebase Review"
+  short_description: "Coach-first und Natural-Language Vollreview"
+  default_prompt: "Fuehre mit $pacecraft-codebase-review ein vollstaendiges Coach-first und Natural-Language Review der Codebasis und lokalen Anwendung durch. Pruefe besonders freie Formulierungen ohne Triggerwoerter, kontextuelle Folgeauftraege, Tool-Nutzung, Nachrichten-Races, API-Fehler, Integrationen und UI/UX."

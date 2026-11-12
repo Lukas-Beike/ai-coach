@@ -7,6 +7,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from backend.coach.tool_specs import CONDITIONAL_REMOTE_WRITE_TOOLS, REMOTE_WRITE_TOOLS
+
 COACH_ACTION_TYPES = {
     "undo_change",
     "remote_coach_write",
@@ -14,16 +16,7 @@ COACH_ACTION_TYPES = {
 }
 
 
-REMOTE_COACH_WRITE_TOOLS = frozenset(
-    {
-        "start_intervals_plan_sync",
-        "push_strength_to_garmin",
-        "sync_competitions",
-        "sync_nutrition",
-        "resolve_training_sync_conflict",
-        "apply_adaptive_replan",
-    }
-)
+REMOTE_COACH_WRITE_TOOLS = REMOTE_WRITE_TOOLS | CONDITIONAL_REMOTE_WRITE_TOOLS
 
 
 LOCAL_COACH_WRITE_TOOLS = frozenset(

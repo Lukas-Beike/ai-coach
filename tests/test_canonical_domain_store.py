@@ -408,6 +408,31 @@ class DomainReplaceTests(DomainStoreFixture):
         self.assertEqual(ReplaceResult(0, 0, 0, 1), self.replace_sleep())
         self.assertEqual((other,), self.reader.sleep_periods(self.db))
 
+    def test_a_replace_retires_legacy_power_curve_rows_of_the_source(self) -> None:
+        # No mapper emits power curves any more; rows stored earlier still retire.
+        self.db.execute(
+            "INSERT INTO power_curve_points(provider, duration_s, watts, observed_on, "
+            "source_kind, recorded_by, source_record_id, mapper_version, created_at, "
+            "updated_at) VALUES ('garmin', 60, 300, '2026-10-20', 'device', "
+            "'garmin', ?, 1, ?, ?)",
+            (WELLNESS_SOURCE, NOW, NOW),
+        )
+        result = canonical_domain_store.replace_source_rows(
+            self.db,
+            provider=ProviderId.GARMIN,
+            source_record_id=WELLNESS_SOURCE,
+            mapper_version=1,
+            now=NOW,
+        )
+        self.assertEqual(1, result.retired)
+        self.assertEqual(
+            ["retired"],
+            [
+                row["state"]
+                for row in self.db.execute("SELECT state FROM power_curve_points")
+            ],
+        )
+
     def test_a_row_another_source_record_emits_moves_to_that_record(self) -> None:
         self.replace_statuses(status())
         moved = status(provenance=provenance("wellness-late"))

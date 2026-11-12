@@ -9,7 +9,7 @@ from support import temp_database
 
 from backend.canonical import garmin_payload
 from backend.db import garmin_store
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.providers.garmin import _collect_optional_metric, _gear_inventory
 from backend.sync.garmin import GarminPayloadService
@@ -854,11 +854,9 @@ class GarminPayloadServiceTests(unittest.TestCase):
     def setUp(self):
         self.database = temp_database(self, "test.sqlite3", row_factory=sqlite3.Row)
         self.key_values = KeyValueRepository(lambda: "2026-09-20T12:00:00")
-        self.snapshots = SnapshotRepository()
         self.sync_state = SyncStateRepository(
             self.database,
             self.key_values,
-            self.snapshots,
             lambda: "2026-09-20T12:00:00",
         )
         with self.database.unit_of_work() as db:
@@ -1052,7 +1050,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertNotIn("activity_matches", payload)
         self.assertNotIn("sport_max_hr", payload)
         self.assertEqual(
-            self.sync_state.latest_snapshot()["recent_activities"], [intervals]
+            snapshot_seed.latest_snapshot(self.database)["recent_activities"],
+            [intervals],
         )
 
 

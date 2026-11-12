@@ -882,7 +882,6 @@ class BackfillChainHookTests(unittest.TestCase):
         for job_type in (
             "historical_backfill",
             "wellness_backfill",
-            "rating_backfill",
             "stream_backfill",
         ):
             with self.subTest(job_type=job_type):
@@ -896,7 +895,6 @@ class BackfillChainHookTests(unittest.TestCase):
         for job_type in (
             "historical_backfill",
             "wellness_backfill",
-            "rating_backfill",
             "stream_backfill",
         ):
             with self.subTest(job_type=job_type):

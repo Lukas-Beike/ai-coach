@@ -1,18 +1,11 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function loadHelpers() {
-  const source = fs.readFileSync(path.join(__dirname, "../public/activity-details.js"), "utf8").replace(/\r\n/g, "\n");
-  const start = source.indexOf("  const RUNNING_DYNAMICS = [");
-  const end = source.indexOf("  function renderRunningForm(");
-  assert.notEqual(start, -1, "RUNNING_DYNAMICS must exist in activity-details.js");
-  assert.notEqual(end, -1, "renderRunningForm must exist in activity-details.js");
-  const context = vm.createContext({});
-  vm.runInContext(`${source.slice(start, end)};globalThis.helpers = { runningDynamics, formDriftLines };`, context);
-  return context.helpers;
+  return extractFunctions("activity-details.js", ["RUNNING_DYNAMICS", "DRIFT_METRICS", "decimal", "isNumber", "runningDynamics", "formDriftLines"]);
 }
 
 const plain = (value) => JSON.parse(JSON.stringify(value));

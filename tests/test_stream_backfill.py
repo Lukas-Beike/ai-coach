@@ -53,7 +53,14 @@ from backend.providers.garmin_personal import (
     GarminPersonalClient,
     GarminTransportClient,
 )
-from backend.providers.garmin_rating_history import RatingReadHooks
+from backend.providers.garmin_rating_history import (
+    AUTH_FAILED,
+    FAILED,
+    KEY_REJECTED,
+    RATE_LIMITED,
+    RatingReadHooks,
+    RatingReadStopped,
+)
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.providers.wahoo_fit_download import WahooFitUnavailable
 from backend.sync.cursors import read_cursor, write_cursor
@@ -79,6 +86,7 @@ from backend.sync.stream_backfill import (
     fit_inventory_counts,
     select_stream_candidates,
     state_key,
+    stop_error,
     stream_backfill_counts,
 )
 from backend.sync.wahoo_stream_backfill import (
@@ -1161,6 +1169,46 @@ class CollectorTests(unittest.TestCase):
 
         self.assertEqual(["1"], skipped)
 
+    def collect(self, answer: Any, *, rejected: bool = False) -> list[str]:
+        skipped: list[str] = []
+
+        class Client:
+            def download_activity_fit(self, _activity_id: str) -> Any:
+                raise answer
+
+        collect_activity_fit_files(
+            Client(),
+            ["1"],
+            lambda _id, _data: None,
+            skipped.append,
+            external_call=_external_call,
+            hooks=_hooks(rejected=rejected),
+            sleep=lambda _seconds: None,
+        )
+        return skipped
+
+    def test_a_forbidden_activity_is_skipped_unless_the_key_was_rejected(self) -> None:
+        self.assertEqual(["1"], self.collect(http_error(403)))
+        with self.assertRaises(RatingReadStopped) as raised:
+            self.collect(http_error(403), rejected=True)
+        self.assertEqual(KEY_REJECTED, raised.exception.kind)
+
+    def test_each_stopped_read_maps_to_its_job_error(self) -> None:
+        expected = {
+            http_error(429): (RATE_LIMITED, 429, "rate_limited"),
+            http_error(401): (AUTH_FAILED, 503, "provider_unavailable"),
+            http_error(500): (FAILED, 503, "provider_unavailable"),
+        }
+        for error, (kind, status, reason) in expected.items():
+            with self.subTest(kind=kind):
+                with self.assertRaises(RatingReadStopped) as raised:
+                    self.collect(error)
+                self.assertEqual(kind, raised.exception.kind)
+                mapped = stop_error(raised.exception)
+                self.assertEqual((status, reason), (mapped.status, mapped.reason))
+        key = stop_error(RatingReadStopped(KEY_REJECTED, "1"))
+        self.assertEqual((401, PERSONAL_KEY_REJECTED_REASON), (key.status, key.reason))
+
 
 class VisibilityTests(unittest.TestCase):
     def test_diagnostics_carry_counts_for_both_providers_and_no_ids(self) -> None:
@@ -1348,7 +1396,7 @@ class RemoteReaderTests(unittest.TestCase):
             patch(
                 "backend.sync.garmin_service._personal_client", return_value=personal
             ),
-            patch("backend.providers.garmin_rating_history.time.sleep"),
+            patch("backend.providers.garmin_fit_history.time.sleep"),
         ):
             reader.fetch_activity_files(
                 ["11", "12"], files.__setitem__, lambda _id: None, nullcontext

@@ -1,24 +1,6 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-// Line endings are normalized so the column-0 function boundaries match on any checkout.
-const readPublic = (file) => fs.readFileSync(path.join(__dirname, "../public", file), "utf8").replace(/\r\n/g, "\n");
-const authSource = readPublic("auth.js");
-const settingsSource = readPublic("settings.js");
-const coachSource = readPublic("coach.js");
-
-// Extracts one top-level function, from its declaration through the closing brace at column 0.
-function extractFunction(source, name) {
-  const match = new RegExp(`^(?:async )?function ${name}\\(`, "m").exec(source);
-  assert.ok(match, `${name} must exist`);
-  const start = match.index;
-  const end = source.indexOf("\n}\n", start);
-  assert.ok(end > start, `${name} must end at a column-0 brace`);
-  return source.slice(start, end + 3);
-}
+const { extractFunctions, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 function abortError() {
   return Object.assign(new Error("Session ended"), { name: "AbortError" });
@@ -33,14 +15,13 @@ function httpError(status, message = "Fehler") {
 function logoutHarness(api) {
   const counts = { showLogin: 0 };
   const toasts = [];
-  const context = vm.createContext({
+  const context = extractFunctions("auth.js", ["logout"], {
     confirmDiscardChanges: async () => true,
     requestConfirmation: async () => true,
     api,
     showLogin() { counts.showLogin += 1; },
     toast(message, error = false) { toasts.push({ message, error }); },
   });
-  vm.runInContext(extractFunction(authSource, "logout"), context);
   return { context, counts, toasts };
 }
 
@@ -51,12 +32,6 @@ test("logout shows the login screen after the server confirmed the logout", asyn
   assert.deepEqual(calls, ["/api/logout"]);
   assert.equal(counts.showLogin, 1);
   assert.deepEqual(toasts, []);
-});
-
-test("the login screen clears the device snapshot, view and message caches", () => {
-  // showLogin runs after logout, a 401 and an unauthenticated start; the caches
-  // hold athlete data and are removed by clearStateSnapshot (state-loader tests).
-  assert.match(extractFunction(authSource, "showLogin"), /^\s*clearStateSnapshot\(\);$/m);
 });
 
 test("a failed logout request keeps the app open, reports the error and allows a retry", async () => {
@@ -98,7 +73,8 @@ function cancelHarness() {
   const toasts = [];
   const apiCalls = [];
   let settle = null;
-  const context = vm.createContext({
+  // updateChatControls is reduced to the cancel button, which is the part under test.
+  const context = extractFunctions("coach.js", ["chatCancelInFlight", "restoreChatCancelAfterFailure", "cancelChat", "updateChatCancelButton"], {
     state,
     counts,
     toasts,
@@ -110,15 +86,8 @@ function cancelHarness() {
     $: () => button,
     scheduleChatStatusPoll() { counts.polls += 1; },
     toast(message, error = false) { toasts.push({ message, error }); },
+    updateChatControls() { context.controlCalls.push(1); context.updateChatCancelButton(button, { reconciling: false }); },
   });
-  // updateChatControls is reduced to the cancel button, which is the part under test.
-  vm.runInContext([
-    "let chatCancelInFlight = false;",
-    extractFunction(coachSource, "restoreChatCancelAfterFailure"),
-    extractFunction(coachSource, "cancelChat"),
-    extractFunction(coachSource, "updateChatCancelButton"),
-    "function updateChatControls() { controlCalls.push(1); updateChatCancelButton($('#cancelChatButton'), { reconciling: false }); }",
-  ].join("\n"), context);
   return { context, controller, state, button, counts, toasts, apiCalls, settle: () => settle };
 }
 
@@ -203,19 +172,16 @@ test("a cancel that fails after the session ended restores the flags without a s
 });
 
 test("the session-ended abort is German, marked, and never toasted", () => {
-  const shared = readPublic("shared.js");
   const rendered = [];
   const node = { replaceChildren(...args) { rendered.push(args); }, querySelector: () => null, append() {}, setAttribute() {} };
-  const context = vm.createContext({
+  const context = extractFunctions("shared.js", ["SESSION_ENDED_MESSAGE", "sessionEndedError", "isSessionEndedError", "toast"], {
     DOMException,
     $: () => node,
-    document: { createElement: () => ({ setAttribute() {}, addEventListener() {}, append() {} }) },
+    document: fakeDocument(),
     clearTimeout() {},
     setTimeout() {},
     hideToast() {},
   });
-  const constant = /^const SESSION_ENDED_MESSAGE = .*;$/m.exec(shared)[0];
-  vm.runInContext([constant, ...["sessionEndedError", "isSessionEndedError", "toast"].map((name) => extractFunction(shared, name))].join("\n"), context);
   const error = context.sessionEndedError();
   assert.equal(error.name, "AbortError");
   assert.equal(context.isSessionEndedError(error), true);
@@ -223,4 +189,52 @@ test("the session-ended abort is German, marked, and never toasted", () => {
   assert.doesNotMatch(error.message, /Session ended/);
   context.toast(error.message, true);
   assert.deepEqual(rendered, []);
+});
+
+// ---- toasts: an error stays long enough to read and can be dismissed ----
+
+function toastHarness() {
+  const document = fakeDocument();
+  const node = document.querySelector("#toast");
+  node.querySelector = (selector) => node.children.find((child) => child.className === selector.slice(1)) || null;
+  const timers = [];
+  const context = extractFunctions("shared.js", ["SESSION_ENDED_MESSAGE", "hideToast", "toast"], {
+    document,
+    $: (selector) => document.querySelector(selector),
+    setTimeout: (handler, delay) => { timers.push({ handler, delay }); return timers.length; },
+    clearTimeout() {},
+  });
+  return { context, node, timers };
+}
+
+test("an error toast is an assertive alert with a labelled close button and lasts eight seconds", () => {
+  const { context, node, timers } = toastHarness();
+  context.toast("Speichern fehlgeschlagen", true);
+  assert.equal(node.className, "toast show error");
+  assert.deepEqual([node.attributes.role, node.attributes["aria-live"]], ["alert", "assertive"]);
+  const close = node.children.find((child) => child.className === "toast-close");
+  assert.equal(close.attributes["aria-label"], "Meldung schließen");
+  assert.equal(timers.at(-1).delay, 8000);
+  close.fire("click");
+  assert.equal(node.className, "toast");
+  assert.equal(close.inert, true);
+});
+
+test("a normal toast is a polite status without a close button and lasts three seconds", () => {
+  const { context, node, timers } = toastHarness();
+  context.toast("Gespeichert");
+  assert.equal(node.className, "toast show");
+  assert.deepEqual([node.attributes.role, node.attributes["aria-live"]], ["status", "polite"]);
+  assert.equal(node.children.length, 1);
+  assert.equal(timers.at(-1).delay, 3000);
+});
+
+// ---- scroll regions: keyboard users can reach a table that scrolls sideways ----
+
+test("a horizontally scrolling table region is focusable and named", () => {
+  const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
+  const region = new FakeElement("div");
+  assert.equal(makeScrollRegionFocusable(region, "Runden dieser Einheit"), region);
+  assert.equal(region.tabIndex, 0);
+  assert.deepEqual([region.attributes.role, region.attributes["aria-label"]], ["region", "Runden dieser Einheit"]);
 });

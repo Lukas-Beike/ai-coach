@@ -109,153 +109,6 @@ function renderGarmin(garmin) {
 }
 
 
-function comparisonText(comparison) {
-  if (comparison?.delta == null) return null;
-  const delta = Number(comparison.delta);
-  if (!Number.isFinite(delta)) return null;
-  let sign;
-  if (delta > 0) sign = "+";
-  else if (delta < 0) sign = "−";
-  else sign = "±";
-  const precision = comparison.unit === "" || comparison.unit === "bpm" || comparison.unit === "ms" ? 0 : 1;
-  const amount = Math.abs(delta).toFixed(precision).replace(".", ",");
-  const unit = comparison.unit ? ` ${comparison.unit}` : "";
-  let arrow;
-  if (comparison.direction === "up") arrow = "↑";
-  else if (comparison.direction === "down") arrow = "↓";
-  else arrow = "→";
-  const comparisonLabel = comparison.label || `${comparison.days}-Tage-Durchschnitt`;
-  return { text: `${arrow} ${sign}${amount}${unit}`, className: comparison.color || "neutral", title: `Vergleich zum ${comparisonLabel}` };
-}
-
-function metricSourceClass(metricData) {
-  const provider = metricData?.source_provider;
-  if (typeof provider === "string" && /^[a-z0-9-]+$/.test(provider)) return `metric-${provider}`;
-  const source = metricData?.source;
-  if (source === "Manuell") return "metric-manual";
-  if (source === "Aus Aktivitäten") return "metric-intervals";
-  return "";
-}
-
-function metricToneClass(label, value) {
-  if (!label.startsWith("Form") || !Number.isFinite(Number(value))) return "";
-  const tsb = Number(value);
-  if (tsb >= -10 && tsb <= 5) return "metric-form-good";
-  if (tsb >= -20 && tsb <= 15) return "metric-form-caution";
-  return "metric-form-bad";
-}
-
-function metricValueParts(metricData) {
-  return {
-    value: metricData && typeof metricData === "object" ? metricData.value : metricData,
-    unit: metricData && typeof metricData === "object" ? metricData.unit : "",
-  };
-}
-
-function metricSourceDetails(metricData) {
-  const source = document.createElement("small");
-  source.textContent = metricData?.source || "Nicht verfügbar";
-  const freshnessLabel = { stale: "Veraltet", partial: "Teilweise aktualisiert", unknown: "Aktualität unbekannt" }[metricData?.freshness];
-  if (freshnessLabel) source.textContent += ` · ${freshnessLabel}`;
-  if (metricData?.observed_at) source.textContent += ` · Messung ${dateLabel(String(metricData.observed_at).slice(0, 10))}`;
-  else if (freshnessLabel && metricData?.fetched_at) source.textContent += ` · Stand ${formatTime(metricData.fetched_at)}`;
-  if (metricData?.measurement_status === "earlier" && Number.isFinite(metricData.measurement_age_days)) {
-    const ageLabel = metricData.measurement_age_days === 1 ? "Tag" : "Tage";
-    source.textContent += ` · ${metricData.measurement_age_days} ${ageLabel} alt`;
-  } else if (metricData?.measurement_status === "unknown") source.textContent += " · Messdatum unbekannt";
-  else if (metricData?.measurement_status === "future") source.textContent += " · Messdatum liegt in der Zukunft";
-  source.title = [metricData?.note || metricData?.source || "", metricData?.fetched_at ? `Abgerufen ${formatTime(metricData.fetched_at)}` : ""].filter(Boolean).join(" · ");
-  source.className = metricSourceClass(metricData);
-  return source;
-}
-
-function metricComparisonBadge(comparison) {
-  const details = comparisonText(comparison);
-  if (!details) return null;
-  const badge = document.createElement("small");
-  badge.className = `metric-comparison ${details.className}`;
-  badge.textContent = details.text;
-  badge.title = details.title;
-  return badge;
-}
-
-function metricEditor(item, metric, label, value, editable) {
-  if (!editable?.key) return null;
-  item.classList.add("metric-editable");
-  const edit = document.createElement("button");
-  edit.type = "button";
-  edit.className = "metric-edit-button";
-  edit.textContent = "✎";
-  edit.title = `${label} bearbeiten`;
-  edit.setAttribute("aria-label", edit.title);
-  const input = document.createElement("input");
-  input.className = "metric-edit-input";
-  input.type = "number";
-  input.step = editable.step || "any";
-  input.min = editable.min ?? "0";
-  input.value = state.data?.profile?.[editable.key] || (value == null ? "" : value);
-  input.hidden = true;
-  edit.addEventListener("click", () => {
-    const editing = item.classList.toggle("editing");
-    input.hidden = !editing;
-    metric.hidden = editing;
-    edit.textContent = editing ? "✓" : "✎";
-    edit.title = editing ? "Wert speichern" : `${label} bearbeiten`;
-    edit.setAttribute("aria-label", edit.title);
-    if (editing) { input.focus(); input.select(); }
-    else void saveInlineMetric(editable.key, input.value, edit);
-  });
-  return { edit, input };
-}
-
-function displayMetric(root, label, metricData, formatter = null, editable = null) {
-  const item = document.createElement("div");
-  const metric = document.createElement("strong");
-  const caption = document.createElement("span");
-  const source = metricSourceDetails(metricData);
-  const { value, unit } = metricValueParts(metricData);
-  // A tile without a value is hidden; an editable one stays so the value can still be entered.
-  if (value == null && !editable?.key) return;
-  if (value == null) metric.textContent = "—";
-  else if (formatter) metric.textContent = formatter(value);
-  else metric.textContent = `${value}${unit ? " " + unit : ""}`;
-  caption.textContent = label;
-  for (const className of [metricSourceClass(metricData), metricToneClass(label, value)]) {
-    if (className) item.classList.add(className);
-  }
-  const valueRow = document.createElement("div");
-  valueRow.className = "metric-value-row";
-  valueRow.append(metric);
-  const badge = metricComparisonBadge(metricData?.comparison);
-  if (badge) {
-    valueRow.append(badge);
-  }
-  const editor = metricEditor(item, metric, label, value, editable);
-  if (editor) {
-    item.append(valueRow, editor.input, caption, source, editor.edit);
-  } else {
-    item.append(valueRow, caption, source);
-  }
-  root.append(item);
-}
-
-async function saveInlineMetric(key, value, button) {
-  button.disabled = true;
-  try {
-    // PUT /api/profile applies only this metric to the server's current profile.
-    const profile = { [key]: String(value || "").trim() };
-    const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(profile) });
-    if (!Object.keys(profile).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
-      throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
-    }
-    toast("Wert gespeichert und für den Coach aktiviert");
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    button.disabled = false;
-  }
-}
-
 function currentPerformanceValues(metrics, history) {
   const values = { ...metrics };
   const preferred = history?.body?.preferred_providers?.cycling_w_per_kg;
@@ -272,20 +125,35 @@ function performanceDataStatus(performance) {
 // Device-computed estimates; thresholds are entered or device-reported values and carry no chip.
 const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_ml_kg_min"]);
 
+// One row per metric with a value, in the given order.
+function currentPerformanceRows(metrics, items) {
+  const body = reportNode("tbody");
+  for (const [key, label] of items) {
+    const metric = metrics?.[key];
+    if (metric?.value == null) continue;
+    const row = reportNode("tr"); row.dataset.metric = key;
+    const heading = reportNode("th", label); heading.scope = "row";
+    if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
+    row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
+    body.append(row);
+  }
+  return body;
+}
+
 function renderCurrentPerformance(metrics, history, status = []) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
-  root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
+  root.replaceChildren(reportNode("h3", "Aktuelle Werte"));
   for (const text of status) root.append(reportNode("p", text, "empty"));
   const groups = [
-    ["Laufen", [
+    ["Laufen", "run", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
       ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
-    ["Radfahren", [
+    ["Radfahren", "ride", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
@@ -293,26 +161,24 @@ function renderCurrentPerformance(metrics, history, status = []) {
     ]],
   ];
   const grid = reportNode("div", null, "current-performance-groups");
-  for (const [sport, items] of groups) {
+  // Laufen and Radfahren each show their own table (#2265); the caption names it for screen readers.
+  for (const [sport, analysisSport, items] of groups) {
     const table = reportNode("table", null, "current-performance-table");
-    table.append(reportNode("caption", sport));
-    const body = reportNode("tbody");
-    for (const [key, label] of items) {
-      const metric = metrics?.[key];
-      if (metric?.value == null) continue;
-      const row = reportNode("tr"); row.dataset.metric = key;
-      const heading = reportNode("th", label); heading.scope = "row";
-      if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
-      row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
-      body.append(row);
+    table.dataset.analysisSport = analysisSport;
+    table.append(reportNode("caption", sport, "sr-only"));
+    const body = currentPerformanceRows(metrics, items);
+    // A status message (e.g. a failed read) keeps the section visible.
+    root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
+    if (!body.childElementCount) {
+      const none = reportNode("p", "Noch keine aktuellen Werte.", "muted");
+      none.dataset.analysisSport = analysisSport;
+      grid.append(none);
+      continue;
     }
-    if (!body.childElementCount) continue;
     table.append(body);
     grid.append(table);
   }
-  // A status message (e.g. a failed read) keeps the section visible.
-  root.dataset.analysisEmpty = String(!grid.childElementCount && !status.length);
-  if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "muted"));
+  root.dataset.analysisEmpty = String(root.dataset.analysisEmptyRunning === "true" && root.dataset.analysisEmptyCycling === "true");
   root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
 }
@@ -323,7 +189,6 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     renderPersonalRecovery(performance?.personal_recovery);
     renderAnalysisHistory(performance?.history);
     void renderCyclingPowerProfile();
-    if (state.route === "analysis/sessions") void ActivityAnalysis.render();
     renderTrainingFocus(performance?.training_focus_periods?.[analysisHistoryPeriod] || performance?.training_focus);
   }
   const root = $("#performancePredictions");

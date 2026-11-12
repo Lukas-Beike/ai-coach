@@ -24,13 +24,11 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.manager.unit_of_work.return_value.__enter__ = Mock(return_value=self.db)
         self.manager.unit_of_work.return_value.__exit__ = Mock(return_value=False)
         self.key_values = Mock()
-        self.jobs = Mock()
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachConversationRecoveryService(
             self.manager,
             threading.RLock(),
             self.key_values,
-            self.jobs,
             self.logger,
         )
         self.error = AppError(
@@ -52,7 +50,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             if payload is not None
             else {
                 "conversation": "remote-id",
-                "previous_response_id": "old-response",
                 "input": "old",
                 "instructions": "base",
             }
@@ -60,10 +57,7 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         request_payload = (
             request_payload
             if request_payload is not None
-            else {
-                "conversation": "remote-id",
-                "previous_response_id": "old-response",
-            }
+            else {"conversation": "remote-id"}
         )
         recovery_state = (
             recovery_state
@@ -78,14 +72,13 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             message="Bitte fortsetzen",
             command_receipts=[{"tool": "read_training_state", "result": {"ok": True}}],
             attachments=attachments or [],
-            client_turn_id="turn-1",
             recovery_state=recovery_state,
             request_delta_emitted=request_delta_emitted,
             attempt=attempt,
         )
         return result, payload, request_payload, recovery_state
 
-    def test_remote_conversation_is_cleared_and_local_context_checkpointed(
+    def test_remote_conversation_is_cleared_and_local_context_rebuilt(
         self,
     ) -> None:
         recovered, payload, request_payload, state = self.recover()
@@ -93,8 +86,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.assertTrue(state["conversation_recovered"])
         self.assertNotIn("conversation", payload)
         self.assertNotIn("conversation", request_payload)
-        self.assertNotIn("previous_response_id", payload)
-        self.assertNotIn("previous_response_id", request_payload)
         self.key_values.set.assert_called_once_with(
             self.db, "openai_conversation_id", ""
         )
@@ -103,15 +94,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.assertEqual(recovery_input["current_message"], "Bitte fortsetzen")
         self.assertTrue(recovery_input["confirmed_steps"][0]["result"]["ok"])
         self.assertIn("Never invent attachment details", payload["instructions"])
-        self.jobs.merge_receipt.assert_called_once_with(
-            "turn-1",
-            {
-                "openai_response_id": None,
-                "previous_response_id": None,
-                "pending_tool_outputs": [],
-                "response_input": payload["input"],
-            },
-        )
         # Later stateless tool rounds seed their chain from the request's input.
         self.assertEqual(request_payload["input"], payload["input"])
         self.logger.warning.assert_called_once()
@@ -123,7 +105,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.assertTrue(recovered)
         self.manager.unit_of_work.assert_not_called()
         self.key_values.set.assert_not_called()
-        self.jobs.merge_receipt.assert_called_once()
 
     def test_recovery_is_one_time_before_delta_and_retry_limit(
         self,
@@ -138,7 +119,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.error = AppError(502, "upstream", reason="provider_unavailable")
         self.assertFalse(self.recover()[0])
         self.manager.unit_of_work.assert_not_called()
-        self.jobs.merge_receipt.assert_not_called()
         self.logger.warning.assert_not_called()
 
     def test_attachment_input_keeps_untrusted_name_and_image_evidence(self) -> None:

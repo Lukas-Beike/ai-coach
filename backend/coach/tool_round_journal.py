@@ -36,7 +36,6 @@ class CoachStructuredToolRoundJournal:
             {
                 "phase": "executing_tools",
                 "pending_tool_calls": pending,
-                "pending_tool_outputs": [],
             },
         )
         return pending
@@ -68,7 +67,6 @@ class CoachStructuredToolRoundJournal:
                 "command_receipts": command_receipts,
                 "pending_tool_calls": pending,
                 "phase": "executing_tools" if pending else "waiting_final_response",
-                "pending_tool_outputs": outputs if not pending else [],
             },
         )
         if name == "clarify_coach_request" and result.get("ok"):
@@ -79,6 +77,3 @@ class CoachStructuredToolRoundJournal:
 
     def finish_round(self, client_turn_id: str, rounds: int) -> None:
         self._job_store.merge_receipt(client_turn_id, {"tool_rounds": rounds})
-
-    def clear_outputs(self, client_turn_id: str) -> None:
-        self._job_store.merge_receipt(client_turn_id, {"pending_tool_outputs": []})

@@ -149,9 +149,9 @@ and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
 The runner warns when the application image's copy of `requirements.txt`,
 `server.py`, `backend/` or `public/` differs from the working
-tree; rebuild it before trusting results. A new `public/` file also needs an
-entry in `STATIC_TARGETS` (`backend/http_api/static_assets.py`), which a unit
-test enforces. A failed child prints a failing test's location and first error
+tree; rebuild it before trusting results. A new `public/` file is served from the
+directory listing (`backend/http_api/static_assets.py`); add it to the
+service-worker `ASSETS` list only if it is cached. A failed child prints a failing test's location and first error
 line; its manifest entry lists all of them under `failures`. The run stops at the first failed child;
 `--keep-going` runs every child and reports all failures (exit stays non-zero).
 
@@ -186,7 +186,7 @@ Keep the smaller matrix/serial path until measured concurrency gains justify
 additional runner-minutes. The full isolated selection can take substantial time
 on Docker Desktop; retain its manifest and wait for the terminal result.
 
-Follow the [disposable browser validation notes](../.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md)
+Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md)
 for manual login, PWA/offline and UI checks. Never target a connected installation.
 Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.

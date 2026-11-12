@@ -31,7 +31,6 @@ from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
 from backend.diagnostics.provider_sync import summarize_provider_sync
-from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.diagnostics.stream_backfill import summarize_stream_backfill
 from backend.diagnostics.wahoo_state import summarize_wahoo
@@ -292,12 +291,6 @@ class DiagnosticReportService:
                 ),
                 "local_load": section(
                     "local_load", lambda: summarize_local_load(key_values, db)
-                ),
-                "rating_backfill": section(
-                    "rating_backfill",
-                    lambda: summarize_rating_backfill(
-                        key_values, db, deps.config.sync_history_earliest_date
-                    ),
                 ),
                 "stream_backfill": section(
                     "stream_backfill",

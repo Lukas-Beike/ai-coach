@@ -1,16 +1,12 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
 
-const read = (name) => fs.readFileSync(path.join(__dirname, "../public", name), "utf8");
-const coachSource = read("coach.js");
 // Only the status polling of coach.js: the rest needs the whole chat interface.
-const statusPollSource = coachSource.slice(
-  coachSource.indexOf("function scheduleChatStatusPoll("),
-  coachSource.indexOf("async function loadInitialState("),
-);
+const STATUS_POLL = ["scheduleChatStatusPoll", "chatStatusJobActive", "chatStatusPollWanted", "stopChatStatusPoll", "loadChatHistoryFresh", "refreshChatProposalsInBackground", "resumeQueuedChat", "chatPollStateIsCurrent", "pendingChatTurn", "pollPendingChatReceipt", "showRunningChatStatus", "finishRecoveredChatStatus", "CHAT_STATUS_SAFETY_POLL_MS", "rescheduleChatStatusPoll", "settleChatStatusPoll", "pollChatStatus", "loadInitialState"];
+// The cadence constants of the sync status poll.
+const SYNC_POLL_CONSTANTS = ["SYNC_POLL_ACTIVE_MS", "SYNC_POLL_IDLE_MS", "SYNC_POLL_RETRY_MS"];
 
 const BOOTSTRAP = "/api/bootstrap?local=1";
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -77,7 +73,7 @@ function frontend({ eventSource = false } = {}) {
     addEventListener(name, listener) { this.listeners[name] = listener; }
     close() { this.closed = true; }
   }
-  const context = vm.createContext({
+  const context = loadPublicScript(["state.js", "state-loader.js", "sync-status.js"], {
     crypto: { randomUUID: () => "test" },
     document: { scripts: [], currentScript: { src: "" }, visibilityState: "visible" },
     navigator: { onLine: true },
@@ -100,6 +96,10 @@ function frontend({ eventSource = false } = {}) {
     renderQuickMessageTemplates() {},
     updateStatusSources(changes) { statusUpdates.push(changes); },
     updateChatControls() {},
+    AppRouter: { routeFromHash: () => "coach", planSegmentFromRoute: () => "overview", baseRoute: () => "coach" },
+    AppState: { setPlanSegment() {} },
+    retryBootstrapAuth() {},
+    scrollChatToLatest() {},
     reloadForUpdateWhenSafe() {},
     renderMessages() {},
     rememberChatTurn() {},
@@ -110,7 +110,8 @@ function frontend({ eventSource = false } = {}) {
     },
     ...(eventSource ? { EventSource: FakeEventSource } : {}),
   });
-  [read("state.js"), read("state-loader.js"), read("sync-status.js"), statusPollSource].forEach((source) => vm.runInContext(source, context));
+  extractFunctions("shared.js", SYNC_POLL_CONSTANTS, context);
+  extractFunctions("coach.js", STATUS_POLL, context);
   const state = vm.runInContext("state", context);
   context.render = (data) => { state.data = data; };
   state.data = { provider_ids: { garmin: "garmin" }, state_versions: {}, messages: [] };
@@ -449,4 +450,91 @@ test("a silently stalled event stream switches to the fast check once it counts 
   assert.equal(app.context.stateEventStreamHealthy(), false);
   await app.clock.advance(1_500);
   assert.equal(app.count("/api/chat/status"), 5, "the fast check starts at the stale point");
+});
+
+const AREAS_OF_RESET = ["chat", "plan", "library", "performance", "feedback", "profile"];
+const AREA_READS = {
+  chat: "/api/chat/history?limit=100",
+  plan: "/api/plan?local=1",
+  library: "/api/library?limit=100",
+  performance: "/api/performance",
+  feedback: "/api/feedback",
+  profile: "/api/profile",
+};
+
+test("a changed server version reloads the areas that show it", () => {
+  const app = frontend();
+  const areasOf = (versions) => [...app.context.changedSyncAreas(versions)].sort();
+  assert.deepEqual(areasOf({ garmin: 1 }), ["performance", "plan"]);
+  assert.deepEqual(areasOf({ checkins: 1 }), ["feedback", "plan"]);
+  assert.deepEqual(areasOf({ activity_feedback: 1 }), ["feedback", "performance", "plan"]);
+  assert.deepEqual(areasOf({ activities: 1 }), ["performance", "plan", "profile"]);
+  assert.deepEqual(areasOf({ library: 1 }), ["library", "plan"]);
+  assert.deepEqual(areasOf({ chat: 1, profile: 1 }), ["chat", "profile"]);
+  // A version the page already shows reloads nothing.
+  app.state.data.state_versions = { checkins: 1 };
+  assert.deepEqual(areasOf({ checkins: 1 }), []);
+});
+
+test("a reset event after the first ready reloads every area and the start data", async () => {
+  const app = frontend();
+  app.context.handleStateEvent(event("ready", { latest_event_id: 1 }));
+  app.context.handleStateEvent(event("reset", {}, "2"));
+  await app.clock.advance(400);
+  await app.settle();
+  assert.equal(app.count(BOOTSTRAP), 1);
+  for (const area of AREAS_OF_RESET) assert.equal(app.count(AREA_READS[area]), 1, area);
+});
+
+test("the sync status is read every 1.5 seconds while a sync runs and slowly when idle", async () => {
+  const app = frontend();
+  app.context.AbortController = AbortController;
+  const STATUS = "/api/sync/status";
+  app.auto.set(STATUS, { running: true, state_versions: {} });
+  app.context.setupSyncStatusMonitoring();
+  await app.clock.advance(0);
+  assert.equal(app.count(STATUS), 1);
+  await app.clock.advance(1_500);
+  assert.equal(app.count(STATUS), 2);
+  await app.clock.advance(3_000);
+  assert.equal(app.count(STATUS), 4);
+  app.auto.set(STATUS, { running: false, state_versions: {} });
+  await app.clock.advance(1_500);
+  assert.equal(app.count(STATUS), 5);
+  await app.clock.advance(59_000);
+  assert.equal(app.count(STATUS), 5, "an idle app waits a minute");
+  await app.clock.advance(1_000);
+  assert.equal(app.count(STATUS), 6);
+});
+
+test("the start reads the local bootstrap with every area, then refreshes the weather", async () => {
+  const app = frontend();
+  app.auto.set("/api/profile", { profile: { weather_location: "Berlin" }, competitions: [] });
+  let loadedWhenWeatherWasRead = null;
+  const read = app.context.api;
+  app.context.api = (requestPath, options) => {
+    if (requestPath.startsWith("/api/weather")) loadedWhenWeatherWasRead = app.state.initialStateLoaded;
+    return read(requestPath, options);
+  };
+  app.state.initialStateLoaded = true;
+  const starting = app.context.loadInitialState();
+  assert.equal(app.state.initialStateLoaded, false, "the start is not loaded while it reads");
+  await app.settle();
+  await starting;
+  assert.equal(app.count(BOOTSTRAP), 1);
+  for (const area of AREAS_OF_RESET) assert.equal(app.count(AREA_READS[area]), 1, area);
+  assert.equal(app.state.initialStateLoaded, true);
+  assert.equal(loadedWhenWeatherWasRead, true, "the weather refresh follows the loaded start");
+});
+
+test("a session that ended while the start was reading leaves the start unloaded", async () => {
+  const app = frontend();
+  app.auto.set("/api/profile", { profile: { weather_location: "Berlin" }, competitions: [] });
+  const starting = app.context.loadInitialState();
+  await app.clock.advance(0);
+  app.state.sessionGeneration += 1;
+  await app.settle();
+  await starting;
+  assert.equal(app.state.initialStateLoaded, false);
+  assert.equal(app.calls.some((call) => call.startsWith("/api/weather")), false);
 });

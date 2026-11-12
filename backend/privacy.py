@@ -70,7 +70,6 @@ PRIVACY_DELETE_SCOPE = (
             "nutrition_sync_dates",
             "nutrition_templates",
             "nutrition_products",
-            "food_database_entries",
         ),
     ),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),

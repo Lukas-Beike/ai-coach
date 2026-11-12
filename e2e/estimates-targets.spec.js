@@ -29,14 +29,14 @@ test("@responsive light analysis load has no axe violation and no control below 
   await expect(focus.locator(".training-focus-legend strong").first()).toHaveCSS("color", await focus.locator("h3").evaluate((node) => getComputedStyle(node).color));
   expect((await new AxeBuilder({ page }).include("#dataPanel").analyze()).violations).toEqual([]);
   expect(await smallControls(page)).toEqual([]);
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/running");
   await expect(page.locator("#performancePredictions .race-predictions-table")).toBeVisible({ timeout: 30_000 });
   expect(await smallControls(page)).toEqual([]);
 });
 
 test("@responsive derived values carry the chip and race predictions are whole minutes", async ({ page }) => {
   test.setTimeout(120_000);
-  await open(page, "analysis/performance", "#performancePredictions .race-predictions-table");
+  await open(page, "analysis/running", "#performancePredictions .race-predictions-table");
   const predictions = page.locator("#performancePredictions");
   await expect(predictions.getByRole("heading", { name: /^Laufprognosen/ }).locator(".estimate-chip")).toHaveText("Schätzung");
   const times = await predictions.locator("tbody td").allTextContents();

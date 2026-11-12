@@ -55,7 +55,7 @@ test("@responsive view refresh targets its active area and ignores stale views",
   await nutritionRefresh.click();
   await expect.poll(() => typeof releaseRefresh).toBe("function");
   expect(posts.filter((post) => post.path === "/api/nutrition/refresh")).toHaveLength(3);
-  await page.evaluate(() => AppRouter.navigate("analysis/performance", { historyMode: "none" }));
+  await page.evaluate(() => AppRouter.navigate("analysis/running", { historyMode: "none" }));
   releaseRefresh();
   await expect(nutritionRefresh).toBeEnabled();
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);

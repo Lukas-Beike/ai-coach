@@ -2250,7 +2250,7 @@ Not mapped (plan format features this module never writes): `intensity_type` oth
 
 - `ZoneConfiguration.resting` and `ZoneConfiguration.model` are set by the Garmin heart-rate zone mapper only (the local producer passes `resting=None`). `ZonePercentBasis` `maximum` and `reserve` are never produced. Wahoo produces no zone configurations.
 - `ZoneConfiguration.valid_until` is `None` for every producer; a local configuration ends by replacement or retirement, not by an end date.
-- `PowerCurve` is never built by a mapper; only `CanonicalTableReader.power_curve` assembles it from stored rows. `PowerCurvePoint` and `PowerCurveFetch` have no producer (the Intervals.icu power-curve mapper was removed); the table reader only rebuilds stored rows.
+- The `power_curve_points` and `power_curve_fetches` tables have no producer and no reader since the Intervals.icu power-curve mapper was removed; only rows of an older database hold them (exported, purged and retired with their source record, never read back).
 - `MetricKind` `ctl`, `atl`, `form`, `eftp`, `subjective_*`, `w_prime`, `height`, `zone2_pace`, `indoor_ftp` have no producer since the Intervals.icu wellness mapper was removed; only rows of an older database hold them.
 
 ## Canonical record `ZoneConfiguration`
@@ -2278,38 +2278,6 @@ Local producer. `local_configuration(payload)` validates one API request or a re
 No mapper produces an Intervals.icu zone configuration any more. A database from before 2.0.0 may still hold such rows (provider `intervals`, label "Intervals.icu", from `lthr`, `ftp`, `indoor_ftp`, `max_hr`, `hr_zones`, `power_zones`, `pace_zones`); they are read as stored and not re-projected.
 
 `effective_zone_configuration(configurations, metric, sport, indoor, day)` (`backend/activities/zone_settings.py`) picks the one configuration that applies: it keeps those with the same `metric` and `sport`, whose `environment` is `None` (or also `indoor`, when the session is indoor or virtual) and that are valid on `day` (`valid_from` <= `day` <= `valid_until`, an open end counts as valid; `day` `None` skips the test). Order of preference: local before providers (providers rank Garmin, Wahoo, Intervals.icu), then an `indoor` configuration before an environment-free one, then the latest `valid_from` (a missing one is the oldest). It returns `None` when nothing applies.
-
-## Canonical record `PowerCurvePoint`
-
-Defined in `backend/canonical/domain_records.py`. The best mean power over one duration from a provider's power curve. Without a producer since the Intervals.icu power-curve mapper was removed; rebuilt from the `power_curve` table by `CanonicalTableReader._power_curve_point`.
-
-| Field | Type / unit / rule | Emitted by | Notes |
-|---|---|---|---|
-| `duration_s` | integer seconds, 1 to 86,400 (not boolean) | none | Point `duration_seconds`. |
-| `watts` | W, 0 to 5,000 | none | Point `watts`. |
-| `observed_on` | date | none | Point `date`, inside the fetch window. |
-| `provider_activity_id` | text or `None` | none | Point `activity_id`. |
-| `provenance` | `Provenance` with provider and source record id, not derived | none | `retrieved_at` = envelope `synced_at`, else the raw record's fetch time. |
-
-## Canonical record `PowerCurveFetch`
-
-Defined in `backend/canonical/domain_records.py`. The outcome of a provider's latest power curve fetch, once per source record. Without a producer since the Intervals.icu power-curve mapper was removed; rebuilt by `CanonicalTableReader._power_curve_fetch`.
-
-| Field | Type / unit / rule | Emitted by | Notes |
-|---|---|---|---|
-| `fetch_status` | lowercase identifier, max 64 characters | none | Envelope `status` (`ok`, `insufficient_data`, `failed`). |
-| `window_start` | date or `None`; set together with `window_end` | none | Envelope `start`; `None` when the window is unusable. |
-| `window_end` | date or `None` | none | Envelope `end`; not before `window_start`. |
-| `provenance` | `Provenance` with provider and source record id, not derived | none | `retrieved_at` = envelope `synced_at`, else `None`. |
-
-## Canonical record `PowerCurve`
-
-Defined in `backend/canonical/domain_records.py`. The stored power curve as read back: each provider's latest fetch and its best efforts. Assembled only by `CanonicalTableReader.power_curve`; no mapper constructs it (`EMPTY_POWER_CURVE` is the empty value).
-
-| Field | Type / unit / rule | Emitted by | Notes |
-|---|---|---|---|
-| `fetches` | tuple of `PowerCurveFetch`, default empty | not produced by a mapper | Active `power_curve_fetch` rows. |
-| `points` | tuple of `PowerCurvePoint`, default empty | not produced by a mapper | Active `power_curve` rows. `is_empty` is true when both tuples are empty. |
 
 ## Locally derived records
 

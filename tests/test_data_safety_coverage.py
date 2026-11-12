@@ -135,7 +135,6 @@ EXPORTED_TABLE_MEMBERS: dict[str, tuple[str, ...]] = {
     "nutrition_sync_dates": ("nutrition_sync_dates.jsonl",),
     "nutrition_templates": ("nutrition_templates.jsonl",),
     "nutrition_products": ("nutrition_products.jsonl",),
-    "food_database_entries": ("food_database_entries.jsonl",),
     # Every key/value row except the excluded keys, in four members.
     "kv": (
         "application_state.json",
@@ -167,7 +166,7 @@ EXPORT_COLUMNS_NOT_EXPORTED: dict[str, dict[str, str]] = {
 # Schema version -> export format version that documents it. Bump both together.
 # Format 14 adds provider_settings.json without a schema change; format 17
 # adds table bookkeeping and coach_action_proposals.jsonl, also without one.
-EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 17, 26: 17}
+EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 17, 26: 17, 27: 18}
 
 # Key/value families (exact key or prefix ending in ":") and what the privacy
 # export does with them. "exported": application_state.json; "excluded": never
@@ -186,7 +185,7 @@ KV_EXPORT_DISPOSITION: dict[str, str] = {
     "garmin_personal_key_rejected": "exported",
     "garmin_sdk_threshold_failures": "exported",
     "garmin_sdk_skipped": "exported",
-    "garmin_rating_backfill_state": "exported",
+    "rating_backfill_removal_state": "exported",
     "garmin_activity_detail_backfill": "exported",
     "garmin_metric_export_fields": "exported",
     "garmin_metric_export_enabled": "exported",
@@ -504,7 +503,7 @@ class DataKindFixture(unittest.TestCase):
         self.kv_set("garmin_metric_export_enabled", "true")
         self.kv_set("intervals_purge_state", json.dumps({"status": "done"}))
         self.kv_set("intervals_ingest_enabled", "0")
-        self.kv_set("garmin_rating_backfill_state", json.dumps({"status": "finished"}))
+        self.kv_set("rating_backfill_removal_state", json.dumps({"status": "finished"}))
         self.kv_set("local_load_state", json.dumps({"stage": "local_load"}))
         self.kv_set("session_metrics_state", json.dumps({"stage": "metrics"}))
         self.db.commit()
@@ -805,7 +804,7 @@ class DataKindExportTests(DataKindFixture):
         self.assertEqual(state["intervals_purge_state"], {"status": "done"})
         self.assertEqual(state["local_load_state"], {"stage": "local_load"})
         self.assertEqual(state["session_metrics_state"], {"stage": "metrics"})
-        self.assertEqual(state["garmin_rating_backfill_state"], {"status": "finished"})
+        self.assertEqual(state["rating_backfill_removal_state"], {"status": "finished"})
 
 
 class DataKindDeleteTests(DataKindFixture):

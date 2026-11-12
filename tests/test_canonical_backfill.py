@@ -981,6 +981,25 @@ class ReprojectionTests(BackfillFixture):
             self.summary(bounded)["providers"][INTERVALS]["reprojected"], 3
         )
 
+    def test_a_reprojection_batch_starts_no_record_after_the_batch_time(self) -> None:
+        # A mapper bump re-projects every raw record (#2287): past the batch time
+        # a batch starts no further record, so the writer is released early.
+        self.populate()
+        backfill = self.make_backfill(batch_size=100)
+        with (
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, self.bumped_activity_version()
+            ),
+            patch.object(backfill_module, "BATCH_SECONDS", 0),
+        ):
+            first = self.run_batch(backfill)
+            reports = self.run_to_completion(backfill)
+        self.assertFalse(first.done)
+        self.assertTrue(reports[-1].done)
+        self.assertEqual(
+            self.summary(backfill)["providers"][INTERVALS]["reprojected"], 3
+        )
+
     def test_reprojection_spans_batches_and_skips_a_row_deleted_mid_way(self) -> None:
         backfill = self.make_backfill(batch_size=100)
         self.set_garmin(

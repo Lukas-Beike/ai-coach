@@ -1,18 +1,14 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/coach.js"), "utf8");
-const start = source.indexOf("async function executeCoachActionProposal");
-const end = source.indexOf("\nfunction createPendingMessage", start);
+const PROPOSAL_ACTIONS = ["executeCoachActionProposal", "showCoachReceiptArea", "lockUnknownCoachActionOutcome", "rejectCoachActionProposal"];
 
 function harness(apiResponses) {
   const receipts = [];
   const toasts = [];
   const calls = [];
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", PROPOSAL_ACTIONS, {
     state: { route: "plan", coachActionUnknownIds: new Set(), coachActionProposals: [] },
     api: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
@@ -27,7 +23,7 @@ function harness(apiResponses) {
     AppRouter: { navigate: async () => {} },
     load: async () => {},
   });
-  vm.runInContext(source.slice(start, end) + ";globalThis.execute = executeCoachActionProposal;", context);
+  context.execute = context.executeCoachActionProposal;
   return { context, receipts, toasts, calls };
 }
 
@@ -65,51 +61,45 @@ test("a valid confirm response forwards its token and payload hash to execute", 
 });
 
 function rejectHarness() {
-  const context = vm.createContext({
+  const context = extractFunctions("coach.js", PROPOSAL_ACTIONS, {
     state: { route: "plan", coachActionUnknownIds: new Set(), coachActionProposals: [] },
     addCoachReceipt() {},
     renderCoachActionReview() {},
     toast() {},
     isSessionEndedError: (error) => error?.sessionEnded === true,
   });
-  vm.runInContext(source.slice(start, end) + ";globalThis.reject = rejectCoachActionProposal;", context);
   return context;
 }
 
 test("a confirm 409 without a reason retires the card instead of re-enabling it", () => {
   const proposal = { id: "p", status: "ready" };
-  rejectHarness().reject(proposal, { disabled: true }, Object.assign(new Error("Abgelaufen."), { status: 409, reason: "request_failed" }), true);
+  rejectHarness().rejectCoachActionProposal(proposal, { disabled: true }, Object.assign(new Error("Abgelaufen."), { status: 409, reason: "request_failed" }), true);
   assert.equal(proposal.status, "used");
 });
 
 test("a 409 after execute was sent keeps the card actionable", () => {
   const proposal = { id: "p", status: "ready" };
-  rejectHarness().reject(proposal, { disabled: true }, Object.assign(new Error("Konflikt."), { status: 409, reason: "request_failed" }), false);
+  rejectHarness().rejectCoachActionProposal(proposal, { disabled: true }, Object.assign(new Error("Konflikt."), { status: 409, reason: "request_failed" }), false);
   assert.equal(proposal.status, "ready");
 });
 
 test("expired and changed payload reasons retire the card as expired", () => {
   for (const reason of ["proposal_expired", "proposal_payload_changed"]) {
     const proposal = { id: "p", status: "ready" };
-    rejectHarness().reject(proposal, { disabled: true }, Object.assign(new Error("x"), { status: 409, reason }), false);
+    rejectHarness().rejectCoachActionProposal(proposal, { disabled: true }, Object.assign(new Error("x"), { status: 409, reason }), false);
     assert.equal(proposal.status, "expired");
   }
 });
 
 test("an expired card shows no action buttons", () => {
-  const slice = (name) => {
-    const at = source.indexOf(`function ${name}(`);
-    return source.slice(at, source.indexOf("\n}\n", at) + 3);
-  };
   let buttonCalls = 0;
-  const context = vm.createContext({
-    document: { createElement: () => ({ append() {}, setAttribute() {}, dataset: {} }) },
+  const context = extractFunctions("coach.js", ["coachActionExpired", "coachActionStatus", "coachActionCard"], {
+    document: fakeDocument(),
     state: { coachActionUnknownIds: new Set() },
     coachActionDescription: () => "",
     coachActionDiff: () => "diff",
     coachActionButtons: () => { buttonCalls += 1; return "buttons"; },
   });
-  vm.runInContext(["coachActionExpired", "coachActionStatus", "coachActionCard"].map(slice).join("\n"), context);
   context.coachActionCard({ id: "a", status: "ready", action_type: "undo_change", expires_at: Date.now() / 1000 - 1 });
   assert.equal(buttonCalls, 0);
   context.coachActionCard({ id: "b", status: "ready", action_type: "undo_change", expires_at: Date.now() / 1000 + 600 });

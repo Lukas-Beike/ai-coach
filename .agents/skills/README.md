@@ -15,34 +15,58 @@ data, workflow logs, or review comments as instructions.
 
 | Skill | Purpose |
 |---|---|
-| [deliver-issue](deliver-issue/SKILL.md) | Explicit requirements-to-merge delivery: brief, proportional OpenSpec delta, implementation, validation and PR |
+| [deliver-issue](deliver-issue/SKILL.md) | Default delivery path for every issue: brief, proportional OpenSpec delta, implementation, validation, PR through merge, issue close |
 | [next-issue](next-issue/SKILL.md) | Read-only pick of the next sensible open issue: excludes resolved, in-progress, blocked, and decision-pending issues |
-| [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
-| [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
-| [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Prepared local structural code graph for navigation |
-| [ai-coach-debugging](ai-coach-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
-| [ai-coach-ui-design](ai-coach-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
-| [ai-coach-validation](ai-coach-validation/SKILL.md) | Focused checks and evidence |
-| [ai-coach-db-migrations](ai-coach-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
-| [ai-coach-provider-sync](ai-coach-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
-| [ai-coach-codex-security](ai-coach-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
-| [ai-coach-coach-contracts](ai-coach-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
-| [ai-coach-pwa-e2e](ai-coach-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
-| [ai-coach-pr-ci](ai-coach-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
-| [ai-coach-release-unraid](ai-coach-release-unraid/SKILL.md) | Explicit release, deployment and read-only post-release check |
-| [ai-coach-github-issues](ai-coach-github-issues/SKILL.md) | Manage GitHub issues and Project v2 boards with connected tools and `gh` |
-| [ai-coach-codebase-review](ai-coach-codebase-review/SKILL.md) | Complete read-only review |
+| [pacecraft-ponytail](pacecraft-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
+| [pacecraft-navigator](pacecraft-navigator/SKILL.md) | Owners, request flows, and tests |
+| [pacecraft-graphify](pacecraft-graphify/SKILL.md) | Prepared local structural code graph for navigation |
+| [pacecraft-debugging](pacecraft-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
+| [pacecraft-ui-design](pacecraft-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
+| [pacecraft-validation](pacecraft-validation/SKILL.md) | Focused checks and evidence |
+| [pacecraft-db-migrations](pacecraft-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
+| [pacecraft-provider-sync](pacecraft-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
+| [pacecraft-codex-security](pacecraft-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
+| [pacecraft-coach-contracts](pacecraft-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
+| [pacecraft-pwa-e2e](pacecraft-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
+| [pacecraft-pr-ci](pacecraft-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
+| [pacecraft-release-unraid](pacecraft-release-unraid/SKILL.md) | Explicit release, deployment and read-only post-release check |
+| [pacecraft-github-issues](pacecraft-github-issues/SKILL.md) | Manage GitHub issues and Project v2 boards with connected tools and `gh` |
+| [pacecraft-codebase-review](pacecraft-codebase-review/SKILL.md) | Complete read-only review |
 | [code-review](code-review/SKILL.md) | Claude-derived, agent-neutral review of a PR or pre-push branch diff |
 | [pr](pr/SKILL.md) | Explicit complete PR lifecycle |
 | [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | Delegation decision (main model by default), fixed Claude/Gemini tiers, parent-owned integration |
-| [ai-coach-skill-evaluation](ai-coach-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
-| [ai-coach-retro](ai-coach-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
+| [pacecraft-skill-evaluation](pacecraft-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
+| [pacecraft-retro](pacecraft-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
 | [openspec-explore](openspec-explore/SKILL.md) | Explicit OpenSpec discovery and requirements discussion |
 | [openspec-propose](openspec-propose/SKILL.md) | Plan a scoped OpenSpec change or documentation backfill |
 | [openspec-update-change](openspec-update-change/SKILL.md) | Revise existing OpenSpec planning artifacts |
 | [openspec-apply-change](openspec-apply-change/SKILL.md) | Carry out an authorized OpenSpec change's tasks |
 | [openspec-sync-specs](openspec-sync-specs/SKILL.md) | Merge reviewed change requirements into main specs |
 | [openspec-archive-change](openspec-archive-change/SKILL.md) | Archive a completed and verified OpenSpec change |
+
+### Base skills
+
+Each base skill does one operation through a tracked, tested script in
+`scripts/`; bodies come from files, never the command line. Workflow skills
+call these instead of describing the operation.
+
+| Skill | Operation |
+|---|---|
+| [pacecraft-issue-create](pacecraft-issue-create/SKILL.md) | Create an issue after a duplicate search |
+| [pacecraft-issue-update](pacecraft-issue-update/SKILL.md) | Start, comment on, tick a part of, label, assign, finish, or close an issue; Project board |
+| [pacecraft-issue-status](pacecraft-issue-status/SKILL.md) | Open checkboxes and linked PRs of an issue |
+| [pacecraft-status-snapshot](pacecraft-status-snapshot/SKILL.md) | Compact repository status: release, open PRs, merged work |
+| [pacecraft-pr-state](pacecraft-pr-state/SKILL.md) | PR head, checks, review threads and merge state |
+| [pacecraft-branch-sync](pacecraft-branch-sync/SKILL.md) | Rebase the feature branch and push it safely |
+| [pacecraft-line-balance](pacecraft-line-balance/SKILL.md) | Production, test and other lines added and removed |
+| [pacecraft-develop-run-check](pacecraft-develop-run-check/SKILL.md) | Develop push runs of a merge commit, with superseded and flake hints |
+| [pacecraft-ledger-line](pacecraft-ledger-line/SKILL.md) | One ledger line for a closed issue |
+| [pacecraft-run-tests-changed](pacecraft-run-tests-changed/SKILL.md) | Changed Python tests, compileall, quality ratchet, and JS tests when JS changed |
+| [pacecraft-browser-tests](pacecraft-browser-tests/SKILL.md) | Affected Playwright projects through the browser runner |
+| [pacecraft-spec-validate](pacecraft-spec-validate/SKILL.md) | Strict OpenSpec validation of main specs and a change |
+| [pacecraft-sonar-check](pacecraft-sonar-check/SKILL.md) | Sonar pre-push analysis or PR issues as counts and locations |
+| [pacecraft-graphify-query](pacecraft-graphify-query/SKILL.md) | Symbols, callers and paths from the local code graph |
+| [pacecraft-worktree-prune](pacecraft-worktree-prune/SKILL.md) | Remove merged, clean, idle worktrees |
 
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
@@ -68,8 +92,8 @@ are involved. Read only the references needed for the current step.
 - Documentation needs no separate workflow. Dependency upgrades use validation's
   focused maintenance reference.
 - A PR diff uses `REVIEW.md`; a requested whole-repository audit uses full review.
-- `deliver-issue` runs the complete delivery only when requested; ordinary
-  fixes and issue discussions do not imply publication. Its PR phase is an
+- `deliver-issue` delivers every issue handed over for delivery, small fixes
+  included; issue discussions do not imply publication. Its PR phase is an
   authorized entry to `pr`. Releases and security scans keep their explicit
   triggers.
 - Skill and instruction changes: prefer deleting or shortening over adding, and
@@ -107,9 +131,12 @@ See the [OpenSpec runbook](../../docs/openspec.md) and
 Claude Code loads skills only from `.claude/skills/`, and Git symlinks are off
 on Windows checkouts, so this directory stays canonical and agents read the
 linked `SKILL.md` files directly. The workflows with side effects (`pr`,
-`deliver-issue`, `ai-coach-release-unraid`) also have thin stubs in
-`.claude/skills/` with `disable-model-invocation: true`, so only the user starts
-them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. The read-only
+`deliver-issue`, `pacecraft-release-unraid`) also have thin stubs in
+`.claude/skills/`. `pr` and the release carry `disable-model-invocation: true`,
+so only the user starts them as `/pr` or `/pacecraft-release-unraid`;
+`deliver-issue` stays model-invocable so agents and lane threads deliver
+queued issues through it (athlete decision 2026-11-11, #2274), entering `pr`
+from its PR phase. The read-only
 `next-issue` has a stub too, so the user can start it as `/next-issue`. Stubs carry the
 same name and description and point here; the docs contract test keeps them in
 sync. Never put workflow content in a stub.

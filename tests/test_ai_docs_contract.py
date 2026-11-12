@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / ".agents" / "skills"
+MODEL_INVOCABLE_STUBS = frozenset({"deliver-issue"})
 SCOPED_INSTRUCTIONS = (
     "backend/AGENTS.md",
     "public/AGENTS.md",
@@ -72,7 +73,7 @@ class AiDocsContractTests(unittest.TestCase):
     def test_skill_evaluation_cases_are_valid_and_targets_exist(self) -> None:
         catalogue = json.loads(
             (
-                SKILL_ROOT / "ai-coach-skill-evaluation" / "evals" / "cases.json"
+                SKILL_ROOT / "pacecraft-skill-evaluation" / "evals" / "cases.json"
             ).read_text(encoding="utf-8")
         )
         self.assertIs(type(catalogue["catalog_version"]), int)
@@ -133,7 +134,7 @@ class AiDocsContractTests(unittest.TestCase):
 
     def test_validation_skill_does_not_reference_removed_test_module(self) -> None:
         validation = (
-            ROOT / ".agents" / "skills" / "ai-coach-validation" / "SKILL.md"
+            ROOT / ".agents" / "skills" / "pacecraft-validation" / "SKILL.md"
         ).read_text(encoding="utf-8")
         self.assertNotIn("tests/test_server.py", validation)
         self.assertTrue((ROOT / "tests" / "run_tests.py").is_file())
@@ -149,7 +150,12 @@ class AiDocsContractTests(unittest.TestCase):
                 content = stub.read_text(encoding="utf-8")
                 description = re.compile(r"(?m)^description:.*$")
                 self.assertIn(f"\nname: {name}\n", content)
-                self.assertIn("\ndisable-model-invocation: true\n", content)
+                # Agents deliver queued issues through deliver-issue (athlete
+                # decision 2026-11-11, #2274); every other stub stays user-only.
+                self.assertEqual(
+                    name not in MODEL_INVOCABLE_STUBS,
+                    "\ndisable-model-invocation: true\n" in content,
+                )
                 self.assertIn(f"`.agents/skills/{name}/SKILL.md`", content)
                 self.assertEqual(
                     description.findall(content),

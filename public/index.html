@@ -33,7 +33,7 @@
     <aside class="desktop-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
-      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
@@ -123,25 +123,25 @@
       <section id="dataPanel" class="panel" aria-label="Analyse">
         <div class="section-heading">
           <div><h2>Analyse</h2></div>
-          <div class="view-refresh"><button type="button" class="icon-button" id="analysisRefreshButton" aria-label="Analyse aktualisieren: Leistung"><svg aria-hidden="true"><use href="#icon-refresh"></use></svg></button><output id="analysisRefreshStatus" aria-live="polite"></output></div>
+          <div class="view-refresh"><button type="button" class="icon-button" id="analysisRefreshButton" aria-label="Analyse aktualisieren: Laufen"><svg aria-hidden="true"><use href="#icon-refresh"></use></svg></button><output id="analysisRefreshStatus" aria-live="polite"></output></div>
         </div>
         <nav class="plan-segment-nav" aria-label="Analysebereiche">
+          <a href="#analysis/running" data-analysis-segment="running">Laufen</a>
+          <a href="#analysis/cycling" data-analysis-segment="cycling">Radfahren</a>
           <a href="#analysis/load" data-analysis-segment="load">Belastung</a>
-          <a href="#analysis/performance" data-analysis-segment="performance">Leistung</a>
           <a href="#analysis/recovery" data-analysis-segment="recovery">Erholung</a>
-          <a href="#analysis/sessions" data-analysis-segment="sessions">Einheiten</a>
         </nav>
         <div id="analysisLoadPeriod" hidden></div>
         <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
-        <section id="activityAnalysis" class="activity-analysis" aria-label="Einzelne Einheiten" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
         <section id="analysisLoadCharts" class="analysis-history-charts" aria-label="Belastung und Trainingszeit" hidden></section>
-        <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Leistungswerte" hidden></section>
+        <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Werte" hidden></section>
         <section id="performanceEnduranceCharts" class="analysis-history-charts" aria-label="Ausdauer-Score" hidden></section>
         <section id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></section>
         <section id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Leistungsentwicklung der letzten 12 Wochen"></section>
-        <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" hidden></section>
-        <section id="cyclingPowerProfile" class="analysis-subchart" aria-label="Leistungsprofil Rad"></section>
+        <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" data-analysis-sport="run" hidden></section>
+        <section id="runningBestEfforts" class="analysis-subchart" aria-label="Bestwerte Laufen" data-analysis-sport="run"></section>
+        <section id="cyclingPowerProfile" class="analysis-subchart" aria-label="Leistungsprofil Rad" data-analysis-sport="ride"></section>
         <section id="analysisEmptyState" aria-label="Keine Daten" hidden></section>
       </section>
 
@@ -563,7 +563,7 @@
     <nav class="bottom-nav" aria-label="Hauptnavigation">
       <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
       <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
-      <a class="nav-item" href="#analysis/performance" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
       <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
       <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>

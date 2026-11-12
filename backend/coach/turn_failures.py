@@ -13,7 +13,6 @@ from backend.coach.authorization import authorized_operations
 from backend.coach.change_receipts import change_summary
 from backend.coach.context_selection import infer_coach_domain
 from backend.coach.outcomes import (
-    COACH_ACTION_LABELS,
     coach_effect_label,
     coach_failure_lines,
     coach_observed_sync_lines,
@@ -21,6 +20,7 @@ from backend.coach.outcomes import (
 )
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
+from backend.coach.tool_specs import ACTION_LABELS
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
@@ -134,14 +134,8 @@ class CoachTurnFailureService:
             summary = change_summary(commands)
             if summary:
                 receipt["change_summary"] = summary
-            # A terminal failure is not resumable and must not retain inline image data.
-            for key in (
-                "openai_response_id",
-                "pending_tool_outputs",
-                "pending_tool_calls",
-                "response_input",
-                "previous_response_id",
-            ):
+            # A failed turn is no attachment anchor and has no open tool calls.
+            for key in ("openai_reached", "pending_tool_calls"):
                 receipt.pop(key, None)
             receipt["message"] = deps.chat_repository.add(
                 db, "assistant", text, client_turn_id=client_turn_id
@@ -228,7 +222,6 @@ class CoachTurnFailureService:
             "organization_usage_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "database_busy": "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut.",
             "provider_timeout": OPENAI_TIMEOUT_MESSAGE,
-            "background_budget_exceeded": OPENAI_TIMEOUT_MESSAGE,
             "not_found": "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
             "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             "response_error": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",
@@ -299,8 +292,7 @@ class CoachTurnFailureService:
             text += (
                 "\nNoch offen: "
                 + ", ".join(
-                    COACH_ACTION_LABELS.get(name, "Angeforderter Schritt")
-                    for name in pending
+                    ACTION_LABELS.get(name, "Angeforderter Schritt") for name in pending
                 )
                 + "."
             )

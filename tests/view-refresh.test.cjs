@@ -1,10 +1,9 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-const context = vm.createContext({});
-vm.runInContext(fs.readFileSync("public/view-refresh.js", "utf8"), context);
+const context = loadPublicScript("view-refresh.js");
 
 function setup({ response, route = "nutrition/diary", request = { path: "/api/nutrition/refresh", body: { area: "diary", date: "2026-10-20" } }, reload = async () => {} } = {}) {
   const classes = new Set();

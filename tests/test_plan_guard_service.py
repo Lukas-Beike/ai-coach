@@ -275,7 +275,7 @@ class PlanGuardWriteTests(unittest.TestCase):
         )
 
     def test_adaptive_replan_is_plan_checked_by_its_own_service(self) -> None:
-        from backend.coach import tool_execution_service as tools
+        from backend.coach import tool_specs as tools
 
         self.assertIn("apply_adaptive_replan", tools.PLAN_CHECKED_TOOLS)
         self.assertIn("apply_adaptive_replan", tools.SELF_GUARDED_TOOLS)

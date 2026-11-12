@@ -10,40 +10,18 @@ from typing import Any
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.coach.tool_specs import (
+    EXTERNAL_FOOD_LOOKUP_TOOLS,
+    PLAN_CHECKED_TOOLS,
+    PROFILE_MUTATING_TOOLS,
+    SELF_GUARDED_TOOLS,
+)
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.planning.plan_guard_service import (
     PLAN_FINDINGS_ARGUMENT,
     PlanGuardService,
-)
-
-PROFILE_MUTATING_COACH_TOOLS = frozenset({"update_profile", "undo_training_change"})
-
-# Coach tools that create or move future planned units; the server checks the
-# resulting plan, rolls the write back on a blocking finding and returns the
-# other findings as notes.
-PLAN_CHECKED_TOOLS = frozenset(
-    {
-        "apply_training_patch",
-        "apply_training_changes",
-        "replace_training_plan",
-        "apply_workout_library_plan",
-        "commit_training_plan",
-        "apply_adaptive_replan",
-    }
-)
-# Checked inside the tool: its optional Intervals.icu sync must run after the
-# guarded local commit, so the guard cannot wrap the whole call.
-SELF_GUARDED_TOOLS = frozenset({"apply_adaptive_replan"})
-
-COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
-    {
-        "lookup_food",
-        "calculate_food_nutrition",
-        "save_nutrition_template",
-        "save_nutrition_product",
-    }
 )
 
 
@@ -108,7 +86,7 @@ class CoachStructuredToolExecutionService:
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
-            *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+            *EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         lock = self._database_lock if local_transaction else nullcontext()
         transaction = (
@@ -118,7 +96,7 @@ class CoachStructuredToolExecutionService:
         )
         coordinator = (
             self._profile_mutation_coordinator
-            if name in PROFILE_MUTATING_COACH_TOOLS
+            if name in PROFILE_MUTATING_TOOLS
             else nullcontext()
         )
         with coordinator, lock, transaction as db:

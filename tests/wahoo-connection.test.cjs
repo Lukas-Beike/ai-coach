@@ -1,16 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 const { wahooConnectionView, wahooFullResyncView, safeWahooAuthorizeUrl } = require("../public/wahoo-connection.js");
-
-const publicDir = path.join(__dirname, "../public");
-const apiSource = fs.readFileSync(path.join(publicDir, "api.js"), "utf8");
-const actionsSource = fs.readFileSync(path.join(publicDir, "sync-actions.js"), "utf8");
-
-const renderSources = ["connection-status.js", "performance-view.js", "wahoo-connection.js"].map((name) => fs.readFileSync(path.join(publicDir, name), "utf8"));
 
 function fakeButton(text = "") {
   const classes = new Set();
@@ -71,11 +64,9 @@ function loadSyncActions(route) {
     load: async () => {},
     renderSettings() {},
   };
-  vm.createContext(context);
-  vm.runInContext(apiSource, context);
-  renderSources.forEach((source) => vm.runInContext(source, context));
+  loadPublicScript(["api.js", "connection-status.js", "performance-view.js", "wahoo-connection.js"], context);
   vm.runInContext("async function api(path, options = {}) { return globalThis.AppApi.request(path, options, () => {}); }", context);
-  vm.runInContext(actionsSource, context);
+  loadPublicScript("sync-actions.js", context);
   return { context, calls, confirmations, selectors, toasts, buttons };
 }
 

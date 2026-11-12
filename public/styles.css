@@ -98,9 +98,6 @@
   --manual-ink: #72d7a8;
   --form-caution-ink: #ffcc80;
   --form-error-ink: #ff6b63;
-  --metric-good-surface: rgba(52, 199, 89, .13);
-  --metric-error-surface: rgba(255, 69, 58, .13);
-  --metric-neutral-surface: rgba(255, 255, 255, .07);
   --planning-danger-border: rgba(255, 69, 58, .5);
   --planning-danger-ink: #ffd9d5;
   --coach-planning-danger-ink: #ffdedb;
@@ -239,7 +236,7 @@ button { cursor: pointer; }
 .status-chip { display: inline-flex; min-height: 24px; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; color: var(--muted); background: var(--surface-raised); font-size: 12px; font-weight: 700; }
 .status-chip[data-status="ready"], .status-chip.success { color: var(--ink); background: var(--success-surface); }
 .status-chip[data-status="loading"], .status-chip.warning { color: var(--ink); background: var(--warning-surface); }
-.status-chip[data-status="error"], .status-chip.danger { color: var(--ink); background: var(--danger-status-surface); }
+.status-chip[data-status="error"] { color: var(--ink); background: var(--danger-status-surface); }
 .segmented-control { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
 .segmented-control > * { flex: 1 1 120px; min-height: 44px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--transparent); font-weight: 700; }
 .segmented-control > .active { color: var(--white); background: var(--accent); }
@@ -324,14 +321,6 @@ h2 {
 
 .panel { display: none; min-width: 0; }
 .panel.active { display: block; }
-.coach-provider-item { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--translucent-surface); }
-.coach-provider-item > span { width: 8px; height: 8px; border-radius: 999px; background: var(--subtle); }
-.coach-provider-item[data-status="ready"] > span { background: var(--accent-bright); }
-.coach-provider-item[data-status="loading"] > span { background: var(--orange); animation: pulse 1.2s ease-in-out infinite; }
-.coach-provider-item[data-status="error"] > span, .coach-provider-item[data-status="stale"] > span { background: var(--danger); }
-.coach-provider-item > div { display: grid; gap: 2px; min-width: 0; }
-.coach-provider-item strong { overflow: hidden; color: var(--ink); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.coach-provider-item small { color: var(--subtle); font-size: .72rem; }
 .plan-segment-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
 .plan-segment-nav a { display: grid; min-width: min-content; min-height: 44px; flex: 1 1 0; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
 .plan-segment-nav a:hover { color: var(--ink); background: var(--accent-soft); }
@@ -360,9 +349,6 @@ h2 {
 .analysis-target-line { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .analysis-day-marker.is-selected rect { fill: var(--ink); fill-opacity: .08; }
 .analysis-chart-card svg :is(.analysis-axis-unit, .analysis-week-caption) { font-size: 11px; }
-.analysis-chart-stack .analysis-coverage { order: 5; }
-.analysis-chart-stack .analysis-chart-note { margin: 0; }
-.analysis-chart-note { margin: 10px 0; color: var(--muted); font-size: .75rem; line-height: 1.5; }
 .analysis-chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; padding: 0; list-style: none; color: var(--ink); font-size: .75rem; }
 .analysis-legend-info { display: inline; min-height: 0; width: auto; padding: 4px 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .analysis-legend-info:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
@@ -813,16 +799,11 @@ h2 {
 .metric-grid small.metric-garmin { color: var(--garmin-ink); }
 .metric-grid .metric-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
 .metric-grid .metric-value-row strong { min-width: 0; }
-.metric-grid .metric-value-row .metric-comparison { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }
 .metric-grid small.metric-intervals { color: var(--intervals-ink); }
 .metric-grid small.metric-manual { color: var(--manual-ink); }
 .metric-grid .metric-form-good strong { color: var(--manual-ink); }
 .metric-grid .metric-form-caution strong { color: var(--form-caution-ink); }
 .metric-grid .metric-form-bad strong { color: var(--form-error-ink); }
-.metric-grid small.metric-comparison { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; padding: 3px 6px; border-radius: 999px; font-size: .72rem; font-weight: 700; }
-.metric-comparison.good { color: var(--ink); background: var(--metric-good-surface); }
-.metric-comparison.bad { color: var(--ink); background: var(--metric-error-surface); }
-.metric-comparison.neutral { color: var(--subtle); background: var(--metric-neutral-surface); }
 .adaptive-planning-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding: 12px 13px; border: 1px solid var(--planning-danger-border); border-radius: 14px; color: var(--ink); background: var(--danger-surface); box-shadow: var(--shadow-soft); }
 .adaptive-planning-notice[hidden] { display: none; }
 .adaptive-planning-notice > div { display: grid; gap: 4px; min-width: 0; }
@@ -886,10 +867,10 @@ h2 {
 .planned-entry > summary, .planned-group > summary { position: relative; display: grid; gap: 4px; min-height: 48px; padding: 6px 10px; cursor: pointer; list-style: none; }
 .planned-entry > summary::-webkit-details-marker, .planned-group > summary::-webkit-details-marker { display: none; }
 .planned-entry > summary:focus-visible, .planned-group > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 8px; }
-.planned-entry[data-sport="Radfahren"], .planned-entry[data-sport="Rad indoor"], .planned-group[data-sport="Radfahren"], .planned-group[data-sport="Rad indoor"], .planned-month-mark[data-sport="Radfahren"], .planned-month-mark[data-sport="Rad indoor"], .activity-analysis-item[data-sport-label="Radfahren"], .activity-analysis-item[data-sport-label="Rad indoor"] { --session-color: var(--planned-session-bike); --session-on-color: var(--planned-session-bike-on); }
-.planned-entry[data-sport="Laufen"], .planned-group[data-sport="Laufen"], .planned-month-mark[data-sport="Laufen"], .activity-analysis-item[data-sport-label="Laufen"] { --session-color: var(--planned-session-run); --session-on-color: var(--planned-session-run-on); }
-.planned-entry[data-sport="Schwimmen"], .planned-group[data-sport="Schwimmen"], .planned-month-mark[data-sport="Schwimmen"], .activity-analysis-item[data-sport-label="Schwimmen"] { --session-color: var(--planned-session-swim); --session-on-color: var(--planned-session-swim-on); }
-.planned-entry[data-sport="Kraft"], .planned-group[data-sport="Kraft"], .planned-month-mark[data-sport="Kraft"], .activity-analysis-item[data-sport-label="Kraft"] { --session-color: var(--planned-session-strength); --session-on-color: var(--planned-session-strength-on); }
+.planned-entry[data-sport="Radfahren"], .planned-entry[data-sport="Rad indoor"], .planned-group[data-sport="Radfahren"], .planned-group[data-sport="Rad indoor"], .planned-month-mark[data-sport="Radfahren"], .planned-month-mark[data-sport="Rad indoor"] { --session-color: var(--planned-session-bike); --session-on-color: var(--planned-session-bike-on); }
+.planned-entry[data-sport="Laufen"], .planned-group[data-sport="Laufen"], .planned-month-mark[data-sport="Laufen"] { --session-color: var(--planned-session-run); --session-on-color: var(--planned-session-run-on); }
+.planned-entry[data-sport="Schwimmen"], .planned-group[data-sport="Schwimmen"], .planned-month-mark[data-sport="Schwimmen"] { --session-color: var(--planned-session-swim); --session-on-color: var(--planned-session-swim-on); }
+.planned-entry[data-sport="Kraft"], .planned-group[data-sport="Kraft"], .planned-month-mark[data-sport="Kraft"] { --session-color: var(--planned-session-strength); --session-on-color: var(--planned-session-strength-on); }
 .planned-session-header { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; color: var(--ink); background: var(--surface-raised); }
 .planned-session-icon { display: grid; width: 30px; height: 30px; grid-row: 1 / 3; place-items: center; border-radius: 8px; color: var(--session-on-color); background: var(--session-color); font-size: .9rem; line-height: 1; }
 .planned-session-title { min-width: 0; color: var(--ink); font-size: .88rem; line-height: 1.35; font-weight: 650; overflow-wrap: break-word; hyphens: auto; }
@@ -1487,7 +1468,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   .metric-grid > div, .metric-grid small,
   .more-segment-nav, .segmented-control, .plan-segment-nav,
   .planned-comparison, .context-preview-content details,
-  .library-sport, .coach-provider-item,
+  .library-sport,
   .skeleton-row,
   .collapsible-section > summary, .secondary-button
 ) { background-color: var(--surface-raised); }
@@ -1649,7 +1630,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .current-performance-table th small { display: block; margin-top: 4px; color: var(--muted); font-size: .72rem; font-weight: 400; overflow-wrap: anywhere; }
 .current-performance-table td { text-align: right; padding-left: 12px; font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .current-performance-table tbody tr:last-child > * { border-bottom: 0; }
-@media (min-width: 768px) { .current-performance-groups { grid-template-columns: 1fr 1fr; gap: 32px; } }
 
 #currentPerformance, #performancePredictions { margin-bottom: 24px; }
 
@@ -1670,22 +1650,16 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .analysis-chart-stack > .analysis-section-help { position: absolute; top: 16px; right: 52px; display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; margin: 0; padding: 0; }
 
 /* Single-session analysis: Garmin-style area charts per channel. */
-.activity-analysis { display: grid; gap: 12px; margin-bottom: 24px; }
-.activity-analysis-list { display: grid; gap: 8px; }
-.activity-analysis-item { --session-color: var(--planned-session-default); --session-on-color: var(--planned-session-default-on); min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
-.activity-analysis-item > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 12px 14px; cursor: pointer; list-style: none; }
-.activity-analysis-item > summary::-webkit-details-marker { display: none; }
-.activity-analysis-item > summary > .planned-session-icon { flex: none; }
 .provenance-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--muted); font-size: .8rem; }
 .provenance-details > p { margin: 0 0 6px; font-size: .78rem; }
-.activity-analysis-item > summary::after { content: "\203a"; flex: 0 0 auto; color: var(--muted); font-size: 1.4rem; line-height: 1; transition: transform .15s; }
-.activity-analysis-item[open] > summary::after { transform: rotate(90deg); }
-.activity-analysis-item > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: var(--radius-md); }
-.activity-analysis-title { display: grid; flex: 1; gap: 3px; min-width: 0; }
-.activity-analysis-title strong { overflow: hidden; color: var(--ink); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
-.activity-analysis-title .muted { font-size: .72rem; }
-.activity-analysis-load { flex: 0 0 auto; color: var(--muted); font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .activity-analysis-error { color: var(--danger-ink); font-size: .78rem; font-weight: 600; }
+.planned-activity-more { border-top: 1px solid var(--line); }
+.planned-activity-more > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 2px; color: var(--ink); font-weight: 700; cursor: pointer; list-style: none; }
+.planned-activity-more > summary::-webkit-details-marker { display: none; }
+.planned-activity-more > summary::after { content: "\25BE"; color: var(--muted); }
+.planned-activity-more[open] > summary::after { content: "\25B4"; }
+.planned-activity-more > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: var(--radius-md); }
+.planned-activity-more > .activity-analysis-panel { padding: 4px 0 8px; }
 .activity-analysis-panel { display: grid; gap: 16px; padding: 0 14px 14px; }
 .activity-analysis-panel > p { margin: 0; font-size: .72rem; }
 .activity-analysis-panel h4 { margin: 0; color: var(--ink); font-size: .85rem; }
@@ -1701,6 +1675,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-analysis-chart.is-cadence { --series: var(--orange); }
 .activity-analysis-chart.is-elevation { --series: var(--subtle); }
 .activity-analysis-chart.is-temperature { --series: var(--yellow); }
+.activity-analysis-chart.is-dynamics { --series: var(--accent-bright); }
 .activity-analysis-chart-header { display: grid; gap: 2px; }
 .activity-analysis-chart-stats { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 0; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .activity-analysis-readout { color: var(--series); font-weight: 700; }
@@ -1721,7 +1696,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .activity-analysis-zones > p { margin: 0; font-size: .72rem; }
 .activity-analysis-laps { display: grid; gap: 8px; }
 .activity-analysis-laps td, .activity-analysis-laps th { font-variant-numeric: tabular-nums; }
-.activity-analysis-more { justify-self: center; }
 
 /* Desktop: a 15-16 px text size, bounded form fields and two charts per row (#1789). */
 @media (min-width: 1100px) {

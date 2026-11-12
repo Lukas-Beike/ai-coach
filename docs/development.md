@@ -24,9 +24,10 @@ subagents.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
-without your approval. `/pr`, `/deliver-issue`, `/next-issue`, and `/ai-coach-release-unraid`
-are user-only Claude Code commands (`disable-model-invocation: true`) that load
-the canonical workflows in `.agents/skills/`.
+without your approval. `/pr`, `/next-issue`, and `/pacecraft-release-unraid` are user-only Claude Code
+commands (`disable-model-invocation: true`); `/deliver-issue` is also model-invocable,
+so agents deliver queued issues through it (#2274). All load the canonical
+workflows in `.agents/skills/`.
 
 To keep usage down, start a fresh session (`/clear`) for each unrelated task;
 every turn re-sends the whole conversation. Check `/usage` occasionally to see
@@ -44,12 +45,12 @@ standard work, and Claude Opus only for genuinely hard or risky tasks, each at
 its newest available version. Writers use isolated worktrees; the main model
 reviews and integrates their branches.
 
-The [retro skill](../.agents/skills/ai-coach-retro/SKILL.md) runs on request and
+The [retro skill](../.agents/skills/pacecraft-retro/SKILL.md) runs on request and
 briefly after a `deliver-issue` run. It prefers removing or shortening
 instructions; a new rule needs an observed failure that a hook or test cannot
 prevent.
 
-Coding tasks default to the repository's [Ponytail workflow](../.agents/skills/ai-coach-ponytail/SKILL.md)
+Coding tasks default to the repository's [Ponytail workflow](../.agents/skills/pacecraft-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
 dependencies or abstractions. Any agent can read its Markdown directly;
 the external Ponytail plugin is optional. Say `ponytail lite`, `ponytail full`,

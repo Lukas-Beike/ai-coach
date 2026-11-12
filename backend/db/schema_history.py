@@ -20,9 +20,7 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION
 type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 
 # Schema version 26, release 2.0.5: the schema production runs and the only
-# supported baseline. While it is also the live schema, a database of this
-# version is recognized as the current shape; the digest freezes it for the
-# first upgrade step after it.
+# supported baseline; the digest freezes it for its upgrade step.
 SHAPE_SCHEMA_V26: Final = "schema-v26"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
@@ -39,6 +37,7 @@ OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 26
 # version here and add one upgrade step from it; a schema that never reached
 # production gets no frozen shape of its own.
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
+    26: frozenset({SHAPE_SCHEMA_V26}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

@@ -198,7 +198,7 @@ class SupervisorTests(unittest.TestCase):
             ".claude/agents/explorer.md",
             ".claude/agents/implementer.md",
             ".claude/agents/reviewer.md",
-            ".claude/skills/ai-coach-release-unraid/SKILL.md",
+            ".claude/skills/pacecraft-release-unraid/SKILL.md",
             ".claude/skills/deliver-issue/SKILL.md",
             ".claude/skills/next-issue/SKILL.md",
             ".claude/skills/pr/SKILL.md",

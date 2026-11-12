@@ -685,6 +685,12 @@ function plannedEntryKey(entry, dateKey) {
 }
 
 let openPlannedEntries = new Set();
+// Calendar cards whose "Details" are open, so a re-render keeps them open (#2258).
+const openActivityDetails = new Set();
+
+function completedSessionIds(calendar) {
+  return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
+}
 const plannedFocusStatuses = new Map();
 
 // The summary chip follows the saved focus without waiting for the next reload.
@@ -1296,8 +1302,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // the catalogue suggestions or goes to the Coach.
   function plannedGarminBlocked(entry, dateKey, todayKey, actual) {
     const reason = entry.push_blocked?.[providerIds().garmin];
-    // A unit in a sync conflict shows only its conflict; that decision comes first.
-    if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity || entry.sync_status === "conflict") return null;
+    if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity) return null;
     const block = document.createElement("span");
     block.className = "planned-conflict planned-garmin-blocked";
     const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
@@ -1343,10 +1348,25 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
-  // The Coach analyses the session the athlete picked: one turn, the same as typing the request.
-  // The message names the session by date, sport, time, duration and its local id; the stored name
-  // never becomes Coach input.
-  function plannedActivityActions(actual, dateKey, title) {
+  // "Details" opens the session's charts, zones, laps and all values in the card (#2258);
+  // the Coach analyses it in one athlete-started turn; "Feedback" opens the rating and session dialog.
+  // The Coach message names the session by date, sport, time, duration and its local id; the stored
+  // name never becomes Coach input.
+  function plannedActivityActions(actual, dateKey, title, entryKey) {
+    const more = document.createElement("details");
+    more.className = "planned-activity-more";
+    const moreSummary = document.createElement("summary");
+    moreSummary.textContent = "Details";
+    const panel = document.createElement("div");
+    panel.className = "activity-analysis-panel";
+    more.append(moreSummary, panel);
+    // A re-render (sync, reload) keeps an opened "Details" open and loads it again.
+    more.addEventListener("toggle", () => {
+      if (entryKey && more.open) openActivityDetails.add(entryKey);
+      else if (entryKey) openActivityDetails.delete(entryKey);
+      if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual);
+    });
+    more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
     const actions = document.createElement("div");
     actions.className = "planned-activity-actions";
     const id = String(actual.activity_id || actual.id || "");
@@ -1357,13 +1377,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       /^[\w:.-]{1,80}$/.test(id) ? `ID ${id}` : null,
     ].filter(Boolean).join(", ")}).`;
     const coach = plannedCoachButton("Mit dem Coach analysieren", prompt, "secondary-button");
-    const details = document.createElement("button");
-    details.type = "button";
-    details.className = "secondary-button planned-activity-details";
-    details.textContent = "Details";
-    details.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
-    actions.append(coach, details);
-    return actions;
+    const feedback = document.createElement("button");
+    feedback.type = "button";
+    feedback.className = "secondary-button planned-activity-feedback";
+    feedback.textContent = "Feedback";
+    feedback.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
+    actions.append(coach, feedback);
+    return [more, actions];
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
@@ -1415,7 +1435,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const metrics = actual ? null : plannedSessionMetrics(entry);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityActions(actual, dateKey, title));
+    if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
@@ -1789,18 +1809,59 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   let renderedCalendar = [];
 
   // Keeps the shown week (and in the month view the selected day, which sets the week) inside the loaded weeks.
-  function keepPlannedSelection(todayKey, firstKey, lastKey) {
+  // The past has no limit: older weeks stay selectable and their sessions load on demand (#2258).
+  function keepPlannedSelection(todayKey, lastKey) {
     const currentWeekKey = planWeekStart(todayKey);
-    if (!selectedWeekKey || selectedWeekKey < firstKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
+    if (!selectedWeekKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
     if (calendarView !== "month") return;
-    if (!selectedDayKey || selectedDayKey < firstKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
+    if (!selectedDayKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
     selectedWeekKey = planWeekStart(selectedDayKey);
+  }
+
+  // Sessions older than the loaded calendar data come page by page from the session list,
+  // newest first; sessions the calendar already holds are skipped.
+  const olderSessions = { items: [], cursor: undefined, loading: false, generation: 0 };
+
+  // New calendar data (sync, reload, undo, feedback) drops the cached older pages, so a deleted,
+  // split or edited session is read again; an answer for the dropped pages is ignored.
+  function resetOlderSessions() {
+    Object.assign(olderSessions, { items: [], cursor: undefined, loading: false, generation: olderSessions.generation + 1 });
+  }
+
+  function withOlderSessions(calendar) {
+    const known = completedSessionIds(calendar);
+    return calendar.concat(olderSessions.items.filter((item) => !known.has(String(item.activity_id || item.id))));
+  }
+
+  // Only a week before the configured ones asks for more: the startup data covers those.
+  function loadOlderSessions(calendar, shownStartKey, configuredStartKey) {
+    if (olderSessions.loading || olderSessions.cursor === null || shownStartKey >= configuredStartKey) return;
+    const loadedStart = calendar.filter((item) => calendarActualActivity(item)).map(plannedEventDate).filter(Boolean).sort()[0];
+    if (loadedStart && shownStartKey >= loadedStart) return;
+    olderSessions.loading = true;
+    const generation = olderSessions.generation;
+    const cursor = olderSessions.cursor ? `&cursor=${encodeURIComponent(olderSessions.cursor)}` : "";
+    api(`/api/activities?limit=100${cursor}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((page) => {
+      if (generation !== olderSessions.generation) return;
+      const known = completedSessionIds(calendar);
+      for (const row of Array.isArray(page?.activities) ? page.activities : []) {
+        // Only sessions before the loaded ones are new; later ones are in the loaded data already.
+        const day = String(row?.started_at_local || "").slice(0, 10);
+        if (row?.id == null || known.has(String(row.id)) || (loadedStart && day >= loadedStart)) continue;
+        olderSessions.items.push({ ...row, date: String(row.started_at_local || "").slice(0, 10), is_completed_activity: true });
+      }
+      olderSessions.cursor = page?.next_cursor || null;
+      olderSessions.loading = false;
+      renderPlanned(renderedCalendar);
+    }, () => { if (generation === olderSessions.generation) olderSessions.loading = false; });
   }
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
     if (!root) return;
+    if (trainingCalendar !== renderedCalendar) resetOlderSessions();
     renderedCalendar = trainingCalendar;
+    const calendar = withOlderSessions(Array.isArray(trainingCalendar) ? trainingCalendar : []);
     const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
     const currentWeekKey = planWeekStart(todayKey);
     const display = state.data?.calendar_display || {};
@@ -1809,8 +1870,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
     const lastWeekKey = addDateKey(currentWeekKey, 7 * futureWeeks);
     const lastDateKey = addDateKey(lastWeekKey, 6);
-    keepPlannedSelection(todayKey, firstWeekKey, lastDateKey);
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
+    keepPlannedSelection(todayKey, lastDateKey);
+    const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
@@ -1828,9 +1889,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         .filter((item) => item?.week_start)
         .map((item) => [String(item.week_start).slice(0, 10), item]),
     );
-    const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
+    const entries = calendar
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
-      .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
+      .filter((item) => plannedEventDate(item) <= lastDateKey)
       .sort((left, right) => String(left.starts_at_local || left.started_at_local || left.date || "").localeCompare(String(right.starts_at_local || right.started_at_local || right.date || "")));
     const planningContextByDate = new Map(
       (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
@@ -1851,7 +1912,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
       eventsByDate,
       dayKey: selectedDayKey,
-      firstWeekKey,
+      // No earliest week: paging back is unlimited.
+      firstWeekKey: "",
       lastDateKey,
       lastWeekKey,
       planningContextByDate,
@@ -1866,6 +1928,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     restorePlannedEntryFocus(root, focusedEntry);
     watchPlannedDetail();
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
+    loadOlderSessions(calendar, calendarView === "month" ? planWeekStart(monthStartKey(selectedDayKey)) : selectedWeekKey, firstWeekKey);
   }
 
   // Wahoo state of an exported library workout. A changed one offers the

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 import unittest
 from datetime import UTC, date, datetime
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.canonical.activity_detail import (
     ActivityLap,
@@ -43,8 +45,10 @@ from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync import session_analysis_stage
+from backend.sync import canonical_backfill, session_analysis_stage
+from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
+from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
@@ -733,6 +737,67 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(("running", 1), (first["status"], first["counts"]["pending"]))
         self.assertEqual("complete", self._run(stage)["status"])
         self.assertEqual(0, self._run(stage)["counts"]["computed"])
+
+    def _sessions_with_streams(self, count: int) -> None:
+        for index in range(2, count + 1):
+            add_session_record(self.manager, GARMIN, f"g{index}", f"act_g{index}")
+        self._write(
+            *(
+                lambda db, index=index: _streams(db, GARMIN, f"g{index}")
+                for index in range(1, count + 1)
+            )
+        )
+
+    def test_a_batch_stops_at_the_batch_time_and_resumes(self) -> None:
+        self._sessions_with_streams(3)
+        with patch.object(canonical_backfill, "BATCH_SECONDS", 0):
+            states = [self._run() for _ in range(3)]
+        self.assertEqual(
+            [("running", 1, 2), ("running", 1, 1), ("complete", 1, 0)],
+            [
+                (
+                    state["status"],
+                    state["counts"]["computed"],
+                    state["counts"]["pending"],
+                )
+                for state in states
+            ],
+        )
+
+    def test_a_long_recompute_leaves_the_writer_to_a_waiting_login(self) -> None:
+        # A method version bump recomputes every session (#2287). Each batch
+        # stops at the batch time, so a foreground write waiting for the writer
+        # gets it well inside its timeout instead of answering 503.
+        self._sessions_with_streams(20)
+        computing = threading.Event()
+        analyse = session_analysis_stage.session_analysis
+
+        def slow_analysis(*args: Any, **kwargs: Any) -> Any:
+            computing.set()
+            time.sleep(0.2)
+            return analyse(*args, **kwargs)
+
+        worker = CanonicalBackfillWorker(
+            backfill=Mock(run_batch=Mock(return_value=BatchReport(items=0, done=True))),
+            database=lambda: self.manager,
+            maintenance_gate=MaintenanceGate(),
+            poll_seconds=0,
+            followups=[self.stage],
+        )
+        with (
+            patch.object(session_analysis_stage, "session_analysis", slow_analysis),
+            patch.object(canonical_backfill, "BATCH_SECONDS", 0.3),
+        ):
+            worker.start()
+            self.addCleanup(worker.stop)
+            self.assertTrue(computing.wait(5))
+            # The 20 sessions take 4 s; a login waits at most 2 s here.
+            with self.manager.unit_of_work(timeout=2.0) as db:
+                self.key_values.set(db, "synthetic_login", "1")
+            worker.join(30)
+        with self.manager.reader() as db:
+            state = summarize_session_analysis(self.key_values, db)
+        self.assertEqual(("complete", 0), (state["status"], state["counts"]["pending"]))
 
 
 class StageOrderTests(unittest.TestCase):

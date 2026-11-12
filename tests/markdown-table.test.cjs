@@ -1,18 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
-const source = fs.readFileSync(path.join(__dirname, "../public/views.js"), "utf8");
-const end = source.indexOf("const CALENDAR_DISPLAY_MAX_WEEKS");
-
-function markdownToHtml(markdown) {
-  assert.ok(end > 0);
-  const context = vm.createContext({});
-  vm.runInContext(source.slice(0, end), context);
-  return vm.runInContext("markdownToHtml", context)(markdown);
-}
+const { markdownToHtml } = loadPublicScript("views.js");
 
 test("a 2x2 markdown table renders a labelled scroll region with header and body cells", () => {
   const html = markdownToHtml("| Name | Wert |\n| --- | :---: |\n| A | 1 |\n| B | 2 |");

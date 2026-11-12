@@ -18,63 +18,67 @@ successful tool receipt during that test. A catalog test compares the matrix to
 Multi-action tools also have explicitly required variants. Each scenario checks
 returned data, durable state or the provider boundary, not just the success flag.
 
-All test names below refer to `tests/test_coach_tool_coverage.py`.
+All test names below refer to `tests/test_coach_tool_coverage.py`. The table is
+generated from the `covers` declarations; regenerate it with
+`python tests/test_coach_tool_coverage.py --write`.
 
+<!-- BEGIN GENERATED TOOL TABLE -->
 | Tool | Successful variants | Scenario tests |
 | --- | --- | --- |
 | `apply_adaptive_replan` | `intervals`, `local` | `test_adaptive_preview_requires_later_acceptance_before_changing_workout`, `test_illness_sync_requires_explicit_remote_acceptance_after_preview` |
 | `apply_training_patch` | `archive`, `create`, `delete`, `move`, `restore`, `update` | `test_planned_unit_lifecycle_keeps_identity_until_deleted` |
 | `apply_workout_library_plan` | `success` | `test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy` |
+| `assign_activity_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
+| `calculate_food_nutrition` | `success` | `test_food_database_read_tools_calculate_without_writing` |
 | `cancel_coach_request` | `success` | `test_clarification_and_cancellation_preserve_athlete_data` |
 | `clarify_coach_request` | `success` | `test_clarification_and_cancellation_preserve_athlete_data` |
 | `commit_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
+| `confirm_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `delete_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
-| `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
+| `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
+| `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_training_report` | `success` | `test_training_report_returns_same_local_facts_without_mutation` |
-| `read_training_records` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
-| `save_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
-| `assign_activity_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
-| `log_equipment_maintenance` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
-| `confirm_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
-| `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
-| `merge_activity_sessions` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_planned_workouts` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_recent_activities` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_training_plans` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_workout_library` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
-| `read_nutrition` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
-| `manage_training_templates` | `archive`, `create`, `delete`, `restore`, `update` | `test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy` |
-| `preview_adaptive_replan` | `success` | `test_adaptive_preview_requires_later_acceptance_before_changing_workout` |
-| `read_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
+| `log_equipment_maintenance` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
+| `log_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `lookup_food` | `success` | `test_food_database_read_tools_calculate_without_writing` |
-| `calculate_food_nutrition` | `success` | `test_food_database_read_tools_calculate_without_writing` |
+| `manage_training_templates` | `archive`, `create`, `delete`, `restore`, `update` | `test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy` |
+| `merge_activity_sessions` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
+| `preview_adaptive_replan` | `success` | `test_adaptive_preview_requires_later_acceptance_before_changing_workout` |
+| `push_strength_to_garmin` | `push`, `remove` | `test_garmin_strength_push_is_bound_to_the_stored_units` |
 | `read_coach_context` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `read_nutrition` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted`, `test_training_records_and_equipment_tools_use_confirmed_local_state` |
+| `read_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
+| `read_training_records` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
 | `read_training_state` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `replace_training_plan` | `success` | `test_replacement_changes_only_requested_period` |
 | `resolve_training_sync_conflict` | `adopt_remote`, `keep_local`, `retry_push`, `retry_read` | `test_conflict_choices_and_failed_job_retries` |
 | `save_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_checkin` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
 | `save_competition` | `create`, `update` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
+| `save_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
 | `save_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `save_nutrition_product` | `success` | `test_confirmed_product_is_saved_locally_through_authorized_coach_receipt` |
 | `save_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
-| `log_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
-| `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
 | `start_provider_refresh` | `calendar`, `garmin`, `wahoo`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |
-| `push_strength_to_garmin` | `push`, `remove` | `test_garmin_strength_push_is_bound_to_the_stored_units` |
-| `sync_nutrition` | `date`, `pending` | `test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued` |
-| `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `sync_competitions` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
+| `sync_nutrition` | `date`, `pending` | `test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued` |
 | `undo_training_change` | `success` | `test_undo_is_a_bound_preview_until_explicit_confirmation` |
-| `update_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
 | `update_nutrition_entry` | `success` | `test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued` |
+| `update_profile` | `success` | `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` |
 | `update_training_plan` | `archive`, `delete`, `update` | `test_requested_draft_commit_and_metadata_lifecycle` |
+<!-- END GENERATED TOOL TABLE -->
 
 ## Failure and conversation coverage
 
@@ -125,7 +129,7 @@ reusing it does not duplicate the dialogue tests.
 
 - `tests/test_coach_tool_coverage.py` runs 43 tests (`python -m unittest
   tests.test_coach_tool_coverage` passes), including declared successful tool
-  variants for every tool in `OWNER_TOOLS`, invalid-argument/reference cases and
+  variants for every tool in `TOOL_SPECS`, invalid-argument/reference cases and
   missing-provenance checks for every write tool carrying `_request`.
 - These are execution and conversation tests, not live language-model
   evaluations.

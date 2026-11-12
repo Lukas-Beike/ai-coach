@@ -41,7 +41,7 @@ The system SHALL support the bundled BLS database, Open Food Facts and, when con
 Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.lookup`, `backend/nutrition/food_database.py::FoodDatabaseService.calculate`, `backend/nutrition/food_database.py::FoodDatabaseService._resolve_ingredient`; `tests/test_food_database.py::FoodDatabaseTests.test_bls_is_complete_offline_and_calculates_edible_grams`, `tests/test_food_database.py::FoodDatabaseTests.test_unknown_macros_are_not_zero_and_units_are_not_guessed`, `tests/test_food_database.py::FoodDatabaseTests.test_untrusted_numbers_and_ingredient_bounds`.
 
 ### Requirement: Permanent external-food mirror with honest fallback
-The system SHALL keep fetched external foods (Open Food Facts and Yazio) in their own `food_database_entries` table, separate from athlete products and diary entries. Fresh mirrored records SHALL avoid unnecessary provider reads; stale fallback SHALL remain visibly stale when a provider recheck fails.
+The system SHALL keep fetched external foods (Open Food Facts and Yazio) as canonical products whose origin names their database, with its fetch time, separate from diary entries; the athlete's own products carry the origin `own`. Fresh stored foods SHALL avoid unnecessary provider reads; stale fallback SHALL remain visibly stale when a provider recheck fails.
 
 #### Scenario: Fresh cached barcode
 - **WHEN** a usable stored record is younger than ninety days and its per-100 values include sugar, fibre and salt
@@ -57,13 +57,17 @@ The system SHALL keep fetched external foods (Open Food Facts and Yazio) in thei
 
 #### Scenario: Forget a mirrored food
 - **WHEN** the athlete explicitly confirms removal of a database entry
-- **THEN** only that mirrored record is removed; product definitions and consumed snapshots remain independent, and a missing record produces a not-found error.
+- **THEN** only that stored food is removed; own products and consumed snapshots remain independent, and a missing record produces a not-found error.
 
 #### Scenario: Repeated mirrored food
 - **WHEN** another successful lookup stores the same external food identity
-- **THEN** its mirror record and fetched time are refreshed without creating a second food identity or consumed meal.
+- **THEN** its stored record and fetched time are refreshed without creating a second food identity or consumed meal.
 
-Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`, `backend/nutrition/food_database.py::FoodDatabaseService._off_product`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`, `backend/nutrition/food_database.py::FoodDatabaseService.forget`, `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_legacy_yazio_fallback_does_not_retry_each_scan`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Mirror storage failures are suppressed so a successful lookup can still return its result.
+#### Scenario: Stored food reads back unchanged
+- **WHEN** a stored food is read again
+- **THEN** it returns every field it was stored with, including fields the product columns do not hold and the absence of nutrient keys it never had.
+
+Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`, `backend/nutrition/food_database.py::FoodDatabaseService._off_product`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`, `backend/nutrition/food_database.py::FoodDatabaseService.forget`, `backend/db/repositories.py::FoodDatabaseEntryRepository`, `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_entry_reads_back_as_the_food_it_stored`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_legacy_yazio_fallback_does_not_retry_each_scan`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Storage failures are suppressed so a successful lookup can still return its result.
 
 ### Requirement: Confirmed product persistence and explicit archival
 The system SHALL require explicit confirmation at product HTTP save, update, archive, and mirror-removal boundaries. Products SHALL retain basis amount/unit, validated nutrient values, source, and provenance without retaining submitted image fields.
@@ -335,3 +339,87 @@ The system SHALL classify Yazio authentication and compatibility failures only a
 - **THEN** existing local and alternative food sources remain usable and retry/backoff limits remain effective.
 
 Evidence: `backend/providers/yazio.py::YazioClient._grant_rejected` (login 400/401/403 stays one ambiguous `food_database_auth_failed`), `backend/providers/yazio.py::YazioClient._raise_http_error` (only a bounded `version_blocked` body on a product request becomes `food_database_version_blocked`), `backend/nutrition/food_database.py::FoodDatabaseService._chain_search` (notices, fallback); `tests/test_yazio.py::YazioClientTests.test_rejected_login_pauses_further_attempts_without_leaking`, `tests/test_yazio.py::YazioClientTests.test_recognized_version_block_is_safe_and_distinct`, `tests/test_yazio.py::YazioClientTests.test_truncated_forbidden_response_is_sanitized`, `tests/test_food_lookup_chain.py::LookupChainTests.test_version_block_is_reported_while_fallback_remains_available`, `tests/test_food_lookup_chain.py::LookupChainTests.test_text_chain_names_rejected_yazio_credentials`. The incident's upstream response and actual cause stay unverified; no live account was used.
+
+### Requirement: Own product wins for its EAN
+Stored database foods with an own product's EAN SHALL stay stored for lookups but SHALL NOT be listed as entries of their own. A newly created own product SHALL take only its empty brand and nutrient fields from them, newest first, scaled to its basis when the unit matches; existing values SHALL stay, each filled field SHALL record its origin and fetch time, and the fill SHALL be part of the creation's change record. A lookup SHALL never change an own product.
+
+#### Scenario: Lookup of an own product's EAN
+- **WHEN** a lookup stores a food whose EAN an own product holds
+- **THEN** the food is stored for later lookups by its id, is not listed as a separate entry, and the own product is unchanged.
+
+#### Scenario: Own product created with the EAN of stored foods
+- **WHEN** the athlete creates an own product with the EAN of stored database foods
+- **THEN** the product's empty fields are filled from those foods, newest first, with origin and fetch time, and a later edit that empties a field keeps it empty.
+
+#### Scenario: Product counted per portion
+- **WHEN** the own product's basis unit differs from the food's
+- **THEN** no nutrient value is filled; an empty brand still is.
+
+#### Scenario: Stored food id
+- **WHEN** a new own product is submitted with the id of a stored database food
+- **THEN** it is saved under a new id and the stored food is unchanged; a Coach scope naming a stored food is no product object.
+
+Evidence: `backend/db/repositories.py::fill_empty_product_fields`, `backend/db/repositories.py::NutritionProductRepository.fill_from_database_entries`, `backend/nutrition/catalog.py::ProductCatalogService.save_product`, `backend/db/repositories.py::FoodDatabaseEntryRepository.search`, `backend/coach/dialogue_action.py`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_own_products_ean_lists_no_entry_and_a_lookup_never_changes_it`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_a_new_own_product_takes_only_empty_fields_from_its_eans_foods`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_new_product_fills_its_gaps_from_stored_foods_of_its_ean`, `tests/test_coach_dialogue.py::CoachDialogueTests.test_a_stored_database_food_is_no_product_scope_object`.
+
+### Requirement: Re-checks fill gaps of stored foods
+A re-check of a stored database food, automatic or manual, SHALL take every value the fresh result has and SHALL keep a stored value where the fresh result has none. Stored foods SHALL name their missing core fields (energy, carbohydrates, protein, fat, sugar, fibre, salt).
+
+#### Scenario: Fresh result fills a gap
+- **WHEN** a stored food without salt is re-checked and the fresh result has salt
+- **THEN** the stored food has the fresh salt value and salt is no longer listed as missing.
+
+#### Scenario: Fresh result lacks a known value
+- **WHEN** a stored food with fibre is re-checked and the fresh result has no fibre
+- **THEN** the stored fibre value stays and only the fetch time and the other fresh values change.
+
+#### Scenario: Fresh result on another or unknown basis
+- **WHEN** the fresh result has an unknown or different basis unit or amount
+- **THEN** no stored nutrient value is carried over and the unit is not guessed; stored fields the fresh result lacks, such as servings, stay.
+
+Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.refresh`, `backend/nutrition/food_database.py::FoodDatabaseService.stored_foods`; `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_fills_gaps_and_keeps_known_values`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_never_guesses_a_basis_and_keeps_further_fields`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_legacy_barcode_entry_refreshes_once_and_falls_back_offline`.
+
+### Requirement: Manual re-check of a stored food
+The athlete SHALL be able to re-check one stored database food online now through a session- and CSRF-protected action that applies the gap-filling rule and returns the refreshed food. When the database cannot be reached or does not know the food, the action SHALL fail visibly and leave the stored food unchanged.
+
+#### Scenario: Manual re-check succeeds
+- **WHEN** the athlete presses "Aktualisieren" on a stored food
+- **THEN** the food is fetched online regardless of its age, its gaps are filled, and its fetch time is now.
+
+#### Scenario: Database unreachable
+- **WHEN** the online fetch fails during a manual re-check
+- **THEN** an error is returned and the stored food, its values and its fetch time are unchanged.
+
+#### Scenario: Unknown entry
+- **WHEN** the request names no stored food
+- **THEN** it is rejected without any online request.
+
+#### Scenario: Write fails
+- **WHEN** the fresh result cannot be stored
+- **THEN** an error is returned instead of a success message.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/http_api/nutrition.py::NutritionPostRoutes._refresh_database_food`, `public/nutrition.js::loadNutritionDatabase`; `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_failed_or_unknown_re_check_changes_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_whose_write_fails_is_reported`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_refresh_names_the_entry`, `e2e/nutrition.spec.js` ("a stored database entry is refreshed on request").
+
+### Requirement: Yazio fills remaining gaps by EAN
+After a manual re-check of an Open Food Facts entry, still-empty core fields SHALL be looked up in Yazio by the entry's EAN when Yazio is configured. Only empty fields SHALL be filled, only from a Yazio product on the same basis, each with origin `yazio` and its fetch time; known values SHALL stay. Lookups and calculations SHALL make no extra Yazio request.
+
+#### Scenario: Gap filled from Yazio
+- **WHEN** a re-checked Open Food Facts entry still lacks salt and Yazio has the same EAN with salt on the same basis
+- **THEN** the entry's salt is the Yazio value, its provenance names `yazio` and the fetch time, and its other values are unchanged.
+
+#### Scenario: No Yazio, no match or another basis
+- **WHEN** Yazio is not configured, fails, has no product for the EAN, or reports another basis
+- **THEN** no field is filled from Yazio, the re-check still succeeds, and a Yazio failure is named in its notice.
+
+#### Scenario: Complete entry
+- **WHEN** the re-checked entry has every core field
+- **THEN** Yazio is not asked.
+
+#### Scenario: Open Food Facts later has the value or another basis
+- **WHEN** a later re-check returns the field from Open Food Facts, or returns the food on another basis
+- **THEN** the field no longer names `yazio` as its origin.
+
+#### Scenario: Lookup of a stale entry
+- **WHEN** a barcode lookup or a calculation re-checks a stale Open Food Facts entry
+- **THEN** Yazio is asked at most once, by the barcode chain itself.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_yazio`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.fill_gaps`; `tests/test_food_lookup_chain.py::LookupChainTests.test_a_re_check_fills_remaining_gaps_from_yazio_by_ean`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_fills_nothing_without_a_match_on_the_same_basis`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_complete_re_check_does_not_ask_yazio`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_basis_change_ends_a_yazio_fill`, `tests/test_food_lookup_chain.py::LookupChainTests.test_lookups_and_calculations_ask_yazio_at_most_once`.

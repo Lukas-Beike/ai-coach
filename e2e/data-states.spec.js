@@ -5,10 +5,10 @@ const { waitForSettledState } = require("./helpers/settled-state");
 // #1783: loading, not configured, no data yet and failed reads look different.
 const POWER_PROFILES = "/api/analysis/power-profiles";
 const ANALYSIS_TABS = [
+  ["running", "Noch keine Laufdaten"],
+  ["cycling", "Noch keine Raddaten"],
   ["load", "Noch keine Belastungsdaten"],
-  ["performance", "Noch keine Leistungsdaten"],
   ["recovery", "Noch keine Erholungsdaten"],
-  ["sessions", "Noch keine Einheiten"],
 ];
 
 async function openAnalysis(page, segment) {
@@ -29,7 +29,7 @@ test("@responsive an empty install shows one empty card with one action per anal
     await expect(card.locator("a, button")).toHaveText(connected ? "Jetzt abgleichen" : "Anbindung einrichten");
     await expect(page.locator("#dataPanel")).not.toContainText("Keine Daten:");
     await expect(card).not.toContainText("Intervals.icu");
-    for (const id of ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts", "currentPerformance", "analysisHistoryCharts", "activityAnalysis"]) {
+    for (const id of ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts", "currentPerformance", "analysisHistoryCharts"]) {
       await expect(page.locator(`#${id}`)).toBeHidden();
     }
   }
@@ -37,6 +37,9 @@ test("@responsive an empty install shows one empty card with one action per anal
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   // The action follows the connection state: no source leads to the connections, a source to a sync.
+  // Laufen has no period window, so a connected source offers the sync.
+  await page.evaluate(() => { location.hash = "#analysis/running"; });
+  await expect(card).toBeVisible();
   await page.evaluate(() => { AppState.state.data.garmin = { ...AppState.state.data.garmin, configured: false }; AppState.state.data.wahoo = { ...AppState.state.data.wahoo, connected: false }; renderAnalysisSegments(AppState.state.route); });
   await expect(card.locator("span")).toHaveText("Garmin oder Wahoo ist nicht verbunden.");
   await expect(card.getByRole("link", { name: "Anbindung einrichten" })).toHaveAttribute("href", "#more/connections");
@@ -54,7 +57,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
       ? route.fulfill({ status: 503, json: { error: "E2E fixture: Leistungsprofil nicht erreichbar" } })
       : route.fulfill({ json: { windows: { "90": { power: [{ sport: "Ride", duration_seconds: 5, watts: 640, status: "ok", date: "2026-10-01", source: "Garmin Connect" }] } } } });
   });
-  await openAnalysis(page, "performance");
+  await openAnalysis(page, "cycling");
   const profile = page.locator("#cyclingPowerProfile");
   const error = profile.locator(".error-state");
   await expect(error).toBeVisible();
@@ -80,7 +83,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
 test("@responsive a hanging analysis read times out into the retry state", async ({ page }) => {
   test.setTimeout(60_000);
   await page.route(`**${POWER_PROFILES}`, () => { /* never answers */ });
-  await openAnalysis(page, "performance");
+  await openAnalysis(page, "cycling");
   const profile = page.locator("#cyclingPowerProfile");
   await expect(profile.locator(".loading-state")).toHaveText("Leistungsprofil wird geladen…");
   await expect(profile.locator(".loading-state")).toHaveAttribute("aria-busy", "true");
@@ -89,23 +92,11 @@ test("@responsive a hanging analysis read times out into the retry state", async
   await expect(profile.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
 });
 
-test("@responsive a failed session list or equipment read offers a retry", async ({ page }) => {
+test("@responsive a failed equipment read offers a retry", async ({ page }) => {
   let fail = true;
   const failing = (message) => (route) => (fail ? route.fulfill({ status: 503, json: { error: message } }) : route.fallback());
-  await page.route(/\/api\/activities\?limit=/, failing("E2E fixture: Einheiten nicht erreichbar"));
   await page.route("**/api/analysis/training-records", failing("E2E fixture: Ausrüstung nicht erreichbar"));
-  await openAnalysis(page, "sessions");
-  const list = page.locator("#activityAnalysis");
-  await expect(list.locator(".error-state")).toBeVisible();
-  await expect(page.locator("#analysisEmptyState")).toBeHidden();
-  fail = false;
-  await list.getByRole("button", { name: "Erneut versuchen" }).click();
-  // The empty fixture has no sessions, so the retry ends in the tab's one empty card.
-  await expect(page.locator("#analysisEmptyState .empty-state strong")).toHaveText("Noch keine Einheiten");
-  await expect(list).toBeHidden();
-
-  // J-201: the equipment read fails into the same retry card.
-  fail = true;
+  // J-201: the equipment read fails into the retry card. A session's details retry in the calendar (activity-details spec).
   await page.goto("/#more/equipment");
   const gear = page.locator("#equipmentItems");
   await expect(gear.locator(".error-state")).toContainText("Ausrüstung nicht erreichbar");

@@ -4,6 +4,7 @@ These regressions verify execution, not a language model's recognition quality.
 """
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -25,9 +26,12 @@ from backend.coach import streams as coach_streams
 from backend.coach import structured_tool_round
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.dialogue import validate_request
+from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.db.repositories import FoodDatabaseEntryRepository
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
 
@@ -191,7 +195,7 @@ class DialogueHarness:
         ):
             transport = transport_factory.return_value
             transport.request.side_effect = response
-            transport.background_request.side_effect = response
+            transport.stream_request.side_effect = response
             receipt = server.COACH_TURNS.chat_turn_service().run(
                 message,
                 client_turn_id=turn or f"turn-{self.counter}",
@@ -236,9 +240,7 @@ class DialogueHarness:
                             "reason": error.reason or "approval_failed",
                         }
                     )
-        return receipt, transport.background_request if kwargs.get(
-            "background_job"
-        ) else transport.request
+        return receipt, transport.stream_request
 
     def state(self):
         return server.PLANNING_WORKFLOWS.structured_training_state_service().read()
@@ -1202,6 +1204,23 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         action = classify("save_coach_activity_feedback", ["activity_feedback"])
         self.assertEqual(action["authorization_scope"], ["activity_feedback"])
         self.assertEqual(action["intent"], "local_action")
+
+    def test_a_stored_database_food_is_no_product_scope_object(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        FoodDatabaseEntryRepository().upsert(
+            db, {"id": "off:4006381333931", "name": "Riegel"}, "2026-10-01"
+        )
+        with self.assertRaises(AppError) as missing:
+            CoachDialogueActionService._validate_scope_tokens(
+                db,
+                "save_nutrition_product",
+                {"nutrition_product:off:4006381333931"},
+                frozenset(),
+            )
+        self.assertEqual(missing.exception.reason, "request_object_missing")
 
     def test_coach_starts_with_tools_and_local_dialogue_without_classifier(self):
         result, model = self.turn(
@@ -2328,8 +2347,64 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             result["command_receipts"][-1]["result"]["reason"], "tool_call_conflict"
         )
 
-    def test_background_resumes_response_and_committed_effect_without_replaying(self):
-        turn_id = "background-resume"
+    def test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once(self):
+        class Killed(BaseException):
+            """Stands for a worker or process death: no failure handling runs."""
+
+        turn_id = "background-restart"
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Müde heute", turn_id, "synthetic-session"
+        )
+
+        def save(call_id):
+            return lambda _: self.call(
+                "save_checkin",
+                {"payload": {"notes": "Synthetic tired"}},
+                ["local_checkin"],
+                call_id=call_id,
+            )
+
+        def killed(_payload):
+            raise Killed
+
+        service = server.ATHLETE_DATA.checkin()
+        with (
+            patch.object(server.ATHLETE_DATA, "checkin", return_value=service),
+            patch.object(
+                service, "save_coach", wraps=service.save_coach
+            ) as save_checkin,
+        ):
+            with self.assertRaises(Killed):
+                self.turn(
+                    "Müde heute",
+                    [save("first-call"), killed],
+                    turn=turn_id,
+                    background_job=True,
+                )
+            store = server.COACH_BACKGROUND_JOBS.job_store()
+            self.assertEqual(
+                store.resume_interrupted(
+                    server.COACH_BACKGROUND_JOBS.turn_failure_service()
+                ),
+                1,
+            )
+            result, model = self.turn(
+                "Müde heute",
+                [save("second-call"), {"output_text": "Bereits gespeichert."}],
+                turn=turn_id,
+                background_job=True,
+            )
+        self.assertEqual(result["status"], "completed")
+        save_checkin.assert_called_once()
+        first = model.call_args_list[0].args[0]
+        self.assertIs(first["store"], False)
+        self.assertNotIn("previous_response_id", first)
+        self.assertIn("already ran in this turn", first["instructions"])
+        steps = json.loads(first["input"])["confirmed_steps"]
+        self.assertEqual([step["tool"] for step in steps], ["save_checkin"])
+
+    def test_job_of_an_older_release_is_requested_again_without_its_resume_state(self):
+        turn_id = "background-upgrade"
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
             "Müde heute", turn_id, "synthetic-session"
         )
@@ -2346,10 +2421,18 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "effect_key": coach_service.dialogue_effect_key(call["name"], args),
             "result": {"ok": True, "status": "saved"},
         }
-        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(
+        store = server.COACH_BACKGROUND_JOBS.job_store()
+        store.merge_receipt(
             turn_id,
-            {"openai_response_id": "synthetic-response", "command_receipts": [prior]},
+            {
+                "openai_response_id": "resp_synthetic",
+                "response_input": [{"synthetic": "input"}],
+                "previous_response_id": "resp_before",
+                "pending_tool_outputs": [{"synthetic": "output"}],
+                "command_receipts": [prior],
+            },
         )
+        store.resume_interrupted(server.COACH_BACKGROUND_JOBS.turn_failure_service())
         with patch.object(
             CoachToolDispatchService,
             "execute",
@@ -2362,31 +2445,16 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 background_job=True,
             )
         self.assertEqual(result["status"], "completed")
+        first = model.call_args_list[0].args[0]
+        self.assertIs(first["store"], False)
+        self.assertNotIn("previous_response_id", first)
+        self.assertIsInstance(first["input"], str)
         self.assertEqual(
-            model.call_args_list[0].kwargs["response_id"], "synthetic-response"
+            [step["tool"] for step in json.loads(first["input"])["confirmed_steps"]],
+            ["save_checkin"],
         )
-
-    def test_background_replays_checkpointed_outputs_before_new_response(self):
-        turn_id = "background-outputs"
-        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
-            "Wie geht es weiter?", turn_id, "synthetic-session"
-        )
-        outputs = [
-            {"type": "function_call_output", "call_id": "read", "output": '{"ok":true}'}
-        ]
-        server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(
-            turn_id,
-            {"openai_response_id": "old-response", "pending_tool_outputs": outputs},
-        )
-        result, model = self.turn(
-            "Wie geht es weiter?",
-            [{"output_text": "Fortgesetzt."}],
-            turn=turn_id,
-            background_job=True,
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(model.call_args.args[0]["input"], outputs)
-        self.assertIsNone(model.call_args.kwargs["response_id"])
+        for key in ("openai_response_id", "response_input", "pending_tool_outputs"):
+            self.assertNotIn(key, result)
 
     def test_tool_round_limit_submits_outputs_and_keeps_provider_selection(self):
         with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):

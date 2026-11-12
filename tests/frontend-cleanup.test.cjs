@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
+const { loadPublicScript } = require("./frontend-harness.cjs");
 
 const publicDir = path.join(__dirname, "../public");
 const read = (name) => fs.readFileSync(path.join(publicDir, name), "utf8").replace(/\r\n/g, "\n");
@@ -41,7 +41,7 @@ test("every script and stylesheet of index.html is cached by the service worker"
 test("removed frontend symbols and files are gone from public/", () => {
   assert.ok(!fs.existsSync(path.join(publicDir, "forms.js")));
   const sources = [...scripts, "index.html", "service-worker.js"].map(read).join("\n");
-  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField"]) {
+  for (const removed of ["renderTrainingPlans", "trainingPlanCard", "trainingPlanEntry", "appendLocalEquipment", "providerShortLabel", "performanceSection", "calendarHorizonText", "calendarHorizonHint", "planningSummary", "forms.js", "contextField", "jumpToChatComposer", "chat-composer-hidden", "coachQueuedMessages", ">Neue Nachricht<", "/api/activities?limit=250", "chatResetButton", "aiProviderSelect"]) {
     assert.ok(!sources.includes(removed), `${removed} is still referenced`);
   }
   assert.ok(!/id="trainingPlans"/.test(index));
@@ -49,12 +49,13 @@ test("removed frontend symbols and files are gone from public/", () => {
 
 test("removed CSS classes and tokens are no longer defined", () => {
   const styles = read("styles.css");
-  for (const cls of ["weekly-chart", "weekly-load-line", "weekly-load-point", "weekly-sport-legend", "coach-overview", "garmin-panel", "replan-preview", "replan-change", "adaptive-planning-dialog", "planned-day-form", "planned-day-metrics", "estimate-note", "training-plan", "eyebrow"]) {
+  for (const cls of ["weekly-chart", "weekly-load-line", "weekly-load-point", "weekly-sport-legend", "coach-overview", "garmin-panel", "replan-preview", "replan-change", "adaptive-planning-dialog", "planned-day-form", "planned-day-metrics", "estimate-note", "training-plan", "eyebrow", "chat-composer-hidden"]) {
     assert.ok(!new RegExp(String.raw`\.${cls}(?![\w-])`).test(styles), `.${cls} is still defined`);
   }
-  for (const token of ["bg-elevated", "planned-entry-shadow", "selected-surface", "session-soft", "space-1", "space-2", "space-6", "estimate-ink"]) {
+  for (const token of ["bg-elevated", "planned-entry-shadow", "selected-surface", "session-soft", "space-1", "space-2", "space-6", "estimate-ink", "bottom-nav-clearance", "chat-fixed-ui-clearance"]) {
     assert.ok(!new RegExp(String.raw`--${token}(?![\w-])`).test(styles), `--${token} is still defined`);
   }
+  assert.ok(!styles.includes(".quick-message-templates::after"), "the quick-start fade overlay is back");
 });
 
 test("collapsible summary titles are never hidden by a merged selector list", () => {
@@ -106,12 +107,9 @@ test("only the kept explanations remain as helper texts", () => {
 });
 
 test("a Coach link names its host when the label does not, and escapes it", () => {
-  const views = read("views.js");
-  const end = views.indexOf("function headingFromMarkdownLine");
-  const context = vm.createContext({ URL });
-  vm.runInContext(views.slice(0, end) + ";globalThis.inline = inlineMarkdown;", context);
-  const differing = context.inline("[Mehr dazu](https://www.example.invalid/path?a=1&b=2)");
+  const context = loadPublicScript("views.js", { URL });
+  const differing = context.inlineMarkdown("[Mehr dazu](https://www.example.invalid/path?a=1&b=2)");
   assert.ok(differing.includes('<a href="https://www.example.invalid/path?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Mehr dazu</a><span class="link-host"> (example.invalid)</span>'));
-  assert.ok(!context.inline("[example.invalid/path](https://example.invalid/path)").includes("link-host"));
-  assert.ok(context.inline("[Quelle](https://example.invalid/x)").includes("(example.invalid)</span>"));
+  assert.ok(!context.inlineMarkdown("[example.invalid/path](https://example.invalid/path)").includes("link-host"));
+  assert.ok(context.inlineMarkdown("[Quelle](https://example.invalid/x)").includes("(example.invalid)</span>"));
 });

@@ -36,6 +36,9 @@ test("@responsive the logout button only appears in Betrieb & Diagnose", async (
   }
   await page.goto("/#more/operations");
   await expect(page.locator("#logoutButton")).toBeVisible();
+  // The version sits in the settings, not in the header.
+  await expect(page.locator("#settingsAppVersion")).toHaveText(/^v\d+\.\d+\.\d+/);
+  await expect(page.locator("header.topbar")).not.toContainText(/PRIVATER TRAININGSBEREICH|v\d+\.\d+\.\d+/);
   await expect(page.locator("#privacyExportButton")).toBeHidden();
   await page.evaluate(() => document.querySelectorAll('details[data-more-segment-panel="operations"]').forEach((section) => { section.open = true; }));
   await expect(page.locator("#privacyExportButton")).toBeVisible();
@@ -68,5 +71,29 @@ test("@responsive the navigation shows fitting labels and no panel outline after
     expect(fit.height).toBeGreaterThanOrEqual(44);
     expect(fit.width).toBeGreaterThanOrEqual(44);
     expect(fit.textFits).toBe(true);
+  }
+});
+
+test("@responsive each navigation item is a stable hash link that opens and focuses its panel", async ({ page }) => {
+  await page.route("**/api/state/events*", (route) => route.abort());
+  await page.goto("/");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Boolean(state.data))).toBe(true);
+  await expect(page.locator("html")).toHaveAttribute("lang", "de");
+  await expect(page.locator("svg.icon-sprite")).toHaveCount(1);
+  for (const [name, hash, panel] of [["Kalender", "#plan/overview", "workoutsPanel"], ["Analyse", "#analysis/running", "dataPanel"], ["Mehr", "#more", "settingsPanel"], ["Coach", "#coach", "chatPanel"]]) {
+    const item = page.locator(`.desktop-nav:visible .nav-item[aria-label="${name}"], .bottom-nav:visible .nav-item[aria-label="${name}"]`);
+    await expect(item, name).toHaveAttribute("href", hash);
+    await item.click();
+    await expect(page).toHaveURL(new RegExp(`${hash}$`));
+    await expect(page.locator(`#${panel}`)).toHaveClass(/active/);
+    await expect(page.locator(`#${panel}`)).toBeFocused();
+    await expect(item).toHaveAttribute("aria-current", "page");
+  }
+  // A hash of a removed route opens the Coach and replaces the address.
+  for (const removed of ["#today", "#activities", "#planned", "#analysis/history"]) {
+    await page.goto(`/${removed}`);
+    await expect(page).toHaveURL(/#coach$/);
+    await expect(page.locator("#chatPanel")).toHaveClass(/active/);
   }
 });

@@ -4,7 +4,7 @@ const { AxeBuilder } = require("@axe-core/playwright");
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Kalender", "workoutsPanel", "plan/overview"],
-  ["Analyse", "dataPanel", "analysis/performance"],
+  ["Analyse", "dataPanel", "analysis/running"],
   ["Ernährung", "nutritionPanel", "nutrition/diary"],
   ["Mehr", "settingsPanel", "more"],
 ];
@@ -36,6 +36,8 @@ test("chat status announcements update once and keep history outside the live re
   // <output> carries the implicit "status" role, so assert the native element
   // instead of an explicit role attribute.
   await expect(page.locator("output#chatOperationStatus")).toHaveCount(1);
+  await expect(page.locator("#chatOperationStatus")).toHaveAttribute("aria-live", "polite");
+  await expect(page.locator("#chatOperationStatus")).not.toHaveAttribute("hidden", /.*/);
   await expect(page.locator("#chatOperationStatus")).toHaveText("Coach arbeitet an deiner Antwort…");
   expect(mutations).toBe(1);
 });
@@ -217,20 +219,21 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     }
 
     await page.getByRole("link", { name: "Analyse", exact: true }).click();
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await expect(page.getByRole("link", { name: "Verlauf", exact: true })).toHaveCount(0);
     await expect(page.locator("#activityFilters, #activityFromDate, #activityToDate")).toHaveCount(0);
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
     await page.goBack();
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more$/);
+    // An old Leistung link opens Laufen (#2265).
     await page.goto("/#analysis/performance");
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await page.goto("/#unknown-route");
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);
@@ -395,10 +398,6 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       display: getComputedStyle(panel).display,
     })));
     expect(panelState.filter((panel) => !panel.active && panel.display !== "none"), "inactive panels must not leak into the active view").toEqual([]);
-    const clippedLabels = await page.locator(".coach-provider-item strong:visible").evaluateAll((nodes) => nodes
-      .filter((node) => node.scrollWidth > node.clientWidth || node.getBoundingClientRect().right > window.innerWidth + 1)
-      .map((node) => node.textContent));
-    expect(clippedLabels, "visible provider labels must fit their cards").toEqual([]);
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
@@ -710,6 +709,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
     await page.evaluate(() => window.__chatTest.push("delta", { text: "# Trainingsanalyse\n\n- Ruhiger Beginn" }));
     await expect(page.locator(".message.assistant.streaming")).toContainText("Ruhiger Beginn");
+    await expect(page.locator(".message.assistant.streaming li")).toContainText("Ruhiger Beginn");
     await page.evaluate(() => { window.__chatTest.stableMessageNode = document.querySelector(".message.user"); });
     await page.evaluate(() => window.__chatTest.push("delta", { text: "\n- Stabiler Abschluss" }));
     await expect(page.locator(".message.assistant.streaming")).toContainText("Stabiler Abschluss");

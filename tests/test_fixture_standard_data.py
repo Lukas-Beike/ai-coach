@@ -384,7 +384,6 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         unit_of_work.return_value.__exit__ = Mock(return_value=False)
         manager = Mock(unit_of_work=unit_of_work)
         repository = fixture_runtime.server.KEY_VALUE_REPOSITORY
-        snapshots = fixture_runtime.server.SNAPSHOT_REPOSITORY
 
         def get_value(_db, key):
             return values.get(key)
@@ -407,14 +406,14 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                 return_value="synthetic-upgrade",
             ),
             patch.object(
-                snapshots,
-                "latest_payload",
+                fixture_runtime,
+                "_latest_snapshot_payload",
                 side_effect=lambda _db: json.dumps(snapshot),
             ),
             patch.object(
-                snapshots,
-                "save",
-                side_effect=lambda _db, value, _created_at: snapshot.update(value),
+                fixture_runtime,
+                "_store_snapshot",
+                side_effect=lambda _db, value: snapshot.update(value),
             ) as save_snapshot_mock,
             patch.object(
                 fixture_runtime,
@@ -488,7 +487,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                         "SELECT COUNT(*) AS count FROM kv WHERE key LIKE 'equipment:%'"
                     ).fetchone()["count"]
                     old_snapshot = json.loads(
-                        server.SNAPSHOT_REPOSITORY.latest_payload(db)
+                        fixture_runtime._latest_snapshot_payload(db)
                     )
                     detail_values = _canonical_details(db, old_snapshot)
                     for row in old_snapshot["recent_wellness"]:
@@ -496,9 +495,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                         row.pop("bodyFat", None)
                         row.pop("sport_info", None)
                     old_snapshot["raw_provider_data"].pop("wellness", None)
-                    server.SNAPSHOT_REPOSITORY.save(
-                        db, old_snapshot, "synthetic-v1-demo"
-                    )
+                    fixture_runtime._store_snapshot(db, old_snapshot)
                     server.KEY_VALUE_REPOSITORY.set(
                         db, "preview_demo_seed_version", "1"
                     )
@@ -509,7 +506,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                     seed_version = server.KEY_VALUE_REPOSITORY.get(
                         db, "preview_demo_seed_version"
                     )
-                    snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+                    snapshot = json.loads(fixture_runtime._latest_snapshot_payload(db))
                     upgraded_nutrition_count = db.execute(
                         "SELECT COUNT(*) AS count FROM nutrition_logs"
                     ).fetchone()["count"]
@@ -695,7 +692,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
 
         def counts():
             with server.database_manager().unit_of_work() as db:
-                snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+                snapshot = json.loads(fixture_runtime._latest_snapshot_payload(db))
                 equipment_keys = db.execute(
                     "SELECT COUNT(*) AS count FROM kv WHERE key LIKE 'equipment%'"
                 ).fetchone()["count"]
@@ -809,7 +806,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
     def _v6_scenarios(self, server, today):
         """Read back every v6 scenario through the public services and snapshot."""
         with server.database_manager().unit_of_work() as db:
-            snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+            snapshot = json.loads(fixture_runtime._latest_snapshot_payload(db))
             version = server.KEY_VALUE_REPOSITORY.get(db, "preview_demo_seed_version")
         checkins = {
             item["checkin_date"]: item
@@ -1000,7 +997,6 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
         state = Mock()
         calls = [
             lambda: transport.request({"input": "{}"}),
-            lambda: transport.background_request({"input": "{}"}),
             lambda: transport.stream_request({"input": "{}"}, lambda _delta: None),
         ]
         with (
@@ -1074,14 +1070,14 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
                 server.runtime_clock, "utc_now", return_value="synthetic-merge"
             ),
             patch.object(
-                server.SNAPSHOT_REPOSITORY,
-                "latest_payload",
+                fixture_runtime,
+                "_latest_snapshot_payload",
                 return_value=json.dumps(snapshot),
             ),
             patch.object(
-                server.SNAPSHOT_REPOSITORY,
-                "save",
-                side_effect=lambda _db, value, _at: saved.append(value),
+                fixture_runtime,
+                "_store_snapshot",
+                side_effect=lambda _db, value: saved.append(value),
             ),
         ):
             fixture_runtime._merge_snapshot_activities(
@@ -1109,7 +1105,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
     @staticmethod
     def _snapshot_activity_ids(server):
         with server.database_manager().unit_of_work() as db:
-            snapshot = json.loads(server.SNAPSHOT_REPOSITORY.latest_payload(db))
+            snapshot = json.loads(fixture_runtime._latest_snapshot_payload(db))
         return sorted(str(item["id"]) for item in snapshot["recent_activities"])
 
 

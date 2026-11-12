@@ -2,12 +2,9 @@ const $ = (selector) => document.querySelector(selector);
 const QUICK_TEMPLATES_INACTIVITY_MS = 6 * 60 * 60 * 1000;
 const LAST_PWA_ACTIVITY_KEY = "intervals-coach-last-pwa-activity";
 const APPEARANCE_KEY = "intervals-coach-appearance";
-const SYNC_POLL_LEASE_KEY = "intervals-coach-sync-poll-lease";
-const SYNC_POLL_CHANNEL = "intervals-coach-sync-status";
 const SYNC_POLL_ACTIVE_MS = 1_500;
 const SYNC_POLL_IDLE_MS = 60_000;
 const SYNC_POLL_RETRY_MS = 5_000;
-const SYNC_POLL_LEASE_MS = 4_000;
 let mobileViewportFrame = null;
 const mobileViewportBaselines = { portrait: 0, landscape: 0 };
 let mobileViewportInputWasFocused = false;
@@ -118,7 +115,6 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
   if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
-  if (route === "analysis/sessions") void ActivityAnalysis.render();
 }
 
 function renderActiveRoute(mainRoute, panelRoute) {

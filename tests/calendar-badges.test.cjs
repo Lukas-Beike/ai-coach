@@ -1,21 +1,13 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
-const start = source.indexOf("const CALENDAR_MARKERS");
-const end = source.indexOf("\nfunction calendarActualActivity(", start);
+const { extractFunctions, FakeElement } = require("./frontend-harness.cjs");
 
 function helpers() {
-  assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({});
-  vm.runInContext(
-    `${source.slice(start, end)};globalThis.helpers = { stripCalendarMarkers, calendarMarkerKeys, plannedDayStatusLabel, plannedDayNoteSpecs, plannedConflictLabels, plannedAppointmentLabel };`,
-    context,
-  );
-  return context.helpers;
+  return extractFunctions("plan-views.js", [
+    "CALENDAR_MARKERS", "MARKER_WORD_GAP", "calendarMarkerSource", "CALENDAR_MARKER_PATTERN", "PLANNED_RAIN_FLAG_MIN_PERCENT", "PLANNED_UV_FLAG_MIN",
+    "PLANNED_AQI_FLAG_MIN", "PLANNED_CAMS_POLLEN_FLAG_MIN", "PLANNED_DAY_STATUS_LABELS",
+    "stripCalendarMarkers", "calendarMarkerKeys", "plannedDayStatusLabel", "plannedDayNoteSpecs", "plannedConflictLabels", "plannedAppointmentLabel",
+  ]);
 }
 
 // vm contexts have their own Array/Object prototypes; normalise before deep comparison.
@@ -98,4 +90,26 @@ test("tolerant marker spellings are stripped and detected like the backend", () 
     plannedAppointmentLabel({ name: "Physio (No-Intensity)", start_local: "2026-10-10T08:30:00" }),
     "Physio · 08:30",
   );
+});
+
+test("each calendar marker is named in German on the day note", () => {
+  const { plannedDayNoteSpecs } = helpers();
+  const labels = { "[NO_TRAINING]": "Kein Training", "[NO_INTENSITY]": "Keine Intensität", "[SHORT_ONLY]": "Nur kurze Einheiten" };
+  for (const [token, label] of Object.entries(labels)) {
+    const [note] = plannedDayNoteSpecs({ appointments: [{ name: `Kurs ${token}` }] }, [], "2026-10-10");
+    assert.equal(note.text, `Kurs · ${label}`, token);
+  }
+});
+
+test("a badge shows its text as text and hides its glyph from screen readers", () => {
+  const { calendarBadge, calendarBadgeRow } = extractFunctions("plan-views.js", ["calendarBadge", "calendarBadgeRow"], {
+    document: { createElement: (tag) => new FakeElement(tag), createTextNode: (text) => ({ text }) },
+  });
+  const badge = calendarBadge({ kind: "calendar", icon: "*", text: "<img src=x onerror=alert(1)>" });
+  assert.equal(badge.className, "planned-badge is-calendar");
+  assert.equal(badge.children[0].attributes["aria-hidden"], "true");
+  assert.deepEqual(badge.children[1], { text: "<img src=x onerror=alert(1)>" });
+  const row = calendarBadgeRow([{ kind: "calendar", text: "A" }, { kind: "day-status", text: "B" }]);
+  assert.equal(row.className, "planned-badges");
+  assert.deepEqual(row.children.map((child) => child.className), ["planned-badge is-calendar", "planned-badge is-day-status"]);
 });

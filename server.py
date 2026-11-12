@@ -149,7 +149,6 @@ from backend.db.repositories import (
     PlanAdjustmentRepository,
     PlanningStateRepository,
     ProfileRepository,
-    SnapshotRepository,
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher, database_schema_is_current
@@ -308,10 +307,10 @@ from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
-    ModelBackgroundPolicy,
     ModelEndpointSettings,
     ModelProviderDiagnostics,
     ModelProviderOwners,
+    ModelResponseLimits,
     ModelTransportAssembly,
     ModelTransportClock,
 )
@@ -435,6 +434,7 @@ from backend.sync.queue_assembly import (
     SyncQueuePolicy,
     SyncQueueWorker,
 )
+from backend.sync.rating_backfill_removal import RatingBackfillRemoval
 from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_assembly import (
     DailySyncLoopSettings,
@@ -487,19 +487,19 @@ LOG_PATH = DATA_DIR / "intervals-coach.log"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-# The Responses API counts both visible output and reasoning tokens against
-# max_output_tokens. Keep ordinary replies bounded, but leave enough room for
-# an explicitly requested multi-week training plan.
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
-OPENAI_BACKGROUND_POLL_SECONDS = 2
-OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
+# The longest silence allowed between two parts of a streamed model response.
+# Long reasoning on a large plan may send nothing for minutes (athlete
+# decision 2026-11-11, #2073: 10 minutes instead of 3).
+OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
+# Plain OpenAI requests (impact classifier, remote conversation create/delete).
+OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -547,7 +547,6 @@ PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
 CHAT_REPOSITORY = ChatRepository(runtime_clock.utc_now)
 CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
-SNAPSHOT_REPOSITORY = SnapshotRepository()
 
 
 PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
@@ -1046,7 +1045,6 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
-    snapshots=SNAPSHOT_REPOSITORY,
     utc_now=runtime_clock.utc_now,
     athlete_clock=lambda: ATHLETE_CLOCK,
 )
@@ -1311,6 +1309,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             openai_responses_path=OPENAI_RESPONSES_PATH,
             json_media_type=JSON_MEDIA_TYPE,
             response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
         ),
         audio=AudioTranscriptionSettings(max_audio_bytes=MAX_AUDIO_BODY_BYTES),
         diagnostics=ModelProviderDiagnostics(
@@ -1318,9 +1317,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             logger=LOGGER,
             app_version=APP_VERSION,
         ),
-        background=ModelBackgroundPolicy(
-            background_poll_seconds=OPENAI_BACKGROUND_POLL_SECONDS,
-            background_max_seconds=OPENAI_BACKGROUND_MAX_SECONDS,
+        limits=ModelResponseLimits(
             max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
         ),
         clock=ModelTransportClock(
@@ -1664,7 +1661,6 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
-        rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
         stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
@@ -2206,6 +2202,10 @@ PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
     key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
 )
 
+RATING_BACKFILL_REMOVAL = RatingBackfillRemoval(
+    key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
+)
+
 SESSION_REBUNDLE = SessionRebundle(
     key_values=KEY_VALUE_REPOSITORY,
     clock=runtime_clock.utc_now,
@@ -2233,6 +2233,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The one-time focus backfill of future units (#1849) runs after all stages.
     extra_followups=(
         PROFILE_WEEKLY_PLAN_REMOVAL,
+        RATING_BACKFILL_REMOVAL,
         SESSION_REBUNDLE,
         SESSION_FOCUS_BACKFILL,
     ),
@@ -2513,9 +2514,12 @@ def main() -> None:
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
             COACH_BACKGROUND_JOBS.turn_failure_service()
         )
+        # The startup writes on this thread come before any worker that can start
+        # the canonical backfill (a finished sync job does): a batch holding the
+        # writer must not fail startup with DatabaseBusyError (#2287).
+        SYNC_SCHEDULERS.startup_scheduler().schedule()
         sync_worker = sync_job_worker()
         sync_worker.start()
-        CANONICAL_BACKFILL.worker.start()
         COACH_JOB_WORKER.start(
             COACH_BACKGROUND_JOBS.job_store,
             COACH_BACKGROUND_JOBS.background_job_runner,
@@ -2524,7 +2528,7 @@ def main() -> None:
                 COACH_BACKGROUND_JOBS.turn_failure_service()
             ),
         )
-        SYNC_SCHEDULERS.startup_scheduler().schedule()
+        CANONICAL_BACKFILL.worker.start()
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
         daily_thread.start()

@@ -88,6 +88,17 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         )
         self.meal_library.forget_database_food.assert_called_once_with("off:1")
 
+    def test_database_entry_refresh_names_the_entry(self):
+        self.handler.read_json.return_value = {"id": "off:1"}
+        self.meal_library.refresh_database_food.return_value = {"ok": True}
+        dispatch_route(
+            self.post_routes,
+            self.handler,
+            "/api/nutrition/products/database/refresh",
+            method="POST",
+        )
+        self.meal_library.refresh_database_food.assert_called_once_with("off:1")
+
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
         self.handler.path = "/api/nutrition/products?barcode=4006381333931"
         self.meal_library.product_catalog.lookup_product.return_value = {

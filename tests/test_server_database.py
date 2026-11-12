@@ -342,22 +342,6 @@ class ServerDatabaseTests(ServerTestCase):
                 [row["activity_id"] for row in repository.list(db)], ["activity-old"]
             )
 
-    def test_snapshot_repository_preserves_latest_payload_and_retention_contract(self):
-        repository = server.SnapshotRepository()
-        with server.database_manager().unit_of_work() as db:
-            for index in range(13):
-                repository.save(
-                    db,
-                    {"synced_at": f"2026-09-{index + 1:02d}", "index": index},
-                    f"2026-09-{index + 1:02d}",
-                )
-            payload = repository.latest_payload(db)
-            count = db.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()[
-                "count"
-            ]
-        self.assertEqual(json.loads(payload)["index"], 12)
-        self.assertEqual(count, 12)
-
     def test_local_public_state_reuses_request_database_connections(self):
         backend = (
             server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
@@ -663,7 +647,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 17)
+                self.assertEqual(manifest["format_version"], 18)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)

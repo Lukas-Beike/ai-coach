@@ -30,6 +30,10 @@ The client SHALL retain a last loaded state snapshot, up to twenty latest persis
 - **WHEN** the device has a saved state and separately saved newer Coach messages
 - **THEN** the start view uses the newer persisted message page, with a cursor for older history, rather than restoring older snapshot messages over it.
 
+#### Scenario: Older history while cached messages sync
+- **WHEN** the start view shows cached messages and the fresh start answers are still pending
+- **THEN** reaching the top of the chat loads no older history automatically from the cached cursor until the fresh messages have replaced the cache; the button for older messages stays usable throughout.
+
 #### Scenario: View read and asset update
 - **WHEN** a recent view is reopened or a saved view cache belongs to other assets
 - **THEN** matching current-asset reads can display while loading; obsolete view-cache entries are not treated as current-asset responses.
@@ -38,7 +42,7 @@ The client SHALL retain a last loaded state snapshot, up to twenty latest persis
 - **WHEN** browser storage rejects writes
 - **THEN** cache failures do not block the application, lower-priority view cache gives way to message/state storage, and invalid cache JSON is ignored.
 
-Evidence: `public/state-loader.js::rememberChatCache`, `public/state-loader.js::readStateSnapshot`, `public/state-loader.js::rememberViewCache`, `public/state-loader.js::writeStateSnapshot`; `tests/state-loader-startup.test.cjs::shown messages are cached at once as the latest page and replace older snapshot messages`, `tests/state-loader-startup.test.cjs::the view cache keeps recent reads for the same assets and is cleared with the snapshot`, `tests/state-loader-startup.test.cjs::a full storage drops the view cache before the message cache`.
+Evidence: `public/state-loader.js::rememberChatCache`, `public/state-loader.js::readStateSnapshot`, `public/state-loader.js::rememberViewCache`, `public/state-loader.js::writeStateSnapshot`; `tests/state-loader-startup.test.cjs::shown messages are cached at once as the latest page and replace older snapshot messages`, `tests/state-loader-startup.test.cjs::the view cache keeps recent reads for the same assets and is cleared with the snapshot`, `tests/state-loader-startup.test.cjs::a full storage drops the view cache before the message cache`; `public/coach.js::appendHistoryPageButton`, `e2e/coach-message-cache.spec.js::cached latest messages show before the start answers and older ones page in`.
 
 ### Requirement: Startup distinguishes cached state from fresh bootstrap
 The client SHALL show compatible stored reads promptly while authentication and fresh state load, and show a noninteractive update-loading screen for a snapshot from different assets. Stored data SHALL not establish fresh server versions or trigger notifications as newly loaded state.
@@ -144,7 +148,7 @@ The client SHALL load expensive report/detail views when needed, cache appropria
 - **WHEN** a local activity lacks provider detail
 - **THEN** the UI preserves available metadata/gaps and offers the explicit detail-refresh operation instead of hiding the activity or fetching provider detail just by opening it.
 
-Evidence: `public/analysis.js::requestAnalysisReport`, `public/analysis.js::clearAnalysisReportCache`, `public/activity-details.js::open`, `public/activity-analysis.js::render`, `public/components.js::DATA_LOAD_TIMEOUT_MS`; `tests/analysis-report-cache.test.cjs::training records are reused for the same state version until invalidated`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/analysis-on-demand.spec.js::@responsive equipment records load only on the equipment route and stay cached`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`. Cache and detail request implementation was inspected; browser behavior was not executed by this worker.
+Evidence: `public/analysis.js::requestAnalysisReport`, `public/analysis.js::clearAnalysisReportCache`, `public/activity-details.js::open`, `public/activity-analysis.js::loadPanel`, `public/components.js::DATA_LOAD_TIMEOUT_MS`; `tests/analysis-report-cache.test.cjs::training records are reused for the same state version until invalidated`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/analysis-on-demand.spec.js::@responsive equipment records load only on the equipment route and stay cached`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`. Cache and detail request implementation was inspected; browser behavior was not executed by this worker.
 
 ### Requirement: Background updates coordinate events and polling
 The client SHALL use authenticated state events when available, coalesce changed-area reloads, reconnect with bounded backoff, and fall back to status polling when event delivery is unavailable or stale. Hidden/offline views SHALL release their active polling/event resources appropriately.
@@ -153,15 +157,15 @@ The client SHALL use authenticated state events when available, coalesce changed
 - **WHEN** ready/heartbeat and state-change events arrive
 - **THEN** replay baseline is respected, changed areas coalesce, and Coach status uses its slow safety check rather than constant fast polling.
 
-#### Scenario: Event interruption or multiple tabs
-- **WHEN** event delivery fails or another tab owns the optional sync-poll lease
-- **THEN** reconnect/poll fallback remains bounded, lease/broadcast coordination avoids needless duplicate sync polling, and storage denial does not disable sync monitoring.
+#### Scenario: Event interruption
+- **WHEN** event delivery fails
+- **THEN** reconnect/poll fallback remains bounded; each visible tab polls the local status endpoint itself.
 
 #### Scenario: Active sync and visibility change
 - **WHEN** sync is running, idle, hidden, or offline
 - **THEN** the ordinary sync poll uses active/idle/retry intervals and hidden/offline transitions close events or release/abort the relevant poll; returning visible triggers fresh status checking.
 
-Evidence: `public/sync-status.js::connectStateEvents`, `public/sync-status.js::handleStateEvent`, `public/sync-status.js::pollSyncStatus`, `public/sync-status.js::syncPollLeaseAvailable`, `public/coach.js::pollChatStatus`; `tests/reload-coalescing.test.cjs::the status is not polled every 1.5 seconds while the event stream is healthy`, `tests/reload-coalescing.test.cjs::a silently stalled event stream switches to the fast check once it counts as stale`, `e2e/state-events.spec.js::hidden and offline pages release status streams and resume only one connection`.
+Evidence: `public/sync-status.js::connectStateEvents`, `public/sync-status.js::handleStateEvent`, `public/sync-status.js::pollSyncStatus`, `public/coach.js::pollChatStatus`; `tests/reload-coalescing.test.cjs::the status is not polled every 1.5 seconds while the event stream is healthy`, `tests/reload-coalescing.test.cjs::a silently stalled event stream switches to the fast check once it counts as stale`, `e2e/state-events.spec.js::hidden and offline pages release status streams and resume only one connection`.
 
 ### Requirement: Busy Coach turns defer bounded background work
 The client SHALL defer nonessential automatic area reloads during an active Coach turn while keeping transcript/profile and athlete-initiated operations live. Deferred background work SHALL coalesce and run when the turn ends or the sixty-second cap is reached.

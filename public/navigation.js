@@ -9,11 +9,11 @@ const NAV_ROUTES = Object.freeze({
   "nutrition/week": "nutritionPanel",
   "nutrition/products": "nutritionPanel",
   analysis: "dataPanel",
-  "analysis/performance": "dataPanel",
+  "analysis/running": "dataPanel",
+  "analysis/cycling": "dataPanel",
   "analysis/load": "dataPanel",
   "nutrition/body": "nutritionPanel",
   "analysis/recovery": "dataPanel",
-  "analysis/sessions": "dataPanel",
   more: "settingsPanel",
   "more/connections": "settingsPanel",
   "more/coach": "settingsPanel",
@@ -47,12 +47,18 @@ globalThis.AppRouter = (() => {
   let configured = false;
   let hashchangeRegistered = false;
 
+  // Removed views whose content lives elsewhere now: the single sessions are in the calendar (#2258),
+  // the former Leistung segment is split by sport and its links open Laufen (#2265).
+  const ROUTE_ALIASES = Object.freeze({ "analysis/sessions": "plan/overview", "analysis/performance": "analysis/running" });
+
   function routeFromHash(hash = globalThis.location.hash) {
     const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
-    return Object.hasOwn(routes, rawRoute) ? rawRoute : defaultRoute;
+    const route = ROUTE_ALIASES[rawRoute] || rawRoute;
+    return Object.hasOwn(routes, route) ? route : defaultRoute;
   }
 
   function hashContainsKnownRoute(hash = globalThis.location.hash) {
+    // An old link is replaced by its new route, so it counts as unknown here.
     const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();
     return Object.hasOwn(routes, rawRoute);
   }

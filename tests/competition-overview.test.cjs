@@ -1,10 +1,8 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const vm = require("node:vm");
 const { test } = require("node:test");
-const source = fs.readFileSync("public/plan-views.js", "utf8");
-const context = vm.createContext({ AppFormat: require("../public/format.js") });
-vm.runInContext(source, context);
+const { loadPublicScript } = require("./frontend-harness.cjs");
+
+const context = loadPublicScript("plan-views.js", { AppFormat: require("../public/format.js") });
 
 test("competition distances retain unknown, zero and free-form values", () => {
   for (const value of [null, undefined, "", "  ", -1]) assert.equal(context.competitionDistance(value), "Distanz unbekannt");

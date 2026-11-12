@@ -49,7 +49,7 @@ The system SHALL expose only service tiers supported by the selected official mo
 
 #### Scenario: Explicit tier selection
 - **WHEN** the athlete saves an offered speed mode
-- **THEN** it persists and is included in subsequent supported Responses, stream and background payloads unless the caller explicitly supplied a tier.
+- **THEN** it persists and is included in subsequent supported Responses and stream payloads unless the caller explicitly supplied a tier.
 
 #### Scenario: Unsupported or compatible tier
 - **WHEN** ultrafast is requested for a model without that capability or a nondefault endpoint is used
@@ -75,14 +75,14 @@ The system SHALL send Coach model traffic through the configured Responses API a
 Evidence: `backend/coach/response_transport.py:CoachResponseTransport`; `backend/providers/model_assembly.py:ModelTransportAssembly.openai_responses_client`; `backend/config.py:validated_openai_base_url`; `backend/providers/openai_requests.py:OpenAIResponsesClient._require_api_key`, `backend/providers/openai_requests.py:endpoint`; `tests/test_coach_response_transport.py:test_transport_uses_openai_responses_adapter`; `tests/test_provider_openai.py:test_responses_client_requires_api_key`, `tests/test_provider_openai.py:test_endpoint_uses_default_for_empty_base_and_rejects_unsafe_base_urls`. This documents code routing, not an external provider parity probe.
 
 ### Requirement: MU5 Durable per-turn model and reasoning identity
-The system SHALL store the selected model and thinking level with an accepted background turn and reuse those stored values when resuming it, independently from later model-setting changes.
+The system SHALL store the selected model and thinking level with an accepted background turn and reuse those stored values when it is requested again, independently from later model-setting changes.
 
 #### Scenario: Accepted background turn
 - **WHEN** a turn is enqueued
 - **THEN** its durable receipt records model and thinking level alongside its stored athlete message/session identity.
 
-#### Scenario: Resume existing turn
-- **WHEN** the turn resumes after interruption
+#### Scenario: Request an existing turn again
+- **WHEN** the turn is requested again after interruption
 - **THEN** its existing conversation, stored model and valid stored thinking level are passed into execution rather than silently taking a newly selected model.
 
 #### Scenario: Invalid stored thinking level
@@ -91,22 +91,22 @@ The system SHALL store the selected model and thinking level with an accepted ba
 
 Evidence: `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `backend/coach/chat_turn.py:CoachChatTurnService._model_settings`, `backend/coach/chat_turn.py:CoachChatTurnService._run`; `tests/test_coach_chat_turn.py:test_background_resume_preserves_openai_model_and_conversation`; `tests/test_coach_request_payload.py:test_settings_fallback_and_output_limit`. Service-tier selection is resolved by the current settings adapter and is not asserted to be frozen with the queued turn.
 
-### Requirement: MU6 Bounded stream/background response lifecycle
-The system SHALL support streaming and resumable background Responses with validated response IDs, bounded payload/response sizes and deadlines, and cancellation that attempts to stop active provider work.
+### Requirement: MU6 One bounded streaming response lifecycle
+The system SHALL send every Coach model request through one streaming transport with bounded payload/response sizes and timeouts, and cancellation that stops the active provider request; turn requests are stateless (`store: false`) and are never created in OpenAI background mode, polled, or resumed by response ID.
 
-#### Scenario: New or resumed background response
-- **WHEN** background execution starts or resumes a valid stored response ID
-- **THEN** it creates with background/store flags or retrieves that response, checkpoints its identity and polls queued/in-progress states with bounded backoff/deadline.
+#### Scenario: Durable job without an attached client stream
+- **WHEN** a durable Coach job requests a response and no client stream is attached
+- **THEN** the same streaming transport is used and the text deltas are dropped; when a client stream is attached, the deltas are published to it, and a turn that already reached OpenAI in an earlier attempt publishes none.
 
-#### Scenario: Cancellation or timeout
-- **WHEN** cancellation is signalled or the total background deadline expires
-- **THEN** the system attempts provider cancellation and reports cancelled/timeout while preserving the original failure if cancellation itself fails.
+#### Scenario: Cancellation
+- **WHEN** cancellation is signalled before or during a streamed request
+- **THEN** the request stops with the public cancelled error; a cancelled stream without a terminal body records one request with empty usage, and a completed body that arrives after the cancel is still billed.
 
-#### Scenario: Transient poll failure or oversized stream
-- **WHEN** retrieval has a resumable timeout/unavailable/invalid-response failure
-- **THEN** the active response remains recoverable; oversized streams fail at the byte bound instead of accepting unbounded provider output.
+#### Scenario: Transient failure or oversized stream
+- **WHEN** a streamed request fails with a transient timeout, unavailability or network error before any text was shown
+- **THEN** the same request is sent again within the bounded retry policy; oversized streams fail at the byte bound instead of accepting unbounded provider output.
 
-Evidence: `backend/providers/openai_requests.py:OpenAIResponsesClient.background`, `backend/providers/openai_requests.py:poll_background_response`, `backend/providers/openai_requests.py:response_id`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_provider_openai.py:test_poll_background_response_polls_until_terminal_with_casefold_status`, `tests/test_provider_openai.py:test_poll_background_response_keeps_resumable_failures_running`, `tests/test_provider_openai.py:test_poll_background_response_preserves_timeout_when_cancel_fails`, `tests/test_provider_openai.py:test_responses_client_background_deadline_includes_resume_retrieve`, `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`; `tests/test_coach_response_transport.py:test_background_forwards_resume_id_checkpoint_and_cancel_event`.
+Evidence: `backend/coach/structured_response.py:CoachStructuredResponseService.respond`; `backend/coach/response_transport.py:CoachResponseTransport.stream_request`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_coach_structured_response.py:test_request_streams_and_drops_deltas_when_no_stream_is_attached`, `tests/test_coach_structured_response.py:test_job_failure_after_the_response_started_is_requested_again`; `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`; `tests/test_server_providers.py:test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage`;, `tests/test_provider_openai.py:test_stream_client_saves_final_response_before_post_read_cancellation` `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`.
 
 ### Requirement: MU7 Durable normalized daily token usage
 The system SHALL persist daily OpenAI request/input/output/total-token counters and last-operation/time metadata atomically, normalize malformed counters safely and present them as usage counts rather than a monetary bill.
@@ -119,11 +119,11 @@ The system SHALL persist daily OpenAI request/input/output/total-token counters 
 - **WHEN** stored usage is malformed or belongs to another day
 - **THEN** the daily counters start at zero while safe status/rate-limit state remains separately available; an absent total falls back to input plus output.
 
-#### Scenario: Background polling
-- **WHEN** a background response is retrieved repeatedly before its terminal result
-- **THEN** retrieval alone does not increment usage; the background path records usage after terminal validation, and the UI exposes requests, tokens and last request rather than fabricated monetary costs.
+#### Scenario: Streamed or failed response
+- **WHEN** a streamed response ends completed or failed
+- **THEN** its usage is recorded once from the final response (MU6 covers a cancelled stream); the UI exposes requests, tokens and last request rather than fabricated monetary costs.
 
-Evidence: `backend/providers/usage.py:daily_summary`, `backend/providers/usage.py:usage_counts`, `backend/providers/usage.py:recorded_usage`; `backend/providers/state.py:ProviderStateService.record_usage`; `backend/providers/openai_requests.py:OpenAIResponsesClient.retrieve`, `backend/providers/openai_requests.py:OpenAIResponsesClient.background`; `public/views.js:renderSettingsUsage`; `tests/test_provider_usage.py:test_daily_summary_decodes_valid_state_and_resets_stale_state`, `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`, `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`; `tests/test_provider_state.py:test_usage_accumulates_atomically_and_logs_only_operation_and_counts`; `tests/test_provider_openai.py:test_responses_client_retrieve_validates_without_recording_usage`. This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
+Evidence: `backend/providers/usage.py:daily_summary`, `backend/providers/usage.py:usage_counts`, `backend/providers/usage.py:recorded_usage`; `backend/providers/state.py:ProviderStateService.record_usage`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `public/views.js:renderSettingsUsage`; `tests/test_provider_usage.py:test_daily_summary_decodes_valid_state_and_resets_stale_state`, `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`, `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`; `tests/test_provider_state.py:test_usage_accumulates_atomically_and_logs_only_operation_and_counts`; `tests/test_provider_openai.py:test_stream_client_requires_final_response_and_records_usage_once_on_success`, `tests/test_provider_openai.py:test_stream_client_failed_response_records_its_usage_before_raising`. This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
 
 ### Requirement: MU8 Safe provider status, error classification and bounded retries
 The system SHALL persist safe provider availability/rate-limit state, distinguish actionable protocol/authentication/quota/billing/timeout failures and keep raw provider error text out of user-facing failures and diagnostic markers.

@@ -655,5 +655,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, runningDynamics, formDriftLines, providerNotes, refreshActions };
+  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, runningDynamics, RUNNING_DYNAMICS, formDriftLines, providerNotes, refreshActions };
 })();

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import backend
 from backend.db.bootstrap import initialize_application_database
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
     database_schema_is_current,
 )
@@ -415,7 +415,6 @@ class DatabaseBootstrapTests(unittest.TestCase):
             [row["payload"] for row in db.execute("SELECT payload FROM snapshots")],
             ["newest-but-old"],
         )
-        self.assertEqual(SnapshotRepository().latest_payload(db), "newest-but-old")
 
     def test_import_has_no_database_side_effects(self):
         with tempfile.TemporaryDirectory() as root:

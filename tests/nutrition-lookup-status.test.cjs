@@ -1,17 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const source = fs.readFileSync(path.join(__dirname, "../public/nutrition.js"), "utf8");
-
-function slice(startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, `${startMarker} must exist`);
-  return source.slice(start, end);
-}
+const { extractFunctions } = require("./frontend-harness.cjs");
 
 function harness(apiImpl) {
   const elements = {
@@ -21,7 +12,7 @@ function harness(apiImpl) {
   };
   const rendered = [];
   const databaseLoads = [];
-  const context = vm.createContext({
+  const context = extractFunctions("nutrition.js", ["nutritionProductLoadSequence", "nutritionLookupResultShown", "isCurrentNutritionProductLoad", "prepareNutritionProductLookup", "showNutritionProductLoadError", "loadNutritionProducts", "lookupNutritionProduct"], {
     state: { sessionGeneration: 1 },
     document: { querySelector: (selector) => elements[selector] || null },
     api: apiImpl,
@@ -30,10 +21,6 @@ function harness(apiImpl) {
     loadNutritionDatabase: async (query) => { databaseLoads.push(query); },
     normalizeNutritionProduct: (product) => product,
   });
-  vm.runInContext(
-    `let nutritionProductLoadSequence = 0;\nlet nutritionLookupResultShown = false;\n${slice("function isCurrentNutritionProductLoad", "async function saveNutritionProduct")}\n${slice("async function lookupNutritionProduct", "function stopNutritionBarcode")}`,
-    context,
-  );
   return { context, elements, rendered, databaseLoads };
 }
 
@@ -80,8 +67,7 @@ test("an explicit product search still replaces the lookup result", async () => 
 });
 
 test("online nutrients fill the product editor without replacing zero or local values", () => {
-  const context = vm.createContext({ nutritionDatabaseSource: (source) => source });
-  vm.runInContext(slice("function normalizeNutritionProduct", "function nutritionProductForm"), context);
+  const context = extractFunctions("nutrition.js", ["normalizeNutritionProduct"], { nutritionDatabaseSource: (source) => source });
   const result = context.normalizeNutritionProduct({
     source: "yazio", sugar_g: 0, per_100: { sugar_g: 5, fiber_g: 2, salt_g: null },
   });

@@ -96,18 +96,6 @@ class PersonalOnlyBatchTests(unittest.TestCase):
 
         self.assert_personal_only(reader, collect)
 
-    def test_rating_batches_make_no_sdk_login(self) -> None:
-        reader = make_reader()
-        with (
-            refuse_sdk_login(),
-            patch("backend.sync.garmin_service.collect_activity_ratings") as collect,
-        ):
-            reader.fetch_activity_ratings(
-                [("11", "")], lambda _row: None, lambda _id: None, nullcontext
-            )
-
-        self.assert_personal_only(reader, collect)
-
     def test_wellness_batches_make_no_sdk_login(self) -> None:
         reader = make_reader()
         with (

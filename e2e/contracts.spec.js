@@ -175,6 +175,7 @@ test("light mode keeps performance source badges readable", { tag: "@responsive"
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
   await ready(page);
   await expect(page.locator("#openaiChatResetButton")).toHaveCount(1);
+  await expect(page.locator("#chatResetButton, #aiProviderSelect")).toHaveCount(0);
   await page.evaluate(() => {
     const original = fetch.bind(window);
     window.__statusCalls = [];
@@ -471,18 +472,6 @@ test("delayed receipt and transcription cannot alter a new session", async ({ pa
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe("new-turn");
 });
 
-test("provider source retains visible stale and partial measurement context", async ({ page }) => {
-  await ready(page);
-  await page.getByRole("link", { name: "Analyse", exact: true }).click();
-  await page.evaluate(() => {
-    const root = document.querySelector("#dataPanel");
-    displayMetric(root, "Fixture retained HRV", { value: 58, unit: "ms", source: "Garmin Connect", freshness: "stale", observed_at: "2026-09-01", fetched_at: "2026-09-02T10:00:00Z" });
-    displayMetric(root, "Fixture retained readiness", { value: 65, source: "Garmin Connect", freshness: "partial", observed_at: "2026-09-02" });
-  });
-  await expect(page.locator("#dataPanel")).toContainText("Garmin Connect · Veraltet · Messung");
-  await expect(page.locator("#dataPanel")).toContainText("Garmin Connect · Teilweise aktualisiert · Messung");
-});
-
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
@@ -659,7 +648,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
-  if (!(await completed.evaluate((element) => element.open))) await completed.locator("summary").click();
+  if (!(await completed.evaluate((element) => element.open))) await completed.locator(":scope > summary").click();
   // Every value once with German labels; the Coach button names the session, never its stored name.
   const facts = completed.locator(".planned-actual-facts");
   await expect(facts).toContainText("Belastung 42");
@@ -694,30 +683,6 @@ test("JSON and audio errors retain status, reason and retry delay", async ({ pag
     expect(error).toMatchObject({ status: 429, reason: "rate_limited", retryAfter: 7 });
     expect(error.message).toContain("7 Sekunden");
   }
-});
-
-test("another tab takes over an expired polling lease after the leader closes", async ({ page, context }) => {
-  await ready(page);
-  const follower = await context.newPage();
-  await installReadFixture(follower, fixture);
-  await ready(follower);
-  for (const tab of [page, follower]) await tab.evaluate(() => {
-    clearTimeout(state.syncPoll.timer);
-    state.syncPoll.controller?.abort();
-    state.syncPoll.channel?.close();
-  });
-  await page.evaluate(() => {
-    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify({ token: state.syncPoll.leaseToken, expires_at: Date.now() + 60000 }));
-  });
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(false);
-  await page.close();
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(true);
-  await follower.evaluate(() => {
-    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify({ token: "closed-fixture-tab", expires_at: Date.now() - 1 }));
-  });
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(true);
-  await follower.evaluate(() => releaseSyncPollLease());
-  expect(await follower.evaluate(() => localStorage.getItem(SYNC_POLL_LEASE_KEY))).toBe(null);
 });
 
 test("only current pending proposals expose an explicit confirmation action", async ({ page }) => {
@@ -764,10 +729,13 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(charts.locator("svg")).toHaveCount(4);
   const running = charts.locator('[data-analysis-section="development-Lauf"]').locator("..");
   const cycling = charts.locator('[data-analysis-section="development-Rad"]').locator("..");
-  await expect(running.getByRole("heading", { name: "Laufen", exact: true })).toBeVisible();
-  await expect(cycling.getByRole("heading", { name: "Rad", exact: true })).toBeVisible();
-  await expect(running.getByRole("button", { name: "Laufen: Informationen", exact: true })).toBeVisible();
-  await expect(cycling.getByRole("button", { name: "Rad: Informationen", exact: true })).toBeVisible();
+  // Each sport's development sits in its own segment (#2265).
+  await expect(running.getByRole("heading", { name: "Entwicklung", exact: true })).toBeVisible();
+  await expect(running.getByRole("button", { name: "Entwicklung: Informationen", exact: true })).toBeVisible();
+  await expect(cycling).toBeHidden();
+  await page.locator('[data-analysis-segment="cycling"]').click();
+  await expect(cycling.getByRole("heading", { name: "Entwicklung", exact: true })).toBeVisible();
+  await expect(cycling.getByRole("button", { name: "Entwicklung: Informationen", exact: true })).toBeVisible();
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
   await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");

@@ -154,7 +154,7 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   Enter-newline with send-button or Ctrl/Cmd+Enter submission.
 - Frontend sources must carry no hand-written `?v=` versions or cache name
   (`StaticAssetService` stamps them); new cached files belong in the
-  service-worker `ASSETS` list. Inspect fresh installation and offline asset
+  service-worker `ASSETS` list (static serving lists `public/` itself). Inspect fresh installation and offline asset
   consistency. Do not demand update dialogs,
   cache conversion, or support for earlier clients contrary to scoped policy.
 

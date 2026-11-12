@@ -86,6 +86,9 @@ class NutritionMealLibraryService:
     def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:
         return self.food_database.stored_foods(query)
 
+    def refresh_database_food(self, food_id: str) -> dict[str, Any]:
+        return {"ok": True, "food": self.food_database.refresh_stored(food_id)}
+
     def forget_database_food(self, food_id: str) -> dict[str, Any]:
         self.food_database.forget(food_id)
         return {"ok": True, "id": food_id, "status": "removed"}

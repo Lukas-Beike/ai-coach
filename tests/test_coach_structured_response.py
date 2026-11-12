@@ -39,79 +39,42 @@ class CoachStructuredResponseTests(unittest.TestCase):
             "recovery_state": {"conversation_recovered": False},
         }
 
-    def test_attached_request_uses_one_transport_without_job_checkpoint(self) -> None:
+    def test_request_streams_and_drops_deltas_when_no_stream_is_attached(self) -> None:
         expected = {"id": "synthetic-response"}
-        self.transport.request.return_value = expected
+        self.transport.stream_request.return_value = expected
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
-        self.transport.request.assert_called_once_with(self.payload)
-        self.transport.background_request.assert_not_called()
+        self.transport.stream_request.assert_called_once()
+        args = self.transport.stream_request.call_args.args
+        self.assertEqual(args[0], self.payload)
+        self.assertIsNone(self.transport.stream_request.call_args.args[2])
+        args[1]("dropped")
+        self.transport.request.assert_not_called()
         self.jobs.merge_receipt.assert_not_called()
 
-    def test_background_checkpoint_persists_response_id_before_result(self) -> None:
+    def test_job_marks_that_openai_was_reached_without_keeping_the_response_id(
+        self,
+    ) -> None:
         expected = {"id": "synthetic-response"}
 
-        def finish(_payload, **kwargs):
-            kwargs["on_response_id"]("resp-new")
+        def finish(_payload, _on_delta, _cancel_event, on_response_id):
+            on_response_id("resp-new")
             return expected
 
-        self.transport.background_request.side_effect = finish
+        self.transport.stream_request.side_effect = finish
         self.options["background_owned"] = True
-        self.options["resume_id"] = "resp-prior"
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
-        self.assertEqual(
-            self.transport.background_request.call_args.kwargs["response_id"],
-            "resp-prior",
-        )
         self.jobs.merge_receipt.assert_called_once_with(
             "turn-synthetic",
-            {
-                "status": "running",
-                "phase": "waiting_openai",
-                "openai_response_id": "resp-new",
-                "pending_tool_outputs": [],
-                "response_input": self.payload["input"],
-                "previous_response_id": None,
-            },
+            {"status": "running", "phase": "waiting_openai", "openai_reached": True},
         )
-
-    def test_transient_background_error_resumes_the_checkpointed_response(self) -> None:
-        expected = {"id": "resumed-response"}
-
-        calls = 0
-
-        def respond(_payload, **kwargs):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                kwargs["on_response_id"]("resp-new")
-                raise AppError(
-                    503, "Synthetic provider unavailable", reason="provider_unavailable"
-                )
-            return expected
-
-        self.transport.background_request.side_effect = respond
-        self.options["background_owned"] = True
-
-        self.assertIs(self.service.respond(self.payload, **self.options), expected)
-
-        self.assertEqual(self.transport.background_request.call_count, 2)
-        self.assertEqual(
-            [
-                item.kwargs["response_id"]
-                for item in self.transport.background_request.call_args_list
-            ],
-            [None, "resp-new"],
-        )
-        self.retry.retry_delay.assert_not_called()
-        self.recovery.recover_if_invalid.assert_not_called()
 
     def test_rate_limit_retries_without_stream_delta(self) -> None:
         expected = {"id": "after-retry"}
-        self.transport.request.side_effect = [
+        self.transport.stream_request.side_effect = [
             AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
             expected,
         ]
@@ -119,7 +82,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
-        self.assertEqual(self.transport.request.call_count, 2)
+        self.assertEqual(self.transport.stream_request.call_count, 2)
         self.retry.retry_delay.assert_called_once()
         self.assertEqual(
             self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], False
@@ -150,7 +113,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self,
     ) -> None:
         expected = {"id": "recovered"}
-        self.transport.request.side_effect = [
+        self.transport.stream_request.side_effect = [
             AppError(
                 409,
                 "Synthetic invalid conversation",
@@ -167,7 +130,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.assertEqual(
             self.recovery.recover_if_invalid.call_args.kwargs["attempt"], 0
         )
-        self.assertEqual(self.transport.request.call_count, 2)
+        self.assertEqual(self.transport.stream_request.call_count, 2)
         self.retry.retry_delay.assert_not_called()
 
     def test_cancellation_before_request_never_calls_provider(self) -> None:
@@ -181,12 +144,12 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.assertEqual(
             (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
         )
-        self.transport.request.assert_not_called()
+        self.transport.stream_request.assert_not_called()
 
     def test_cancellation_during_retry_wait_prevents_second_provider_call(self) -> None:
         cancelled = threading.Event()
         self.options["cancel_event"] = cancelled
-        self.transport.request.side_effect = AppError(
+        self.transport.stream_request.side_effect = AppError(
             429, "Synthetic rate limit", reason="rate_limit_exceeded"
         )
         self.retry.retry_delay.return_value = 0.01
@@ -196,7 +159,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
             self.service.respond(self.payload, **self.options)
 
         self.assertEqual(raised.exception.reason, "chat_cancelled")
-        self.transport.request.assert_called_once()
+        self.transport.stream_request.assert_called_once()
 
     @staticmethod
     def _incomplete(*output: dict) -> dict:
@@ -215,11 +178,11 @@ class CoachStructuredResponseTests(unittest.TestCase):
         responses = [self._incomplete({"type": "reasoning"}), expected]
         sent: list[int] = []
 
-        def request(payload):
+        def request(payload, *_args, **_kwargs):
             sent.append(payload["max_output_tokens"])
             return responses.pop(0)
 
-        self.transport.request.side_effect = request
+        self.transport.stream_request.side_effect = request
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
@@ -239,14 +202,14 @@ class CoachStructuredResponseTests(unittest.TestCase):
             {"type": "function_call", "name": "read_profile", "call_id": "call-1"},
         ):
             with self.subTest(item=item["type"]):
-                self.transport.request.reset_mock()
+                self.transport.stream_request.reset_mock()
                 response = self._incomplete(item)
-                self.transport.request.return_value = response
+                self.transport.stream_request.return_value = response
 
                 self.assertIs(
                     self.service.respond(self.payload, **self.options), response
                 )
-                self.transport.request.assert_called_once()
+                self.transport.stream_request.assert_called_once()
 
     def test_token_exhaustion_is_not_repeated_in_a_server_side_conversation(
         self,
@@ -254,11 +217,11 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.payload["max_output_tokens"] = 16_000
         self.payload["conversation"] = "conv-synthetic"
         response = self._incomplete({"type": "reasoning"})
-        self.transport.request.return_value = response
+        self.transport.stream_request.return_value = response
 
         self.assertIs(self.service.respond(self.payload, **self.options), response)
 
-        self.transport.request.assert_called_once()
+        self.transport.stream_request.assert_called_once()
 
     def test_token_exhaustion_after_retryable_failures_still_gets_the_larger_budget(
         self,
@@ -274,59 +237,27 @@ class CoachStructuredResponseTests(unittest.TestCase):
             expected,
         ]
 
-        def request(payload):
+        def request(payload, *_args, **_kwargs):
             sent.append(payload["max_output_tokens"])
             result = responses.pop(0)
             if isinstance(result, AppError):
                 raise result
             return result
 
-        self.transport.request.side_effect = request
+        self.transport.stream_request.side_effect = request
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
         self.assertEqual(sent, [16_000, 16_000, 16_000, 32_000])
 
-    def test_token_exhaustion_in_a_resumed_background_response_is_repeated(
-        self,
-    ) -> None:
-        self.payload["max_output_tokens"] = 16_000
-        self.options["background_owned"] = True
-        self.options["resume_id"] = "resp-prior"
-        expected = {"id": "after-escalation", "status": "completed"}
-        responses = [
-            AppError(
-                503, "Synthetic provider unavailable", reason="provider_unavailable"
-            ),
-            self._incomplete({"type": "reasoning"}),
-            expected,
-        ]
-        sent: list[int] = []
-
-        def background(payload, **_kwargs):
-            sent.append(payload["max_output_tokens"])
-            result = responses.pop(0)
-            if isinstance(result, AppError):
-                raise result
-            return result
-
-        self.transport.background_request.side_effect = background
-
-        self.assertIs(self.service.respond(self.payload, **self.options), expected)
-
-        self.assertEqual(sent, [16_000, 16_000, 32_000])
-        self.assertEqual(
-            self.transport.background_request.call_args.kwargs["response_id"], None
-        )
-
     def test_token_exhaustion_is_not_repeated_at_the_larger_budget(self) -> None:
         self.payload["max_output_tokens"] = 32_000
         response = self._incomplete({"type": "reasoning"})
-        self.transport.request.return_value = response
+        self.transport.stream_request.return_value = response
 
         self.assertIs(self.service.respond(self.payload, **self.options), response)
 
-        self.transport.request.assert_called_once()
+        self.transport.stream_request.assert_called_once()
 
 
 class _ServerErrorFailure(AppError):
@@ -379,8 +310,8 @@ class CoachTransientRetryTests(unittest.TestCase):
         ):
             with self.subTest(reason=reason, status=status):
                 self.sleep.reset_mock()
-                self.transport.request.reset_mock()
-                self.transport.request.side_effect = [
+                self.transport.stream_request.reset_mock()
+                self.transport.stream_request.side_effect = [
                     self.failure(status, reason),
                     self.failure(status, reason),
                     expected,
@@ -388,7 +319,7 @@ class CoachTransientRetryTests(unittest.TestCase):
                 self.assertIs(
                     self.service.respond(self.payload, **self.options), expected
                 )
-                self.assertEqual(self.transport.request.call_count, 3)
+                self.assertEqual(self.transport.stream_request.call_count, 3)
                 self.assertEqual(
                     [call.args[0] for call in self.sleep.call_args_list], [2, 5]
                 )
@@ -398,9 +329,28 @@ class CoachTransientRetryTests(unittest.TestCase):
             502, "Synthetic provider failure", reason="response_failed"
         )
         expected = {"id": "completed"}
-        self.transport.request.side_effect = [failed, expected]
+        self.transport.stream_request.side_effect = [failed, expected]
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
+        self.sleep.assert_called_once_with(2)
+
+    def test_job_failure_after_the_response_started_is_requested_again(self) -> None:
+        expected = {"id": "completed"}
+        calls = 0
+
+        def stream(_payload, _on_delta, _cancel_event, on_response_id):
+            nonlocal calls
+            calls += 1
+            on_response_id("resp-started")
+            if calls == 1:
+                raise self.failure(503, "provider_unavailable")
+            return expected
+
+        self.transport.stream_request.side_effect = stream
+        self.options["background_owned"] = True
+
+        self.assertIs(self.service.respond(self.payload, **self.options), expected)
+        self.assertEqual(calls, 2)
         self.sleep.assert_called_once_with(2)
 
     def test_stream_failure_after_output_is_not_retried(self) -> None:
@@ -419,29 +369,16 @@ class CoachTransientRetryTests(unittest.TestCase):
         self.sleep.assert_not_called()
 
     def test_retries_stay_within_three_attempts(self) -> None:
-        self.transport.request.side_effect = self.failure(503, "provider_unavailable")
+        self.transport.stream_request.side_effect = self.failure(
+            503, "provider_unavailable"
+        )
 
         with self.assertRaises(AppError) as raised:
             self.service.respond(self.payload, **self.options)
 
         self.assertEqual(raised.exception.reason, "provider_unavailable")
-        self.assertEqual(self.transport.request.call_count, 3)
+        self.assertEqual(self.transport.stream_request.call_count, 3)
         self.assertEqual(self.sleep.call_count, 2)
-
-    def test_budget_exhaustion_is_neither_resumed_nor_retried(self) -> None:
-        def run(_payload, **kwargs):
-            kwargs["on_response_id"]("resp-budget")
-            raise self.failure(504, "background_budget_exceeded")
-
-        self.transport.background_request.side_effect = run
-        self.options["background_owned"] = True
-
-        with self.assertRaises(AppError) as raised:
-            self.service.respond(self.payload, **self.options)
-
-        self.assertEqual(raised.exception.reason, "background_budget_exceeded")
-        self.transport.background_request.assert_called_once()
-        self.sleep.assert_not_called()
 
 
 if __name__ == "__main__":

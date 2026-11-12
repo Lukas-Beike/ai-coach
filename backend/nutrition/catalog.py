@@ -9,7 +9,10 @@ from typing import Any
 
 from backend import change_history
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import NutritionProductRepository
+from backend.db.repositories import (
+    FoodDatabaseEntryRepository,
+    NutritionProductRepository,
+)
 from backend.errors import AppError
 from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import FoodDatabaseService, matches_all_terms
@@ -98,7 +101,22 @@ class ProductCatalogService:
                     reason="nutrition_product_barcode_conflict",
                 )
             previous = self._products.get(db, normalized["id"])
+            if previous is None and FoodDatabaseEntryRepository().get(
+                db, normalized["id"]
+            ):
+                # A new product never takes over a stored database food's id.
+                normalized["id"] = uuid.uuid4().hex
             saved = self._products.save(db, normalized)
+            # A new own product wins for its EAN: its empty fields come from the
+            # stored foods of that EAN and are part of this change.
+            if (
+                previous is None
+                and saved.get("barcode")
+                and self._products.fill_from_database_entries(
+                    db, saved["id"], saved["barcode"]
+                )
+            ):
+                saved = self._products.get(db, saved["id"]) or saved
             change_history.record_change(
                 db,
                 PRODUCT_ENTITY_TYPE,

@@ -85,7 +85,7 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
   await expect(root).not.toContainText("Keine Daten");
   expect(await new AxeBuilder({ page }).include("#bodyAnalysisCharts").analyze()).toEqual(expect.objectContaining({ violations: [] }));
   await expect(root.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
-  await page.evaluate(() => { location.hash = "#analysis/performance"; });
+  await page.evaluate(() => { location.hash = "#analysis/cycling"; });
   const weightRoot = page.locator("#analysisHistoryCharts [data-analysis-section='development-Rad']");
   await expect(weightRoot).toBeVisible();
   await expect(root).toBeHidden();

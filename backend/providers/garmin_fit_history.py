@@ -6,7 +6,7 @@ such call, so without a Personal API key the client has no method and the read
 ends with ``FitTransportMissing`` before any request.
 
 A pause separates the calls; the caller's guard wraps each download only, never
-the pause. Errors are classified exactly like the rating backfill (the sync owner
+the pause. Errors are classified by the shared history read policy (the sync owner
 injects the policy through ``RatingReadHooks``):
 
 * a client error, an unreadable answer or a 403 on one activity skips only that

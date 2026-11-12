@@ -1,28 +1,6 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const { test } = require("node:test");
-
-const code = fs.readFileSync(path.join(__dirname, "../public/activity-details.js"), "utf8").replace(/\r\n/g, "\n");
-
-function element(tag) {
-  const listeners = {};
-  return {
-    tag,
-    children: [],
-    attributes: {},
-    className: "",
-    textContent: "",
-    value: "",
-    append(...items) { this.children.push(...items); },
-    replaceChildren(...items) { this.children = items; },
-    setAttribute(name, value) { this.attributes[name] = value; },
-    addEventListener(type, handler) { listeners[type] = handler; },
-    focus() {},
-    fire(type, event = {}) { return listeners[type]({ preventDefault() {}, ...event }); },
-  };
-}
+const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
 function text(item) {
   if (typeof item === "string") return item;
@@ -30,20 +8,13 @@ function text(item) {
 }
 
 function loadRenderRoute() {
-  const start = code.indexOf("  function node(");
-  const context = vm.createContext({ document: { createElement: (tag) => element(tag) } });
-  const parts = [
-    code.slice(start, code.indexOf("\n  function chart(", start)),
-    code.slice(code.indexOf("  function renderRoute("), code.indexOf("  const COVERAGE_LABELS")),
-  ];
-  vm.runInContext(`${parts.join("\n")};globalThis.renderRoute = renderRoute;`, context);
-  return context.renderRoute;
+  return extractFunctions("activity-details.js", ["node", "renderRoute"], { document: fakeDocument() }).renderRoute;
 }
 
 const ROUTE = { label: "Hausrunde", repeat_index: 5, repeat_count: 6, route_id: "r3" };
 
 test("the route shows its label and visit with a rename action", () => {
-  const content = element("div");
+  const content = new FakeElement("div");
   loadRenderRoute()(ROUTE, async () => ({}), content);
   const [line] = content.children;
   assert.equal(text(line.children[0]) + text(line.children[1]), "Hausrunde, 5. Mal Umbenennen");
@@ -51,13 +22,13 @@ test("the route shows its label and visit with a rename action", () => {
 });
 
 test("a session without a route renders nothing", () => {
-  const content = element("div");
+  const content = new FakeElement("div");
   loadRenderRoute()(undefined, async () => ({}), content);
   assert.equal(content.children.length, 0);
 });
 
 test("renaming posts the route id and name, then shows the new label", async () => {
-  const content = element("div");
+  const content = new FakeElement("div");
   const calls = [];
   const api = async (url, options) => { calls.push([url, JSON.parse(options.body), options.method]); return { label: "Seerunde" }; };
   loadRenderRoute()(ROUTE, api, content);
@@ -75,7 +46,7 @@ test("renaming posts the route id and name, then shows the new label", async () 
 });
 
 test("a refused name stays in the form with the message", async () => {
-  const content = element("div");
+  const content = new FakeElement("div");
   const api = async () => { throw new Error("Der Name ist ungültig."); };
   loadRenderRoute()(ROUTE, api, content);
   const [line] = content.children;

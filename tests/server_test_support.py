@@ -99,14 +99,15 @@ def _garmin_metrics(snapshot):
 
 
 def _current_performance_context(snapshot=None, today=None):
-    effective_snapshot = (
-        snapshot
-        if snapshot is not None
-        else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
-    )
+    import snapshot_seed
     from canonical_recovery_support import recovery_only_inputs
     from garmin_support import read_garmin
 
+    effective_snapshot = (
+        snapshot
+        if snapshot is not None
+        else snapshot_seed.latest_snapshot(server.database_manager())
+    )
     garmin = read_garmin()
     wellness = (effective_snapshot or {}).get("recent_wellness")
     # Recovery, form, ramp rate and eFTP come only from observations (#1411,

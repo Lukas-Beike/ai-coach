@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { waitForSettledState } = require("./helpers/settled-state");
 
-async function performanceFixture(page, changes, route = "performance") {
+async function performanceFixture(page, changes, route = "running") {
   await page.route("**/api/performance", async (request) => {
     const response = await request.fetch();
     const data = await response.json();
@@ -14,7 +14,7 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
   // A later reload of an area redraws every chart; start from the settled page, with the power profile read.
   await waitForSettledState(page);
-  if (route === "performance") await expect(page.locator("#cyclingPowerProfile")).not.toHaveAttribute("data-analysis-empty", "loading");
+  if (route === "running" || route === "cycling") await expect(page.locator("#cyclingPowerProfile")).not.toHaveAttribute("data-analysis-empty", "loading");
 }
 
 async function localFitnessFixture(page) {
@@ -31,7 +31,7 @@ async function localFitnessFixture(page) {
 }
 
 test("@responsive running tolerance renders Garmin toleranceScore instead of missing data", async ({ page }) => {
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/running");
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise && !!state.data?.performance?.history?.end);
   await page.evaluate(() => {
     const history = structuredClone(state.data.performance.history);
@@ -68,7 +68,7 @@ test("@responsive running tolerance renders Garmin toleranceScore instead of mis
 test("@responsive standard demo shows one compact race table and sport-specific collapsible development", async ({ page }) => {
   test.setTimeout(180_000);
   expect((await page.request.get("/api/fixture/demo")).ok()).toBe(true);
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/running");
   const table = page.locator("#performancePredictions");
   await expect(table.locator("tbody tr")).toHaveCount(4);
   await expect(table.locator("thead th")).toHaveCount(2);
@@ -78,20 +78,30 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await expect(page.locator("#analysisHistoryCharts")).not.toContainText("Historische Entwicklung");
   const cycling = page.locator("[data-analysis-section='development-Rad']");
   const running = page.locator("[data-analysis-section='development-Lauf']");
-  const powerProfile = cycling.locator("#cyclingPowerProfile");
-  await expect(powerProfile.locator("tbody tr")).toHaveCount(5);
-  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
-  await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
-  await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toHaveCount(1);
   await expect(running).not.toContainText("Keine Daten");
   await expect(running.locator("#performancePredictions")).toHaveCount(1);
-  await expect(running.locator(".analysis-group-title")).toHaveText("Laufen");
-  await expect(cycling.locator(".analysis-group-title")).toHaveText("Rad");
+  await expect(running.locator("#runningBestEfforts")).toHaveCount(1);
+  // Laufen shows no cycling part (#2265).
+  await expect(cycling).toBeHidden();
+  await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toBeHidden();
   const endurance = page.locator("#performanceEnduranceCharts");
   // The demo has no endurance score, so the section stays empty and hidden (#1783).
   await expect(endurance).toBeHidden();
   expect(await endurance.evaluate((element) => element.previousElementSibling.id)).toBe("currentPerformance");
-  for (const group of [running, cycling]) {
+  await running.locator(":scope > summary").click();
+  await expect(table).toBeHidden();
+  await running.locator(":scope > summary").click();
+  await expect(page.locator("#performanceWeightCharts")).toHaveCount(0);
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/cycling", { historyMode: "replace" }); });
+  await expect(running).toBeHidden();
+  const powerProfile = cycling.locator("#cyclingPowerProfile");
+  await expect(powerProfile.locator("tbody tr")).toHaveCount(5);
+  await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
+  await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
+  await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toBeVisible();
+  await expect(cycling.locator(".analysis-group-title")).toHaveText("Entwicklung");
+  for (const [route, group] of [["analysis/running", running], ["analysis/cycling", cycling]]) {
+    await page.evaluate(async (route) => { await AppRouter.navigate(route, { historyMode: "replace" }); }, route);
     const title = await group.locator(".analysis-group-title").boundingBox();
     const help = await group.locator("xpath=../button[contains(@class, 'analysis-section-help')]").boundingBox();
     expect(help.x - title.x - title.width).toBeGreaterThanOrEqual(12);
@@ -101,14 +111,9 @@ test("@responsive standard demo shows one compact race table and sport-specific 
     await expect(group).toHaveAttribute("open", "");
     await page.keyboard.press("Escape");
   }
-  await running.locator(":scope > summary").click();
-  await expect(table).toBeHidden();
-  await running.locator(":scope > summary").click();
-  await expect(page.locator("#performanceWeightCharts")).toHaveCount(0);
   await cycling.locator(":scope > summary").click();
   await expect(cycling).not.toHaveAttribute("open", "");
   await expect(cycling.locator("svg").first()).toBeHidden();
-  await expect(running.locator("svg").first()).toBeVisible();
   await cycling.locator(":scope > summary").focus();
   await page.keyboard.press("Enter");
   await expect(cycling.locator("svg").first()).toBeVisible();
@@ -343,7 +348,7 @@ test("@responsive sparse performance shows measurements and the current value li
       run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 300 }, { date: "2026-09-08", value: 290 }] }],
       running_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: [{ date: "2026-09-08", value: 49 }] }],
     },
-  } });
+  } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(2);
   await expect(root.locator("svg")).toHaveCount(2);
@@ -367,7 +372,7 @@ test("sparse FTP draws one connected series with its legend and no eFTP", async 
     start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
       cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
     },
-  } });
+  } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   const chart = root.locator("svg");
   await expect(chart).toHaveCount(1);
@@ -425,7 +430,7 @@ test("@responsive repeated performance values are labelled once without a normal
   const points = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: index % 2 ? 210 : 200 }));
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points: [] }, metrics: {
     cycling_ftp_watts: [{ source: "Garmin Connect", points }],
-  } } });
+  } } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
   expect((await root.locator(".analysis-point-value").allTextContents()).sort()).toEqual(["200", "210"]);
@@ -446,7 +451,7 @@ test("@responsive performance keeps dated FTP values and weekly medians independ
     cycling_ftp_watts: [{ source: "Garmin Connect", points }],
     cycling_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: points.map((point) => ({ ...point, value: point.value - 160 })) }],
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: points.slice(1).map((point) => ({ ...point, value: 500 - point.value })) }],
-  } } });
+  } } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
   const ftp = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Leistungsschwelle · FTP", exact: true }) });
@@ -458,12 +463,13 @@ test("@responsive performance keeps dated FTP values and weekly medians independ
   const vo2max = root.locator("[data-analysis-section='development-Rad'] .analysis-subchart").filter({ has: page.getByRole("heading", { name: "VO₂max Schätzung", exact: true }) });
   await vo2max.getByText("Werte ansehen", { exact: true }).click();
   await expect(vo2max.locator("tbody td:nth-child(2)")).toHaveText([/50 ml\/kg\/min.*3 Messungen/, /55 ml\/kg\/min.*2 Messungen/]);
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/running", { historyMode: "replace" }); });
   const pace = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
   await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
-  await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/cycling", { historyMode: "replace" }); });
   await expect(ftp.locator("tbody tr")).toHaveCount(5);
   await expect(vo2max.locator("tbody tr")).toHaveCount(2);
 });
@@ -572,7 +578,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
         }],
       },
     },
-  });
+  }, "load");
   const performance = page.locator("#analysisHistoryCharts");
   await expect(performance.getByRole("heading", { name: "Trainingsbereitschaft" })).toHaveCount(0);
   await expect(page.locator("#analysisLoadCharts").getByRole("heading", { name: "Trainingsbereitschaft" })).toHaveCount(0);
@@ -621,7 +627,7 @@ test("@responsive legend info buttons have a 44px layout box, a German name and 
   await performanceFixture(page, { history: {
     start: "2026-09-01", end: "2026-09-08", load: { points: [] },
     metrics: { cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }] },
-  } });
+  } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   const button = root.getByRole("button", { name: "Erklärung zu FTP", exact: true });
   await expect(button).toHaveAttribute("aria-expanded", "false");
@@ -684,7 +690,7 @@ test("@responsive empty performance charts are omitted without a missing-data li
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-08", load: { points: [] }, metrics: {
     cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: null }, { date: "2026-09-08", value: null }] }],
-  } } });
+  } } }, "cycling");
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator("svg")).toHaveCount(1);
   await expect(root.getByRole("heading", { name: "Schwellenpace", exact: true })).toHaveCount(0);
@@ -698,7 +704,7 @@ test("@responsive performance without any history renders no empty sport groups 
   await expect(root.locator(".analysis-group-title")).toHaveCount(0);
   await expect(root.locator("svg")).toHaveCount(0);
   await expect(page.locator("#currentPerformance table")).toHaveCount(0);
-  await expect(page.locator("#currentPerformance")).toContainText("Noch keine aktuellen Leistungswerte.");
+  await expect(page.locator("#currentPerformance")).toContainText("Noch keine aktuellen Werte.");
   await expect(page.locator("#currentPerformance")).not.toContainText("—");
 });
 

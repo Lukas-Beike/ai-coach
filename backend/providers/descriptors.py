@@ -326,15 +326,13 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         # (backend/sync/garmin_strength_push.py); it is never scheduled either.
         # wellness_backfill is the one-off, insert-only wellness history walk
         # (backend/sync/garmin_wellness_history.py), queued once at startup;
-        # rating_backfill likewise reads the watch ratings of past activities
-        # (backend/sync/garmin_rating_backfill.py); stream_backfill re-fetches the
-        # FIT streams of past activities (backend/sync/stream_backfill.py).
+        # stream_backfill re-fetches the FIT streams of past activities
+        # (backend/sync/stream_backfill.py).
         job_types=frozenset(
             {
                 "refresh",
                 "historical_backfill",
                 "wellness_backfill",
-                "rating_backfill",
                 "stream_backfill",
                 "activity_details",
                 "plan_push",

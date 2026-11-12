@@ -319,7 +319,7 @@ class ServerRuntimeTests(ServerTestCase):
         server.COACH_BACKGROUND_JOBS.job_store().merge_receipt(
             "turn-background-recovery-phase",
             {
-                "openai_response_id": "resp-recovery-phase",
+                "openai_reached": True,
                 "phase": "waiting_final_response",
                 "tool_rounds": 1,
             },
