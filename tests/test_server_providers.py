@@ -278,6 +278,11 @@ class ServerProvidersTests(ServerTestCase):
         client = server.MODEL_TRANSPORT.openai_responses_client()
 
         self.assertIs(client.wait, server.time.sleep)
+        self.assertEqual(client.response_timeout_seconds, 180)
+        self.assertEqual(server.OPENAI_RESPONSE_TIMEOUT_SECONDS, 600)
+        self.assertEqual(
+            server.MODEL_TRANSPORT.openai_stream_client().config.timeout, 600
+        )
 
     def test_attached_durable_job_streams_deltas_through_the_provider_stream(self):
         csrf_hash = "csrf-attached-provider-stream"

@@ -41,7 +41,8 @@ class ModelTransportAssemblyTests(unittest.TestCase):
                     default_openai_base_url="https://api.openai.com/v1",
                     openai_responses_path="/responses",
                     json_media_type="application/json",
-                    response_timeout_seconds=180,
+                    response_timeout_seconds=600,
+                    request_timeout_seconds=180,
                 ),
                 audio=AudioTranscriptionSettings(max_audio_bytes=2048),
                 diagnostics=ModelProviderDiagnostics(
@@ -76,6 +77,8 @@ class ModelTransportAssemblyTests(unittest.TestCase):
         self.assertEqual(factory.call_args.kwargs["api_key"], "openai-test-key")
         self.assertIs(factory.call_args.kwargs["thinking_level"], settings)
         self.assertIs(factory.call_args.kwargs["http_client"], http.return_value)
+        # A plain request keeps its own limit, apart from the streamed one.
+        self.assertEqual(factory.call_args.kwargs["response_timeout_seconds"], 180)
         self.assertIs(factory.call_args.kwargs["provider_state"], state.return_value)
 
     def test_stream_opener_patch_targets_remain_at_provider_owners(self):
@@ -90,7 +93,7 @@ class ModelTransportAssemblyTests(unittest.TestCase):
             self.assertEqual(assembly.openai_stream_client(), "openai-stream")
 
         self.assertIs(openai_factory.call_args.kwargs["opener"], opener)
-        self.assertEqual(openai_factory.call_args.args[0].timeout, 180)
+        self.assertEqual(openai_factory.call_args.args[0].timeout, 600)
         self.assertIs(
             openai_factory.call_args.args[2], assembly._selected_thinking_level
         )

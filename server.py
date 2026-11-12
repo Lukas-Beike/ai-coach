@@ -498,6 +498,8 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 # Long reasoning on a large plan may send nothing for minutes (athlete
 # decision 2026-11-11, #2073: 10 minutes instead of 3).
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
+# Plain OpenAI requests (impact classifier, remote conversation create/delete).
+OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -1307,6 +1309,7 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             openai_responses_path=OPENAI_RESPONSES_PATH,
             json_media_type=JSON_MEDIA_TYPE,
             response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+            request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
         ),
         audio=AudioTranscriptionSettings(max_audio_bytes=MAX_AUDIO_BODY_BYTES),
         diagnostics=ModelProviderDiagnostics(

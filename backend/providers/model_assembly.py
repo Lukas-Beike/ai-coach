@@ -31,7 +31,9 @@ class ModelEndpointSettings:
     default_openai_base_url: str
     openai_responses_path: str
     json_media_type: str
+    # Longest silence in a streamed response; a plain request has its own limit.
     response_timeout_seconds: int
+    request_timeout_seconds: int
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ class ModelTransportAssembly:
         self._json_media_type = endpoints.json_media_type
         self._max_audio_bytes = audio.max_audio_bytes
         self._response_timeout_seconds = endpoints.response_timeout_seconds
+        self._request_timeout_seconds = endpoints.request_timeout_seconds
         self._max_response_bytes = limits.max_response_bytes
         self._audio_timeout_seconds = audio.timeout_seconds
         self._transcription_model = audio.model
@@ -119,7 +122,7 @@ class ModelTransportAssembly:
             base_url=config.openai_base_url,
             default_base_url=self._default_openai_base_url,
             responses_path=self._openai_responses_path,
-            response_timeout_seconds=self._response_timeout_seconds,
+            response_timeout_seconds=self._request_timeout_seconds,
             thinking_level=self._selected_thinking_level,
             http_client=self._provider_http_client(),
             provider_state=self._provider_state_service(),
