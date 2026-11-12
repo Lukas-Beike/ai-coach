@@ -8,15 +8,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.providers.descriptors import (
-    GARMIN_ID,
-    GARMIN_NOT_CONFIGURED_MESSAGE,
-    WAHOO_NOT_CONFIGURED_MESSAGE,
-)
 from backend.runtime.events import StateEventBuffer
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
@@ -32,6 +28,10 @@ from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_runtime import FullResyncHandler, ProviderRuntimeRegistry
+from backend.sync.provider_table import (
+    GARMIN_NOT_CONFIGURED_MESSAGE,
+    WAHOO_NOT_CONFIGURED_MESSAGE,
+)
 from backend.sync.wahoo_sync import WahooSyncService
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID, WAHOO_ID
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 
 _INPUT_PROVIDERS: Final = (GARMIN_ID, WAHOO_ID)
 _PLAN_PUSH: Final = "plan_push"

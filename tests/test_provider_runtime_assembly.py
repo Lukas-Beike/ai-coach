@@ -28,17 +28,9 @@ from provider_runtime_fakes import (
     fake_binding,
 )
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-    SchedulePolicy,
-)
 from backend.sync.assembly import (
     ProviderRefreshRetryPolicy,
     ProviderSyncAssembly,
@@ -64,6 +56,12 @@ from backend.sync.provider_runtime_assembly import (
     WahooRuntimeDependencies,
     build_provider_runtime,
     builtin_bindings,
+)
+from backend.sync.provider_table import (
+    CALENDAR_ID,
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    WEATHER_ID,
+    SchedulePolicy,
 )
 
 BUILTIN_IDS = frozenset({INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID})

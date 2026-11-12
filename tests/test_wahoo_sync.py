@@ -9,10 +9,9 @@ import unittest
 from typing import Any
 from unittest.mock import Mock, patch
 
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import WAHOO_ID, MetricKind, ProviderId
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.errors import AppError
-from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.sync.canonical_coverage_store import CanonicalCoverageStore, coverage_key
 from backend.sync.commands import WahooSynchronousRefresh
@@ -361,7 +360,7 @@ class FailureTests(WahooSyncCase):
 
 class SkipTests(WahooSyncCase):
     def test_unconfigured_skips_without_touching_the_source(self) -> None:
-        from backend.providers.descriptors import WAHOO_NOT_CONFIGURED_MESSAGE
+        from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
         from tests.wahoo_sync_fixture import make_config
 
         self.config = make_config(wahoo=False)
@@ -374,7 +373,7 @@ class SkipTests(WahooSyncCase):
         self.assertEqual(0, self._canonical_row_count())
 
     def test_disconnected_skips_without_touching_the_source(self) -> None:
-        from backend.providers.descriptors import WAHOO_NOT_CONFIGURED_MESSAGE
+        from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 
         self.connection.connected = False
 

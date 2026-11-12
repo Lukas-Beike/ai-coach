@@ -10,7 +10,6 @@ from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.db.schema import initialize_schema
-from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.jobs import (
     ALLOWED_JOB_TRANSITIONS,
     BACKFILL_CONTINUATION_SQL,
@@ -36,6 +35,7 @@ from backend.sync.jobs import (
     validate_job_request,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 
 # Provider-level rejection text per job type, as the live validators raise it.
 # Type-level errors (unknown job type, field errors) are not listed here.

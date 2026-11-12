@@ -20,6 +20,7 @@ from typing import Any, Final
 
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
+    WAHOO_ID,
     ActivityRecordState,
     ProviderId,
     RecordingOrigin,
@@ -37,7 +38,6 @@ from backend.db.canonical_store import (
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.descriptors import WAHOO_ID
 from backend.providers.fit_activity_detail_mapping import (
     MAPPER_VERSION,
     map_fit_activity_detail,

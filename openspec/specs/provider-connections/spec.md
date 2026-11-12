@@ -7,7 +7,7 @@ Record the implemented connection surfaces, authentication lifecycle, safe statu
 ## Requirements
 
 ### Requirement: Supported connection surface
-The system SHALL expose Garmin Connect and Wahoo as data sources and Intervals.icu as an output target according to their registry descriptors, plus Open-Meteo weather and a read-only iCalendar feed. It SHALL distinguish provider availability, configuration and an athlete connection where these are separate states. A recording-origin label such as Wahoo, Garmin, Strava, Zwift, manual or upload SHALL not by itself create a direct provider connection.
+The system SHALL expose Garmin Connect and Wahoo as data sources and Intervals.icu as an output target according to their provider table entries, plus Open-Meteo weather and a read-only iCalendar feed. It SHALL distinguish provider availability, configuration and an athlete connection where these are separate states. A recording-origin label such as Wahoo, Garmin, Strava, Zwift, manual or upload SHALL not by itself create a direct provider connection.
 
 #### Scenario: Unconnected Wahoo configuration
 - **WHEN** Wahoo client settings exist but the athlete has not connected an account
@@ -19,7 +19,7 @@ The system SHALL expose Garmin Connect and Wahoo as data sources and Intervals.i
 
 Detailed contract: The current training registry contains no direct Polar, COROS, Suunto, or Strava OAuth adapter.
 
-Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`, `tests/test_garmin_activity_mapping.py:test_manufacturer_names_the_recording_origin`.
+Evidence: `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`, `tests/test_garmin_activity_mapping.py:test_manufacturer_names_the_recording_origin`.
 
 ### Requirement: Intervals server configuration and requests
 The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness history or athlete record, and remote writes SHALL enter their explicit domain use cases.

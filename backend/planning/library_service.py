@@ -9,12 +9,11 @@ from typing import Any
 
 from backend import change_history
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
-from backend.canonical.vocabulary import RemoteEntityKind, Sport
+from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
 from backend.planning.sport import with_activity_type
-from backend.providers.descriptors import WAHOO_ID
 from backend.providers.intervals_workouts import (
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_TEMPLATE_WORKOUT_TYPES,

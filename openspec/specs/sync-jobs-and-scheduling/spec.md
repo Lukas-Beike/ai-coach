@@ -19,7 +19,7 @@ The system SHALL validate provider and job type together using the configured re
 
 Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, and stream backfill; Wahoo supports refresh, plan push, and stream backfill; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
 
-Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
+Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
 ### Requirement: Durable jobs and duplicate suppression
 The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active refresh and backfill jobs requested by `scheduler`, `startup` or `connection`. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. Requests by `user`, `coach` or `backfill` (the continuation of a chain, which carries its own cursor) always create their own job.
@@ -45,7 +45,7 @@ The system SHALL schedule configured startup refreshes in calendar, Garmin, weat
 - **WHEN** a provider already has an active refresh or historical-backfill job
 - **THEN** startup does not duplicate that operation; disabled or unconnected providers are skipped.
 
-Evidence: `backend/sync/scheduler.py:StartupSyncScheduler.schedule`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_startup_sync_scheduler.py:test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`, `tests/test_wahoo_runtime_acceptance.py:test_connected_account_flows_from_the_scheduler_to_the_status`.
+Evidence: `backend/sync/scheduler.py:StartupSyncScheduler.schedule`, `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_startup_sync_scheduler.py:test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`, `tests/test_wahoo_runtime_acceptance.py:test_connected_account_flows_from_the_scheduler_to_the_status`.
 
 ### Requirement: Automatic cadence and eligibility
 The system SHALL wait 300 seconds before each automatic loop pass, schedule eligible providers in weather, calendar, Garmin, Wahoo order, and then attempt the morning Body Battery refresh. Calendar, Wahoo, and Garmin without a Personal API key SHALL use the latest parseable attempt or success marker with a 3600-second due interval. With a key, Garmin SHALL follow its change check. Weather SHALL use forecast cache expiry and retry backoff instead of a daily marker.
@@ -91,7 +91,7 @@ The system SHALL NOT read Intervals.icu activities, wellness history, athlete re
 
 Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records of a database restored from a release before 2.0.0 are not read. The competition push reconciles linked events and never imports new competitions from Intervals.icu.
 
-Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
+Evidence: `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
 
 ### Requirement: Bounded resumable historical backfill
 The system SHALL walk Garmin history in inclusive chunks of at most 90 days down to the configured history floor. A restart SHALL resume before the persisted historical cursor. Complete chunks may schedule their next chunk after 15 seconds; partial chunks SHALL stop continuation. Two consecutive completely empty chunks SHALL end the walk and persist the floor.

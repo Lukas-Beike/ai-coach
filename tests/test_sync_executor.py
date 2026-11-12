@@ -16,7 +16,6 @@ from unittest.mock import Mock, patch
 from provider_runtime_fakes import ACME_ID, FakeJobOwner, acme_descriptor
 
 from backend.errors import AppError
-from backend.providers.descriptors import CALENDAR_ID, WEATHER_ID
 from backend.sync.executor import (
     CalendarWeatherJobAdapter,
     CalendarWeatherSyncJobOwner,
@@ -30,6 +29,7 @@ from backend.sync.executor import (
     dispatch_provider_job,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 
 
 class RecordingService:

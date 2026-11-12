@@ -42,11 +42,6 @@ from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
-from backend.providers.descriptors import (
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    ManualSyncRoute,
-    ProviderDescriptor,
-)
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.commands import ProviderRefreshCommandService
@@ -57,6 +52,11 @@ from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import (
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    ManualSyncRoute,
+    ProviderDescriptor,
+)
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
     DailySyncScheduler,

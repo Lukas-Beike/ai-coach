@@ -14,10 +14,10 @@ from unittest.mock import Mock, patch
 from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 from support import temp_database
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
@@ -30,6 +30,7 @@ from backend.sync.observation import OPERATION_CONTEXT
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_resync_assembly import full_resync_handlers
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 
 NOW = "2026-09-20T12:00:00+00:00"
 

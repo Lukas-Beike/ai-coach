@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from backend.athlete.profile import timezone_name
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.errors import COACH_ABORTED_ERROR, AppError
@@ -19,7 +20,6 @@ from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_adapter
 from backend.providers import garmin_morning
 from backend.providers import http as provider_http
-from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin import (
     ExternalCall,
     GarminClientFactory,
@@ -55,6 +55,7 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
@@ -99,9 +100,7 @@ def refresh_morning_battery_after_sync(
     return morning_battery.refresh(cancel_event=cancel_event)
 
 
-GARMIN_MFA_REQUIRED_MESSAGE = (
-    "Garmin verlangt MFA. Bitte Garmin in der Garmin-Karte unter Anbindungen neu verbinden."
-)
+GARMIN_MFA_REQUIRED_MESSAGE = "Garmin verlangt MFA. Bitte Garmin in der Garmin-Karte unter Anbindungen neu verbinden."
 
 
 def _garmin_login_argument(config: Config, garmin_tokens: Any | None) -> str:

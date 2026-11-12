@@ -28,8 +28,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.providers import http as provider_http
-from backend.providers.descriptors import GARMIN_ID
 
 PERSONAL_BASE_URL: Final = "https://personal.connectapi.garmin.com"
 TOKEN_PATH: Final = "/personalapitoken-service/personal-api/personal-api-key/token"

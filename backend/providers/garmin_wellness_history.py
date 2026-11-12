@@ -30,7 +30,7 @@ from functools import partial
 from typing import Any, Final
 
 from backend.canonical.section_items import record_day
-from backend.providers.descriptors import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.providers.garmin import (
     ExternalCall,
     normalize_range_records,

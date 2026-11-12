@@ -23,11 +23,8 @@ from backend.http_api.sync_commands import (
     SyncCommandEndpoint,
 )
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.providers.descriptors import (
-    WAHOO_NOT_CONFIGURED_MESSAGE,
-    ManualSyncRoute,
-)
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE, ManualSyncRoute
 
 try:
     from .provider_runtime_fakes import ACME_ID, acme_descriptor

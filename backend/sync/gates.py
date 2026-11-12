@@ -8,13 +8,9 @@ from contextlib import AbstractContextManager, contextmanager
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
-from backend.providers.descriptors import (
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-)
+from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 
 RESYNC_RUNNING_REASON = "provider_resync_running"
 

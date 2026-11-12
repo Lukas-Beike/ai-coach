@@ -16,8 +16,8 @@ import json
 from collections.abc import Mapping
 from typing import Any, Final
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.db.repositories import KeyValueRepository
-from backend.providers.descriptors import GARMIN_ID
 from backend.sync.canonical_backfill import BatchReport
 
 STAGE: Final = "rating_backfill_removal"

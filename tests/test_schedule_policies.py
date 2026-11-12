@@ -10,14 +10,14 @@ from typing import Any, cast
 
 from provider_runtime_fakes import ACME_ID, FakeSchedulePolicy, acme_descriptor
 
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    WEATHER_ID,
-)
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_table import (
+    CALENDAR_ID,
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    WEATHER_ID,
+)
 from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
     GarminSchedulePolicy,

@@ -18,16 +18,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.athlete.profile import ProfileService
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
 from backend.sync.commands import GarminSynchronousRefresh, WahooSynchronousRefresh
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
@@ -57,6 +51,7 @@ from backend.sync.provider_runtime import (
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
 )
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
     GarminSchedulePolicy,

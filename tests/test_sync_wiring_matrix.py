@@ -30,17 +30,11 @@ from unittest import mock
 
 from support import temp_database
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.contracts import nutrition_approval_item
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
@@ -62,6 +56,7 @@ from backend.sync.provider_runtime_assembly import (
     build_provider_runtime,
     builtin_bindings,
 )
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 

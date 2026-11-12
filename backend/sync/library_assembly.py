@@ -14,7 +14,6 @@ from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.observability import Redactor
 from backend.planning.library_service import WorkoutLibraryService
-from backend.providers.descriptors import Capability
 from backend.runtime.events import StateEventBuffer
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
@@ -22,6 +21,7 @@ from backend.sync.library import (
     WorkoutLibrarySyncStateService,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import Capability
 from backend.sync.workout_export import WorkoutLibraryExportPort
 
 # Intervals.icu stays the default target. A target must declare the

@@ -33,6 +33,7 @@ from backend.backup.assembly import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
@@ -305,7 +306,6 @@ from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
-from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelEndpointSettings,

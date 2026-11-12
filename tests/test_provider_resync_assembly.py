@@ -4,8 +4,8 @@ import logging
 import unittest
 from unittest.mock import Mock, patch
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.sync import provider_resync_assembly as assembly_module
 from backend.sync.full_resync import resync_field_keys
 from backend.sync.gates import ProviderResyncGate

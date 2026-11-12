@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.providers.descriptors import INTERVALS_ID
+from backend.canonical.vocabulary import INTERVALS_ID
 from backend.sync.queue import SyncJobQueueService
 
 _NOTHING_QUEUED = (

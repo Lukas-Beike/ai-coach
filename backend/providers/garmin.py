@@ -18,7 +18,7 @@ from typing import Any
 
 from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
 from backend.canonical.section_items import record_day
-from backend.providers.descriptors import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
     GARMIN_RESTING_KCAL_ALIASES,

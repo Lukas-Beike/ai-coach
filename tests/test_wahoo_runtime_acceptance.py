@@ -18,10 +18,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
-from backend.providers.descriptors import (
-    WAHOO_ID,
-    WAHOO_NOT_CONFIGURED_MESSAGE,
-)
+from backend.canonical.vocabulary import WAHOO_ID
 from backend.providers.wahoo_client import WahooClient
 from backend.sync.daily import daily_marker_key
 from backend.sync.executor import SyncJobExecutor, WahooJobAdapter
@@ -31,6 +28,7 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import WahooSchedulePolicy
 from backend.sync.scheduler import (

@@ -6,14 +6,9 @@ import unittest
 
 from server_test_support import server
 
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WAHOO_ID,
-    WEATHER_ID,
-)
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 
 SQLCIPHER_SKIP_REASON = "SQLCipher requires the Docker runtime on Windows"
 
