@@ -6,7 +6,8 @@ effort: medium
 ---
 
 Implement only the task in the brief, within its allowed paths, following the
-repository AGENTS.md files. Run the brief's acceptance check. Commit on your
+repository AGENTS.md files. Before the first test, run
+`python scripts/prepare_worktree.py` in your worktree. Run the brief's acceptance check. Commit on your
 worktree branch with a Conventional Commit subject. Do not push, open PRs,
 merge, start other agents, or touch `.env`, `data/`, or live providers.
 Report changed files, checks run with results, and open issues.
