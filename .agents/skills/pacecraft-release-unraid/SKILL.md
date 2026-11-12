@@ -24,7 +24,9 @@ Use this skill only when the user explicitly asks to start or carry out a Pacecr
    select an unrelated or merely newest release. The publish run for that tag,
    including its test, browser, quality and `build-and-push` jobs, must have
    succeeded ([pr-state](../pacecraft-pr-state/SKILL.md) and `gh run view` for
-   detail).
+   detail). The publish run's final digest-parity step can fail transiently
+   right after the promotion: rerun only that failed job once
+   (`gh run rerun <run id> --failed`); a second failure stops the release.
 5. Immediately before updating Unraid, run [image-verify](../pacecraft-image-verify/SKILL.md)
    for the tag. Stop unless it exits 0 (`latest` equals the release digest).
 
@@ -33,7 +35,7 @@ Use this skill only when the user explicitly asks to start or carry out a Pacecr
 After GHCR publication is verified:
 
 1. Use the Unraid MCP. Find the single container named `pacecraft`, inspect its configured image, and confirm the repository is `ghcr.io/lukas-beike/pacecraft`. A container still named `ai-coach` on `ghcr.io/lukas-beike/ai-coach` predates the 2.0.0 rename: stop and hand the athlete the Unraid rename steps from the 2.0.0 release notes instead of editing it. If the container is missing, duplicated, or points to another image repository, stop and report that instead of changing a different container.
-2. Refresh Docker image digests with `docker.refresh_digests`, then inspect the update state for that container. Its configured tag must be `latest` or the exact release tag being deployed. Do not change unrelated containers or tags.
+2. Refresh Docker image digests with `docker.refresh_digests` (allow a timeout of about 300 seconds), then inspect the update state for that container. Its configured tag must be `latest` or the exact release tag being deployed. Do not change unrelated containers or tags.
 3. Apply the pending update only to that container with `docker.update_container`, using its observed container ID (or exact name if the MCP requires a name). Do not use `update_all_containers`, remove/recreate the container, or touch its volumes.
 4. Read the container details again and wait for the updated container to become healthy; if the health check is unavailable, query its `/api/health` endpoint when reachable. Report success only when the update completed, the running image digest matches the verified release digest, and the application is healthy. If no update is pending after digest refresh, compare the running image digest with that verified release digest: treat a match as an already completed deployment, and stop with diagnostics when it differs. Treat an `unhealthy` state or a health-check timeout as a failed update, and do not retry repeatedly.
 

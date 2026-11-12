@@ -34,11 +34,13 @@ stop, report it, and do not try to repair production.
 3. **Protection:** [prod-guards](../pacecraft-prod-guards/SKILL.md): 401 without
    a session, 403 without the CSRF token, TLS days to expiry. A failed guard
    stops the check.
-4. **Logs:** save the `pacecraft` container logs since its start from the
-   Unraid MCP to the scratchpad and run [prod-logs](../pacecraft-prod-logs/SKILL.md)
-   with `--since <container start>`: counts and event names only, the number of
-   removed past app-created Garmin workouts after the first Garmin refresh since
-   the deploy, and plan-sync error events. Delete the saved log afterwards.
+4. **Logs:** run [prod-logs](../pacecraft-prod-logs/SKILL.md) with the app's
+   own redacted entries (`--url`, `--password-file`): counts and event names
+   only, the number of removed past app-created Garmin workouts after the first
+   Garmin refresh since the deploy, and plan-sync error events. The Unraid MCP
+   logs call ignores `level=` and truncates at about 40 KB, so a saved container
+   log covers only the latest window: use it (`--log-file`, then delete it) for
+   startup errors, and say which window the counts cover.
 5. **Server health (Unraid MCP, read-only):** container memory, appdata disk use
    and database file size, compared with the previous release; the automatic
    database recovery copy exists and is recent - report only its age and size,

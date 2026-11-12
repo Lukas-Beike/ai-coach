@@ -5,9 +5,10 @@ description: Base skill. Count warning and error log entries by event name from 
 
 # Production logs as counts
 
-Either save the `pacecraft` container logs since its last start from the
-Unraid MCP to a file in the session scratchpad, or read the app's own redacted
-entries with the secret-file login:
+Prefer the app's own redacted entries with the secret-file login. A container
+log saved from the Unraid MCP to the session scratchpad also works, but that
+call ignores `level=` and truncates at about 40 KB, so it covers only the
+latest window; name that window with the counts.
 
 ```powershell
 python scripts/prod_logs.py --log-file <scratchpad>/container.log [--since <container start, ISO>]
