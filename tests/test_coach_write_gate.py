@@ -756,6 +756,13 @@ class RemoteTierTests(unittest.TestCase):
             # and an "ohne" phrase that names the target negates its part.
             "Nein, synchronisiere den Plan mit Intervals.",
             "Lade die Woche ohne die Krafteinheiten zu Intervals hoch.",
+            # A negated or self-kept sync blocks the whole message, and the
+            # training term "Intervals" names no sync (#2341).
+            "Plane die Woche. Synchronisieren mache ich selbst.",
+            "Nicht synchronisieren! Nur lokal speichern. Der Sync kommt später.",
+            "Sync den Plan. Nein, doch nicht synchronisieren.",
+            "Mach mir 5x4 min Intervals am Dienstag.",
+            "Plane 6x800 m Intervals für Donnerstag und sync es nicht.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(gate.remote_requested(text))
@@ -772,6 +779,9 @@ class RemoteTierTests(unittest.TestCase):
             "Sync mit Intervals bitte.",
             "Nicht verschieben. Sync den Plan zu Intervals.",
             "Synchronisiere mit Intervals.icu.",
+            "Nicht synchronisieren. Aber den Plan danach zu Intervals hochladen.",
+            "Synchronisier den Plan bitte selbst mit Intervals.",
+            "Mach mir 5x4 min Intervals und schick sie zu Intervals.icu.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(gate.remote_requested(text))

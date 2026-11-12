@@ -191,7 +191,18 @@ _POLITE_REQUEST = re.compile(
 )
 
 
+# "Synchronisieren mache ich selbst": the athlete keeps the action (#2341).
+_SELF = re.compile(r"(?<![a-z])(?:selbst|selber|myself)(?![a-z])")
+_FIRST_PERSON = re.compile(r"(?<![a-z])(?:ich|i)(?![a-z])")
+# The training term ("5x4 min Intervals"), not the provider name Intervals.icu.
+_TRAINING_INTERVALS = re.compile(r"(?<![a-z])intervals(?!\.icu)(?![a-z])")
+# Split "abgleichen" ("gleiche ... mit Intervals ab"); "lade ... hoch" is a push verb.
+_SPLIT_ABGLEICH = re.compile(r"(?<![a-z])gleich[a-z]*\s.*(?<![a-z])ab(?![a-z])")
+
+
 def _negates(part: str) -> bool:
+    if _SELF.search(part) and _FIRST_PERSON.search(part):
+        return True
     return bool(_NEGATION.search(part)) or any(
         _SYNC_TARGET_PATTERN.search(_loose(normalize(phrase)))
         for phrase in _WITHOUT.findall(part)
@@ -209,7 +220,11 @@ def remote_requested(text: str) -> bool:
     ohne die Ruhetage" still asks for it. A part that names Garmin or Wahoo but
     not Intervals.icu ("Sync meine Garmin-Daten"), or that describes a past sync
     ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
+    A negated or self-kept sync ("Synchronisieren mache ich selbst") blocks the
+    whole message up to the next contrast word, and the training term
+    "Intervals" without ".icu" needs a push verb (#2341).
     """
+    parts: list[tuple[str, bool]] = []
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
             sentence.rstrip().endswith(("?", "？"))
@@ -217,15 +232,31 @@ def remote_requested(text: str) -> bool:
             and not _POLITE_REQUEST.search(sentence)
         ):
             continue
-        if any(
-            _mentions_remote(part)
-            and not _negates(part)
-            and not _names_other_provider(part)
-            and not _describes_past(part)
-            for part in _CONTRAST.split(sentence)
-        ):
-            return True
-    return False
+        parts.extend(
+            (part, index > 0) for index, part in enumerate(_CONTRAST.split(sentence))
+        )
+    start = 0
+    for index, (part, _) in enumerate(parts):
+        if _mentions_remote(part) and _negates(part):
+            start = next(
+                (later for later in range(index + 1, len(parts)) if parts[later][1]),
+                len(parts),
+            )
+    return any(
+        _names_sync(part)
+        and not _negates(part)
+        and not _names_other_provider(part)
+        and not _describes_past(part)
+        for part, _ in parts[start:]
+    )
+
+
+def _names_sync(part: str) -> bool:
+    """Whether a part names the sync; the training term needs a push verb."""
+    return _mentions_remote(_TRAINING_INTERVALS.sub(" ", part)) or (
+        _mentions_remote(part)
+        and bool(_PUSH_VERBS.search(_loose(part)) or _SPLIT_ABGLEICH.search(part))
+    )
 
 
 # One group per provider, named by its id. Garmin is named as the provider or
