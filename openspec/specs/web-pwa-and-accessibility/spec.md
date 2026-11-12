@@ -135,11 +135,15 @@ The client SHALL show the settings areas under the fixed title "Mehr" as one swi
 - **WHEN** the athlete opens a card or follows a setup link for one provider
 - **THEN** that card opens with its status, freshness and retry history, credentials, settings and actions and no other provider's fields; several cards can be open at once, and the Open-Meteo card keeps the CC BY 4.0 attribution.
 
+#### Scenario: A check fills a not yet checked chip
+- **WHEN** a configured Intervals.icu or Claude card shows "Nicht geprüft" and the athlete runs "Verbindung prüfen"
+- **THEN** its chip shows "Verbunden" after a successful check and "Fehler" after a failed one, also after a reload while the server keeps the result.
+
 #### Scenario: Unsaved profile
 - **WHEN** a profile field changes
 - **THEN** the save bar shows "Ungespeichert" until the profile is saved, then "Gespeichert"; a closed section opens when it holds an invalid value.
 
-Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`.
+Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`, `tests/provider-checks.test.cjs::Intervals.icu and Claude chips follow the last explicit check, also after a reload`.
 
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.
