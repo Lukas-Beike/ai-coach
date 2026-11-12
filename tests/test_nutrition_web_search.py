@@ -7,13 +7,15 @@ import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
 from backend.errors import AppError
+from backend.nutrition import web_search
 from backend.nutrition.web_search import NutritionWebSearchService
+from backend.providers.openai_requests import OpenAIResponsesClient, ResponsesClock
 
 PAGE = "https://example.test/synthetic-bar"
 NOW = datetime(2026, 11, 12, 8, 0, tzinfo=UTC)
@@ -86,6 +88,97 @@ ROW = {
     "basis_unit": "g",
     "missing_fields": ["salt_g", "fiber_g"],
 }
+
+
+class _WireHttp:
+    """The HTTP layer under a real Responses client: records what goes out."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    def request(self, method: str, url: str, payload: Any, **_options: Any) -> Any:
+        self.sent.append({"method": method, "url": url, "payload": payload})
+        return {"status": "completed", "output": []}
+
+
+class _WireState:
+    def validate_openai_response(self, _path: str, result: Any) -> Any:
+        return result
+
+    def record_usage(self, *_args: Any) -> None:
+        return None
+
+
+def wire_search(http: _WireHttp) -> NutritionWebSearchService:
+    """The web search over a real Responses client, wired as server.py does."""
+    client = OpenAIResponsesClient(
+        api_key="synthetic-key",
+        base_url="https://api.example.test/v1/",
+        default_base_url="https://api.openai.com/v1",
+        responses_path="/responses",
+        response_timeout_seconds=17,
+        thinking_level=lambda: "high",
+        http_client=cast(Any, http),
+        provider_state=cast(Any, _WireState()),
+        logger=None,
+        clock=ResponsesClock(lambda _seconds: None),
+        service_tier=lambda _model: "priority",
+    )
+    return NutritionWebSearchService(
+        selected_model=lambda: "synthetic-model",
+        openai_request=client.request,
+        openai_path="/responses",
+    )
+
+
+class NutritionWebSearchWireTests(unittest.TestCase):
+    def test_the_outgoing_request_is_unchanged(self) -> None:
+        """Golden wire payload, recorded before the model seam (#2338)."""
+        http = _WireHttp()
+        wire_search(http).search([ROW])
+        self.assertEqual(
+            http.sent,
+            [
+                {
+                    "method": "POST",
+                    "url": "https://api.example.test/v1/responses",
+                    "payload": {
+                        "model": "synthetic-model",
+                        "tools": [{"type": "web_search"}],
+                        "instructions": web_search._INSTRUCTIONS,
+                        "input": json.dumps(
+                            {
+                                "products": [
+                                    {
+                                        "ref": 1,
+                                        "name": "Synthetic bar",
+                                        "brand": "Synthetic brand",
+                                        "barcode": "4006381333931",
+                                        "basis_amount": 100,
+                                        "basis_unit": "g",
+                                        "missing_fields": ["salt_g", "fiber_g"],
+                                    }
+                                ]
+                            },
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        "text": {
+                            "format": {
+                                "type": "json_schema",
+                                "name": "product_values",
+                                "strict": True,
+                                "schema": web_search._SCHEMA,
+                            }
+                        },
+                        "store": False,
+                        "include": ["web_search_call.action.sources"],
+                        "reasoning": {"effort": "low"},
+                        "service_tier": "default",
+                    },
+                }
+            ],
+        )
 
 
 class NutritionWebSearchTests(unittest.TestCase):
