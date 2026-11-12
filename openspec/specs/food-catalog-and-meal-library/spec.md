@@ -278,7 +278,7 @@ The system SHALL authenticate with the configured account email and password and
 - **WHEN** a search runs
 - **THEN** the region is the configured two-letter country code, else DE, and the locale is derived from it.
 
-Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient._token`, `backend/nutrition/assembly.py::NutritionAssembly`; `tests/test_yazio.py::YazioClientTests.test_search_sends_the_profile_sex_and_none_when_unset`, `tests/test_yazio.py::YazioClientTests.test_country_is_configurable_and_validated`, `tests/test_yazio.py::YazioClientTests.test_expired_token_is_refreshed_then_login_is_the_fallback`.
+Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient._token`, `backend/nutrition/wiring.py::build_nutrition`; `tests/test_yazio.py::YazioClientTests.test_search_sends_the_profile_sex_and_none_when_unset`, `tests/test_yazio.py::YazioClientTests.test_country_is_configurable_and_validated`, `tests/test_yazio.py::YazioClientTests.test_expired_token_is_refreshed_then_login_is_the_fallback`.
 
 ### Requirement: Yazio failures are sanitized and isolated
 The system SHALL cache successful Yazio responses, back off after rate limits and rejected logins, and map every failure to a sanitized error disclosing neither credentials, tokens, queries nor response bodies. A Yazio failure SHALL NOT fail saved-product search, BLS or Open Food Facts lookup.

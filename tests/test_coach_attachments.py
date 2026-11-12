@@ -351,7 +351,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 side_effect=post,
             ),
         ):
-            server.NUTRITION_ASSEMBLY.meal_library_service().extract_packaging_photo(
+            server.NUTRITION_SERVICES.meal_library_service().extract_packaging_photo(
                 {"image_data_url": "data:image/jpeg;base64," + image}
             )
         return sent

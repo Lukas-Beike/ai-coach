@@ -801,7 +801,7 @@ def scripted(responders):
 
 
 def product_id(name):
-    catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+    catalog = server.NUTRITION_SERVICES.meal_library_service().product_catalog
     return next(p["id"] for p in catalog.list_products(query=name) if p["name"] == name)
 
 
