@@ -894,9 +894,10 @@ h2 {
 .planned-comparison { display: grid; gap: 4px; padding: 10px; border-radius: 10px; color: var(--muted); background: var(--translucent-surface); font-size: .75rem; line-height: 1.5; }
 .planned-comparison p { margin: 0; }
 .planned-badge.is-focus-derived { border-style: dashed; color: var(--muted); }
-.planned-focus-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
-.planned-focus-field select { min-height: 36px; padding: 4px 8px; }
+.planned-focus-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+/* The label sits above its select, so a phone never breaks it inside a word (#2370). */
+.planned-focus-field { display: grid; flex: 0 1 12rem; gap: 4px; font-size: .78rem; font-weight: 700; }
+.planned-focus-field select { min-height: 36px; width: 100%; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
 .planned-week-sync { display: flex; padding: 6px 0 2px; }
 .planned-week-sync .planned-sync-button { position: relative; display: inline-flex; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; }
