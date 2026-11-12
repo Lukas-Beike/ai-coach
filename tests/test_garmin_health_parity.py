@@ -355,7 +355,8 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
 
     def test_vo2max_matches_legacy_per_sport(self) -> None:
         _, cycling = _latest_value(self.result, MetricKind.VO2MAX, Sport.RIDE)
-        _, running = _latest_value(self.result, MetricKind.VO2MAX, Sport.RUN)
+        # Garmin's maxmet reports no running object; generic is the running value.
+        _, running = _latest_value(self.result, MetricKind.VO2MAX)
 
         self.assertEqual(cycling, self.metrics["cycling_vo2max_ml_kg_min"]["value"])
         self.assertEqual(running, self.metrics["running_vo2max_ml_kg_min"]["value"])

@@ -100,7 +100,7 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
         self.assertEqual(garmin["activity_sync_time_stored"], True)
         self.assertEqual(garmin["observation_sync_time_stored"], True)
         self.assertEqual(garmin["activities"], 2)
-        self.assertEqual(garmin["observations"], 32)
+        self.assertEqual(garmin["observations"], 31)
         self.assertEqual(garmin["issues"][str(IssueReason.UNSUPPORTED)], 0)
 
     def test_every_issue_reason_is_reported_with_an_explicit_count(self) -> None:

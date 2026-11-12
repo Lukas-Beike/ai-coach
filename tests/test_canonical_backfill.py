@@ -122,11 +122,17 @@ def garmin_activity(identifier: int) -> dict[str, Any]:
 
 
 def synthetic_weights(count: int) -> list[dict[str, Any]]:
-    template = load_fixture("garmin", "weight.json")[0]
+    """Daily weight summaries in the recorded ``dailyWeightSummaries`` row shape."""
+    template = load_fixture("garmin", "weight.json")[0]["dailyWeightSummaries"][0]
     start = date(2025, 1, 1)
+    days = [(start + timedelta(days=i)).isoformat() for i in range(count)]
     return [
-        dict(template, calendarDate=(start + timedelta(days=i)).isoformat())
-        for i in range(count)
+        dict(
+            template,
+            summaryDate=day,
+            latestWeight=dict(template["latestWeight"], samplePk=i, calendarDate=day),
+        )
+        for i, day in enumerate(days)
     ]
 
 

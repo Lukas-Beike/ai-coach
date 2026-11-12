@@ -1642,7 +1642,7 @@ Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAM
 | `hrv` | `get_hrv_data_range(start, end)` (Personal `/hrv-service/hrv/daily/{s}/{e}`), rows unwrapped from `hrvSummaries` by `normalize_range_records` | `_GROUPED_SECTIONS["hrv"]` | observed (single-day shape) |
 | `resting_hr` | `get_heart_rates(day)` per day (Personal `/wellness-service/wellness/dailyHeartRate`); backfill rows `{calendarDate, restingHeartRate}` built by `_resting_rows` from daily summaries | `_GROUPED_SECTIONS["resting_hr"]` | documented, fixture `resting_hr` |
 | `readiness` | SDK `get_training_readiness(today)` | `_GROUPED_SECTIONS["readiness"]` + `morning_readiness` | documented, fixture `readiness` |
-| `max_metrics` | SDK `get_max_metrics_range(today-89, today)` | `_GROUPED_SECTIONS["max_metrics"]` | documented, fixture `max_metrics` |
+| `max_metrics` | SDK `get_max_metrics_range(today-89, today)` | `_GROUPED_SECTIONS["max_metrics"]` | recorded daily shape (`MAX_METRICS_DAILY` in `tests/canonical_consumer_cases.py`, #2345), fixture `max_metrics` |
 | `running_threshold` | SDK `get_lactate_threshold(latest=True)` | `_map_running_threshold`, `_THRESHOLD_GROUPS` | documented, fixture `running_threshold` |
 | `cycling_ftp` | SDK `get_cycling_ftp()` | `_GROUPED_SECTIONS["cycling_ftp"]` | documented, fixture `cycling_ftp` |
 | `cycling_ftp_history` | SDK `get_functional_threshold_power_range(start, end, sport="CYCLING", aggregation="daily")` | `_GROUPED_SECTIONS["cycling_ftp_history"]`, `_FTP_RANGE_GROUPS` | documented, fixture `cycling_ftp_history` |
@@ -1654,6 +1654,23 @@ Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAM
 | `endurance_score` | SDK `get_endurance_score(start, end, aggregation="daily")` | `_GROUPED_SECTIONS["endurance_score"]` | documented, fixture `endurance_score` |
 | `performance_history` | none: written by `append_garmin_performance_history` (90 days of `{date, metrics}`) | `_map_performance_history` | documented |
 | training sections | SDK calls named in "Training sections" | `training_values`, `endurance_group_values` | documented |
+
+#### Wire fixtures and their shape source (#2391)
+
+Each file under `tests/fixtures/providers/garmin/` was checked against the strongest shape evidence in the
+repository; no provider account was read. Values are synthetic.
+
+- Follow a recorded or observed shape: `max_metrics` (undated rows, `calendarDate` per sport object, no `running`
+  object: `MAX_METRICS_DAILY`), `sleep` (`{calendarDate, dailySleepDTO}` with `sleepScores.overall.value`, as
+  `wrap_daily_sleep` stores it), `body_battery` (day key `date`), `daily_stats` (nested range rows before
+  `flatten_daily_summary`), `weight` (`dailyWeightSummaries[].latestWeight`, grams, as `preserve_weight_response`
+  stores it), `hrv` (`calendarDate`, `weeklyAvg`, `lastNightAvg`), `activities` (list keys named "observed" in the
+  `garmin_activity_mapping.py` section) and `personal/heart_rate_zones` (Personal API probe, #1776). The sources are
+  the "observed" notes of this map and the test payloads shaped after the sanitized answers
+  (`tests/test_garmin_personal_transport.py`, `tests/test_garmin_wellness_history.py`).
+- Code-consistent only, no recorded shape in the repository: `heart_rate_zones` (SDK subset of the Personal
+  zones), `resting_hr`, `readiness`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `race_predictions`,
+  `endurance_score`, the training sections, `gear`, `gear_stats`, `user_profile` and `activity_detail/*`.
 
 #### Sleep (`sleep`)
 
@@ -2484,7 +2501,7 @@ State of the code when this map was written. The defects below are tracked in [#
 
 - **Sessions older than the provider file history, or without a file, hold no full-resolution streams.** Stream-based values (critical power/speed, running bests, aerobic decoupling, HR-distribution TRIMP) stay empty for them; the stream backfill (#1763) fetches the Garmin and Wahoo files of the other sessions.
 - **No Wahoo payload has been captured.** Every Wahoo key in this map is "documented" (mapper docstrings, synthetic test rows, FIT SDK field definitions).
-- **Garmin ride and strength list rows**, and every Garmin family without a file in the payload set (readiness, thresholds, FTP, race predictions, VO2max, heart-rate zones, endurance score, training status, gear), are documented through synthetic fixtures only.
+- **Garmin ride and strength list rows**, and every Garmin family without a file in the payload set (readiness, thresholds, FTP, race predictions, heart-rate zones, endurance score, training status, gear), are documented through synthetic fixtures only (see "Wire fixtures and their shape source").
 - **Metric kinds nothing produces:** the kinds marked "unproduced by providers" in the "Status" column of "Metric kinds" (`training_load` was never produced, `run_threshold_power` is legacy: run FTP is `ftp` with sport `run`, the Intervals.icu kinds are retained for stored rows). Kinds stored for export that no reader uses: see the "Status" column of "Metric kinds".
 - **`LapSource` value `splits`** has no producer; it is only ranked when sets are merged.
 

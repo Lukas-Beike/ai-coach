@@ -1,12 +1,14 @@
 [
   {
-    "calendarDate": "2026-10-08",
-    "weight": 72100,
-    "unitKey": "gram"
-  },
-  {
-    "calendarDate": "2026-10-10",
-    "weight": 71500,
-    "unitKey": "gram"
+    "dailyWeightSummaries": [
+      {
+        "summaryDate": "2026-10-08",
+        "latestWeight": {"samplePk": 1, "calendarDate": "2026-10-08", "weight": 72100.0}
+      },
+      {
+        "summaryDate": "2026-10-10",
+        "latestWeight": {"samplePk": 2, "calendarDate": "2026-10-10", "weight": 71500.0}
+      }
+    ]
   }
 ]

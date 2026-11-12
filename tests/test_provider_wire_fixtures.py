@@ -389,7 +389,7 @@ class GarminWireFixtureTests(unittest.TestCase):
 
         self.assertEqual(len(records), 2)
         for record in records:
-            with self.subTest(date=record["calendarDate"]):
+            with self.subTest(date=record["date"]):
                 self.assertTrue(0 <= record["charged"] <= 100)
                 self.assertTrue(0 <= record["drained"] <= 100)
 
