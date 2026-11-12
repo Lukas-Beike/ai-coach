@@ -113,6 +113,23 @@ def read_sse_events(
     return size
 
 
+def _transport_error(exc: BaseException) -> AppError:
+    """The safe error for an oversized, timed-out or unreachable stream."""
+    if isinstance(exc, provider_http.ProviderResponseTooLarge):
+        return AppError(
+            502,
+            "Die Streaming-Antwort von Claude ist zu groß.",
+            reason="response_too_large",
+        )
+    if isinstance(exc, TimeoutError):
+        return AppError(
+            504, "Claude hat nicht rechtzeitig geantwortet.", reason="provider_timeout"
+        )
+    return AppError(
+        503, error_message("provider_unavailable"), reason="provider_unavailable"
+    )
+
+
 @dataclass(frozen=True)
 class ClaudeTransportConfig:
     api_key: str
@@ -287,30 +304,8 @@ class ClaudeMessagesClient:
             self._record("messages_stream_failed", assembler, context, started, exc)
             self._record_status(exc)
             raise
-        except provider_http.ProviderResponseTooLarge as exc:
-            error = AppError(
-                502,
-                "Die Streaming-Antwort von Claude ist zu groß.",
-                reason="response_too_large",
-            )
-            self._record("messages_stream_failed", assembler, context, started, error)
-            self._record_status(error)
-            raise error from exc
-        except TimeoutError as exc:
-            error = AppError(
-                504,
-                "Claude hat nicht rechtzeitig geantwortet.",
-                reason="provider_timeout",
-            )
-            self._record("messages_stream_failed", assembler, context, started, error)
-            self._record_status(error)
-            raise error from exc
-        except OSError as exc:
-            error = AppError(
-                503,
-                error_message("provider_unavailable"),
-                reason="provider_unavailable",
-            )
+        except (provider_http.ProviderResponseTooLarge, OSError) as exc:
+            error = _transport_error(exc)
             self._record("messages_stream_failed", assembler, context, started, error)
             self._record_status(error)
             raise error from exc
