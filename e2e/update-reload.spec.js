@@ -59,7 +59,11 @@ async function openProfileForms(page) {
   await page.goto("/#more/profile");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.locator("#zoneSettings > summary").click();
+  // #2262: a zone kind's "Bearbeiten"/"Anlegen" opens the editor under it.
+  await page.locator('#zoneOverview [data-zone-box="power"] .zone-edit').click();
   await expect(page.locator("#zoneLimits")).toBeVisible();
+  // The fixture has no FTP to prefill, and the power editor needs one.
+  await page.locator("#zoneThreshold").fill("250");
 }
 
 async function openYazioForm(page) {
@@ -88,7 +92,7 @@ for (const [name, open, field, save, value, saved] of [
 ]) {
   test(`@responsive a service worker update keeps a typed ${name} value while focus leaves and the save button is pressed`, async ({ page }) => {
     await controlledApp(page);
-    await page.route("**/api/zones", (route) => route.fulfill({ status: 400, json: { error: "fixture" } }));
+    await page.route("**/api/zones", (route) => (route.request().method() === "GET" ? route.fallback() : route.fulfill({ status: 400, json: { error: "fixture" } })));
     await page.route("**/api/settings/credentials", (route) => route.fulfill({ status: 400, json: { error: "fixture" } }));
     await open(page);
     const before = await loads(page);

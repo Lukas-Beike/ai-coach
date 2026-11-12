@@ -24,7 +24,7 @@ test("a failed request without a server response shows an honest German message 
     : route.fallback()));
   await page.evaluate(() => { location.hash = "more/profile"; });
   await expect(page.locator("#profilePanel")).toBeVisible();
-  await page.locator("#profileForm button[type=submit]").click();
+  await page.getByRole("button", { name: "Athletenkontext speichern" }).click();
   const toast = page.locator("#toast");
   await expect(toast).toContainText(NETWORK_MESSAGE);
   await expect(toast).toHaveClass(/error/);

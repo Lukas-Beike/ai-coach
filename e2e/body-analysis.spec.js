@@ -133,6 +133,8 @@ test("@responsive profile body save offers explicit retry after a known Garmin f
   await page.goto("/#more/profile");
   const form = page.locator("#profileForm");
   await expect(form).toBeVisible();
+  // Every profile section starts closed (#2262).
+  await form.locator("> details.profile-section").first().locator(":scope > summary").click();
   await form.locator('[name="weight_kg"]').fill("72");
   await form.getByRole("button", { name: "Athletenkontext speichern" }).click();
   const retry = page.locator("#retryBodyGarmin");

@@ -37,13 +37,16 @@ test("@responsive local zones save with provider alternatives and undo", async (
   await section.locator("summary").click();
   expect((await initialZones).ok()).toBeTruthy();
   await page.evaluate(() => loadZones());
-  await page.locator("#zoneSport").selectOption("ride");
-  await page.locator("#zoneMetric").selectOption("power");
+  // #2262: each zone kind of the sport page opens the editor under it.
+  const power = page.locator('#zoneOverview [data-zone-box="power"]');
+  await power.locator(".zone-edit").click();
   await page.getByLabel("FTP (W)").fill("280");
   await page.getByLabel("Zonenobergrenzen (% der FTP)").fill("50, 70, 85, 100, 115, 140, 999");
   await section.getByRole("button", { name: "Lokal speichern" }).click();
   const receipt = page.locator("#zoneReceipt");
   await expect(receipt).toContainText("Lokale Zonen gespeichert");
+  await expect(power).toContainText("Lokal gespeichert");
+  await power.getByRole("button", { name: "Bearbeiten" }).click();
   await expect(page.locator("#zoneSources")).toContainText("Lokal (gilt)");
   await expect(section.getByRole("button", { name: "Lokale Zonen entfernen" })).toBeVisible();
   let zones = await (await request.get("/api/zones")).json();
@@ -55,6 +58,8 @@ test("@responsive local zones save with provider alternatives and undo", async (
   await expect(receipt).toHaveText("Zurückgenommen.");
   zones = await (await request.get("/api/zones")).json();
   expect(zones.configurations.filter((item) => item.source === "local")).toEqual([]);
+  await expect(power).not.toContainText("Lokal gespeichert");
+  await power.locator(".zone-edit").click();
   await expect(section.getByRole("button", { name: "Lokale Zonen entfernen" })).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
@@ -66,7 +71,8 @@ test("@responsive invalid local zones change nothing", async ({ page, request })
   await section.locator("summary").click();
   expect((await initialZones).ok()).toBeTruthy();
   await page.evaluate(() => loadZones());
-  await page.locator("#zoneMetric").selectOption("heart_rate");
+  await page.locator('#zoneSportTabs [data-zone-sport="run"]').click();
+  await page.locator('#zoneOverview [data-zone-box="heart_rate"] .zone-edit').click();
   await page.getByLabel("Schwellenpuls (LSHF, bpm)").fill("170");
   await page.getByLabel("Zonenobergrenzen (bpm)").fill("150, 140, 160");
   await section.getByRole("button", { name: "Lokal speichern" }).click();
