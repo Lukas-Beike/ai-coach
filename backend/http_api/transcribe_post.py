@@ -34,7 +34,9 @@ class TranscribePostRoutes:
         bytes; 400 "Die Audioaufnahme wurde unvollständig übertragen."; 503
         `not_configured` "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr →
         Anbindungen hinterlegen."; 502 "OpenAI hat kein Transkript
-        zurückgegeben." when the provider returns no text.
+        zurückgegeben." when the provider returns no text; 502 `network_error`,
+        `http_error` or `client_error` when the OpenAI request fails ("OpenAI ist
+        nicht erreichbar." and similar).
         """
         content_type = handler.headers.get("Content-Type", "")
         audio = handler.read_audio_body()

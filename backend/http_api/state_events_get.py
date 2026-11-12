@@ -45,7 +45,8 @@ class StateEventsGetRoutes:
         named `provider`, `job`, `planning`, `coach` or `sync` (each with `id:`
         and a JSON object), then `ready` with `latest_event_id`. A `since` the
         buffer no longer covers, or ahead of it (earlier process), sends `reset`
-        with `reason` `gap` and `latest_event_id` instead. Every 15 seconds
+        with `reason` `gap` and `latest_event_id` instead of the events, then
+        `ready`. Every 15 seconds
         without an event it sends `heartbeat` with `latest_event_id`.
 
         Errors: 400 `invalid_event_cursor` "Die Event-ID ist ungültig." for a

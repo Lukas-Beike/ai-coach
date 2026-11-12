@@ -35,7 +35,7 @@ class PlanningGetRoutes:
         """Planning projection.
 
         Request: query `local` (`1` skips the weather refresh and answers from
-        stored data; any other value or none refreshes the weather first).
+        stored data; any other value or none first refreshes the weather when it is stale).
 
         Response: 200 with `plans`, `planned`, `training_calendar`, `calendar`,
         `planning_view`, `planning_compliance`, `parallel_cycling`, `weather`,

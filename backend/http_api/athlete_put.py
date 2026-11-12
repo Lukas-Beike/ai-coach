@@ -152,8 +152,8 @@ class AthletePutRoutes:
 
         Errors: 400 "Die Zonen sind ungültig: {reason}." with the invalid field or
         rule (`sport`, `metric`, `environment`, `limits oder percent_limits`,
-        `limits braucht 3 bis 7 Werte`, `Schwellenpuls (LSHF) fehlt`, `FTP fehlt`,
-        `valid_from`); 400 "Die maximale Herzfrequenz darf nicht unter dem
+        `{field} braucht 3 bis 7 Werte`, `threshold`, `maximum`, `Schwellenpuls
+        (LSHF) fehlt`, `FTP fehlt`, `valid_from`); 400 "Die maximale Herzfrequenz darf nicht unter dem
         Schwellenpuls liegen."; 400 "Die Zonenobergrenzen dürfen nicht über der
         maximalen Herzfrequenz liegen."; 400 "Das Datum „Gilt ab“ darf nicht in der
         Zukunft liegen.".

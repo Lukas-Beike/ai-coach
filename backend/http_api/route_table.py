@@ -136,7 +136,7 @@ def _handler(route: Route) -> Any:
 def _gate(route: Route) -> str:
     if route.method in _GATE_LABELS:
         return _GATE_LABELS[route.method]
-    return "after access" if route.gated else "no"
+    return "after access" if route.gated and route.access is not Access.PUBLIC else "no"
 
 
 def route_reference(routes: Iterable[Route]) -> str:

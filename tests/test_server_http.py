@@ -190,8 +190,18 @@ class ServerHttpTests(ServerTestCase):
         refused = {
             (r.method, re.sub(r"\{.*?\}", "abc-123", r.path))
             for r in table.routes
-            if r.method == "PUT" or (r.method == "POST" and r.gated)
+            if r.method == "PUT"
+            or (r.method == "POST" and r.gated and r.access is not Access.PUBLIC)
         }
+        # Without a session the gate still answers first for PUT, while a POST
+        # is refused by its access check before it reaches the gate.
+        anonymous_restore = statuses(
+            without_session, Access.SESSION_CSRF, {}, maintenance_port
+        )
+        self.assertEqual(
+            {key: 503 if key[0] == "PUT" else 401 for key in anonymous_restore},
+            anonymous_restore,
+        )
         self.assertEqual(
             {key: 503 for key in refused},
             {key: status for key, status in during_restore.items() if key in refused},

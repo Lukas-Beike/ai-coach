@@ -20,7 +20,8 @@ The route contracts list only route-specific errors. Every route can also
 answer the common errors: 401 without a valid session, 403 without a valid
 CSRF token, 429 when rate limited, 503 during maintenance or while the
 database is busy, 400, 413 or 415 for a malformed, oversized or non-JSON
-request body, and 500 for an unexpected failure. Errors are JSON with a German
+request body, 502 or another classified status when a provider request
+fails, and 500 for an unexpected failure. Errors are JSON with a German
 `error` message and no secret or raw provider text.
 
 Everything between the markers is generated from the route table
@@ -739,7 +740,7 @@ macro total is `null` unless every entry reports it. `macro_ranges` maps
 `protein_g`, `carbs_g` and `fat_g` to `[low, high]` where weight and training
 calendar allow it.
 
-Errors: 400 "Ungültiges Datumsformat '<value>'. Erwartet wird YYYY-MM-DD." for
+Errors: 400 "Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD." for
 an invalid `date`.
 
 ### `POST /api/nutrition/entry`
@@ -768,9 +769,9 @@ undo reference.
 
 Errors: 400 "Beschreibung der Mahlzeit ist erforderlich."; 400 "Kalorienangabe
 (kcal) ist erforderlich."; 400 "Kalorien müssen zwischen 0 und 10000 liegen.";
-400 "Ungültiges Datumsformat '<value>'. Erwartet wird YYYY-MM-DD."; 400
-"Ungültige Uhrzeit '<value>'."; 400 "Bei unbekannter Uhrzeit ist der Mahlzeittyp
-erforderlich."; 400 "Ungültiger Mahlzeittyp '<value>'. Erlaubt sind: breakfast,
+400 "Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD."; 400
+"Ungültige Uhrzeit '{value}'."; 400 "Bei unbekannter Uhrzeit ist der Mahlzeittyp
+erforderlich."; 400 "Ungültiger Mahlzeittyp '{value}'. Erlaubt sind: breakfast,
 lunch, dinner, snack."; 400 "Komponenten dürfen nicht mit Einzelzutaten,
 Summenwerten oder clientseitiger Herkunft kombiniert werden."; 400 "1 bis 20
 Mahlzeitenkomponenten sind erforderlich."; 400 "Ungültige Mahlzeitenkomponente."
@@ -787,7 +788,7 @@ Request: JSON body `{"id": string, "product_id": string, "amount": number,
 "unit": string}`; `id` is the entry id, `amount` is above 0 up to 10000, `unit`
 must be the basis unit of the product (`g`, `ml` or `portion`). The entry
 becomes a composite of at most 20 components and its description gains " +
-<product name>".
+{product name}".
 
 Response: 200 `{"ok": true, "entry", "change"}` with the updated entry and the
 undo reference.
@@ -814,7 +815,7 @@ Errors: 400 "id ist erforderlich zum Löschen." for a missing id; 404
 
 ### `GET /api/nutrition/products`
 
-Request: query `q` (search text, optional), `barcode`, `source` and `scope`,
+Request: query `q` (search text, optional), `source`, `scope` and `barcode`,
 checked in this order. `source=database` lists the stored food database entries
 (at most 50, newest first without `q`). `scope=all` lists own products and
 stored database foods matching `q`. A `barcode` looks the product up, local
@@ -847,7 +848,7 @@ the undo reference.
 
 Errors: 400 `confirmation_required` "Das Produkt muss ausdrücklich bestätigt
 werden."; 400 `invalid_food_extraction` "Ein Produktname ist erforderlich.",
-"Ungültiger Wert für <field>.", "Ungültige Bezugsmenge.", "Bezugsmenge muss
+"Ungültiger Wert für {field}.", "Ungültige Bezugsmenge.", "Bezugsmenge muss
 zwischen 0 und 10000 liegen." or "Bezugsmenge und Einheit sind erforderlich.";
 400 "Ungültige Produktquelle."; 409 `nutrition_product_barcode_conflict` "Diese
 EAN ist bereits einem lokalen Produkt zugeordnet."
@@ -970,7 +971,7 @@ products). `week` and `body`: the Garmin result, `status` (`ok` or `partial`),
 `library_unavailable`, `provider_unavailable`) when Garmin cannot be read.
 
 Errors: 400 "Ungültiger Ernährungsbereich." for another `area`; 400 "Ungültiger
-Anfrageinhalt." for another key; 400 "Ungültiges Datumsformat '<value>'.
+Anfrageinhalt." for another key; 400 "Ungültiges Datumsformat '{value}'.
 Erwartet wird YYYY-MM-DD." for an invalid `date`; 400 "Der Zeitraum muss 14 oder
 84 Tage umfassen."; 400 "Das Datum darf nicht in der Zukunft liegen."; 503
 `provider_busy` "Garmin wird bereits aktualisiert."
@@ -1023,7 +1024,7 @@ Errors: none beyond the common ones.
 ### `GET /api/plan`
 
 Request: query `local` (`1` skips the weather refresh and answers from
-stored data; any other value or none refreshes the weather first).
+stored data; any other value or none first refreshes the weather when it is stale).
 
 Response: 200 with `plans`, `planned`, `training_calendar`, `calendar`,
 `planning_view`, `planning_compliance`, `parallel_cycling`, `weather`,
@@ -1178,7 +1179,8 @@ Response: 200 with `status` (`"ok"`), `restored` (`true`) and
 database, or null); `Set-Cookie` clears the `ic_session` and `ic_csrf`
 cookies, since the restored sessions are deleted.
 
-Errors: 413 "Das Datenbank-Backup ist leer oder zu groß."; 400 "Das
+Errors: an empty or oversized upload gets the common 400 or 413 "Ungültige
+Größe des Anfrageinhalts."; 400 "Das
 Datenbank-Backup konnte nicht validiert werden: ..." (redacted detail of
 at most 300 characters), "Das Backup entspricht keinem unterstützten
 Datenbankschema.", "Das Backup entspricht nicht exakt dem aktuellen
@@ -1284,8 +1286,10 @@ Request: path `provider` (`openai`, `anthropic`, `intervals`, `garmin`,
 Response: 200 with `status`, `checked_at` and `guidance` as in
 `GET /api/providers/connections`. The check waits at most 45 seconds and
 then answers `checking` while it finishes in the background; repeating a
-settled check for the same credentials within 10 seconds returns the
-stored result without a new provider request.
+check for the same credentials within 10 seconds of a `success`,
+`auth_failed`, `rate_limited`, `misconfigured`, `unsupported` or
+`scope_missing` result returns the stored result without a new provider
+request.
 
 Errors: 404 `unknown_provider` "Unbekannter Anbieter." for any other
 provider id.
@@ -1407,7 +1411,8 @@ session ends. It sends the retained events after `since` as SSE events
 named `provider`, `job`, `planning`, `coach` or `sync` (each with `id:`
 and a JSON object), then `ready` with `latest_event_id`. A `since` the
 buffer no longer covers, or ahead of it (earlier process), sends `reset`
-with `reason` `gap` and `latest_event_id` instead. Every 15 seconds
+with `reason` `gap` and `latest_event_id` instead of the events, then
+`ready`. Every 15 seconds
 without an event it sends `heartbeat` with `latest_event_id`.
 
 Errors: 400 `invalid_event_cursor` "Die Event-ID ist ungültig." for a
@@ -1477,7 +1482,9 @@ Audioaufnahme." for an empty body, 413 with the same message above 8 000 000
 bytes; 400 "Die Audioaufnahme wurde unvollständig übertragen."; 503
 `not_configured` "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr →
 Anbindungen hinterlegen."; 502 "OpenAI hat kein Transkript
-zurückgegeben." when the provider returns no text.
+zurückgegeben." when the provider returns no text; 502 `network_error`,
+`http_error` or `client_error` when the OpenAI request fails ("OpenAI ist
+nicht erreichbar." and similar).
 
 ### `GET /api/wahoo/callback`
 
@@ -1565,8 +1572,8 @@ Response: 200 `{"configuration": object, "change": object | null}`;
 
 Errors: 400 "Die Zonen sind ungültig: {reason}." with the invalid field or
 rule (`sport`, `metric`, `environment`, `limits oder percent_limits`,
-`limits braucht 3 bis 7 Werte`, `Schwellenpuls (LSHF) fehlt`, `FTP fehlt`,
-`valid_from`); 400 "Die maximale Herzfrequenz darf nicht unter dem
+`{field} braucht 3 bis 7 Werte`, `threshold`, `maximum`, `Schwellenpuls
+(LSHF) fehlt`, `FTP fehlt`, `valid_from`); 400 "Die maximale Herzfrequenz darf nicht unter dem
 Schwellenpuls liegen."; 400 "Die Zonenobergrenzen dürfen nicht über der
 maximalen Herzfrequenz liegen."; 400 "Das Datum „Gilt ab“ darf nicht in der
 Zukunft liegen.".

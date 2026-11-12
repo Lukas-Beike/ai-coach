@@ -46,7 +46,8 @@ class PrivacyRestorePostRoutes:
         database, or null); `Set-Cookie` clears the `ic_session` and `ic_csrf`
         cookies, since the restored sessions are deleted.
 
-        Errors: 413 "Das Datenbank-Backup ist leer oder zu groß."; 400 "Das
+        Errors: an empty or oversized upload gets the common 400 or 413 "Ungültige
+        Größe des Anfrageinhalts."; 400 "Das
         Datenbank-Backup konnte nicht validiert werden: ..." (redacted detail of
         at most 300 characters), "Das Backup entspricht keinem unterstützten
         Datenbankschema.", "Das Backup entspricht nicht exakt dem aktuellen

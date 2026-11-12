@@ -64,8 +64,10 @@ class ProviderConnectionPostRoutes:
         Response: 200 with `status`, `checked_at` and `guidance` as in
         `GET /api/providers/connections`. The check waits at most 45 seconds and
         then answers `checking` while it finishes in the background; repeating a
-        settled check for the same credentials within 10 seconds returns the
-        stored result without a new provider request.
+        check for the same credentials within 10 seconds of a `success`,
+        `auth_failed`, `rate_limited`, `misconfigured`, `unsupported` or
+        `scope_missing` result returns the stored result without a new provider
+        request.
 
         Errors: 404 `unknown_provider` "Unbekannter Anbieter." for any other
         provider id.

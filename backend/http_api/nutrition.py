@@ -124,7 +124,7 @@ class NutritionGetRoutes:
     def _product_list(self, handler: Any, request: RouteRequest) -> None:
         """Product search, barcode lookup or food database entries.
 
-        Request: query `q` (search text, optional), `barcode`, `source` and `scope`,
+        Request: query `q` (search text, optional), `source`, `scope` and `barcode`,
         checked in this order. `source=database` lists the stored food database entries
         (at most 50, newest first without `q`). `scope=all` lists own products and
         stored database foods matching `q`. A `barcode` looks the product up, local
@@ -153,7 +153,7 @@ class NutritionGetRoutes:
         `protein_g`, `carbs_g` and `fat_g` to `[low, high]` where weight and training
         calendar allow it.
 
-        Errors: 400 "Ungültiges Datumsformat '<value>'. Erwartet wird YYYY-MM-DD." for
+        Errors: 400 "Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD." for
         an invalid `date`.
         """
         date_param = (
@@ -245,9 +245,9 @@ class NutritionPostRoutes:
 
         Errors: 400 "Beschreibung der Mahlzeit ist erforderlich."; 400 "Kalorienangabe
         (kcal) ist erforderlich."; 400 "Kalorien müssen zwischen 0 und 10000 liegen.";
-        400 "Ungültiges Datumsformat '<value>'. Erwartet wird YYYY-MM-DD."; 400
-        "Ungültige Uhrzeit '<value>'."; 400 "Bei unbekannter Uhrzeit ist der Mahlzeittyp
-        erforderlich."; 400 "Ungültiger Mahlzeittyp '<value>'. Erlaubt sind: breakfast,
+        400 "Ungültiges Datumsformat '{value}'. Erwartet wird YYYY-MM-DD."; 400
+        "Ungültige Uhrzeit '{value}'."; 400 "Bei unbekannter Uhrzeit ist der Mahlzeittyp
+        erforderlich."; 400 "Ungültiger Mahlzeittyp '{value}'. Erlaubt sind: breakfast,
         lunch, dinner, snack."; 400 "Komponenten dürfen nicht mit Einzelzutaten,
         Summenwerten oder clientseitiger Herkunft kombiniert werden."; 400 "1 bis 20
         Mahlzeitenkomponenten sind erforderlich."; 400 "Ungültige Mahlzeitenkomponente."
@@ -269,7 +269,7 @@ class NutritionPostRoutes:
         "unit": string}`; `id` is the entry id, `amount` is above 0 up to 10000, `unit`
         must be the basis unit of the product (`g`, `ml` or `portion`). The entry
         becomes a composite of at most 20 components and its description gains " +
-        <product name>".
+        {product name}".
 
         Response: 200 `{"ok": true, "entry", "change"}` with the updated entry and the
         undo reference.
@@ -333,7 +333,7 @@ class NutritionPostRoutes:
         `library_unavailable`, `provider_unavailable`) when Garmin cannot be read.
 
         Errors: 400 "Ungültiger Ernährungsbereich." for another `area`; 400 "Ungültiger
-        Anfrageinhalt." for another key; 400 "Ungültiges Datumsformat '<value>'.
+        Anfrageinhalt." for another key; 400 "Ungültiges Datumsformat '{value}'.
         Erwartet wird YYYY-MM-DD." for an invalid `date`; 400 "Der Zeitraum muss 14 oder
         84 Tage umfassen."; 400 "Das Datum darf nicht in der Zukunft liegen."; 503
         `provider_busy` "Garmin wird bereits aktualisiert."
@@ -427,7 +427,7 @@ class NutritionPostRoutes:
 
         Errors: 400 `confirmation_required` "Das Produkt muss ausdrücklich bestätigt
         werden."; 400 `invalid_food_extraction` "Ein Produktname ist erforderlich.",
-        "Ungültiger Wert für <field>.", "Ungültige Bezugsmenge.", "Bezugsmenge muss
+        "Ungültiger Wert für {field}.", "Ungültige Bezugsmenge.", "Bezugsmenge muss
         zwischen 0 und 10000 liegen." or "Bezugsmenge und Einheit sind erforderlich.";
         400 "Ungültige Produktquelle."; 409 `nutrition_product_barcode_conflict` "Diese
         EAN ist bereits einem lokalen Produkt zugeordnet."
