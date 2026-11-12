@@ -423,3 +423,24 @@ After a manual re-check of an Open Food Facts entry, still-empty core fields SHA
 - **THEN** Yazio is asked at most once, by the barcode chain itself.
 
 Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_yazio`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.fill_gaps`; `tests/test_food_lookup_chain.py::LookupChainTests.test_a_re_check_fills_remaining_gaps_from_yazio_by_ean`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_fills_nothing_without_a_match_on_the_same_basis`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_complete_re_check_does_not_ask_yazio`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_basis_change_ends_a_yazio_fill`, `tests/test_food_lookup_chain.py::LookupChainTests.test_lookups_and_calculations_ask_yazio_at_most_once`.
+
+### Requirement: Coach fills empty product fields
+The Coach SHALL list own products and stored database foods with empty core fields, and SHALL write values into named products only where the field is empty at write time, per the product's own basis, each with its origin, source page and time. Known values SHALL never be replaced. Every write SHALL be in the change history so the turn receipt names product, field, value and origin and whole-turn undo restores the empty fields.
+
+#### Scenario: Incomplete products listed
+- **WHEN** the Coach lists incomplete products
+- **THEN** own products and stored database foods with empty core fields are returned with id, name, brand, EAN, basis, origin and their missing fields, and complete products are not.
+
+#### Scenario: Only empty fields written
+- **WHEN** the Coach writes salt and fat into a product whose fat is already known
+- **THEN** salt is written with its origin and source page, fat keeps its value and is reported as skipped.
+
+#### Scenario: Receipt and undo
+- **WHEN** a turn fills fields of an own product and a stored database food
+- **THEN** its receipt lists each product, field, value and origin, and whole-turn undo empties exactly those fields again.
+
+#### Scenario: Unknown or invalid input
+- **WHEN** a named product does not exist, a field is not a core field, or a value is not a finite number in range
+- **THEN** that item is rejected without writing it.
+
+Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.

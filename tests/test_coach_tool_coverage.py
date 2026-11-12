@@ -127,7 +127,6 @@ ROOT = Path(__file__).resolve().parents[1]
 COVERAGE_DOC = ROOT / "docs/coach-tool-coverage.md"
 TOOL_MAP_DOC = ROOT / "openspec/COACH_TOOLS.md"
 SPECS_DIR = ROOT / "openspec/specs"
-CHANGES_DIR = ROOT / "openspec/changes"
 BEGIN = "<!-- BEGIN GENERATED TOOL TABLE -->\n"
 END = "<!-- END GENERATED TOOL TABLE -->\n"
 
@@ -159,10 +158,7 @@ def coverage_table() -> str:
 def requirement_headings() -> dict[str, str]:
     """``capability/<id or title>`` -> ``capability / <full requirement heading>``."""
     headings: dict[str, str] = {}
-    # Requirements of a change not yet archived count as well.
-    for spec in sorted(
-        [*SPECS_DIR.glob("*/spec.md"), *CHANGES_DIR.glob("*/specs/*/spec.md")]
-    ):
+    for spec in sorted(SPECS_DIR.glob("*/spec.md")):
         capability = spec.parent.name
         for line in spec.read_text(encoding="utf-8").splitlines():
             if line.startswith("### Requirement: "):
