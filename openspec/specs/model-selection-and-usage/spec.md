@@ -49,7 +49,7 @@ The system SHALL expose only service tiers supported by the selected official mo
 
 #### Scenario: Explicit tier selection
 - **WHEN** the athlete saves an offered speed mode
-- **THEN** it persists and is included in subsequent supported Responses, stream and background payloads unless the caller explicitly supplied a tier.
+- **THEN** it persists and is included in subsequent supported Responses and stream payloads unless the caller explicitly supplied a tier.
 
 #### Scenario: Unsupported or compatible tier
 - **WHEN** ultrafast is requested for a model without that capability or a nondefault endpoint is used
@@ -100,13 +100,13 @@ The system SHALL send every Coach model request through one streaming transport 
 
 #### Scenario: Cancellation
 - **WHEN** cancellation is signalled before or during a streamed request
-- **THEN** the request stops with the public cancelled error and the cancelled response's usage is recorded.
+- **THEN** the request stops with the public cancelled error; a cancelled stream without a terminal body records one request with empty usage, and a completed body that arrives after the cancel is still billed.
 
 #### Scenario: Transient failure or oversized stream
 - **WHEN** a streamed request fails with a transient timeout, unavailability or network error before any text was shown
 - **THEN** the same request is sent again within the bounded retry policy; oversized streams fail at the byte bound instead of accepting unbounded provider output.
 
-Evidence: `backend/coach/structured_response.py:CoachStructuredResponseService.respond`; `backend/coach/response_transport.py:CoachResponseTransport.stream_request`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_coach_structured_response.py:test_request_streams_and_drops_deltas_when_no_stream_is_attached`, `tests/test_coach_structured_response.py:test_job_failure_after_the_response_started_is_requested_again`; `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`; `tests/test_server_providers.py:test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage`; `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`.
+Evidence: `backend/coach/structured_response.py:CoachStructuredResponseService.respond`; `backend/coach/response_transport.py:CoachResponseTransport.stream_request`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_coach_structured_response.py:test_request_streams_and_drops_deltas_when_no_stream_is_attached`, `tests/test_coach_structured_response.py:test_job_failure_after_the_response_started_is_requested_again`; `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`; `tests/test_server_providers.py:test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage`;, `tests/test_provider_openai.py:test_stream_client_saves_final_response_before_post_read_cancellation` `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`.
 
 ### Requirement: MU7 Durable normalized daily token usage
 The system SHALL persist daily OpenAI request/input/output/total-token counters and last-operation/time metadata atomically, normalize malformed counters safely and present them as usage counts rather than a monetary bill.
@@ -120,8 +120,8 @@ The system SHALL persist daily OpenAI request/input/output/total-token counters 
 - **THEN** the daily counters start at zero while safe status/rate-limit state remains separately available; an absent total falls back to input plus output.
 
 #### Scenario: Streamed or failed response
-- **WHEN** a streamed response ends completed, failed or cancelled
-- **THEN** its usage is recorded once from the final validated response; the UI exposes requests, tokens and last request rather than fabricated monetary costs.
+- **WHEN** a streamed response ends completed or failed
+- **THEN** its usage is recorded once from the final response (MU6 covers a cancelled stream); the UI exposes requests, tokens and last request rather than fabricated monetary costs.
 
 Evidence: `backend/providers/usage.py:daily_summary`, `backend/providers/usage.py:usage_counts`, `backend/providers/usage.py:recorded_usage`; `backend/providers/state.py:ProviderStateService.record_usage`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `public/views.js:renderSettingsUsage`; `tests/test_provider_usage.py:test_daily_summary_decodes_valid_state_and_resets_stale_state`, `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`, `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`; `tests/test_provider_state.py:test_usage_accumulates_atomically_and_logs_only_operation_and_counts`; `tests/test_provider_openai.py:test_stream_client_requires_final_response_and_records_usage_once_on_success`, `tests/test_provider_openai.py:test_stream_client_failed_response_records_its_usage_before_raising`. This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
 

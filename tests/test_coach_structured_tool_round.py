@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import unittest
+from typing import cast
 from unittest.mock import MagicMock, Mock, patch
 
 from backend.coach.dialogue import INSTRUCTIONS
@@ -449,7 +450,7 @@ class StructuredToolRoundTests(unittest.TestCase):
         state = self.state()
         state.context = {"local_date": "2026-10-01"}
         state.model_instructions = "synthetic" + RESUMED_STEPS_NOTICE
-        self.service._training_context.build.return_value = "fresh synthetic context"
+        cast(Mock, self.service._training_context).build.return_value = "fresh context"
 
         self.assertIn(RESUMED_STEPS_NOTICE, self.service._refreshed_instructions(state))
         state.model_instructions = "synthetic"
