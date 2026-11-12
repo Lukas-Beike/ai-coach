@@ -35,11 +35,12 @@ _STEP_TYPES: Final = {"warmup": 1, "cooldown": 2, "interval": 3, "repeat": 6}
 # Header words, folded; cooldown first because "abwarmen" contains "warm".
 _COOLDOWN_WORDS: Final = ("cool", "auslauf", "abwarm", "ausroll")
 _WARMUP_WORDS: Final = ("warm", "einlauf", "aufwarm")
-_TARGET_IDS: Final = {"power.zone": 2, "heart.rate.zone": 4, "pace.zone": 6}
-_TARGET_KEYS: Final = {
-    "power": "power.zone",
-    "hr": "heart.rate.zone",
-    "pace": "pace.zone",
+_PACE_TARGET: Final = "pace.zone"
+# Step kind -> (Garmin target type key, id).
+_TARGETS: Final = {
+    "power": ("power.zone", 2),
+    "hr": ("heart.rate.zone", 4),
+    "pace": (_PACE_TARGET, 6),
 }
 _ABSOLUTE_UNITS: Final = {"power": "W", "hr": "BPM"}
 _ABSOLUTE = re.compile(r"(?P<low>\d+)(?:-(?P<high>\d+))?(?P<unit>W|BPM)")
@@ -164,7 +165,7 @@ def _flatten(steps: Any, flat: list[tuple[Any, ...]]) -> None:
                 _rounded(step.get("endConditionValue"), 1),
                 target,
                 *(
-                    _rounded(step.get(field), 3 if target == "pace.zone" else 0)
+                    _rounded(step.get(field), 3 if target == _PACE_TARGET else 0)
                     for field in ("targetValueOne", "targetValueTwo")
                 ),
             )
@@ -239,7 +240,7 @@ def _executable(
     low, high = _range(
         where, kind, str(step.get("target") or "").strip().upper(), targets
     )
-    key = _TARGET_KEYS[kind]
+    key, target_id = _TARGETS[kind]
     # Pace is sent at the precision comparable_steps compares (0.001 m/s).
     digits = 3 if kind == "pace" else 0
     return {
@@ -254,9 +255,9 @@ def _executable(
         },
         "endConditionValue": value,
         "targetType": {
-            "workoutTargetTypeId": _TARGET_IDS[key],
+            "workoutTargetTypeId": target_id,
             "workoutTargetTypeKey": key,
-            "displayOrder": _TARGET_IDS[key],
+            "displayOrder": target_id,
         },
         "targetValueOne": round(low, digits),
         "targetValueTwo": round(high, digits),
@@ -268,7 +269,7 @@ def _range(
     where: str, kind: str, text: str, targets: GarminRunTargets
 ) -> tuple[float, float]:
     """The absolute (lower, upper) bounds of a target: W, bpm or m/s."""
-    if kind not in _TARGET_KEYS:
+    if kind not in _TARGETS:
         raise GarminRunMappingError(
             f"{where}: Die Zielart '{kind}' wird nicht unterstützt."
         )
