@@ -126,6 +126,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 ),
                 settings=SimpleNamespace(
                     selected_model=lambda: "gpt-test",
+                    selected_provider=lambda: "openai",
                     selected_thinking_level=lambda: "medium",
                     available_model_options=lambda: [{"id": "gpt-test"}],
                 ),
@@ -435,6 +436,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
         self.assertIs(report["configuration"]["openai_base_url_custom"], False)
         self.assertIs(report["configuration"]["anthropic_base_url_custom"], False)
+        self.assertEqual(report["configuration"]["model_provider"], "openai")
         self.assertEqual(
             report["wahoo"],
             {

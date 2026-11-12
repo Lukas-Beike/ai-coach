@@ -15,41 +15,34 @@ from backend.providers.model_seam import ModelRequest, ModelStep, ModelTurn
 
 
 class CoachResponseTransportTests(unittest.TestCase):
+    """The Coach sends neutral requests; the model transport picks the provider."""
+
     def setUp(self) -> None:
-        self.openai = Mock()
-        self.openai_stream = Mock()
-        self.transport = CoachResponseTransport(
-            lambda: self.openai, lambda: self.openai_stream
-        )
+        self.complete = Mock(return_value=ModelTurn(text="answer"))
+        self.stream = Mock(return_value=ModelTurn(stop_reason="completed"))
+        self.transport = CoachResponseTransport(self.complete, self.stream)
 
-    def test_transport_uses_openai_responses_adapter(self) -> None:
-        openai_factory = Mock(return_value=self.openai)
-        stream_factory = Mock(return_value=self.openai_stream)
-        transport = CoachResponseTransport(openai_factory, stream_factory)
+    def test_request_goes_to_the_one_shot_transport(self) -> None:
         request = ModelRequest(model="m", instructions="i")
-        self.openai.complete.return_value = ModelTurn(text="OpenAI")
 
-        self.assertEqual(transport.request(request), ModelTurn(text="OpenAI"))
+        self.assertEqual(self.transport.request(request), ModelTurn(text="answer"))
 
-        self.openai.complete.assert_called_once_with(request)
-
-        openai_factory.assert_called_once_with()
-        stream_factory.assert_not_called()
+        self.complete.assert_called_once_with(request)
+        self.stream.assert_not_called()
 
     def test_stream_forwards_delta_callback_cancel_and_response_id(self) -> None:
         request = ModelRequest(model="m", instructions="i", input="hello")
         cancel_event = threading.Event()
         on_delta = Mock()
         on_response_id = Mock()
-        self.openai_stream.stream.return_value = {"status": "completed"}
 
         turn = self.transport.stream_request(
             request, on_delta, cancel_event, on_response_id
         )
 
         self.assertEqual(turn, ModelTurn(stop_reason="completed"))
-        self.openai_stream.stream.assert_called_once_with(
-            responses_adapter.request_payload(request),
+        self.stream.assert_called_once_with(
+            request,
             on_delta,
             cancel_event=cancel_event,
             on_response_id=on_response_id,

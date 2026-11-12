@@ -132,6 +132,5 @@ class CoachConversationAssembly:
 
     def response_transport(self) -> CoachResponseTransport:
         return CoachResponseTransport(
-            self._model_transport.openai_responses_client,
-            self._model_transport.openai_stream_client,
+            self._model_transport.complete, self._model_transport.stream
         )

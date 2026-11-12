@@ -144,7 +144,9 @@ class ClaudeMessagesClient:
         """One page of the Models API: the newest models are on it."""
         config = self.config
         if not config.api_key.strip():
-            raise AppError(503, ANTHROPIC_API_KEY_ERROR, reason="not_configured")
+            raise AppError(
+                503, ANTHROPIC_API_KEY_ERROR, reason="anthropic_not_configured"
+            )
         request = Request(
             endpoint(
                 config.base_url,
@@ -181,14 +183,17 @@ class ClaudeMessagesClient:
         request: ModelRequest,
         on_text_delta: Callable[[str], None],
         cancel_event: Any = None,
+        on_response_id: Callable[[str], None] | None = None,
     ) -> ModelTurn:
         """Stream one request, resuming a paused server-side search loop."""
         if not self.config.api_key.strip():
-            raise AppError(503, ANTHROPIC_API_KEY_ERROR, reason="not_configured")
+            raise AppError(
+                503, ANTHROPIC_API_KEY_ERROR, reason="anthropic_not_configured"
+            )
         payload = request_payload(request, stream=True)
         json_answer = request.json_output or request.output_schema is not None
         paused: list[Any] = []
-        message = self._send(payload, on_text_delta, cancel_event)
+        message = self._send(payload, on_text_delta, cancel_event, on_response_id)
         for _ in range(MAX_PAUSE_CONTINUATIONS):
             if message.get("stop_reason") != "pause_turn":
                 break
@@ -201,7 +206,7 @@ class ClaudeMessagesClient:
                     {"role": "assistant", "content": message.get("content") or []},
                 ],
             }
-            message = self._send(payload, on_text_delta, cancel_event)
+            message = self._send(payload, on_text_delta, cancel_event, on_response_id)
         if message.get("stop_reason") == "refusal":
             raise AppError(502, REFUSED_MESSAGE, reason="refused")
         # One turn: the content before each pause belongs to the answer.
@@ -235,6 +240,7 @@ class ClaudeMessagesClient:
         payload: dict[str, Any],
         on_text_delta: Callable[[str], None],
         cancel_event: Any,
+        on_response_id: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         assembler = StreamAssembler()
         started = self.clock()
@@ -244,6 +250,9 @@ class ClaudeMessagesClient:
             text = assembler.feed(event)
             if text:
                 on_text_delta(text)
+            # The provider has the request: a retry must not repeat its deltas.
+            if event.get("type") == "message_start" and on_response_id is not None:
+                on_response_id(str((assembler.message or {}).get("id") or ""))
 
         response: Any = None
         try:

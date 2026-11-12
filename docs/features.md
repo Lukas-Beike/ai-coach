@@ -2,7 +2,7 @@
 
 ## AI Coach & Conversational Intelligence
 - **Natural Language Coaching**: Conversational coaching without rigid trigger words, supporting natural phrasing, corrections, follow-up questions, and pronoun resolution across turns.
-- **Responses API Support**: Uses OpenAI Responses-compatible APIs with real-time SSE token streaming. Chat Completions and provider fallback are unsupported.
+- **Selectable model provider**: OpenAI Responses (or a compatible endpoint) or Claude through the Anthropic Messages API, chosen under Coach & Modell, both with real-time SSE token streaming. Chat Completions and fallback between providers are unsupported; voice transcription stays with OpenAI.
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates save athlete preferences, equipment notes, and constraints to the durable profile when the athlete explicitly asks in Coach Chat; no separate UI confirmation is needed.
 - **Sport-Specific Training Preferences**: The profile keeps general training preferences plus separate preferences for running, cycling, swimming, strength training, and mobility; the Coach saves sport-specific wishes in the matching field.

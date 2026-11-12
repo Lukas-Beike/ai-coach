@@ -26,7 +26,7 @@ function coach({ busy = false, chatRequest = null, chatServerOperationId = null 
     data: { messages: [], configured: { openai: true } },
   };
   const drained = [];
-  const context = extractFunctions("coach.js", ["MAX_QUEUED_ATTACHMENT_BYTES", "resumeQueuedChat", "finishRecoveredChatStatus", "queueChatMessage", "chatControlState", "sendMessage"], {
+  const context = extractFunctions("coach.js", ["MAX_QUEUED_ATTACHMENT_BYTES", "resumeQueuedChat", "finishRecoveredChatStatus", "queueChatMessage", "coachConfigured", "chatControlState", "sendMessage"], {
     state,
     document: { visibilityState: "visible" },
     $: (selector) => (selector === "#messageInput" ? input : null),

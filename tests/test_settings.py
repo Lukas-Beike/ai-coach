@@ -123,7 +123,11 @@ class SettingsServiceTests(unittest.TestCase):
         self.values["selected_service_tier"] = "ultrafast"
         self.assertEqual(self.service.selected_model(), "custom-deployment")
         self.assertEqual(
-            [o["id"] for o in self.service.available_model_options()],
+            [
+                o["id"]
+                for o in self.service.available_model_options()
+                if o["provider"] == "openai"
+            ],
             ["custom-deployment"],
         )
         self.assertIsNone(self.service.service_tier())
@@ -133,6 +137,53 @@ class SettingsServiceTests(unittest.TestCase):
             self.service.save_model("gpt-6.1-sol")
         with self.assertRaises(AppError):
             self.service.save_service_tier("fast")
+
+    def test_claude_families_follow_the_resolver_and_need_their_key(self):
+        status = {
+            "opus": {"model": "claude-opus-5-5", "rejected": "claude-opus-5-6"},
+            "sonnet": {"model": "claude-sonnet-5-5", "rejected": None},
+        }
+        service = SettingsService(
+            lambda: self.current_config[0],
+            self.values.get,
+            self.values.__setitem__,
+            claude_models=lambda: status,
+        )
+        claude = [
+            o for o in service.available_model_options() if o["provider"] == "claude"
+        ]
+        self.assertEqual(
+            [(o["id"], o["label"], o["model"], o["rejected"]) for o in claude],
+            [
+                ("claude-opus", "Opus", "claude-opus-5-5", "claude-opus-5-6"),
+                ("claude-sonnet", "Sonnet", "claude-sonnet-5-5", None),
+                ("claude-haiku", "Haiku", None, None),
+            ],
+        )
+        # Without an Anthropic key the families show but cannot be chosen.
+        self.assertTrue(all(o["disabled"] for o in claude))
+        with self.assertRaises(AppError) as raised:
+            service.save_model("claude-opus")
+        self.assertEqual(raised.exception.status, 400)
+        self.assertNotIn("selected_model_openai", self.values)
+        self.current_config[0] = replace(
+            self.current_config[0], anthropic_api_key="anthropic-test-key"
+        )
+        self.assertEqual(service.save_model("claude-opus"), {"model": "claude-opus"})
+        self.assertEqual(service.selected_model(), "claude-opus")
+        self.assertEqual(service.selected_provider(), "anthropic")
+        # Claude has no speed modes; OpenAI's stay as they were.
+        self.assertIsNone(service.service_tier())
+        self.current_config[0] = replace(self.current_config[0], openai_api_key="")
+        self.assertTrue(
+            all(
+                o["disabled"]
+                for o in service.available_model_options()
+                if o["provider"] == "openai"
+            )
+        )
+        service.save_model("gpt-6-sol")
+        self.assertEqual(service.selected_provider(), "openai")
 
     def test_calendar_defaults_clamping_and_write_keys(self):
         self.assertEqual(
@@ -176,8 +227,6 @@ class SettingsServiceTests(unittest.TestCase):
             self.assertEqual(error.exception.status, 400)
             self.assertEqual(str(error.exception), message)
             self.assertEqual(self.writes, [])
-
-
 
 
 if __name__ == "__main__":

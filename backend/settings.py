@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.config import DEFAULT_OPENAI_BASE_URL, Config
 from backend.errors import AppError
+from backend.providers.claude_models import FAMILIES, setting_family
 
 MODEL_OPTIONS = (
     {
@@ -22,6 +23,7 @@ MODEL_OPTIONS = (
     {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"},
     {"id": "gpt-6-astra", "label": "GPT-6 Astra"},
 )
+CLAUDE_LABELS = {"opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku"}
 SERVICE_TIER_OPTIONS = (
     {
         "id": "default",
@@ -83,14 +85,16 @@ class SettingsService:
         config_supplier: Callable[[], Config],
         get_value: Callable[[str], str | None],
         set_value: Callable[[str, str], None],
+        claude_models: Callable[[], dict[str, dict[str, str | None]]] = dict,
     ) -> None:
         self._config_supplier = config_supplier
         self._get_value = get_value
         self._set_value = set_value
+        # Per family: the model in use and a rejected newer one (no provider call).
+        self._claude_models = claude_models
 
-    @staticmethod
-    def _available_model_options(config: Config) -> list[dict[str, str]]:
-        options = (
+    def _available_model_options(self, config: Config) -> list[dict[str, Any]]:
+        options: list[dict[str, Any]] = (
             _copy_options(MODEL_OPTIONS)
             if config.openai_base_url.rstrip("/") == DEFAULT_OPENAI_BASE_URL
             else []
@@ -105,10 +109,29 @@ class SettingsService:
                     "description": "In .env konfiguriert",
                 },
             )
+        openai_ready = bool(config.openai_api_key.strip())
+        for option in options:
+            option.update(provider="openai", disabled=not openai_ready)
+        claude_ready = bool(config.anthropic_api_key.strip())
+        status = self._claude_models()
+        for family in FAMILIES:
+            family_status = status.get(family) or {}
+            options.append(
+                {
+                    "id": f"claude-{family}",
+                    "label": CLAUDE_LABELS[family],
+                    "provider": "claude",
+                    "model": family_status.get("model"),
+                    "rejected": family_status.get("rejected"),
+                    "disabled": not claude_ready,
+                }
+            )
         return options
 
     def _selected_model(self, config: Config) -> str:
-        configured = {option["id"] for option in self._available_model_options(config)}
+        configured = {
+            str(option["id"]) for option in self._available_model_options(config)
+        }
         stored = self._get_value("selected_model_openai")
         default = config.openai_model
         return stored if stored in configured else default
@@ -123,12 +146,16 @@ class SettingsService:
             settings[key] = max(0, min(value, CALENDAR_DISPLAY_MAX_WEEKS))
         return settings
 
-    def available_model_options(self) -> list[dict[str, str]]:
+    def available_model_options(self) -> list[dict[str, Any]]:
         config = self._config_supplier()
         return self._available_model_options(config)
 
     def selected_model(self) -> str:
         return self._selected_model(self._config_supplier())
+
+    def selected_provider(self) -> str:
+        """anthropic for a Claude family, else openai."""
+        return "anthropic" if setting_family(self.selected_model()) else "openai"
 
     def save_model(self, model: Any) -> dict[str, str]:
         config = self._config_supplier()
@@ -137,6 +164,11 @@ class SettingsService:
             option["id"] for option in self._available_model_options(config)
         }:
             raise AppError(400, "Nicht unterstützte Modellauswahl.")
+        if setting_family(model_id) and not config.anthropic_api_key.strip():
+            raise AppError(
+                400, "Für Claude fehlt der API-Schlüssel unter Mehr › Anbindungen."
+            )
+        # One setting for both providers; the key name predates Claude.
         self._set_value("selected_model_openai", model_id)
         return {"model": model_id}
 
@@ -222,5 +254,3 @@ class SettingsService:
         for key, value in updates.items():
             self._set_value(f"calendar_display_{key}", str(value))
         return {"status": "ok", **self._calendar_display_settings()}
-
-

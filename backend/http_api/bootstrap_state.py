@@ -90,6 +90,8 @@ class PublicBootstrapService:
             )
             jobs = deps.sync_job_queue_service().list()
             state_version_values = deps.state_version_service().versions()
+            provider = deps.settings.selected_provider()
+            provider_state = deps.provider_state_service()
             state = {
                 "state_versions": state_version_values,
                 "app": {"name": deps.app_name, "version": deps.app_version},
@@ -188,6 +190,7 @@ class PublicBootstrapService:
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),
                 "model": {
                     "selected": deps.settings.selected_model(),
+                    "provider": provider,
                     "options": deps.settings.available_model_options(),
                 },
                 "service_tier": deps.settings.service_tier_state(),
@@ -198,6 +201,12 @@ class PublicBootstrapService:
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
                     "anthropic": bool(deps.config.anthropic_api_key),
+                    # The selected model's provider has its key.
+                    "coach": bool(
+                        deps.config.anthropic_api_key
+                        if provider == "anthropic"
+                        else deps.config.openai_api_key
+                    ),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
@@ -213,7 +222,11 @@ class PublicBootstrapService:
                     if deps.provider_credentials is not None
                     else None
                 ),
-                "usage": deps.provider_state_service().summary("openai"),
+                "usage": provider_state.summary(provider),
+                "provider_status": {
+                    name: provider_state.summary(name).get("status") or {}
+                    for name in ("openai", "anthropic")
+                },
             }
             # Always present, so a cleared warning also clears on a client that merges bootstraps.
             state["threshold_warnings"] = deps.threshold_warnings() or None

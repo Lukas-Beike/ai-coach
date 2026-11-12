@@ -518,7 +518,7 @@ class ClaudeStreamClientTests(unittest.TestCase):
         client, opener, _, _ = make_client(api_key=" ")
         with self.assertRaises(AppError) as raised:
             client.complete(ModelRequest(model="claude-opus-5-5"))
-        self.assertEqual(raised.exception.reason, "not_configured")
+        self.assertEqual(raised.exception.reason, "anthropic_not_configured")
         self.assertEqual(opener.requests, [])
         client, _, _, _ = make_client(sse_body(FIXTURES["tool_round"]), max_bytes=200)
         with self.assertRaises(AppError) as raised:

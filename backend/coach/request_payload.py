@@ -15,6 +15,7 @@ from backend.coach.context_selection import (
     select_coach_context,
 )
 from backend.coach.playbooks import nutrition_playbook, playbook_for
+from backend.providers.claude_models import setting_family
 from backend.providers.model_seam import ModelRequest
 from backend.settings import SettingsService
 
@@ -111,6 +112,10 @@ class CoachRequestPayloadService:
         self._training_context = training_context
         self._settings = settings
         self._max_output_tokens = max_output_tokens
+
+    def keeps_remote_conversation(self, model: str | None) -> bool:
+        """Only OpenAI keeps a conversation; Claude gets the local dialogue."""
+        return setting_family(model or self._settings.selected_model()) is None
 
     def build(
         self,

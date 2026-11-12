@@ -23,6 +23,8 @@ DEFAULT_MODELS = {
     "sonnet": "claude-sonnet-5-5",
     "haiku": "claude-haiku-5-5",
 }
+# The model setting names a family; the request resolves it to a model id.
+SETTING_FAMILIES = {f"claude-{family}": family for family in FAMILIES}
 REFRESH_AFTER = timedelta(hours=24)
 # After a failed listing, the next attempt waits this long instead of a day.
 RETRY_AFTER = timedelta(hours=1)
@@ -30,6 +32,11 @@ RETRY_AFTER = timedelta(hours=1)
 _MODEL_ID = re.compile(r"^claude-(opus|sonnet|haiku)-\d{1,2}(?:-\d{1,2})?$")
 # A newly resolved model that rejects the request shape or is unknown.
 _REJECTION_STATUSES = frozenset({400, 404})
+
+
+def setting_family(model: str | None) -> str | None:
+    """The Claude family a model setting selects, or None for an OpenAI model."""
+    return SETTING_FAMILIES.get(str(model or ""))
 
 
 def newest_by_family(models: Any) -> dict[str, str]:

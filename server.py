@@ -970,6 +970,7 @@ SETTINGS = SettingsService(
     lambda: CONFIG,
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
+    claude_models=lambda: MODEL_TRANSPORT.claude_models().status(),
 )
 
 
@@ -1238,8 +1239,6 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
-# The nutrition photo and web search share this one OpenAI client.
-nutrition_openai_client = lambda: MODEL_TRANSPORT.openai_responses_client()
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
@@ -1252,11 +1251,11 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             photo_extractor=lambda: NutritionPhotoExtractionService(
                 selected_model=SETTINGS.selected_model,
-                complete=lambda request: nutrition_openai_client().complete(request),
+                complete=lambda request: MODEL_TRANSPORT.complete(request),
             ),
             web_searcher=lambda: NutritionWebSearchService(
                 selected_model=SETTINGS.selected_model,
-                complete=lambda request: nutrition_openai_client().complete(request),
+                complete=lambda request: MODEL_TRANSPORT.complete(request),
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
             observed_opener=observed_provider_opener,
@@ -1271,6 +1270,8 @@ MODEL_TRANSPORT = ModelTransportAssembly(
             service_tier=SETTINGS.service_tier,
             http_client=PROVIDER_TRANSPORT.json_http_client,
             state_service=provider_state_service,
+            read_value=lambda key: key_value_service().get(key),
+            write_value=lambda key, value: key_value_service().set(key, value),
         ),
         endpoints=ModelEndpointSettings(
             default_openai_base_url=DEFAULT_OPENAI_BASE_URL,

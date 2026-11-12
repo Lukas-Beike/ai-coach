@@ -195,6 +195,7 @@ class DiagnosticReportService:
                     "garmin_fixture_configured": deps.garmin_fixture_loader.path()
                     is not None,
                     "model": deps.settings.selected_model(),
+                    "model_provider": deps.settings.selected_provider(),
                     "thinking_level": deps.settings.selected_thinking_level(),
                     "available_models": [
                         option["id"]

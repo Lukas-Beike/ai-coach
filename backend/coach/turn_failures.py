@@ -212,6 +212,8 @@ class CoachTurnFailureService:
             "openai_not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
             # OpenAI configuration errors carry the shared not_configured reason.
             "not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
+            "anthropic_not_configured": "Claude ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen.",
+            "refused": "Claude hat diese Anfrage abgelehnt.",
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",
