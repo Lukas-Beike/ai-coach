@@ -54,7 +54,13 @@ from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
     summarize_session_analysis,
 )
-from tests.canonical_detail_support import NOW, ZONE, add_session_record, open_manager
+from tests.canonical_detail_support import (
+    NOW,
+    ZONE,
+    add_session_record,
+    open_manager,
+    writer_free_while_computing,
+)
 from tests.canonical_domain_support import local_zone_configuration
 
 GARMIN = ProviderId.GARMIN
@@ -693,11 +699,19 @@ class SessionAnalysisStageTests(unittest.TestCase):
             calls.append(1)
             return planned
 
-        def stage(clock: str) -> SessionAnalysisStage:
+        def stage(*clock: str) -> SessionAnalysisStage:
+            # Each clock read takes the next time and stays on the last one.
+            ticks = iter(clock)
+            last = [clock[0]]
+
+            def read() -> str:
+                last[0] = next(ticks, last[0])
+                return last[0]
+
             return SessionAnalysisStage(
                 key_values=self.key_values,
                 zone_provider=lambda: ZONE,
-                clock=lambda: clock,
+                clock=read,
                 planned_units=planned_units,
             )
 
@@ -709,7 +723,16 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertIsNone(row["payload"]["target_snapshot"])
 
         self._write(lambda db: _ftp(db, GARMIN, 250.0))
-        recent = self._run(stage("2026-09-11T08:00:00+00:00"))
+        # #2311: the prefetch freezes the targets; the writer, a moment later,
+        # keeps that result instead of analysing the session again.
+        recent_stage = stage("2026-09-11T08:00:00+00:00", "2026-09-11T08:00:02+00:00")
+        analyse = session_analysis_stage.session_analysis
+        with patch.object(
+            session_analysis_stage, "session_analysis", wraps=analyse
+        ) as analysed:
+            recent_stage.prefetch(lambda: self.manager)
+            recent = self._run(recent_stage)
+        self.assertEqual(1, analysed.call_count)
 
         self.assertEqual(1, recent["counts"]["outcomes"]["targets_frozen"])
         row = self._row("act_g1")
@@ -762,6 +785,20 @@ class SessionAnalysisStageTests(unittest.TestCase):
                 )
                 for state in states
             ],
+        )
+
+    def test_sessions_are_analysed_before_the_writer_is_taken(self) -> None:
+        # #2311: the worker's prefetch decodes and analyses with a reader, so
+        # the writer transaction only re-checks fingerprints and writes.
+        self._sessions_with_streams(3)
+        free = writer_free_while_computing(
+            self.manager, self.stage, session_analysis_stage, "session_analysis"
+        )
+        self.assertEqual([True, True, True], free)
+        with self.manager.reader() as db:
+            state = summarize_session_analysis(self.key_values, db)
+        self.assertEqual(
+            ("complete", 3), (state["status"], state["counts"]["sessions"])
         )
 
     def test_a_long_recompute_leaves_the_writer_to_a_waiting_login(self) -> None:

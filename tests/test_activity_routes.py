@@ -14,7 +14,11 @@ from typing import Any
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from canonical_detail_support import add_session_record, open_manager
+from canonical_detail_support import (
+    add_session_record,
+    open_manager,
+    writer_free_while_computing,
+)
 from support import dispatch_route
 
 from backend.activities import route_store, routes
@@ -33,6 +37,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.activity_route_post import ActivityRoutePostRoutes
 from backend.privacy import GPS_TRACKS_DELETE_CONFIRMATION_TEXT, PrivacyDeleteService
+from backend.sync import activity_routes
 from backend.sync.activity_routes import (
     ActivityRoutesStage,
     summarize_activity_routes,
@@ -398,6 +403,16 @@ class StageTests(StageCase):
         assert other is not None
         self.assertEqual("Strecke 2", other["label"])
         self.assertEqual((1, 1), (other["repeat_index"], other["repeat_count"]))
+
+    def test_tracks_are_decoded_before_the_writer_is_taken(self) -> None:
+        # #2311: the worker's prefetch decodes the tracks with a reader.
+        add_outdoor_session(self.manager, 1, loop(seed=1))
+        add_outdoor_session(self.manager, 2, loop(seed=2))
+        free = writer_free_while_computing(
+            self.manager, self.stage, activity_routes, "_track"
+        )
+        self.assertEqual([True, True], free)
+        self.assertEqual(2, (self._block("act_g2") or {})["repeat_index"])
 
     def test_the_ordinal_follows_the_start_time_not_the_arrival(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1), day=20)
