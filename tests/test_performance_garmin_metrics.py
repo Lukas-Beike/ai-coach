@@ -118,7 +118,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
             "max_metrics": [
                 {
                     "generic": {"vo2MaxPreciseValue": 54.3, "vo2MaxValue": 54},
-                    "cycling": {"vo2MaxValue": 58, "vo2MaxPreciseValue": 58.6},
+                    "cycling": {"vo2MaxPreciseValue": 58.6, "VO2MaxValue": 58},
                 }
             ]
         }
@@ -126,6 +126,16 @@ class GarminPerformanceMetricTests(unittest.TestCase):
 
         self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 54.3)
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["value"], 58.6)
+        # A placeholder precise value is dropped like in the canonical mapping, not replaced.
+        placeholder = garmin_payload_performance_metrics(
+            {
+                "max_metrics": {
+                    "generic": {"vo2MaxPreciseValue": 0.0, "vo2MaxValue": 54}
+                }
+            },
+            CURRENT_DATE,
+        )
+        self.assertIsNone(placeholder["running_vo2max_ml_kg_min"]["value"])
 
     def test_threshold_aliases_speed_scaling_and_bounds(self):
         cases = (

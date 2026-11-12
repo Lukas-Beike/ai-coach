@@ -59,6 +59,7 @@ test("race prediction rows exclude body weight and empty states give a reason", 
     run_5k_seconds: { value: 1307 }, run_10k_seconds: { value: 2741.4 }, run_half_marathon_seconds: { value: 5960 }, run_marathon_seconds: { value: 12_310 },
   }).map(({ label, metric, withSeconds }) => [label, predictionTime(metric.value, withSeconds)]));
   assert.deepEqual(shown, { "5 km": "21:47", "10 km": "45:41", Halbmarathon: "1:39 h", Marathon: "3:25 h" });
+  assert.equal(predictionTime(3735, true), "1:02:15 h", "an hour or more carries h like the longer races");
 
   assert.equal(
     racePredictionEmptyReason({ weight_kg: { value: 72.4 } }),

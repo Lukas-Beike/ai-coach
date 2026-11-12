@@ -304,13 +304,22 @@ def _garmin_collect_vo2_values(
     value: Any, values: dict[str, list[float | int]], path: tuple[str, ...] = ()
 ) -> None:
     if isinstance(value, dict):
-        # The precise value hides its rounded twin in the same section (#2263).
-        precise = _garmin_vo2_value(value.get(GARMIN_VO2MAX_ALIASES[0])) is not None
+        # A section with Garmin's named fields yields one value in the canonical
+        # mapping's precedence, the precise one first (#2263); other spellings of
+        # its VO2max fields are not read beside it.
+        named = _first_present(value, GARMIN_VO2MAX_ALIASES)
+        if named is not None:
+            number = _garmin_vo2_value(named)
+            if number is not None:
+                values[_garmin_sport_category(_garmin_key(" ".join(path)))].append(
+                    number
+                )
         for key, item in value.items():
             normalized = _garmin_key(key)
-            if precise and key in GARMIN_VO2MAX_ALIASES[1:]:
-                continue
-            if "vo2max" in normalized or ("vo2" in normalized and "max" in normalized):
+            is_vo2 = "vo2max" in normalized or (
+                "vo2" in normalized and "max" in normalized
+            )
+            if is_vo2 and named is None:
                 number = _garmin_vo2_value(item)
                 if number is not None:
                     context = _garmin_key(" ".join((*path, str(key))))
