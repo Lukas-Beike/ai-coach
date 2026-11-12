@@ -4,7 +4,7 @@ const { extractFunctions } = require("./frontend-harness.cjs");
 
 const PROFILE_SAVE = ["profileSaveInFlight", "profileFormValues", "PROFILE_ENTRY_FIELDS", "profileSaveConfirmed", "clearProfileEntryFields", "resetProfileEntryFields", "profileFieldText", "bodyExportMessage", "reportBodyExport", "isDefiniteProfileRejection", "retryBodyGarmin", "applyAdoptedFirstThreshold", "adoptFirstThreshold", "determineChangedProfileFields", "handleProfileSaveOutcome", "handleProfileSaveError", "saveProfile"];
 const COACH_PROPOSALS = ["isHttpClientRejection", "reconcileCoachActionProposal", "executeCoachActionProposal", "showCoachReceiptArea", "lockUnknownCoachActionOutcome", "rejectCoachActionProposal"];
-const SYNC_POLL = ["syncPollLeaseAvailable", "releaseSyncPollLease", "broadcastSyncMessage", "changedSyncAreas", "renderSyncStatus", "renderMaintenanceStatus", "handleSyncStatus", "scheduleSyncPoll", "pollSyncStatus"];
+const SYNC_POLL = ["changedSyncAreas", "renderSyncStatus", "renderMaintenanceStatus", "handleSyncStatus", "scheduleSyncPoll", "pollSyncStatus"];
 const NOTIFICATIONS = ["NOTIFICATION_MAX_ATTEMPTS", "NOTIFICATION_RETRY_DELAY_MS", "reserveNotificationAttempt", "showPwaNotification", "competitionCountdownText", "notifyState"];
 
 // Objects created inside a vm context have their own prototypes; compare plain copies.
@@ -294,23 +294,20 @@ test("resetting the coach chat waits while queued messages have not been sent", 
   assert.equal(toasts.at(-1).isError, true);
 });
 
-test("an in-flight sync poll does not take the poll lease", async () => {
-  let leaseWrites = 0;
+test("an in-flight sync poll starts no second request", async () => {
+  let requests = 0;
   const context = extractFunctions("sync-status.js", SYNC_POLL, {
-    state: { data: {}, syncPoll: { controller: {}, leaseToken: "tab", timer: null } },
+    state: { data: {}, syncPoll: { controller: {}, timer: null } },
     document: { visibilityState: "visible" },
     navigator: { onLine: true },
-    localStorage: { getItem: () => null, setItem: () => { leaseWrites += 1; }, removeItem() {} },
-    SYNC_POLL_LEASE_KEY: "lease",
-    SYNC_POLL_LEASE_MS: 1000,
     SYNC_POLL_RETRY_MS: 1000,
     SYNC_POLL_IDLE_MS: 1000,
     SYNC_POLL_ACTIVE_MS: 1000,
-    api: async () => { throw new Error("no request expected"); },
+    api: async () => { requests += 1; return {}; },
     providerIds: () => ({}),
   });
   await context.pollSyncStatus();
-  assert.equal(leaseWrites, 0);
+  assert.equal(requests, 0);
 });
 
 test("notification bodies omit competition names and provider error text", async () => {

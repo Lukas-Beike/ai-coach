@@ -83,9 +83,9 @@ $("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 // A closed profile section cannot show its invalid field: open it first.
 $("#profileForm").addEventListener("invalid", (event) => { event.target.closest?.("details")?.setAttribute("open", ""); }, true);
-$("#modelSelect").addEventListener("change", saveModel);
-$("#serviceTierSelect").addEventListener("change", saveServiceTier);
-$("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
+$("#modelSelect").addEventListener("change", (event) => saveSelectSetting(event, "model", "model", "Aktiv"));
+$("#serviceTierSelect").addEventListener("change", (event) => saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit"));
+$("#thinkingLevelSelect").addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level"));
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) { void loadYazioStatus(); void loadProviderChecks(); } });
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });

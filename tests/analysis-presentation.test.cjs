@@ -267,7 +267,7 @@ test("current performance shows the status lines below its heading", () => {
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {
-  const { analysisValidPoint, analysisWeeklyMeanPoints } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisWeeklyMeanPoints"], {
+  const { analysisValidPoint, analysisWeeklyMeanPoints } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisWeeklyPoints", "analysisWeeklyMeanPoints"], {
     addDateKey: (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10),
   });
   const points = [
@@ -280,7 +280,7 @@ test("weekly daily-activity mean averages known days and keeps empty weeks as ga
 });
 
 test("12-week body charts show the latest reading of each week and draw a single week as a point", () => {
-  const { bodyWeeklyPoints, analysisPlottable } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisPlottable", "bodyWeeklyPoints"], {
+  const { bodyWeeklyPoints, analysisPlottable } = extractFunctions("analysis.js", ["analysisValidPoint", "analysisPlottable", "analysisWeeklyPoints", "bodyWeeklyPoints"], {
     addDateKey: (key, days) => new Date(Date.parse(key) + days * 86400000).toISOString().slice(0, 10),
   });
   const points = [
@@ -372,4 +372,72 @@ test("the table behind a chart scrolls in a named region that the keyboard can r
   appendAnalysisTable(section, "Ruhepuls", [{ label: "Garmin", points: [{ date: "2026-10-10", value: 48 }] }], "bpm");
   const region = section.children[0].children.find((child) => child.className === "analysis-chart-table");
   assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Ruhepuls: Einzelwerte"]);
+});
+
+// Runs the real weekly aggregations; results are copied out of the sandbox for literal comparison.
+const WEEKLY = ["analysisValidPoint", "analysisWeeklyPoints", "analysisWeeklyPerformancePoints", "analysisWeeklySumPoints", "analysisWeeklyMeanPoints", "analysisWeeklyLastPoints", "bodyWeeklyPoints"];
+const weekly = () => extractFunctions("analysis.js", WEEKLY, {
+  addDateKey: (key, days) => new Date(Date.parse(`${key}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10),
+});
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+// Mondays 2026-10-05, 10-12 and 10-19; the third week is cut at 10-21.
+const WEEKLY_POINTS = [
+  { date: "2026-10-05", value: 1.5 }, { date: "2026-10-07", value: 2.5 }, { date: "2026-10-09", value: null }, { date: "2026-10-11", value: 0.3 },
+  { date: "2026-10-14", value: "n/a" },
+  { date: "2026-10-19", value: 7 }, { date: "2026-10-21", value: 3 },
+];
+
+test("weekly sums add the known days per week, keep empty weeks as gaps and cut the last week at the end", () => {
+  assert.deepEqual(plain(weekly().analysisWeeklySumPoints(WEEKLY_POINTS, "2026-10-05", "2026-10-21")), [
+    { date: "2026-10-11", value: 4.3, observedDate: "2026-10-11" },
+    { date: "2026-10-18", value: null },
+    { date: "2026-10-21", value: 10, observedDate: "2026-10-21" },
+  ]);
+});
+
+test("weekly means round to one decimal over the known days of each week", () => {
+  assert.deepEqual(plain(weekly().analysisWeeklyMeanPoints(WEEKLY_POINTS, "2026-10-05", "2026-10-21")), [
+    { date: "2026-10-11", value: 1.4, observedDate: "2026-10-11" },
+    { date: "2026-10-18", value: null },
+    { date: "2026-10-21", value: 5, observedDate: "2026-10-21" },
+  ]);
+});
+
+test("the weekly state keeps the last known point of each week with its fields", () => {
+  const points = WEEKLY_POINTS.map((point) => ({ ...point, source: "garmin" }));
+  assert.deepEqual(plain(weekly().analysisWeeklyLastPoints(points, "2026-10-05", "2026-10-21")), [
+    { date: "2026-10-11", value: 0.3, source: "garmin", observedDate: "2026-10-11" },
+    { date: "2026-10-18", value: null },
+    { date: "2026-10-21", value: 3, source: "garmin", observedDate: "2026-10-21" },
+  ]);
+});
+
+test("weekly performance takes the latest reading by date, or the median with its count", () => {
+  const points = [
+    { date: "2026-10-09", value: 40 }, { date: "2026-10-05", value: 50 }, { date: "2026-10-07", value: 60 }, { date: "2026-10-06", value: null },
+    { date: "2026-10-20", value: 30 }, { date: "2026-10-19", value: 10 },
+  ];
+  assert.deepEqual(plain(weekly().analysisWeeklyPerformancePoints(points, "2026-10-05", "2026-10-21")), [
+    { date: "2026-10-11", value: 40, observedDate: "2026-10-09" },
+    { date: "2026-10-18", value: null },
+    { date: "2026-10-21", value: 30, observedDate: "2026-10-20" },
+  ]);
+  assert.deepEqual(plain(weekly().analysisWeeklyPerformancePoints(points, "2026-10-05", "2026-10-21", true)), [
+    { date: "2026-10-11", value: 50, observedDate: "2026-10-09", count: 3 },
+    { date: "2026-10-18", value: null },
+    { date: "2026-10-21", value: 20, observedDate: "2026-10-20", count: 2 },
+  ]);
+});
+
+test("weekly body points keep the last reading with its fields, the reading count and gap weeks", () => {
+  const points = [
+    { date: "2026-10-05", value: 70.2, observed_at: "2026-10-05T06:00:00Z" }, { date: "2026-10-08", value: 69.8 }, { date: "2026-10-10", value: null },
+    { date: "2026-10-20", value: 69.1, observed_at: "2026-10-20T07:00:00Z" },
+  ];
+  assert.deepEqual(plain(weekly().bodyWeeklyPoints(points, "2026-10-05", "2026-10-21")), [
+    { date: "2026-10-11", value: 69.8, weekReadings: 2, observedDate: "2026-10-08" },
+    { date: "2026-10-18", value: null, weekReadings: 0 },
+    { date: "2026-10-21", value: 69.1, observed_at: "2026-10-20T07:00:00Z", weekReadings: 1, observedDate: "2026-10-20T07:00:00Z" },
+  ]);
 });

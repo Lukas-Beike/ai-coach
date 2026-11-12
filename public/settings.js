@@ -247,30 +247,12 @@ async function restoreDatabaseBackup() {
   }
 }
 
-async function saveModel(event) {
-  const select = event.currentTarget;
-  select.disabled = true;
-  try {
-    await api("/api/settings/model", { method: "PUT", body: JSON.stringify({ model: select.value }) });
-    toast(`Aktiv: ${select.options[select.selectedIndex].text}`);
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally { select.disabled = false; }
-}
-
-async function saveThinkingLevel(event) {
-  const select = event.currentTarget;
-  select.disabled = true;
-  try {
-    await api("/api/settings/thinking-level", { method: "PUT", body: JSON.stringify({ thinking_level: select.value }) });
-    toast(`Thinking Level: ${select.options[select.selectedIndex].text}`);
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally { select.disabled = false; }
+// One select that saves on change: PUT /api/settings/<name> with the chosen value, then names the active option.
+function saveSelectSetting({ currentTarget: select }, name, field, label) {
+  return runAction(select, async () => {
+    await api(`/api/settings/${name}`, { method: "PUT", body: JSON.stringify({ [field]: select.value }) });
+    return `${label}: ${select.options[select.selectedIndex].text}`;
+  });
 }
 
 async function saveCalendarDisplaySettings(event) {
@@ -436,19 +418,6 @@ async function deletePrivacyData() {
     state.loadedAreas.clear();
     await load();
   } catch (error) { toast(error.message, true); } finally { release(); }
-}
-
-async function saveServiceTier(event) {
-  const select = event.currentTarget;
-  select.disabled = true;
-  try {
-    await api("/api/settings/service-tier", { method: "PUT", body: JSON.stringify({ service_tier: select.value }) });
-    toast(`Geschwindigkeit: ${select.options[select.selectedIndex].text}`);
-    await load();
-  } catch (error) {
-    toast(error.message, true);
-    await load();
-  } finally { select.disabled = false; }
 }
 
 // Local zones win over provider zones; the editor shows both and saves local values only.

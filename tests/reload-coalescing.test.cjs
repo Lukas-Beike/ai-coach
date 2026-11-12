@@ -6,7 +6,7 @@ const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs")
 // Only the status polling of coach.js: the rest needs the whole chat interface.
 const STATUS_POLL = ["scheduleChatStatusPoll", "chatStatusJobActive", "chatStatusPollWanted", "stopChatStatusPoll", "loadChatHistoryFresh", "refreshChatProposalsInBackground", "resumeQueuedChat", "chatPollStateIsCurrent", "pendingChatTurn", "pollPendingChatReceipt", "showRunningChatStatus", "finishRecoveredChatStatus", "CHAT_STATUS_SAFETY_POLL_MS", "rescheduleChatStatusPoll", "settleChatStatusPoll", "pollChatStatus", "loadInitialState"];
 // The cadence constants of the sync status poll.
-const SYNC_POLL_CONSTANTS = ["SYNC_POLL_LEASE_KEY", "SYNC_POLL_CHANNEL", "SYNC_POLL_ACTIVE_MS", "SYNC_POLL_IDLE_MS", "SYNC_POLL_RETRY_MS", "SYNC_POLL_LEASE_MS"];
+const SYNC_POLL_CONSTANTS = ["SYNC_POLL_ACTIVE_MS", "SYNC_POLL_IDLE_MS", "SYNC_POLL_RETRY_MS"];
 
 const BOOTSTRAP = "/api/bootstrap?local=1";
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -487,12 +487,8 @@ test("a reset event after the first ready reloads every area and the start data"
 });
 
 test("the sync status is read every 1.5 seconds while a sync runs and slowly when idle", async () => {
-  const values = new Map();
   const app = frontend();
-  Object.assign(app.context, {
-    AbortController,
-    localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) },
-  });
+  app.context.AbortController = AbortController;
   const STATUS = "/api/sync/status";
   app.auto.set(STATUS, { running: true, state_versions: {} });
   app.context.setupSyncStatusMonitoring();

@@ -157,15 +157,15 @@ The client SHALL use authenticated state events when available, coalesce changed
 - **WHEN** ready/heartbeat and state-change events arrive
 - **THEN** replay baseline is respected, changed areas coalesce, and Coach status uses its slow safety check rather than constant fast polling.
 
-#### Scenario: Event interruption or multiple tabs
-- **WHEN** event delivery fails or another tab owns the optional sync-poll lease
-- **THEN** reconnect/poll fallback remains bounded, lease/broadcast coordination avoids needless duplicate sync polling, and storage denial does not disable sync monitoring.
+#### Scenario: Event interruption
+- **WHEN** event delivery fails
+- **THEN** reconnect/poll fallback remains bounded; each visible tab polls the local status endpoint itself.
 
 #### Scenario: Active sync and visibility change
 - **WHEN** sync is running, idle, hidden, or offline
 - **THEN** the ordinary sync poll uses active/idle/retry intervals and hidden/offline transitions close events or release/abort the relevant poll; returning visible triggers fresh status checking.
 
-Evidence: `public/sync-status.js::connectStateEvents`, `public/sync-status.js::handleStateEvent`, `public/sync-status.js::pollSyncStatus`, `public/sync-status.js::syncPollLeaseAvailable`, `public/coach.js::pollChatStatus`; `tests/reload-coalescing.test.cjs::the status is not polled every 1.5 seconds while the event stream is healthy`, `tests/reload-coalescing.test.cjs::a silently stalled event stream switches to the fast check once it counts as stale`, `e2e/state-events.spec.js::hidden and offline pages release status streams and resume only one connection`.
+Evidence: `public/sync-status.js::connectStateEvents`, `public/sync-status.js::handleStateEvent`, `public/sync-status.js::pollSyncStatus`, `public/coach.js::pollChatStatus`; `tests/reload-coalescing.test.cjs::the status is not polled every 1.5 seconds while the event stream is healthy`, `tests/reload-coalescing.test.cjs::a silently stalled event stream switches to the fast check once it counts as stale`, `e2e/state-events.spec.js::hidden and offline pages release status streams and resume only one connection`.
 
 ### Requirement: Busy Coach turns defer bounded background work
 The client SHALL defer nonessential automatic area reloads during an active Coach turn while keeping transcript/profile and athlete-initiated operations live. Deferred background work SHALL coalesce and run when the turn ends or the sixty-second cap is reached.

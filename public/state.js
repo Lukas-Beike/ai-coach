@@ -87,8 +87,6 @@ globalThis.AppState = (() => {
       controller: null,
       timer: null,
       operationId: null,
-      channel: null,
-      leaseToken: secureToken("tab"),
     },
   };
 
