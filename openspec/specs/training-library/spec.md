@@ -248,7 +248,7 @@ Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_r
 
 #### Scenario: Hidden units are removed by the next explicit sync
 - **WHEN** a unit that is archived or deleted (a replan archives the replaced unit) still holds a remote event ID in an open sync state and is dated today or later
-- **THEN** the week sync button of that day's week removes it (at most 20 events, soonest first), and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched. The week button sends its units and its leftovers in separate `plan_push` jobs, so a leftover that cannot be removed never fails a unit; a selected Coach card adds them as further entries of its own job while the job has room.
+- **THEN** the week sync button of that day's week removes it (at most 20 events, soonest first), and only the linked event is deleted; events without a stored unit are never touched. The week button sends its units and its leftovers in separate `plan_push` jobs, so a leftover that cannot be removed never fails a unit; a selected Coach sync, and a sync bound to the units of one Coach turn (created, changed or replacement units), add them as further entries of its own job while the job has room, so replacing a unit and sending its successor also removes the replaced unit's event, which Intervals.icu would otherwise keep forwarding to Garmin (#2373). The plan selection accepts beyond the turn's units only such leftovers of hidden units.
 
 #### Scenario: Leftovers no pending unit carries
 - **WHEN** hidden units hold an Intervals.icu event but no unit of that week waits for that provider

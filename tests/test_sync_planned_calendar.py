@@ -486,6 +486,44 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(self.unit()["sync_state"], "synced")
         self.assertEqual(self.client.read_ids[0], "event-1")
 
+    def test_a_replaced_ride_loses_its_event_and_its_successor_gets_one(self):
+        # #2373: the Coach replaced the indoor ride by another sport on the same
+        # day; syncing both entries deletes the ride's own event and creates the
+        # successor's. A foreign event of that day is never touched.
+        ride_id = "87654321-4321-8765-4321-876543218765"
+        ride_event = {
+            "id": "event-ride",
+            "category": "WORKOUT",
+            "start_date_local": TODAY.isoformat() + "T06:00:00",
+        }
+        foreign = {"id": "event-foreign", "category": "WORKOUT"}
+        self.client.events = [ride_event, foreign]
+        self.client.remote_event = ride_event
+        self.add_unit(
+            local_id=ride_id,
+            payload=self.workout(
+                sport="VirtualRide",
+                name="Lockeres Indoor-Rad",
+                archived=True,
+                local_deleted=True,
+                remote_event_id="event-ride",
+            ),
+        )
+        self.add_unit()
+        self.client.responses = [[{"id": "event-new", "type": "WeightTraining"}]]
+
+        self.assertIsNone(self.service.sync_entry(ride_id))
+        created = self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual(["event-ride"], self.client.deleted)
+        self.assertEqual("event-new", created["id"])
+        self.assertEqual(
+            ["event-foreign", "event-new"],
+            sorted(str(event["id"]) for event in self.client.events),
+        )
+        self.assertEqual("synced", self.unit(ride_id)["sync_state"])
+        self.assertEqual("synced", self.unit()["sync_state"])
+
     def test_removed_unit_restored_sends_no_stale_event_id(self):
         removed = {
             "id": "event-1",

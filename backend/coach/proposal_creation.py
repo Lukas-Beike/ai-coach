@@ -345,15 +345,16 @@ def _card_authorized_intent(
     """Authorize exactly the units an Intervals.icu plan-sync card lists.
 
     The athlete approves the card, which shows every listed unit. The model's
-    unit tokens are not what the athlete sees, so for a selected sync they are
-    replaced by tokens for the card entries, each checked against local state.
-    The tokens are stored with the hashed card payload and grant nothing else.
+    unit tokens are not what the athlete sees, so for a selected sync, and for a
+    Coach turn's sync that also carries leftovers (#2373), they are replaced by
+    tokens for the card entries, each checked against local state. The tokens
+    are stored with the hashed card payload and grant nothing else.
     """
     entries = arguments.get("entries")
     if (
         tool != "start_intervals_plan_sync"
         or arguments.get("repair") is True
-        or (intent.get("request") or {}).get("sync_scope") != "selected"
+        or (intent.get("request") or {}).get("sync_scope") not in _LEFTOVER_SCOPES
         or not isinstance(entries, list)
         or not entries
     ):
@@ -459,26 +460,26 @@ def _payload_date(row: Any) -> str:
     return str(payload.get("date") or "") if isinstance(payload, dict) else ""
 
 
+# The Coach sync scopes that also remove the leftovers of hidden units.
+_LEFTOVER_SCOPES = frozenset({"selected", "created", "changed"})
+
+
 def _with_intervals_leftovers(
     approved: dict[str, Any],
     intent: dict[str, Any],
     database_manager: DatabaseManager,
     today: date,
 ) -> dict[str, Any]:
-    """Add the Intervals.icu events of deleted or replaced units to a selected sync.
+    """Add the Intervals.icu events of deleted or replaced units to a sync.
 
     The athlete cannot select a hidden unit, yet its event stays in the
     calendar and keeps reaching Garmin. The card lists these units as removals.
-    A sync that must cover exactly the units of one Coach turn gets none.
+    A sync bound to the units of one Coach turn carries them too, so replacing a
+    unit and sending the new one also removes the old event (#2373); the plan
+    selection accepts no other extra unit.
     """
-    if (intent.get("request") or {}).get("sync_scope") != "selected" or any(
-        intent.get(key)
-        for key in (
-            "_replacement_sync_entry_ids",
-            "_created_sync_entry_ids",
-            "_changed_sync_entry_ids",
-            "_sync_all_pending",
-        )
+    if (intent.get("request") or {}).get("sync_scope") not in _LEFTOVER_SCOPES or (
+        intent.get("_sync_all_pending")
     ):
         return approved
     entries = [entry for entry in approved["entries"] if isinstance(entry, dict)]

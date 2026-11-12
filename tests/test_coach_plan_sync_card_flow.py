@@ -377,6 +377,50 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         self.assertEqual(sorted(ids), sorted(e["library_workout_id"] for e in queued))
         self.assertNotIn(OTHER_UNIT, {e["library_workout_id"] for e in queued})
 
+    def test_replacing_a_ride_by_a_run_and_sending_it_removes_the_rides_event(
+        self,
+    ) -> None:
+        # The athlete's Friday (#2373): the Coach replaced the indoor ride by a
+        # run and sent the run; the ride's Intervals.icu event must go too, or
+        # Intervals.icu keeps the ride in Garmin.
+        ride, _day, _sport = WEEK[4]
+        with self.flow.database.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload=? WHERE local_id=?",
+                (
+                    json.dumps(
+                        {
+                            "name": "Lockeres Indoor-Rad",
+                            "date": "2026-11-13",
+                            "type": "VirtualRide",
+                            "remote_event_id": "evt-ride",
+                            "archived": True,
+                            "local_deleted": True,
+                        },
+                        sort_keys=True,
+                    ),
+                    ride,
+                ),
+            )
+        run = OTHER_UNIT
+        # As the created scope prepares it: the turn's unit carries its token.
+        call = self.coach_tool_call(
+            [run], scope=["intervals_sync", f"planned_unit:{run}"]
+        )
+        call["action"]["request"]["sync_scope"] = "created"
+        call["action"]["_created_sync_entry_ids"] = [run]
+
+        for name, send in (
+            ("card", lambda: approve_card(self.flow, create_card(self.flow, call))),
+            ("named", lambda: run_in_turn(self.flow, call)),
+        ):
+            with self.subTest(name):
+                send()
+                queued = json.loads(self.plan_push_jobs()[-1]["payload"])["entries"]
+                self.assertEqual(
+                    [run, ride], [entry["library_workout_id"] for entry in queued]
+                )
+
     def test_unit_tokens_from_the_model_never_widen_the_card(self) -> None:
         call = self.coach_tool_call(
             [WEEK[0][0]],
