@@ -74,7 +74,9 @@ and commit/tag messages, including intermediate commits, in temporary storage an
 A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
 no scan. After a clean scan the hook runs CI's repository quality ratchet
 (`python tools/quality_baseline.py`: mypy and Ruff, about 35 seconds
-on Windows) on a clean export of HEAD; new findings block the push. Do not use `--no-verify`.
+on Windows) on a clean export of HEAD; new findings block the push. The same
+ratchet reports a function above Sonar's cognitive complexity 15 (rule
+`python:S3776`) as a `cognitive` finding named by function, not score. Do not use `--no-verify`.
 
 Enable the hook in each clone (the relative path also works in its worktrees):
 

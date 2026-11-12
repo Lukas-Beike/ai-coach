@@ -95,7 +95,9 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         diagnostics = evidence["diagnostics"]
         self.assertTrue(diagnostics)
-        self.assertLessEqual({item["tool"] for item in diagnostics}, {"ruff", "mypy"})
+        self.assertLessEqual(
+            {item["tool"] for item in diagnostics}, {"ruff", "mypy", "cognitive"}
+        )
         evidence = evidence["coverage_evidence"]
         totals = evidence["totals"]
         measured = (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -17,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests/fixtures/quality_baseline.json"
 REQUIREMENTS = ROOT / "requirements-dev.txt"
 TOOLS = ("ruff", "mypy")
+# The cognitive counter is this module's own code and has no pinned version, so
+# it stays out of TOOLS (version recording and alignment) but is accepted debt.
+COGNITIVE = "cognitive"
+COGNITIVE_CODE = "S3776"
+COGNITIVE_LIMIT = 15
 # Line and column are reported for humans but are not debt identity, so an
 # unrelated edit that moves a known diagnostic does not fail the ratchet.
 IDENTITY_FIELDS = ("tool", "path", "code", "message_sha256")
@@ -108,6 +114,115 @@ def diagnostic(tool: str, item: dict, root: Path) -> dict:
     }
 
 
+# Structures that count 1 plus nesting; their listed fields sit at their own
+# level and everything else (the body, handlers, cases) one level deeper.
+_COGNITIVE_HEADS = {
+    ast.For: ("target", "iter"),
+    ast.AsyncFor: ("target", "iter"),
+    ast.While: ("test",),
+    ast.ExceptHandler: ("type",),
+    ast.Match: ("subject",),
+}
+
+
+def _cognitive_score(node: ast.AST, nesting: int, operator: type | None = None) -> int:
+    """Score one node and its descendants; `operator` is a boolean parent's kind."""
+    if isinstance(node, ast.BoolOp):
+        # Like operators in one chain, even across parentheses, count once.
+        own = 0 if operator is type(node.op) else 1
+        return own + sum(
+            _cognitive_score(value, nesting, type(node.op)) for value in node.values
+        )
+    if isinstance(node, ast.If):
+        return _if_score(node, nesting, 1 + nesting)
+    heads = _COGNITIVE_HEADS.get(type(node))
+    if heads is not None:
+        return (
+            1
+            + nesting
+            + sum(
+                _cognitive_score(child, nesting + (field not in heads))
+                for field, value in ast.iter_fields(node)
+                for child in (value if isinstance(value, list) else [value])
+                if isinstance(child, ast.AST)
+            )
+        )
+    own = 1 + nesting if isinstance(node, ast.IfExp) else 0
+    if isinstance(
+        node, ast.IfExp | ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef
+    ):
+        nesting += 1
+    return own + sum(
+        _cognitive_score(child, nesting) for child in ast.iter_child_nodes(node)
+    )
+
+
+def _if_score(node: ast.If, nesting: int, increment: int) -> int:
+    total = increment + _cognitive_score(node.test, nesting)
+    total += sum(_cognitive_score(item, nesting + 1) for item in node.body)
+    rest = node.orelse
+    # `elif` is an If whose keyword starts at the column of its parent's `if`.
+    if (
+        len(rest) == 1
+        and isinstance(rest[0], ast.If)
+        and rest[0].col_offset == node.col_offset
+    ):
+        return total + _if_score(rest[0], nesting, 1)
+    if rest:
+        total += 1 + sum(_cognitive_score(item, nesting + 1) for item in rest)
+    return total
+
+
+def cognitive_complexity(function: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    """Return SonarQube's python:S3776 cognitive complexity of a function body.
+
+    Structures count 1 plus their nesting level: if, ternary, for, while, except
+    and match. `elif` and `else` count 1 without nesting; each chain of like
+    `and`/`or` operators counts 1; lambdas and nested functions raise the nesting
+    of their content, which belongs to the enclosing function. Simplifications:
+    recursion, comprehensions, `else` of loops and try, and `try`/`with` blocks
+    count nothing, and the decorators and defaults of the measured function are
+    not scored.
+    """
+    return sum(_cognitive_score(statement, 0) for statement in function.body)
+
+
+def _functions(node: ast.AST, prefix: str = ""):
+    """Yield (qualified name, function) for every outermost function and method."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            yield prefix + child.name, child
+        elif isinstance(child, ast.ClassDef):
+            yield from _functions(child, f"{prefix}{child.name}.")
+        else:
+            yield from _functions(child, prefix)
+
+
+def cognitive_diagnostics(root: Path, files: list[str]) -> list[dict]:
+    """Report each function above the limit by name, never by score, so the
+    baseline identity survives the score changing."""
+    diagnostics = []
+    for path in files:
+        try:
+            tree = ast.parse((root / path).read_text(encoding="utf-8"), path)
+        except SyntaxError as error:
+            raise RuntimeError(f"Cannot parse {path} for complexity") from error
+        for name, function in _functions(tree):
+            if cognitive_complexity(function) > COGNITIVE_LIMIT:
+                message = f"Cognitive complexity of {name} is above {COGNITIVE_LIMIT}"
+                diagnostics.append(
+                    {
+                        "tool": COGNITIVE,
+                        "path": path,
+                        "line": function.lineno,
+                        "column": function.col_offset + 1,
+                        "code": COGNITIVE_CODE,
+                        "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
+                    }
+                )
+    return diagnostics
+
+
 def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
     files = source_files(root)
     if not files:
@@ -158,6 +273,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
         item = json.loads(line)
         if item["severity"] == "error":
             diagnostics.append(diagnostic("mypy", item, root))
+    diagnostics.extend(cognitive_diagnostics(root, files))
 
     return versions, sorted(
         diagnostics, key=lambda item: json.dumps(item, sort_keys=True)
@@ -225,10 +341,13 @@ def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> 
             "--align-versions` and commit tests/fixtures/quality_baseline.json."
         )
     if any(
-        item.get("tool") not in {"ruff", "mypy"}
+        item.get("tool") not in {*TOOLS, COGNITIVE}
         for item in [*baseline["diagnostics"], *diagnostics]
     ):
-        raise RuntimeError("Quality baseline supports Ruff and mypy diagnostics only")
+        raise RuntimeError(
+            "Quality baseline supports Ruff, mypy and cognitive complexity "
+            "diagnostics only"
+        )
     added, obsolete = compare(baseline["diagnostics"], diagnostics)
     for label, items in (("NEW", added), ("OBSOLETE", obsolete)):
         for item in items:
