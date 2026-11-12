@@ -76,9 +76,8 @@ function renderProviderCheck(provider) {
   }
   const button = document.querySelector(`[data-check-button="${provider}"]`);
   if (button) button.disabled = view.disabled;
-  const chip = Object.keys(CHECKED_CONNECTION_CHIPS).find((selector) => CHECKED_CONNECTION_CHIPS[selector] === provider);
-  const base = chip && document.querySelector(chip)?.dataset.base;
-  if (base) setConnectionChip(chip, base);
+  const chip = button?.closest(".connection-card")?.querySelector(".connection-chip");
+  if (chip?.dataset.base) setConnectionChip(`#${chip.id}`, chip.dataset.base);
 }
 
 function renderProviderChecks() {

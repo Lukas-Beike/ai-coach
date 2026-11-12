@@ -12,9 +12,12 @@ function loadChecks(apiHandler, providers = PROVIDERS) {
   const buttons = new Map();
   const classes = new Map();
   const chips = new Map();
+  // Each provider's card holds its chip ("#<id>ConnectionStatus") and its check button.
+  const card = (id) => ({ querySelector: (selector) => (selector === ".connection-chip" ? chips.get(`#${id}ConnectionStatus`) : buttons.get(id)) });
   for (const id of providers) {
     results.set(id, { textContent: "", classList: { toggle: (_name, on) => classes.set(id, Boolean(on)) } });
-    buttons.set(id, { dataset: { checkButton: id, ...(id === "beta" ? { checkGroup: "beta beta-card" } : {}) }, disabled: false, addEventListener(_type, handler) { this.click = handler; } });
+    buttons.set(id, { dataset: { checkButton: id, ...(id === "beta" ? { checkGroup: "beta beta-card" } : {}) }, disabled: false, addEventListener(_type, handler) { this.click = handler; }, closest: () => card(id) });
+    chips.set(`#${id}ConnectionStatus`, Object.assign(new FakeElement(), { id: `${id}ConnectionStatus`, closest: () => card(id) }));
   }
   const calls = [];
   const toasts = [];
@@ -23,10 +26,7 @@ function loadChecks(apiHandler, providers = PROVIDERS) {
       addEventListener: () => {},
       querySelectorAll: () => [...buttons.values()],
       querySelector: (selector) => {
-        if (selector.startsWith("#")) {
-          if (!chips.has(selector)) chips.set(selector, new FakeElement());
-          return chips.get(selector);
-        }
+        if (selector.startsWith("#")) return chips.get(selector);
         const id = /"(\w+)"/.exec(selector)[1];
         return selector.includes("check-result") ? results.get(id) : buttons.get(id);
       },

@@ -93,17 +93,15 @@ function garminSourceLines(garmin, sdkConnected) {
 }
 
 // #2443: a configured but not yet used Intervals.icu or Claude card takes its chip
-// from the provider's last explicit connection check.
-const CHECKED_CONNECTION_CHIPS = Object.freeze({
-  "#intervalsConnectionStatus": "intervals",
-  "#anthropicConnectionStatus": "anthropic",
-});
+// from the last explicit check of its card's check button.
+const CHECKED_CONNECTION_CHIPS = Object.freeze(["#intervalsConnectionStatus", "#anthropicConnectionStatus"]);
 
 function setConnectionChip(selector, kind) {
   const node = document.querySelector(selector);
   if (!node) return;
-  const provider = CHECKED_CONNECTION_CHIPS[selector];
-  if (provider) node.dataset.base = kind;
+  const checked = CHECKED_CONNECTION_CHIPS.includes(selector);
+  if (checked) node.dataset.base = kind;
+  const provider = checked ? node.closest(".connection-card")?.querySelector("[data-check-button]")?.dataset.checkButton : "";
   const shown = provider ? checkedConnectionKind(kind, providerCheckResults.get(provider)) : kind;
   const chip = Object.hasOwn(CONNECTION_CHIPS, shown) ? shown : "unchecked";
   node.textContent = CONNECTION_CHIPS[chip];
