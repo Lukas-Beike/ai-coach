@@ -180,13 +180,13 @@ test("a protected save without the password sends nothing and keeps the entries"
   for (const provider of ["openai", "anthropic"]) {
     const harness = loadProviderConnections();
     harness.setData({ credentials: { fields: statusFields } });
-    harness.element(`cred-${provider}_base_url`).value = "https://proxy.example.test/v1";
+    harness.element(`cred-${provider}_base_url`).value = "https://proxy.example.test";
 
     await harness.fn("saveProviderCredentials")(event(), provider);
 
     assert.equal(harness.calls.length, 0);
     assert.equal(harness.element(credentialFormIds(provider).error).textContent, "Bitte das App-Passwort eingeben.");
-    assert.equal(harness.element(`cred-${provider}_base_url`).value, "https://proxy.example.test/v1");
+    assert.equal(harness.element(`cred-${provider}_base_url`).value, "https://proxy.example.test");
   }
 });
 

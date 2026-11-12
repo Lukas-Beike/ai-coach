@@ -249,6 +249,7 @@ class ProbeTests(unittest.TestCase):
             "config": lambda: config,
             "request": Mock(return_value={}),
             "default_openai_base_url": "https://default.example.test/v1",
+            "default_anthropic_base_url": "https://claude-default.example.test",
             "intervals_get": Mock(),
             "wahoo_status": lambda: {
                 "connected": True,

@@ -523,8 +523,6 @@ function renderAiConnection(configured, status) {
 // No Claude traffic reports a status yet, so a configured key reads as not checked.
 function renderClaudeConnection(configured) {
   setConnectionChip("#anthropicConnectionStatus", connectionKind({ configured, unchecked: true }));
-  const detail = $("#anthropicConnectionDetail");
-  if (detail) detail.textContent = configured ? "" : "ANTHROPIC_API_KEY nicht konfiguriert";
 }
 
 function intervalsConnectionState(data, configured) {

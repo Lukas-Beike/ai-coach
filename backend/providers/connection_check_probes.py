@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from backend.config import DEFAULT_ANTHROPIC_BASE_URL, Config
+from backend.config import Config
 from backend.errors import AppError
 from backend.providers import openai_requests
 from backend.providers.claude_requests import CLAUDE_MODELS_PATH, claude_headers
@@ -83,6 +83,7 @@ def build_probes(
     config: Callable[[], Config],
     request: Callable[..., Any],
     default_openai_base_url: str,
+    default_anthropic_base_url: str,
     intervals_get: Callable[[str], Any],
     wahoo_status: Callable[[], dict[str, Any]],
     wahoo_user: Callable[[], Any],
@@ -108,7 +109,7 @@ def build_probes(
         _models_check(
             request,
             base_url=current.anthropic_base_url,
-            default_base_url=DEFAULT_ANTHROPIC_BASE_URL,
+            default_base_url=default_anthropic_base_url,
             path=CLAUDE_MODELS_PATH,
             headers=claude_headers(current.anthropic_api_key),
             service="anthropic-check",

@@ -23,7 +23,7 @@ DEFAULT_SYNC_HISTORY_EARLIEST_DATE = date(2000, 1, 1)
 _LOGGER = logging.getLogger("intervals_coach")
 
 
-def validated_base_url(value: str, setting: str = "OPENAI_BASE_URL") -> str:
+def validated_base_url(value: str, setting: str) -> str:
     """Accept HTTPS endpoints and HTTP endpoints on loopback only."""
     candidate = str(value or "").strip().rstrip("/")
     try:
@@ -253,7 +253,8 @@ def load_config(
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
         openai_base_url=validated_base_url(
-            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL
+            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL,
+            "OPENAI_BASE_URL",
         ),
         openai_model=_env_text(target, "OPENAI_MODEL", "gpt-6-luna"),
         intervals_api_key=value("INTERVALS_API_KEY", ""),

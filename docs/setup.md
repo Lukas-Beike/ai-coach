@@ -123,11 +123,11 @@ server {
 
 ## Provider credentials in the app
 
-Intervals.icu, OpenAI, Garmin Personal API key (with its expiry date), Wahoo and Yazio credentials can be entered in each provider's card under **Mehr > Anbindungen** instead of in `.env`:
+Intervals.icu, OpenAI, Claude (Anthropic), Garmin Personal API key (with its expiry date), Wahoo and Yazio credentials can be entered in each provider's card under **Mehr > Anbindungen** instead of in `.env`:
 
 - **Where values live:** a value saved in the app is stored in the encrypted database and takes precedence. The matching environment variable is a read-only fallback that applies again after the stored value is removed.
 - **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
-- **Secrets:** API keys, client secrets and passwords are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID, Garmin key expiry date) are shown as the current value.
+- **Secrets:** API keys, client secrets and passwords are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI and Anthropic base URLs, Intervals.icu athlete ID, Wahoo client ID, Garmin key expiry date) are shown as the current value.
 - **Timing:** changes apply without a container restart.
 - **Password re-entry:** setting the OpenAI or Anthropic base URL or the Wahoo client ID or secret asks for the `APP_PASSWORD` again, on top of the session, because these values decide where a model provider key is sent and which Wahoo app is used. A wrong or missing password changes nothing. Removing a stored value needs no password.
 - **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin or Intervals.icu accounts or the Wahoo account itself, but it revokes this app's Wahoo grant at Wahoo first (best effort, like "Wahoo trennen"); a failed revoke is reported after the purge, which completes either way.

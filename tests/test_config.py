@@ -213,15 +213,16 @@ class ConfigTests(unittest.TestCase):
 
     def test_openai_base_url_requires_https_or_loopback_http(self):
         self.assertEqual(
-            validated_base_url("https://api.example.test/v1/"),
+            validated_base_url("https://api.example.test/v1/", "OPENAI_BASE_URL"),
             "https://api.example.test/v1",
         )
         self.assertEqual(
-            validated_base_url("http://127.0.0.1:8080/v1"),
+            validated_base_url("http://127.0.0.1:8080/v1", "OPENAI_BASE_URL"),
             "http://127.0.0.1:8080/v1",
         )
         self.assertEqual(
-            validated_base_url("http://[::1]:8080/v1"), "http://[::1]:8080/v1"
+            validated_base_url("http://[::1]:8080/v1", "OPENAI_BASE_URL"),
+            "http://[::1]:8080/v1",
         )
         for value in (
             "http://192.168.1.5/v1",
@@ -229,7 +230,7 @@ class ConfigTests(unittest.TestCase):
             "ftp://api.example.test/v1",
         ):
             with self.subTest(value=value), self.assertRaises(AppError):
-                validated_base_url(value)
+                validated_base_url(value, "OPENAI_BASE_URL")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.assertRaises(AppError) as raised:
