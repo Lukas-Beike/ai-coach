@@ -288,7 +288,7 @@ A Coach write tool MAY declare that it counts as a bulk change from a lower numb
 - **THEN** the call is denied before any write, and the Coach asks the athlete first.
 
 #### Scenario: One product filled
-- **WHEN** the Coach fills gaps of one product
-- **THEN** no bulk confirmation is needed; the write still needs the athlete's own request and shows a receipt.
+- **WHEN** the Coach fills gaps of one product, also with values from several origins or in a second attempt within the turn
+- **THEN** no bulk confirmation is needed, because products count by id; the write still needs the athlete's own request and shows a receipt.
 
-Evidence: `backend/coach/tool_specs.py:ToolSpec.bulk_from`, `backend/coach/write_gate.py:call_impact`, `backend/coach/turn_write_gate.py:CoachTurnWriteGate`, `backend/coach/dialogue_action.py` (`local_nutrition_gaps`); `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_dialogue.py` (gap scope cases).
+Evidence: `backend/coach/tool_specs.py:ToolSpec.bulk_from`, `backend/coach/tool_specs.py:ToolSpec.distinct_records`, `backend/coach/write_gate.py:record_ids`, `backend/coach/write_gate.py:call_impact`, `backend/coach/turn_write_gate.py:CoachTurnWriteGate`, `backend/coach/dialogue_action.py` (`local_nutrition_gaps`); `tests/test_coach_write_gate.py:test_many_records_in_one_turn_need_a_confirmed_bulk_change`, `tests/test_coach_dialogue.py` (gap scope cases).

@@ -72,6 +72,9 @@ class ToolSpec:
     no_record: bool = False  # a draft or preview; changes no record
     record_lists: tuple[str, ...] = ()  # argument lists with one record per item
     bulk_from: int | None = None  # a call reaching this many records counts as bulk
+    # Items naming the same record id count once (values of one product
+    # from several origins are one product).
+    distinct_records: bool = False
     needs_approval: bool = False  # the classifier confirms an approved preview
     plan_checked: bool = False  # the resulting plan is checked
     self_guarded: bool = False  # the plan check runs inside the tool
@@ -250,6 +253,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         action="Produktlücken füllen",
         record_lists=("products",),
         bulk_from=2,
+        distinct_records=True,
         requirements=(
             "food-catalog-and-meal-library/Coach fills empty product fields",
             "coach-tool-authority/Tool-specific bulk threshold",
@@ -587,6 +591,7 @@ RECORD_LISTS = {
 }
 APPROVAL_TOOLS = _names(lambda spec: spec.needs_approval)
 BULK_FROM = {spec.name: spec.bulk_from for spec in TOOL_SPECS if spec.bulk_from}
+DISTINCT_RECORD_TOOLS = _names(lambda spec: spec.distinct_records)
 PLAN_CHECKED_TOOLS = _names(lambda spec: spec.plan_checked)
 SELF_GUARDED_TOOLS = _names(lambda spec: spec.self_guarded)
 PROFILE_MUTATING_TOOLS = _names(lambda spec: spec.mutates_profile)

@@ -561,6 +561,32 @@ class DestructiveTierTests(unittest.TestCase):
         # product saved earlier in the turn does not make one fill bulk.
         self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 0), set())
         self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 1), {"bulk"})
+        # Products count by id: one product with values from two origins is
+        # one product, also after an earlier attempt for it in the turn (#2336).
+        one_twice = {"products": [{"id": "p1"}, {"id": "p1"}]}
+        for arguments, seen, impact in (
+            (one_twice, frozenset(), set()),
+            ({"products": [{"id": "p1"}]}, frozenset({"p1"}), set()),
+            ({"products": [{"id": "p1"}, {"id": "p2"}]}, frozenset(), {"bulk"}),
+            ({"products": [{"id": "p2"}]}, frozenset({"p1"}), {"bulk"}),
+        ):
+            with self.subTest(arguments=arguments, seen=seen):
+                self.assertEqual(
+                    gate.call_impact(fill, arguments, len(seen), len(seen), seen),
+                    impact,
+                )
+        self.assertEqual(gate.record_count(fill, one_twice), 1)
+        state = gate.TurnGateState()
+        for _ in range(2):
+            self.assertTrue(
+                _check(
+                    fill,
+                    "Trag die Lücken von Skyr ein",
+                    arguments=one_twice,
+                    classifier=_Classifier(_verdict(["nutrition"])),
+                    state=state,
+                ).allowed
+            )
 
         # Small calls add up across the turn.
         authority = _authority("Verschieb alles")
