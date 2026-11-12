@@ -41,7 +41,47 @@ class AthletePutRoutes:
         return routes
 
     def _handle_profile(self, handler: Any, _request: RouteRequest) -> None:
-        """Patch only the submitted profile fields; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export`."""
+        """Patch only the submitted profile fields.
+
+        Request: JSON object of profile fields; fields not sent keep their value,
+        unknown keys are ignored, `null` clears a field, values are trimmed to 4000
+        characters. Fields: `name`, `goals`, `sports`, `training_background`,
+        `typical_weekly_volume`, `availability`, `constraints`, `equipment`,
+        `training_preferences` and its `_running`, `_cycling`, `_swimming`,
+        `_strength`, `_mobility` variants, `training_model` (`pyramidal`,
+        `polarized`, `threshold`, `sweet_spot`), `performance_notes`, `weight_kg`
+        (20 to 300), `body_fat_pct` (1 to 70), `height_cm` (50 to 250), `sex`
+        (`male`, `female` or empty), `coaching_style`, `timezone` (IANA name),
+        `weather_location`, `sleep_target_hours` (4 to 12), `fueling_tolerance`,
+        `first_threshold_pct` (40 to 100, percent of the run threshold HR),
+        `first_threshold_origin` (`measured`, `estimated` or empty) and
+        `preferred_source_thresholds`, `_body`, `_hrv`, `_resting_hr`, `_sleep`
+        (`garmin` or empty). Instead of the percent, `first_threshold_hr` (bpm, 60
+        to 220) with optional `first_threshold_on` (`YYYY-MM-DD`) is converted with
+        the run threshold HR of that day and stored as `measured`. With
+        `sync_body_to_garmin: true` a changed `weight_kg` or `body_fat_pct` is also
+        exported to Garmin; with `retry_body_to_garmin: true` as well, the export
+        runs even when unchanged. Neither flag is stored.
+
+        Response: 200 with the saved profile (every field as a string); with
+        `sync_body_to_garmin: true` also `garmin_body_export`: `unchanged`,
+        `success`, `uncertain`, `rejected`, `unavailable`, `superseded` or
+        `invalid`. The profile is saved before the export, whatever its outcome.
+
+        Errors: 400 "Die Zeitzone muss eine gültige IANA-Zeitzone sein."; 400
+        "Unbekanntes Trainingsmodell; erlaubt: pyramidal, polarized, threshold,
+        sweet_spot"; 400 "Unbekannte bevorzugte Quelle; erlaubt: garmin oder leer.";
+        400 "Unbekanntes Geschlecht; erlaubt: male, female oder leer."; 400 "Das
+        Gewicht muss zwischen 20 und 300 kg liegen.", "Die Größe muss zwischen 50
+        und 250 cm liegen.", "Der Körperfettanteil muss zwischen 1 und 70 %
+        liegen.", "Das Schlafziel muss zwischen 4 und 12 Stunden liegen."; 400
+        "Die Herkunft der ersten Schwelle muss gemessen oder geschätzt sein."; 400
+        "Die gemessene erste Schwelle muss zwischen 40 und 100 % LSHF liegen."; 400
+        "Die gemessene erste Schwelle muss zwischen 60 und 220 bpm liegen."; 400
+        "Das Messdatum muss das Format JJJJ-MM-TT haben."; 400 "Zu diesem Datum ist
+        keine Laktatschwelle (LSHF) bekannt, mit der die erste Schwelle in Prozent
+        gespeichert werden kann.".
+        """
         deadline = monotonic() + 10.0
         payload = handler.read_json()
         profile = self._profile_service()
@@ -92,11 +132,50 @@ class AthletePutRoutes:
         return {**result, "garmin_body_export": status}
 
     def _save_zones(self, handler: Any, request: RouteRequest) -> None:
-        """Save one local zone configuration; returns a receipt with an undo reference."""
+        """Save one local zone configuration.
+
+        Request: JSON body `{"sport": string, "metric": string, "environment":
+        string | null, "limits": number[], "percent_limits": number[],
+        "threshold": number, "maximum": number, "valid_from": string,
+        "from_beginning": boolean}`. `sport` is `ride`, `run` or `swim`; `metric`
+        is `heart_rate`, `power` or `pace`; `environment` is `null` or `indoor`.
+        Exactly one of `limits` (absolute upper zone limits in bpm, W or m/s) and
+        `percent_limits` (percent of the threshold) is required, each 3 to 7
+        numbers. `threshold` is required for `heart_rate` and `power`; `maximum` is
+        read for `heart_rate` only. `valid_from` (`YYYY-MM-DD`, not in the future)
+        defaults to today; `from_beginning: true` stores an undated base value
+        instead.
+
+        Response: 200 `{"configuration": object, "change": object | null}`;
+        `change` is the undo reference (`id`, `entity_type`, `action`,
+        `after_hash`).
+
+        Errors: 400 "Die Zonen sind ungültig: {reason}." with the invalid field or
+        rule (`sport`, `metric`, `environment`, `limits oder percent_limits`,
+        `limits braucht 3 bis 7 Werte`, `Schwellenpuls (LSHF) fehlt`, `FTP fehlt`,
+        `valid_from`); 400 "Die maximale Herzfrequenz darf nicht unter dem
+        Schwellenpuls liegen."; 400 "Die Zonenobergrenzen dürfen nicht über der
+        maximalen Herzfrequenz liegen."; 400 "Das Datum „Gilt ab“ darf nicht in der
+        Zukunft liegen.".
+
+        The route exists only where zone editing is configured.
+        """
         self._handle_zones(handler, request)
 
     def _remove_zones(self, handler: Any, request: RouteRequest) -> None:
-        """Remove one local zone configuration; needs `confirmed: true`."""
+        """Remove one local zone configuration.
+
+        Request: JSON body `{"key": string, "confirmed": true}`; `key` is the `key`
+        of a local configuration from `GET /api/zones`.
+
+        Response: 200 `{"configuration": null, "change": object | null}`; `change`
+        is the undo reference (`id`, `entity_type`, `action`, `after_hash`).
+
+        Errors: 400 "Das Entfernen lokaler Zonen muss bestätigt werden." unless
+        `confirmed` is `true`; 404 "Lokale Zonen nicht gefunden.".
+
+        The route exists only where zone editing is configured.
+        """
         self._handle_zones(handler, request)
 
     def _handle_zones(self, handler: Any, request: RouteRequest) -> None:

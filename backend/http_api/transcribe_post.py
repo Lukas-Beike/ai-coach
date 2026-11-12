@@ -19,7 +19,23 @@ class TranscribePostRoutes:
         return [Route("POST", "/api/transcribe", Access.SESSION_CSRF, self._transcribe)]
 
     def _transcribe(self, handler: Any, _request: RouteRequest) -> None:
-        """Transcribe short-lived voice input."""
+        """Transcribe short-lived voice input.
+
+        Request: the raw audio bytes as body, not JSON. `Content-Type` is one of
+        `audio/webm`, `audio/mp4`, `audio/ogg`, `audio/mpeg`, `audio/wav`,
+        `audio/x-wav`, `audio/mpga`, `audio/m4a` (parameters after `;` are ignored);
+        `Content-Length` 1 to 8 000 000 bytes. The audio is never stored.
+
+        Response: 200 `{"transcript": string}`.
+
+        Errors: 415 "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG,
+        MP3 und WAV."; 400 "Ungültige Content-Length."; 400 "Ungültige Größe der
+        Audioaufnahme." for an empty body, 413 with the same message above 8 000 000
+        bytes; 400 "Die Audioaufnahme wurde unvollständig übertragen."; 503
+        `not_configured` "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr →
+        Anbindungen hinterlegen."; 502 "OpenAI hat kein Transkript
+        zurückgegeben." when the provider returns no text.
+        """
         content_type = handler.headers.get("Content-Type", "")
         audio = handler.read_audio_body()
         result = self._audio_client().transcribe(audio, content_type)
