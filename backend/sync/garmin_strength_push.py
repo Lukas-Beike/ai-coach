@@ -290,32 +290,36 @@ class GarminStrengthPushService:
                 if removed[0] >= _PAST_REMOVAL_BATCH or reads >= _CLEANUP_READS:
                     break
                 reads += 1
-                try:
-                    own = _app_created(_call(client.get_workout_by_id, workout_id))
-                    if own:
-                        _call(client.delete_workout, workout_id)
-                except _Missing:
-                    own = True
-                except AppError:
-                    # Refused: this pass moves on; it is not the app's to retry
-                    # forever, so the finished pass leaves it in Garmin.
+                if self._remove_if_own(client, workout_id):
+                    removed[0] += 1
+                else:
                     checked.add(workout_id)
-                    continue
-                if not own:
-                    checked.add(workout_id)
-                    continue
-                with self._database_manager().unit_of_work() as db:
-                    db.execute(
-                        "DELETE FROM remote_links WHERE provider=? AND entity_kind=? "
-                        "AND remote_id=?",
-                        (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, workout_id),
-                    )
-                removed[0] += 1
             else:
                 finished = True
         finally:
             # A Garmin outage keeps what this pass already read.
             self._save_cleanup({"done": finished, "checked": sorted(checked)})
+
+    def _remove_if_own(self, client: Any, workout_id: str) -> bool:
+        """Delete one workout if the app sent it; False for another's or a refused one.
+
+        A refused workout is not retried forever: the finished pass leaves it.
+        """
+        try:
+            if not _app_created(_call(client.get_workout_by_id, workout_id)):
+                return False
+            _call(client.delete_workout, workout_id)
+        except _Missing:
+            pass
+        except AppError:
+            return False
+        with self._database_manager().unit_of_work() as db:
+            db.execute(
+                "DELETE FROM remote_links WHERE provider=? AND entity_kind=? "
+                "AND remote_id=?",
+                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, workout_id),
+            )
+        return True
 
     def _upcoming_workout_ids(self, today: date) -> set[str]:
         """Workouts linked to a stored unit dated today or later."""
