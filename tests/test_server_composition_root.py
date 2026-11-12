@@ -29,6 +29,13 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.providers import audio as audio_provider
+from backend.providers.claude_models import ClaudeModelResolver
+from backend.providers.claude_requests import ClaudeMessagesClient
+from backend.providers.http import JsonHttpClient
+from backend.providers.intervals_client import IntervalsClient
+from backend.providers.openai_requests import OpenAIResponsesClient
+from backend.providers.openai_stream import OpenAIStreamClient
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.weather import WeatherSyncService
 from backend.weather.service import WeatherService
@@ -89,6 +96,34 @@ class CompositionRootTests(ServerTestCase):
         report = diagnostics.report_service()
         self.assertIsInstance(report, DiagnosticReportService)
         self.assertIn("logs", report.report())
+
+    def test_provider_transports_build_their_clients_over_the_live_owners(
+        self,
+    ) -> None:
+        # Only constructs clients; no remote endpoint is called.
+        provider = server.PROVIDER_TRANSPORT
+        http_client = provider.json_http_client()
+        self.assertIsInstance(http_client, JsonHttpClient)
+        self.assertIs(provider.json_http_client(), http_client)
+        self.assertIs(server.APP.provider_transport, provider)
+        self.assertIsInstance(provider.intervals_client(), IntervalsClient)
+        explicit = replace(server.CONFIG, intervals_api_key="test-key")
+        self.assertIs(provider.intervals_client(explicit).config, explicit)
+
+        model = server.MODEL_TRANSPORT
+        self.assertIs(server.APP.model_transport, model)
+        self.assertIsInstance(model.openai_responses_client(), OpenAIResponsesClient)
+        self.assertIsInstance(model.openai_stream_client(), OpenAIStreamClient)
+        self.assertIsInstance(model.claude_client(), ClaudeMessagesClient)
+        self.assertIsInstance(
+            model.audio_transcription_client(), audio_provider.AudioTranscriptionClient
+        )
+        self.assertIsInstance(model.claude_models(), ClaudeModelResolver)
+        self.assertEqual(
+            model.openai_stream_client().config.timeout,
+            server.OPENAI_RESPONSE_TIMEOUT_SECONDS,
+        )
+        self.assertTrue(callable(model.complete) and callable(model.stream))
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

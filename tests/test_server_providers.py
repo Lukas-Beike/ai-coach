@@ -19,7 +19,6 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
 from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses import response_text
-from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import freshness as sync_freshness
 from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_service
@@ -77,40 +76,6 @@ class ServerProvidersTests(ServerTestCase):
         )
         self.assertIsNotNone(assembly)
         deferred.assert_not_called()
-
-    def test_provider_transport_assembly_keeps_late_dependencies_lazy(self):
-        from backend.providers.transport_assembly import (
-            IntervalsTransportSettings,
-            ProviderHttpSettings,
-            ProviderOperationContext,
-        )
-
-        calls = []
-        deferred = lambda: calls.append("called")
-        assembly = ProviderTransportAssembly(
-            dependencies=ProviderTransportAssembly.Inputs(
-                http=ProviderHttpSettings(
-                    app_version="test",
-                    max_response_bytes=1024,
-                    logger=None,
-                    diagnostic_capture=None,
-                    redact_text=str,
-                    safe_response_headers=lambda headers: headers,
-                    opener=deferred,
-                ),
-                operation=ProviderOperationContext(
-                    operation_context=lambda: None,
-                ),
-                intervals=IntervalsTransportSettings(
-                    config=deferred,
-                    athlete_now=deferred,
-                    operation=deferred,
-                ),
-            )
-        )
-
-        self.assertIsNotNone(assembly)
-        self.assertEqual([], calls)
 
     def test_morning_recovery_service_is_shared_and_recomposed_for_config(self):
         original = server.morning_body_battery_service()
@@ -390,7 +355,7 @@ class ServerProvidersTests(ServerTestCase):
         )
         with patch.object(server, "CONFIG", config):
             with self.assertRaises(AppError) as sdk_error:
-                server.provider_http.external_call(
+                provider_http.external_call(
                     "garmin",
                     "login",
                     lambda: (_ for _ in ()).throw(RuntimeError(f"login {email}")),
@@ -508,7 +473,7 @@ class ServerProvidersTests(ServerTestCase):
                 "athlete_note": "synthetic athlete note",
             },
         }
-        server.provider_http.external_call(
+        provider_http.external_call(
             "garmin",
             "body_battery",
             lambda: response,
@@ -528,7 +493,7 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIn("shape", response_capture)
         self.assertNotIn("synthetic athlete note", json.dumps(response_capture))
 
-        server.provider_http.external_call(
+        provider_http.external_call(
             "garmin",
             "body_battery",
             lambda: {"new_marker": "synthetic provider response"},
@@ -1048,7 +1013,7 @@ class ServerProvidersTests(ServerTestCase):
         server.observability.configure_logging(
             server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR
         )
-        result = server.provider_http.external_call(
+        result = provider_http.external_call(
             "garmin",
             "get_sleep_daily",
             lambda: [{"sleepScore": 80}],

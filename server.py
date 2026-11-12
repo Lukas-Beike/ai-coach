@@ -13,7 +13,6 @@ import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 
 from backend import config as app_config
@@ -280,29 +279,19 @@ from backend.provider_credentials import (
 from backend.providers import activity_weather as activity_weather_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
-from backend.providers import http as provider_http
 from backend.providers import state as provider_state
 from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
-from backend.providers.model_assembly import (
-    AudioTranscriptionSettings,
-    ModelEndpointSettings,
-    ModelProviderDiagnostics,
-    ModelProviderOwners,
-    ModelResponseLimits,
-    ModelTransportAssembly,
-    ModelTransportClock,
+from backend.providers.model_wiring import (
+    JSON_MEDIA_TYPE,
+    OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    ModelTransportServices,
+    build_model_transport,
 )
 from backend.providers.observed_opener import Opener, observed_opener
-from backend.providers.openai_error_classifier import OpenAIErrorClassifier
-from backend.providers.transport_assembly import (
-    IntervalsTransportSettings,
-    ProviderHttpSettings,
-    ProviderOperationContext,
-    ProviderTransportAssembly,
-)
+from backend.providers.transport_wiring import build_provider_transport
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -458,19 +447,11 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
-JSON_MEDIA_TYPE = "application/json"
-OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
 APP_VERSION = "2.1.4"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
-# The longest silence allowed between two parts of a streamed model response.
-# Long reasoning on a large plan may send nothing for minutes (athlete
-# decision 2026-11-11, #2073: 10 minutes instead of 3).
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
-# Plain OpenAI requests (impact classifier, remote conversation create/delete).
-OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -1093,31 +1074,16 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
 APP.external_calendar = EXTERNAL_CALENDAR
 
 
-PROVIDER_TRANSPORT = ProviderTransportAssembly(
-    dependencies=ProviderTransportAssembly.Inputs(
-        http=ProviderHttpSettings(
-            app_version=APP_VERSION,
-            max_response_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-            logger=LOGGER,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            redact_text=REDACTOR.redact_text,
-            safe_response_headers=partial(
-                observability.safe_response_headers, redact=REDACTOR.redact_text
-            ),
-            opener=lambda: provider_http.urlopen,
-            provider_error_details=OpenAIErrorClassifier(
-                provider_state_service, runtime_clock.utc_now
-            ),
-        ),
-        operation=ProviderOperationContext(
-            operation_context=sync_observation.operation_context,
-        ),
-        intervals=IntervalsTransportSettings(
-            config=lambda: CONFIG,
-            athlete_now=ATHLETE_CLOCK.now,
-            operation=INTERVALS_RESYNC_GATE.operation,
-        ),
-    ),
+PROVIDER_TRANSPORT = build_provider_transport(
+    app_version=APP_VERSION,
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    redact_text=REDACTOR.redact_text,
+    provider_state=provider_state_service,
+    operation_context=sync_observation.operation_context,
+    current_config=lambda: CONFIG,
+    athlete_now=ATHLETE_CLOCK.now,
+    intervals_operation=INTERVALS_RESYNC_GATE.operation,
 )
 APP.provider_transport = PROVIDER_TRANSPORT
 WAHOO_CONNECTION = WahooConnectionAssembly(
@@ -1184,37 +1150,18 @@ WAHOO_SYNC = WahooSyncAssembly(
 APP.settings = SETTINGS
 NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)
 APP.nutrition = NUTRITION_SERVICES
-MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
-    dependencies=ModelTransportAssembly.Inputs(
-        providers=ModelProviderOwners(
-            config=lambda: CONFIG,
-            selected_thinking_level=SETTINGS.selected_thinking_level,
-            service_tier=SETTINGS.service_tier,
-            http_client=PROVIDER_TRANSPORT.json_http_client,
-            state_service=provider_state_service,
-            read_value=lambda key: key_value_service().get(key),
-            write_value=lambda key, value: key_value_service().set(key, value),
-        ),
-        endpoints=ModelEndpointSettings(
-            default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
-            openai_responses_path=OPENAI_RESPONSES_PATH,
-            json_media_type=JSON_MEDIA_TYPE,
-            response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
-        ),
-        audio=AudioTranscriptionSettings(max_audio_bytes=MAX_AUDIO_BODY_BYTES),
-        diagnostics=ModelProviderDiagnostics(
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            logger=LOGGER,
-            app_version=APP_VERSION,
-        ),
-        limits=ModelResponseLimits(
-            max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-        ),
-        clock=ModelTransportClock(
-            utc_now=runtime_clock.utc_now,
-        ),
-    )
+MODEL_TRANSPORT: ModelTransportServices = build_model_transport(
+    config=lambda: CONFIG,
+    selected_thinking_level=SETTINGS.selected_thinking_level,
+    service_tier=SETTINGS.service_tier,
+    http_client=PROVIDER_TRANSPORT.json_http_client,
+    provider_state=provider_state_service,
+    read_value=lambda key: key_value_service().get(key),
+    write_value=lambda key, value: key_value_service().set(key, value),
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    app_version=APP_VERSION,
+    max_audio_bytes=MAX_AUDIO_BODY_BYTES,
 )
 APP.model_transport = MODEL_TRANSPORT
 COACH_CONVERSATION = CoachConversationAssembly(

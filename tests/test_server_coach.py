@@ -1449,7 +1449,11 @@ class ServerCoachTests(ServerTestCase):
 
         with (
             patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
+                ),
             ),
             patch.object(
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")

@@ -62,6 +62,7 @@ from backend.canonical.vocabulary import (
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
+from backend.providers import http as provider_http
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
@@ -84,7 +85,7 @@ def blocked_provider(*args, **kwargs):
     )
 
 
-server.provider_http.JsonHttpClient.request = blocked_provider
+provider_http.JsonHttpClient.request = blocked_provider
 
 
 class FixtureConversationProvisionService:

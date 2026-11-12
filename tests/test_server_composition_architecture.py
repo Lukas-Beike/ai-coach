@@ -395,16 +395,16 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         )
 
     def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
-        assembly = next(
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_wiring.py")
+        builder = next(
             node
             for node in transport_tree.body
-            if isinstance(node, ast.ClassDef)
-            and node.name == "ProviderTransportAssembly"
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "build_provider_transport"
         )
         json_client = next(
             node
-            for node in assembly.body
+            for node in builder.body
             if isinstance(node, ast.FunctionDef) and node.name == "json_http_client"
         )
         self.assertIn(
@@ -429,7 +429,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
         self.assertIn(
-            "ProviderTransportAssembly",
+            "build_provider_transport",
             ast.unparse(provider_transport.value),
         )
         self.assertFalse(
@@ -467,7 +467,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
         self.assertIn(
-            "operation=INTERVALS_RESYNC_GATE.operation",
+            "intervals_operation=INTERVALS_RESYNC_GATE.operation",
             ast.unparse(provider_transport.value),
         )
 
@@ -486,21 +486,19 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "serving=lambda: CANONICAL_READ", ast.unparse(activity_reads.value)
         )
 
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
-        assembly = next(
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_wiring.py")
+        builder = next(
             node
             for node in transport_tree.body
-            if isinstance(node, ast.ClassDef)
-            and node.name == "ProviderTransportAssembly"
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "build_provider_transport"
         )
         client_factory = next(
             node
-            for node in assembly.body
+            for node in builder.body
             if isinstance(node, ast.FunctionDef) and node.name == "intervals_client"
         )
-        self.assertIn(
-            "operation=self._intervals_operation", ast.unparse(client_factory)
-        )
+        self.assertIn("operation=intervals_operation", ast.unparse(client_factory))
 
     def test_sync_persistence_reads_go_through_their_helpers(
         self,

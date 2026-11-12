@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from server_test_support import server
 
+from backend.providers import http as provider_http
 from backend.providers.intervals_client import IntervalsClient
 
 
@@ -23,8 +24,8 @@ class IntervalsClientTests(unittest.TestCase):
         )()
         request = Mock(return_value=[])
         with patch.object(
-            server.PROVIDER_TRANSPORT,
-            "json_http_client",
+            provider_http.JSON_HTTP_CLIENT_CACHE,
+            "get",
             return_value=Mock(request=request),
         ):
             client = server.PROVIDER_TRANSPORT.intervals_client(config)

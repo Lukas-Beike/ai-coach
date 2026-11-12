@@ -923,7 +923,7 @@ class ServerHttpTests(ServerTestCase):
                 side_effect=AssertionError("network"),
             ),
             patch.object(
-                server.provider_http,
+                provider_http,
                 "external_call",
                 side_effect=AssertionError("network"),
             ),
