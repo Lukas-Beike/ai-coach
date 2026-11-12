@@ -1,5 +1,6 @@
 """Exercise the diagnostic ratchet without running providers or changing sources."""
 
+import ast
 import contextlib
 import io
 import json
@@ -105,7 +106,7 @@ class QualityBaselineTests(unittest.TestCase):
 
     def test_formatter_diagnostics_are_rejected_from_the_quality_baseline(self):
         self.baseline["diagnostics"] = [{"tool": "format"}]
-        with self.assertRaisesRegex(RuntimeError, "Ruff and mypy"):
+        with self.assertRaisesRegex(RuntimeError, "Ruff, mypy and cognitive"):
             self.check([])
 
     def test_formatter_is_not_collected_by_the_quality_gate(self):
@@ -154,6 +155,7 @@ class QualityBaselineTests(unittest.TestCase):
 
         with (
             patch("tools.quality_baseline.source_files", return_value=files),
+            patch("tools.quality_baseline.cognitive_diagnostics", return_value=[]),
             patch("tools.quality_baseline.run", side_effect=fake_run),
         ):
             quality_baseline.collect(Path.cwd())
@@ -267,3 +269,107 @@ class QualityBaselineTests(unittest.TestCase):
         mocked_run.return_value.stdout = ""
         with self.assertRaisesRegex(RuntimeError, "without diagnostic"):
             quality_baseline.run(["ruff"], Path.cwd())
+
+
+def nested_chain(extra=""):
+    """A function whose five nested structures score 1 + 2 + 3 + 4 + 5 = 15."""
+    return (
+        "def chain(a, b):\n"
+        "    if a:\n"
+        "        for x in b:\n"
+        "            if x:\n"
+        "                while x:\n"
+        "                    if b:\n"
+        "                        pass\n" + extra
+    )
+
+
+class CognitiveComplexityTests(unittest.TestCase):
+    def findings(self, source, name="sample.py"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / name).write_text(source, encoding="utf-8")
+            return quality_baseline.cognitive_diagnostics(root, [name])
+
+    def score(self, source):
+        return quality_baseline.cognitive_complexity(ast.parse(source).body[0])
+
+    def test_limit_is_exclusive_at_fifteen(self):
+        self.assertEqual(self.score(nested_chain()), 15)
+        self.assertEqual(self.findings(nested_chain()), [])
+        over = nested_chain("    c = a or b\n")
+        self.assertEqual(self.score(over), 16)
+        [finding] = self.findings(over)
+        self.assertEqual(
+            (finding["tool"], finding["code"], finding["path"], finding["line"]),
+            ("cognitive", "S3776", "sample.py", 1),
+        )
+
+    def test_scores_follow_the_sonar_increments(self):
+        source = (
+            "def f(a, b, c):\n"
+            "    if a and b or c:\n"  # if 1, two operator chains 2
+            "        pass\n"
+            "    elif b:\n"  # 1
+            "        pass\n"
+            "    else:\n"  # 1
+            "        pass\n"
+            "    try:\n"
+            "        pass\n"
+            "    except ValueError:\n"  # 1
+            "        pass\n"
+            "    for i in a:\n"  # 1
+            "        x = 1 if i else 2\n"  # 1 + nesting 1
+            "    g = lambda: 1 if a else 2\n"  # lambda nests the ternary: 2
+            "    def inner():\n"
+            "        if a:\n"  # 1 + nesting 1
+            "            pass\n"
+            "    match a:\n"  # 1
+            "        case 1:\n"
+            "            pass\n"
+            "    return a and (b and c)\n"  # one chain: 1
+        )
+        self.assertEqual(self.score(source), 15)
+
+    def test_else_if_nests_but_elif_does_not(self):
+        nested = "def f(a, b):\n  if a:\n    pass\n  else:\n    if b:\n      pass\n"
+        flat = "def f(a, b):\n  if a:\n    pass\n  elif b:\n    pass\n"
+        self.assertEqual(self.score(nested), 4)
+        self.assertEqual(self.score(flat), 2)
+
+    def test_methods_are_named_and_nested_functions_belong_to_the_outer_one(self):
+        body = nested_chain("    c = a or b\n").splitlines()
+        indented = "".join(f"    {line}\n" for line in body)
+        [method] = self.findings("class Box:\n" + indented)
+        self.assertEqual(method["line"], 2)
+        [outer] = self.findings("def outer():\n" + indented)
+        self.assertEqual(outer["line"], 1)
+
+    def test_identity_ignores_the_score_and_names_the_function(self):
+        first = self.findings(nested_chain("    c = a or b\n"))
+        more = self.findings(nested_chain("    c = a or b\n    d = a or b\n"))
+        renamed = self.findings(
+            nested_chain("    c = a or b\n").replace("chain", "other")
+        )
+        self.assertEqual(
+            quality_baseline.identity(first[0]), quality_baseline.identity(more[0])
+        )
+        self.assertNotEqual(
+            quality_baseline.identity(first[0]), quality_baseline.identity(renamed[0])
+        )
+
+    def test_existing_over_limit_function_is_baseline_debt_and_new_ones_fail(self):
+        known = self.findings(nested_chain("    c = a or b\n"))[0]
+        versions = {"ruff": "0.16.10", "mypy": "2.4.0"}
+        baseline = {"schema": 1, "versions": versions, "diagnostics": [known]}
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(quality_baseline.check(baseline, versions, [known]), 0)
+            added = {**known, "line": 40, "message_sha256": "b" * 64}
+            result = quality_baseline.check(baseline, versions, [known, added])
+        self.assertEqual(result, 1)
+        self.assertIn("NEW cognitive sample.py:40 S3776", output.getvalue())
+
+    def test_unparsable_source_is_fatal(self):
+        with self.assertRaisesRegex(RuntimeError, "Cannot parse"):
+            self.findings("def broken(:\n")
