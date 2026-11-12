@@ -46,6 +46,18 @@ product on the same basis; each filled field names `yazio` and its fetch time
 under `filled_fields`, and a later Open Food Facts value or a change of basis
 ends it. A Yazio failure is named in the status line; lookups and calculations
 make no extra Yazio request.
+The Coach helps complete products: `list_incomplete_nutrition_products` lists
+own products and stored database foods with empty core fields (at most 50), and
+`fill_nutrition_product_gaps` writes values it looked up, per the product's own
+basis, into named products. Only fields that are empty at write time are
+written; a known value is reported as skipped, never replaced. An invalid item
+(unknown product, non-core field, negative or implausible value) is rejected
+whole. Each written field records its origin (`open_food_facts`, `yazio`, `bls`
+or `web`, a web value with its source page) and time under `filled_fields`.
+Filling two or more products is a bulk change: the Coach asks first and needs
+your yes. The command receipt of the turn lists each product, field, value and origin, and
+undo of the turn empties exactly those fields again (change history entity
+`food_database_entry` for stored database foods).
 For the Coach, matches carry the origin `data_origin` (`live`,
 `local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
 section lists the stored entries; "Lokal speichern" (save locally) takes over an
