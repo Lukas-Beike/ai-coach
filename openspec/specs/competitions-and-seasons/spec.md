@@ -69,7 +69,7 @@ The system SHALL keep remote pushes explicit and output-only (Intervals.icu rece
 - **THEN** no remote event ever becomes a local competition and a clean local row never takes remote values; a clean linked row inside the fetched calendar window whose remote event is gone, or a dirty unlinked row that matches a remote event only by name and date, is marked as a conflict instead.
 
 #### Scenario: Named approved push
-- **WHEN** the athlete explicitly requests competition synchronization and approves its frozen manifest
+- **WHEN** the athlete explicitly requests competition synchronization, and the manifest is frozen when the request runs
 - **THEN** outbound writes use stable identity and supported sport payloads, with concurrent local edits checked before marking captured records synced.
 
 #### Scenario: Conflict choice
