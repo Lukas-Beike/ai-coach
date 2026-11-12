@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "c3218443dbbd0e422bf09788358c8bdf4d10fbe4",
+  "base": "c48ad04e073ac1bb6851e5c9237043cccbcd209b",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -227,6 +227,12 @@
       "path": "tests/test_browser_runner.py",
       "code": "S3776",
       "message_sha256": "bcfaac240dc542fb4c261ce8b7087e46505556fbc6a94c79cfd6b0cc7fb3c486"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "bef356eb2bc636f685b19fcc288ca3d8db5378e080b6ccdc6cb5613dc2f5a4a6"
     },
     {
       "tool": "cognitive",
