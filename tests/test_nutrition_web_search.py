@@ -199,6 +199,16 @@ class NutritionWebSearchTests(unittest.TestCase):
             ],
         )
 
+    def test_an_unhashable_or_unknown_ref_is_dropped_without_failing(self) -> None:
+        answer = response([value("salt_g", 0.7)])
+        text = answer["output"][-1]["content"][0]
+        found = json.loads(text["text"])["products"]
+        text["text"] = json.dumps(
+            {"products": [{"ref": [1], "values": []}, {"ref": "1"}, *found]}
+        )
+        result = service(answer)[0].search([ROW])
+        self._assert_kept(result, 1, 0)
+
     def test_failures_give_unavailable_without_provider_text(self) -> None:
         cases = {
             "endpoint rejects the tool": AppError(

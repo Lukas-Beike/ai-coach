@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import parse_qsl, urlsplit
 
 from backend.db.repositories import NUTRIENT_COLUMNS
@@ -128,10 +128,11 @@ class NutritionWebSearchService:
         except AppError, AttributeError, KeyError, TypeError, ValueError:
             return dict(UNAVAILABLE)
         cited = _cited_pages(response)
+        # Only integer refs name a requested product; anything else is dropped.
         by_ref = {
-            item.get("ref"): item.get("values")
+            item["ref"]: item.get("values")
             for item in found
-            if isinstance(item, dict)
+            if isinstance(item, dict) and type(item.get("ref")) is int
         }
         return {
             "ok": True,
@@ -236,16 +237,31 @@ def _kept_values(
         if per_mass:
             limit = min(limit, 9.5 * basis if field == "kcal" else basis)
         if (
-            isinstance(field, str)
-            and field in missing
+            field in missing
             and field not in kept
-            and isinstance(value, int | float)
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            and 0 <= value <= limit
-            and isinstance(url, str)
-            and SOURCE_URL.fullmatch(url)
-            and _page_key(url) in cited
+            and _plausible(value, limit)
+            and _cited(url, cited)
         ):
-            kept[field] = {"field": field, "value": round(value, 3), "source_url": url}
+            kept[str(field)] = {
+                "field": field,
+                "value": round(value, 3),
+                "source_url": url,
+            }
     return {"values": list(kept.values()), "dropped": len(entries) - len(kept)}
+
+
+def _plausible(value: Any, limit: float) -> TypeGuard[float]:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and 0 <= value <= limit
+    )
+
+
+def _cited(url: Any, cited: set[Any]) -> bool:
+    return (
+        isinstance(url, str)
+        and SOURCE_URL.fullmatch(url) is not None
+        and _page_key(url) in cited
+    )

@@ -222,6 +222,34 @@ class ProductCatalogService:
             }
         return {"ok": True, "changes": changes, "unchanged": unchanged}
 
+    def _record_fill(
+        self,
+        db: Any,
+        product_id: str,
+        previous: dict[str, Any] | None,
+        entry: dict[str, Any] | None,
+    ) -> None:
+        """Record a gap fill of an own product or a stored food for undo."""
+        if previous:
+            change_history.record_change(
+                db,
+                PRODUCT_ENTITY_TYPE,
+                product_id,
+                "update",
+                previous,
+                self._products.get(db, product_id),
+            )
+        elif entry:
+            filled = FoodDatabaseEntryRepository().get(db, product_id) or entry
+            change_history.record_change(
+                db,
+                FOOD_ENTITY_TYPE,
+                product_id,
+                "update",
+                food_history_value(entry),
+                food_history_value(filled),
+            )
+
     def _fill_one(self, db: Any, item: Any, fetched_at: str) -> dict[str, Any]:
         product_id = str(item.get("id") or "") if isinstance(item, dict) else ""
         try:
@@ -245,25 +273,8 @@ class ProductCatalogService:
                 fetched_at=fetched_at,
                 source_url=page or None,
             )
-        if written and previous:
-            change_history.record_change(
-                db,
-                PRODUCT_ENTITY_TYPE,
-                product_id,
-                "update",
-                previous,
-                self._products.get(db, product_id),
-            )
-        elif written and entry:
-            filled = FoodDatabaseEntryRepository().get(db, product_id) or entry
-            change_history.record_change(
-                db,
-                FOOD_ENTITY_TYPE,
-                product_id,
-                "update",
-                food_history_value(entry),
-                food_history_value(filled),
-            )
+        if written:
+            self._record_fill(db, product_id, previous, entry)
         return {
             "id": product_id,
             "name": (previous or entry or {}).get("name"),
@@ -513,18 +524,28 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, dict[str, str]]:
     raw = item.get("values")
     if not isinstance(raw, dict) or not raw:
         raise ValueError("values muss Kernfelder mit Zahlen enthalten.")
-    values: dict[str, float] = {}
-    for field, value in raw.items():
-        limit = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
-        if (
-            field not in NUTRIENT_COLUMNS
-            or isinstance(value, bool)
-            or not isinstance(value, int | float)
-            or not math.isfinite(value)
-            or not 0 <= value <= limit
-        ):
-            raise ValueError(f"Ungültiger Wert für {field}.")
-        values[field] = round(value, 3)
+    values = {field: _core_value(field, value) for field, value in raw.items()}
+    return values, str(origin), _gap_sources(item, per_field, values, origin)
+
+
+def _core_value(field: str, value: Any) -> float:
+    """A valid core nutrient value, rounded; raise ValueError otherwise."""
+    limit = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
+    if (
+        field not in NUTRIENT_COLUMNS
+        or isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or not 0 <= value <= limit
+    ):
+        raise ValueError(f"Ungültiger Wert für {field}.")
+    return round(value, 3)
+
+
+def _gap_sources(
+    item: dict[str, Any], per_field: dict[str, Any], values: Any, origin: Any
+) -> dict[str, str]:
+    """Each value's source page: its own in ``source_urls``, else ``source_url``."""
     sources = {
         field: str(per_field.get(field) or item.get("source_url") or "").strip()
         for field in values
@@ -534,4 +555,4 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, dict[str, str]]:
             raise ValueError(f"source_url für {field} muss eine http(s)-Adresse sein.")
         if origin == "web" and not page:
             raise ValueError(f"Webwerte brauchen eine source_url für {field}.")
-    return values, str(origin), sources
+    return sources
