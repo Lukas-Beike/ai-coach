@@ -19,6 +19,7 @@ from pathlib import Path
 from backend import config as app_config
 from backend import observability
 from backend.activities.route_store import ActivityRouteService
+from backend.app.context import AppContext
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -165,12 +166,7 @@ from backend.diagnostics.assembly import (
 )
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import INTERNAL_SERVER_ERROR
-from backend.history.assembly import (
-    HistoryAssembly,
-    HistoryAthleteServices,
-    HistoryPersistence,
-    HistoryPlanningServices,
-)
+from backend.history.wiring import build_history
 from backend.http_api import server as http_server
 from backend.http_api.activity_assembly import (
     ActivityReadAssembly,
@@ -297,13 +293,10 @@ from backend.provider_credentials import (
     ProviderCredentialService,
 )
 from backend.providers import activity_weather as activity_weather_provider
-from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
-from backend.providers import dwd_pollen as dwd_pollen_provider
 from backend.providers import http as provider_http
 from backend.providers import state as provider_state
-from backend.providers import weather as weather_provider
 from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
@@ -459,17 +452,12 @@ from backend.sync.wahoo_connection_assembly import (
     WahooConnectionInputs,
 )
 from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
-from backend.sync.weather import WeatherSyncService
+from backend.sync.weather import build_weather_sync
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.activity_weather_store import home_coordinates
-from backend.weather.assembly import (
-    WeatherAssembly,
-    WeatherProviderRuntime,
-    WeatherStateOwners,
-    WeatherSyncRuntime,
-)
 from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
+from backend.weather.wiring import WeatherServices, build_weather
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -776,7 +764,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
         daily_sources=DailyPlanningSources(
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
             external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
-            weather_service=lambda: WEATHER_ASSEMBLY.service(),
+            weather_service=lambda: WEATHER.service(),
             morning_body_battery_service=morning_body_battery_service,
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -806,31 +794,25 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
     )
 )
 
-HISTORY = HistoryAssembly(
-    dependencies=HistoryAssembly.Inputs(
-        persistence=HistoryPersistence(database_manager, PROFILE_REPOSITORY),
-        athlete=HistoryAthleteServices(
-            profile_service=ATHLETE_DATA.profile,
-            competition_service=PLANNING_DATA.competition,
-            zone_service=ATHLETE_DATA.zones,
-            feedback_service=ATHLETE_DATA.activity_feedback,
-            session_corrections=ATHLETE_DATA.session_corrections,
-            # Defined further down; resolved only when a history service is built.
-            nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
-            checkin_service=ATHLETE_DATA.checkin,
-            meal_library=lambda: NUTRITION_ASSEMBLY.meal_library_service(),
-            product_catalog=lambda: NUTRITION_ASSEMBLY.product_catalog_service(),
-            food_database_entries=lambda: NUTRITION_ASSEMBLY.food_mirror(),
-            equipment_history=ATHLETE_DATA.equipment_history,
-        ),
-        planning=HistoryPlanningServices(
-            workout_library_service=PLANNING_DATA.workout_library,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            training_plan_service=PLANNING_DATA.training_plan,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-        ),
-    )
+# The application context the domain builders read (#2069). Owners whose
+# builder step has not run yet are set as they are created.
+APP = AppContext(
+    config=lambda: CONFIG,
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    clock=ATHLETE_CLOCK,
+    ids=lambda: uuid.uuid4().hex,
+    logger=LOGGER,
+    maintenance=runtime_maintenance.MAINTENANCE_GATE,
+    redactor=REDACTOR,
+    operation_context=sync_observation.OPERATION_CONTEXT,
+    athlete=ATHLETE_DATA,
+    planning=PLANNING_DATA,
+    planning_workflows=PLANNING_WORKFLOWS,
+    planning_revision=PLANNING_REVISION_SERVICE,
+    provider_sync=PROVIDER_SYNC,
 )
+HISTORY = build_history(APP)
 
 
 def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
@@ -1178,6 +1160,7 @@ PROVIDER_TRANSPORT = ProviderTransportAssembly(
         ),
     ),
 )
+APP.provider_transport = PROVIDER_TRANSPORT
 WAHOO_CONNECTION = WahooConnectionAssembly(
     WahooConnectionInputs(
         config=lambda: CONFIG,
@@ -1262,6 +1245,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
         ),
     )
 )
+APP.nutrition = NUTRITION_ASSEMBLY
 MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
     dependencies=ModelTransportAssembly.Inputs(
         providers=ModelProviderOwners(
@@ -1409,46 +1393,13 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
         ),
     )
 )
-WEATHER_ASSEMBLY = WeatherAssembly(
-    dependencies=WeatherAssembly.Inputs(
-        state=WeatherStateOwners(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            profile_service=ATHLETE_DATA.profile,
-        ),
-        provider=WeatherProviderRuntime(
-            client_factory=lambda forecast_days: weather_provider.WeatherClient(
-                PROVIDER_TRANSPORT.json_http_client().request,
-                runtime_clock.utc_now,
-                LOGGER,
-                forecast_days=forecast_days,
-                air_quality_client=air_quality_provider.AirQualityClient(
-                    PROVIDER_TRANSPORT.json_http_client().request
-                ),
-                pollen_client=dwd_pollen_provider.DwdPollenClient(
-                    PROVIDER_TRANSPORT.json_http_client().request
-                ),
-            ),
-            refresh_tracker=PROVIDER_SYNC.refresh_tracker,
-            operation_context=sync_observation.OPERATION_CONTEXT,
-            operation_id_factory=lambda: uuid.uuid4().hex,
-        ),
-        sync=WeatherSyncRuntime(
-            service_factory=WeatherSyncService,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            now=lambda: datetime.now(UTC),
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            adaptive_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-            observer=PROVIDER_SYNC.operation_observer,
-            logger=LOGGER,
-        ),
-    ),
-)
+WEATHER: WeatherServices = build_weather(APP)
+WEATHER_SYNC = build_weather_sync(APP, WEATHER)
 
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            weather_service=WEATHER_ASSEMBLY.service,
+            weather_service=WEATHER.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
@@ -1635,7 +1586,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-        weather_sync_service=WEATHER_ASSEMBLY.sync_service,
+        weather_sync_service=WEATHER_SYNC,
     ),
     wahoo=WahooJobDependencies(
         sync_service=WAHOO_SYNC.sync_service,
@@ -1710,7 +1661,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
         ),
         providers=SyncScheduleProviders(
             garmin_resync_gate=GARMIN_RESYNC_GATE,
-            weather_refresh_due=lambda: WEATHER_ASSEMBLY.sync_service().refresh_due(),
+            weather_refresh_due=lambda: WEATHER_SYNC().refresh_due(),
             wahoo=SYNC_JOB_DEPENDENCIES.wahoo,
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
             all_sync_days=ALL_SYNC_DAYS,
@@ -2107,7 +2058,7 @@ PUBLIC_STATE = PublicStateAssembly(
             sync_job_queue=lambda: SYNC_JOB_QUEUE,
         ),
         projections=PublicStateProjectionOwners(
-            weather=lambda: WEATHER_ASSEMBLY,
+            weather=lambda: WEATHER,
             workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
             provider_resync=lambda: PROVIDER_RESYNC,
             coach_conversation=lambda: COACH_CONVERSATION,

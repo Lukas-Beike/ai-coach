@@ -139,7 +139,7 @@ class AuditRemediationTests(unittest.TestCase):
 
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             self.assertEqual(
-                server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured"
+                server.WEATHER.service().state()["state"], "not_configured"
             )
         self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
         self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
@@ -229,14 +229,14 @@ with patch.object(Path, 'read_text', deny):
             ),
         )
         self.assertEqual(
-            server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale"
+            server.WEATHER.service().state(refresh=False)["state"], "stale"
         )
         with patch.object(
-            server.WEATHER_ASSEMBLY.service(),
+            server.WEATHER.service(),
             "state",
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
-            server.WEATHER_ASSEMBLY.sync_service().sync()
+            server.WEATHER_SYNC().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute(

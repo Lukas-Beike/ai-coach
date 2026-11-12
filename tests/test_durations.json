@@ -387,7 +387,6 @@
  "test_garmin_weight_walk.WalkLimitTests": 0.016,
  "test_garmin_weight_walk.WalkStructureTests": 0.001,
  "test_garmin_weight_walk.WeightPayloadTests": 0.001,
- "test_history_assembly.HistoryAssemblyTests": 0.002,
  "test_history_service.ChangeHistoryServiceTests": 0.118,
  "test_history_undo_service.HistoryUndoServiceTests": 0.142,
  "test_http_athlete_get_routes.AthleteGetRoutesTests": 0.007,

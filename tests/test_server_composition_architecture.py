@@ -626,32 +626,22 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for node in weather_tree.body
             )
         )
-        assembly_tree = _parse(BACKEND_ROOT / "weather" / "assembly.py")
-        assembly = next(
+        wiring_tree = _parse(BACKEND_ROOT / "weather" / "wiring.py")
+        builder = next(
             node
-            for node in assembly_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "WeatherAssembly"
+            for node in wiring_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_weather"
         )
-        service_method = next(
-            node
-            for node in assembly.body
-            if isinstance(node, ast.FunctionDef) and node.name == "service"
-        )
-        self.assertIn(
-            "weather.WEATHER_SERVICE_CACHE.get",
-            ast.unparse(service_method),
-        )
+        self.assertIn("weather.WEATHER_SERVICE_CACHE.get", ast.unparse(builder))
         server_tree = _parse(SERVER_PATH)
-        weather_assembly = next(
+        weather = next(
             node
             for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "WEATHER_ASSEMBLY"
-                for target in node.targets
-            )
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "WEATHER"
         )
-        self.assertIn("WeatherAssembly", ast.unparse(weather_assembly.value))
+        self.assertIn("build_weather", ast.unparse(weather))
         self.assertFalse(
             any(
                 isinstance(node, ast.FunctionDef)

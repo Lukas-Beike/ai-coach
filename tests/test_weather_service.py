@@ -11,17 +11,12 @@ from backend.db.repositories import KeyValueRepository, ProfileRepository
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.weather import cache
-from backend.weather.assembly import (
-    WeatherAssembly,
-    WeatherProviderRuntime,
-    WeatherStateOwners,
-    WeatherSyncRuntime,
-)
 from backend.weather.service import (
     WeatherCacheStore,
     WeatherRefreshJournal,
     WeatherService,
 )
+from backend.weather.wiring import build_weather
 
 
 class DatabaseManager:
@@ -117,32 +112,13 @@ class Logger:
 
 
 class WeatherServiceTests(unittest.TestCase):
-    def test_weather_assembly_keeps_provider_and_database_dependencies_lazy(self):
-        callbacks = [Mock() for _ in range(8)]
-        (
-            manager,
-            profile,
-            client,
-            tracker,
-            operation_id,
-            now,
-            today,
-            preview,
-        ) = callbacks
-        observer = Mock()
-        assembly = WeatherAssembly(
-            dependencies=WeatherAssembly.Inputs(
-                state=WeatherStateOwners(manager, Mock(), profile),
-                provider=WeatherProviderRuntime(client, tracker, Mock(), operation_id),
-                sync=WeatherSyncRuntime(
-                    MaintenanceGate(), now, today, preview, observer, Mock(), Mock()
-                ),
-            )
-        )
+    def test_weather_builder_keeps_provider_and_database_dependencies_lazy(self):
+        ctx = Mock()
+        build_weather(ctx)
 
-        self.assertIsNotNone(assembly)
-        for callback in (*callbacks, observer):
-            callback.assert_not_called()
+        self.assertEqual([], ctx.method_calls)
+        ctx.database.assert_not_called()
+        ctx.ids.assert_not_called()
 
     def setUp(self):
         self.manager = DatabaseManager()
