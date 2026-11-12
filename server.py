@@ -1275,10 +1275,8 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
-# The nutrition web search sends its Responses payload through this transport.
-nutrition_openai_request = lambda path, payload: (
-    MODEL_TRANSPORT.openai_responses_client().request(path, payload)
-)
+# The nutrition photo and web search share this one OpenAI client.
+nutrition_openai_client = lambda: MODEL_TRANSPORT.openai_responses_client()
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
@@ -1291,13 +1289,13 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
             intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
             photo_extractor=lambda: NutritionPhotoExtractionService(
                 selected_model=SETTINGS.selected_model,
-                complete=lambda request: (
-                    MODEL_TRANSPORT.openai_responses_client().complete(request)
-                ),
+                complete=lambda request: nutrition_openai_client().complete(request),
             ),
             web_searcher=lambda: NutritionWebSearchService(
                 selected_model=SETTINGS.selected_model,
-                openai_request=nutrition_openai_request,
+                openai_request=lambda path, payload: nutrition_openai_client().request(
+                    path, payload
+                ),
                 openai_path=OPENAI_RESPONSES_PATH,
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
