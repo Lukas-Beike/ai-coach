@@ -14,7 +14,6 @@ function loadDetailRenderer(makeScrollRegionFocusable = (region) => region) {
   return extractFunctions("activity-details.js", ["STRENGTH_SOURCES", "strengthExerciseLabel", "strengthNumber", "strengthSeconds", "strengthAmount", "renderStrengthSets"], {
     AppFormat: require("../public/format.js"),
     document,
-    h: extractFunctions("components.js", ["h"], { document }).h,
     makeScrollRegionFocusable,
   }).renderStrengthSets;
 }

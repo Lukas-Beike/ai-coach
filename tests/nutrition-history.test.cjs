@@ -1,8 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
-const textOf = (node) => (typeof node === "string" ? node : `${node.textContent}${node.children.map(textOf).join("")}`);
 
 const WEEK = ["nutritionChartDays", "nutritionChartRows", "nutritionEmptyRunRow", "nutritionChartDayRow", "nutritionWeekValue", "renderNutritionWeek"];
 const context = extractFunctions("nutrition.js", WEEK);
@@ -32,7 +31,7 @@ test("history displays daily balance from paired days alongside the total", () =
   const document = fakeDocument();
   const markValueMissing = (node, text = "nicht erfasst") => { node.textContent = text; node.missing = true; return node; };
   const setValueWithUnit = (node, text) => { node.textContent = text; };
-  const ctx = extractFunctions("nutrition.js", WEEK, { document, h: extractFunctions("components.js", ["h"], { document }).h, markValueMissing, setValueWithUnit, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
+  const ctx = extractFunctions("nutrition.js", WEEK, { document, markValueMissing, setValueWithUnit, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
   for (const [count, balance, paired, expected] of [[14, -4468, 14, "-319 kcal"], [84, -600, 3, "-200 kcal"], [14, 300, 3, "+100 kcal"], [14, 3, 14, "0 kcal"], [14, -5, 14, "0 kcal"], [14, -7, 14, "-1 kcal"], [14, 0, 2, "0 kcal"], [84, null, 0, "nicht erfasst"]]) {
     const averages = Object.fromEntries(["intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "salt_g"].map((key) => [key, { value: null, days: 0 }]));
     ctx.renderNutritionWeek({ days: Array(count).fill({ date: "2026-01-01" }), start_date: "start", end_date: "end", balance_kcal: balance, balance_days: paired, averages });

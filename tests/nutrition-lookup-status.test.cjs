@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { extractFunctions, FakeElement } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement, textOf } = require("./frontend-harness.cjs");
 
 function harness(apiImpl) {
   const elements = {
@@ -88,7 +88,6 @@ const LIST_FUNCTIONS = ["NUTRITION_FIELD_NAMES", "NUTRITION_SOURCE_NAMES", "NUTR
 const OWN = { id: "own-1", name: "Whey", brand: "Fixture", barcode: "4000000000017", basis_amount: 100, basis_unit: "g", origin: "own", fetched_at: null, favorite: 1, kcal: 380, carbs_g: 5, protein_g: 72, fat_g: 6, sugar_g: 2, fiber_g: 1, salt_g: 0.1, missing_fields: [] };
 const FOOD = { id: "off:4006381333931", name: "Haferdrink", brand: "Beispiel", barcode: "4006381333931", basis_amount: 100, basis_unit: "ml", origin: "open_food_facts", source: "open_food_facts", fetched_at: "2026-10-01T08:00:00+00:00", favorite: 0, kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: null, fiber_g: 0, salt_g: null, missing_fields: ["sugar_g", "salt_g"] };
 
-const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
 const descendants = (node) => node.children.filter((child) => typeof child !== "string").flatMap((child) => [child, ...descendants(child)]);
 const withClass = (node, name) => descendants(node).filter((child) => child.className.split(" ").includes(name));
 
@@ -97,7 +96,6 @@ function listContext() {
   const document = { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null };
   const context = extractFunctions("nutrition.js", LIST_FUNCTIONS, {
     document,
-    h: extractFunctions("components.js", ["h"], { document }).h,
     api: async () => ({}),
     useNutritionProduct() {}, saveNutritionProduct() {}, refreshNutritionProduct() {}, deleteNutritionProduct() {}, reloadNutritionProducts() {},
     showNutritionProductError() {},

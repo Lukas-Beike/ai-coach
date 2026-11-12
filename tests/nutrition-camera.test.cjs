@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, loadPublicScript, FakeElement, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 const IMAGE_FUNCTIONS = ["MAX_NUTRITION_IMAGE_EDGE", "MAX_NUTRITION_IMAGE_BYTES", "nutritionImageDataUrl", "resizeNutritionImage", "prepareNutritionImage"];
 const PHOTO = new Uint8Array([255, 216, 255, 224, 1, 2, 3]);
@@ -130,7 +130,6 @@ test("a failed image keeps the draft, shows the error and releases the loading s
 // Composite meals, unknown values and the Coach draft of a product.
 const MEAL_FUNCTIONS = ["nutritionNumber", "nutritionDatabaseLabel", "nutritionBasisLabel", "nutritionComponentSource", "nutritionComponentDetails", "addNutritionProductToCoachDraft"];
 
-const textOf = (node) => (typeof node === "string" ? node : `${node.textContent}${node.children.map(textOf).join("")}`);
 
 // An element that refuses HTML, so a name can only reach the page as text.
 class TextOnlyElement extends FakeElement {
@@ -145,7 +144,6 @@ function mealSetup(use) {
   const document = { createElement: (tag) => new TextOnlyElement(tag), querySelector: () => input };
   const context = extractFunctions("nutrition.js", MEAL_FUNCTIONS, {
     document, state, events,
-    h: extractFunctions("components.js", ["h"], { document }).h,
     AppFormat: { number: (value) => String(value) },
     Event: class { constructor(type) { this.type = type; } },
     nutritionProductUseAmount: () => use,

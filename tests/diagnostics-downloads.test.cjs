@@ -98,7 +98,6 @@ function settingsDownloads() {
   document.createElement = (tag) => Object.assign(new FakeElement(tag), { click() { events.push(["click", this.download]); } });
   const context = extractFunctions("settings.js", ["privacyInFlight", "downloadDatabaseBackup", "downloadPrivacyExport"], {
     document,
-    h: extractFunctions("components.js", ["h"], { document }).h,
     $: (selector) => document.querySelector(selector),
     downloadRequest: async () => new Blob(["x"]),
     URL: { createObjectURL: () => "blob:fixture", revokeObjectURL: (url) => events.push(["revoke", url]) },

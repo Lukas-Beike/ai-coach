@@ -9,7 +9,7 @@ function text(item) {
 
 function loadRenderRoute() {
   const document = fakeDocument();
-  return extractFunctions("activity-details.js", ["renderRoute"], { document, h: extractFunctions("components.js", ["h"], { document }).h }).renderRoute;
+  return extractFunctions("activity-details.js", ["renderRoute"], { document }).renderRoute;
 }
 
 const ROUTE = { label: "Hausrunde", repeat_index: 5, repeat_count: 6, route_id: "r3" };
