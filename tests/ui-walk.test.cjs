@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
@@ -56,4 +57,14 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   done = run("--url", "http://127.0.0.1:9", "--password-file", path.join(os.tmpdir(), "missing-secret-file"), "--out-dir", path.join(os.tmpdir(), "walk"));
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the secret file/);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "walk-test-"));
+  const secret = path.join(scratch, "secret");
+  fs.writeFileSync(secret, "fake-login-value");
+  const notJson = path.join(scratch, "previous.json");
+  fs.writeFileSync(notJson, "fake-login-value is not JSON");
+  done = run("--url", "http://127.0.0.1:9", "--password-file", secret, "--out-dir", path.join(scratch, "walk"), "--compare", notJson);
+  fs.rmSync(scratch, { recursive: true, force: true });
+  assert.equal(done.status, 2);
+  assert.match(done.stdout, /cannot read the previous walk/);
+  assert.doesNotMatch(done.stdout, /fake-login-value/);
 });

@@ -22,10 +22,9 @@ export const WIDTHS = { phone: { width: 412, height: 915 }, desktop: { width: 12
 // Every file the walk reads or writes lives in the system temp directory (the
 // session scratchpad), never in the repository or anywhere else a path could reach.
 export function scratchPath(target) {
-  const resolved = path.resolve(target);
-  const scratch = path.resolve(os.tmpdir());
-  const inside = (base) => resolved === base || resolved.startsWith(base + path.sep);
-  if (!inside(scratch) || inside(ROOT)) {
+  const scratch = path.resolve(os.tmpdir()) + path.sep;
+  const resolved = path.resolve(scratch, String(target));
+  if (!resolved.startsWith(scratch) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
     throw new Error("files must be in the system temp directory");
   }
   return resolved;
@@ -184,8 +183,9 @@ async function main() {
   let previous = null;
   try {
     previous = values.compare ? JSON.parse(fs.readFileSync(scratchPath(values.compare), "utf8")) : null;
-  } catch (error) {
-    console.log(`FAIL cannot read the previous walk (${error.message})`);
+  } catch {
+    // The error text could quote the file's content; never print it.
+    console.log("FAIL cannot read the previous walk");
     return 2;
   }
   const { chromium } = await import("@playwright/test");
