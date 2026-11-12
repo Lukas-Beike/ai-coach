@@ -28,7 +28,7 @@ test("the product list is one request for all products, and a search is passed o
   await context.loadNutritionProducts("");
   await context.loadNutritionProducts("hafer & co");
   assert.deepEqual(urls, ["/api/nutrition/products?scope=all", "/api/nutrition/products?scope=all&q=hafer%20%26%20co"]);
-  assert.deepEqual(rendered.map(([, options]) => options.search), [false, true]);
+  assert.deepEqual(rendered.map(([, options]) => options.search), ["", "hafer & co"]);
 });
 
 const LOCAL_LOOKUP = { ok: true, source: "manual", local: true, product: { id: "p1", name: "Haferdrink" } };
@@ -84,7 +84,7 @@ test("product editor follows the barcode result before the product lists", () =>
 });
 
 // The product page: one merged list in two sections (#2267).
-const LIST_FUNCTIONS = ["NUTRITION_FIELD_NAMES", "NUTRITION_PRODUCT_SECTIONS", "nutritionProductSectionsOpen", "nutritionIsDatabaseProduct", "nutritionMissingFields", "nutritionProductDate", "nutritionOriginText", "nutritionIncompleteMark", "nutritionProductSection", "nutritionProductCard", "renderNutritionProducts", "appendNutritionProductActions", "nutritionFavoriteButton", "normalizeNutritionProduct", "nutritionDatabaseSource"];
+const LIST_FUNCTIONS = ["NUTRITION_FIELD_NAMES", "NUTRITION_SOURCE_NAMES", "NUTRITION_PRODUCT_SECTIONS", "nutritionProductSectionsOpen", "nutritionProductSearchShown", "nutritionProductSectionsBeforeSearch", "nutritionIsDatabaseProduct", "nutritionMissingFields", "nutritionProductDate", "nutritionOriginText", "nutritionIncompleteMark", "nutritionProductSection", "nutritionProductCard", "renderNutritionProducts", "appendNutritionProductActions", "nutritionFavoriteButton", "normalizeNutritionProduct", "nutritionDatabaseSource"];
 const OWN = { id: "own-1", name: "Whey", brand: "Fixture", barcode: "4000000000017", basis_amount: 100, basis_unit: "g", origin: "own", fetched_at: null, favorite: 1, kcal: 380, carbs_g: 5, protein_g: 72, fat_g: 6, sugar_g: 2, fiber_g: 1, salt_g: 0.1, missing_fields: [] };
 const FOOD = { id: "off:4006381333931", name: "Haferdrink", brand: "Beispiel", barcode: "4006381333931", basis_amount: 100, basis_unit: "ml", origin: "open_food_facts", source: "open_food_facts", fetched_at: "2026-10-01T08:00:00+00:00", favorite: 0, kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: null, fiber_g: 0, salt_g: null, missing_fields: ["sugar_g", "salt_g"] };
 
@@ -124,11 +124,17 @@ test("an opened section stays open on the next render until the page is left", (
   assert.deepEqual(target.children.map((section) => section.open), [false, true]);
 });
 
-test("while searching, only sections with hits are open and the search does not change what stays open", () => {
+test("a new search opens sections with hits once, keeps toggles, and ends as before", () => {
   const { context, target } = listContext();
-  context.renderNutritionProducts([FOOD], { search: true });
+  context.renderNutritionProducts([FOOD], { search: "riegel" });
   assert.deepEqual(target.children.map((section) => section.open), [false, true]);
+  // The athlete closes a section; a re-render of the same search keeps it closed.
+  target.children[1].open = false;
   target.children[1].listeners.toggle();
+  context.renderNutritionProducts([FOOD], { search: "riegel" });
+  assert.deepEqual(target.children.map((section) => section.open), [false, false]);
+  // Ending the search restores what was open before it.
+  context.renderNutritionProducts([FOOD], { search: "riegel bar" });
   context.renderNutritionProducts([FOOD]);
   assert.deepEqual(target.children.map((section) => section.open), [false, false]);
 });
@@ -137,7 +143,8 @@ test("every card shows its origin, its missing fields and the same actions and s
   const { context, target } = listContext();
   context.renderNutritionProducts([OWN, FOOD]);
   const [own, food] = target.children[1].children[1].children;
-  assert.equal(textOf(withClass(own, "nutrition-origin")[0]), "eigen");
+  // An own product names where its values came from.
+  assert.match(textOf(withClass(own, "nutrition-origin")[0]), /^eigen( · .+)?$/);
   assert.equal(textOf(withClass(food, "nutrition-origin")[0]), "Datenbank · Stand 01.10.2026");
   assert.equal(withClass(own, "nutrition-incomplete").length, 0);
   const missing = withClass(food, "nutrition-incomplete")[0];
@@ -149,6 +156,19 @@ test("every card shows its origin, its missing fields and the same actions and s
     assert.equal(withClass(card, "nutrition-favorite").length, 1);
   }
   assert.equal(withClass(food, "nutrition-favorite")[0].attributes["aria-pressed"], "false");
+});
+
+test("a product without a known unit cannot be used, and its date is the local day", () => {
+  const { context, target } = listContext();
+  // 23:30 UTC on 1 October is already 2 October in Berlin.
+  const late = { ...FOOD, basis_unit: null, fetched_at: "2026-10-01T23:30:00+00:00" };
+  context.renderNutritionProducts([late]);
+  const [card] = target.children[1].children[1].children;
+  const [use] = withClass(card, "nutrition-actions")[0].children;
+  assert.equal(use.disabled, true);
+  assert.match(textOf(card), /Bezugsmenge unbekannt/);
+  const expected = new Date(late.fetched_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  assert.equal(textOf(withClass(card, "nutrition-origin")[0]), `Datenbank · Stand ${expected}`);
 });
 
 test("a live lookup hit is not a stored product: it only offers saving it locally", () => {
@@ -178,6 +198,7 @@ function actionContext(responses) {
     requestConfirmation: async (question) => { calls.push(["confirm", question]); return true; },
     showNutritionReceipt: (_status, message) => { status.textContent = message; },
     loadNutritionProducts: async () => {},
+    state: { sessionGeneration: 1 },
   });
   return { context, calls, status };
 }
