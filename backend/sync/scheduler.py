@@ -16,7 +16,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.backfill_resume import historical_backfill_payload
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import (
     ProviderSchedulePolicy,
@@ -44,7 +44,6 @@ class DailySyncScheduler:
         *,
         config: DailySyncSchedulerConfig,
         schedule_policies: Mapping[str, ProviderSchedulePolicy],
-        registry: ProviderRegistry | None = None,
         retry_held: Callable[[str], bool] | None = None,
         backfill_resumer: Callable[[], None] | None = None,
     ) -> None:
@@ -56,14 +55,13 @@ class DailySyncScheduler:
         self._retry_held = retry_held
         self._maintenance_gate = maintenance_gate
         self._config = config
-        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
-        self._daily_marker_ids = self._registry.daily_marker_ids()
+        self._daily_marker_ids = DEFAULT_PROVIDER_REGISTRY.daily_marker_ids()
         self._policies = schedule_policies
 
     def schedule(self) -> None:
-        """Enqueue eligible refresh jobs in the registry's daily rank order."""
+        """Enqueue eligible refresh jobs in the provider table's daily rank order."""
         with self._maintenance_gate.operation():
-            for provider_id in self._registry.daily_order():
+            for provider_id in DEFAULT_PROVIDER_REGISTRY.daily_order():
                 policy = self._policies.get(provider_id)
                 if policy is not None:
                     self._schedule_provider_safely(provider_id, policy)
@@ -245,17 +243,15 @@ class StartupSyncScheduler:
         *,
         config: StartupSyncSchedulerConfig,
         schedule_policies: Mapping[str, ProviderSchedulePolicy],
-        registry: ProviderRegistry | None = None,
     ) -> None:
         self._queue = queue
         self._sync_state = sync_state
         self._config = config
-        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
         self._policies = schedule_policies
 
     def schedule(self) -> None:
-        """Queue startup work in the registry's startup rank order."""
-        for provider_id in self._registry.startup_order():
+        """Queue startup work in the provider table's startup rank order."""
+        for provider_id in DEFAULT_PROVIDER_REGISTRY.startup_order():
             policy = self._policies.get(provider_id)
             if policy is not None:
                 self._schedule_provider(provider_id, policy)
@@ -275,7 +271,7 @@ class StartupSyncScheduler:
         # Each backfill chain walks its own cursor to the floor once; a restart
         # resumes below the cursor (the wellness walk is the one-off #1730).
         for job_type in BACKFILL_CURSOR_STREAMS:
-            if self._registry.supports_job(provider_id, job_type):
+            if DEFAULT_PROVIDER_REGISTRY.supports_job(provider_id, job_type):
                 self._enqueue_historical_backfill(provider_id, job_type)
 
     def _enqueue_historical_backfill(

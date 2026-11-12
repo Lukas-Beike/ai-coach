@@ -20,7 +20,7 @@ from backend.sync.jobs import (
     SyncJobStore,
     normalize_sync_job_request,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 PRUNE_INTERVAL_SECONDS = 3600.0
 
@@ -36,8 +36,6 @@ class SyncJobQueueService:
         wake_event: threading.Event,
         all_sync_days: int,
         daily_sync_markers: DailySyncMarkerService,
-        *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._store = store
         self._publisher = publisher
@@ -45,7 +43,6 @@ class SyncJobQueueService:
         self._wake_event = wake_event
         self._all_sync_days = all_sync_days
         self._daily_sync_markers = daily_sync_markers
-        self._registry = registry
         self._last_prune: float | None = None
 
     def state(self, job_id: str) -> dict[str, Any]:
@@ -105,7 +102,6 @@ class SyncJobQueueService:
                     job_type,
                     payload,
                     all_sync_days=self._all_sync_days,
-                    registry=self._registry,
                     enforce_period_limit=True,
                 )
             except JobValidationError as exc:
@@ -125,7 +121,7 @@ class SyncJobQueueService:
             if (
                 requested in {"startup", "scheduler"}
                 and envelope["type"] == "refresh"
-                and envelope["provider"] in self._registry.daily_marker_ids()
+                and envelope["provider"] in DEFAULT_PROVIDER_REGISTRY.daily_marker_ids()
             ):
                 self._daily_sync_markers.mark_attempt(envelope["provider"])
             return result

@@ -1018,12 +1018,12 @@ SYNC_PERSISTENCE = SyncPersistenceAssembly(
 
 
 def sync_state_repository() -> SyncStateRepository:
-    """Return the sync state repository bound to the runtime provider registry."""
+    """Return the sync state repository bound to the active database."""
     return SYNC_PERSISTENCE.state_repository()
 
 
 def sync_daily_markers() -> DailySyncMarkerService:
-    """Return the daily sync marker service bound to the runtime provider registry."""
+    """Return the daily sync marker service bound to the active database."""
     return SYNC_PERSISTENCE.daily_markers()
 
 
@@ -1117,7 +1117,6 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             logger=LOGGER,
             retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
-            registry=DEFAULT_PROVIDER_REGISTRY,
             foreground_busy=_coach_foreground_busy,
             held_providers=resetting_providers,
         ),
@@ -1229,7 +1228,6 @@ WAHOO_SYNC = WahooSyncAssembly(
         key_values=KEY_VALUE_REPOSITORY,
         daily_markers=sync_daily_markers,
         observer=lambda: PROVIDER_SYNC.operation_observer(),
-        registry=DEFAULT_PROVIDER_REGISTRY,
         zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
         now=lambda: datetime.now(UTC),
         logger=LOGGER,

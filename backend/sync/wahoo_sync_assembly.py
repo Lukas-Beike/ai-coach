@@ -24,7 +24,6 @@ from backend.providers.wahoo_plan_mapping import WahooPlanReferences
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.stream_backfill import StreamBackfillService
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 from backend.sync.wahoo_connection import WahooConnectionService
@@ -54,7 +53,6 @@ class WahooSyncInputs:
     key_values: KeyValueRepository
     daily_markers: Callable[[], DailySyncMarkerService]
     observer: Callable[[], SyncOperationObserver]
-    registry: ProviderRegistry
     zone_provider: Callable[[], tzinfo | None]
     now: Callable[[], datetime]
     logger: logging.Logger
@@ -104,7 +102,6 @@ class WahooSyncAssembly:
                     ),
                     daily_markers=inputs.daily_markers,
                     observer=inputs.observer,
-                    registry=inputs.registry,
                     clock=WahooSyncClock(inputs.now, inputs.zone_provider),
                     logger=inputs.logger,
                     gate=inputs.resync_gate,

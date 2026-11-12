@@ -58,7 +58,7 @@ from backend.sync.metric_export_port import (
     MetricExportPort,
     MetricWrite,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 _LOGGER = logging.getLogger("intervals_coach")
 
@@ -151,7 +151,6 @@ class MetricExportService:
         database_lock: AbstractContextManager[Any],
         today: Callable[[], date],
         utc_now: Callable[[], datetime],
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         links: RemoteLinkRepository | None = None,
     ) -> None:
         self._database_manager = database_manager
@@ -161,7 +160,6 @@ class MetricExportService:
         self._ports = dict(ports)
         self._today = today
         self._utc_now = utc_now
-        self._registry = registry
         self._links = links or RemoteLinkRepository()
         self._key_values = KeyValueRepository(lambda: self._utc_now().isoformat())
         self._export_lock = threading.Lock()
@@ -425,7 +423,7 @@ class MetricExportService:
         records are read, and offers Garmin measurements only for body metrics.
         """
         automatic = consented is not None
-        kinds = self._registry.get(target.value).metric_exports
+        kinds = DEFAULT_PROVIDER_REGISTRY.get(target.value).metric_exports
         start = self._today() - timedelta(days=_LOOKBACK_DAYS)
         reader = self._observation_reader()
         offered: list[tuple[str, MetricExportField, Observation, bool]] = []
@@ -565,7 +563,7 @@ class MetricExportService:
             return port.read_record(field, source.observed_on)
         except Exception as exc:  # noqa: BLE001 - reported safely, never raw
             _LOGGER.warning("Metric export read failed (%s)", type(exc).__name__)
-            label = self._registry.get(target.value).label
+            label = DEFAULT_PROVIDER_REGISTRY.get(target.value).label
             raise AppError(
                 502,
                 f"Die aktuellen Werte von {label} konnten nicht gelesen werden; "

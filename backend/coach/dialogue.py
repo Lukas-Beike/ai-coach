@@ -18,7 +18,7 @@ from backend.coach.conversation import CoachMessageService
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 __all__ = [
     "INSTRUCTIONS",
@@ -261,13 +261,17 @@ language. Never mention internal authorization scopes or classification errors.
 """
 
 
-def provider_scope_tokens(
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-) -> list[str]:
-    """Return the _request scope tokens of the registry's refresh and write targets."""
+def provider_scope_tokens() -> list[str]:
+    """Return the _request scope tokens of the provider table's refresh and write targets."""
     return [
-        *(f"{target}_refresh" for target in registry.coach_refresh_targets()),
-        *(f"{target}_sync" for target in registry.coach_write_targets()),
+        *(
+            f"{target}_refresh"
+            for target in DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
+        ),
+        *(
+            f"{target}_sync"
+            for target in DEFAULT_PROVIDER_REGISTRY.coach_write_targets()
+        ),
     ]
 
 

@@ -32,7 +32,7 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 - **WHEN** Intervals credentials are configured
 - **THEN** no activity, wellness-history or athlete-record read is part of any sync; only an explicit push, its read-back (library, calendar events, the wellness day and sport settings of an export) or the explicit connection check reaches Intervals.icu.
 
-Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_http_sync_registry_routes.py:test_not_configured_message_rejects_manual_and_job_routes`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
+Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_any_job_is_stored`, `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
 ### Requirement: Garmin login and MFA
 The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, a disconnect, or the local data purge SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.

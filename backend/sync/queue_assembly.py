@@ -13,7 +13,6 @@ from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import job_outcomes, jobs, queue
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -39,7 +38,6 @@ class SyncQueuePolicy:
     logger: Any
     retry_base_seconds: int
     retry_max_seconds: int
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     foreground_busy: Callable[[], bool] | None = None
     held_providers: Callable[[], Collection[str]] | None = None
 
@@ -74,7 +72,6 @@ class SyncJobQueueAssembly:
         self._logger = policy.logger
         self._retry_base_seconds = policy.retry_base_seconds
         self._retry_max_seconds = policy.retry_max_seconds
-        self._registry = policy.registry
         self._foreground_busy = policy.foreground_busy
         self._held_providers = policy.held_providers
 
@@ -84,7 +81,6 @@ class SyncJobQueueAssembly:
             self._database_manager(),
             self._now,
             self._uuid_factory,
-            registry=self._registry,
             foreground_busy=self._foreground_busy,
             held_providers=self._held_providers,
         )
@@ -98,7 +94,6 @@ class SyncJobQueueAssembly:
             self._wake_event(),
             self._all_sync_days,
             self._daily_sync_marker_service(),
-            registry=self._registry,
         )
 
     def outcome_service(self) -> job_outcomes.SyncJobOutcomeService:

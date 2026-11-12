@@ -17,7 +17,7 @@ from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import ProviderSchedulePolicy
 from backend.sync.state import SyncStateRepository
@@ -66,7 +66,6 @@ class BackfillChainResumer:
         *,
         chunk_days: int,
         earliest_date: date,
-        registry: ProviderRegistry | None = None,
         interval: timedelta = RESUME_INTERVAL,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -75,14 +74,13 @@ class BackfillChainResumer:
         self._policies = policies
         self._chunk_days = chunk_days
         self._earliest_date = earliest_date
-        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
         self._interval = interval.total_seconds()
         self._clock = clock
         self._last_queued: dict[tuple[str, str], float] = {}
 
     def resume(self) -> None:
         """Re-queue stopped chains of all providers, each at most once per interval."""
-        for provider_id in self._registry.startup_order():
+        for provider_id in DEFAULT_PROVIDER_REGISTRY.startup_order():
             policy = self._policies.get(provider_id)
             if policy is not None and policy.configured() and not policy.blocked():
                 self._queue_chains(provider_id, requested_by=SCHEDULER_REQUESTER)
@@ -97,7 +95,7 @@ class BackfillChainResumer:
         self, provider_id: str, *, requested_by: str, throttle: bool = True
     ) -> None:
         for job_type in BACKFILL_CURSOR_STREAMS:
-            if not self._registry.supports_job(provider_id, job_type):
+            if not DEFAULT_PROVIDER_REGISTRY.supports_job(provider_id, job_type):
                 continue
             key = (provider_id, job_type)
             last = self._last_queued.get(key)
