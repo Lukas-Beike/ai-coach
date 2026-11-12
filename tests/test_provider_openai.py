@@ -247,9 +247,9 @@ class OpenAIProviderErrorTests(unittest.TestCase):
                 "keys": ["input", "instructions", "reasoning", "stream", "tools"],
             },
         )
-        self.assertNotIn(
-            "Analysiere meine letzte Einheit", values["diagnostic_capture_entries"]
-        )
+        # The sanitized request body is kept for every Coach request (athlete
+        # decision 2026-11-11, #2073); provider text and credentials are not.
+        self.assertEqual(started["request"]["input"], "Analysiere meine letzte Einheit")
         self.assertEqual(transport["http_status"], 200)
         self.assertEqual(transport["event_counts"], {"response.failed": 1})
         self.assertEqual(failed["provider_error"]["code"], "unknown_schema_failure")
