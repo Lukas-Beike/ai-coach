@@ -101,8 +101,13 @@ def fill_empty_product_fields(
         return False
     details = json.loads(row["details"])
     origin = database_origin(str(food["id"]))
+    # A value the food itself took from another database keeps that origin.
+    passed_on = food.get("filled_fields") or {}
     details.setdefault("filled_fields", {}).update(
-        {key: {"origin": origin, "fetched_at": fetched_at} for key in updates}
+        {
+            key: passed_on.get(key) or {"origin": origin, "fetched_at": fetched_at}
+            for key in updates
+        }
     )
     db.execute(
         "UPDATE nutrition_products SET "

@@ -10,6 +10,7 @@ from typing import Any, cast
 from support import temp_database
 
 from backend.db import row_factory
+from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import FoodDatabaseMirror
@@ -347,6 +348,18 @@ class LookupChainTests(unittest.TestCase):
             {"salt_g": {"origin": "yazio", "fetched_at": self.now.isoformat()}},
         )
         self.assertEqual(refreshed["missing_fields"], ["sugar_g", "fiber_g"])
+        # An own product filling from this entry keeps the Yazio origin.
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO nutrition_products(id, barcode, name, basis_amount, "
+                "basis_unit, source, created_at, updated_at) VALUES "
+                "('own', ?, 'Eigen', 100, 'g', 'manual', 'now', 'now')",
+                (BARCODE,),
+            )
+            NutritionProductRepository.fill_from_database_entries(db, "own", BARCODE)
+            filled = NutritionProductRepository().get(db, "own")["filled_fields"]
+        self.assertEqual(filled["salt_g"]["origin"], "yazio")
+        self.assertEqual(filled["kcal"]["origin"], "open_food_facts")
         # A later Open Food Facts value wins and drops the Yazio origin.
         later = off_food()
         later["per_100"]["salt_g"] = 0.02
