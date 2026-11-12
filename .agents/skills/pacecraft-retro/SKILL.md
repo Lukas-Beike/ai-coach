@@ -147,11 +147,11 @@ choice authorizes only that action for that finding. Without an answer, or on a
 noninteractive host, create nothing: report the findings with issue drafts as
 pending decisions.
 
-- **New issue**: search open issues for a duplicate first and link it instead
-  of filing another. Write the title as `<type>(<scope>): <description>` and the
-  body in English with observation, cause/hypothesis, impact, owning path,
-  proposed action, and success check. Never include athlete data, provider
-  payloads, credentials, or unredacted logs. Report each issue URL.
+- **New issue**: file it with [issue-create](../pacecraft-issue-create/SKILL.md)
+  (duplicate search, title rule); link a found duplicate instead. The English
+  body holds observation, cause/hypothesis, impact, owning path, proposed
+  action, and success check; never athlete data, provider payloads,
+  credentials, or unredacted logs. Report each issue URL.
 - **Fix in this session**: follow the owning workflow, orchestration, and
   validation as for any authorized change, then update this retro once with the
   outcome; do not run a new retro on it.
