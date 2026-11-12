@@ -191,7 +191,7 @@ subscription/OAuth upstreams with paid API-key fallbacks disabled, no athlete
 data, never read the proxy's credential files, and no routing, provider, or
 billing changes. The one tracked live run is `tests/coach_live_eval.py`
 (#2221): started by hand with a dedicated evaluation key, the dialogue catalogue
-once per run, at most 150 model calls and 5 USD, tool calls only on temporary
+once per run, at most 300 model calls and 5 USD, tool calls only on temporary
 storage with unconfigured providers; never part of the suite, CI or pre-push.
 Normal tests stay mocked.
 
