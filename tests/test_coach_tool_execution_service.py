@@ -210,6 +210,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
         # No card (#2342): the bound payload runs, and findings the athlete
         # accepted in the same message stay with it.
         bound = {"adjustment_id": "adj-1", "sync_illness_to_intervals": True}
+        self.proposal_creation.removes_garmin_workouts.return_value = False
         self.proposal_creation.prepare_remote_write.return_value = {
             "payload": {"arguments": bound, "intent": {"bound": True}},
             "details": [],
