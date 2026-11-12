@@ -605,18 +605,25 @@ class ChokePointTests(unittest.TestCase):
 
     def test_a_failed_write_leaves_the_bulk_budget_to_its_retry(self) -> None:
         # Two failed 5-record patches stay below the threshold of 7 (#2335).
+        name = "apply_training_patch"
         five = {"changes": [{"action": "create"}] * 5}
-        self.metadata = lambda name: {
-            **ChokePointTests.metadata(name),
-            "arguments": five,
-        }
+        metadata = {**self.metadata(name), "arguments": five}
         self.execution.execute.side_effect = AppError(409, "synthetic conflict")
         self.failure.project.return_value = {"ok": False, "reason": "tool_failed"}
         state = self.state("Plane mir fünf Einheiten")
 
-        for _attempt in range(2):
-            result = self.execute(state, "apply_training_patch")[2]
-            self.assertEqual(result["reason"], "tool_failed")
+        with patch(
+            "backend.coach.structured_tool_round.structured_tool_call_metadata",
+            return_value=metadata,
+        ):
+            for _attempt in range(2):
+                result = self.service._execute_tool_call(
+                    {"type": "function_call", "name": name, "call_id": "call-one"},
+                    state=state,
+                    question="",
+                    cancelled=False,
+                )[2]
+                self.assertEqual(result["reason"], "tool_failed")
 
         self.assertEqual(self.execution.execute.call_count, 2)
         self.logger.warning.assert_not_called()
