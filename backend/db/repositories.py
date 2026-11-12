@@ -191,9 +191,12 @@ _NOT_HELD_BY_OWN = (
     "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
     "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL))"
 )
-# Active own products and the database foods no own product holds.
+# Active own products and the database foods no active own product holds: an
+# archived product's food is listed again.
 _LISTED = (
-    f"(CASE WHEN origin = 'own' THEN status = 'active' ELSE {_NOT_HELD_BY_OWN} END)"
+    "(CASE WHEN origin = 'own' THEN status = 'active' ELSE "
+    "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM nutrition_products "
+    "WHERE origin = 'own' AND status = 'active' AND barcode IS NOT NULL)) END)"
 )
 
 
@@ -354,15 +357,15 @@ class NutritionProductRepository:
         rows = db.execute(
             self._LISTING_SELECT
             + f" WHERE {_LISTED}"
-            + "".join(f" AND {clause}" for clause in found[0])
-            + " ORDER BY name COLLATE NOCASE, id LIMIT ?",
-            (*found[1], max(1, min(int(limit), 1000))),
+            + "".join(f" AND {clause}" for clause in found[0]),
+            found[1],
         ).fetchall()
-        # SQLite folds ASCII case only; "Äpfel" belongs under A, not after Z.
+        # Sorted before the cut: SQLite folds ASCII case only, and "Äpfel"
+        # belongs under A, not after Z.
         return sorted(
             (self._listed(row) for row in rows),
             key=lambda product: (_name_key(product["name"]), product["id"]),
-        )
+        )[: max(1, min(int(limit), 1000))]
 
     def get_database(self, db: Any, product_id: str) -> dict[str, Any] | None:
         """A stored database food as a product, or None for any other id."""
@@ -691,9 +694,17 @@ class FoodDatabaseEntryRepository:
         )
 
     def restore_nutrients(
-        self, db: Any, food_id: str, values: Mapping[str, Any]
+        self,
+        db: Any,
+        food_id: str,
+        values: Mapping[str, Any],
+        marks: Mapping[str, Any] | None = None,
     ) -> None:
-        """Put nutrient values back; a restored value is no longer a filled one."""
+        """Put nutrient values back, with the origin marks they had then.
+
+        ``marks`` are the recorded marks when the undone change altered them;
+        otherwise the marks stay, except that an emptied value has no origin.
+        """
         row = db.execute(
             "SELECT details FROM nutrition_products WHERE id=? AND origin <> 'own'",
             (food_id,),
@@ -701,8 +712,11 @@ class FoodDatabaseEntryRepository:
         if row is None or not values:
             return
         details = json.loads(row["details"])
-        for key in values:
-            details.get("filled_fields", {}).pop(key, None)
+        if marks is not None:
+            details["filled_fields"] = dict(marks)
+        for key, value in values.items() if marks is None else ():
+            if value is None:
+                details.get("filled_fields", {}).pop(key, None)
         db.execute(
             "UPDATE nutrition_products SET "
             + ", ".join(f"{key}=?" for key in values)
@@ -733,8 +747,13 @@ class FoodDatabaseEntryRepository:
         db.execute(
             "UPDATE nutrition_products SET "
             + ", ".join(f"{key}=?" for key in values)
-            + ", details=? WHERE id=?",
-            (*values.values(), json.dumps(details, ensure_ascii=False), food_id),
+            + ", details=?, updated_at=? WHERE id=?",
+            (
+                *values.values(),
+                json.dumps(details, ensure_ascii=False),
+                edited_at,
+                food_id,
+            ),
         )
 
     def delete(self, db: Any, food_id: str) -> bool:

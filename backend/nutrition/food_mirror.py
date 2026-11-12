@@ -31,6 +31,7 @@ def food_history_value(entry: dict[str, Any]) -> dict[str, Any]:
         "basis_amount": entry["basis_amount"],
         "basis_unit": entry["basis_unit"],
         **{key: entry["per_100"].get(key) for key in NUTRIENT_COLUMNS},
+        "filled_fields": entry.get("filled_fields", {}),
     }
 
 
@@ -154,6 +155,7 @@ class FoodDatabaseMirror:
                 for key, value in target.items()
                 if key in NUTRIENT_COLUMNS and current.get(key) != value
             },
+            target.get("filled_fields"),
         )
         restored = self._entries.get(db, entity_id)
         return food_history_value(restored) if restored else {}

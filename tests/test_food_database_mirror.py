@@ -460,6 +460,35 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
             )
             self.assertEqual(catalog.get_product(target["id"]), target)
         self.assertEqual(self.off.calls, [("product", BARCODE)])
+        # An archived product is not re-checked.
+        library = self.library()
+        catalog.archive_product(with_ean["id"])
+        with self.assertRaises(AppError) as archived:
+            library.refresh_database_food(with_ean["id"])
+        self.assertEqual(archived.exception.reason, "nutrition_product_archived")
+        self.assertEqual(len(self.off.calls), 1)
+
+    def test_a_re_check_by_ean_falls_back_from_an_unavailable_source(self):
+        # The newest stored food is from Yazio, which is not configured here.
+        self.mirror.store([food()])
+        self.now += timedelta(minutes=1)
+        self.mirror.store(
+            [
+                {
+                    **food(),
+                    "id": "yazio:0a1b2c3d-0000-4000-8000-000000000009",
+                    "barcode": BARCODE,
+                }
+            ]
+        )
+        self.now += timedelta(days=1)
+
+        self.service.refresh_barcode(BARCODE)
+
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
+        self.assertEqual(
+            self.mirror.get(f"off:{BARCODE}")["fetched_at"], self.now.isoformat()
+        )
 
     def test_a_re_check_never_guesses_a_basis_and_keeps_further_fields(self):
         stored = {**food(), "servings": [{"name": "Riegel", "amount": 40}]}

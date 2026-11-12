@@ -93,6 +93,12 @@ class NutritionMealLibraryService:
         """Re-check a stored food, or an own product by its EAN."""
         with self._database_manager.reader() as db:
             own = self._products.get(db, product_id)
+        if own and own.get("status") != "active":
+            raise AppError(
+                409,
+                "Archivierte Produkte werden nicht aktualisiert.",
+                reason="nutrition_product_archived",
+            )
         if own:
             return self._product_catalog.refresh_product(own)
         return {"ok": True, "food": self.food_database.refresh_stored(product_id)}

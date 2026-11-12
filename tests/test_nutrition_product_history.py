@@ -287,6 +287,16 @@ class NutritionProductHistoryTests(unittest.TestCase):
             (entry["per_100"]["kcal"], entry["per_100"].get("fat_g")), (60, None)
         )
         self.assertEqual(entry["filled_fields"], {})
+        # Undo of a second edit keeps the first edit and its mark, so a later
+        # re-check still keeps the athlete's value.
+        self.catalog.update_product(food["id"], {"kcal": 65})
+        _, second = self.collected(
+            lambda: self.catalog.update_product(food["id"], {"kcal": 70})
+        )
+        self.undo(second)
+        entry = self.stored_food(food["id"])
+        self.assertEqual(entry["per_100"]["kcal"], 65)
+        self.assertEqual(entry["filled_fields"]["kcal"]["origin"], "manual")
 
         with patch.object(
             self.library.food_database, "refresh_barcode", return_value=""

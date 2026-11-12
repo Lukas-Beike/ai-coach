@@ -261,18 +261,26 @@ class NutritionProductContractTests(unittest.TestCase):
             self.stored_food(f"off:{own['barcode']}", "Aaa Zwilling"),
             # An umlaut sorts with its vowel, not after Z.
             self.stored_food("off:4000000000031", "Äpfel getrocknet"),
+            # The food of an archived product's EAN is listed again.
+            self.stored_food("off:4006381333948", "Bohnen"),
         )
 
         listed = catalog.list_all_products()
 
         self.assertEqual(
             [item["name"] for item in listed],
-            ["Äpfel getrocknet", "apfelmus", "Banane", "Zebra Riegel"],
+            ["Äpfel getrocknet", "apfelmus", "Banane", "Bohnen", "Zebra Riegel"],
         )
         by_name = {item["name"]: item for item in listed}
         self.assertEqual(
             [(item["origin"], item["favorite"]) for item in listed],
-            [("open_food_facts", 0), ("open_food_facts", 0), ("yazio", 0), ("own", 0)],
+            [
+                ("open_food_facts", 0),
+                ("open_food_facts", 0),
+                ("yazio", 0),
+                ("open_food_facts", 0),
+                ("own", 0),
+            ],
         )
         self.assertEqual(by_name["apfelmus"]["fetched_at"], "2026-10-01")
         self.assertIsNone(by_name["Zebra Riegel"]["fetched_at"])
@@ -306,13 +314,7 @@ class NutritionProductContractTests(unittest.TestCase):
         catalog = self.library.product_catalog
         food_id = "off:4000000000017"
         self.store_foods(self.stored_food(food_id, "Apfelmus", "Hersteller"))
-        edit = {
-            "kcal": 52,
-            "salt_g": 0.1,
-            "carbs_g": 10,
-            "name": "Anders",
-            "barcode": "1",
-        }
+        edit = {"kcal": 52, "salt_g": 0.1, "carbs_g": 10}
 
         with change_history.collect_changes() as changes:
             edited = catalog.update_product(food_id, edit)
@@ -345,15 +347,25 @@ class NutritionProductContractTests(unittest.TestCase):
         before = catalog.get_product(food_id)
         for label, payload in (
             ("negative", {"kcal": -1}),
-            ("text", {"kcal": "1"}),
-            ("too large", {"salt_g": 1000.5}),
+            ("not a number", {"kcal": "viel"}),
+            ("too large", {"salt_g": 10000.5}),
             ("boolean", {"fat_g": True}),
             ("one bad value rejects all", {"kcal": 60, "salt_g": -2}),
+            # Name, brand, EAN and basis belong to the database: no silent drop.
+            ("name", {"name": "Neuer Name", "kcal": 60}),
+            ("basis", {"basis_unit": "ml"}),
+            ("archived", {"status": "archived"}),
         ):
             with self.subTest(label), self.assertRaises(AppError) as raised:
                 catalog.update_product(food_id, payload)
             self.assertEqual(raised.exception.status, 400)
         self.assertEqual(catalog.get_product(food_id), before)
+        # Checked like an own product: German spelling counts, unchanged fields pass.
+        edited = catalog.update_product(
+            food_id, {"name": before["name"], "kcal": "61,5"}
+        )
+        self.assertEqual(edited["kcal"], 61.5)
+        self.assertNotEqual(edited["updated_at"], before["updated_at"])
 
     def test_invalid_gap_fills_are_rejected_without_a_write(self):
         catalog = self.library.product_catalog

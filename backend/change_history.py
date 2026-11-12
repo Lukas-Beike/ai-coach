@@ -236,6 +236,8 @@ FOOD_DATABASE_ENTRY_FIELDS = (
     "id",
     "basis_amount",
     "basis_unit",
+    # Where each filled or edited value came from; undo puts it back.
+    "filled_fields",
     "kcal",
     "carbs_g",
     "protein_g",

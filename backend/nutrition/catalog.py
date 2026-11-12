@@ -22,7 +22,7 @@ from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import FoodDatabaseService, matches_all_terms
 from backend.nutrition.food_mirror import FOOD_ENTITY_TYPE, food_history_value
 from backend.nutrition.models import nutrition_number
-from backend.nutrition.photo import validate_packaging_extraction
+from backend.nutrition.photo import _validated_number, validate_packaging_extraction
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
 FOOD_NOT_FOUND = "Datenbankeintrag nicht gefunden."
@@ -221,8 +221,9 @@ class ProductCatalogService:
     ) -> dict[str, Any]:
         """Edit the nutrient values of a stored database food.
 
-        It stays a database entry; the other fields (name, brand, EAN, basis)
-        belong to the database and are ignored. Each changed value counts as
+        It stays a database entry: name, brand, EAN and basis belong to the
+        database, so a change of them is refused, not silently dropped. Values
+        are checked like those of an own product. Each changed value counts as
         the athlete's own, which a re-check keeps. The change is in the history.
         """
         payload = payload if isinstance(payload, dict) else {}
@@ -230,16 +231,25 @@ class ProductCatalogService:
             entry = self._foods.get(db, food_id)
             if entry is None:
                 raise AppError(404, FOOD_NOT_FOUND, reason="food_not_found")
-            try:
-                values = {
-                    key: None
-                    if payload[key] is None
-                    else _core_value(key, payload[key])
-                    for key in NUTRIENT_COLUMNS
-                    if key in payload and payload[key] != entry["per_100"].get(key)
-                }
-            except ValueError as exc:
-                raise AppError(400, str(exc)) from exc
+            if payload.get("status") not in (None, "active") or any(
+                key in payload and payload[key] not in (None, "", entry.get(field))
+                for key, field in _DATABASE_OWNED_FIELDS
+            ):
+                raise AppError(
+                    400,
+                    "Bei einem Datenbankeintrag sind nur die Nährwerte änderbar.",
+                    reason="food_database_field_fixed",
+                )
+            values = {
+                key: _validated_number(payload[key], field=key)
+                for key in NUTRIENT_COLUMNS
+                if key in payload
+            }
+            values = {
+                key: value
+                for key, value in values.items()
+                if value != entry["per_100"].get(key)
+            }
             if values:
                 self._foods.edit_nutrients(db, food_id, values, self._utc_now())
                 change_history.record_change(
@@ -623,6 +633,16 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, dict[str, str]]:
         raise ValueError("values muss Kernfelder mit Zahlen enthalten.")
     values = {field: _core_value(field, value) for field, value in raw.items()}
     return values, str(origin), _gap_sources(item, per_field, values, origin)
+
+
+# Fields of a stored database food that its database owns: (payload key, entry key).
+_DATABASE_OWNED_FIELDS = (
+    ("name", "name"),
+    ("brand", "brands"),
+    ("barcode", "barcode"),
+    ("basis_amount", "basis_amount"),
+    ("basis_unit", "basis_unit"),
+)
 
 
 def _core_value(field: str, value: Any) -> float:

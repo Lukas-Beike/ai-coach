@@ -608,8 +608,12 @@ class FoodDatabaseService:
         A failed lookup raises and leaves the stored foods unchanged.
         """
         stored = self._mirror.by_barcode(barcode) if self._mirror else []
-        if stored:
-            return str(self.refresh_stored(stored[0]["id"]).get("notice", ""))
+        # Newest first; a source that is unavailable gives way to the next one.
+        for entry in stored:
+            try:
+                return str(self.refresh_stored(entry["id"]).get("notice", ""))
+            except AppError:
+                continue
         return self._barcode_lookup(barcode)[1]
 
     def forget(self, food_id: Any) -> None:
