@@ -1,6 +1,6 @@
 ---
 name: pacecraft-graphify-query
-description: Base skill. Query the local structural code graph for symbols, callers, dependencies and paths between them. Use before Grep for symbol or dependency lookups; domain knowledge is in ai-coach-graphify.
+description: Base skill. Query the local structural code graph for symbols, callers, dependencies and paths between them. Use before Grep for symbol or dependency lookups; domain knowledge is in pacecraft-graphify.
 ---
 
 # Query the graph
@@ -19,4 +19,4 @@ python scripts/graphify_local.py path <source> <target> [--directed|--undirected
 - Exit 2 with `Graphify local unavailable` means no usable graph: run
   `python scripts/graphify_local.py update` (or `setup` once) and retry,
   otherwise fall back to Grep. After source edits, run `update` first.
-- Setup, freshness and export details: [ai-coach-graphify](../ai-coach-graphify/SKILL.md).
+- Setup, freshness and export details: [pacecraft-graphify](../pacecraft-graphify/SKILL.md).

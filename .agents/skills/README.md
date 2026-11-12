@@ -61,6 +61,12 @@ call these instead of describing the operation.
 | [pacecraft-line-balance](pacecraft-line-balance/SKILL.md) | Production, test and other lines added and removed |
 | [pacecraft-develop-run-check](pacecraft-develop-run-check/SKILL.md) | Develop push runs of a merge commit, with superseded and flake hints |
 | [pacecraft-ledger-line](pacecraft-ledger-line/SKILL.md) | One ledger line for a closed issue |
+| [pacecraft-run-tests-changed](pacecraft-run-tests-changed/SKILL.md) | Changed Python tests, compileall, quality ratchet, and JS tests when JS changed |
+| [pacecraft-browser-tests](pacecraft-browser-tests/SKILL.md) | Affected Playwright projects through the browser runner |
+| [pacecraft-spec-validate](pacecraft-spec-validate/SKILL.md) | Strict OpenSpec validation of main specs and a change |
+| [pacecraft-sonar-check](pacecraft-sonar-check/SKILL.md) | Sonar pre-push analysis or PR issues as counts and locations |
+| [pacecraft-graphify-query](pacecraft-graphify-query/SKILL.md) | Symbols, callers and paths from the local code graph |
+| [pacecraft-worktree-prune](pacecraft-worktree-prune/SKILL.md) | Remove merged, clean, idle worktrees |
 
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
