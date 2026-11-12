@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 57 tools currently offered to the conversational Coach.
+This matrix covers every tool currently offered to the conversational Coach.
 It measures execution through `chat_with_coach`, not the accuracy of a language
 model's interpretation.
 
@@ -130,9 +130,9 @@ reusing it does not duplicate the dialogue tests.
 
 ## Validation results
 
-- `tests/test_coach_tool_coverage.py` runs 43 tests (`python -m unittest
-  tests.test_coach_tool_coverage` passes), including declared successful tool
-  variants for every tool in `TOOL_SPECS`, invalid-argument/reference cases and
-  missing-provenance checks for every write tool carrying `_request`.
+- `python -m unittest tests.test_coach_tool_coverage` passes. The module covers
+  declared successful tool variants for every tool in `TOOL_SPECS`,
+  invalid-argument/reference cases and missing-provenance checks for every write
+  tool carrying `_request`.
 - These are execution and conversation tests, not live language-model
   evaluations.
