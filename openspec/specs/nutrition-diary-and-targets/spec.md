@@ -248,7 +248,25 @@ The diary SHALL subtly color complete macro totals outside athlete-specific dail
 - **WHEN** a required weight, calorie value or macro total is unknown
 - **THEN** the affected comparison is not colored and no missing value is assumed.
 
-Evidence: `backend/nutrition/macro_ranges.py`, `backend/http_api/nutrition.py`, `public/nutrition.js`; `tests/test_nutrition_macro_ranges.py`, `tests/test_nutrition_api_and_sync.py`, `tests/nutrition-macro-ranges.test.cjs`, `e2e/nutrition-macro-ranges.spec.js`.
+#### Scenario: Intensity source
+- **WHEN** a session of the day is read for its intensity
+- **THEN** recorded power zone times decide, else pace zone times, else heart-rate zone times, else a planned duration profile; seconds in zone 4 or above are summed, and a recorded session without readable zone times has no usable intensity.
+
+#### Scenario: Planned profile
+- **WHEN** a planned session has a duration-axis profile with constant segments
+- **THEN** its seconds in zone 4 or above count toward the ten-minute threshold; ramps, ranged labels or another axis make the intensity unknown.
+
+#### Scenario: Several sessions
+- **WHEN** a day has several sessions
+- **THEN** their minutes add up, and one session with at least 600 seconds in zone 4 or above raises the level by one; a session without duration or usable intensity, or a calendar entry that cannot be dated, keeps the carbohydrate range at 3 to 5 g/kg.
+
+#### Scenario: Low value on the running day
+- **WHEN** a complete total lies below its range
+- **THEN** it is marked low only for days before today; a value above its range is marked on every day.
+
+Detailed contract: the fat range is 20 to 30 percent of the recorded kcal divided by 9 kcal per gram. The weight is the current performance weight, else the profile weight. A missed, archived or locally deleted calendar entry contributes nothing. The classes are `nutrition-above-range` and `nutrition-below-range`.
+
+Evidence: `backend/nutrition/macro_ranges.py`, `backend/http_api/nutrition.py`, `public/nutrition.js`; `tests/test_nutrition_macro_ranges.py::test_ambiguous_zone_range_uses_light_fallback`, `tests/test_nutrition_macro_ranges.py::test_multiple_sessions_and_exact_high_intensity_cutoff`, `tests/test_nutrition_macro_ranges.py::test_completed_activity_uses_actual_day_and_skips_missed_plan`, `tests/test_nutrition_macro_ranges.py::test_context_keeps_profile_weight_when_plan_is_unavailable`, `tests/test_nutrition_api_and_sync.py`, `tests/nutrition-macro-ranges.test.cjs::marks complete values outside a range and avoids premature low warnings`, `e2e/nutrition-macro-ranges.spec.js`.
 
 ### Requirement: Nutrition history shows average daily calorie balance
 The nutrition history SHALL show a signed average daily calorie balance alongside the total balance for both the 14-day and 12-week views, with the count of days used and the period's day count.
@@ -270,3 +288,83 @@ The nutrition history SHALL show a signed average daily calorie balance alongsid
 - **THEN** the average is shown as unavailable with zero coverage, rather than as zero.
 
 Evidence: `backend/nutrition/sync_status.py::NutritionSyncStatusService.get_week_summary` supplies the paired balance sum and count (`balance_kcal`, `balance_days`); `public/nutrition.js::renderNutritionWeek` derives and displays the signed average beside the total. `tests/nutrition-history.test.cjs::history displays daily balance from paired days alongside the total` covers the complete, partial, surplus, balanced, rounding-to-zero and no-paired-day cases; `e2e/nutrition-week.spec.js::@responsive nutrition week shows coverage, signed balance and missing days without fueling` and `e2e/nutrition-week.spec.js::@responsive nutrition gaps keep expenditure visible without inventing intake` cover the rendered tiles at all viewports; `tests/test_nutrition_garmin_expenditure.py::NutritionGarminExpenditureTests.test_week_uses_closed_days_and_only_paired_values_for_balance` covers the paired-day summary.
+
+### Requirement: Entry normalization rules
+The system SHALL normalize an entry to `meal_date`, `logged_at`, `meal_type`, `description` (required, cut to 500 characters), whole `kcal`, macros with one decimal, `source`, `nutrition_basis`, `logged_time_known` and `sync_state` `local`. It SHALL accept the aliases `date`, `meal_time`, `calories`, `carbs`, `carbohydrates`, `protein` and `fat`, and SHALL reject ambiguous grouped-thousands text instead of reading it as a decimal.
+
+#### Scenario: Meal type from the clock
+- **WHEN** no meal type is given and the time is known
+- **THEN** the type is breakfast from 05:00, lunch from 11:00, snack from 15:00, dinner from 18:00 and snack from 23:00 to 04:59.
+
+#### Scenario: Meal for another day without a time
+- **WHEN** an entry for a day other than the athlete's today names no time
+- **THEN** it is stored with unknown time (the noon anchor); for today the current local time is used.
+
+#### Scenario: Time with another date
+- **WHEN** a given timestamp carries a date other than the meal date
+- **THEN** its clock time is kept and its date replaced by the meal date; an unparsable time is 400.
+
+#### Scenario: Ambiguous number text
+- **WHEN** a quantity arrives as text such as "1,200", or "1.200" for kcal
+- **THEN** the entry is rejected with 400 instead of reading 1.2 or 1200.
+
+#### Scenario: Source and sync state
+- **WHEN** a client sends a source outside `manual`, `voice`, `photo`, `coach`, or a `sync_state`
+- **THEN** the source becomes `manual` and the sync state stays `local`.
+
+Detailed contract: `logged_time_known` must be a boolean; with an unknown time a meal type is required ("Bei unbekannter Uhrzeit ist der Mahlzeittyp erforderlich."). A correction that names a field and its alias with different values is 400 "Widersprüchliche Werte für {feld}."; equal values are accepted. For entries with a database basis the macro aliases are ignored.
+
+Evidence: `backend/nutrition/models.py::normalize_nutrition_entry`, `backend/nutrition/models.py::meal_type_from_hour`, `backend/nutrition/models.py::_normalize_logged_time`, `backend/nutrition/diary.py::_canonical_meal_changes`; `tests/test_nutrition.py::test_meal_type_from_hour`, `tests/test_nutrition.py::test_grouped_thousands_text_is_rejected_instead_of_read_as_a_decimal`, `tests/test_nutrition.py::test_zero_values_are_preserved_and_client_cannot_claim_sync_state`, `tests/test_nutrition.py::test_conflicting_alias_and_field_are_rejected_and_equal_values_accepted`, `tests/test_nutrition_meal_times.py::test_meal_for_another_day_without_a_time_has_no_known_time`, `tests/test_nutrition_meal_times.py::test_dated_time_is_rebased_onto_the_meal_date`, `tests/test_nutrition_meal_times.py::test_unparsable_time_is_rejected_instead_of_a_known_noon`.
+
+### Requirement: Energy block of a diary day
+The system SHALL return `energy_expenditure` with every day read, and SHALL keep the diary readable when its inputs fail. Request and response shapes of the day, week and refresh routes are in `docs/api-routes.md`.
+
+#### Scenario: Energy block
+- **WHEN** a day is read
+- **THEN** `energy_expenditure` has `total_kcal`, `active_kcal`, `resting_kcal`, `projected_total_kcal`, `projection_resting_kcal`, `projection_reference_date`, `source`, `measured_date`, `freshness`, `fetched_at`, `synced_at`, `provisional`, `status` (`measured` or `unavailable`), `measurement_status` and `measurement_age_days`.
+
+#### Scenario: Failed reference inputs
+- **WHEN** the weight or training data for the macro ranges cannot be read
+- **THEN** the day is answered without the unavailable ranges; `macro_ranges` omits what cannot be derived.
+
+Evidence: `backend/performance/daily_health.py::daily_energy_expenditure`, `backend/http_api/nutrition.py::NutritionGetRoutes._day_summary`, `backend/nutrition/sync_status.py::NutritionSyncStatusService.get_week_summary`; `tests/test_nutrition_api_and_sync.py::test_get_day_route`, `tests/test_nutrition_api_and_sync.py::test_day_reference_failure_preserves_diary`, `tests/test_nutrition_api_and_sync.py::test_history_period_is_forwarded`, `tests/test_nutrition_meal_times.py::test_entry_route_returns_the_change_for_undo`.
+
+### Requirement: Correction and meal-extension semantics
+A correction SHALL accept only meal date, time, time knowledge, meal type, description, kcal, macros (and their aliases), `food_ingredients`, `components` and `packaging_label`, SHALL keep the stored source, and SHALL mark hand-edited nutrients with the basis `manual_correction`. Adding a product to a meal SHALL keep the earlier values as the first component.
+
+#### Scenario: Unsupported field
+- **WHEN** a correction names any other field or is empty
+- **THEN** it fails with 400 "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
+
+#### Scenario: Meal that was not a composite
+- **WHEN** a product is added to a single-source meal
+- **THEN** the meal becomes a composite whose first component carries the earlier nutrients and basis, with kind `estimate` for Coach, photo or voice entries and `manual` otherwise, and the amount and unit of its basis or 1 `portion`.
+
+#### Scenario: Limits
+- **WHEN** the meal already has 20 components
+- **THEN** the addition fails with 400; otherwise the description gains " + {product name}" and stays within 500 characters, cutting the older text first.
+
+Evidence: `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService._apply_meal_correction`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/diary.py::NutritionDiaryService._meal_component`, `backend/nutrition/diary.py::NutritionDiaryService._extended_description`; `tests/test_nutrition_favorites_and_meal_additions.py::test_an_estimated_meal_keeps_its_values_as_the_first_component`, `tests/test_nutrition_favorites_and_meal_additions.py::test_description_keeps_the_newest_product_within_the_limit`, `tests/test_nutrition_favorites_and_meal_additions.py::test_wrapped_meal_keeps_sugar_and_salt_totals`, `tests/test_nutrition.py::test_database_values_override_model_values_and_provenance_survives_corrections`.
+
+### Requirement: Diary and history view states
+The client SHALL show the nutrition area as Tagebuch, Verlauf, Körper and Produkte. The diary SHALL offer a date field with previous, next and "Heute", show a cached copy of the requested view at once, and let the athlete delete a meal directly after a confirmation, with a "Rückgängig" receipt. The history SHALL switch between 14 days and 12 weeks and state the coverage of every figure.
+
+#### Scenario: Empty day
+- **WHEN** a day has no entries
+- **THEN** all total tiles show "nicht erfasst" and the status reads "Noch keine Mahlzeiten erfasst. Das bedeutet nicht, dass du nichts gegessen hast."
+
+#### Scenario: Failed load
+- **WHEN** a day cannot be loaded and no cached copy exists
+- **THEN** the requested date stays in the field and one error with "Erneut laden" is shown; with a cached copy the status reads "Gespeicherter Stand. Aktualisierung fehlgeschlagen: …".
+
+#### Scenario: Balance label
+- **WHEN** the history is rendered
+- **THEN** the balance tile is named "Kaloriendefizit", "Kalorienüberschuss" or "Ausgeglichene Bilanz", or "Erfasste Teilbilanz" when fewer days than the period are paired.
+
+#### Scenario: Twelve weeks
+- **WHEN** 84 days are shown
+- **THEN** the chart has 12 rows of weekly averages of intake and expenditure, each with "{n} von 7 Tagen", and consecutive rows without data collapse into one "keine Daten" row.
+
+Detailed contract: a meal card shows time and meal label (the label alone when the time is unknown), description, values, and a source line unless the entry is a locally stored manual entry; synced entries show "Synchronisiert". The expenditure section shows "Tagesverbrauch", "Aktivkalorien" and "Grundumsatz"; its status line names the source and the freshness ("Aktuell", "Veraltet", "Verzögert", else "Aktualität unbekannt") and, for the running day, "Vorläufig, da der Tag noch läuft"; its date line reads "Sync: …" or else "Abgerufen: …". For today "Prognose Tagesverbrauch" carries an estimate chip and a tooltip naming the resting reference day.
+
+Evidence: `public/nutrition.js::renderNutritionDay`, `public/nutrition.js::showNutritionDayLoadError`, `public/nutrition.js::loadNutrition`, `public/nutrition.js::nutritionCard`, `public/nutrition.js::deleteNutritionEntry`, `public/nutrition.js::renderNutritionExpenditure`, `public/nutrition.js::renderNutritionWeek`, `public/nutrition.js::nutritionChartDays`; `e2e/nutrition-diary-undo.spec.js::@responsive diary shows decimal commas and offers undo and delete for back-filled meals`, `e2e/nutrition.spec.js::@responsive a failed diary load keeps the requested date, shows one error and retries the day`, `e2e/nutrition-week.spec.js::@responsive nutrition history switches between 14 days and 12 weeks`, `e2e/nutrition-expenditure.spec.js::@responsive nutrition diary presents Garmin energy expenditure and unavailable states`.
