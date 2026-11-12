@@ -877,6 +877,7 @@ async function refreshNutritionProduct(product, button) {
     const result = await api("/api/nutrition/products/database/refresh", { method: "POST", body: JSON.stringify({ id: product.id }) });
     if (generation !== state.sessionGeneration) return;
     await reloadNutritionProducts({ refresh: true });
+    if (generation !== state.sessionGeneration) return;
     showNutritionReceipt(status, [`„${product.name}“ aktualisiert.`, result.notice || result.food?.notice].filter(Boolean).join(" "), result.change, () => reloadNutritionProducts({ refresh: true }));
   } catch (error) {
     if (generation !== state.sessionGeneration) return;
@@ -896,6 +897,7 @@ async function deleteNutritionProduct(product) {
     const result = await api(database ? "/api/nutrition/products/database/delete" : "/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) });
     if (generation !== state.sessionGeneration) return;
     await reloadNutritionProducts();
+    if (generation !== state.sessionGeneration) return;
     showNutritionReceipt(document.querySelector("#nutritionProductStatus"), database ? `Eintrag „${product.name}“ aus der Datenbank entfernt.` : `Produkt „${product.name}“ gelöscht.`, result.change, () => reloadNutritionProducts());
   } catch (error) { if (generation === state.sessionGeneration) showNutritionProductError(database ? "Eintrag konnte nicht entfernt werden" : "Produkt konnte nicht gelöscht werden", error); }
 }
@@ -1125,10 +1127,11 @@ async function submitNutritionProductForm(form) {
     const payload = nutritionProductPayload(form);
     const saved = await api("/api/nutrition/products", { method: payload.id ? "PUT" : "POST", body: JSON.stringify({ ...payload, confirmed: true }) });
     if (generation !== state.sessionGeneration) return;
-    editor.hidden = true; editor.replaceChildren(); await loadNutritionProducts();
+    // The list is read again with the search the athlete is in.
+    editor.hidden = true; editor.replaceChildren(); await reloadNutritionProducts();
     const name = saved.product?.name || "Produkt";
     const message = form.dataset.database === "true" ? `Nährwerte von „${name}“ gespeichert.` : `Produkt „${name}“ lokal gespeichert.`;
-    if (generation === state.sessionGeneration) showNutritionReceipt(status, message, saved.change, () => loadNutritionProducts());
+    if (generation === state.sessionGeneration) showNutritionReceipt(status, message, saved.change, () => reloadNutritionProducts());
   } catch (error) { if (generation === state.sessionGeneration) status.textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
 }
 

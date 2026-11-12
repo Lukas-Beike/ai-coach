@@ -225,6 +225,15 @@ test("re-checking an own product without an EAN names the EAN and the editor", a
   assert.equal(button.disabled, false);
 });
 
+test("a logout while the list reloads leaves no receipt of a re-check or delete", async () => {
+  for (const [action, product] of [["refreshNutritionProduct", { id: "off:1", name: "Haferdrink", origin: "open_food_facts" }], ["deleteNutritionProduct", { id: "own-1", name: "Whey", origin: "own" }]]) {
+    const { context, status } = actionContext({});
+    context.loadNutritionProducts = async () => { context.state.sessionGeneration += 1; };
+    await context[action](product, new FakeElement("button"));
+    assert.equal(status.textContent, "", action);
+  }
+});
+
 test("a re-check shows the outcome the server reports", async () => {
   const { context, status } = actionContext({ "/api/nutrition/products/database/refresh": { ok: true, notice: "Nichts zu ergänzen." } });
   await context.refreshNutritionProduct({ id: "off:1", name: "Haferdrink", origin: "open_food_facts" }, new FakeElement("button"));
