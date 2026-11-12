@@ -1115,6 +1115,20 @@ h2 {
 .connection-chip.is-ok::before { background: var(--accent-bright); }
 .connection-chip.is-error::before { background: var(--danger); }
 .connection-chip.is-unchecked::before { background: var(--orange); }
+.equipment-tab-panel, .equipment-uncategorized { display: grid; gap: 9px; }
+.equipment-archive[open] > .equipment-card { margin-top: 9px; }
+.equipment-card > summary { flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+.equipment-card > summary::after { order: 1; }
+.equipment-card > summary > :is(.equipment-card-line, progress) { order: 2; flex: 1 1 100%; }
+.equipment-card > summary progress { height: 4px; border: 0; border-radius: 999px; background: var(--progress-track); accent-color: var(--accent-bright); }
+.equipment-card > summary progress::-webkit-progress-bar { background: var(--progress-track); }
+.equipment-card[data-state="unchecked"] > summary progress { accent-color: var(--orange); }
+.equipment-card[data-state="error"] > summary progress { accent-color: var(--danger); }
+.equipment-card[data-state="off"] > summary progress { accent-color: var(--subtle); }
+.equipment-source-tag { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; }
+.equipment-card h5 { margin: 0; color: var(--ink); font-size: .74rem; }
+.equipment-card .connection-card-status :is(p, ul) { margin: 0; color: var(--muted); font-size: .8rem; }
+.equipment-card .connection-card-status ul { padding-left: 18px; }
 .connection-lines { display: grid; gap: 2px; margin: 0; padding: 0; color: var(--muted); font-size: .72rem; list-style: none; }
 .connection-actions .secondary-button { width: 100%; min-height: 44px; display: grid; place-items: center; text-align: center; }
 .connection-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
@@ -1584,10 +1598,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 }
 .activity-laps { padding-left: 22px; }
 .planned-strength { margin: 4px 0 0; padding-left: 18px; }
-.garmin-equipment-card { border-top: 1px solid var(--line); padding: 12px 0; }
-.garmin-equipment-card h4 { margin: 0 0 6px; }
-.garmin-equipment-card p { color: var(--muted); font-size: .85rem; }
-.garmin-equipment-card progress { width: 100%; accent-color: var(--accent-bright); }
 
 .analysis-chart-card svg .analysis-point-value { font-size: 12px; fill: var(--ink); stroke: var(--surface); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; pointer-events: none; }
 .training-focus-legend li > span { width: max-content; max-width: 72px; }

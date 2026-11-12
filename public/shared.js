@@ -107,6 +107,8 @@ function currentPlanLoadAreas() {
 }
 
 function ensureRouteData(route = state.route) {
+  // Connection and equipment cards start collapsed on every visit (#2301, #2302).
+  if (AppRouter.baseRoute(route) === "more") document.querySelectorAll(".connection-card[open], #equipmentItems details[open]").forEach((card) => { card.open = false; });
   if (!state.data) return;
   const requested = [];
   const panelRoute = AppRouter.baseRoute(route);

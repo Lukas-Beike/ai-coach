@@ -93,7 +93,8 @@ test("@responsive equipment records load only on the equipment route and stay ca
 
   await routeTo(page, "#more/equipment");
   await expect(page.locator("#equipmentItems").getByRole("heading", { name: "Ausrüstung und Wartung" })).toBeVisible();
-  expect(reportCounts()[TRAINING_RECORDS]).toBe(1);
+  // The heading shows while the read is still starting, so the count is polled.
+  await expect.poll(() => reportCounts()[TRAINING_RECORDS]).toBe(1);
 
   const layout = await page.evaluate(() => {
     const nav = document.querySelector("#settingsPanel > .more-segment-nav").getBoundingClientRect();
