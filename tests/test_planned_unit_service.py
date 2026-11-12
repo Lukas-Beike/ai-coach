@@ -537,6 +537,41 @@ class PlannedUnitServiceTests(unittest.TestCase):
         payload = json.loads(self.state()[0][0]["payload"])
         self.assertEqual(payload["duration_minutes"], 30)
 
+    def test_athlete_moves_a_sent_unit_to_another_day_from_today_on(self):
+        self.service.create(self.workout(starts_at_local="2026-09-21T18:30:00"))
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+        listed = self.service.list(push_state=True)[0]
+        before = self.state()
+        for day, expected_hash, status in (
+            ("2026-09-23", "stale", 409),
+            ("2026-09-19", listed["payload_hash"], 400),
+            ("23.09.2026", listed["payload_hash"], 400),
+            (None, listed["payload_hash"], 400),
+        ):
+            with self.subTest(day=day), self.assertRaises(AppError) as caught:
+                self.service.move(str(self.id), day, expected_hash)
+            self.assertEqual(status, caught.exception.status)
+        self.assertEqual(before, self.state())
+        # Today is the earliest day; the start keeps its time of day.
+        result = self.service.move(str(self.id), "2026-09-20", listed["payload_hash"])
+        planned, history, _revision = self.state()
+        payload = json.loads(planned[0]["payload"])
+        self.assertEqual("local", result["status"])
+        self.assertEqual(
+            ("2026-09-20", "2026-09-20T18:30:00"),
+            (payload["date"], payload["starts_at_local"]),
+        )
+        # A sent unit now waits for the athlete's explicit sync.
+        self.assertEqual(
+            ("local", 1), (planned[0]["sync_state"], planned[0]["sync_dirty"])
+        )
+        self.assertEqual("update", history[-1]["action"])
+
     def test_unknown_start_stays_unknown_across_date_move_and_undo(self):
         self.service.create(self.workout())
         self.service.update(str(self.id), {"date": "2026-09-23"})
