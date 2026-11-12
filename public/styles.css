@@ -1571,8 +1571,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-product-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
 .nutrition-product-head h3 { margin: 0; min-width: 0; }
 .nutrition-favorite { flex: none; min-width: 44px; min-height: 44px; margin: -8px -8px 0 0; padding: 0; border: 0; background: none; color: var(--accent); font-size: 1.4rem; line-height: 1; cursor: pointer; }
-.nutrition-product-others > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--ink); }
-.nutrition-product-others > .nutrition-list { margin: 0 0 18px; }
+.nutrition-product-section > summary { min-height: 44px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink); }
+.nutrition-product-section > .nutrition-list { margin: 0 0 18px; }
+.nutrition-product-card .nutrition-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 5px; }
+.nutrition-product-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.nutrition-origin { padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: .75rem; }
+.nutrition-incomplete { color: var(--orange); font-size: .8rem; font-weight: 650; overflow-wrap: anywhere; }
 .nutrition-low-confidence { box-shadow: 0 0 0 1px var(--nutrition-warning-border); }
 #nutritionBarcodeVideo { display: block; width: 100%; max-height: 40vh; object-fit: cover; border-radius: 12px; background: var(--black); }
 :root .activity-detail-dialog {

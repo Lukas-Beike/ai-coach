@@ -102,7 +102,7 @@ test("nutrition product refresh reload preserves the selected search query", () 
   const source = fs.readFileSync("public/nutrition.js", "utf8");
   assert.match(source, /loadNutritionProducts\(query, \{ background: true, throwOnError: true, refresh: true, expectedQuery: query \}\)/);
   assert.match(source, /if \(background && nutritionLookupResultShown && !refresh\) return;/);
-  assert.match(source, /renderNutritionProducts\(result\.products \|\| \[\], \{ expandOthers: othersOpen \}\);\s*if \(!preserveLookup\) status\.textContent/);
+  assert.match(source, /renderNutritionProducts\(result\.products \|\| \[\], \{ search: query \}\);\s*if \(!preserveLookup\) status\.textContent/);
   assert.match(source, /targetId: "#nutritionLookupResult"/);
   assert.match(source, /if \(!preserveLookup\) status\.textContent = "Produkte werden gesucht/);
 });

@@ -1,6 +1,17 @@
 const { test, expect } = require("@playwright/test");
 const { waitForSettledState } = require("./helpers/settled-state");
 
+const productSection = (page, key) => page.locator(`#nutritionProducts details[data-section="${key}"]`);
+
+// Opens a product section and returns its cards.
+async function openProductSection(page, key) {
+  const section = productSection(page, key);
+  await expect(section).toBeAttached();
+  if (!await section.evaluate((node) => node.open)) await section.locator("summary").click();
+  await expect(section).toHaveAttribute("open", "");
+  return section.locator(".nutrition-product-card");
+}
+
 test("@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption", async ({ page }) => {
   const showNutrition = async (route) => {
     await page.evaluate((nextRoute) => AppRouter.navigate(nextRoute, { historyMode: "push" }), route);
@@ -81,18 +92,19 @@ test("@responsive nutrition product library supports review, local save, favorit
   await editor.locator('[name="basis_amount"]').fill("100");
   await editor.locator('[name="basis_unit"]').selectOption("g");
   await editor.getByRole("button", { name: "Produkt lokal speichern" }).click();
-  let card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
-  await expect(card).toContainText("380 kcal");
+  await expect(page.locator("#nutritionProductStatus")).toContainText("lokal gespeichert");
   await page.reload();
-  await expect(page.locator("#nutritionProducts .nutrition-product-others")).not.toHaveAttribute("open", "");
-  await page.locator("#nutritionProducts .nutrition-product-others > summary").click();
-  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await expect(productSection(page, "favorites")).not.toHaveAttribute("open", "");
+  await expect(productSection(page, "all")).not.toHaveAttribute("open", "");
+  const cards = await openProductSection(page, "all");
+  let card = cards.filter({ hasText: productName });
   await expect(card).toContainText("72 g");
+  await expect(card).toContainText("eigen");
+  await expect(card).toContainText("fehlt: Kohlenhydrate");
 
   await card.getByRole("button", { name: "Bearbeiten" }).click();
   await editor.locator('[name="protein_g"]').fill("73");
   await editor.getByRole("button", { name: "Produkt lokal speichern" }).click();
-  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await expect(card).toContainText("73 g");
 
   await page.evaluate(() => {
@@ -105,8 +117,8 @@ test("@responsive nutrition product library supports review, local save, favorit
   await page.locator("#nutritionProductUseCoach").click();
   await expect.poll(() => page.locator("#messageInput").evaluate((input) => input.value)).toMatch(/^Bestehender Entwurf\nDazu 25 g \(Produkt-ID: /);
   await page.goto("/#nutrition/products");
-  await page.locator("#nutritionProducts .nutrition-product-others").evaluate((group) => { group.open = true; });
-  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await page.reload();
+  await openProductSection(page, "all");
   await card.getByRole("button", { name: "Verwenden" }).click();
   await page.locator("#nutritionProductUseAmount").fill("50");
   await expect(page.locator("#nutritionProductUseMeal")).toHaveValue("");
@@ -115,16 +127,126 @@ test("@responsive nutrition product library supports review, local save, favorit
   await page.goto("/#nutrition/diary");
   await expect(page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Snack" }).filter({ hasText: productName })).toHaveCount(1);
   await page.goto("/#nutrition/products");
-  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await page.reload();
+  await openProductSection(page, "all");
   await card.getByRole("button", { name: /Als Favorit markieren/ }).click();
-  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await expect(card.getByRole("button", { name: /Favorit entfernen/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#nutritionProducts .nutrition-product-card").first()).toContainText(productName);
+  const favorites = await openProductSection(page, "favorites");
+  await expect(favorites.filter({ hasText: productName })).toHaveCount(1);
 
   await card.getByRole("button", { name: "Löschen" }).click();
   await expect(page.locator("#confirmationDialog")).toBeVisible();
   await page.locator("#confirmationDialogAccept").click();
-  await expect(page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName })).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+  await expect(favorites.filter({ hasText: productName })).toHaveCount(0);
+});
+
+test("@responsive the product list has sections, markers and the same four actions for own and database products", async ({ page }) => {
+  const nutrients = { kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: 4, fiber_g: 0, salt_g: 0.1 };
+  const base = { basis_amount: 100, basis_unit: "g", status: "active", filled_fields: {}, favorite: 0, ...nutrients };
+  const products = [
+    { ...base, id: "yazio:0a1b2c3d-0000-4000-8000-000000000001", name: "Apfelmus", brand: "", barcode: "4000000000031", origin: "yazio", source: "yazio", fetched_at: "2026-09-30", favorite: 1 },
+    { ...base, id: "off:4006381333931", name: "Haferdrink", brand: "Beispiel", barcode: "4006381333931", origin: "open_food_facts", source: "open_food_facts", fetched_at: "2026-10-01", sugar_g: null, salt_g: null },
+    { ...base, id: "own-musli", name: "Müsli", brand: "Fixture", barcode: null, origin: "own", source: "manual", fetched_at: null, sugar_g: null, salt_g: null },
+    { ...base, id: "own-whey", name: "Whey", brand: "Fixture", barcode: "4000000000017", origin: "own", source: "manual", fetched_at: null },
+  ];
+  const requests = { listed: [], favorite: [], put: [], refresh: [], forget: [] };
+  const withMissing = (product) => ({ ...product, missing_fields: ["kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g"].filter((key) => product[key] == null) });
+  await page.route("**/api/nutrition/products**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const find = (id) => products.find((product) => product.id === id);
+    if (request.method() === "GET") {
+      const term = (url.searchParams.get("q") || "").toLowerCase();
+      requests.listed.push(url.searchParams.get("scope") + ":" + term);
+      return route.fulfill({ json: { ok: true, products: products.filter((product) => !term || [product.name, product.brand, product.barcode].join(" ").toLowerCase().includes(term)).map(withMissing) } });
+    }
+    const body = request.postDataJSON();
+    if (url.pathname.endsWith("/favorite")) { requests.favorite.push(body); find(body.id).favorite = body.favorite ? 1 : 0; return route.fulfill({ json: { ok: true, product: find(body.id) } }); }
+    if (url.pathname.endsWith("/database/refresh")) {
+      requests.refresh.push(body);
+      return route.fulfill({ status: 400, json: { ok: false, error: "Zum Aktualisieren braucht das Produkt eine EAN.", reason: "nutrition_product_barcode_missing" } });
+    }
+    if (url.pathname.endsWith("/database/delete")) { requests.forget.push(body); products.splice(products.indexOf(find(body.id)), 1); return route.fulfill({ json: { ok: true, id: body.id, status: "removed" } }); }
+    if (request.method() === "PUT") { requests.put.push(body); Object.assign(find(body.id), body); return route.fulfill({ json: { ok: true, product: find(body.id) } }); }
+    return route.continue();
+  });
+  await page.goto("/#nutrition/products");
+  await expect(productSection(page, "all")).toBeAttached();
+
+  // Both sections are collapsed and count their entries and their incomplete ones.
+  const favoritesSummary = productSection(page, "favorites").locator("summary");
+  const allSummary = productSection(page, "all").locator("summary");
+  await expect(favoritesSummary).toHaveText("Favoriten (1)");
+  await expect(allSummary).toHaveText("Alle Produkte (4) ⚠ 2");
+  await expect(allSummary.getByRole("img", { name: "2 unvollständig" })).toBeVisible();
+  await expect(favoritesSummary.getByRole("img")).toHaveCount(0);
+  await expect(productSection(page, "favorites")).not.toHaveAttribute("open", "");
+  await expect(productSection(page, "all")).not.toHaveAttribute("open", "");
+  await expect(page.locator("#nutritionDatabase")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Datenbank" })).toHaveCount(0);
+
+  // One list by name; each card names its origin and what it lacks.
+  const cards = await openProductSection(page, "all");
+  await expect(cards).toHaveCount(4);
+  await expect(cards.locator("h3")).toHaveText(["Apfelmus", "Beispiel · Haferdrink", "Fixture · Müsli", "Fixture · Whey"]);
+  const oat = cards.filter({ hasText: "Haferdrink" });
+  await expect(oat).toContainText("Datenbank · Stand 01.10.2026");
+  await expect(oat).toContainText("EAN 4006381333931 · Basis: 100 g");
+  await expect(oat.getByRole("img", { name: "Unvollständig, es fehlen: Zucker, Salz" })).toHaveText("⚠ fehlt: Zucker, Salz");
+  await expect(cards.filter({ hasText: "Whey" })).toContainText("eigen");
+  await expect(cards.filter({ hasText: "Whey" }).getByRole("img")).toHaveCount(0);
+  for (const name of ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]) await expect(cards.getByRole("button", { name })).toHaveCount(4);
+  await expect(cards.getByRole("button", { name: /Favorit/ })).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Lokal speichern" })).toHaveCount(0);
+
+  // A database entry can be marked as a favorite.
+  await oat.getByRole("button", { name: /Als Favorit markieren/ }).click();
+  await expect(favoritesSummary).toHaveText("Favoriten (2) ⚠ 1");
+  expect(requests.favorite).toEqual([{ id: "off:4006381333931", favorite: true }]);
+
+  // Its editor shows name, brand, EAN and basis read only and sends only nutrient values.
+  await oat.getByRole("button", { name: "Bearbeiten" }).click();
+  const editor = page.locator("#nutritionExtraction");
+  await expect(editor).toBeVisible();
+  for (const name of ["name", "brand", "barcode", "basis_amount", "basis_unit"]) await expect(editor.locator(`[name="${name}"]`)).toBeDisabled();
+  await expect(editor.locator('[name="name"]')).toHaveValue("Haferdrink");
+  await editor.locator('[name="sugar_g"]').fill("3.5");
+  await editor.locator('[name="salt_g"]').fill("0.1");
+  await editor.getByRole("button", { name: "Nährwerte speichern" }).click();
+  await expect(page.locator("#nutritionProductStatus")).toContainText("Nährwerte von „Haferdrink“ gespeichert.");
+  expect(requests.put).toEqual([{ id: "off:4006381333931", kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: 3.5, fiber_g: 0, salt_g: 0.1, confirmed: true }]);
+  await expect(allSummary).toHaveText("Alle Produkte (4) ⚠ 1");
+  await expect(oat.getByRole("img")).toHaveCount(0);
+
+  // An own product without an EAN cannot be re-checked; the editor takes the EAN.
+  const musli = cards.filter({ hasText: "Müsli" });
+  await musli.getByRole("button", { name: "Aktualisieren" }).click();
+  await expect(page.locator("#nutritionProductStatus")).toHaveText("Für Aktualisieren wird eine EAN gebraucht. Unter Bearbeiten eintragen.");
+  expect(requests.refresh).toEqual([{ id: "own-musli" }]);
+  await musli.getByRole("button", { name: "Bearbeiten" }).click();
+  await expect(editor.locator('[name="barcode"]')).toBeEnabled();
+  await expect(editor.locator('[name="name"]')).toBeEnabled();
+  await editor.getByRole("button", { name: "Abbrechen" }).click();
+
+  // Deleting a database entry asks first and removes it from the database.
+  await oat.getByRole("button", { name: "Löschen" }).click();
+  await expect(page.locator("#confirmationDialog")).toContainText("Eintrag „Haferdrink“ aus der Datenbank entfernen?");
+  await page.locator("#confirmationDialogAccept").click();
+  await expect(cards).toHaveCount(3);
+  expect(requests.forget).toEqual([{ id: "off:4006381333931", confirmed: true }]);
+  await expect(page.locator("#nutritionProductStatus")).toContainText("aus der Datenbank entfernt");
+
+  // A search covers all products and opens the sections with hits.
+  await allSummary.click();
+  await expect(productSection(page, "all")).not.toHaveAttribute("open", "");
+  await page.locator("#nutritionProductQuery").fill("4000000000017");
+  await page.locator("#nutritionProductSearch").getByRole("button", { name: "Suchen" }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(productSection(page, "all")).toHaveAttribute("open", "");
+  await expect(productSection(page, "favorites")).not.toHaveAttribute("open", "");
+  expect(requests.listed.at(-1)).toBe("all:4000000000017");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("@responsive packaging extraction requires editable basis values before explicit local save", async ({ page }) => {
@@ -342,23 +464,24 @@ test("@responsive a stored database entry is refreshed on request and the list i
       salt = 0.4;
       return route.fulfill({ json: { ok: true, food: { id: "off:4006381333931" } } });
     }
-    if (request.method() === "GET" && url.searchParams.get("source") === "database") {
+    if (request.method() === "GET" && url.searchParams.get("scope") === "all") {
       listed += 1;
-      return route.fulfill({ json: { ok: true, foods: [{
-        id: "off:4006381333931", name: "Haselnuss Riegel", brands: "Beispiel", basis_amount: 100, basis_unit: "g",
-        per_100: { kcal: 540, carbs_g: 50, protein_g: 8, fat_g: 33, sugar_g: 40, fiber_g: 3, salt_g: salt },
-        data_origin: "local_database", stored_at: "2026-10-01T08:00:00+00:00",
+      return route.fulfill({ json: { ok: true, products: [{
+        id: "off:4006381333931", name: "Haselnuss Riegel", brand: "Beispiel", barcode: "4006381333931", basis_amount: 100, basis_unit: "g",
+        kcal: 540, carbs_g: 50, protein_g: 8, fat_g: 33, sugar_g: 40, fiber_g: 3, salt_g: salt, origin: "open_food_facts", source: "open_food_facts",
+        fetched_at: "2026-10-01", favorite: 0, status: "active", filled_fields: {}, missing_fields: salt === null ? ["salt_g"] : [],
       }] } });
     }
-    if (request.method() === "GET") return route.fulfill({ json: { ok: true, products: [] } });
     return route.continue();
   });
   await page.goto("/#nutrition/products");
-  const card = page.locator("#nutritionDatabase .nutrition-product-card").filter({ hasText: "Haselnuss Riegel" });
-  await expect(card).toBeVisible();
+  const cards = await openProductSection(page, "all");
+  const card = cards.filter({ hasText: "Haselnuss Riegel" });
+  await expect(card).toContainText("fehlt: Salz");
   await card.getByRole("button", { name: "Aktualisieren" }).click();
   await expect(page.locator("#nutritionProductStatus")).toContainText("„Haselnuss Riegel“ aktualisiert.");
   expect(refreshes).toEqual([{ id: "off:4006381333931" }]);
   // The list is read again after the refresh, so the filled value is shown.
   await expect.poll(() => listed).toBeGreaterThan(1);
+  await expect(card).not.toContainText("fehlt:");
 });

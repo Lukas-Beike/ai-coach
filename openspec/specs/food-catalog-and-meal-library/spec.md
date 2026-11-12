@@ -155,7 +155,7 @@ The system SHALL create a new diary entry when a saved meal is consumed, scale i
 Evidence: `backend/nutrition/diary.py::NutritionDiaryService.log_template`, `backend/nutrition/diary.py::NutritionDiaryService._scale_composite_basis`; `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_template_without_meal_time_stores_unknown_time_and_keeps_meal_type`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_component_replacement_metadata_and_template_portion_snapshots`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_restart_and_database_backup_keep_composite_entries_and_templates`.
 
 ### Requirement: Product UI separates review from recording consumption
-The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption. The athlete SHALL be able to mark saved products as favorites, which the product list shows first, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
+The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption. The athlete SHALL be able to mark any product as favorite, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
 
 #### Scenario: Use a saved product
 - **WHEN** the athlete selects a product and consumed quantity
@@ -166,8 +166,8 @@ The client SHALL present product and label candidates for review and explicit lo
 - **THEN** the draft stays intact and gains one line naming the quantity and product id, never the product name.
 
 #### Scenario: Favorite products
-- **WHEN** the athlete marks a saved product as a favorite
-- **THEN** the product list shows it before other products, open, while unmarked products stay together in one collapsed group, and saving or editing the product keeps the mark.
+- **WHEN** the athlete marks a product, own or from a database, as a favorite
+- **THEN** it is listed under "Favoriten" and still under "Alle Produkte", and saving, editing or re-checking the product keeps the mark.
 
 #### Scenario: Add a product to a logged meal
 - **WHEN** the athlete adds a saved product and quantity to a logged meal
@@ -179,9 +179,9 @@ The client SHALL present product and label candidates for review and explicit lo
 
 #### Scenario: Safe ingredient details
 - **WHEN** the diary displays a composite meal
-- **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations.
+- **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations, and a component from a database product is labelled as such.
 
-Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`. These browser scenarios were inspected, not executed by this worker.
+Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`.
 
 ### Requirement: Coach food reads preserve explicit source and batch results
 The system SHALL support explicit database source selection and bounded batched ingredient lookup through the Coach read interface. Source selection SHALL retain separately labelled matching saved products rather than hiding them or silently replacing the chosen database.
@@ -494,3 +494,28 @@ The product API SHALL list own products and stored database foods together, sort
 - **THEN** it is recorded like an own product with its values at that time.
 
 Evidence: `backend/db/repositories.py::NutritionProductRepository.list_all`, `backend/nutrition/catalog.py::ProductCatalogService.update_product`, `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/nutrition/components.py`, `backend/http_api/nutrition.py` (`scope=all`); `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`, `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`, `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite).
+
+### Requirement: One product list with sections and incomplete markers
+The product page SHALL show "Favoriten (n)" and "Alle Produkte (n)" as collapsible sections, both collapsed when the page opens, each total followed by the number of incomplete entries. Every card SHALL show its origin and, when incomplete, the names of its missing fields, and SHALL offer Verwenden, Bearbeiten, Aktualisieren and Löschen.
+
+#### Scenario: Page opens
+- **WHEN** the athlete opens Ernährung › Produkte
+- **THEN** both sections are collapsed and each heading shows its total and its number of incomplete entries.
+
+#### Scenario: Incomplete product
+- **WHEN** a product lacks salt and sugar
+- **THEN** its card shows the incomplete symbol with an accessible label naming salt and sugar.
+
+#### Scenario: Search
+- **WHEN** the athlete searches by name, brand or EAN
+- **THEN** both own products and database entries are searched, and sections with hits open.
+
+#### Scenario: Database entry actions
+- **WHEN** the athlete edits a database entry, re-checks it, or deletes it
+- **THEN** only its nutrient values are editable, the re-check result is shown, and deleting removes it from the database after confirmation.
+
+#### Scenario: Own product without EAN
+- **WHEN** the athlete re-checks an own product without an EAN
+- **THEN** the page says an EAN is needed and the editor allows entering one.
+
+Evidence: `public/nutrition.js::renderNutritionProducts`, `public/nutrition.js::nutritionProductSection`, `public/nutrition.js::nutritionProductCard`, `public/nutrition.js::appendNutritionProductActions`, `public/nutrition.js::refreshNutritionProduct`, `public/nutrition.js::deleteNutritionProduct`, `public/nutrition.js::lockNutritionDatabaseFields`; `tests/nutrition-lookup-status.test.cjs` (sections, counters, search, cards, actions, unit and date cases), `e2e/nutrition.spec.js` (product list on mobile, tablet-landscape and desktop).
