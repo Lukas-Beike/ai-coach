@@ -927,7 +927,7 @@ class PushTests(PushHarness):
         details = _garmin_approval_details(arguments, self.database_manager, TODAY)
 
         self.assertEqual(
-            [("Kraft A", "Kraft an Garmin")],
+            [("Kraft A", "An Garmin")],
             [(item["name"], item["sport"]) for item in details],
         )
 
@@ -1014,7 +1014,7 @@ class PushTests(PushHarness):
             arguments["entries"],
         )
         self.assertEqual(
-            [("Kraft B", "Kraft an Garmin"), ("Kraft A", "Wird bei Garmin entfernt")],
+            [("Kraft B", "An Garmin"), ("Kraft A", "Wird bei Garmin entfernt")],
             [(item["name"], item["sport"]) for item in details],
         )
 

@@ -1075,7 +1075,7 @@ const COACH_RECEIPT_LABELS = {
   sync_competitions: "Wettkampfsynchronisierung beauftragt",
   resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
   start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
-  push_strength_to_garmin: "Garmin-Krafteinheiten beauftragt",
+  push_strength_to_garmin: "Garmin-Einheiten beauftragt",
 };
 const SYNC_JOB_RECEIPT_LABELS = {
   queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft",
