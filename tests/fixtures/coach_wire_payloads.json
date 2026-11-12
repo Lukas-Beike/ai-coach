@@ -23,7 +23,7 @@
     }
    ],
    "instructions": {
-    "sha256": "b298c7639dfbedf916ac8f776ceb4392cb3f9d2afc4823dcd28ef16bb46690d3"
+    "sha256": "c2c5cdd1b799b5cdfbd04e84d0be9fbf277980814e2f7a232311e04c6caebe9b"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -34,7 +34,7 @@
    "store": true,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -48,7 +48,7 @@
     }
    ],
    "instructions": {
-    "sha256": "b298c7639dfbedf916ac8f776ceb4392cb3f9d2afc4823dcd28ef16bb46690d3"
+    "sha256": "c2c5cdd1b799b5cdfbd04e84d0be9fbf277980814e2f7a232311e04c6caebe9b"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -59,7 +59,7 @@
    "store": true,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -71,7 +71,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":5,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Den Giro entfernen\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -82,14 +82,14 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
   {
    "input": "{\"athlete_message\":\"Den Giro entfernen\",\"previous_assistant_message\":\"Fertig.\"}",
    "instructions": {
-    "sha256": "4c3da3aa84ae03d08c701d6f7c9d82b2eb35638345bd98c5a6d2a5762f9017e8"
+    "sha256": "882042284eeba07cfadc3e765bcfac9eb2e15d95f620c6e0614c5323bd0068df"
    },
    "max_output_tokens": 1024,
    "model": "gpt-6-luna",
@@ -175,7 +175,7 @@
     }
    ],
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -186,7 +186,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -215,7 +215,7 @@
     }
    ],
    "instructions": {
-    "sha256": "f576a3673cdf0cf8a7b22927cb21cf8c9fe53fa3341b7226636ff80a994b9089"
+    "sha256": "0572afbcfcc0f79aabb2df320b072007c52c6ff8e9e467b2c90cd7a0ebd46e16"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -226,7 +226,7 @@
    "store": true,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -252,7 +252,7 @@
     }
    ],
    "instructions": {
-    "sha256": "a5f4d737971f31da914d1a5ab7398ef1ebf88e30773dd21b8a9c55177c4d4242"
+    "sha256": "5c94fcaaa26fb9689633a50b15c3e614bb881b32c46c89dac0938126e75373ab"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -263,7 +263,7 @@
    "store": true,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -305,7 +305,7 @@
     }
    ],
    "instructions": {
-    "sha256": "f576a3673cdf0cf8a7b22927cb21cf8c9fe53fa3341b7226636ff80a994b9089"
+    "sha256": "0572afbcfcc0f79aabb2df320b072007c52c6ff8e9e467b2c90cd7a0ebd46e16"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -316,7 +316,7 @@
    "store": true,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -361,7 +361,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":1,\"messages\":[],\"pending_request\":null,\"confirmed_results\":[],\"attachment_evidence\":[]},\"current_message\":\"Wie war meine Woche?\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -372,7 +372,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -384,7 +384,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -395,7 +395,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -405,7 +405,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 32000,
    "model": "gpt-6-luna",
@@ -416,7 +416,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -428,7 +428,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -439,7 +439,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -470,7 +470,7 @@
     }
    ],
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -481,7 +481,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -528,7 +528,7 @@
     }
    ],
    "instructions": {
-    "sha256": "8c2534db8e976bfeee34525cd15067cc1283b89179ebc8ba61091059ef63f402"
+    "sha256": "4c80218959d69e502ac6aa9d9784fcd4d18b73e53f6f70bbc93b0a1f286320d0"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -539,7 +539,7 @@
    "store": false,
    "tool_choice": "none",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
@@ -551,7 +551,7 @@
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -562,7 +562,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -593,7 +593,7 @@
     }
    ],
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -604,7 +604,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   },
@@ -651,7 +651,7 @@
     }
    ],
    "instructions": {
-    "sha256": "5deccadb7d64e558e4cf88e942de964597590b8d2e5c42b35a8911e457d19e79"
+    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
    },
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
@@ -662,7 +662,7 @@
    "store": false,
    "tool_choice": "auto",
    "tools": {
-    "sha256": "f8be975ad080f928c169dd62270de8191c58ab1197956e10825cc76b62971543"
+    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
    },
    "truncation": "auto"
   }
