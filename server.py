@@ -1293,10 +1293,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
             ),
             web_searcher=lambda: NutritionWebSearchService(
                 selected_model=SETTINGS.selected_model,
-                openai_request=lambda path, payload: nutrition_openai_client().request(
-                    path, payload
-                ),
-                openai_path=OPENAI_RESPONSES_PATH,
+                complete=lambda request: nutrition_openai_client().complete(request),
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
             observed_opener=observed_provider_opener,

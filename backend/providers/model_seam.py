@@ -39,6 +39,10 @@ class ModelRequest:
     # One-shot answer: a JSON object, or {"name": ..., "schema": ...} for a schema.
     json_output: bool = False
     output_schema: dict[str, Any] | None = None
+    # The provider searches the web and reports the pages it read.
+    web_search: bool = False
+    # A fixed service tier instead of the one the athlete selected.
+    service_tier: str | None = None
 
 
 @dataclass
@@ -52,6 +56,10 @@ class ModelTurn:
     usage: dict[str, Any] = field(default_factory=dict)
     # completed, max_tokens, incomplete, failed, cancelled; "" when not reported.
     stop_reason: str = ""
+    # The text of the last message: earlier messages may narrate a search.
+    final_text: str = ""
+    # The pages a web search read or the answer cites.
+    sources: list[str] = field(default_factory=list)
 
     @property
     def incomplete(self) -> bool:

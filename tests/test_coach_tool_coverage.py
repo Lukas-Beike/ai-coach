@@ -27,6 +27,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.sync.adaptive import IllnessPauseSyncService
 
 
@@ -1762,14 +1763,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ]
         }
         client = Mock()
-        client.request.return_value = found
+        sent = []
+
+        def complete(request):
+            # Through the real adapter: the wire payload out, the reply read back.
+            sent.append(request_payload(request))
+            return model_turn(found)
+
+        client.complete.side_effect = complete
         with patch.object(
             server.MODEL_TRANSPORT, "openai_responses_client", return_value=client
         ):
             result = self.run_tool(
                 "search_web_for_product_values", {"products": [own["id"]]}
             )
-            client.request.side_effect = AppError(400, "raw provider detail")
+            client.complete.side_effect = AppError(400, "raw provider detail")
             unavailable, _ = self.turn(
                 "Suche die Werte im Web.",
                 [
@@ -1785,8 +1793,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             result["products"][0]["values"],
             [{"field": "salt_g", "value": 0.1, "source_url": page}],
         )
-        payload = client.request.call_args_list[0].args[1]
-        self.assertEqual(payload["tools"], [{"type": "web_search"}])
+        self.assertEqual(sent[0]["tools"], [{"type": "web_search"}])
         self.assertEqual(unavailable["status"], "completed")
         outcome = unavailable["command_receipts"][0]["result"]
         self.assertEqual(outcome["status"], "unavailable")

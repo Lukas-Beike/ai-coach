@@ -7,13 +7,17 @@ import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
 from backend.errors import AppError
+from backend.nutrition import web_search
 from backend.nutrition.web_search import NutritionWebSearchService
+from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.openai_requests import OpenAIResponsesClient, ResponsesClock
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 PAGE = "https://example.test/synthetic-bar"
 NOW = datetime(2026, 11, 12, 8, 0, tzinfo=UTC)
@@ -62,15 +66,16 @@ def value(field: Any, number: Any, url: str = PAGE) -> dict[str, Any]:
 def service(result: Any) -> tuple[NutritionWebSearchService, list[dict[str, Any]]]:
     sent: list[dict[str, Any]] = []
 
-    def request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        sent.append({"path": path, **payload})
+    def complete(request: ModelRequest) -> ModelTurn:
+        # Through the real adapter: the wire payload out, the reply read back.
+        sent.append(request_payload(request))
         if isinstance(result, Exception):
             raise result
-        return result
+        return model_turn(result)
 
     return (
         NutritionWebSearchService(
-            selected_model=lambda: "synthetic-model", openai_request=request
+            selected_model=lambda: "synthetic-model", complete=complete
         ),
         sent,
     )
@@ -88,18 +93,139 @@ ROW = {
 }
 
 
+class _WireHttp:
+    """The HTTP layer under a real Responses client: records what goes out."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    def request(self, method: str, url: str, payload: Any, **_options: Any) -> Any:
+        self.sent.append({"method": method, "url": url, "payload": payload})
+        return {"status": "completed", "output": []}
+
+
+class _WireState:
+    def validate_openai_response(self, _path: str, result: Any) -> Any:
+        return result
+
+    def record_usage(self, *_args: Any) -> None:
+        return None
+
+
+def wire_search(http: _WireHttp) -> NutritionWebSearchService:
+    """The web search over a real Responses client, wired as server.py does."""
+    client = OpenAIResponsesClient(
+        api_key="synthetic-key",
+        base_url="https://api.example.test/v1/",
+        default_base_url="https://api.openai.com/v1",
+        responses_path="/responses",
+        response_timeout_seconds=17,
+        thinking_level=lambda: "high",
+        http_client=cast(Any, http),
+        provider_state=cast(Any, _WireState()),
+        logger=None,
+        clock=ResponsesClock(lambda _seconds: None),
+        service_tier=lambda _model: "priority",
+    )
+    return NutritionWebSearchService(
+        selected_model=lambda: "synthetic-model",
+        complete=client.complete,
+    )
+
+
+class NutritionWebSearchWireTests(unittest.TestCase):
+    def test_the_outgoing_request_is_unchanged(self) -> None:
+        """Golden wire payload, recorded before the model seam (#2338)."""
+        http = _WireHttp()
+        wire_search(http).search([ROW])
+        self.assertEqual(
+            http.sent,
+            [
+                {
+                    "method": "POST",
+                    "url": "https://api.example.test/v1/responses",
+                    "payload": {
+                        "model": "synthetic-model",
+                        "tools": [{"type": "web_search"}],
+                        "instructions": web_search._INSTRUCTIONS,
+                        "input": json.dumps(
+                            {
+                                "products": [
+                                    {
+                                        "ref": 1,
+                                        "name": "Synthetic bar",
+                                        "brand": "Synthetic brand",
+                                        "barcode": "4006381333931",
+                                        "basis_amount": 100,
+                                        "basis_unit": "g",
+                                        "missing_fields": ["salt_g", "fiber_g"],
+                                    }
+                                ]
+                            },
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        "text": {
+                            "format": {
+                                "type": "json_schema",
+                                "name": "product_values",
+                                "strict": True,
+                                "schema": web_search._SCHEMA,
+                            }
+                        },
+                        "store": False,
+                        "include": ["web_search_call.action.sources"],
+                        "reasoning": {"effort": "low"},
+                        "service_tier": "default",
+                    },
+                }
+            ],
+        )
+
+
+class ResponsesAdapterWebSearchTests(unittest.TestCase):
+    def test_web_search_and_tier_reach_every_request_shape(self) -> None:
+        for request in (
+            ModelRequest(model="m", input="x", web_search=True, service_tier="default"),
+            ModelRequest(
+                model="m",
+                input="x",
+                json_output=True,
+                web_search=True,
+                service_tier="default",
+            ),
+        ):
+            payload = request_payload(request)
+            self.assertIn({"type": "web_search"}, payload["tools"])
+            self.assertIn("web_search_call.action.sources", payload["include"])
+            self.assertEqual(payload["service_tier"], "default")
+
+    def test_malformed_sources_and_citations_read_as_none(self) -> None:
+        turn = model_turn(
+            {
+                "output": [
+                    {"type": "web_search_call", "action": {"sources": "x"}},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "annotations": 5}],
+                    },
+                    {"type": "message", "content": "text"},
+                ]
+            }
+        )
+        self.assertEqual((turn.sources, turn.final_text), ([], ""))
+
+
 class NutritionWebSearchTests(unittest.TestCase):
     def test_request_carries_only_product_data(self) -> None:
         searcher, sent = service(response([]))
         searcher.search([ROW])
         request = sent[0]
-        self.assertEqual(request["path"], "/v1/responses")
         self.assertEqual(request["model"], "synthetic-model")
         self.assertEqual(request["tools"], [{"type": "web_search"}])
         self.assertEqual(
             set(request),
             {
-                "path",
                 "model",
                 "tools",
                 "instructions",
@@ -233,7 +359,7 @@ class NutritionWebSearchTests(unittest.TestCase):
             NutritionWebSearchService(),
             NutritionWebSearchService(selected_model=lambda: "model"),
             NutritionWebSearchService(
-                selected_model=lambda: "", openai_request=lambda *_: {}
+                selected_model=lambda: "", complete=lambda _request: ModelTurn()
             ),
         ):
             self.assertEqual(searcher.search([ROW])["status"], "unavailable")
