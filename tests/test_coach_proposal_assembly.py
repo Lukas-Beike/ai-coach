@@ -17,7 +17,6 @@ def make_assembly() -> tuple[CoachProposalAssembly, dict[str, Mock]]:
     dependencies = {
         "manager": Mock(name="database_manager"),
         "nutrition_diary": Mock(name="nutrition_diary_service"),
-        "nutrition_meal_library": Mock(name="nutrition_meal_library_service"),
         "history": Mock(name="history_undo_service"),
         "intervals": Mock(name="intervals_client_factory"),
         "gate": Mock(name="maintenance_gate"),
@@ -29,9 +28,6 @@ def make_assembly() -> tuple[CoachProposalAssembly, dict[str, Mock]]:
     dependencies["nutrition_diary_provider"] = Mock(
         return_value=dependencies["nutrition_diary"]
     )
-    dependencies["nutrition_meal_library_provider"] = Mock(
-        return_value=dependencies["nutrition_meal_library"]
-    )
     dependencies["history_provider"] = Mock(return_value=dependencies["history"])
     dependencies["gate"].return_value = Mock(name="first_gate")
     assembly = CoachProposalAssembly(
@@ -39,7 +35,6 @@ def make_assembly() -> tuple[CoachProposalAssembly, dict[str, Mock]]:
             persistence=ProposalPersistence(
                 dependencies["manager_provider"],
                 dependencies["nutrition_diary_provider"],
-                dependencies["nutrition_meal_library_provider"],
             ),
             execution=ProposalExecutionOwners(
                 dependencies["history_provider"],
@@ -79,10 +74,6 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         self.assertIs(
             create_factory.call_args.kwargs["nutrition_diary_service"],
             dependencies["nutrition_diary_provider"],
-        )
-        self.assertIs(
-            create_factory.call_args.kwargs["nutrition_meal_library_service"],
-            dependencies["nutrition_meal_library_provider"],
         )
         self.assertIs(confirm_factory.call_args.args[0], dependencies["manager"])
         self.assertEqual(dependencies["manager_provider"].call_count, 3)
