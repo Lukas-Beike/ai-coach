@@ -434,7 +434,7 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
             "Montagslauf",
             "Run",
             session_focus="tempo",
-            description="- 10km Tempo",
+            description="- 10km Z3 Pace",
             hr_cap=None,
             duration_minutes=55,
         )
@@ -445,7 +445,7 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
             "Montags-Radeinheit",
             "Ride",
             session_focus="threshold",
-            description="- 60m 95% FTP",
+            description="- 60m 95%",
             duration_minutes=60,
         )
     server.PLANNING_DATA.competition().save(
@@ -749,11 +749,21 @@ def run_case(
                         "tools": counter.tool_names[mark:],
                         "status": receipt.get("status", ""),
                         "text": str((receipt.get("message") or {}).get("content", "")),
+                        "failed_tools": _failed_tools(receipt),
                     }
                 )
         after = snapshot(server)
     result = score_case(case, before, after, turns, tags)
     return {"id": case["id"], "turns": turns, **result}
+
+
+def _failed_tools(receipt: dict[str, Any]) -> list[str]:
+    """Tool steps the app refused, as tool:reason codes (never their message text)."""
+    return [
+        f"{step.get('tool')}:{(step.get('result') or {}).get('reason') or 'failed'}"
+        for step in receipt.get("command_receipts") or []
+        if isinstance(step, dict) and (step.get("result") or {}).get("ok") is False
+    ]
 
 
 # --- CLI and report ------------------------------------------------------------
@@ -839,6 +849,8 @@ def render_report(
             )
         lines.append(f"- {'PASS' if r['passed'] else 'FAIL'} `{r['id']}`: {tools}")
         lines += [f"  - {p}" for p in problems]
+        refused = [t for turn in r["turns"] for t in turn.get("failed_tools", [])]
+        lines += [f"  - tool refused {t}" for t in refused]
     if not_run:
         lines += [
             "",

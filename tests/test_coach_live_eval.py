@@ -591,6 +591,18 @@ class ScriptedLoopTests(unittest.TestCase):
         with scripted(responders):
             return live.run_case(CASES[case_id], counter, SETTINGS), counter
 
+    def test_every_case_setup_seeds_through_the_real_services(self):
+        # A setup the app rejects (an invalid seeded workout) fails here, not
+        # in a paid live run.
+        for case_id in CASES:
+            with self.subTest(case=case_id):
+                result, _counter = self.run_scripted(
+                    case_id, itertools.repeat("Synthetische Antwort")
+                )
+                self.assertNotIn(
+                    True, [m.startswith("error:") for m in result["misses"]]
+                )
+
     def test_a_correct_atomic_patch_scores_clean_and_counts_every_call(self):
         def patch_call():
             now = state()
@@ -852,6 +864,7 @@ class CommandLineTests(unittest.TestCase):
                         "tools": ["clarify_coach_request"],
                         "text": "Frage?",
                         "status": "completed",
+                        "failed_tools": ["save_checkin:invalid_checkin"],
                     }
                 ],
                 "safety": [],
@@ -866,6 +879,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Unnecessary clarifications: 1", text)
         self.assertIn("SAFETY mutation_in_read_only_case", text)
         self.assertIn("apply_training_patch", text)
+        self.assertIn("tool refused save_checkin:invalid_checkin", text)
 
 
 if __name__ == "__main__":
