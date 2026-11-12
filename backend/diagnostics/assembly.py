@@ -38,7 +38,8 @@ class DiagnosticGarminServices:
     client_factory: Callable[[], Any]
     fixture_loader: Callable[[], Any]
     sync_state: Callable[[], Any]
-    change_check: Callable[[], Any] | None = None
+    # The Garmin change check's status: counts and times only (#2372).
+    change_check: Callable[[], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -152,10 +153,6 @@ class DiagnosticsAssembly:
                 canonical_read=(
                     self._canonical_read() if self._canonical_read is not None else None
                 ),
-                garmin_change_check=(
-                    (lambda: self._garmin_change_check().status())
-                    if self._garmin_change_check is not None
-                    else None
-                ),
+                garmin_change_check=self._garmin_change_check,
             )
         )

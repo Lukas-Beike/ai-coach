@@ -2261,7 +2261,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             client_factory=GARMIN_ASSEMBLY.client_factory,
             fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
             sync_state=GARMIN_ASSEMBLY.sync_state_service,
-            change_check=GARMIN_ASSEMBLY.change_check,
+            change_check=lambda: GARMIN_ASSEMBLY.change_check().status(),
         ),
         local_projections=DiagnosticLocalProjections(
             profile=ATHLETE_DATA.profile,
