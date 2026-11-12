@@ -189,8 +189,9 @@ class GarminStrengthPushService:
         Runs after a Garmin refresh. Nothing happens while the latest refresh
         could not log the SDK in, so no extra login is tried. A failure is logged
         and never fails the refresh: the links stay for the next refresh. Every
-        run logs its count, zero included, and stores its time and removals for
-        the diagnostics (#2408); a skip logs its reason.
+        run logs its count, zero included, and stores its time, outcome,
+        removals and the links still waiting for the diagnostics (#2408); a skip
+        logs its reason.
         """
         if not self._configured():
             return 0
@@ -203,6 +204,7 @@ class GarminStrengthPushService:
                     "context": {"reason": "sdk_skipped"},
                 },
             )
+            self._record_run(0, "skipped")
             return 0
         removed = [0]
         cleanup: dict[str, Any] | None = None
@@ -225,7 +227,7 @@ class GarminStrengthPushService:
                 extra={"event": "garmin_past_workout_removal_failed"},
             )
         if cleanup is not None:
-            self._record_run(removed[0])
+            self._record_run(removed[0], "failed" if failed else "ok")
         if failed and not removed[0]:
             return 0
         # Logged on every run, zero included, so a quiet run is visible (#2408).
@@ -238,8 +240,8 @@ class GarminStrengthPushService:
         )
         return removed[0]
 
-    def _record_run(self, removed: int) -> None:
-        """Add the run's time and removals to the stored state the diagnostics read."""
+    def _record_run(self, removed: int, outcome: str) -> None:
+        """Store the run's time, outcome and removals, and the links still waiting."""
         try:
             state = self._cleanup_state()
             self._save_cleanup(
@@ -247,6 +249,9 @@ class GarminStrengthPushService:
                     **state,
                     "removed": state["removed"] + removed,
                     "last_run_at": self._now().astimezone(UTC).isoformat(),
+                    "last_outcome": outcome,
+                    # Athlete-local cutoff, the one the removal itself uses.
+                    "pending": len(self._past_links()),
                 }
             )
         except Exception:  # noqa: BLE001 - a status write never fails the refresh

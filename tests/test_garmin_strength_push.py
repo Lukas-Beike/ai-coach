@@ -1232,6 +1232,8 @@ class PastWorkoutRemovalTests(unittest.TestCase):
                 "checked": ["703", "704"],
                 "removed": 2,
                 "last_run_at": NOW.isoformat(),
+                "last_outcome": "ok",
+                "pending": 0,
             },
             self.cleanup(),
         )
@@ -1320,6 +1322,9 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.assertEqual(
             {"reason": "sdk_skipped"}, getattr(logs.records[0], "context", None)
         )
+        self.assertEqual(
+            ("skipped", 1), (self.cleanup()["last_outcome"], self.cleanup()["pending"])
+        )
         self.assertIsNotNone(self.link(U1))
         self.assertEqual([], self.garmin.calls)
 
@@ -1359,6 +1364,9 @@ class PastWorkoutRemovalTests(unittest.TestCase):
             [getattr(record, "event", None) for record in logs.records],
         )
         self.assertEqual(NOW.isoformat(), self.cleanup()["last_run_at"])
+        self.assertEqual(
+            ("failed", 1), (self.cleanup()["last_outcome"], self.cleanup()["pending"])
+        )
 
 
 if __name__ == "__main__":

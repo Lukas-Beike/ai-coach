@@ -141,6 +141,6 @@ After each Garmin `refresh` job, the system SHALL unschedule and delete the link
 
 #### Scenario: Every run is visible
 - **WHEN** a Garmin refresh finishes
-- **THEN** a removal run logs `garmin_past_workouts_removed` with its count, zero included, or `garmin_past_workout_removal_failed`, and stores its time and the running total of removals; a refresh whose SDK login was skipped logs `garmin_past_workout_removal_skipped` and makes no Garmin call; the diagnostics section `garmin_past_workout_removal` reports only counts and the last run time (#2408).
+- **THEN** a removal run logs `garmin_past_workouts_removed` with its count, zero included, or `garmin_past_workout_removal_failed`, and stores its time, its outcome, the running total of removals and the past linked workouts it left; a refresh whose SDK login was skipped logs `garmin_past_workout_removal_skipped`, stores the outcome `skipped` and makes no Garmin call; the diagnostics section `garmin_past_workout_removal` reports only these counts, the outcome and the last run time (#2408).
 
 Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/garmin_strength_push.py:GarminStrengthPushService._remove_unlinked`, `backend/sync/executor.py:GarminJobAdapter`, `backend/diagnostics/plan_sync.py:summarize_garmin_removal`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`, `tests/test_diagnostic_plan_sync.py:GarminRemovalDiagnosticsTests`.

@@ -211,6 +211,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "checked": 0,
                 "removed": 0,
                 "last_run_at": None,
+                "last_outcome": None,
                 "past_links_pending": 0,
             },
         )
@@ -303,8 +304,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # three domain tables) to the same snapshot; the stream backfill counts
         # add two (Garmin records, the stream cursor); the provider sync times add
         # two (refresh history, push jobs); the schema version adds one; the
-        # Garmin past-workout removal adds two (its state, the links waiting).
-        self.assertEqual(len(self.db.queries), 25)
+        # Garmin past-workout removal adds its stored state.
+        self.assertEqual(len(self.db.queries), 24)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
