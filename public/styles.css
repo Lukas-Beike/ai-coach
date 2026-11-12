@@ -898,8 +898,6 @@ h2 {
 /* The label sits above its select, so a phone never breaks it inside a word (#2370). */
 .planned-focus-field { display: grid; flex: 0 1 12rem; gap: 4px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; width: 100%; padding: 4px 8px; }
-.planned-strength-plan { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; color: var(--muted); font-size: .8rem; line-height: 1.5; }
-.planned-strength-plan strong { color: var(--ink); font-weight: 600; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
 .planned-week-sync { display: flex; padding: 6px 0 2px; }
 .planned-week-sync .planned-sync-button { position: relative; display: inline-flex; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; }

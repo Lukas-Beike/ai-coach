@@ -66,37 +66,6 @@ function restorePlannedEntryFocus(root, focused) {
   (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
 }
 
-// A planned strength unit lists every stored exercise in plan order (#2370): its
-// warm-up, sets × reps, load, rest and note. The description is generated from the
-// same structure, so it is shown only for a unit without one.
-// Stored values keep their decimals (41,25 kg), as the plan text and the Garmin workout.
-function plannedStrengthLoad(item) {
-  const number = (value) => AppFormat.number(value, { digits: 2 });
-  return [
-    item.kg == null ? null : Number(item.kg) ? `${number(item.kg)} kg` : "ohne Zusatzgewicht",
-    item.pct_1rm == null ? null : `${number(item.pct_1rm)} % 1RM`,
-    item.rpe == null ? null : `RPE ${number(item.rpe)}`,
-    item.rir == null ? null : `${number(item.rir)} RIR`,
-  ].filter(Boolean).join(", ");
-}
-
-function plannedStrengthPlan(structure) {
-  if (!Array.isArray(structure) || !structure.length) return null;
-  const list = document.createElement("ol");
-  list.className = "planned-strength-plan";
-  for (const item of structure) {
-    const row = document.createElement("li");
-    const name = document.createElement("strong");
-    name.textContent = item.name || "Übung";
-    const warmup = item.warmup ? `Aufwärmen ${item.warmup.sets}×${item.warmup.reps}${item.warmup.kg == null ? "" : ` @ ${plannedStrengthLoad({ kg: item.warmup.kg })}`}, dann ` : "";
-    const load = plannedStrengthLoad(item);
-    const parts = [`${warmup}${item.sets}×${item.reps}${load ? ` @ ${load}` : ""}`, item.rest_s == null ? null : `${item.rest_s} s Pause`, item.note || null];
-    row.append(name, document.createTextNode(` ${parts.filter(Boolean).join(" · ")}`));
-    list.append(row);
-  }
-  return list;
-}
-
 // The unit's description, or a placeholder when the card body would stay empty.
 function appendPlannedDescription(details, text) {
   if (!text && details.childElementCount) return;
@@ -1470,10 +1439,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
-    // A done unit with an executed-sets comparison shows that comparison instead.
-    const strengthPlan = entry.compliance?.strength_sets ? null : plannedStrengthPlan(entry.strength_structure);
-    if (strengthPlan) details.append(strengthPlan);
-    else appendPlannedDescription(details, entry.description);
+    appendPlannedDescription(details, entry.description);
     card.append(cardSummary, details);
     return card;
   }
@@ -2052,7 +2018,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           heading.append(cardTitle, meta);
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
-          card.append(heading, plannedStrengthPlan(workout.strength_structure) || description);
+          card.append(heading, description);
           const wahoo = libraryWahooRow(workout);
           if (wahoo) card.append(wahoo);
           cards.append(card);
