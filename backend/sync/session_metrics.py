@@ -5,7 +5,9 @@ Each batch fingerprints every live ride and run from its summary, the content
 hashes of its full-resolution stream sets and its members, before any stream is
 decoded. Only sessions whose stored rows carry another fingerprint are
 recomputed, at most ``batch_size`` per transaction within the batch time
-(#2287), so a pass without changes decodes nothing and writes nothing. A
+(#2287), so a pass without changes decodes nothing and writes nothing. The
+worker's ``prefetch`` decodes and computes the batch with a reader first, so the
+writer transaction only re-checks the fingerprints and writes (#2311). A
 computed session upserts one derived observation per metric it has, owned by
 the session; its other rows and the rows of sessions that are gone are
 retired. Sessions computed without any value keep their fingerprint in the
@@ -59,7 +61,12 @@ from backend.performance.session_metrics_reads import (
     DERIVED_LABEL,
     stored_session_metrics,
 )
-from backend.sync.canonical_backfill import BatchReport, timed_batch
+from backend.sync.canonical_backfill import (
+    PREFETCH_SECONDS,
+    BatchReport,
+    precomputed_batch,
+    timed_batch,
+)
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -139,6 +146,30 @@ class _Plan:
     keep: set[str] = field(default_factory=set)
     empty: dict[str, str] = field(default_factory=dict)
     changed: list[tuple[Mapping[str, Any], str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _Scan:
+    """One read of every session's inputs, without decoding a stream."""
+
+    sessions: Mapping[str, Sequence[ActivityRecord]]
+    summaries: list[Mapping[str, Any]]
+    stream_keys: Mapping[str, Sequence[Any]]
+    stored: Mapping[str, Mapping[str, Mapping[str, Any]]]
+    state: dict[str, Any]
+    plan: _Plan
+
+    def compute(
+        self, db: Any, item: Mapping[str, Any], fingerprint: str
+    ) -> SessionMetrics:
+        """Decode the session's streams and compute its metrics."""
+        session_id = str(item["id"])
+        activity = (
+            _analysis_activity(db, session_id, self.sessions[session_id])
+            if session_id in self.stream_keys
+            else None
+        )
+        return session_metrics(item, activity, fingerprint)
 
 
 @dataclass(slots=True)
@@ -230,14 +261,106 @@ class SessionMetricsStage:
         self._clock = clock
         self._reader = reader or CanonicalTableReader()
         self._batch_size = batch_size
+        self._prepared: dict[str, tuple[str, SessionMetrics]] | None = None
 
     @property
     def stage(self) -> str:
         return STAGE
 
+    def prefetch(self, database: Callable[[], Any]) -> None:
+        """Compute one batch of changed sessions with a reader, before the writer."""
+        prepared: dict[str, tuple[str, SessionMetrics]] = {}
+        with database().reader() as db:
+            scan = self._scan(db)
+            for item, fingerprint in timed_batch(
+                scan.plan.changed, self._batch_size, PREFETCH_SECONDS
+            ):
+                prepared[str(item["id"])] = (
+                    fingerprint,
+                    scan.compute(db, item, fingerprint),
+                )
+        self._prepared = prepared
+
     def run_batch(self, db: Any) -> BatchReport:
-        """Recompute up to one batch of changed sessions in the caller's transaction."""
+        """Write up to one batch of changed sessions in the caller's transaction.
+
+        Sessions the prefetch computed are written while their fingerprint is
+        unchanged; without a prefetch the batch computes inline.
+        """
         now = self._clock()
+        prepared, self._prepared = self._prepared, None
+        scan = self._scan(db)
+        summaries, stored, state, plan = (
+            scan.summaries,
+            scan.stored,
+            scan.state,
+            scan.plan,
+        )
+        keep, next_empty = plan.keep, plan.empty
+        tally = _Tally()
+        done_ids: set[str] = set()
+        for item, metrics in precomputed_batch(
+            [
+                (str(item["id"]), fingerprint, (item, fingerprint))
+                for item, fingerprint in plan.changed
+            ],
+            self._batch_size,
+            prepared,
+            lambda entry: scan.compute(db, *entry),
+        ):
+            summary, fingerprint = item
+            session_id = str(summary["id"])
+            done_ids.add(session_id)
+            written = _write_session(db, summary, metrics, now, tally)
+            if written:
+                keep.update(written)
+            else:
+                next_empty[session_id] = fingerprint
+        computed = len(done_ids)
+        pending = [
+            (item, fingerprint)
+            for item, fingerprint in plan.changed
+            if str(item["id"]) not in done_ids
+        ]
+        for waiting, _ in pending:
+            # Not recomputed yet: its stored rows stay until a later batch.
+            keep.update(
+                row["natural_key"]
+                for row in stored.get(str(waiting["id"]), {}).values()
+            )
+        retired = canonical_store.retire_derived_observations(
+            db, METHOD_ID, keep=keep, now=now
+        )
+        done = not pending
+        counts = {
+            "sessions": len(summaries),
+            "with_streams": len(scan.stream_keys),
+            "computed": computed,
+            "pending": len(pending),
+            "values": dict(sorted(tally.values.items())),
+            "bases": dict(sorted(tally.bases.items())),
+            "written": tally.written,
+            "retired": retired,
+        }
+        self._save(
+            db,
+            {
+                "status": "complete" if done else "running",
+                "method_version": METHOD_VERSION,
+                "completed_at": now if done else state.get("completed_at"),
+                "counts": counts,
+                "empty": next_empty,
+            },
+        )
+        # Counts only: metric names and bases, never values or identifiers.
+        _LOGGER.info(
+            "Local session metrics reconciled",
+            extra={"event": "session_metrics_reconciled", "context": counts},
+        )
+        return BatchReport(items=computed, done=done)
+
+    def _scan(self, db: Any) -> _Scan:
+        """Fingerprint every live ride and run before any stream is decoded."""
         sessions = {
             session_id: records
             for session_id, records in self._reader.activity_sessions(db)
@@ -262,61 +385,7 @@ class SessionMetricsStage:
         stored = stored_session_metrics(db)
         state = self._state(db)
         plan = _plan(summaries, sessions, stream_keys, stored, state.get("empty") or {})
-        keep, next_empty = plan.keep, plan.empty
-        tally = _Tally()
-        computed = 0
-        for item, fingerprint in timed_batch(plan.changed, self._batch_size):
-            computed += 1
-            session_id = str(item["id"])
-            activity = (
-                _analysis_activity(db, session_id, sessions[session_id])
-                if session_id in stream_keys
-                else None
-            )
-            written = _write_session(
-                db, item, session_metrics(item, activity, fingerprint), now, tally
-            )
-            if written:
-                keep.update(written)
-            else:
-                next_empty[session_id] = fingerprint
-        pending = plan.changed[computed:]
-        for waiting, _ in pending:
-            # Not recomputed yet: its stored rows stay until a later batch.
-            keep.update(
-                row["natural_key"]
-                for row in stored.get(str(waiting["id"]), {}).values()
-            )
-        retired = canonical_store.retire_derived_observations(
-            db, METHOD_ID, keep=keep, now=now
-        )
-        done = not pending
-        counts = {
-            "sessions": len(summaries),
-            "with_streams": len(stream_keys),
-            "computed": computed,
-            "pending": len(pending),
-            "values": dict(sorted(tally.values.items())),
-            "bases": dict(sorted(tally.bases.items())),
-            "written": tally.written,
-            "retired": retired,
-        }
-        self._save(
-            db,
-            {
-                "status": "complete" if done else "running",
-                "method_version": METHOD_VERSION,
-                "completed_at": now if done else state.get("completed_at"),
-                "counts": counts,
-                "empty": next_empty,
-            },
-        )
-        # Counts only: metric names and bases, never values or identifiers.
-        _LOGGER.info(
-            "Local session metrics reconciled",
-            extra={"event": "session_metrics_reconciled", "context": counts},
-        )
-        return BatchReport(items=computed, done=done)
+        return _Scan(sessions, summaries, stream_keys, stored, state, plan)
 
     def mark_failed(self, db: Any) -> None:
         state = self._state(db)

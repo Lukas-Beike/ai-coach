@@ -100,10 +100,14 @@ MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
 # A backfill batch starts no new raw record or session after this long: the
-# re-projection and the follow-up stages that decode streams in the writer, so a
-# waiting login, Coach turn or provider sync gets the writer within seconds
-# (#2287). Foreground writers wait up to 20 s.
+# re-projection, and a follow-up stage that computes in the writer when it had no
+# prefetch, so a waiting login, Coach turn or provider sync gets the writer within
+# seconds (#2287). Foreground writers wait up to 20 s.
 BATCH_SECONDS: Final = 2.0
+# A follow-up stage's prefetch decodes and computes with a reader before the
+# writer (#2311), so it may take longer than a writer batch; it stays well inside
+# the restore drain timeout, as the maintenance gate is held meanwhile.
+PREFETCH_SECONDS: Final = 6.0
 
 _LOGGER = logging.getLogger("intervals_coach")
 _REPROJECT: Final = "reproject"
@@ -125,13 +129,42 @@ class BatchReport:
     done: bool
 
 
-def timed_batch[T](items: Sequence[T], size: int) -> Iterator[T]:
-    """Yield up to ``size`` items until ``BATCH_SECONDS`` have passed; always the first."""
-    deadline = time.monotonic() + BATCH_SECONDS
+def timed_batch[T](
+    items: Sequence[T], size: int, seconds: float | None = None
+) -> Iterator[T]:
+    """Yield up to ``size`` items until ``seconds`` (default ``BATCH_SECONDS``) have
+    passed; always the first."""
+    deadline = time.monotonic() + (BATCH_SECONDS if seconds is None else seconds)
     for index, item in enumerate(items[:size]):
         if index and time.monotonic() >= deadline:
             return
         yield item
+
+
+def precomputed_batch[T, R](
+    items: Sequence[tuple[str, str, T]],
+    size: int,
+    prepared: Mapping[str, tuple[str, R]] | None,
+    compute: Callable[[T], R],
+) -> Iterator[tuple[T, R]]:
+    """Yield ``(item, result)`` for one writer batch of ``(key, fingerprint, item)``.
+
+    A result a stage's prefetch computed with a reader is used while the item's
+    fingerprint is unchanged, so the writer only writes (#2311). Without a
+    prefetch, or when none of its results is still valid, the batch computes
+    inline within ``BATCH_SECONDS``, as before, so the stage always progresses.
+    """
+    if prepared:
+        valid = [
+            (item, prepared[key][1])
+            for key, fingerprint, item in items
+            if key in prepared and prepared[key][0] == fingerprint
+        ]
+        if valid:
+            yield from valid
+            return
+    for _key, _fingerprint, item in timed_batch(items, size):
+        yield item, compute(item)
 
 
 @dataclass(frozen=True, slots=True)

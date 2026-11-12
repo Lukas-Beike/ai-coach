@@ -8,7 +8,9 @@ snapshot and the locally resolved thresholds, before any set is decoded. Only
 sessions whose stored ``activity_detail_analysis`` row is not a version-3 row
 with that fingerprint are recomputed, at most ``batch_size`` per transaction and
 no more than the backfill's batch time allows (#2287), so a pass without
-changes decodes nothing and writes nothing.
+changes decodes nothing and writes nothing. The worker's ``prefetch`` freezes
+targets, decodes and analyses the batch with a reader first, so the writer
+transaction only re-checks the fingerprints and writes (#2311).
 
 A session without such a row is computed when it has a stream or lap set; a
 version-3 row whose session lost its sets is rewritten without an analysis.
@@ -70,7 +72,12 @@ from backend.performance.session_zones import (
 )
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.target_snapshot import freeze_targets
-from backend.sync.canonical_backfill import BatchReport, timed_batch
+from backend.sync.canonical_backfill import (
+    PREFETCH_SECONDS,
+    BatchReport,
+    precomputed_batch,
+    timed_batch,
+)
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -116,6 +123,16 @@ class _Session:
             targets=targets,
             thresholds=self.thresholds,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _Analysed:
+    """One session's computed row and its outcome, ready to be written."""
+
+    fingerprint: str
+    payload: dict[str, Any]
+    outcome: str
+    frozen: bool
 
 
 @dataclass(slots=True)
@@ -216,30 +233,54 @@ class SessionAnalysisStage:
         self._preferences = preferences
         self._reader = reader or CanonicalTableReader()
         self._batch_size = batch_size
+        self._prepared: dict[str, tuple[str, _Analysed]] | None = None
 
     @property
     def stage(self) -> str:
         return STAGE
 
-    def run_batch(self, db: Any) -> BatchReport:
-        """Recompute up to one batch of changed sessions in the caller's transaction."""
+    def prefetch(self, database: Callable[[], Any]) -> None:
+        """Analyse one batch of changed sessions with a reader, before the writer."""
         now = self._clock()
-        summaries, sessions = self._sessions(db)
-        changed = [
-            (session, fingerprint)
-            for session, row in sessions
-            if (fingerprint := session.fingerprint(session.targets))
-            != _current_fingerprint(row)
-        ]
+        prepared: dict[str, tuple[str, _Analysed]] = {}
+        with database().reader() as db:
+            summaries, _, changed = self._changed(db)
+            context = _FreezeContext(summaries, self._planned_units, now)
+            for session, fingerprint in timed_batch(
+                changed, self._batch_size, PREFETCH_SECONDS
+            ):
+                prepared[session.session_id] = (
+                    fingerprint,
+                    self._analyse(db, session, fingerprint, context),
+                )
+        self._prepared = prepared
+
+    def run_batch(self, db: Any) -> BatchReport:
+        """Write up to one batch of changed sessions in the caller's transaction.
+
+        Sessions the prefetch analysed are written while their fingerprint is
+        unchanged; without a prefetch the batch analyses inline.
+        """
+        now = self._clock()
+        prepared, self._prepared = self._prepared, None
+        summaries, total, changed = self._changed(db)
         tally = _Tally()
         context = _FreezeContext(summaries, self._planned_units, now)
         computed = 0
-        for session, fingerprint in timed_batch(changed, self._batch_size):
-            self._write(db, session, fingerprint, context, now, tally)
+        for session, analysed in precomputed_batch(
+            [
+                (session.session_id, fingerprint, (session, fingerprint))
+                for session, fingerprint in changed
+            ],
+            self._batch_size,
+            prepared,
+            lambda entry: self._analyse(db, *entry, context),
+        ):
+            self._store(db, session[0], analysed, now, tally)
             computed += 1
         done = computed == len(changed)
         counts = {
-            "sessions": len(sessions),
+            "sessions": total,
             "computed": computed,
             "pending": len(changed) - computed,
             "outcomes": dict(sorted(tally.outcomes.items())),
@@ -261,6 +302,23 @@ class SessionAnalysisStage:
             extra={"event": "session_analysis_reconciled", "context": counts},
         )
         return BatchReport(items=computed, done=done)
+
+    def _changed(
+        self, db: Any
+    ) -> tuple[Sequence[Mapping[str, Any]], int, list[tuple[_Session, str]]]:
+        """The summaries, the session count and the sessions whose stored row
+        carries another fingerprint."""
+        summaries, sessions = self._sessions(db)
+        return (
+            summaries,
+            len(sessions),
+            [
+                (session, fingerprint)
+                for session, row in sessions
+                if (fingerprint := session.fingerprint(session.targets))
+                != _current_fingerprint(row)
+            ],
+        )
 
     def _sessions(
         self, db: Any
@@ -324,31 +382,38 @@ class SessionAnalysisStage:
             sessions.append((session, row))
         return summaries, sessions
 
-    def _write(
+    def _analyse(
         self,
         db: Any,
         session: _Session,
         fingerprint: str,
         context: _FreezeContext,
-        now: str,
-        tally: _Tally,
-    ) -> None:
+    ) -> _Analysed:
+        """Freeze the session's targets if needed and compute its row; no write."""
         targets = session.targets
+        frozen = False
         if targets is None and session.keys:
             targets = stored_targets(db, session.session_id, session.all_records)
             if targets is None:
                 targets = context.freeze(session)
-                tally.outcomes["targets_frozen"] += targets is not None
+                frozen = targets is not None
             if targets is not None:
                 fingerprint = session.fingerprint(targets)
         payload = self._payload(db, session, targets)
-        tally.outcomes[_outcome(session, payload)] += 1
+        return _Analysed(fingerprint, payload, _outcome(session, payload), frozen)
+
+    @staticmethod
+    def _store(
+        db: Any, session: _Session, analysed: _Analysed, now: str, tally: _Tally
+    ) -> None:
+        tally.outcomes["targets_frozen"] += analysed.frozen
+        tally.outcomes[analysed.outcome] += 1
         outcome = activity_detail_store.save_analysis(
             db,
             session.session_id,
             analysis_version=ANALYSIS_VERSION,
-            input_sha256=fingerprint,
-            payload=payload,
+            input_sha256=analysed.fingerprint,
+            payload=analysed.payload,
             now=now,
         )
         tally.written += outcome is not activity_detail_store.WriteOutcome.UNCHANGED

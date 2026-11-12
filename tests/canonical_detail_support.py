@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
+from typing import Any
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from intervals_plan_stub import intervals_ingest_plan
@@ -12,6 +16,10 @@ from intervals_plan_stub import intervals_ingest_plan
 from backend.canonical.vocabulary import ProviderId, StreamChannel
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
+from backend.errors import DatabaseBusyError
+from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.canonical_backfill import BatchReport
+from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_ingest import ingest_plan
 
 NOW = "2026-10-18T08:00:00+00:00"
@@ -34,6 +42,49 @@ STREAM_KEY_CHANNELS = {
     "temperature": StreamChannel.TEMPERATURE_C,
     "moving": StreamChannel.MOVING,
 }
+
+
+def _writer_free(manager: DatabaseManager) -> bool:
+    """Whether another thread gets the writer at once."""
+    taken: list[bool] = []
+
+    def attempt() -> None:
+        try:
+            with manager.unit_of_work(timeout=0):
+                taken.append(True)
+        except DatabaseBusyError:
+            taken.append(False)
+
+    thread = threading.Thread(target=attempt)
+    thread.start()
+    thread.join(5)
+    return taken == [True]
+
+
+def writer_free_while_computing(
+    manager: DatabaseManager, stage: Any, module: ModuleType, name: str
+) -> list[bool]:
+    """Run ``stage`` in the backfill worker until it is complete; per call of
+    ``module.name`` (its per-session computation), whether the writer was free
+    meanwhile (#2311)."""
+    free: list[bool] = []
+    compute = getattr(module, name)
+
+    def probe(*args: Any, **kwargs: Any) -> Any:
+        free.append(_writer_free(manager))
+        return compute(*args, **kwargs)
+
+    worker = CanonicalBackfillWorker(
+        backfill=Mock(run_batch=Mock(return_value=BatchReport(items=0, done=True))),
+        database=lambda: manager,
+        maintenance_gate=MaintenanceGate(),
+        poll_seconds=0,
+        followups=[stage],
+    )
+    with patch.object(module, name, probe):
+        worker.start()
+        worker.join(30)
+    return free
 
 
 def open_manager(directory: str | Path, name: str = "detail.db") -> DatabaseManager:

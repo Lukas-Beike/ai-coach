@@ -54,7 +54,13 @@ from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
     summarize_session_analysis,
 )
-from tests.canonical_detail_support import NOW, ZONE, add_session_record, open_manager
+from tests.canonical_detail_support import (
+    NOW,
+    ZONE,
+    add_session_record,
+    open_manager,
+    writer_free_while_computing,
+)
 from tests.canonical_domain_support import local_zone_configuration
 
 GARMIN = ProviderId.GARMIN
@@ -762,6 +768,20 @@ class SessionAnalysisStageTests(unittest.TestCase):
                 )
                 for state in states
             ],
+        )
+
+    def test_sessions_are_analysed_before_the_writer_is_taken(self) -> None:
+        # #2311: the worker's prefetch decodes and analyses with a reader, so
+        # the writer transaction only re-checks fingerprints and writes.
+        self._sessions_with_streams(3)
+        free = writer_free_while_computing(
+            self.manager, self.stage, session_analysis_stage, "session_analysis"
+        )
+        self.assertEqual([True, True, True], free)
+        with self.manager.reader() as db:
+            state = summarize_session_analysis(self.key_values, db)
+        self.assertEqual(
+            ("complete", 3), (state["status"], state["counts"]["sessions"])
         )
 
     def test_a_long_recompute_leaves_the_writer_to_a_waiting_login(self) -> None:

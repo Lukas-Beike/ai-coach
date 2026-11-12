@@ -6,7 +6,9 @@ cycling types map to an unknown environment) it fingerprints the stream content
 hashes, the start and the distance before any stream is decoded; only sessions
 whose stored input hash differs are decoded, fingerprinted
 (``backend.activities.routes``) and placed, oldest first, so a pass without
-changes decodes nothing. Sessions that are gone and routes without a session
+changes decodes nothing. The worker's ``prefetch`` decodes and fingerprints the
+batch with a reader first, so the writer transaction only re-checks the input
+hashes and places the tracks (#2311). Sessions that are gone and routes without a session
 leave the index, athlete names stay on the routes that remain. Nothing is
 requested remotely.
 
@@ -37,7 +39,12 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import activity_detail_store
 from backend.db.repositories import KeyValueRepository
-from backend.sync.canonical_backfill import BatchReport, timed_batch
+from backend.sync.canonical_backfill import (
+    PREFETCH_SECONDS,
+    BatchReport,
+    precomputed_batch,
+    timed_batch,
+)
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -122,10 +129,28 @@ class ActivityRoutesStage:
         self._zone_provider = zone_provider
         self._reader = reader or CanonicalTableReader()
         self._batch_size = batch_size
+        self._prepared: dict[str, tuple[str, routes.Fingerprint | None]] | None = None
 
     @property
     def stage(self) -> str:
         return STAGE
+
+    def prefetch(self, database: Callable[[], Any]) -> None:
+        """Decode one batch of changed tracks with a reader, before the writer."""
+        prepared: dict[str, tuple[str, routes.Fingerprint | None]] = {}
+        try:
+            with database().reader() as db:
+                wanted, hashes, changed = self._changed(db, route_store.load_index(db))
+                for session_id in timed_batch(
+                    changed, self._batch_size, PREFETCH_SECONDS
+                ):
+                    prepared[session_id] = (
+                        hashes[session_id],
+                        _track(db, session_id, wanted[session_id].get("distance_m")),
+                    )
+        except Exception:  # noqa: BLE001 - the writer batch computes inline instead
+            prepared = {}
+        self._prepared = prepared
 
     def run_batch(self, db: Any) -> BatchReport:
         """Place one batch; a failure is logged and never blocks later stages."""
@@ -144,36 +169,25 @@ class ActivityRoutesStage:
 
     def _run_batch(self, db: Any) -> BatchReport:
         """Place one batch of changed sessions in the caller's transaction."""
+        prepared, self._prepared = self._prepared, None
         index = route_store.load_index(db)
         before = json.dumps(index, sort_keys=True)
-        wanted = self._wanted(db)
-        keys = activity_detail_store.full_stream_keys(db, list(wanted))
+        wanted, hashes, changed = self._changed(db, index)
         sessions = index["sessions"]
-        hashes = {
-            session_id: _input_hash(
-                summary,
-                [
-                    key.content_sha256
-                    for key in keys.get(session_id, ())
-                    if key.provider != _INTERVALS
-                ],
-            )
-            for session_id, summary in wanted.items()
-        }
-        changed = [
-            session_id
-            for session_id, digest in hashes.items()
-            if sessions.get(session_id, {}).get("h") != digest
-        ]
         placed = 0
-        for session_id in timed_batch(changed, self._batch_size):
+        for session_id, track in precomputed_batch(
+            [(session_id, hashes[session_id], session_id) for session_id in changed],
+            self._batch_size,
+            prepared,
+            lambda session_id: _track(
+                db, session_id, wanted[session_id].get("distance_m")
+            ),
+        ):
             placed += 1
             summary = wanted[session_id]
             sessions.setdefault(session_id, {"route": None})
             sessions[session_id].update(h=hashes[session_id], at=summary["started_at"])
-            routes.place(
-                index, session_id, _track(db, session_id, summary.get("distance_m"))
-            )
+            routes.place(index, session_id, track)
         routes.prune(index, wanted)
         if json.dumps(index, sort_keys=True) != before:
             route_store.save_index(self._key_values, db, index)
@@ -208,6 +222,30 @@ class ActivityRoutesStage:
     def summary(self, db: Any) -> dict[str, Any]:
         """Return the content-free status and counts of the last batch."""
         return summarize_activity_routes(self._key_values, db)
+
+    def _changed(
+        self, db: Any, index: Mapping[str, Any]
+    ) -> tuple[dict[str, Mapping[str, Any]], dict[str, str], list[str]]:
+        """Wanted sessions, their input hashes, and the ids whose hash changed."""
+        wanted = self._wanted(db)
+        keys = activity_detail_store.full_stream_keys(db, list(wanted))
+        hashes = {
+            session_id: _input_hash(
+                summary,
+                [
+                    key.content_sha256
+                    for key in keys.get(session_id, ())
+                    if key.provider != _INTERVALS
+                ],
+            )
+            for session_id, summary in wanted.items()
+        }
+        changed = [
+            session_id
+            for session_id, digest in hashes.items()
+            if index["sessions"].get(session_id, {}).get("h") != digest
+        ]
+        return wanted, hashes, changed
 
     def _wanted(self, db: Any) -> dict[str, Mapping[str, Any]]:
         """Rides and runs not known to be indoor, by session id, oldest first."""
