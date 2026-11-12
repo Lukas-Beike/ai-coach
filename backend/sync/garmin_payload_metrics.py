@@ -300,30 +300,39 @@ def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
     return {kind: value for kind, (_, value) in values.items()}
 
 
+def _is_vo2_key(key: Any) -> bool:
+    normalized = _garmin_key(key)
+    return "vo2max" in normalized or ("vo2" in normalized and "max" in normalized)
+
+
+def _garmin_section_vo2_values(
+    section: dict[str, Any], path: tuple[str, ...]
+) -> list[tuple[tuple[str, ...], Any]]:
+    """The VO2max candidates of one section, with the path that names their sport.
+
+    A section with Garmin's named fields yields one value in the canonical
+    mapping's precedence, the precise one first (#2263); other spellings of its
+    VO2max fields are not read beside it.
+    """
+    named = _first_present(section, GARMIN_VO2MAX_ALIASES)
+    if named is not None:
+        return [(path, named)]
+    return [
+        ((*path, str(key)), item) for key, item in section.items() if _is_vo2_key(key)
+    ]
+
+
 def _garmin_collect_vo2_values(
     value: Any, values: dict[str, list[float | int]], path: tuple[str, ...] = ()
 ) -> None:
     if isinstance(value, dict):
-        # A section with Garmin's named fields yields one value in the canonical
-        # mapping's precedence, the precise one first (#2263); other spellings of
-        # its VO2max fields are not read beside it.
-        named = _first_present(value, GARMIN_VO2MAX_ALIASES)
-        if named is not None:
-            number = _garmin_vo2_value(named)
+        for context, item in _garmin_section_vo2_values(value, path):
+            number = _garmin_vo2_value(item)
             if number is not None:
-                values[_garmin_sport_category(_garmin_key(" ".join(path)))].append(
+                values[_garmin_sport_category(_garmin_key(" ".join(context)))].append(
                     number
                 )
         for key, item in value.items():
-            normalized = _garmin_key(key)
-            is_vo2 = "vo2max" in normalized or (
-                "vo2" in normalized and "max" in normalized
-            )
-            if is_vo2 and named is None:
-                number = _garmin_vo2_value(item)
-                if number is not None:
-                    context = _garmin_key(" ".join((*path, str(key))))
-                    values[_garmin_sport_category(context)].append(number)
             _garmin_collect_vo2_values(item, values, (*path, str(key)))
     elif isinstance(value, list):
         for item in value[:100]:
