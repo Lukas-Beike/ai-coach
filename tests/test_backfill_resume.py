@@ -252,14 +252,10 @@ class BackfillChainResumerTests(SyncQueueFixtureMixin, unittest.TestCase):
         queue = Mock()
         queue.active.return_value = True
         scheduler = DailySyncScheduler(
-            Mock(),
             queue,
             Mock(spec=DailySyncMarkerService),
-            Mock(),
             self.maintenance_gate,
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=False,
-                garmin_automatic_sync_days=7,
                 auto_update_label="auto",
             ),
             schedule_policies={},

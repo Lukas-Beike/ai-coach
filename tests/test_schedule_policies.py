@@ -7,10 +7,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 from typing import Any, cast
+from unittest.mock import Mock
 
 from provider_runtime_fakes import ACME_ID, FakeSchedulePolicy, acme_descriptor
 
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
+from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.execution_assembly import WahooJobDependencies
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_table import (
@@ -29,6 +32,15 @@ from backend.sync.scheduler import (
     DailySyncSchedulerConfig,
     StartupSyncScheduler,
     StartupSyncSchedulerConfig,
+)
+from backend.sync.scheduler_assembly import (
+    DailySyncLoopSettings,
+    SyncScheduleControls,
+    SyncScheduleOwners,
+    SyncSchedulePersistence,
+    SyncSchedulePolicy,
+    SyncScheduleProviders,
+    SyncSchedulerAssembly,
 )
 
 
@@ -291,14 +303,10 @@ def _daily(
     policies: dict[str, Any], queue: _ScheduleQueue, markers: _ScheduleMarkers
 ) -> DailySyncScheduler:
     return DailySyncScheduler(
-        cast(Any, _Profile()),
         cast(Any, queue),
         cast(Any, markers),
-        cast(Any, _Garmin()),
         cast(Any, _ScheduleGate()),
         config=DailySyncSchedulerConfig(
-            calendar_url_enabled=True,
-            garmin_automatic_sync_days=7,
             auto_update_label="auto-label",
         ),
         schedule_policies=policies,
@@ -308,13 +316,9 @@ def _daily(
 
 def _startup(policies: dict[str, Any], queue: _ScheduleQueue) -> StartupSyncScheduler:
     return StartupSyncScheduler(
-        cast(Any, _Profile()),
         cast(Any, queue),
-        cast(Any, _Garmin()),
         cast(Any, _SyncState()),
         config=StartupSyncSchedulerConfig(
-            calendar_enabled=True,
-            garmin_automatic_sync_days=7,
             sync_chunk_days=30,
             sync_earliest_date=date(2020, 1, 1),
         ),
@@ -390,6 +394,62 @@ class AcmeMockScheduleTests(unittest.TestCase):
         jobs = {(str(job["provider"]), str(job["job_type"])) for job in queue.enqueued}
         self.assertIn((GARMIN_ID, "historical_backfill"), jobs)
         self.assertNotIn((ACME_ID, "historical_backfill"), jobs)
+
+
+class SchedulerAssemblyPolicyTests(unittest.TestCase):
+    """The production assembly hands its provider options to the policies."""
+
+    def _assembly(self, due: list[bool], gate: ProviderResyncGate) -> Any:
+        config = Mock(calendar_ical_url="https://calendar.invalid/feed.ics")
+        wahoo_sync = Mock()
+        wahoo_sync.configured.return_value = True
+        return SyncSchedulerAssembly(
+            dependencies=SyncSchedulerAssembly.Inputs(
+                owners=SyncScheduleOwners(
+                    lambda: cast(Any, _Profile()),
+                    Mock(),
+                    Mock(),
+                    lambda: cast(Any, _Garmin()),
+                ),
+                persistence=SyncSchedulePersistence(Mock()),
+                controls=SyncScheduleControls(MaintenanceGate(), lambda _s: None),
+                policy=SyncSchedulePolicy(
+                    lambda: config, 7, "auto", 30, date(2020, 1, 1)
+                ),
+                daily_loop=DailySyncLoopSettings(Mock(), Mock()),
+                providers=SyncScheduleProviders(
+                    garmin_resync_gate=gate,
+                    weather_refresh_due=lambda: due[0],
+                    wahoo=WahooJobDependencies(
+                        sync_service=lambda: wahoo_sync,
+                        plan_push_service=Mock(),
+                        resync_gate=ProviderResyncGate("Wahoo"),
+                    ),
+                    sync_period_defaults={WAHOO_ID: 84},
+                    all_sync_days=-1,
+                ),
+            )
+        )
+
+    def test_daily_and_startup_policies_carry_the_provider_options(self) -> None:
+        due = [False]
+        gate = ProviderResyncGate("Garmin")
+        assembly = self._assembly(due, gate)
+        scheduled = {WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID}
+
+        startup = assembly.startup_scheduler()._policies
+        daily = assembly.daily_scheduler()._policies
+
+        self.assertEqual(scheduled, set(startup))
+        self.assertEqual(scheduled, set(daily))
+        self.assertTrue(daily[WAHOO_ID].configured())
+        self.assertTrue(daily[WEATHER_ID].blocked())
+        due[0] = True
+        self.assertFalse(daily[WEATHER_ID].blocked())
+        self.assertFalse(daily[GARMIN_ID].blocked())
+        gate.begin_reset()
+        self.addCleanup(gate.end_reset)
+        self.assertTrue(daily[GARMIN_ID].blocked())
 
 
 if __name__ == "__main__":

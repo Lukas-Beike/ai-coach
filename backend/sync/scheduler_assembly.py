@@ -18,6 +18,7 @@ from backend.sync import scheduler
 from backend.sync.backfill_resume import BackfillChainResumer
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import WahooJobDependencies
+from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.queue import SyncJobQueueService
@@ -79,7 +80,7 @@ class SyncScheduleProviders:
     sync_period_defaults: Mapping[str, int]
     all_sync_days: int
     # The light change check that schedules the automatic Garmin refresh (#2303).
-    garmin_change_check: Callable[[], Any] | None = None
+    garmin_change_check: Callable[[], GarminChangeCheck] | None = None
 
 
 class SyncSchedulerAssembly:
@@ -136,14 +137,10 @@ class SyncSchedulerAssembly:
         markers = self._daily_sync_marker_service()
         garmin = self._garmin_sync_service()
         return scheduler.DailySyncScheduler(
-            profile,
             queue,
             markers,
-            garmin,
             self._maintenance_gate,
             config=scheduler.DailySyncSchedulerConfig(
-                calendar_url_enabled=calendar_enabled,
-                garmin_automatic_sync_days=self._garmin_automatic_sync_days,
                 auto_update_label=self._auto_update_label,
             ),
             schedule_policies=self._schedule_policies(
@@ -181,13 +178,9 @@ class SyncSchedulerAssembly:
         garmin = self._garmin_sync_service()
         sync_state = self._sync_state_repository()
         return scheduler.StartupSyncScheduler(
-            profile,
             queue,
-            garmin,
             sync_state,
             config=scheduler.StartupSyncSchedulerConfig(
-                calendar_enabled=calendar_enabled,
-                garmin_automatic_sync_days=self._garmin_automatic_sync_days,
                 sync_chunk_days=self._sync_chunk_days,
                 sync_earliest_date=self._sync_earliest_date,
             ),

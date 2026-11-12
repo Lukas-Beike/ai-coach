@@ -1,7 +1,7 @@
 """Runtime contracts for provider-owned synchronization orchestration.
 
-Providers contribute runtime objects (freshness sources, full-resync handlers, synchronous refreshes, running probes) through a
-``ProviderRuntimeBinding``. ``ProviderRuntimeRegistry`` checks each binding
+Providers contribute runtime objects (freshness sources, full-resync handlers,
+synchronous refreshes, running probes) through a ``ProviderRuntimeBinding``. ``ProviderRuntimeRegistry`` checks each binding
 against the static descriptor in ``ProviderRegistry`` and exposes the bound
 objects in descriptor order.
 
