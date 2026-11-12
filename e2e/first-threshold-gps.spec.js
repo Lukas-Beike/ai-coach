@@ -84,9 +84,11 @@ test("the GPS-tracks switch takes clicks once loaded and a failed save restores 
   // #2418: no click before the stored state is shown.
   const isGet = (response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET";
   let releaseLoad;
+  let gets = 0;
   const loadHeld = new Promise((resolve) => { releaseLoad = resolve; });
   await page.route("**/api/privacy/gps", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
+    gets += 1;
     await loadHeld;
     return route.continue();
   });
@@ -114,8 +116,14 @@ test("the GPS-tracks switch takes clicks once loaded and a failed save restores 
   await expect(toggle).toBeChecked({ checked: !before });
   await expect(toggle).toBeDisabled();
   // Reopening during the save loads nothing that could overwrite the switch.
+  const getsBeforeReopen = gets;
   await summary.click();
   await summary.click();
+  await expect(page.locator("#privacySection")).toHaveAttribute("open", "");
+  // Give a load a moment to start; none may run, and the switch stays locked.
+  await page.waitForTimeout(500);
+  expect(gets).toBe(getsBeforeReopen);
+  await expect(toggle).toBeDisabled();
   failSave();
   await expect(page.locator("#toast")).toBeVisible();
   await expect(toggle).toBeChecked({ checked: before });
