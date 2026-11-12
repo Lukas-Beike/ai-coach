@@ -23,17 +23,16 @@ conflicts, CI failures, and review feedback through the merge.
   without it the pre-push hook refuses every push.
 - Commit only this task's changes with Conventional Commit subjects; leave
   unrelated user changes alone and stop if they block the rebase.
-- Fetch `develop` and rebase onto it. Resolve conflicts by understanding both
-  sides; ask the user for product decisions you cannot infer.
-- Check every subject in `develop..HEAD` against the Conventional Commit types
-  in root `AGENTS.md`; reword invalid ones.
-- Run the required validation from `AGENTS.md` and fix real failures. Never
-  weaken tests, security, or required checks.
+- Rebase with [branch-sync](../pacecraft-branch-sync/SKILL.md) (no `--push`
+  yet). Resolve conflicts by understanding both sides; ask the user for product
+  decisions you cannot infer. Reword the invalid subjects it lists.
+- Run [run-tests-changed](../pacecraft-run-tests-changed/SKILL.md) and fix real
+  failures. Never weaken tests, security, or required checks.
 - **OpenSpec:** list `git diff --name-only --no-renames origin/develop...HEAD --
   openspec/changes`. Each `openspec/changes/<name>/` path outside `archive/`
   names a change that must be archived on this branch: its active directory is
   gone at `HEAD`, an `archive/<date>-<name>/` exists, and
-  `npm run openspec -- validate --all --strict --no-interactive` passes.
+  [spec-validate](../pacecraft-spec-validate/SKILL.md) `--all` passes.
   Archive it under deliver-issue's rules if all tasks are done; otherwise stop
   and report the open tasks.
 - **Spec drift:** when the branch archives no OpenSpec change, list the main
@@ -43,18 +42,16 @@ conflicts, CI failures, and review feedback through the merge.
   for the changed behavior. If described behavior changed, or the change adds
   behavior to that capability, update the requirement, its scenarios, and its
   `Evidence` line directly in `openspec/specs/` on this branch and run
-  `npm run openspec -- validate --specs --strict --no-interactive`. Otherwise
+  [spec-validate](../pacecraft-spec-validate/SKILL.md). Otherwise
   write in the PR body which capabilities you checked and that their described
   behavior is unchanged. Refactors and test-only changes need only that line.
 
 **Sonar pre-push check:** after the rebase and validation, run
-`sonar analyze --base origin/develop --format json` (the resolved base) with the
-SonarQube CLI on the head to be pushed. The push hook runs the same secrets scan
-and refuses the push when the CLI is missing or unauthenticated, so report that
-as a blocker and stop; never bypass the hook. The agentic (Vortex) part may
-return 403 on this connection; record that as a limit, not a pass. Local output
-has shown only the secrets and agentic sections, so do not claim code-quality
-rule coverage from it. Fix findings on changed lines with new commits, without
+[sonar-check](../pacecraft-sonar-check/SKILL.md) against the resolved base on
+the head to be pushed. A missing or unauthenticated CLI is a blocker: stop;
+never bypass the hook. Its `limit` line (agentic part forbidden) is a limit,
+not a pass, and its output covers only the secrets and agentic sections, so do
+not claim code-quality rule coverage from it. Fix findings on changed lines with new commits, without
 new files, pass-through classes, or wrappers (root `AGENTS.md`), and rerun the
 affected checks. In the PR body, record the rule key, file, and line of any
 accepted issue; never paste matched secret text or scanner payloads.
@@ -87,17 +84,15 @@ confirmation. List every unfixed finding with its reason in the PR body.
 
 ## 3. Publish
 
-- Push with `git -c core.hooksPath=.githooks push`, using `--force-with-lease`
-  after a rewrite. The pre-push hook scans outgoing commits for secrets and runs the
-  quality ratchet; never
-  bypass it with `--no-verify`.
+- Push with [branch-sync](../pacecraft-branch-sync/SKILL.md) `--push`; the
+  repository hooks scan for secrets and run the quality ratchet. Never bypass
+  them with `--no-verify`.
 - Create one non-draft PR against `develop` (or reuse the open one for this
   branch) with an English Conventional Commit title and a body covering the
   change, validation, and review results, plus a merge-danger line: one-way or
   two-way door (schema migrations and remote writes are usually one-way) and
-  the blast radius, and a line-balance line: production lines added/removed
-  (`git diff --shortstat origin/develop...HEAD -- backend server.py public`)
-  and test lines added/removed (the same for `-- tests e2e`). Name the issue with `Closes #N`, or `Part of #N` when more
+  the blast radius, and the line balance from
+  [line-balance](../pacecraft-line-balance/SKILL.md). Name the issue with `Closes #N`, or `Part of #N` when more
   PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
 - Enable `gh pr merge <number> --auto --squash` only when the base is `develop`
@@ -108,29 +103,30 @@ confirmation. List every unfixed finding with its reason in the PR body.
 Watch with the host's PR watcher when available (`watch_pull_request`), and
 yield; otherwise poll about every 30 seconds. On each wake:
 
-- Read the current head. Fetch review threads through GraphQL `reviewThreads`
-  (with `isResolved`) and top-level comments. For each open item: fix it if
+- Read the current head, checks, threads and comments with
+  [pr-state](../pacecraft-pr-state/SKILL.md). For each open item: fix it if
   valid, run the affected checks, reply with the result, then resolve the
   thread; if not actionable, reply with the concrete reason before resolving.
   Disable auto-merge while repairs are in progress, and re-enable it once the
   current head has no open feedback.
 - Later changes (feedback fixes, CI fixes, conflict resolutions, rebases) need
   validation, not another local review; CI reviews the new head.
-- If the branch falls behind or conflicts, rebase (never a merge-style "Update
-  branch") and push with `--force-with-lease`.
+- If the branch falls behind or conflicts, rebase and push with
+  [branch-sync](../pacecraft-branch-sync/SKILL.md) `--push` (never a
+  merge-style "Update branch").
 - If checks fail, read the logs, fix the cause, and push. The `Gitar` check is
   required (see `.github/AGENTS.md`); no bypass. If it never reports on an
   otherwise green head, note the PR number in the issue (#1906 tracks its
   reliability) and ask the user before any admin merge.
-- If Sonar reports new issues, list them for the PR with
-  `sonar list issues --pull-request <number>`, fix the findings on changed lines,
+- If Sonar reports new issues, list them with
+  [sonar-check](../pacecraft-sonar-check/SKILL.md) `--pr <number>`, fix the findings on changed lines,
   and push. Do not accept issues to clear the gate without an evidence line in
   the PR body.
 - Stop and report if GitHub requires something you cannot satisfy, or if the PR
   is closed without merging.
 
-Finish only when GitHub reports the PR merged (`mergedAt` set), required checks
-passed, and every thread and comment is handled. Enabled auto-merge is not a
+Finish only when [pr-state](../pacecraft-pr-state/SKILL.md) reports the PR
+merged, required checks passed, and every thread and comment is handled. Enabled auto-merge is not a
 merge. Call `unwatch_pull_request` before the final report. An open PR handed
 back unmonitored must have auto-merge disabled. Report the PR URL, merge state,
 validation, and fixes made.
