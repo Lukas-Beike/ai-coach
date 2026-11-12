@@ -1224,7 +1224,7 @@ function plannedUnitActions(entry, dateKey, todayKey) {
   const key = plannedEntryKey(entry, dateKey);
   const toggle = h("button", { type: "button", className: "secondary-button", "aria-expanded": "false" }, "Verschieben");
   const days = h("div", { className: "planned-move-days", role: "group", "aria-label": "Neuer Tag", hidden: true });
-  const status = h("p", { className: "planned-focus-status planned-move-status", role: "status" });
+  const status = h("p", { className: "planned-move-status", role: "status" });
   toggle.addEventListener("click", () => {
     days.hidden = !days.hidden;
     toggle.setAttribute("aria-expanded", String(!days.hidden));
