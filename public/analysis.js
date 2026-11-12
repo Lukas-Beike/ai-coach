@@ -757,54 +757,62 @@ function criticalPowerLine(result, sport, hasValues) {
   return line;
 }
 
-async function renderCyclingPowerProfile() {
-  if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route) || !state.data?.performance) return;
-  const root = document.getElementById("cyclingPowerProfile");
-  const generation = ++cyclingPowerProfileGeneration;
-  const session = state.sessionGeneration;
+// Both profile cards show the read's loading state once, or its failure with a retry.
+function showProfileCardsState(error) {
   for (const [id, title] of PROFILE_CARDS) {
     const target = document.getElementById(id);
-    if (target.childElementCount && target.dataset.analysisEmpty !== "failed") continue;
-    target.dataset.analysisEmpty = "loading";
-    target.replaceChildren(reportNode("h4", title), createLoadingState(`${title} wird geladen…`));
+    if (!error && target.childElementCount && target.dataset.analysisEmpty !== "failed") continue;
+    target.dataset.analysisEmpty = error ? "failed" : "loading";
+    target.replaceChildren(reportNode("h4", title), error
+      ? createErrorState(error.message, () => void renderCyclingPowerProfile())
+      : createLoadingState(`${title} wird geladen…`));
   }
+}
+
+async function renderCyclingPowerProfile() {
+  if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route) || !state.data?.performance) return;
+  const generation = ++cyclingPowerProfileGeneration;
+  const session = state.sessionGeneration;
+  showProfileCardsState(null);
   try {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
-    root.replaceChildren(reportNode("h4", "Leistungsprofil"));
-    const hasValues = cyclingPowerProfileHasValues(result);
-    if (hasValues) {
-      root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
-      root.append(cyclingPowerProfileTable(result));
-    } else root.append(reportNode("p", "Noch keine Leistungsdaten.", "muted"));
-    const coverage = result.windows?.["90"]?.cache_coverage;
-    if (coverage?.power_unknown_records > 0) {
-      const gap = reportNode("p", `Für ${coverage.power_unknown_records} von ${coverage.power_records} Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.`, "analysis-reference-note");
-      gap.dataset.powerProfileGap = "true";
-      root.append(gap);
-    }
-    const criticalPower = criticalPowerLine(result, "ride", hasValues);
-    if (criticalPower) root.append(criticalPower);
-    root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
+    renderPowerProfile(result);
     renderRunningBestEfforts(result);
     renderAnalysisSegmentsIfActive();
   } catch (error) {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
-      for (const [id, title] of PROFILE_CARDS) {
-        const target = document.getElementById(id);
-        target.dataset.analysisEmpty = "failed";
-        target.replaceChildren(reportNode("h4", title), createErrorState(error?.message, () => void renderCyclingPowerProfile()));
-      }
+      showProfileCardsState(error || new Error());
       renderAnalysisSegmentsIfActive();
     }
   }
+}
+
+function renderPowerProfile(result) {
+  const root = document.getElementById("cyclingPowerProfile");
+  root.replaceChildren(reportNode("h4", "Leistungsprofil"));
+  const hasValues = cyclingPowerProfileHasValues(result);
+  if (hasValues) {
+    root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
+    root.append(cyclingPowerProfileTable(result));
+  } else root.append(reportNode("p", "Noch keine Leistungsdaten.", "muted"));
+  const coverage = result.windows?.["90"]?.cache_coverage;
+  if (coverage?.power_unknown_records > 0) {
+    const gap = reportNode("p", `Für ${coverage.power_unknown_records} von ${coverage.power_records} Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.`, "analysis-reference-note");
+    gap.dataset.powerProfileGap = "true";
+    root.append(gap);
+  }
+  const criticalPower = criticalPowerLine(result, "ride", hasValues);
+  if (criticalPower) root.append(criticalPower);
+  root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
 }
 
 // The fastest observed pace per duration and time per distance of the last 90 days (#2265),
 // in the targets and order the report returns.
 function runningBestEffortRow(kind, point) {
   const minutes = point.duration_seconds / 60;
-  const label = kind === "speed" ? `${AppFormat.number(minutes)} ${minutes === 1 ? "Minute" : "Minuten"}` : `${AppFormat.number(point.distance_meters / 1000)} km`;
+  const unit = minutes === 1 ? "Minute" : "Minuten";
+  const label = kind === "speed" ? `${AppFormat.number(minutes)} ${unit}` : `${AppFormat.number(point.distance_meters / 1000)} km`;
   let text = null;
   if (kind === "speed" && point.speed_mps > 0) text = formatPace(1000 / Number(point.speed_mps));
   else if (kind === "distance" && point.seconds > 0) text = AppFormat.clock(point.seconds);
@@ -1420,7 +1428,7 @@ function renderAnalysisSegments(route = state.route) {
   document.getElementById("analysisHistoryCharts").hidden = !sport;
   document.getElementById("currentPerformance").hidden = !sport;
   // Laufen and Radfahren share the containers; each part names its sport.
-  document.querySelectorAll("#dataPanel [data-analysis-sport]").forEach((part) => { part.hidden = part.dataset.analysisSport !== sport || !part.childElementCount; });
+  document.querySelectorAll("#dataPanel [data-analysis-sport]").forEach((part) => { part.hidden = part.dataset.analysisSport !== sport || !part.hasChildNodes(); });
   const endurance = document.getElementById("performanceEnduranceCharts");
   endurance.hidden = !load || !endurance.childElementCount;
   document.getElementById("analysisLoadPeriod").hidden = segment !== "load";

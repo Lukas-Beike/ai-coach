@@ -91,5 +91,10 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(page.locator("#currentPerformance table[data-analysis-sport='ride']")).toBeVisible();
   for (const hidden of ["#runningBestEfforts", "#performancePredictions", "#currentPerformance table[data-analysis-sport='run']", "[data-analysis-section='development-Lauf']"]) await expect(page.locator(hidden)).toBeHidden();
   await expect(page.locator("#analysisRefreshButton")).toHaveAttribute("aria-label", "Analyse aktualisieren: Radfahren");
+  // A sport without current values names it in its own segment.
+  await page.locator('[data-analysis-segment="running"]').click();
+  await page.evaluate(() => { renderCurrentPerformance({ cycling_ftp_watts: { value: 260, unit: "W" } }, state.data.performance.history); renderAnalysisSegments(state.route); });
+  await expect(page.locator("#currentPerformance p[data-analysis-sport='run']")).toBeVisible();
+  await expect(page.locator("#currentPerformance p[data-analysis-sport='run']")).toHaveText("Noch keine aktuellen Werte.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

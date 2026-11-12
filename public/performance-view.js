@@ -272,6 +272,21 @@ function performanceDataStatus(performance) {
 // Device-computed estimates; thresholds are entered or device-reported values and carry no chip.
 const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_ml_kg_min"]);
 
+// One row per metric with a value, in the given order.
+function currentPerformanceRows(metrics, items) {
+  const body = reportNode("tbody");
+  for (const [key, label] of items) {
+    const metric = metrics?.[key];
+    if (metric?.value == null) continue;
+    const row = reportNode("tr"); row.dataset.metric = key;
+    const heading = reportNode("th", label); heading.scope = "row";
+    if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
+    row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
+    body.append(row);
+  }
+  return body;
+}
+
 function renderCurrentPerformance(metrics, history, status = []) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
@@ -298,16 +313,7 @@ function renderCurrentPerformance(metrics, history, status = []) {
     const table = reportNode("table", null, "current-performance-table");
     table.dataset.analysisSport = analysisSport;
     table.append(reportNode("caption", sport, "sr-only"));
-    const body = reportNode("tbody");
-    for (const [key, label] of items) {
-      const metric = metrics?.[key];
-      if (metric?.value == null) continue;
-      const row = reportNode("tr"); row.dataset.metric = key;
-      const heading = reportNode("th", label); heading.scope = "row";
-      if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
-      row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
-      body.append(row);
-    }
+    const body = currentPerformanceRows(metrics, items);
     // A status message (e.g. a failed read) keeps the section visible.
     root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
     if (!body.childElementCount) {
