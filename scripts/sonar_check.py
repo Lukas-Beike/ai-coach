@@ -197,6 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     if data is None:
         print(f"FAILED {label}: no JSON result (exit {done.returncode})")
         return 1
+    if args.pr and isinstance(data, dict):
+        # The issue list also carries `components` and `users`: not issues.
+        data = {"issues": data.get("issues") or []}
     code = report(label, data)
     if code == 0 and done.returncode != 0 and global_error_kind(data) != "forbidden":
         print(f"FAILED {label}: exit {done.returncode} without a listed issue")

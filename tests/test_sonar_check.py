@@ -52,6 +52,8 @@ LIST_ISSUES = {
         }
     ],
     "paging": {"total": 1},
+    "components": [{"key": "proj", "name": "proj"}, {"key": "proj:backend/e.py"}],
+    "users": [{"login": "someone", "name": "Some One"}],
 }
 
 
@@ -142,6 +144,8 @@ class SonarCheckTests(unittest.TestCase):
             ["list", "issues", "--pull-request", "42", "--format", "json"],
         )
         self.assertIn("issue python:S3776 backend/e.py:40", out)
+        self.assertEqual(out.count("issue "), 1)
+        self.assertNotIn("someone", out)
 
     def test_list_form_and_unsafe_fields_are_handled(self):
         payload = [{"rule": "bad rule\nwith newline", "file": "a\nb", "line": "x"}]
