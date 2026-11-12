@@ -190,11 +190,14 @@ def coach_execution_scope(
 
 def require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
     if not require_scope(intent, *tokens):
-        raise AppError(
+        error = AppError(
             403,
             "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.",
             reason="intent_scope_denied",
         )
+        # For the model only: the scope tokens one of which its _request lacks.
+        error.required_scope = list(tokens[:4])
+        raise error
 
 
 def authorized_operations(intent: dict[str, Any]) -> set[str]:

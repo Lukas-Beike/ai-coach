@@ -370,6 +370,12 @@ class PlanCheckRuleTests(unittest.TestCase):
                 self.assertEqual(codes(found), [expected] if expected else [])
                 if expected in plan_checks.REQUIRED_CODES:
                     self.assertTrue(found[0]["blocking"])
+        # A mismatch shows the Coach what the template keeps and what it wrote.
+        dropped = plan_checks.template_conformance(
+            [strength(strength_structure=[press])], templates
+        )[0]["evidence"]
+        self.assertEqual(dropped["template_structure"], ["bankdrücken", "rudern"])
+        self.assertEqual(dropped["unit_structure"], ["bankdrücken"])
         # Moving an older unit keeps its finding, so it never blocks the move.
         older = unit("3", "2026-11-04", "run", 30, description="- 30m Z2 HR")
         moved = {**older, "date": "2026-11-06"}

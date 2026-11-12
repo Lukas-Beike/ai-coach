@@ -626,6 +626,20 @@ def _strength_content(unit: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _readable_structure(unit: Mapping[str, Any]) -> list[str]:
+    """``_structure_of`` as short labels: exercise names, or step kind and basis."""
+    labels = []
+    for item in (_structure_of(unit) or [])[:8]:
+        if isinstance(item, str):
+            labels.append(item)
+            continue
+        kind, ramp, distance = item
+        labels.append(
+            f"{kind}{' ramp' if ramp else ''} {'distance' if distance else 'time'}"
+        )
+    return labels
+
+
 def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
     """The part of a unit a variant keeps: exercise names, or step kinds in order.
 
@@ -699,6 +713,9 @@ def template_conformance(
         if _structure_of(unit) != _structure_of(template) or (
             planned_sport_environment(template)[0] is not sport
         ):
+            # What the variant must keep, so the Coach can correct the write.
+            evidence["template_structure"] = _readable_structure(template)
+            evidence["unit_structure"] = _readable_structure(unit)
             message = (
                 f"Planned unit differs from its library template {evidence['template']!r} "
                 "beyond load and intensity. " + _TEMPLATE_HINT

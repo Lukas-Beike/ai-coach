@@ -488,7 +488,7 @@ The system SHALL turn every failed tool call into a result the model can act on,
 
 #### Scenario: Result shape
 - **WHEN** a tool call fails with an application error
-- **THEN** the result is `{"ok": false, "reason", "error"}` with the error's reason and German message, plus `validation_reason` when it matches `request_[a-z_]{1,72}` and `findings` when the error carries a list; an error without a reason gets `tool_arguments_invalid` for status 400, else `tool_failed`; a value, type or key error becomes `{"ok": false, "reason": "tool_arguments_invalid", "error": "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}`
+- **THEN** the result is `{"ok": false, "reason", "error"}` with the error's reason and German message, plus `validation_reason` when it matches `request_[a-z_]{1,72}` `findings` when the error carries a list (a `template_mismatch` finding's evidence names the template's and the unit's structure), and `required_scope` (the scope tokens one of which the call's `_request` lacked) after an `intent_scope_denied`, for the model only; an error without a reason gets `tool_arguments_invalid` for status 400, else `tool_failed`; a value, type or key error becomes `{"ok": false, "reason": "tool_arguments_invalid", "error": "Die Werkzeugargumente sind ungültig. Prüfe das Schema und den aktuellen Zustand und korrigiere den Aufruf."}`
 
 #### Scenario: Unknown or unoffered tool
 - **WHEN** the tool is not offered in this turn or the dispatcher knows no owner
