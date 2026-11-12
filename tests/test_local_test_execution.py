@@ -370,7 +370,18 @@ class SupervisorTests(unittest.TestCase):
         self.check_real_owned_descendant(parent_exits=False)
 
     def test_cleanup_stops_descendants_after_the_parent_exits(self):
-        self.check_real_owned_descendant(parent_exits=True)
+        # The first read of the existing ready file meets a Windows sharing violation (#2387).
+        real_read, refused = Path.read_text, []
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "descendant.json" and not refused and path.exists():
+                refused.append(path)
+                raise PermissionError(13, "synthetic sharing violation")
+            return real_read(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", autospec=True, side_effect=read_text):
+            self.check_real_owned_descendant(parent_exits=True)
+        self.assertTrue(refused)
 
     def check_real_owned_descendant(self, parent_exits):
         ready = self.root / "descendant.json"
@@ -393,10 +404,14 @@ class SupervisorTests(unittest.TestCase):
         cleaned = False
         try:
             deadline = time.monotonic() + 10
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertTrue(ready.exists(), "owned descendant reached readiness")
-            observed = json.loads(ready.read_text())
+            last_error = None
+            while observed is None and time.monotonic() < deadline:
+                try:
+                    observed = json.loads(ready.read_text())
+                except (FileNotFoundError, PermissionError) as error:
+                    last_error = error
+                    time.sleep(0.02)
+            self.assertIsNotNone(observed, f"owned descendant reached readiness: {last_error!r}")
             if os.name == "nt":
                 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                 kernel.OpenProcess.argtypes = [
