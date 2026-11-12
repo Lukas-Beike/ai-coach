@@ -9,7 +9,7 @@ import io
 import json
 import threading
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -48,7 +48,7 @@ def sse_body(events):
 
 class FakeResponse(io.BytesIO):
     status = 200
-    headers = {}
+    headers = None
 
 
 class FakeOpener:
@@ -487,7 +487,7 @@ class ClaudeStreamClientTests(unittest.TestCase):
 
 
 class ClaudeModelResolverTests(unittest.TestCase):
-    NOW = datetime(2026, 12, 2, 8, 0)
+    NOW = datetime(2026, 12, 2, 8, 0, tzinfo=UTC)
 
     def make(self, state=None, listing=None):
         store = {"state": state or {}}
@@ -570,7 +570,7 @@ class ClaudeModelResolverTests(unittest.TestCase):
                 resolver, store, _ = self.make(state=dict(state))
                 sent = []
 
-                def send(model, error=error):
+                def send(model, error=error, sent=sent):
                     sent.append(model)
                     raise error
 
