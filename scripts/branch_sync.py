@@ -1,11 +1,12 @@
 """Rebase the current feature branch onto the target and optionally push it.
 
-    python scripts/branch_sync.py [--onto origin/develop] [--push]
+    python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <file>]
 
 Refuses on develop, main, a detached HEAD and a dirty working tree. Fetches
 origin, rebases, checks every commit subject against the Conventional Commit
 types, and with --push pushes with --force-with-lease through the repository
-hooks (never --no-verify). The hooks need the SonarQube CLI on PATH.
+hooks (never --no-verify). The hooks need the SonarQube CLI on PATH. A push
+that adds a file at the repository root is refused unless --allow-root names it.
 
 Exit 0: in sync (and pushed); 1: refused, rebase conflict (left in progress:
 resolve it or run `git rebase --abort`) or invalid subjects; 2: bad input,
@@ -72,7 +73,12 @@ def rebased(onto: str) -> bool:
     return True
 
 
-def sync(onto: str, push: bool) -> int:
+def new_root_files(onto: str) -> list[str]:
+    added = git("diff", "--name-only", "--diff-filter=A", f"{onto}...HEAD")
+    return [name for name in added.splitlines() if name and "/" not in name]
+
+
+def sync(onto: str, push: bool, allowed: frozenset[str] = frozenset()) -> int:
     branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch == "HEAD" or branch in PROTECTED:
         print(
@@ -98,6 +104,14 @@ def sync(onto: str, push: bool) -> int:
         for subject in bad:
             print(f"  {subject}")
         return 1
+    stray = [name for name in new_root_files(onto) if name not in allowed]
+    if push and stray:
+        # A stray root file is usually a session artefact (a mistyped redirect).
+        print("refused: new files at the repository root; remove them or pass")
+        print("--allow-root <file> for each one the PR names:")
+        for name in stray:
+            print(f"  {name}")
+        return 1
     if push:
         git(
             "-c", "core.hooksPath=.githooks", "push",
@@ -115,9 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--onto", default="origin/develop")
     parser.add_argument("--push", action="store_true")
+    parser.add_argument("--allow-root", action="append", default=[])
     args = parser.parse_args(argv)
     try:
-        return sync(args.onto, args.push)
+        return sync(args.onto, args.push, frozenset(args.allow_root))
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
