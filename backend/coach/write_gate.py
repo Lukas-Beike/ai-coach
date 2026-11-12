@@ -302,6 +302,15 @@ _PROVIDER_OBJECT = _compile(
     )
 )
 _INTERVALS_NAME = re.compile(r"(?<![a-z])intervals(?![a-z])")
+# A refused send or removal ("Nein, doch nicht hochladen"); "spiel"/"pack" are
+# left out so "Spiel nicht zu hart" refuses nothing.
+_REFUSED_SEND = _compile(
+    "^" + stem
+    for stem in _words(
+        "sync,synchronisier,schick,send,übertrag,push,lad,hochlad,upload,trag,"
+        "export,entfern,lösch,remove,delete"
+    )
+)
 
 
 def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
@@ -320,7 +329,7 @@ def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
         named = {str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)}
         if _negates(part):
             # A refusal blocks the whole message, as for Intervals.icu (#2342).
-            if named or _PROVIDER_OBJECT.search(loose) or _TRANSFER_VERB.search(loose):
+            if named or _PROVIDER_OBJECT.search(loose) or _REFUSED_SEND.search(loose):
                 found.clear()
                 blocked = True
         elif named and _PROVIDER_OBJECT.search(loose) and (index or not blocked):
@@ -600,7 +609,7 @@ def _remote_effect(arguments: Mapping[str, Any] | None) -> bool:
     )
 
 
-def _garmin_effects(arguments: Mapping[str, Any] | None) -> tuple[bool, bool]:
+def garmin_effects(arguments: Mapping[str, Any] | None) -> tuple[bool, bool]:
     """Whether the call removes and whether it uploads Garmin workouts."""
     entries = arguments.get("entries") if isinstance(arguments, Mapping) else None
     items = [entry for entry in entries or [] if isinstance(entry, Mapping)]
@@ -820,7 +829,7 @@ def _check_garmin_write(
     removal wording; the classifier is not asked, so no local delete is
     confirmed as a side effect.
     """
-    removes, uploads = _garmin_effects(arguments)
+    removes, uploads = garmin_effects(arguments)
     if uploads and not ProviderId.GARMIN in authority.provider_requests:
         return GateDecision(
             False, REMOTE_GARMIN, REMOTE_GARMIN_DENIAL, state.classifier_used

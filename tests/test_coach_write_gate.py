@@ -1311,6 +1311,8 @@ class GarminTierTests(unittest.TestCase):
             "Schick die Kraft auf meine Uhr. Nein, doch nicht schicken.",
             "Nicht an Garmin schicken! Die Kraft schicke ich später auf meine Uhr.",
             "Die Krafteinheit schicke ich selbst auf meine Uhr.",
+            "Schick die Kraft auf meine Uhr. Nein, doch nicht hochladen.",
+            "Schick die Kraft auf meine Uhr. Bitte nicht synchronisieren.",
         ):
             with self.subTest(text=text):
                 decision = _check(
@@ -1376,6 +1378,12 @@ class GarminTierTests(unittest.TestCase):
         self.assertTrue(allowed.allowed, allowed)
         # No classifier verdict is cached, so no local delete is confirmed.
         self.assertEqual([], classifier.calls)
+        # A withdrawn removal blocks the whole message (#2342).
+        self.assertFalse(
+            gate.garmin_removal_requested(
+                "Entferne die Krafteinheit von Garmin. Nein, doch nicht löschen."
+            )
+        )
 
     def test_a_removal_request_never_grants_an_upload(self):
         decision = _check(

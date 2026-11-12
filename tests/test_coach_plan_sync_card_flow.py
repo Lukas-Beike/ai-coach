@@ -393,6 +393,23 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         scope = json.loads(row["payload"])["intent"]["authorization_scope"]
         self.assertNotIn(f"planned_unit:{OTHER_UNIT}", scope)
 
+    def test_without_a_card_the_request_scope_bounds_the_units(self) -> None:
+        """No card shows the model's selection (#2342), so its own unit tokens
+        bound what a card-free sync may push."""
+        ids = [local_id for local_id, _, _ in WEEK]
+        call = self.coach_tool_call(
+            ids, scope=["intervals_sync", f"planned_unit:{WEEK[0][0]}"]
+        )
+
+        with self.assertRaises(AppError) as caught:
+            run_in_turn(self.flow, call)
+
+        self.assertEqual(
+            (403, "intent_scope_denied"),
+            (caught.exception.status, caught.exception.reason),
+        )
+        self.assertEqual([], self.plan_push_jobs())
+
     def test_card_creation_rejects_a_unit_that_does_not_exist(self) -> None:
         call = self.coach_tool_call([WEEK[0][0]], scope=["intervals_sync"])
         call["arguments"]["entries"][0]["library_workout_id"] = (
@@ -423,13 +440,18 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         self.assertEqual([], self.plan_push_jobs())
 
 
-def _plan_sync_call(flow: CardFlow) -> dict[str, Any]:
+def _plan_sync_call(flow: CardFlow, *tokens: str) -> dict[str, Any]:
     return prepared_call(
         flow,
         "start_intervals_plan_sync",
         {"entries": unit_entries(flow, [WEEK[1][0]]), "reason": "Lauf"},
-        plan_sync_request(["intervals_sync"]),
+        plan_sync_request(["intervals_sync", *tokens]),
     )
+
+
+def _named_plan_sync_call(flow: CardFlow) -> dict[str, Any]:
+    """Without a card the model's own unit token authorizes the unit (#2342)."""
+    return _plan_sync_call(flow, f"planned_unit:{WEEK[1][0]}")
 
 
 def _garmin_call(flow: CardFlow) -> dict[str, Any]:
@@ -527,6 +549,8 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
         for tool, (build, provider, job_type, bound) in CARD_KINDS.items():
             with self.subTest(tool=tool):
                 self.flow = wire_card_flow(self)
+                if tool == "start_intervals_plan_sync":
+                    build = _named_plan_sync_call
 
                 result = run_in_turn(self.flow, build(self.flow))
 
@@ -734,6 +758,38 @@ class RetryByJobProviderTests(unittest.TestCase):
                     )
                     self.assertEqual([job["id"]], jobs)
                 self.assertEqual("queued", job_status(self.flow, job["id"]))
+
+    def test_a_named_push_retry_runs_without_a_card_unless_it_removes_from_garmin(
+        self,
+    ) -> None:
+        # A retry is a named sync (#2342); a Garmin removal keeps its card.
+        for provider, removes, expected in (
+            ("intervals", False, "queued"),
+            ("garmin", False, "queued"),
+            ("garmin", True, "approval_required"),
+        ):
+            with self.subTest(provider=provider, removes=removes):
+                self.flow = wire_card_flow(self)
+                job = failed_job(self.flow, provider, "plan_push")
+                if removes:
+                    payload = json.loads(queued_jobs(self.flow)[0]["payload"])
+                    payload["entries"][0] = {
+                        "library_workout_id": STRENGTH_IDS[0],
+                        "remove": True,
+                    }
+                    with self.flow.database.unit_of_work() as db:
+                        db.execute(
+                            "UPDATE sync_jobs SET payload=? WHERE id=?",
+                            (json.dumps(payload), job["id"]),
+                        )
+                call = retry_call(
+                    self.flow, job, target=provider, scope=f"{provider}_sync", push=True
+                )
+
+                result = run_in_turn(self.flow, call)
+
+                self.assertEqual(expected, result["status"], result)
+                self.assertEqual(int(removes), card_count(self.flow))
 
     def test_a_push_retry_without_the_job_providers_sync_scope_is_denied(self) -> None:
         for provider, job_type, label in RETRIED_JOBS:

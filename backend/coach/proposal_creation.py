@@ -21,6 +21,7 @@ from backend.coach.proposal_models import (
 )
 from backend.coach.proposal_validation import (
     _validate_local_coach_write,
+    _validate_remote_coach_write,
     remote_coach_write_diff,
     remote_write_target,
     validated_coach_action_preview_input,
@@ -124,11 +125,14 @@ class CoachProposalCreationService:
         conversation_id: str,
         client_turn_id: str,
         session_csrf_hash: str,
+        card: bool = True,
     ) -> dict[str, Any]:
         """Bind a Coach remote write to stored state, as its card would show it.
 
-        Returns the payload to dispatch and the rows a card lists; a card-free
-        run dispatches exactly what an approved card would (#2342).
+        Returns the payload to dispatch and the rows a card lists. A card-free
+        run (#2342) binds the same state but keeps the request's own unit scope:
+        only units the server adds (orphan leftovers) gain a token, since no card
+        shows the athlete the model's selection.
         """
         if not conversation_id or not client_turn_id or not session_csrf_hash:
             raise AppError(
@@ -153,9 +157,29 @@ class CoachProposalCreationService:
             "conversation_id": str(conversation_id)[:160],
             "client_turn_id": str(client_turn_id)[:160],
         }
-        payload["intent"] = _card_authorized_intent(
+        authorized = _card_authorized_intent(
             tool, payload["arguments"], intent, self._database_manager
         )
+        if not card and authorized is not intent:
+            chosen = {
+                str(entry.get("library_workout_id") or entry.get("local_id") or "")
+                for entry in arguments.get("entries") or []
+                if isinstance(entry, dict)
+            }
+            added = {
+                token
+                for token in authorized["authorization_scope"]
+                if token.startswith(("planned_unit:", "library_workout:"))
+                and token.partition(":")[2] not in chosen
+            }
+            authorized = {
+                **intent,
+                "authorization_scope": sorted(
+                    {*intent.get("authorization_scope", []), *added}
+                ),
+            }
+        payload["intent"] = authorized
+        _validate_remote_coach_write(payload)
         details = _remote_write_approval_details(
             tool,
             payload["arguments"],
@@ -809,7 +833,7 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
             "id": str(row["intervals_event_id"] or row["id"]),
         }
     return {
-        "name": "Remote-Wettkampfeintrag l\u00f6schen",
+        "name": _REMOTE_COMPETITION_DELETE,
         "date": "Freigegebene L\u00f6schmarkierung",
         "id": str(row["intervals_event_id"] or row["id"]),
     }
@@ -869,12 +893,9 @@ def _nutrition_approval_arguments(
     return {**arguments, "_approval_manifest": manifest}
 
 
+# A card-free run never carries an explicit Garmin removal ("Von Garmin entfernen").
 _REMOVAL_LABELS = frozenset(
-    {
-        "Wird bei Intervals.icu entfernt",
-        "Wird bei Garmin entfernt",
-        "Von Garmin entfernen",
-    }
+    {"Wird bei Intervals.icu entfernt", "Wird bei Garmin entfernt"}
 )
 
 

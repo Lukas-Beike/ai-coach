@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import (
     CoachProposalCreationService,
@@ -20,6 +22,7 @@ from backend.coach.tool_specs import (
     SELF_GUARDED_TOOLS,
 )
 from backend.coach.training_patch import CoachTrainingPatchService
+from backend.coach.write_gate import garmin_effects
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.planning.plan_guard_service import (
@@ -131,16 +134,19 @@ class CoachStructuredToolExecutionService:
                     "session_csrf_hash": session_csrf_hash,
                 }
                 # The athlete's named sync is the approval (#2342); only an
-                # explicit Garmin removal still asks on a card.
-                if _removes_garmin_workouts(name, arguments):
+                # explicit Garmin removal, or a retry of one, still asks on a card.
+                if _removes_garmin_workouts(db, name, arguments):
                     proposal = self._proposal_creation.create_remote_write(
                         name, arguments, action, **binding
                     )
                     return {**proposal, "ok": True, "status": "approval_required"}
                 prepared = self._proposal_creation.prepare_remote_write(
-                    name, arguments, action, **binding
+                    name, arguments, action, **binding, card=False
                 )
+                accepted = arguments.get(PLAN_FINDINGS_ARGUMENT)
                 arguments = prepared["payload"]["arguments"]
+                if accepted is not None:
+                    arguments = {**arguments, PLAN_FINDINGS_ARGUMENT: accepted}
                 action = prepared["payload"]["intent"]
                 removals = remote_removal_lines(prepared["details"])
             result = self._tool_dispatch.execute(
@@ -156,8 +162,22 @@ class CoachStructuredToolExecutionService:
             return {**result, "remote_removals": removals} if removals else result
 
 
-def _removes_garmin_workouts(name: str, arguments: dict[str, Any]) -> bool:
-    entries = arguments.get("entries") if name == "push_strength_to_garmin" else None
-    return isinstance(entries, list) and any(
-        isinstance(entry, dict) and entry.get("remove") is True for entry in entries
-    )
+def _removes_garmin_workouts(db: Any, name: str, arguments: dict[str, Any]) -> bool:
+    """Whether the call, or the Garmin job it retries, removes Garmin workouts."""
+    if name == "push_strength_to_garmin":
+        return garmin_effects(arguments)[0]
+    if name != "resolve_training_sync_conflict" or not arguments.get("job_id"):
+        return False
+    row = db.execute(
+        "SELECT provider, payload FROM sync_jobs WHERE id=?",
+        (str(arguments["job_id"]),),
+    ).fetchone()
+    try:
+        payload = (
+            json.loads(row["payload"])
+            if row and row["provider"] == ProviderId.GARMIN
+            else {}
+        )
+    except TypeError, ValueError:
+        payload = {}
+    return isinstance(payload, dict) and garmin_effects(payload)[0]

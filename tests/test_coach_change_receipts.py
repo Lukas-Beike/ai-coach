@@ -164,14 +164,15 @@ class ChangeSummaryTests(unittest.TestCase):
                         "ok": True,
                         "status": "queued",
                         "sync_job_id": "job-1",
-                        "remote_removals": [removal],
+                        "remote_removals": [removal, removal],
                     },
                 )
             ]
         )
 
         assert summary is not None
-        self.assertEqual(summary["labels"][1:], [removal])
+        # Two alike deletions stay two lines.
+        self.assertEqual(summary["labels"][1:], [removal, removal])
         self.assertFalse(summary["undoable"])
 
     def test_an_applied_history_undo_is_listed_and_blocks_turn_undo(self) -> None:
