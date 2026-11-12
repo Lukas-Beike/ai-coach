@@ -225,7 +225,7 @@ Evidence: `backend/coach/session_checks.py:matched_focus`, `backend/performance/
 
 #### Scenario: Turn continues without this stream
 - **WHEN** the turn ID was already submitted by this session, the turn has no attached relay, a restore or delete is pending, or execution is requeued after queue contention
-- **THEN** the stream sends `background` with the job's `status`, `mode` and `operation_id` (and `plan_scope` for a submission) and ends while the turn goes on; a closed connection never cancels the turn
+- **THEN** the stream sends `background` and ends while the turn goes on: with the submitted job (`status`, `mode`, `operation_id`, `plan_scope`) for a known turn ID or a turn without relay, with `status`, `mode` and `operation_id` after a requeue, and with `operation_id` alone while maintenance is pending; a closed connection never cancels the turn
 
 #### Scenario: Relay finds the turn finished
 - **WHEN** 15 seconds pass without an event and the turn is no longer active
