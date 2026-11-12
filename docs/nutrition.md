@@ -55,7 +55,7 @@ written; a known value is reported as skipped, never replaced. An invalid item
 whole. Each written field records its origin (`open_food_facts`, `yazio`, `bls`
 or `web`, a web value with its source page) and time under `filled_fields`.
 Filling two or more products is a bulk change: the Coach asks first and needs
-your yes. The command receipt of the turn lists each product, field, value and origin, and
+your yes. The turn's change line in the chat lists each product, field, value and origin, and
 undo of the turn empties exactly those fields again (change history entity
 `food_database_entry` for stored database foods).
 For the Coach, matches carry the origin `data_origin` (`live`,

@@ -84,6 +84,39 @@ def _plan_notes(result: dict[str, Any]) -> list[dict[str, Any]]:
     return notes
 
 
+_FIELD_NAMES = {
+    "kcal": "Energie",
+    "carbs_g": "Kohlenhydrate",
+    "protein_g": "Eiweiß",
+    "fat_g": "Fett",
+    "sugar_g": "Zucker",
+    "fiber_g": "Ballaststoffe",
+    "salt_g": "Salz",
+}
+_ORIGIN_NAMES = {
+    "open_food_facts": "Open Food Facts",
+    "yazio": "Yazio",
+    "bls": "BLS",
+    "web": "Web",
+}
+
+
+def _gap_fill_lines(tool: Any, entry: dict[str, Any]) -> list[str]:
+    """One receipt line per filled product: each field with value and origin."""
+    if tool != "fill_nutrition_product_gaps":
+        return []
+    return [
+        f"{change.get('name') or change.get('id')}: "
+        + ", ".join(
+            f"{_FIELD_NAMES.get(item['field'], item['field'])} {format(item['value'], 'g').replace('.', ',')}"
+            f" ({_ORIGIN_NAMES.get(item['origin'], item['origin'])})"
+            for item in change.get("written", [])
+        )
+        for change in (entry.get("result") or {}).get("changes", [])
+        if change.get("written")
+    ]
+
+
 def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Summarize a turn's applied writes for the chat, or ``None`` without any.
 
@@ -100,9 +133,9 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
         undoable = (
             undoable and tool in _FULLY_TRACKED_TOOLS and bool(entry.get("changes"))
         )
-        label = coach_effect_label(entry)
-        if label not in labels:
-            labels.append(label)
+        for label in (coach_effect_label(entry), *_gap_fill_lines(tool, entry)):
+            if label not in labels:
+                labels.append(label)
         for note in _plan_notes(entry["result"]):
             if note not in notes:
                 notes.append(note)
