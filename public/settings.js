@@ -588,8 +588,10 @@ function zoneSourceText(item) {
   return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
 }
 
-// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values; LT1 and the
-// origin of each of its values from the performance thresholds (#2427).
+const THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung aus festem Anteil von LT2" };
+
+// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values, LT1 from the
+// performance thresholds (#2427); `origins` names where each row's values come from.
 function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, thresholds = state.data?.performance?.thresholds || {}) {
   const spec = ZONE_SPORTS[sport];
   const metric = sport === "ride" ? "power" : "pace";
@@ -597,25 +599,23 @@ function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, 
   const values = thresholds.first_thresholds?.[sport] || {};
   const lt1 = { main: (metric === "power" ? values.watts : values.pace_seconds_per_km) ?? null, hr: values.hr_bpm ?? null };
   const sources = [metrics[spec.lt2[0]], metrics[spec.lt2[1]]].filter((item) => item?.value != null);
+  const lt1Origins = [["Puls", values.hr_origin], [metric === "power" ? "Leistung" : "Pace", metric === "power" ? values.power_origin : values.pace_origin]]
+    .filter(([, origin]) => THRESHOLD_ORIGINS[origin]).map(([name, origin]) => `${name} ${THRESHOLD_ORIGINS[origin]}`);
   return {
     metric,
     lt1,
     lt2,
-    lt1Source: firstThresholdSource(metric, values),
-    lt2Source: sources[0]?.source || null,
+    origins: { lt1: lt1Origins.join(" · ") || null, lt2: lt2Origin(metric, metrics, spec) },
     validFrom: sources.map((item) => String(item.observed_at || "")).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) || null,
   };
 }
 
-const FIRST_THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität (App)", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung" };
-
-// "LT1 gemessen, Pace Schätzung": the heart rate's origin, then the pace's or power's where it differs.
-function firstThresholdSource(metric, values) {
-  const hr = FIRST_THRESHOLD_ORIGINS[values.hr_origin];
-  const main = FIRST_THRESHOLD_ORIGINS[metric === "power" ? values.power_origin : values.pace_origin];
-  const mainLabel = metric === "power" ? "Leistung" : "Pace";
-  if (!hr) return main ? `LT1 · ${mainLabel} ${main}` : null;
-  return main && main !== hr ? `LT1 ${hr}, ${mainLabel} ${main}` : `LT1 ${hr}`;
+// One provider names the row; providers that differ per value are named per value.
+function lt2Origin(metric, metrics, spec) {
+  const named = [[metric === "power" ? "Leistung" : "Pace", metrics[spec.lt2[0]]], ["Puls", metrics[spec.lt2[1]]]].filter(([, item]) => item?.value != null && item.source);
+  if (!named.length) return null;
+  if (new Set(named.map(([, item]) => item.source)).size === 1) return `Von ${named[0][1].source}`;
+  return named.map(([name, item]) => `${name} von ${item.source}`).join(" · ");
 }
 
 function thresholdMainText(metric, value) {
@@ -626,19 +626,27 @@ function zoneEditButton(label, attributes) {
   return h("button", { type: "button", className: "zone-edit", dataset: attributes }, label);
 }
 
+// A small yellow "i" names the origin of a threshold row in a popover (athlete decision 2026-11-12, #2427).
+let thresholdInfoId = 0;
+function thresholdOriginInfo(label, text) {
+  const button = h("button", { type: "button", className: "threshold-info", "aria-label": `Herkunft ${label}` }, "i");
+  const info = h("div", { className: "analysis-info-tooltip", id: `threshold-info-${++thresholdInfoId}` }, text);
+  bindAnalysisPopover(button, info);
+  return [button, info];
+}
+
 function thresholdBox(sport) {
   const rows = thresholdRows(sport);
   const heading = h("h3", null, "Schwellen", rows.validFrom ? h("small", null, `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`) : null);
   const grid = h("div", "zone-thresholds", h("span"), h("span", "zone-muted", rows.metric === "power" ? "Leistung" : "Pace"), h("span", "zone-muted", "Puls"));
-  const lt2Label = sport === "ride" ? "LT2 / FTP" : "LT2";
-  const lines = [{ label: "LT1", values: rows.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, main: "lt2-main", hr: "lt2-hr" }];
-  for (const { label, values, ...names } of lines) {
-    grid.append(h("span", "zone-muted", label),
+  const lt2Label = sport === "ride" ? "Anaerob (LT2) / FTP" : "Anaerob (LT2)";
+  const lines = [{ label: "Aerob (LT1)", values: rows.lt1, origin: rows.origins.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, origin: rows.origins.lt2, main: "lt2-main", hr: "lt2-hr" }];
+  for (const { label, values, origin, ...names } of lines) {
+    grid.append(h("span", "zone-muted", label, origin ? thresholdOriginInfo(label, origin) : null),
       h("b", { dataset: { threshold: names.main } }, thresholdMainText(rows.metric, values.main)),
       h("b", { dataset: { threshold: names.hr } }, values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
   }
-  const source = [rows.lt1Source, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
-  const foot = h("p", "zone-source", source || null, zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
+  const foot = h("p", "zone-source", zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
   return h("section", { className: "zone-box", dataset: { zoneBox: "thresholds" } }, heading, grid, foot);
 }
 

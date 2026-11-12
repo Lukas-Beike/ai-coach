@@ -827,6 +827,8 @@ h2 {
 .zone-box h3 small, .zone-muted, .zone-source { color: var(--muted); font-size: .78rem; font-weight: 400; }
 .zone-thresholds { display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px 12px; font-size: .88rem; }
 .zone-thresholds b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.threshold-info { position: relative; display: inline-grid; width: 18px; height: 18px; min-height: 0; margin-left: 6px; padding: 0; place-items: center; border: 0; border-radius: 50%; color: var(--warning-ink); background: var(--yellow); font-size: .72rem; font-weight: 700; line-height: 1; vertical-align: middle; }
+.threshold-info::before { content: ""; position: absolute; inset: -13px; }
 .zone-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .zone-list li { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
 .zone-list i { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--zone-color, var(--training-zone-7)); }
