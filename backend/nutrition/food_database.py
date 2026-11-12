@@ -344,22 +344,21 @@ class FoodDatabaseService:
             if stored is None:
                 raise
             return stored, LOCAL_DATABASE_STALE
-        return self._kept(food), LIVE
+        return self._kept([food])[0], LIVE
 
-    def _kept(self, food: dict[str, Any]) -> dict[str, Any]:
-        """Store a live food and return it as kept, with its gaps filled."""
+    def _kept(self, foods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Store live foods and return them as kept, with their gaps filled."""
         kept: list[dict[str, Any]] = []
         # A failed write never breaks the lookup itself.
         with contextlib.suppress(Exception):
-            kept = self._mirror.refresh([food]) if self._mirror else []
-        return next(
-            (
-                {key: value for key, value in entry.items() if key != "fetched_at"}
-                for entry in kept
-                if entry["id"] == food["id"]
-            ),
-            food,
-        )
+            kept = self._mirror.refresh(foods) if self._mirror else []
+        by_id = {
+            entry["id"]: {
+                key: value for key, value in entry.items() if key != "fetched_at"
+            }
+            for entry in kept
+        }
+        return [by_id.get(food["id"], food) for food in foods]
 
     def _search_source(
         self,
@@ -382,9 +381,7 @@ class FoodDatabaseService:
             if not local:
                 raise
             return local, LOCAL_DATABASE_STALE
-        if self._mirror:
-            self._mirror.store(foods)
-        return foods, LIVE
+        return self._kept(foods), LIVE
 
     def _off_product(
         self, barcode: str, *, refresh_legacy: bool = False
@@ -440,10 +437,7 @@ class FoodDatabaseService:
             return None, exc.reason or True
         if food is None or not _usable(food):
             return None, False
-        food = {**food, "barcode": barcode}
-        if self._mirror:
-            self._mirror.store([food])
-        return food, False
+        return self._kept([{**food, "barcode": barcode}])[0], False
 
     def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, str | bool]:
         """Mirror, then Yazio when configured, then Open Food Facts.

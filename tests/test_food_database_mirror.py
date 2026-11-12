@@ -369,6 +369,10 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
         self.assertIsNone(kept["per_100"]["salt_g"])
         self.assertEqual(kept["servings"], stored["servings"])
         self.assertEqual(live["servings"], stored["servings"])
+        # Search hits, too, are returned as kept.
+        self.off.search = lambda query: [fresh]
+        hit = self.service.lookup({"query": "Haselnuss", "source": "open_food_facts"})
+        self.assertEqual(hit["foods"][0]["servings"], stored["servings"])
 
     def test_a_re_check_whose_write_fails_is_reported(self):
         self.mirror.store([food()])
