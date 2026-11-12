@@ -33,7 +33,7 @@ test("visibility, chart variants and reduced motion override component styles", 
     await page.locator(".nutrition-low-confidence").focus();
     await expect(page.locator(".nutrition-low-confidence")).toBeFocused();
     await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", "rgb(220, 164, 72)");
-    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("box-shadow", `${theme === "dark" ? "rgba(16, 163, 127, 0.17)" : "rgba(8, 120, 95, 0.1)"} 0px 0px 0px 3px`);
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("box-shadow", `${theme === "dark" ? "rgba(52, 207, 161, 0.13)" : "rgba(8, 120, 95, 0.09)"} 0px 0px 0px 3px`);
     await page.locator(".nutrition-low-confidence").blur();
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
