@@ -113,15 +113,17 @@ class RunnerEvidenceTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())["status"], "empty")
 
 
-def plan(shard, total):
+def plan(shard, total, suite="container"):
     all_ids = [f"synthetic.Class{i}.test_case" for i in range(1, total + 1)]
+    # The container suite leaves out a discovered module, as CI's selection does.
+    discovered = all_ids if suite == "all" else [*all_ids, "synthetic.Other.test_case"]
     return {
         "version": 1,
         "status": "selected",
-        "suite": "all",
+        "suite": suite,
         "shard": shard,
         "total": total,
-        "discovered_ids": all_ids,
+        "discovered_ids": discovered,
         "suite_ids": all_ids,
         "selected_ids": [all_ids[shard - 1]],
         "selected_classes": [f"synthetic.Class{shard}"],
@@ -153,6 +155,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_bounded_serial_default_and_invalid_workers(self):
         self.assertEqual(local.parse_args([]).workers, 1)
+        self.assertEqual(local.parse_args([]).suite, "container")
         for count in ("0", "5", "-1"):
             with (
                 contextlib.redirect_stderr(io.StringIO()),
@@ -165,6 +168,19 @@ class SupervisorTests(unittest.TestCase):
             local.parse_args(
                 ["--workers", "2", "--record-durations-directory", str(self.root)]
             )
+        # Durations and coverage describe the complete suite only.
+        for partial in (
+            ["--record-durations-directory", str(self.root)],
+            ["--coverage-wheel", __file__],
+        ):
+            with (
+                self.subTest(partial=partial[0]),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                local.parse_args(partial)
+        recording = ["--suite", "all", "--record-durations-directory", str(self.root)]
+        self.assertEqual(local.parse_args(recording).suite, "all")
 
     def test_initial_manifest_and_disjoint_invocations(self):
         manifest = json.loads((self.owner.output / "summary.json").read_text())
@@ -260,13 +276,20 @@ class SupervisorTests(unittest.TestCase):
 
     def test_class_partition_validation_rejects_duplicate_missing_and_split(self):
         plans = [plan(1, 2), plan(2, 2)]
-        local.validate_selection(plans)
+        local.validate_selection(plans, "container")
         for changed in ("selected_ids", "selected_classes"):
             broken = [plans[0], {**plans[1], changed: plans[0][changed]}]
             with self.assertRaises(ValueError):
-                local.validate_selection(broken)
+                local.validate_selection(broken, "container")
         with self.assertRaises(ValueError):
-            local.validate_selection(plans[:1])
+            local.validate_selection(plans[:1], "container")
+        # A container selection cannot pass as the complete suite, nor the reverse.
+        with self.assertRaises(ValueError):
+            local.validate_selection(plans, "all")
+        complete = [plan(1, 2, "all"), plan(2, 2, "all")]
+        local.validate_selection(complete, "all")
+        with self.assertRaises(ValueError):
+            local.validate_selection(complete, "container")
 
     def test_result_rejects_suite_error_missing_or_changed_selection(self):
         selection = plan(1, 1)
@@ -567,6 +590,11 @@ class SupervisorTests(unittest.TestCase):
             (["docker", "image", "rm", tag], "remove-test-source-tag"), spawned
         )
         self.assertTrue(all("/app/tests/run_tests.py" in command for command in tests))
+        lists = [command for command, name in spawned if name.startswith("list-")]
+        self.assertEqual(
+            {command[command.index("--suite") + 1] for command in [*lists, *tests]},
+            {"container"},
+        )
         self.assertTrue(all("coverage" not in command for command in tests))
         self.assertEqual(
             [shard["status"] for shard in summary["shards"]], ["passed", "passed"]

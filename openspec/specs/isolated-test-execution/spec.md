@@ -107,11 +107,15 @@ Local Python execution SHALL reuse the existing class-preserving shard assignmen
 - **WHEN** container validation is requested after application, dependency, or startup inputs changed
 - **THEN** the test application image is rebuilt from those inputs before being used as current validation evidence.
 
+#### Scenario: Local container run matches CI
+- **WHEN** a developer runs `tests/run_sqlcipher_tests.ps1` without `-Suite`
+- **THEN** it runs the `--suite container` selection of CI's `container_tests` job and partitions exactly that selection; every module runs only with `-Suite all`, which duration recording and coverage require.
+
 #### Scenario: Complete coverage evidence is requested
 - **WHEN** all Python shards finish
 - **THEN** their coverage outputs can be combined without overwriting one another and missing or failed shards cannot produce complete successful evidence.
 
-Evidence: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, `scripts/run_sqlcipher_tests.py`; `tests/test_local_test_execution.py::SupervisorTests.test_bounded_serial_default_and_invalid_workers`, `tests/test_local_test_execution.py::SupervisorTests.test_class_partition_validation_rejects_duplicate_missing_and_split`, `tests/test_local_test_execution.py::SupervisorTests.test_build_once_current_image_disjoint_shards_and_incremental_results`, `tests/test_local_test_execution.py::SupervisorTests.test_coverage_requires_exactly_one_nonempty_file_for_every_shard`, `tests/test_local_test_execution.py::SupervisorTests.test_nonzero_missing_and_suite_error_cannot_pass`, `tests/test_ci_contracts.py`.
+Evidence: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, `scripts/run_sqlcipher_tests.py`; `tests/test_local_test_execution.py::SupervisorTests.test_bounded_serial_default_and_invalid_workers`, `tests/test_local_test_execution.py::SupervisorTests.test_recording_rejects_shards_before_any_process`, `tests/test_local_test_execution.py::SupervisorTests.test_class_partition_validation_rejects_duplicate_missing_and_split`, `tests/test_local_test_execution.py::SupervisorTests.test_build_once_current_image_disjoint_shards_and_incremental_results`, `tests/test_local_test_execution.py::SupervisorTests.test_coverage_requires_exactly_one_nonempty_file_for_every_shard`, `tests/test_local_test_execution.py::SupervisorTests.test_nonzero_missing_and_suite_error_cannot_pass`, `tests/test_ci_contracts.py`.
 
 ### Requirement: Smaller fixtures retain the tested domain behavior
 Fixture optimization SHALL preserve each existing scenario's relevant records, expected results, and state isolation. Specialized cases SHALL retain their upgrade, restart, idempotence, and weekday coverage; complete-demo checks SHALL continue to exercise complete synthetic demo construction.
