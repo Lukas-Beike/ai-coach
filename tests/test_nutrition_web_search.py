@@ -55,7 +55,7 @@ def response(
     }
 
 
-def value(field: str, number: Any, url: str = PAGE) -> dict[str, Any]:
+def value(field: Any, number: Any, url: str = PAGE) -> dict[str, Any]:
     return {"field": field, "value": number, "source_url": url}
 
 
