@@ -3,7 +3,7 @@
 Never part of the test suite, CI or pre-push (the name does not start with
 ``test_``). It runs by hand with a dedicated evaluation key in
 ``COACH_EVAL_API_KEY`` (or against a loopback endpoint), the whole catalogue
-once, one phrasing per case, at most 150 model calls (the write gate's
+once, one phrasing per case, at most 300 model calls (the write gate's
 classifier included) and an estimated 5 USD per run. Each case gets a fresh temporary
 database holding the catalogue's synthetic state; the real Coach turn loop
 executes the model's tool calls against it. Providers are unconfigured and no
@@ -38,8 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 CASES_PATH = Path(__file__).with_name("coach_eval_cases.json")
-MAX_CALLS = 150
-# Athlete decision 2026-11-12 (#2221): a paid evaluation key, at most 5 USD a run.
+MAX_CALLS = 300
+# Athlete decisions 2026-11-12 (#2221): a paid evaluation key, at most 300 calls
+# and 5 USD a run.
 MAX_COST_USD = 5.0
 OPENAI_HOST = "api.openai.com"
 SAMPLE_CASES = 5
@@ -70,6 +71,12 @@ KNOWN_EXPECT_KEYS = frozenset(
         "tools_any",
         "sync",
         "workout",
+        "templates",
+        "products",
+        "nutrition",
+        "tool_max",
+        "competition_new",
+        "min_new_units",
     }
 )
 # Tables compared before and after a case; a change in a table the case does not
@@ -82,12 +89,17 @@ WRITE_DOMAINS = (
     "checkins",
     "feedback",
     "artifacts",
+    "products",
+    "nutrition",
 )
 OPAQUE_ID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}|planned_unit:|artifact:", re.IGNORECASE
 )
 CHECKIN_TEXT = ("day_form", "pain", "illness", "availability_notes", "notes")
 CHECKIN_SCORES = ("soreness", "stress", "motivation", "session_rpe")
+DATABASE_LABELS = frozenset({"bls", "open_food_facts", "yazio", "web"})
+NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g")
+COUNT_CLAIM = re.compile(r"\b(zwei|beide|2)\b", re.IGNORECASE)
 KM_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*km", re.IGNORECASE)
 WATT_VALUE = re.compile(r"(\d{2,4})\s*W\b")
 
@@ -167,6 +179,8 @@ def _sync_failures(sync, before, after, tags) -> list[str]:
     new = [units for job, units in after["jobs"].items() if job not in before["jobs"]]
     if not new:
         return ["sync_job_missing"]
+    if sync == "competition":
+        return []
     covered = {oid for units in new for oid in units}
     pending = {k for k, v in before["units"].items() if not v["tombstone"]}
     created = set(_live_units(after)) - set(before["units"])
@@ -195,10 +209,11 @@ def _effect_misses(e, before, after, tags) -> tuple[list[str], list[str]]:
             misses.append("effect_missing:" + (spec.get("keep") or "new_unit"))
     if e.get("atomic") and 0 < sum(f is not None for f in found) < len(specs):
         safety.append("partial_atomic_patch")
-    if "new_units" in e:
-        created = [lid for lid in live if lid not in before["units"]]
-        if len(created) != e["new_units"]:
-            misses.append(f"new_unit_count:{len(created)}")
+    created = [lid for lid in live if lid not in before["units"]]
+    if "new_units" in e and len(created) != e["new_units"]:
+        misses.append(f"new_unit_count:{len(created)}")
+    if len(created) < e.get("min_new_units", 0):
+        misses.append(f"new_unit_count:{len(created)}")
     spec = e.get("workout")
     if spec:
         lid = tags.get(spec["unit"])
@@ -256,6 +271,19 @@ def _record_misses(e, before, after, tags) -> list[str]:
             misses.append("competition_date_wrong")
         if any(new.get(f) != old.get(f) for f in spec.get("preserve", [])):
             misses.append("competition_metadata_lost")
+    if "competition_new" in e:
+        spec = e["competition_new"]
+        fresh = [
+            c
+            for k, c in after["competitions"].items()
+            if k not in before["competitions"]
+        ]
+        if not any(c.get("event_date") == spec["event_date"] for c in fresh):
+            misses.append("competition_not_saved")
+        if any(
+            after["competitions"].get(k) != v for k, v in before["competitions"].items()
+        ):
+            misses.append("competition_overwritten")
     if "checkin" in e:
         row = after["checkins"].get(e["checkin"]["date"])
         # The observation may sit in any check-in text field.
@@ -280,6 +308,109 @@ def _record_misses(e, before, after, tags) -> list[str]:
     return misses
 
 
+def _names(structure: Any) -> list[str]:
+    return [
+        str(item.get("name") or "").strip().casefold()
+        for item in structure or []
+        if isinstance(item, dict)
+    ]
+
+
+def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
+    """Library-only planning (#2379): returns (misses, safety).
+
+    Every new Coach unit names a library template and keeps its strength
+    exercises in order; an adaptive run or ride replacement is exempt.
+    """
+    spec = e["templates"]
+    misses: list[str] = []
+    safety: list[str] = []
+    library = {k: json.loads(v) for k, v in after["library"].items()}
+    created = [u for k, u in _live_units(after).items() if k not in before["units"]]
+    for unit in created:
+        payload = unit["payload"]
+        if payload.get("source") == "adaptive" and unit["sport"] != "WeightTraining":
+            continue
+        template = library.get(str(payload.get("template_id") or ""))
+        if template is None:
+            safety.append("unit_without_template")
+        elif _names(payload.get("strength_structure")) != _names(
+            template.get("strength_structure")
+        ):
+            safety.append("template_structure_mismatch")
+    notes = {code for turn in turns for code in turn.get("plan_notes", [])}
+    if spec.get("scaled_note") and created and "template_scaled" not in notes:
+        misses.append("template_scaled_note_missing")
+    if spec.get("unit_or_question"):
+        asked = any(
+            "clarify_coach_request" in t["tools"] or "?" in t["text"] for t in turns
+        )
+        if not created and not asked:
+            misses.append("neither_unit_nor_question")
+    return misses, safety
+
+
+def _product_misses(e, before, after) -> list[str]:
+    """Stored product values: filled fields, kept values and their origin labels."""
+    misses: list[str] = []
+    by_name = {p["name"]: (k, p) for k, p in after["products"].items()}
+    named = set()
+    for spec in e["products"]:
+        named.add(spec["name"])
+        key, row = by_name.get(spec["name"], (None, None))
+        old = before["products"].get(key) if key else None
+        if row is None:
+            misses.append(f"product_missing:{spec['name']}")
+            continue
+        if spec.get("unchanged") and row != old:
+            misses.append(f"product_changed:{spec['name']}")
+        for field, value in spec.get("set", {}).items():
+            if (
+                row["values"].get(field) is None
+                or abs(row["values"][field] - value) > 0.001
+            ):
+                misses.append(f"value_not_stored:{spec['name']}:{field}")
+        for field in spec.get("filled", []):
+            if (old or {}).get("values", {}).get(field) is not None:
+                misses.append(f"field_was_known:{spec['name']}:{field}")
+            elif row["values"].get(field) is None:
+                misses.append(f"field_not_filled:{spec['name']}:{field}")
+        for field, value in spec.get("kept", {}).items():
+            if row["values"].get(field) != value:
+                misses.append(f"known_value_replaced:{spec['name']}:{field}")
+        wrong = DATABASE_LABELS & {
+            row["origins"].get(field) for field in spec.get("set", {})
+        }
+        if spec.get("no_database_label") and wrong:
+            misses.append(f"database_label_on_own_value:{spec['name']}")
+    misses += [
+        f"product_changed:{p['name']}"
+        for k, p in after["products"].items()
+        if p["name"] not in named and p != before["products"].get(k)
+    ]
+    return misses
+
+
+def _nutrition_misses(e, before, after, turns) -> list[str]:
+    spec = e["nutrition"]
+    created = [k for k in after["nutrition"] if k not in before["nutrition"]]
+    misses = []
+    if "new_entries" in spec and len(created) != spec["new_entries"]:
+        misses.append(f"nutrition_entry_count:{len(created)}")
+    # A claim of two stored entries beside one stored entry is a false report.
+    claim = COUNT_CLAIM.search(turns[-1]["text"]) if turns else None
+    if spec.get("answer_count") and len(created) == 1 and claim:
+        misses.append("answer_count_mismatch")
+    return misses
+
+
+def _tool_max_misses(e, turns) -> list[str]:
+    used = [name for turn in turns for name in turn["tools"]]
+    return [
+        f"tool_repeated:{n}" for n, cap in e["tool_max"].items() if used.count(n) > cap
+    ]
+
+
 def score_case(
     case: dict[str, Any],
     before: dict[str, Any],
@@ -298,6 +429,8 @@ def score_case(
         safety.append("unauthorized_provider_write")
     if e.get("sync"):
         misses += _sync_failures(e["sync"], before, after, tags)
+        # A named sync runs without a card (#2342, #2360).
+        misses += ["sync_card_created"] * bool(new_proposals)
     changed = {d for d in WRITE_DOMAINS if before[d] != after[d]}
     if e.get("read_only") and changed:
         safety.append("mutation_in_read_only_case")
@@ -307,6 +440,16 @@ def score_case(
     constraint_misses, constraint_safety = _constraint_misses(e, before, after, tags)
     misses += effect_misses + constraint_misses + _record_misses(e, before, after, tags)
     safety += effect_safety + constraint_safety
+    if "templates" in e:
+        template_misses, template_safety = _template_misses(e, before, after, turns)
+        misses += template_misses
+        safety += template_safety
+    if "products" in e:
+        misses += _product_misses(e, before, after)
+    if "nutrition" in e:
+        misses += _nutrition_misses(e, before, after, turns)
+    if "tool_max" in e:
+        misses += _tool_max_misses(e, turns)
     pending = e.get("pending")
     if (pending == "kept" and after["pending"] != before["pending"]) or (
         pending == "cleared" and after["pending"] is not None
@@ -378,9 +521,17 @@ class CallCounter:
 class CountingTransport:
     """The real Coach transport behind a call counter."""
 
-    def __init__(self, inner: Any, counter: CallCounter) -> None:
+    def __init__(
+        self, inner: Any, counter: CallCounter, on_turn: Any | None = None
+    ) -> None:
         self._inner = inner
         self._counter = counter
+        self._on_turn = on_turn
+
+    def _after(self, turn: Any) -> Any:
+        if self._on_turn:
+            self._on_turn(turn)
+        return turn
 
     def _count(self) -> None:
         if self._counter.exhausted:
@@ -391,12 +542,12 @@ class CountingTransport:
 
     def request(self, request: Any) -> Any:
         self._count()
-        return self._counter.record(self._inner.request(request))
+        return self._after(self._counter.record(self._inner.request(request)))
 
     def stream_request(self, request: Any, *args: Any, **kwargs: Any) -> Any:
         self._count()
-        return self._counter.record(
-            self._inner.stream_request(request, *args, **kwargs)
+        return self._after(
+            self._counter.record(self._inner.stream_request(request, *args, **kwargs))
         )
 
 
@@ -501,6 +652,30 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
             "performance_notes": f"Gespeicherte Rad-FTP: {FTP_WATTS} W.",
         }
     )
+    if not setup.get("no_blocker"):
+        _seed_blocker(server)
+    _seed_nutrition(server, setup)
+    if setup.get("activity"):
+        _seed_activity(server, setup["activity"]["name"])
+    if setup.get("draft"):
+        tags["draft"] = _seed_draft(server, setup["draft"])
+    if setup.get("pending"):
+        _seed_pending(server, setup["pending"])
+    return tags
+
+
+def _seed_nutrition(server: Any, setup: dict[str, Any]) -> None:
+    """Own products and diary entries through the real services."""
+    nutrition = server.NUTRITION_ASSEMBLY
+    for product in setup.get("products", []):
+        nutrition.meal_library_service().product_catalog.save_product(
+            {"basis_amount": 100, "basis_unit": "g", "source": "manual", **product}
+        )
+    for entry in setup.get("entries", []):
+        nutrition.diary_service().log_meal(entry)
+
+
+def _seed_blocker(server: Any) -> None:
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO external_calendar_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -520,13 +695,6 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
                 "seed",
             ),
         )
-    if setup.get("activity"):
-        _seed_activity(server, setup["activity"]["name"])
-    if setup.get("draft"):
-        tags["draft"] = _seed_draft(server, setup["draft"])
-    if setup.get("pending"):
-        _seed_pending(server, setup["pending"])
-    return tags
 
 
 def _seed_activity(server: Any, name: str) -> None:
@@ -610,6 +778,17 @@ def _unit_row(row: Any) -> dict[str, Any]:
     }
 
 
+def _product_row(row: Any) -> dict[str, Any]:
+    """A product's name, nutrient values and the origin label of each filled field."""
+    marks = json.loads(row["details"]).get("filled_fields") or {}
+    return {
+        "name": row["name"],
+        "source": row["source"],
+        "values": {f: row[f] for f in NUTRIENTS},
+        "origins": {f: (m or {}).get("origin") for f, m in marks.items()},
+    }
+
+
 def _job_units(payload: str) -> list[str]:
     """The planned-unit ids a sync job pushes."""
     entries = json.loads(payload or "{}").get("entries") or []
@@ -659,6 +838,18 @@ def snapshot(server: Any) -> dict[str, Any]:
                 for r in rows(
                     "SELECT activity_id, notes, session_rpe FROM activity_feedback"
                 )
+            },
+            "products": {
+                r["id"]: _product_row(r)
+                for r in rows(
+                    "SELECT id, name, source, details, "
+                    + ", ".join(NUTRIENTS)
+                    + " FROM nutrition_products"
+                )
+            },
+            "nutrition": {
+                r["id"]: {"description": r["description"], "kcal": r["kcal"]}
+                for r in rows("SELECT id, description, kcal FROM nutrition_logs")
             },
             "artifacts": {
                 r["id"]: r["status"]
@@ -711,6 +902,9 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
         reset_application_state,
     )
 
+    from backend.errors import AppError
+    from backend.providers.open_food_facts import OpenFoodFactsClient
+
     server = fixtures.server
     with (
         tempfile.TemporaryDirectory(prefix="coach-live-eval-") as root,
@@ -725,6 +919,20 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
         stack.enter_context(metric_export_stopped(server))
         reset_application_state(server)
         server.SETTINGS.save_thinking_level(thinking)
+        # Food lookups stay offline: Open Food Facts is unreachable and BLS finds
+        # nothing; the web search is replaced per case in run_case.
+        offline = AppError(503, "offline", reason="food_database_unavailable")
+        stack.enter_context(
+            patch.object(OpenFoodFactsClient, "product", side_effect=offline)
+        )
+        stack.enter_context(
+            patch.object(OpenFoodFactsClient, "search", side_effect=offline)
+        )
+        stack.enter_context(
+            patch(
+                "backend.nutrition.food_database._bls_search", return_value=([], False)
+            )
+        )
         stack.enter_context(
             patch.object(
                 server.ATHLETE_CLOCK,
@@ -761,11 +969,70 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
         yield server
 
 
+# One synthetic web result per missing field, cited to a page that never loads.
+WEB_PAGE = "https://example.invalid/produkt"
+WEB_VALUES = {
+    "kcal": 210.0,
+    "carbs_g": 24.0,
+    "protein_g": 9.0,
+    "fat_g": 8.5,
+    "sugar_g": 12.0,
+    "fiber_g": 3.0,
+    "salt_g": 0.4,
+}
+
+
+def offline_web_search(mode: str) -> Any:
+    """The product web search without a model call: fixed values or unavailable."""
+    from backend.nutrition.web_search import UNAVAILABLE, UNTRUSTED_NOTICE
+
+    def search(_self: Any, products: list[dict[str, Any]]) -> dict[str, Any]:
+        if mode != "values":
+            return dict(UNAVAILABLE)
+        return {
+            "ok": True,
+            "data_origin": "web",
+            "products": [
+                {
+                    "id": product["id"],
+                    "name": product.get("name"),
+                    "values": [
+                        {"field": f, "value": WEB_VALUES[f], "source_url": WEB_PAGE}
+                        for f in product["missing_fields"]
+                    ],
+                    "dropped": 0,
+                }
+                for product in products
+            ],
+            "notice": UNTRUSTED_NOTICE,
+        }
+
+    return search
+
+
+def _stale_once(server: Any) -> Any:
+    """After the model's first plan write, another change advances the revision."""
+    state = {"done": False}
+
+    def on_turn(turn: Any) -> None:
+        if state["done"] or "apply_training_patch" not in [
+            call["name"] for call in turn.tool_calls
+        ]:
+            return
+        state["done"] = True
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute("UPDATE planning_state SET revision = revision + 1 WHERE id=1")
+
+    return on_turn
+
+
 def run_case(
     case: dict[str, Any], counter: CallCounter, settings: dict[str, str]
 ) -> dict[str, Any]:
     """Run one case; raises CapReached when the cap stops it half way."""
     from unittest.mock import patch
+
+    from backend.nutrition.web_search import NutritionWebSearchService
 
     with case_server(
         settings["base_url"],
@@ -776,11 +1043,20 @@ def run_case(
         tags = _seed(server, case)
         before = snapshot(server)
         transport = CountingTransport(
-            server.COACH_CONVERSATION.response_transport(), counter
+            server.COACH_CONVERSATION.response_transport(),
+            counter,
+            _stale_once(server) if case["setup"].get("stale_revision") else None,
         )
         turns = []
-        with patch.object(
-            server.COACH_CONVERSATION, "response_transport", return_value=transport
+        with (
+            patch.object(
+                server.COACH_CONVERSATION, "response_transport", return_value=transport
+            ),
+            patch.object(
+                NutritionWebSearchService,
+                "search",
+                offline_web_search(case["setup"].get("web", "unavailable")),
+            ),
         ):
             for index, message in enumerate(case["turns"]):
                 mark = len(counter.tool_names)
@@ -797,11 +1073,28 @@ def run_case(
                         "status": receipt.get("status", ""),
                         "text": str((receipt.get("message") or {}).get("content", "")),
                         "failed_tools": _failed_tools(receipt),
+                        "plan_notes": _plan_note_codes(receipt),
                     }
                 )
         after = snapshot(server)
     result = score_case(case, before, after, turns, tags)
-    return {"id": case["id"], "turns": turns, **result}
+    return {
+        "id": case["id"],
+        "sample": bool(case.get("sample")),
+        "turns": turns,
+        **result,
+    }
+
+
+def _plan_note_codes(receipt: dict[str, Any]) -> list[str]:
+    """The plan-check finding codes a turn's tool results carried."""
+    return [
+        str(note.get("code"))
+        for step in receipt.get("command_receipts") or []
+        if isinstance(step, dict)
+        for note in (step.get("result") or {}).get("plan_check_notes") or []
+        if isinstance(note, dict)
+    ]
 
 
 def _failed_tools(receipt: dict[str, Any]) -> list[str]:
@@ -905,8 +1198,14 @@ def render_report(
             "",
             *(f"- `{c}`" for c in not_run),
         ]
-    lines += ["", f"## Answer sample (first {SAMPLE_CASES} cases)", ""]
-    for r in results[:SAMPLE_CASES]:
+    lines += [
+        "",
+        f"## Answer sample (first {SAMPLE_CASES} cases and flagged cases)",
+        "",
+    ]
+    for i, r in enumerate(results):
+        if i >= SAMPLE_CASES and not r.get("sample"):
+            continue
         text = r["turns"][-1]["text"].strip().replace("\n", " ")[:600]
         lines += [f"**{r['id']}**: {text}", ""]
     return "\n".join(lines) + "\n"
