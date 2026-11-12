@@ -73,12 +73,30 @@ def rebased(onto: str) -> bool:
     return True
 
 
-def new_root_files(onto: str) -> list[str]:
-    added = git(
-        *("-c", "core.quotePath=false", "diff", "--name-only", "--no-renames"),
-        *("--diff-filter=A", f"{onto}...HEAD"),
-    )
-    return [name for name in added.splitlines() if name and "/" not in name]
+def outgoing_problems(onto: str, push: bool, allowed: frozenset[str]) -> bool:
+    """Print invalid subjects and, for a push, new root files; True if any."""
+    problems = [
+        ("invalid commit subjects (need <type>(<scope>): <description>):", s)
+        for s in invalid_subjects(onto)
+    ]
+    if push:
+        added = git(
+            *("-c", "core.quotePath=false", "diff", "--name-only", "--no-renames"),
+            *("--diff-filter=A", f"{onto}...HEAD"),
+        )
+        # A stray root file is usually a session artefact (a mistyped redirect).
+        problems += [
+            ("refused: new root files; remove them or pass --allow-root <file>:", n)
+            for n in added.splitlines()
+            if n and "/" not in n and n not in allowed
+        ]
+    heading = None
+    for title, item in problems:
+        if title != heading:
+            print(title)
+            heading = title
+        print(f"  {item}")
+    return bool(problems)
 
 
 def sync(onto: str, push: bool, allowed: frozenset[str] = frozenset()) -> int:
@@ -101,19 +119,7 @@ def sync(onto: str, push: bool, allowed: frozenset[str] = frozenset()) -> int:
     git("fetch", "origin")
     if not rebased(onto):
         return 1
-    bad = invalid_subjects(onto)
-    if bad:
-        print("invalid commit subjects (need <type>(<scope>): <description>):")
-        for subject in bad:
-            print(f"  {subject}")
-        return 1
-    stray = [name for name in new_root_files(onto) if name not in allowed]
-    if push and stray:
-        # A stray root file is usually a session artefact (a mistyped redirect).
-        print("refused: new files at the repository root; remove them or pass")
-        print("--allow-root <file> for each one the PR names:")
-        for name in stray:
-            print(f"  {name}")
+    if outgoing_problems(onto, push, allowed):
         return 1
     if push:
         git(
