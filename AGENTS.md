@@ -185,11 +185,7 @@ tablet-landscape, desktop) and, when a browser is available,
 check login, fresh PWA install/offline assets, safe Markdown, Enter versus
 Shift+Enter, microphone, notifications, and the changed flow.
 
-Small synthetic provider probes may use the existing local CLIProxyAPI under the
-[proxy runbook](docs/cliproxyapi-probes.md): confirmed
-subscription/OAuth upstreams with paid API-key fallbacks disabled, no athlete
-data, never read the proxy's credential files, and no routing, provider, or
-billing changes. The one tracked live run is `tests/coach_live_eval.py`
+The one tracked live model run is `tests/coach_live_eval.py`
 (#2221): started by hand with a dedicated evaluation key, the dialogue catalogue
 once per run, at most 300 model calls and 5 USD, tool calls only on temporary
 storage with unconfigured providers; never part of the suite, CI or pre-push.
