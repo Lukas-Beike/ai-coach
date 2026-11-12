@@ -144,7 +144,7 @@ class BranchSyncTests(unittest.TestCase):
         remote_tip = git(self.origin, "rev-parse", "feat/x")
         git(self.work, "commit", "-q", "--amend", "-m", "feat(ui): add c, reworded")
         with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):
-            code, _, err = self.sync("--push")
+            code, _, err = self.sync("--push", "--allow-root", "c.txt")
         self.assertEqual(code, 2)
         self.assertIn("rejected", err)
         self.assertEqual(git(self.origin, "rev-parse", "feat/x"), remote_tip)
@@ -155,6 +155,17 @@ class BranchSyncTests(unittest.TestCase):
             code, _, _ = self.sync("--push")
         self.assertEqual(code, 1)
         self.assertEqual(git(self.origin, "branch", "--list", "feat/x"), "")
+
+    def test_new_root_file_blocks_the_push_unless_allowed(self):
+        commit(self.work, "stray-redirect", "temp path\n", "fix(ui): add file")
+        with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):
+            code, out, _ = self.sync("--push")
+            self.assertEqual(code, 1)
+            self.assertIn("  stray-redirect", out)
+            self.assertEqual(git(self.origin, "branch", "--list", "feat/x"), "")
+            code, out, _ = self.sync("--push", "--allow-root", "stray-redirect")
+        self.assertEqual(code, 0)
+        self.assertIn("pushed: feat/x", out)
 
     def test_push_without_sonar_exits_two_before_any_git_change(self):
         empty = self.root / "empty"

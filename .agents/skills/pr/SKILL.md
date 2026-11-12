@@ -21,7 +21,8 @@ conflicts, CI failures, and review feedback through the merge.
 - Setup prerequisite: the SonarQube CLI is installed and authenticated
   ([development](../../../docs/development.md#secret-checks-before-git-pushes));
   without it the pre-push hook refuses every push.
-- Commit only this task's changes with Conventional Commit subjects; leave
+- Commit only this task's changes, staged by named path (never `git add -A`
+  or `git add .`), with Conventional Commit subjects; leave
   unrelated user changes alone and stop if they block the rebase.
 - Rebase with [branch-sync](../pacecraft-branch-sync/SKILL.md) (no `--push`
   yet). Resolve conflicts by understanding both sides; ask the user for product
