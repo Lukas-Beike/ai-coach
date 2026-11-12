@@ -55,6 +55,23 @@ def invalid_subjects(onto: str) -> list[str]:
     return [s for s in subjects if not SUBJECT.match(s)]
 
 
+def rebased(onto: str) -> bool:
+    """Rebase onto the target; on a conflict, leave it in progress and list it."""
+    try:
+        git("rebase", onto)
+    except CliError as exc:
+        conflicts = git("diff", "--name-only", "--diff-filter=U").split()
+        if not conflicts:
+            raise
+        print(f"conflict: rebase onto {onto} stopped in {len(conflicts)} file(s)")
+        for name in conflicts:
+            print(f"  {name}")
+        print("hint: resolve and `git rebase --continue`, or `git rebase --abort`")
+        print(f"detail: {exc}", file=sys.stderr)
+        return False
+    return True
+
+
 def sync(onto: str, push: bool) -> int:
     branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch == "HEAD" or branch in PROTECTED:
@@ -73,17 +90,7 @@ def sync(onto: str, push: bool) -> int:
     except CliError:
         leased = ""  # never pushed: the push only succeeds while it stays absent
     git("fetch", "origin")
-    try:
-        git("rebase", onto)
-    except CliError as exc:
-        conflicts = git("diff", "--name-only", "--diff-filter=U").split()
-        if not conflicts:
-            raise
-        print(f"conflict: rebase onto {onto} stopped in {len(conflicts)} file(s)")
-        for name in conflicts:
-            print(f"  {name}")
-        print("hint: resolve and `git rebase --continue`, or `git rebase --abort`")
-        print(f"detail: {exc}", file=sys.stderr)
+    if not rebased(onto):
         return 1
     bad = invalid_subjects(onto)
     if bad:

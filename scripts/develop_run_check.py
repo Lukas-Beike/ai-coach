@@ -21,11 +21,15 @@ FIELDS = "databaseId,workflowName,status,conclusion,url,headSha,createdAt"
 GREEN = {"success", "skipped", "neutral"}
 
 
+class NotMerged(RuntimeError):
+    """The PR has no merge commit yet."""
+
+
 def merge_sha(pr: int) -> str:
     data = gh_json("pr", "view", str(pr), "--json", "mergeCommit,mergedAt") or {}
     oid = (data.get("mergeCommit") or {}).get("oid")
     if not data.get("mergedAt") or not oid:
-        raise LookupError(f"PR #{pr} is not merged; no merge commit to check.")
+        raise NotMerged(f"PR #{pr} is not merged; no merge commit to check.")
     return oid
 
 
@@ -100,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         if failing:
             return 1
         return 3 if "pending" in states else 0
-    except LookupError as exc:
+    except NotMerged as exc:
         print(f"refused: {exc}")
         return 1
     except (CliError, KeyError, TypeError) as exc:

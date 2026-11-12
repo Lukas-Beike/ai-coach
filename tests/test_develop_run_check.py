@@ -159,6 +159,11 @@ class DevelopRunCheckTests(unittest.TestCase):
             code = develop_run_check.main(["--sha", SHA])
         self.assertEqual(code, 2)
         self.assertIn("failed", err.getvalue())
+        # A run record without a field is a malformed answer, not an unmerged PR.
+        broken = {k: v for k, v in run_record(1, *CI).items() if k != "conclusion"}
+        code, out, _, _ = check("--sha", SHA, runs=[broken])
+        self.assertEqual(code, 2)
+        self.assertNotIn("refused", out)
 
 
 if __name__ == "__main__":
