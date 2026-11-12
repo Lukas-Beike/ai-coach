@@ -165,8 +165,13 @@ class FixtureGarminClient:
     def get_hrv_data_range(self, start: str, end: str) -> Any:
         return self._value("hrv")
 
+    def get_daily_summaries(self, start: str, end: str) -> Any:
+        # The range endpoint wraps its nested rows in ``data``.
+        return {"data": self._value("daily_stats")}
+
     def get_user_summary(self, current: str) -> Any:
-        return self._value("daily_stats")
+        # The per-day endpoint answers one flat summary; documented shape only.
+        return {"calendarDate": current, "totalSteps": 8421, "floorsAscended": 7}
 
     def get_heart_rates(self, current: str) -> Any:
         return self._value("resting_hr")
@@ -208,7 +213,8 @@ class FixtureGarminClient:
         return self._value("running_threshold")
 
     def get_weigh_ins(self, start: str, end: str) -> Any:
-        return self._value("weight")
+        # Garmin answers one object; the collector stores it as a one-element list.
+        return self._value("weight")[0]
 
     def get_functional_threshold_power_range(
         self, start: str, end: str, *, sport: str, aggregation: str
@@ -389,7 +395,7 @@ class GarminWireFixtureTests(unittest.TestCase):
 
         self.assertEqual(len(records), 2)
         for record in records:
-            with self.subTest(date=record["calendarDate"]):
+            with self.subTest(date=record["date"]):
                 self.assertTrue(0 <= record["charged"] <= 100)
                 self.assertTrue(0 <= record["drained"] <= 100)
 

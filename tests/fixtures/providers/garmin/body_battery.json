@@ -1,11 +1,11 @@
 [
   {
-    "calendarDate": "2026-10-09",
+    "date": "2026-10-09",
     "charged": 72,
     "drained": 55
   },
   {
-    "calendarDate": "2026-10-10",
+    "date": "2026-10-10",
     "charged": 68,
     "drained": 41
   }
