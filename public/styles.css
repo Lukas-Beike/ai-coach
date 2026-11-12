@@ -776,6 +776,18 @@ h2 {
 .planned-steps [data-zone="6"] .planned-step-mark { background: var(--training-zone-6); }
 .planned-steps [data-zone="7"] .planned-step-mark { background: var(--training-zone-7); }
 .planned-step-range { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.planned-zone-time { display: grid; gap: 4px; }
+.planned-zone-time-bar { display: flex; height: 10px; overflow: hidden; border-radius: 5px; background: var(--surface-input); }
+.planned-zone-time-bar i { display: block; min-width: 2px; background: var(--muted); }
+.planned-zone-time-bar [data-zone="1"] { background: var(--training-zone-1); }
+.planned-zone-time-bar [data-zone="2"] { background: var(--training-zone-2); }
+.planned-zone-time-bar [data-zone="3"] { background: var(--training-zone-3); }
+.planned-zone-time-bar [data-zone="4"] { background: var(--training-zone-4); }
+.planned-zone-time-bar [data-zone="5"] { background: var(--training-zone-5); }
+.planned-zone-time-bar [data-zone="6"] { background: var(--training-zone-6); }
+.planned-zone-time-bar [data-zone="7"] { background: var(--training-zone-7); }
+.planned-zone-time-legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.planned-zone-time-source { margin: 0; color: var(--subtle); font-size: .72rem; }
 .calendar-workout-profile [data-zone="2"], .planned-zone-legend [data-zone="2"] { color: var(--training-zone-2); }
 .calendar-workout-profile [data-zone="3"], .planned-zone-legend [data-zone="3"] { color: var(--training-zone-3); }
 .calendar-workout-profile [data-zone="4"], .planned-zone-legend [data-zone="4"] { color: var(--training-zone-4); }
