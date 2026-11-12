@@ -162,7 +162,7 @@ The system SHALL answer `GET /api/weather` (contract in `docs/api-routes.md`) wi
 
 #### Scenario: Location not found
 - **WHEN** geocoding finds no location
-- **THEN** the error text is "Der Wetterort wurde nicht gefunden."; every other failure shows "Wetterdaten konnten derzeit nicht aktualisiert werden."
+- **THEN** the error text is "Der Wetterort wurde nicht gefunden."; another provider error with status 400 shows its own message, and every other failure shows "Wetterdaten konnten derzeit nicht aktualisiert werden."
 
 #### Scenario: Concurrent refreshes
 - **WHEN** an unforced refresh waited for the refresh lock while another one stored a fresh forecast

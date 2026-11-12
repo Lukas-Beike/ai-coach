@@ -422,7 +422,7 @@ The system SHALL store how many weeks the training calendar shows back and ahead
 - **THEN** only that value changes.
 
 #### Scenario: Invalid input
-- **WHEN** the body is not an object, names neither value, or a value is not a whole number from 0 to 52
+- **WHEN** the body is not an object, names neither value, or a value cannot be converted to an integer or lies outside 0 to 52 (a convertible value such as `3.7` or `true` is stored as its integer)
 - **THEN** the request fails with 400 and nothing changes.
 
 #### Scenario: Stored value out of range
