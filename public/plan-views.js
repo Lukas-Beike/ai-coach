@@ -1,15 +1,13 @@
-  function plannedAirValues(weather) {
-    const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
-    const aqi = calendarMetricNumber(air.european_aqi_max);
-    const category = air.european_aqi_category ? " (" + air.european_aqi_category + ")" : "";
-    return [
-      aqi ? `AQI ${aqi}${category}` : "",
-      calendarMetricNumber(air.uv_index_max) ? `UV ${calendarMetricNumber(air.uv_index_max)}` : "",
-      plannedPollenLabel(weather.pollen),
-    ].filter(Boolean);
-  }
-
-globalThis.AppPlanViews = Object.freeze({ plannedPushTargets, plannedWeekSyncJobs, runPlannedWeekSync, plannedGarminBlockedText });
+function plannedAirValues(weather) {
+  const air = weather.air_quality && typeof weather.air_quality === "object" ? weather.air_quality : {};
+  const aqi = calendarMetricNumber(air.european_aqi_max);
+  const category = air.european_aqi_category ? " (" + air.european_aqi_category + ")" : "";
+  return [
+    aqi ? `AQI ${aqi}${category}` : "",
+    calendarMetricNumber(air.uv_index_max) ? `UV ${calendarMetricNumber(air.uv_index_max)}` : "",
+    plannedPollenLabel(weather.pollen),
+  ].filter(Boolean);
+}
 
 // One explicit plan_push job, carrying the hashes the entries were shown with.
 async function runPlanPush(provider, entries) {
