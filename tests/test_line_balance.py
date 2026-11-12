@@ -22,6 +22,9 @@ NUMSTAT = (
     "4\t0\tscripts/new.py\n"
     "-\t-\tpublic/icons/logo.png\n"
     "1\t1\tbackend_notes.md\n"
+    "0\t0\t.agents/skills/{ai-coach-x => pacecraft-x}/SKILL.md\n"
+    "1\t1\ttests/{old.py => new.py}\n"
+    "2\t0\tdocs/a.md => backend/b.py\n"
 )
 
 
@@ -44,12 +47,12 @@ class LineBalanceTests(unittest.TestCase):
         result, _ = self.balance()
         self.assertEqual(
             result,
-            {"production": (18, 3), "tests": (9, 6), "other": (14, 2)},
+            {"production": (20, 3), "tests": (10, 7), "other": (14, 2)},
         )
 
     def test_default_and_commit_ranges(self):
         _, fake = self.balance()
-        self.assertEqual(fake.calls[0][1:4], ["diff", "--numstat", "--no-renames"])
+        self.assertEqual(fake.calls[0][1:4], ["diff", "--numstat", "-M"])
         self.assertEqual(fake.calls[0][-1], "origin/develop...HEAD")
         _, fake = self.balance(base="origin/main", head="topic")
         self.assertEqual(fake.calls[0][-1], "origin/main...topic")
@@ -66,7 +69,7 @@ class LineBalanceTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             out.getvalue().splitlines(),
-            ["production: +18 / -3", "tests: +9 / -6", "other: +14 / -2"],
+            ["production: +20 / -3", "tests: +10 / -7", "other: +14 / -2"],
         )
 
 

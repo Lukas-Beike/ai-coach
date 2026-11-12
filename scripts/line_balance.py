@@ -4,7 +4,8 @@
 
 Compares base...head, or SHA^..SHA with --commit. Production is backend/,
 server.py and public/; tests are tests/ and e2e/; everything else (docs,
-skills, scripts, configuration) is other. Binary files count as 0. Exit 0 ok,
+skills, scripts, configuration) is other. Binary files count as 0; a renamed
+file counts only its changed lines. Exit 0 ok,
 2 bad input or a failed git call.
 """
 
@@ -26,6 +27,17 @@ def category(path: str) -> str:
     return "tests" if path.startswith(TESTS) else "other"
 
 
+def destination(path: str) -> str:
+    """The new path of a rename line such as `a/{old => new}/f` or `old => new`."""
+    if " => " not in path:
+        return path
+    if "{" in path:
+        before, rest = path.split("{", 1)
+        inner, after = rest.split("}", 1)
+        return (before + inner.split(" => ", 1)[1] + after).replace("//", "/")
+    return path.split(" => ", 1)[1]
+
+
 def balance(
     base: str = "origin/develop",
     head: str = "HEAD",
@@ -35,8 +47,10 @@ def balance(
     """Added and removed lines per category for base...head, or for one commit."""
     span = f"{commit}^..{commit}" if commit else f"{base}...{head}"
     totals = {"production": [0, 0], "tests": [0, 0], "other": [0, 0]}
-    for line in git("diff", "--numstat", "--no-renames", span, cwd=cwd).splitlines():
+    # Renames count only their changed lines, not the whole moved file.
+    for line in git("diff", "--numstat", "-M", span, cwd=cwd).splitlines():
         added, removed, path = line.split("\t", 2)
+        path = destination(path)
         if added.isdigit() and removed.isdigit():  # binary files show "-"
             totals[category(path)][0] += int(added)
             totals[category(path)][1] += int(removed)
