@@ -1247,6 +1247,40 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.assertEqual(45, len(self.garmin.workouts))
         self.assertTrue(self.cleanup()["done"])
 
+    def test_a_refused_workout_never_stalls_the_one_time_removal(self) -> None:
+        self.cleanup({})
+        self.garmin.workouts.update(
+            {
+                "701": {"description": "Pacecraft"},
+                "702": {"description": "Eigenes"},
+                "703": {"description": "Pacecraft"},
+            }
+        )
+        delete = self.garmin.delete_workout
+
+        def refuse(workout_id):
+            if workout_id == "701":
+                raise _http_error(403)
+            return delete(workout_id)
+
+        with patch.object(self.garmin, "delete_workout", side_effect=refuse):
+            self.assertEqual(1, self.service.remove_past())
+
+        self.assertEqual({"701", "702"}, set(self.garmin.workouts))
+        self.assertEqual({"done": True, "checked": ["701", "702"]}, self.cleanup())
+
+    def test_a_garmin_outage_keeps_the_progress_of_the_pass(self) -> None:
+        self.cleanup({})
+        self.garmin.workouts.update(
+            {"701": {"description": "Eigenes"}, "702": {"description": "Pacecraft"}}
+        )
+        with patch.object(self.garmin, "delete_workout", side_effect=_http_error(500)):
+            self.assertEqual(0, self.service.remove_past())
+
+        self.assertEqual({"done": False, "checked": ["701"]}, self.cleanup())
+        self.assertEqual(1, self.service.remove_past())
+        self.assertTrue(self.cleanup()["done"])
+
     def test_a_busy_or_unconfigured_garmin_removes_nothing(self) -> None:
         self.linked(U1, "2026-11-05")
 

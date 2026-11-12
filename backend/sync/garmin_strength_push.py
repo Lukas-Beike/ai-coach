@@ -282,31 +282,40 @@ class GarminStrengthPushService:
         keep = self._upcoming_workout_ids(today) | _scheduled_from(client, today)
         checked = set(state["checked"])
         reads = 0
-        finished = True
-        for workout_id in _strength_workout_ids(client):
-            if workout_id in keep or workout_id in checked:
-                continue
-            if removed[0] >= _PAST_REMOVAL_BATCH or reads >= _CLEANUP_READS:
-                finished = False
-                break
-            reads += 1
-            try:
-                own = _app_created(_call(client.get_workout_by_id, workout_id))
-                if own:
-                    _call(client.delete_workout, workout_id)
-            except _Missing:
-                own = True
-            if not own:
-                checked.add(workout_id)
-                continue
-            with self._database_manager().unit_of_work() as db:
-                db.execute(
-                    "DELETE FROM remote_links WHERE provider=? AND entity_kind=? "
-                    "AND remote_id=?",
-                    (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, workout_id),
-                )
-            removed[0] += 1
-        self._save_cleanup({"done": finished, "checked": sorted(checked)})
+        finished = False
+        try:
+            for workout_id in _strength_workout_ids(client):
+                if workout_id in keep or workout_id in checked:
+                    continue
+                if removed[0] >= _PAST_REMOVAL_BATCH or reads >= _CLEANUP_READS:
+                    break
+                reads += 1
+                try:
+                    own = _app_created(_call(client.get_workout_by_id, workout_id))
+                    if own:
+                        _call(client.delete_workout, workout_id)
+                except _Missing:
+                    own = True
+                except AppError:
+                    # Refused: this pass moves on; it is not the app's to retry
+                    # forever, so the finished pass leaves it in Garmin.
+                    checked.add(workout_id)
+                    continue
+                if not own:
+                    checked.add(workout_id)
+                    continue
+                with self._database_manager().unit_of_work() as db:
+                    db.execute(
+                        "DELETE FROM remote_links WHERE provider=? AND entity_kind=? "
+                        "AND remote_id=?",
+                        (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, workout_id),
+                    )
+                removed[0] += 1
+            else:
+                finished = True
+        finally:
+            # A Garmin outage keeps what this pass already read.
+            self._save_cleanup({"done": finished, "checked": sorted(checked)})
 
     def _upcoming_workout_ids(self, today: date) -> set[str]:
         """Workouts linked to a stored unit dated today or later."""
