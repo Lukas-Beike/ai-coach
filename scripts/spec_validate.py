@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--change", help="also validate this change")
     parser.add_argument("--all", action="store_true", help="also validate all")
     args = parser.parse_args(argv)
+    # Review text and check output carry emoji; a Windows console is cp1252.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if args.change is not None and not CHANGE_NAME.match(args.change):
         print("error: --change takes a name such as add-example", file=sys.stderr)
         return 2

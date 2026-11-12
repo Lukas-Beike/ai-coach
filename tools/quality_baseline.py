@@ -429,8 +429,8 @@ def check(
     if obsolete:
         print(
             "Obsolete baseline entries must be removed. Regenerate with "
-            "`python tools/quality_baseline.py --snapshot --base <commit>` and "
-            "update tests/fixtures/quality_baseline.json."
+            "`python tools/quality_baseline.py --snapshot --base <commit>`, which "
+            "rewrites tests/fixtures/quality_baseline.json."
         )
     return 1 if added or obsolete else 0
 
@@ -459,7 +459,7 @@ def main() -> int:
         if not args.base or not re.fullmatch(r"[0-9a-f]{40}", args.base):
             parser.error("--snapshot requires an immutable --base SHA")
         current = json.loads(BASELINE.read_text(encoding="utf-8"))
-        print(
+        BASELINE.write_text(
             json.dumps(
                 {
                     "schema": 1,
@@ -472,7 +472,11 @@ def main() -> int:
                 },
                 indent=2,
             )
+            + "\n",
+            encoding="utf-8",
+            newline="\n",
         )
+        print(f"Quality ratchet: wrote {BASELINE.relative_to(ROOT).as_posix()}")
         return 0
     return check(
         json.loads(BASELINE.read_text(encoding="utf-8")),
