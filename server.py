@@ -1800,64 +1800,76 @@ RUN_LTHR = RunLthr(
 
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
-    return PlanGuardService(
-        estimate_unit=_planned_unit_estimator(),
-        planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
-        completed_activities=lambda: read_completed(
-            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
-        ),
-        competitions=lambda: PLANNING_DATA.competition().list(),
-        illness=lambda: recent_illness(
-            ATHLETE_DATA.checkin().list(10),
-            ATHLETE_CLOCK.now().date(),
-            (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_illness_pause()
-                or (None, None)
-            )[1],
-        ),
-        progress=lambda: read_progress(HTTP_API.training_reports()),
-        training_model=lambda: str(
-            ATHLETE_DATA.profile().get().get("training_model") or ""
-        ),
-        profile=lambda: ATHLETE_DATA.profile().get(),
-        today=lambda: ATHLETE_CLOCK.now().date(),
-        thresholds=lambda: read_load_thresholds(
-            database_manager(),
-            CANONICAL_READ,
-            ATHLETE_CLOCK.now().date(),
-            ATHLETE_DATA.zones().configurations(),
-            lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
-        ),
-        expects_strength=lambda: strength_expected(
-            str(
-                ATHLETE_DATA.profile().get().get("training_preferences_strength") or ""
+    return (
+        PlanGuardService(
+            estimate_unit=_planned_unit_estimator(),
+            planned_units=lambda: PLANNING_DATA.planned_unit().list(
+                1000, future_only=True
             ),
-            PLANNING_DATA.competition().list(),
-            ATHLETE_CLOCK.now().date(),
-        ),
-        calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
-        templates=lambda: {
-            str(item["id"]): item
-            for item in PLANNING_DATA.workout_library().list(1000)
-            if not item.get("date")
-        },
-        history=BriefHistory(
-            lessons=lambda: read_lessons(_block_lessons),
-            recent_units=lambda: PLANNING_DATA.planned_unit().list(
-                1000,
-                future_only=True,
-                since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
+            completed_activities=lambda: read_completed(
+                database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
             ),
-            recent_completed=lambda: read_completed(
+            competitions=lambda: PLANNING_DATA.competition().list(),
+            illness=lambda: recent_illness(
+                ATHLETE_DATA.checkin().list(10),
+                ATHLETE_CLOCK.now().date(),
+                (
+                    PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_illness_pause()
+                    or (None, None)
+                )[1],
+            ),
+            progress=lambda: read_progress(HTTP_API.training_reports()),
+            training_model=lambda: str(
+                ATHLETE_DATA.profile().get().get("training_model") or ""
+            ),
+            profile=lambda: ATHLETE_DATA.profile().get(),
+            today=lambda: ATHLETE_CLOCK.now().date(),
+            thresholds=lambda: read_load_thresholds(
                 database_manager(),
                 CANONICAL_READ,
                 ATHLETE_CLOCK.now().date(),
-                days=LAST_TEST_DAYS,
+                ATHLETE_DATA.zones().configurations(),
+                lambda db: preferences_from_profile(
+                    ATHLETE_DATA.profile().get_from_db(db)
+                ),
             ),
-        ),
-    ).with_return_stage(
-        lambda: (
-            PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
+            expects_strength=lambda: strength_expected(
+                str(
+                    ATHLETE_DATA.profile().get().get("training_preferences_strength")
+                    or ""
+                ),
+                PLANNING_DATA.competition().list(),
+                ATHLETE_CLOCK.now().date(),
+            ),
+            calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(
+                56
+            ),
+            history=BriefHistory(
+                lessons=lambda: read_lessons(_block_lessons),
+                recent_units=lambda: PLANNING_DATA.planned_unit().list(
+                    1000,
+                    future_only=True,
+                    since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
+                ),
+                recent_completed=lambda: read_completed(
+                    database_manager(),
+                    CANONICAL_READ,
+                    ATHLETE_CLOCK.now().date(),
+                    days=LAST_TEST_DAYS,
+                ),
+            ),
+        )
+        .with_return_stage(
+            lambda: (
+                PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
+            )
+        )
+        .with_templates(
+            lambda: {
+                str(item["id"]): item
+                for item in PLANNING_DATA.workout_library().list(1000)
+                if not item.get("date")
+            }
         )
     )
 

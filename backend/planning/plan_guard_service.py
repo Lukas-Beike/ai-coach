@@ -455,11 +455,10 @@ class PlanGuardService:
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         profile: Callable[[], Mapping[str, Any]] = dict,
         history: BriefHistory | None = None,
-        templates: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
     ) -> None:
         # The undated library templates by id; None leaves the template rule
         # unchecked, as for a guard built without the library (#2379).
-        self._templates = templates
+        self._templates: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None
         self._history = history or BriefHistory()
         self._return_stage: Callable[[], int | None] = lambda: None
         self._profile = profile
@@ -539,6 +538,13 @@ class PlanGuardService:
         if self._illness_cache is None:
             self._illness_cache = (self._illness(),)
         return self._illness_cache[0]
+
+    def with_templates(
+        self, templates: Callable[[], Mapping[str, Mapping[str, Any]]]
+    ) -> PlanGuardService:
+        """Check that units come from these library templates (#2379)."""
+        self._templates = templates
+        return self
 
     def with_return_stage(
         self, return_stage: Callable[[], int | None]
