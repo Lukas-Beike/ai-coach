@@ -1,6 +1,6 @@
 // One element builder (#2111): props is a class name or an object of properties
 // (`aria-*`/`data-*` become attributes, `dataset` merges); children are nodes or text,
-// arrays are flattened, and null, undefined and false are skipped.
+// arrays are flattened, and null, undefined, false and empty text are skipped.
 function h(tag, props = null, ...children) {
   const element = document.createElement(tag);
   const entries = typeof props === "string" ? [["className", props || null]] : Object.entries(props || {});
@@ -10,7 +10,7 @@ function h(tag, props = null, ...children) {
     else if (key.includes("-")) element.setAttribute(key, String(value));
     else element[key] = value;
   }
-  for (const child of children.flat()) if (child != null && child !== false) element.append(typeof child === "object" ? child : String(child));
+  for (const child of children.flat()) if (child != null && child !== false && child !== "") element.append(typeof child === "object" ? child : String(child));
   return element;
 }
 

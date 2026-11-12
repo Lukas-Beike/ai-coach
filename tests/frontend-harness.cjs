@@ -54,7 +54,7 @@ function extractFunctions(file, names, globals = {}) {
 
 // A minimal element. Beyond the plain fields it records, for the golden tree comparisons, which properties were
 // explicitly set (even to "" or false), how often each listener type was registered and the SVG namespace;
-// textContent replaces the children like in a browser, and querySelector answers ".a", ".a + .b[data-k="v"]"
+// textContent replaces the children and reads all descendant text like in a browser, and querySelector answers ".a", ".a + .b[data-k="v"]"
 // and ":scope > .a" (any other selector throws).
 class FakeElement {
   constructor(tag = "div") {
@@ -70,7 +70,11 @@ class FakeElement {
     };
     return new Proxy(this, { set }); // NOSONAR: test fake; only a proxy sees properties explicitly set to "" or false.
   }
-  get textContent() { return this._text; }
+  // Like a browser: own text plus all descendant text; exactly the assigned value while it is the only child.
+  get textContent() {
+    if (this.children.length === 1 && this.children[0] === this._text) return this._text;
+    return this.children.map((child) => (child instanceof FakeElement ? child.textContent : String(child))).join("");
+  }
   set textContent(value) { this._text = value; this.children = value === "" || value == null ? [] : [value]; }
   get childElementCount() { return this.children.filter((child) => typeof child !== "string").length; }
   get lastElementChild() { return this.children.findLast((child) => typeof child !== "string") ?? null; }

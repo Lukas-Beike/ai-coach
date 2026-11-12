@@ -1326,10 +1326,11 @@ function coachWorkingLabel() {
 }
 
 function createCoachWorkingIndicator() {
-  const node = h("div", { id: "coachWorking", className: "coach-working", "aria-hidden": "true", "aria-label": coachWorkingLabel() });
+  const label = coachWorkingLabel();
+  const node = h("div", { id: "coachWorking", className: "coach-working", "aria-hidden": "true", "aria-label": label });
   const dots = h("span", { className: "working-dots", "aria-hidden": "true" });
   dots.innerHTML = "<i></i><i></i><i></i>";
-  node.append(dots, h("span", null, coachWorkingLabel()));
+  node.append(dots, h("span", null, label));
   return node;
 }
 
@@ -1365,7 +1366,7 @@ function coachActionDiff(proposal) {
     entry.carbs, entry.protein, entry.fat, entry.source,
     entry.keep && `Behalten: ${entry.keep}`,
     entry.delete && `Löschen: ${entry.delete}`,
-  ].filter(Boolean).join(" · ") || null)));
+  ].filter(Boolean).join(" · "))));
 }
 
 function coachActionButtons(proposal) {
@@ -1391,16 +1392,10 @@ function coachActionButtons(proposal) {
     state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
   });
-  const confirm = h("button", { type: "button" });
-  if (remoteWrite) {
-    confirm.textContent = "Remote-Änderung freigeben";
-  } else if (localWrite) {
-    confirm.textContent = proposal.object_ids?.operation === "save_nutrition_product"
-      ? "Produkt speichern"
-      : "Mahlzeitvorlage speichern";
-  } else {
-    confirm.textContent = "Änderung zurücknehmen";
-  }
+  let confirmLabel = "Änderung zurücknehmen";
+  if (remoteWrite) confirmLabel = "Remote-Änderung freigeben";
+  else if (localWrite) confirmLabel = proposal.object_ids?.operation === "save_nutrition_product" ? "Produkt speichern" : "Mahlzeitvorlage speichern";
+  const confirm = h("button", { type: "button" }, confirmLabel);
   confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
   return h("div", "coach-action-card-actions", later, confirm);
 }
@@ -1557,7 +1552,7 @@ function createPendingMessage(entry, index = 0) {
   return h(
     "div",
     "message user pending",
-    h("div", null, entry.message || null),
+    h("div", null, entry.message),
     h("span", "pending-label", index === 0 ? "Als Nächstes" : "Wird nach der aktuellen Antwort gesendet"),
     h(
       "div",
@@ -1756,7 +1751,7 @@ function renderMessageNode(message, latest = false) {
   else {
     node.textContent = message.content;
     if (message.attachment_names) {
-      node.append(h("small", null, messageAttachmentLabel(message.attachment_names) || null));
+      node.append(h("small", null, messageAttachmentLabel(message.attachment_names)));
     }
   }
   appendMessageRetry(node, message);
@@ -2117,7 +2112,7 @@ const CONTEXT_KEY_LABELS = {
 const CONTEXT_HIDDEN_KEYS = new Set(["field", "role"]);
 
 function contextPreNode(text) {
-  return h("pre", null, text || null);
+  return h("pre", null, text);
 }
 
 function contextTextNode(text) {
@@ -2147,7 +2142,7 @@ function contextListNode(items, depth) {
 function contextObjectNode(object, depth) {
   const entries = Object.entries(object).filter(([key]) => !CONTEXT_HIDDEN_KEYS.has(key));
   return h("dl", "context-preview-values", entries.flatMap(([key, item]) => [
-    h("dt", null, CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ") || null),
+    h("dt", null, CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ")),
     h("dd", null, contextValueNode(item, key, depth + 1)),
   ]));
 }

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument, FakeElement, textOf } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
 const TURN_RENDERERS = ["appendMessageChanges", "appendPlanNotes", "undoCoachTurn", "appendFailedTurnRetry", "resendChatText", "profileSetupButton"];
 
@@ -42,10 +42,10 @@ test("an undoable turn lists its changes with one undo button", () => {
   const line = render(context, { role: "assistant", client_turn_id: "turn-1", coach_changes: changes() });
   assert.equal(line.className, "message-changes");
   assert.equal(line.children[0].className, "message-changes-icon");
-  assert.equal(textOf(line.children[1]), "Profil aktualisiert · Trainingsvorlagen bearbeitet (2)");
+  assert.equal(line.children[1].textContent, "Profil aktualisiert · Trainingsvorlagen bearbeitet (2)");
   assert.equal(line.children[2].className, "message-undo");
   assert.equal(line.children[2].type, "button");
-  assert.equal(textOf(line.children[2]), "Rückgängig");
+  assert.equal(line.children[2].textContent, "Rückgängig");
 });
 
 test("plan notes render safe labels, dates, evidence and warning emphasis", () => {
@@ -60,12 +60,12 @@ test("plan notes render safe labels, dates, evidence and warning emphasis", () =
       { code: "calendar_load", dates: ["2026-11-03"], severity: "notice" }],
   }) });
   assert.equal(node.children[1].className, "message-plan-note is-warning");
-  assert.match(textOf(node.children[1]), /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
-  assert.match(textOf(node.children[2]), /Hinweis: Harte Tage in Folge · Praxisbasiert/);
-  assert.match(textOf(node.children[3]), /Hinweis: Lastsprung · Aus Distanzstudien übertragen/);
-  assert.match(textOf(node.children[4]), /Hinweis: Wochenlast steigt/);
-  assert.match(textOf(node.children[5]), /Hinweis: Last unbekannt/);
-  assert.match(textOf(node.children[6]), /Hinweis: Kalender und Einheit · 03\.11\.2026/);
+  assert.match(node.children[1].textContent, /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
+  assert.match(node.children[2].textContent, /Hinweis: Harte Tage in Folge · Praxisbasiert/);
+  assert.match(node.children[3].textContent, /Hinweis: Lastsprung · Aus Distanzstudien übertragen/);
+  assert.match(node.children[4].textContent, /Hinweis: Wochenlast steigt/);
+  assert.match(node.children[5].textContent, /Hinweis: Last unbekannt/);
+  assert.match(node.children[6].textContent, /Hinweis: Kalender und Einheit · 03\.11\.2026/);
 });
 
 test("undone, untracked and turn-less changes show no undo button", () => {
@@ -78,7 +78,7 @@ test("undone, untracked and turn-less changes show no undo button", () => {
   for (const [message, prefix] of cases) {
     const line = render(context, { role: "assistant", ...message });
     assert.equal(line.children.length, 2);
-    assert.ok(textOf(line.children[1]).startsWith(prefix));
+    assert.ok(line.children[1].textContent.startsWith(prefix));
   }
 });
 
@@ -171,7 +171,7 @@ test("the newest failed reply sends its request again and keeps the draft", () =
   const node = new FakeElement("div");
   context.appendFailedTurnRetry(node, messages[1], true);
   const retry = node.children[0];
-  assert.equal(textOf(retry), "Erneut senden");
+  assert.equal(retry.textContent, "Erneut senden");
   assert.match(node.className, /is-failed/);
   retry.listeners.click();
   assert.deepEqual(JSON.parse(JSON.stringify(submitted)), [{ text: "Plane meine Woche", attachments: [], requestKind: "plan_week" }]);

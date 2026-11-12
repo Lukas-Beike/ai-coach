@@ -177,4 +177,3 @@
               "150"
   <div class="dialog-actions">
   <p class="muted" role="status">
-    ""
