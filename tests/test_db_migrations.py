@@ -2,13 +2,18 @@
 
 import json
 import sqlite3
+import sys
 import tempfile
+import textwrap
 import unittest
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
+
+# The repository root, for running this file as a script with --write.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from support import temp_database
 
@@ -42,6 +47,42 @@ BASELINE_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v26.sql.txt"
 # stand-in: the live schema one index short, stored with the previous version.
 PREVIOUS_SHAPE = "synthetic-previous"
 PREVIOUS_VERSION = CURRENT_SCHEMA_VERSION - 1
+SCHEMA_REFERENCE = Path(__file__).resolve().parents[1] / "docs" / "schema-reference.md"
+REFERENCE_BEGIN = "<!-- BEGIN GENERATED SCHEMA -->\n"
+REFERENCE_END = "<!-- END GENERATED SCHEMA -->\n"
+
+
+def schema_reference() -> str:
+    """The current schema as ``docs/schema-reference.md`` carries it."""
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.row_factory = sqlite3.Row
+        initialize_schema(db)
+        digest = signature_digest(database_schema_signature(db))
+        rows = db.execute(
+            "SELECT type, name, sql FROM sqlite_master "
+            "WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY type, name"
+        ).fetchall()
+    lines = [
+        f"Schema version: `{CURRENT_SCHEMA_VERSION}` (`PRAGMA user_version`).",
+        "",
+        f"Shape digest: `{digest}`.",
+        "",
+        (
+            f"{sum(row['type'] == 'table' for row in rows)} tables and "
+            f"{sum(row['type'] == 'index' for row in rows)} named indexes, in signature order."
+        ),
+    ]
+    for row in rows:
+        sql = textwrap.dedent("        " + row["sql"]).strip()
+        lines += [
+            "",
+            f"### {row['type']} `{row['name']}`",
+            "",
+            "```sql",
+            sql + ";",
+            "```",
+        ]
+    return "\n".join(lines) + "\n"
 
 
 def previous_shape_database(db) -> None:
@@ -299,6 +340,14 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         db.commit()
         self.assertTrue(database_schema_is_current(db))
 
+    def test_schema_reference_is_current(self):
+        document = SCHEMA_REFERENCE.read_text(encoding="utf-8")
+        self.assertEqual(
+            document.split(REFERENCE_BEGIN, 1)[1].split(REFERENCE_END, 1)[0],
+            schema_reference(),
+            "Regenerate with: python tests/test_db_migrations.py --write",
+        )
+
     def test_frozen_baseline_fixture_is_the_recorded_production_shape(self):
         db = self.connect()
         db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
@@ -525,4 +574,18 @@ class DatabaseSchemaGateTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if "--write" in sys.argv:
+        before, rest = SCHEMA_REFERENCE.read_text(encoding="utf-8").split(
+            REFERENCE_BEGIN, 1
+        )
+        SCHEMA_REFERENCE.write_text(
+            before
+            + REFERENCE_BEGIN
+            + schema_reference()
+            + REFERENCE_END
+            + rest.split(REFERENCE_END, 1)[1],
+            encoding="utf-8",
+            newline="\n",
+        )
+    else:
+        unittest.main()
