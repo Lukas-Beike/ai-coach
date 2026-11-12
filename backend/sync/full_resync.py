@@ -6,7 +6,7 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -15,7 +15,6 @@ from backend.sync import observation
 from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.observation import OPERATION_CONTEXT, SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FullResyncHandler
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
 PARTIAL_RESYNC_ERROR = "Teilweise geladen. Bitte erneut starten."
@@ -189,6 +188,19 @@ class FullResyncOperationJournal:
 
 def _start_thread(provider: str, target: Callable[[], None]) -> None:
     threading.Thread(target=target, name=f"full-resync-{provider}", daemon=True).start()
+
+
+class FullResyncHandler(Protocol):
+    """Runs a provider's full resync for one operation."""
+
+    def configured(self) -> bool:
+        """Return whether the provider can run a full resync."""
+
+    def not_configured_error(self) -> AppError:
+        """Return the error raised when the provider is not configured."""
+
+    def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:
+        """Run the full resync and return its result."""
 
 
 class FullResyncRuns:

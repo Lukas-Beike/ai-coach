@@ -19,9 +19,10 @@ from backend.sync.freshness_sources import (
     DEFAULT_FRESHNESS_SOURCES,
     GARMIN_CORE_ERROR_SIGNAL,
     GARMIN_TOKENSTORE_SIGNAL,
+    FreshnessInputs,
+    FreshnessSource,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
 from backend.sync.provider_table import FreshnessArea
 from backend.sync.refresh import cleanup_refresh_history
 
@@ -184,9 +185,8 @@ def _check_sources_match_registry(
 ) -> None:
     """Reject sources that disagree with the registry's declared areas.
 
-    A provider with sources must supply exactly its declared area names, as the
-    runtime registry requires of a binding; a source for an undeclared provider
-    is an error. Failing here keeps a partial projection from being returned.
+    A provider with sources must supply exactly its declared area names; a
+    source for an undeclared provider is an error. Failing here keeps a partial projection from being returned.
     """
     declared: dict[str, set[str]] = {}
     for provider_id, area in registry.freshness_areas():

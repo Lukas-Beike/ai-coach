@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -348,6 +349,7 @@ from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
     SyncCommandCore,
+    coach_synchronous_refreshes,
 )
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import (
@@ -358,6 +360,8 @@ from backend.sync.execution_assembly import (
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
     WahooJobDependencies,
+    configured_for_job,
+    provider_configured_checks,
 )
 from backend.sync.executor import chained_after_job
 from backend.sync.external_calendar_assembly import (
@@ -423,12 +427,6 @@ from backend.sync.provider_resync_assembly import (
     ProviderResyncPersistence,
     ProviderResyncRuntime,
     ResyncProviderOwners,
-)
-from backend.sync.provider_runtime import ProviderRuntimeRegistry
-from backend.sync.provider_runtime_assembly import (
-    ProviderRuntimeDependencies,
-    build_provider_runtime,
-    builtin_bindings,
 )
 from backend.sync.queue_assembly import (
     SyncJobQueueAssembly,
@@ -605,35 +603,6 @@ def provider_state_service() -> provider_state.ProviderStateService:
     )
 
 
-def provider_runtime() -> ProviderRuntimeRegistry:
-    """Build a fresh runtime registry over the live built-in provider owners.
-
-    Assemblies call this per build, so schedule snapshots are never reused across
-    builds. Providers are named only by the static descriptor registry.
-    """
-    jobs = SYNC_JOB_DEPENDENCIES
-    return build_provider_runtime(
-        DEFAULT_PROVIDER_REGISTRY,
-        builtin_bindings(
-            ProviderRuntimeDependencies(
-                config=lambda: CONFIG,
-                profile=ATHLETE_DATA.profile,
-                database_manager=database_manager,
-                key_values=KEY_VALUE_REPOSITORY,
-                database_lock=DB_LOCK,
-                garmin_resync_gate=GARMIN_RESYNC_GATE,
-                garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
-                historical=jobs.historical,
-                state=jobs.state,
-                intervals=jobs.intervals,
-                garmin=jobs.garmin,
-                calendar_weather=jobs.calendar_weather,
-                wahoo=jobs.wahoo,
-            )
-        ),
-    )
-
-
 PROVIDER_SYNC = ProviderSyncAssembly(
     dependencies=ProviderSyncAssembly.Inputs(
         persistence=ProviderSyncPersistence(
@@ -653,7 +622,6 @@ PROVIDER_SYNC = ProviderSyncAssembly(
             retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
         ),
     ),
-    provider_runtime=provider_runtime,
 )
 
 
@@ -754,8 +722,8 @@ ACTIVITY_READS = ActivityReadAssembly(
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
-    refreshable_providers=lambda: provider_runtime().configured_for_job(
-        "activity_details"
+    refreshable_providers=lambda: configured_for_job(
+        PROVIDER_CONFIGURED, "activity_details"
     ),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
@@ -1051,12 +1019,12 @@ SYNC_PERSISTENCE = SyncPersistenceAssembly(
 
 def sync_state_repository() -> SyncStateRepository:
     """Return the sync state repository bound to the runtime provider registry."""
-    return SYNC_PERSISTENCE.state_repository(registry=provider_runtime().static)
+    return SYNC_PERSISTENCE.state_repository()
 
 
 def sync_daily_markers() -> DailySyncMarkerService:
     """Return the daily sync marker service bound to the runtime provider registry."""
-    return SYNC_PERSISTENCE.daily_markers(registry=provider_runtime().static)
+    return SYNC_PERSISTENCE.daily_markers()
 
 
 GARMIN_TOKENS = GarminTokenStore(
@@ -1614,6 +1582,8 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
         resync=ResyncProviderOwners(
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
             garmin_resync_gate=GARMIN_RESYNC_GATE,
+            wahoo_sync_service=WAHOO_SYNC.sync_service,
+            wahoo_resync_gate=WAHOO_RESYNC_GATE,
             all_sync_days=ALL_SYNC_DAYS,
         ),
         persistence=ProviderResyncPersistence(
@@ -1631,11 +1601,10 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             after_resync=DERIVED_PASS_HOOK,
         ),
     ),
-    provider_runtime=provider_runtime,
 )
 
 
-# Shared with provider_runtime() so both read the same live owners.
+# Shared by the executor, scheduler, Coach refreshes and configured checks.
 SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     historical=HistoricalSyncDependencies(
         local_now=ATHLETE_CLOCK.now,
@@ -1676,6 +1645,10 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         resync_gate=WAHOO_RESYNC_GATE,
         stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
     ),
+)
+
+PROVIDER_CONFIGURED: dict[str, Callable[[], bool]] = provider_configured_checks(
+    SYNC_JOB_DEPENDENCIES, config=lambda: CONFIG, profile=ATHLETE_DATA.profile
 )
 
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
@@ -1757,6 +1730,9 @@ SYNC_COMMANDS = SyncCommandAssembly(
         planning_revision=PLANNING_REVISION_SERVICE,
         utc_now=runtime_clock.utc_now,
         training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+        synchronous_refreshes=lambda: coach_synchronous_refreshes(
+            SYNC_JOB_DEPENDENCIES
+        ),
         after_refresh=DERIVED_PASS_HOOK,
     ),
     illness_pause=IllnessPauseDependencies(
@@ -1767,7 +1743,6 @@ SYNC_COMMANDS = SyncCommandAssembly(
         redactor=REDACTOR,
         today=lambda: ATHLETE_CLOCK.now().date(),
     ),
-    provider_runtime=provider_runtime,
 )
 
 
@@ -2157,8 +2132,8 @@ PUBLIC_STATE = PublicStateAssembly(
             planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
         ),
     ),
-    provider_runtime=provider_runtime,
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
+    running_probes={WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running()},
 )
 
 CANONICAL_READ = build_canonical_read(
@@ -2447,9 +2422,9 @@ HTTP_API = HttpApiAssembly(
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
                 wahoo_sync=WAHOO_SYNC.sync_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
-                provider_configured=lambda provider_id: (
-                    provider_runtime().provider_configured(provider_id)
-                ),
+                provider_configured=lambda provider_id: PROVIDER_CONFIGURED[
+                    provider_id
+                ](),
                 period_defaults=SYNC_PERIOD_DEFAULTS,
                 all_sync_days=ALL_SYNC_DAYS,
                 uuid_factory=lambda: uuid.uuid4().hex,

@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from backend.canonical.vocabulary import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -19,15 +19,14 @@ from backend.sync.full_resync import (
     FULL_RESYNC_LABEL,
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
+    FullResyncHandler,
     FullResyncOperationJournal,
     FullResyncRuns,
     FullResyncStateStore,
-    resync_field_keys,
 )
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.provider_runtime import FullResyncHandler, ProviderRuntimeRegistry
 from backend.sync.provider_table import (
     GARMIN_NOT_CONFIGURED_MESSAGE,
     WAHOO_NOT_CONFIGURED_MESSAGE,
@@ -46,6 +45,8 @@ class CompetitionSyncOwners:
 class ResyncProviderOwners:
     garmin_sync_service: Callable[[], Any]
     garmin_resync_gate: ProviderResyncGate
+    wahoo_sync_service: Callable[[], Any]
+    wahoo_resync_gate: ProviderResyncGate
     all_sync_days: int
 
 
@@ -155,12 +156,16 @@ class WahooFullResync:
 def full_resync_handlers(
     *,
     garmin_service: GarminSyncService,
+    wahoo_service: WahooSyncService,
     all_sync_days: int,
 ) -> dict[str, FullResyncHandler]:
-    """Map each built-in provider identifier to its full resync handler."""
+    """Map each provider with a full resync to its handler."""
     return {
         GARMIN_ID: GarminFullResync(
             garmin_service=garmin_service, all_sync_days=all_sync_days
+        ),
+        WAHOO_ID: WahooFullResync(
+            sync_service=wahoo_service, all_sync_days=all_sync_days
         ),
     }
 
@@ -179,7 +184,6 @@ class ProviderResyncAssembly:
         self,
         *,
         dependencies: ProviderResyncAssembly.Inputs,
-        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
     ) -> None:
         competition = dependencies.competition
         resync = dependencies.resync
@@ -190,6 +194,8 @@ class ProviderResyncAssembly:
         self._competition_service = competition.competition_service
         self._garmin_sync_service = resync.garmin_sync_service
         self._garmin_resync_gate = resync.garmin_resync_gate
+        self._wahoo_sync_service = resync.wahoo_sync_service
+        self._wahoo_resync_gate = resync.wahoo_resync_gate
         self._all_sync_days = resync.all_sync_days
         self._database_manager = persistence.database_manager
         self._key_values = persistence.key_values
@@ -201,7 +207,6 @@ class ProviderResyncAssembly:
         self._monotonic = runtime.monotonic
         self._operation_observer = runtime.operation_observer
         self._after_resync = runtime.after_resync
-        self._provider_runtime = provider_runtime
         self._resync_runs = FullResyncRuns()
 
     def competition_reconciler(self) -> CompetitionSyncReconciler:
@@ -225,20 +230,16 @@ class ProviderResyncAssembly:
 
     def full_resync_service(self) -> FullProviderResyncService:
         """Create full provider resynchronization over current service owners."""
-        if self._provider_runtime is not None:
-            return self._runtime_full_resync_service(self._provider_runtime())
         observer = self._operation_observer()
-        gates: dict[str, ProviderResyncGate] = {GARMIN_ID: self._garmin_resync_gate}
+        gates: dict[str, ProviderResyncGate] = {
+            GARMIN_ID: self._garmin_resync_gate,
+            WAHOO_ID: self._wahoo_resync_gate,
+        }
         handlers = full_resync_handlers(
             garmin_service=self._garmin_sync_service(),
+            wahoo_service=self._wahoo_sync_service(),
             all_sync_days=self._all_sync_days,
         )
-        unmanaged = sorted(set(handlers) - set(PROVIDER_RESYNC_KEYS))
-        if unmanaged:
-            raise ValueError(
-                "full resync handlers without registered state keys: "
-                + ", ".join(unmanaged)
-            )
         return FullProviderResyncService(
             handlers,
             FullResyncStateStore(
@@ -255,38 +256,6 @@ class ProviderResyncAssembly:
                 self._uuid_factory,
             ),
             gates=gates,
-            after_resync=self._after_resync,
-            runs=self._resync_runs,
-        )
-
-    def _runtime_full_resync_service(
-        self, runtime: ProviderRuntimeRegistry
-    ) -> FullProviderResyncService:
-        """Build the resync service from the registry's handlers and state keys."""
-        observer = self._operation_observer()
-        handlers = runtime.resync_handlers()
-        gates: dict[str, ProviderResyncGate] = {}
-        for provider_id in handlers:
-            gate = runtime.binding(provider_id).gate
-            if gate is not None:
-                gates[provider_id] = gate
-        return FullProviderResyncService(
-            handlers,
-            FullResyncStateStore(
-                self._database_manager(),
-                self._key_values,
-                resync_field_keys(runtime.static.resync_key_map()),
-            ),
-            FullResyncOperationJournal(
-                observer,
-                self._logger,
-                self._redactor.redact_text,
-                self._utc_now,
-                self._monotonic,
-                self._uuid_factory,
-            ),
-            gates=gates,
-            registry=runtime.static,
             after_resync=self._after_resync,
             runs=self._resync_runs,
         )

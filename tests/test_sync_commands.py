@@ -17,11 +17,15 @@ import unittest
 from datetime import date
 from unittest.mock import Mock
 
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.errors import AppError
+from backend.sync.command_assembly import coach_synchronous_refreshes
 from backend.sync.commands import (
     GarminSynchronousRefresh,
     ProviderRefreshCommandService,
+    WahooSynchronousRefresh,
 )
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 class ProviderRefreshCommandServiceTests(unittest.TestCase):
@@ -303,6 +307,38 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         service.start("garmin", {})
 
         self.assertEqual(requested, [])
+
+
+class CoachSynchronousRefreshWiringTests(unittest.TestCase):
+    """The production inline refreshes (replaces the runtime binding checks)."""
+
+    def _refreshes(self, state: Mock) -> dict:
+        jobs = Mock()
+        jobs.historical.all_sync_days = -1
+        jobs.historical.sync_period_defaults = {WAHOO_ID: 84}
+        jobs.state.sync_state_repository.return_value = state
+        return coach_synchronous_refreshes(jobs)
+
+    def test_every_waiting_provider_has_an_inline_refresh(self) -> None:
+        waiting = {
+            descriptor.provider_id
+            for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
+            if descriptor.coach_waits_for_completion
+        }
+        refreshes = self._refreshes(Mock())
+
+        self.assertEqual({GARMIN_ID, WAHOO_ID}, set(refreshes))
+        self.assertLessEqual(waiting, set(refreshes))
+        self.assertIsInstance(refreshes[GARMIN_ID], GarminSynchronousRefresh)
+        self.assertIsInstance(refreshes[WAHOO_ID], WahooSynchronousRefresh)
+
+    def test_wahoo_reads_its_stored_sync_period(self) -> None:
+        state = Mock()
+        state.sync_period.return_value = 30
+        refresh = self._refreshes(state)[WAHOO_ID]
+
+        self.assertEqual(30, refresh._stored_days())
+        state.sync_period.assert_called_once_with(WAHOO_ID, {WAHOO_ID: 84}, -1)
 
 
 if __name__ == "__main__":

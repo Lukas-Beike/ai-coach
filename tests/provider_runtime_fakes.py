@@ -1,4 +1,4 @@
-"""Shared fakes for provider runtime and orchestration tests.
+"""Shared fakes for provider orchestration tests.
 
 The ``acme-mock`` provider exists only in tests. It is registered alongside the
 real descriptors to prove that orchestration needs no provider literal. Helper
@@ -10,11 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from backend.sync.provider_runtime import (
-    FreshnessInputs,
-    FreshnessSource,
-    ProviderRuntimeBinding,
-)
+from backend.sync.freshness_sources import FreshnessInputs, FreshnessSource
 from backend.sync.provider_table import (
     Capability,
     FreshnessArea,
@@ -117,21 +113,4 @@ def fake_freshness_inputs(
         get_value=stored.get,
         profile=dict(profile or {}),
         signals={},
-    )
-
-
-def fake_binding(
-    provider_id: str = ACME_ID,
-    *,
-    freshness: Mapping[str, FreshnessSource] | None = None,
-    configured: bool = True,
-) -> ProviderRuntimeBinding:
-    """Build a binding around fakes; freshness defaults to the acme area."""
-    sources: Mapping[str, FreshnessSource] = (
-        {ACME_AREA: acme_freshness_source()} if freshness is None else freshness
-    )
-    return ProviderRuntimeBinding(
-        provider_id=provider_id,
-        configured=lambda: configured,
-        freshness=sources,
     )

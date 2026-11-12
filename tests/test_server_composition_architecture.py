@@ -502,7 +502,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "operation=self._intervals_operation", ast.unparse(client_factory)
         )
 
-    def test_sync_persistence_reads_pass_the_runtime_registry_through_helpers(
+    def test_sync_persistence_reads_go_through_their_helpers(
         self,
     ) -> None:
         server_tree = _parse(SERVER_PATH)
@@ -514,8 +514,6 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual({helper.name for helper in helpers}, helper_names)
         helper_nodes = {id(node) for helper in helpers for node in ast.walk(helper)}
-        for helper in helpers:
-            self.assertIn("registry=provider_runtime().static", ast.unparse(helper))
 
         raw_access = [
             node.lineno
@@ -529,7 +527,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         self.assertEqual(
             [],
             raw_access,
-            "Sync state and marker reads must use the registry-bound helpers:\n"
+            "Sync state and marker reads must use their helpers:\n"
             + "\n".join(f"server.py:{line}" for line in raw_access),
         )
 
