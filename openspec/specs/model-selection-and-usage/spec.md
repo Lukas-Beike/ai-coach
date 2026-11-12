@@ -13,6 +13,10 @@ The system SHALL expose endpoint-appropriate model options, persist a supported 
 - **WHEN** the app uses its default official OpenAI base URL
 - **THEN** available options include GPT-6 Luna, GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra, plus a distinct configured model when needed; a saved valid choice is returned on later reads.
 
+#### Scenario: Ids and stored values
+- **WHEN** the athlete saves a model, thinking level or speed (route contracts in `docs/api-routes.md`, generated)
+- **THEN** the model ids are `gpt-6-luna` (the default of `OPENAI_MODEL`), `gpt-6-sol`, `gpt-6.1-sol` and `gpt-6-astra` for the official endpoint, plus the configured model when it is none of these, and `claude-opus`, `claude-sonnet` and `claude-haiku`; the model id is trimmed and case-sensitive, the thinking level and speed are lower-cased before the check, and the three values are stored under `selected_model_openai` (for both providers), `selected_thinking_level` and `selected_service_tier`; when a model change leaves a stored speed that the new model does not offer, the stored value stays and requests use `fast` where the model offers it, else no tier
+
 #### Scenario: Compatible endpoint
 - **WHEN** a nondefault compatible base URL is configured
 - **THEN** only its configured model is offered among the OpenAI options and a stored official-model choice no longer overrides that configured endpoint model.
@@ -125,6 +129,10 @@ The system SHALL send every Coach model request through one streaming transport 
 #### Scenario: Responses request fields
 - **WHEN** the first request of a Coach turn goes to OpenAI
 - **THEN** the payload has `model`, `reasoning.effort` when a level is set, `conversation` only for a retained attachment conversation, `instructions`, `input` (the JSON of `dialogue`, `current_message` and `confirmed_steps`, with attachment parts), `tools`, `tool_choice: auto`, `max_output_tokens`, `truncation: auto`, `store` (false unless an attachment conversation is retained), `include: ["reasoning.encrypted_content"]` when stateless, `parallel_tool_calls: false`, `stream: true` and `service_tier` when one applies; follow-up tool rounds send `tool_choice: none` after a question, a cancel or an exhausted tool budget, and their `input` carries the tool outputs (with the earlier items replayed when stateless)
+
+#### Scenario: Follow-up inside an attachment conversation
+- **WHEN** an OpenAI turn follows an upload within the retention window and carries no attachment of its own
+- **THEN** its `input` holds only `current_message`, `confirmed_steps`, `current_user_message_id`, `local_date`, `timezone` and `pending_request`, because the retained conversation supplies the dialogue; a turn with attachments sends the full local dialogue as well
 
 Evidence: `backend/coach/structured_response.py:CoachStructuredResponseService.respond`; `backend/coach/response_transport.py:CoachResponseTransport.stream_request`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_coach_structured_response.py:test_request_streams_and_drops_deltas_when_no_stream_is_attached`, `tests/test_coach_structured_response.py:test_job_failure_after_the_response_started_is_requested_again`; `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`; `tests/test_server_providers.py:test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage`;, `tests/test_provider_openai.py:test_stream_client_saves_final_response_before_post_read_cancellation` `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`.
 
@@ -241,3 +249,54 @@ The system SHALL count Claude requests and tokens in their own daily counters, w
 - **THEN** the Claude counters add one request and its input, output and total tokens, and the OpenAI counters stay unchanged.
 
 Evidence: `backend/providers/usage.py:usage_counts`, `backend/providers/state.py:ProviderStateService.record_usage`, `backend/providers/claude_messages_adapter.py:neutral_usage`; `tests/test_provider_usage.py`, `tests/test_provider_state.py`.
+
+### Requirement: MU13 Retry, timeout and output limits of Coach requests
+The system SHALL apply the retry, timeout and output limits of the scenarios to every streamed Coach model request, and SHALL stop every wait on cancellation.
+
+#### Scenario: Transient failure before any output
+- **WHEN** a request fails with `provider_unavailable`, `network_error`, `provider_timeout`, or `response_failed` with the provider code `server_error`, no text was shown and the turn keeps no remote conversation
+- **THEN** it is repeated after about 2 and then 5 seconds (plus up to 1 second), at most 3 attempts in total
+
+#### Scenario: Rate limit
+- **WHEN** the provider reports `rate_limit_exceeded` before any text
+- **THEN** the request waits for the given retry-after when it is at most 60 seconds, else 5 seconds times the attempt number, for at most 2 retries, and a longer retry-after ends the turn; a `Retry-After` header counts only as a number, rounded up and limited to 1 to 86,400 seconds
+
+#### Scenario: Reasoning used the whole output budget
+- **WHEN** a response ends incomplete for the output limit with neither text nor a tool call, nothing was shown, no provider-side conversation holds the turn and the request allowed fewer than 32,000 tokens
+- **THEN** it is repeated once with 32,000 tokens, which consumes no transport retry; the default limit is 16,000 output tokens
+
+#### Scenario: Timeouts, sizes and locked conversations
+- **WHEN** a request waits, streams or meets a locked remote conversation
+- **THEN** a streamed response may be silent for at most 600 seconds between two parts (else 504 `provider_timeout`) and is limited to 10,000,000 bytes (else 502 `response_too_large`), a plain request (the impact classifier, remote conversation create and delete) times out after 180 seconds, and a locked remote conversation is tried again after 1 and 2 seconds, 3 attempts in all
+
+Evidence: `backend/coach/response_retry.py:CoachResponseRetryPolicy`, `backend/coach/structured_response.py:CoachStructuredResponseService.respond`, `backend/coach/limits.py:COACH_DEFAULT_MAX_OUTPUT_TOKENS`, `backend/coach/limits.py:COACH_LONG_PLAN_MAX_OUTPUT_TOKENS`, `backend/providers/openai_errors.py:retry_after_seconds`, `backend/providers/openai_requests.py:request_with_conversation_retry`, `backend/providers/model_assembly.py:ModelTransportAssembly.openai_stream_client`, `server.py:OPENAI_RESPONSE_TIMEOUT_SECONDS`, `server.py:OPENAI_REQUEST_TIMEOUT_SECONDS`; `tests/test_coach_structured_response.py:test_retries_stay_within_three_attempts`, `tests/test_coach_structured_response.py:test_reasoning_only_token_exhaustion_repeats_with_the_larger_budget`, `tests/test_coach_response_retry.py:test_integer_retry_after_is_used_and_over_budget_is_rejected`, `tests/test_provider_openai.py:test_request_with_conversation_retry_retries_lock_with_delays_and_notification`.
+
+### Requirement: MU14 OpenAI failure classification and provider status
+The system SHALL classify an OpenAI HTTP error into one safe reason with a fixed German message, in a fixed order and without echoing provider text, and SHALL keep one safe status record per provider.
+
+#### Scenario: Classification order
+- **WHEN** an OpenAI request answers with an error
+- **THEN** the reason is chosen in this order: `conversation_locked`; `conversation_state_invalid` (an invalid continuation or tool-output state); the billing reasons `credit_balance_exhausted`, the spend and usage limit codes and `insufficient_quota`, before any rate limit; `rate_limit_exceeded` (HTTP 429 or the rate-limit code or type); `authentication_or_permission` (401, 403, invalid key, organization or permission); `not_found` (404 or an unknown model); `provider_unavailable` (500 and above); else `http_error` with "OpenAI konnte die Anfrage nicht verarbeiten (HTTP <n>)."; the fixed messages are normative in `_openai_error_reason`, and the explanation shown for a failed turn is the mapping of CC11
+
+#### Scenario: Status record
+- **WHEN** a request succeeds or fails
+- **THEN** the key `openai_status` (`anthropic_status` for Claude) holds `{state, reason, message (at most 300 characters), http_status, updated_at}` and, for OpenAI only from an allowlist, `provider_error_code`; a success writes `state: ok`, `reason: ok` and "OpenAI ist verfügbar." ("Claude ist verfügbar."); state, reason and operation names must match `[a-z0-9][a-z0-9_.:/-]{0,79}`, else they read `unknown`; daily usage lives under `openai_usage` and `anthropic_usage` and the rate-limit snapshot under `openai_rate_limits`
+
+Evidence: `backend/providers/openai_errors.py:_openai_error_reason`, `backend/providers/openai_errors.py:error_details`, `backend/providers/state.py:ProviderStateService.record_status`, `backend/providers/state.py:ProviderStateService.record_success`; `tests/test_provider_state.py:test_status_is_normalized_and_provider_code_is_allowlisted`, `tests/test_provider_state.py:test_openai_response_validation_surfaces_and_persists_billing_failure`, `tests/test_coach_turn_failures.py:test_openai_billing_failure_is_a_persisted_actionable_chat_message`.
+
+### Requirement: MU15 OpenAI stream events, transport errors and usage operations
+The system SHALL read a streamed Responses answer as server-sent events up to the byte limit, map transport failures to fixed reasons and count every OpenAI request in the daily usage under an operation name.
+
+#### Scenario: Events
+- **WHEN** a stream is read
+- **THEN** an event ends at a blank line and takes its kind from the `event:` line or the JSON `type`; `response.created` and `response.in_progress` report the response id, `response.output_text.delta` with a non-empty string reports answer text, and `error`, `response.completed`, `response.incomplete` and `response.failed` end the stream with the event's response (the event itself for `error`); `[DONE]` is ignored; data that is no JSON object fails with 502 `invalid_response` "OpenAI hat ein ungültiges Streaming-Ereignis zurückgegeben."
+
+#### Scenario: Transport failures
+- **WHEN** a stream request fails
+- **THEN** a missing key is 503 `not_configured`, a stream without a final event 502 `invalid_response` "OpenAI hat keine vollständige Streaming-Antwort zurückgegeben.", more bytes than the limit 502 `response_too_large` "Die Streaming-Antwort von OpenAI ist zu groß.", a timeout 504 `provider_timeout` "OpenAI hat nicht rechtzeitig geantwortet.", a network error 503 `provider_unavailable` "OpenAI ist vorübergehend nicht verfügbar." and any of them after a cancel 499 `chat_cancelled`; a busy local database is passed on unchanged
+
+#### Scenario: Usage operations
+- **WHEN** usage is recorded
+- **THEN** the operation is `responses_stream` for a stream that ended completed or incomplete, `responses_stream_failed` for one that ended with a failed body, `responses_stream_cancelled` for a cancelled or disconnected stream (one request with zero tokens when no body arrived), `responses` for a plain request such as the impact classifier, and `transcription` for a voice note
+
+Evidence: `backend/providers/openai_events.py:consume_sse_event`, `backend/providers/openai_events.py:_decode_sse_event`, `backend/providers/openai_stream.py:OpenAIStreamClient`, `backend/providers/openai_stream.py:OpenAIStreamTelemetry`, `backend/providers/openai_requests.py:OpenAIResponsesClient`, `backend/providers/usage.py`; `tests/test_provider_openai.py:test_consume_sse_event_returns_all_final_response_states`, `tests/test_provider_openai.py:test_stream_client_timeout_network_and_client_disconnect_contracts`, `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`, `tests/test_provider_openai.py:test_stream_client_requires_final_response_and_records_usage_once_on_success`.
