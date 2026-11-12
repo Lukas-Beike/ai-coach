@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -203,13 +203,19 @@ _SELF_KEPT = re.compile(
     r"(?<![a-z])i(?:'ll| will)?\s+(?:do|sync|upload|handle)\s+(?:it|that|this|them)"
     r"\s+myself(?![a-z])"
 )
-# The training term ("5x4 min Intervals") names the provider only as a target
-# ("zu Intervals", "in den Intervals Kalender") or with a split "gleiche ... ab".
+# The training term ("5x4 min Intervals") names the provider only as the
+# target of a transfer verb ("Lade ... zu Intervals hoch", "Trag ... in Intervals
+# ein") or in a split "gleiche ... mit Intervals ab".
 _TRAINING_INTERVALS = re.compile(r"(?<![a-z])intervals(?!\.icu)(?![a-z])")
 _INTERVALS_TARGET = re.compile(
     r"(?<![a-z])(?:an|in|ins|zu|zum|nach|to|into|on|onto)\s+"
-    r"(?:(?:den|dem|die|das|my|mein[a-z]*)\s+)?intervals(?![a-z])|"
-    r"(?<![a-z])gleich[a-z]*\s.*intervals\s+ab(?![a-z])"
+    r"(?:(?:den|dem|die|das|my|mein[a-z]*)\s+)?intervals(?![a-z])"
+)
+_TRANSFER_VERB = _compile(
+    "^" + stem for stem in _words("trag,übertrag,schick,send,push,lad,export")
+)
+_SPLIT_ABGLEICH = re.compile(
+    r"(?<![a-z])gleich(?:e|st|t)?\s+(?:[a-z0-9]+\s+){0,5}?mit\s+intervals\s+ab(?![a-z])"
 )
 
 
@@ -221,10 +227,25 @@ def _negates(part: str) -> bool:
 
 
 def _names_sync(part: str) -> bool:
-    """Whether a part names the sync; the bare training term needs a target."""
-    return _mentions_remote(_TRAINING_INTERVALS.sub(" ", part)) or bool(
-        _INTERVALS_TARGET.search(part)
+    """Whether a part names the sync; the bare training term needs a transfer."""
+    return (
+        _mentions_remote(_TRAINING_INTERVALS.sub(" ", part))
+        or bool(_SPLIT_ABGLEICH.search(part))
+        or bool(_INTERVALS_TARGET.search(part) and _TRANSFER_VERB.search(_loose(part)))
     )
+
+
+def _request_parts(text: str) -> Iterator[tuple[int, str]]:
+    """Each sentence part with its index after contrast words, skipping
+    information questions unless they address the coach with a request verb."""
+    for sentence in _SENTENCE.findall(normalize(text)):
+        if (
+            sentence.rstrip().endswith(("?", "？"))
+            and _INFORMATION_QUESTION.search(sentence)
+            and not _POLITE_REQUEST.search(sentence)
+        ):
+            continue
+        yield from enumerate(_CONTRAST.split(sentence))
 
 
 def remote_requested(text: str) -> bool:
@@ -239,25 +260,18 @@ def remote_requested(text: str) -> bool:
     not Intervals.icu ("Sync meine Garmin-Daten"), or that describes a past sync
     ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
     A negated or self-kept sync ("Synchronisieren mache ich selbst") blocks the
-    whole message up to the next contrast word, and the training term
-    "Intervals" names the provider only as a target ("zu Intervals") (#2341).
+    whole message until a contrast part that names an unnegated sync, and the
+    training term "Intervals" names the provider only as a transfer target
+    ("zu Intervals hochladen") (#2341).
     """
     requested = blocked = False
-    for sentence in _SENTENCE.findall(normalize(text)):
-        if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
-        ):
+    for index, part in _request_parts(text):
+        if not _names_sync(part) or _names_other_provider(part):
             continue
-        for index, part in enumerate(_CONTRAST.split(sentence)):
-            blocked = blocked and not index
-            if not _names_sync(part) or _names_other_provider(part):
-                continue
-            if _negates(part):
-                requested, blocked = False, True
-            elif not blocked and not _describes_past(part):
-                requested = True
+        if _negates(part):
+            requested, blocked = False, True
+        elif (index or not blocked) and not _describes_past(part):
+            requested, blocked = True, False
     return requested
 
 
@@ -295,24 +309,17 @@ def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
     information questions ask nothing, as for ``remote_requested``.
     """
     found: set[str] = set()
-    for sentence in _SENTENCE.findall(normalize(text)):
+    for _, part in _request_parts(text):
+        loose = _loose(part)
         if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
+            verbs.search(loose)
+            and _PROVIDER_OBJECT.search(loose)
+            and not _INTERVALS_NAME.search(part)
+            and not _negates(part)
         ):
-            continue
-        for part in _CONTRAST.split(sentence):
-            loose = _loose(part)
-            if (
-                verbs.search(loose)
-                and _PROVIDER_OBJECT.search(loose)
-                and not _INTERVALS_NAME.search(part)
-                and not _negates(part)
-            ):
-                found.update(
-                    str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
-                )
+            found.update(
+                str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
+            )
     return frozenset(found)
 
 

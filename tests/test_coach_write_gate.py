@@ -765,6 +765,10 @@ class RemoteTierTests(unittest.TestCase):
             "Plane 6x800 m Intervals für Donnerstag und sync es nicht.",
             "Pack 5x4 min Intervals in den Dienstag.",
             "Plane die Intervals gleich ab Montag.",
+            "Plane gleich 5x4 min Intervals ab Montag.",
+            "Ändere den Dienstag zu Intervals.",
+            "Wandle den Lauf in Intervals um.",
+            "Nicht synchronisieren, aber plane die Woche neu. Der Sync kommt später.",
             "Den Sync mache ich selber.",
             "I'll sync it myself.",
             # Accepted fail-closed limit: a negation that only narrows the
