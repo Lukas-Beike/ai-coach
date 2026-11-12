@@ -1031,6 +1031,7 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             activity_summaries=lambda: CANONICAL_READ,
         ),
         tokens=GARMIN_TOKENS,
+        run_zones=lambda: RUN_LTHR.zones_resolver(),
     )
 )
 

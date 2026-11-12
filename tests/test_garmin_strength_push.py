@@ -11,6 +11,15 @@ from unittest.mock import Mock, patch
 
 from support import temp_database
 
+from backend.activities.hr_cap import (
+    HR_CAP_PERCENT,
+    LOW_PERCENT_KEY,
+    PERCENT_KEY,
+    SOURCE_DEFAULT,
+    SOURCE_KEY,
+    resolved_range,
+)
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.coach.proposal_creation import (
     _approved_garmin_arguments,
@@ -48,6 +57,17 @@ UNIT = {
     "date": "2026-11-09",
     "strength_structure": [SQUAT],
 }
+RUN = {
+    "sport": "Run",
+    "name": "Tempo",
+    "date": "2026-11-09",
+    "target": "AUTO",
+    "description": (
+        "Warmup\n- 10m 60-70% LTHR\n\nMain set 2x\n- 4m 5:00/km Pace\n- 1m 140-150bpm"
+    ),
+}
+RUN_ABSOLUTE = {**RUN, "description": "- 10m 140-150bpm\n- 4m 5:00/km Pace"}
+CAP = {PERCENT_KEY: 80.0, LOW_PERCENT_KEY: 65.0, SOURCE_KEY: SOURCE_DEFAULT}
 needs_catalogue = unittest.skipUnless(
     mapping.catalogue_available(), "garminconnect is not installed"
 )
@@ -479,14 +499,16 @@ def _http_error(status: int) -> Exception:
     return error
 
 
-@needs_catalogue
-class PushTests(unittest.TestCase):
+class PushHarness(unittest.TestCase):
+    """A temporary database, the in-memory Garmin and a push service over both."""
+
     def setUp(self) -> None:
         self.database_manager = temp_database(
             self, "push.sqlite", row_factory=row_factory, schema=True
         )
         self.garmin = FakeGarmin()
         self.sessions = 0
+        self.zones: ZoneSettings | None = None
 
         @contextmanager
         def session():
@@ -500,6 +522,7 @@ class PushTests(unittest.TestCase):
             today=lambda: TODAY,
             now=lambda: NOW,
             redactor=lambda text: text.replace("SECRET", "[redacted]"),
+            run_zones=lambda: lambda _unit: self.zones,
         )
 
     def insert(self, local_id: str, payload: dict, *, tombstone: int = 0) -> str:
@@ -536,6 +559,9 @@ class PushTests(unittest.TestCase):
                 db, RemoteEntityKind.PLANNED_UNIT, local_id, "garmin"
             )
 
+
+@needs_catalogue
+class PushTests(PushHarness):
     def test_push_uploads_verifies_schedules_and_links(self) -> None:
         digest = self.insert(U1, UNIT)
 
@@ -652,7 +678,7 @@ class PushTests(unittest.TestCase):
         result = self.push((U1, self.insert(U1, UNIT)))
 
         self.assertEqual("error", result["status"])
-        self.assertIn("nicht alle Übungen", result["results"][0]["error"])
+        self.assertIn("nicht vollständig übernommen", result["results"][0]["error"])
         self.assertEqual({}, self.garmin.workouts)
         self.assertNotIn("schedule", [call[0] for call in self.garmin.calls])
         self.assertIsNone(self.link(U1))
@@ -712,7 +738,7 @@ class PushTests(unittest.TestCase):
         errors = [item["error"] for item in result["results"]]
         self.assertIn("Keine Garmin-Übung zugeordnet: Copenhagen", errors[0])
         self.assertIn("Vergangene", errors[1])
-        self.assertIn("Nur Krafteinheiten", errors[2])
+        self.assertIn("Nur Kraft- und Laufeinheiten", errors[2])
 
     def test_stale_hash_and_tombstone_are_conflicts(self) -> None:
         self.insert(U1, UNIT)
@@ -1040,6 +1066,139 @@ class PushTests(unittest.TestCase):
         self.assertEqual(0, self.sessions)
 
 
+class RunPushTests(PushHarness):
+    """Run units reach Garmin as running workouts; they need no exercise catalogue."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.zones = ZoneSettings(lthr=170.0, max_hr=190.0)
+
+    def steps(self, workout_id: str = "501") -> list[dict]:
+        return self.garmin.workouts[workout_id]["workoutSegments"][0]["workoutSteps"]
+
+    def test_push_uploads_a_running_workout_with_resolved_targets(self) -> None:
+        result = self.push((U1, self.insert(U1, RUN)))
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(
+            [("upload", "501"), ("get", "501"), ("schedule", "501", "2026-11-09")],
+            self.garmin.calls,
+        )
+        workout = self.garmin.workouts["501"]
+        self.assertEqual("running", workout["sportType"]["sportTypeKey"])
+        self.assertEqual("Pacecraft\n" + RUN["description"], workout["description"])
+        first = self.steps()[0]
+        self.assertEqual((102, 119), (first["targetValueOne"], first["targetValueTwo"]))
+        link = self.link(U1)
+        self.assertEqual(
+            ("501", "502", garmin_fingerprint(RUN)),
+            (link.remote_id, link.remote_external_id, link.baseline_hash),
+        )
+
+    def test_the_heart_rate_cap_is_sent_as_bpm(self) -> None:
+        unit = {
+            **RUN,
+            "description": "- 10m Z1 HR",
+            "session_focus": next(iter(HR_CAP_PERCENT)),
+            "hr_cap": CAP,
+        }
+
+        self.push((U1, self.insert(U1, unit)))
+
+        resolved = resolved_range(CAP, 170.0)
+        assert resolved is not None
+        low, high = resolved
+        step = self.steps()[0]
+        self.assertEqual((low, high), (step["targetValueOne"], step["targetValueTwo"]))
+        self.assertEqual("heart.rate.zone", step["targetType"]["workoutTargetTypeKey"])
+
+    def test_a_second_push_updates_the_same_workout(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+        moved = self.update(U1, {**RUN, "date": "2026-11-10"})
+        self.garmin.calls.clear()
+
+        self.push((U1, moved))
+
+        self.assertEqual(
+            [
+                ("update", "501"),
+                ("get", "501"),
+                ("unschedule", "502"),
+                ("schedule", "501", "2026-11-10"),
+            ],
+            self.garmin.calls,
+        )
+        self.assertEqual(["501"], list(self.garmin.workouts))
+
+    def test_without_zones_only_absolute_targets_map(self) -> None:
+        self.service = past_removal_service(self.database_manager, self.garmin)
+        relative = self.insert(U1, RUN)
+        absolute = self.insert(U2, RUN_ABSOLUTE)
+
+        result = self.push((U1, relative), (U2, absolute))
+
+        self.assertEqual("partial", result["status"])
+        self.assertIn("Schwellenpuls", result["results"][0]["error"])
+        self.assertEqual("synced", result["results"][1]["status"])
+        self.assertIsNone(self.link(U1))
+        self.assertEqual([("upload", "501")], self.garmin.calls[:1])
+        self.assertEqual(["501"], list(self.garmin.workouts))
+
+    def test_a_relative_target_without_zones_writes_nothing(self) -> None:
+        self.zones = None
+
+        result = self.push((U1, self.insert(U1, RUN)))
+
+        self.assertEqual("error", result["status"])
+        self.assertIn("Schwellenpuls", result["results"][0]["error"])
+        self.assertEqual([], self.garmin.calls)
+        self.assertEqual(0, self.sessions)
+        self.assertIsNone(self.link(U1))
+
+    def test_other_sports_and_unparsable_text_are_refused(self) -> None:
+        ride = self.insert(U1, {**RUN, "sport": "Ride"})
+        plain = self.insert(U2, {**RUN, "description": "Locker laufen"})
+
+        result = self.push((U1, ride), (U2, plain))
+
+        self.assertIn("Nur Kraft- und Laufeinheiten", result["results"][0]["error"])
+        self.assertEqual("error", result["results"][1]["status"])
+        self.assertEqual([], self.garmin.calls)
+
+    def test_a_workout_read_back_changed_is_deleted_and_never_scheduled(self) -> None:
+        upload = self.garmin.upload_workout
+
+        def altered(document):
+            saved = upload(document)
+            self.steps(str(saved["workoutId"]))[0]["targetValueOne"] = 1.0
+            return saved
+
+        with patch.object(self.garmin, "upload_workout", side_effect=altered):
+            result = self.push((U1, self.insert(U1, RUN)))
+
+        self.assertEqual("error", result["status"])
+        self.assertIn("nicht vollständig übernommen", result["results"][0]["error"])
+        self.assertEqual({}, self.garmin.workouts)
+        self.assertEqual({}, self.garmin.schedules)
+        self.assertIsNone(self.link(U1))
+
+    def test_a_deleted_run_unit_is_an_orphan_and_a_valid_one_is_not(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+        self.assertEqual(
+            [], [i.local_id for i in find_orphans_listed(self.database_manager)]
+        )
+
+        self.update(U1, {**RUN, "local_deleted": True, "archived": True})
+        self.assertEqual(
+            [U1], [i.local_id for i in find_orphans_listed(self.database_manager)]
+        )
+
+        self.update(U1, {**RUN, "description": "Locker laufen"})
+        self.assertEqual(
+            [U1], [i.local_id for i in find_orphans_listed(self.database_manager)]
+        )
+
+
 def find_orphans_listed(database_manager: DatabaseManager) -> list:
     with database_manager.reader() as db:
         return find_orphans(db, TODAY, limit=None)[0]
@@ -1092,8 +1251,10 @@ class PastWorkoutRemovalTests(unittest.TestCase):
     def link(self, local_id: str):
         return garmin_link(self.database_manager, local_id)
 
-    def linked(self, local_id: str, day: str, *, tombstone: int = 0) -> str:
-        payload = json.dumps({**UNIT, "date": day})
+    def linked(
+        self, local_id: str, day: str, *, tombstone: int = 0, unit: dict = UNIT
+    ) -> str:
+        payload = json.dumps({**unit, "date": day})
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO planned_units(id, local_id, payload, tombstone, created_at, updated_at) "
@@ -1143,6 +1304,17 @@ class PastWorkoutRemovalTests(unittest.TestCase):
             [None, today, None],
             [getattr(self.link(u), "remote_id", None) for u in (U1, U2, U3)],
         )
+
+    def test_a_linked_run_workout_of_a_past_day_is_removed(self) -> None:
+        past = self.linked(U1, "2026-11-05", unit=RUN)
+        upcoming = self.linked(U2, "2026-11-07", unit=RUN)
+
+        self.assertEqual(1, self.service.remove_past())
+
+        self.assertEqual({upcoming}, set(self.garmin.workouts))
+        self.assertIsNone(self.link(U1))
+        self.assertEqual(upcoming, self.link(U2).remote_id)
+        self.assertNotIn(past, self.garmin.workouts)
 
     def test_a_refused_workout_keeps_its_link_and_the_others_still_go(self) -> None:
         refused = self.linked(U3, "2026-11-04")

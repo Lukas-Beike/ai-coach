@@ -23,7 +23,11 @@ from backend.planning.push_state import (
     garmin_fingerprint,
 )
 from backend.planning.wahoo_orphans import WahooOrphan
-from backend.providers.garmin_strength_workout import catalogue_available
+from backend.providers import garmin_run_workout
+from backend.providers.garmin_strength_workout import (
+    PAYLOAD_VERSION,
+    catalogue_available,
+)
 
 STRENGTH = {
     "sport": "WeightTraining",
@@ -31,6 +35,13 @@ STRENGTH = {
     "strength_structure": [{"name": "Kniebeuge", "sets": 3, "reps": 5}],
 }
 RIDE = {"sport": "Ride", "date": "2026-11-09", "description": "- 30m 60%"}
+RUN = {
+    "sport": "Run",
+    "name": "Tempo",
+    "date": "2026-11-09",
+    "target": "AUTO",
+    "description": "- 10m 140-150bpm",
+}
 
 
 # Content-only plan push hash of STRENGTH; sync fields never move it.
@@ -363,6 +374,83 @@ class PushStateTests(unittest.TestCase):
         self.assertEqual({"intervals": True}, projected[0]["push_pending"])
         self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
         self.assertEqual({}, projected[1]["push_blocked"])
+
+    def test_a_run_unit_is_offered_to_garmin_until_its_content_was_pushed(self) -> None:
+        def pending(payload: dict) -> Any:
+            return self.project(
+                [
+                    {
+                        "local_id": "r1",
+                        "payload": json.dumps(payload),
+                        "sync_state": "synced",
+                    }
+                ]
+            )[0]
+
+        self.assertTrue(pending(RUN)["push_pending"]["garmin"])
+        self.assertEqual({}, pending(RUN)["push_blocked"])
+
+        self.link("r1", garmin_fingerprint(RUN) or "")
+        self.assertFalse(pending(RUN)["push_pending"]["garmin"])
+        # An Intervals.icu sync rewrites other fields, not what Garmin holds.
+        synced = {**RUN, "sync_status": "synced", "remote_event_id": "e1"}
+        self.assertFalse(pending(synced)["push_pending"]["garmin"])
+        for field, value in (
+            ("name", "Neu"),
+            ("date", "2026-11-10"),
+            ("description", "- 10m 150-160bpm"),
+            ("target", "HR"),
+            ("hr_cap", {"percent": 80.0}),
+        ):
+            with self.subTest(field=field):
+                self.assertTrue(
+                    pending({**RUN, field: value})["push_pending"]["garmin"]
+                )
+
+    def test_run_text_without_steps_offers_no_garmin_push(self) -> None:
+        plain = json.dumps({**RUN, "description": "Locker laufen"})
+        projected = self.project(
+            [
+                {"local_id": "r2", "payload": plain, "sync_state": "local"},
+                {"local_id": "r3", "payload": json.dumps(RIDE), "sync_state": "local"},
+            ]
+        )
+
+        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({}, projected[0]["push_blocked"])
+        self.assertEqual({"intervals": True}, projected[1]["push_pending"])
+        self.assertEqual({}, projected[1]["push_blocked"])
+        self.assertIsNone(garmin_fingerprint(RIDE))
+
+    def test_the_run_fingerprint_follows_the_workout_document_version(self) -> None:
+        content = {
+            "name": "Tempo",
+            "date": "2026-11-09",
+            "description": RUN["description"],
+            "target": "AUTO",
+            "hr_cap": None,
+            "payload_version": garmin_run_workout.PAYLOAD_VERSION,
+        }
+        expected = hashlib.sha256(
+            json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+
+        self.assertEqual(expected, garmin_fingerprint(RUN))
+
+    def test_the_strength_fingerprint_keeps_its_formula(self) -> None:
+        content = {
+            "name": "",
+            "date": STRENGTH["date"],
+            "exercises": strength_structure.normalize_structure(
+                STRENGTH["strength_structure"]
+            ),
+            "payload_version": PAYLOAD_VERSION,
+        }
+        expected = hashlib.sha256(
+            json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+
+        self.assertEqual(expected, garmin_fingerprint(STRENGTH))
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

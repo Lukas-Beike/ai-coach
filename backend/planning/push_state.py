@@ -3,8 +3,8 @@
 Read-only projection over stored planned units and their remote links. A unit
 still needs Intervals.icu when it was never synced, failed or went missing
 remotely (strength goes there as a note); it needs Garmin when it is a
-strength unit with a valid structure whose Garmin fingerprint differs from the
-pushed one. The payload hash is the
+strength unit with a valid structure or a run unit with parseable step text
+whose Garmin fingerprint differs from the pushed one. The payload hash is the
 one the ``plan_push`` jobs check, so the browser can send it back unchanged.
 """
 
@@ -16,7 +16,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import TYPE_CHECKING, Any, Final
 
-from backend.canonical.planning_fields import STRENGTH_STRUCTURE
+from backend.activities.workout_text import structured_blocks
+from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import WAHOO_ID, ProviderId, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
@@ -24,6 +25,7 @@ from backend.planning import strength_structure
 from backend.planning.leftovers import nearest_first
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
+from backend.providers import garmin_run_workout
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
     GarminExercise,
@@ -79,10 +81,23 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
     is built marks units sent in the old form as changed.
 
     Intervals.icu syncs and focus edits rewrite other payload fields, so the
-    Garmin push state compares only this. ``None`` when the unit cannot be
-    pushed (not strength, or no valid structure).
+    Garmin push state compares only this. A run unit's fingerprint holds its
+    text, target and heart-rate cap, not the athlete references the push
+    resolves them with. ``None`` when the unit cannot be pushed (neither
+    strength nor run, or a strength unit without valid structure).
     """
     sport, _environment = planned_sport_environment(payload)
+    if sport is Sport.RUN:
+        return _digest(
+            {
+                "name": str(payload.get("name") or ""),
+                "date": str(payload.get("date") or "")[:10],
+                "description": str(payload.get("description") or ""),
+                "target": str(payload.get("target") or ""),
+                HR_CAP: payload.get(HR_CAP),
+                "payload_version": garmin_run_workout.PAYLOAD_VERSION,
+            }
+        )
     if sport is not Sport.STRENGTH:
         return None
     try:
@@ -99,6 +114,10 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
         "exercises": exercises,
         "payload_version": PAYLOAD_VERSION,
     }
+    return _digest(content)
+
+
+def _digest(content: Mapping[str, Any]) -> str:
     serialized = json.dumps(content, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
@@ -111,11 +130,22 @@ def pushable_fingerprint(
     A strength unit without a valid structure is ``no_structure``; one with an
     unmapped exercise is ``unmapped``, since every push would fail. No button is
     offered either way; the Coach or the job still names the exercise with
-    catalogue suggestions. Other sports return ``(None, None)``.
+    catalogue suggestions. A run unit whose step text does not parse, and other
+    sports, return ``(None, None)``: Garmin is simply not offered, since the
+    strength texts the calendar shows for a blocked unit do not fit a run.
     """
     fingerprint = garmin_fingerprint(payload)
+    sport, _environment = planned_sport_environment(payload)
+    if sport is Sport.RUN:
+        try:
+            structured_blocks(
+                str(payload.get("description") or ""),
+                str(payload.get("target") or "AUTO"),
+            )
+        except ValueError:
+            return None, None
+        return fingerprint, None
     if fingerprint is None:
-        sport, _environment = planned_sport_environment(payload)
         return None, ("no_structure" if sport is Sport.STRENGTH else None)
     try:
         resolved_exercises(
@@ -218,7 +248,7 @@ def attach_push_state(
     unit nearest to ``today``, so the calendar can always offer their removal.
 
     ``resync`` holds the local ids of synced units whose exported heart-rate range
-    moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
+    moved only with the threshold HR. ``push_blocked`` names why a strength or run unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
     lists = _cleanup_lists(orphans, intervals_orphans, wahoo_orphans)
