@@ -216,6 +216,44 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 Evidence: `backend/coach/session_checks.py:matched_focus`, `backend/performance/pace_at_hr.py:session_comparison`, `backend/planning/leg_strength.py:strength_before`, `tests/test_coach_session_checks.py`; `backend/coach/playbooks.py:playbook_for` (`block_review`), `backend/coach/playbooks.py:nutrition_playbook`, `tests/test_coach_playbooks.py:PlaybookBudgetTests`, `tests/test_coach_activity_read_tools.py:CoachActivityReadToolServiceTests.test_detail_of_an_old_session_carries_its_planned_units`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`, `backend/coach/context_selection.py:free_text_review_kind`, `tests/test_coach_playbooks.py:FreeTextReviewKindTests`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_review_kinds_share_the_answer_format_and_plain_language`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_context_budget.py:CoachContextBudgetTests`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_adjust_week_playbook_guards_hard_days_and_writes`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week, plan_block and adjust_week also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
 
+### Requirement: CC9b Chat stream event contract
+`POST /api/chat/stream` SHALL answer one finite `text/event-stream` per submitted turn whose events let a client follow the durable turn without owning it. The request fields, event payloads and error reasons are the route contract in `docs/api-routes.md`, generated from the route handler.
+
+#### Scenario: Attached turn
+- **WHEN** a valid turn is submitted and its stream stays attached
+- **THEN** the stream sends `started` with the operation ID before the submission is validated and enqueued (a missing turn ID is refused earlier as a JSON 400), then `delta` text chunks, a `heartbeat` after every 15 seconds without an event while the turn is queued or running, and ends after `completed` (the stored receipt without its session key) or `error` (`reason` and a redacted message of at most 1000 characters)
+
+#### Scenario: Turn continues without this stream
+- **WHEN** the turn ID was already submitted by this session, the turn has no attached relay, a restore or delete is pending, or execution is requeued after queue contention
+- **THEN** the stream sends `background` with the job's `status`, `mode` and `operation_id` (and `plan_scope` for a submission) and ends while the turn goes on; a closed connection never cancels the turn
+
+#### Scenario: Relay finds the turn finished
+- **WHEN** 15 seconds pass without an event and the turn is no longer active
+- **THEN** the stream reads the stored receipt and sends it as `completed`, or an `error` when it cannot be read
+
+#### Scenario: Deltas only on the first attempt
+- **WHEN** a turn is requested again after its first attempt reached the model, or no stream is attached
+- **THEN** no `delta` events are published, and the final reply arrives in the receipt
+
+#### Scenario: Stored receipt at enqueue
+- **WHEN** a turn is accepted
+- **THEN** its command receipt holds `status`, `mode` (`background`), `phase` (`queued`, then `preparing` and `running` in the worker), `operation_id`, `session_key` (SHA-256 of the session's CSRF hash), `user_message_id`, `client_turn_id`, `plan_scope`, `ai_provider`, `model`, `thinking_level` and `request_kind`
+
+Evidence: `backend/http_api/chat_stream.py:CoachChatStreamTransport._stream`, `backend/http_api/chat_stream.py:CoachChatStreamTransport._relay_events`; `backend/coach/background_job.py:CoachBackgroundJobRunner._delta_callback`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`; `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `tests/test_http_chat_stream.py:test_stream_relays_events_and_unregisters_after_terminal_event`, `tests/test_http_chat_stream.py:test_disconnect_does_not_cancel_or_stop_durable_submission`, `tests/test_http_chat_stream.py:test_pending_maintenance_detaches_a_queued_turn_relay`, `tests/test_http_chat_stream.py:test_restart_replay_returns_original_job_as_background`, `tests/test_http_chat_stream.py:test_timeout_heartbeats_while_active_then_reads_final_receipt`, `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`.
+
+### Requirement: CC9c Fixed model instructions as normative source
+The fixed Coach instructions SHALL be the normative text of these modules, not restated in specs: the dialogue rules and scope-token vocabulary (`backend/coach/dialogue.py:INSTRUCTIONS`), the coaching rules (`backend/coach/prompt.py:COACH_PROMPT`), the quick-action and nutrition playbooks (`backend/coach/playbooks.py`) and the attachment policy and turn notices (`backend/coach/request_payload.py`).
+
+#### Scenario: Instruction order
+- **WHEN** a Coach turn's instructions are composed
+- **THEN** they are the dialogue rules, the attachment policy, the training context (the coaching rules, then the athlete context and library marked as untrusted external data), the playbook of the turn's kind and the nutrition playbook when nutrition is selected, then the notices for an earlier attachment summary, requeued confirmed steps and an advisory turn without writes; every tool round of the turn sends the same text
+
+#### Scenario: Changing a rule
+- **WHEN** a rule in one of these modules changes
+- **THEN** the change is a behaviour change of the Coach contract and needs the same review and evaluation as any other Coach behaviour change; the specs reference the module rather than a copy
+
+Evidence: `backend/coach/request_payload.py:compose_model_instructions`; `backend/coach/context.py` (training context prefix); `backend/coach/dialogue.py:INSTRUCTIONS`; `backend/coach/prompt.py:COACH_PROMPT`; `backend/coach/playbooks.py:playbook_for`, `backend/coach/playbooks.py:nutrition_playbook`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`.
+
 ### Requirement: CC10 Composer continuity and user-controlled input
 The system SHALL keep drafts editable while the Coach runs, serialize queued follow-ups, preserve rejected input on session expiry and require the athlete to send editable voice transcripts as chat messages.
 

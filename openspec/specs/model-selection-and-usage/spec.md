@@ -122,6 +122,10 @@ The system SHALL send every Coach model request through one streaming transport 
 - **WHEN** a streamed request fails with a transient timeout, unavailability or network error before any text was shown
 - **THEN** the same request is sent again within the bounded retry policy; oversized streams fail at the byte bound instead of accepting unbounded provider output.
 
+#### Scenario: Responses request fields
+- **WHEN** a Coach turn request goes to OpenAI
+- **THEN** the payload has `model`, `reasoning.effort` when a level is set, `conversation` only for a retained attachment conversation, `instructions`, `input` (the JSON of `dialogue`, `current_message` and `confirmed_steps`, with attachment parts), `tools`, `tool_choice: auto`, `max_output_tokens`, `truncation: auto`, `store` (false unless an attachment conversation is retained), `include: ["reasoning.encrypted_content"]` when stateless, `parallel_tool_calls: false`, `stream: true` and `service_tier` when one applies
+
 Evidence: `backend/coach/structured_response.py:CoachStructuredResponseService.respond`; `backend/coach/response_transport.py:CoachResponseTransport.stream_request`; `backend/providers/openai_stream.py:OpenAIStreamClient`; `tests/test_coach_structured_response.py:test_request_streams_and_drops_deltas_when_no_stream_is_attached`, `tests/test_coach_structured_response.py:test_job_failure_after_the_response_started_is_requested_again`; `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`; `tests/test_server_providers.py:test_responses_stream_request_cancel_before_provider_call_records_cancelled_usage`;, `tests/test_provider_openai.py:test_stream_client_saves_final_response_before_post_read_cancellation` `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`.
 
 ### Requirement: MU7 Durable normalized daily token usage
