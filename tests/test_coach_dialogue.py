@@ -2399,6 +2399,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         first = model.call_args_list[0].args[0]
         self.assertIs(first["store"], False)
         self.assertNotIn("previous_response_id", first)
+        self.assertIn("already ran in this turn", first["instructions"])
         steps = json.loads(first["input"])["confirmed_steps"]
         self.assertEqual([step["tool"] for step in steps], ["save_checkin"])
 

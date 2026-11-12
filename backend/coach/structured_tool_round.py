@@ -19,6 +19,7 @@ from backend.coach.job_store import CoachJobStore
 from backend.coach.proposal_models import coach_action_hash
 from backend.coach.request_payload import (
     LOCAL_ATTACHMENT_SUMMARY_NOTICE,
+    RESUMED_STEPS_NOTICE,
     compose_model_instructions,
 )
 from backend.coach.response_transport import raise_if_chat_cancelled
@@ -384,6 +385,7 @@ class CoachStructuredToolRoundService:
             in state.model_instructions,
             request_kind=selection.kind,
             nutrition="nutrition_products" in selection.sections,
+            resumed_steps=RESUMED_STEPS_NOTICE in state.model_instructions,
         )
 
     def _update_plan_scope(

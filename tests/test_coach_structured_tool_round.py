@@ -8,7 +8,10 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from backend.coach.dialogue import INSTRUCTIONS
-from backend.coach.request_payload import compose_model_instructions
+from backend.coach.request_payload import (
+    RESUMED_STEPS_NOTICE,
+    compose_model_instructions,
+)
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -441,6 +444,18 @@ class StructuredToolRoundTests(unittest.TestCase):
 
         execute.assert_not_called()
         self.response.respond.assert_not_called()
+
+    def test_refresh_rebuild_keeps_the_requeued_turn_notice(self) -> None:
+        state = self.state()
+        state.context = {"local_date": "2026-10-01"}
+        state.model_instructions = "synthetic" + RESUMED_STEPS_NOTICE
+        self.service._training_context.build.return_value = "fresh synthetic context"
+
+        self.assertIn(RESUMED_STEPS_NOTICE, self.service._refreshed_instructions(state))
+        state.model_instructions = "synthetic"
+        self.assertNotIn(
+            RESUMED_STEPS_NOTICE, self.service._refreshed_instructions(state)
+        )
 
     def test_refresh_rebuild_keeps_compact_profile(self) -> None:
         state = self.state()

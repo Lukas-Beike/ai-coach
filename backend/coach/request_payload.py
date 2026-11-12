@@ -42,6 +42,11 @@ LOCAL_ATTACHMENT_SUMMARY_NOTICE = (
     "\nEarlier attachments are available only through local summaries and dialogue. Earlier image pixels are unavailable; "
     "ask for missing evidence only if essential. Never invent attachment details."
 )
+RESUMED_STEPS_NOTICE = (
+    "\nThis turn was interrupted and is requested again. The confirmed_steps in the input "
+    "already ran in this turn: never repeat them or report them as new, and continue only "
+    "the work that is still unfinished."
+)
 _ADVISORY_RUN_NOTICE = (
     "\nThis is an automatic advisory run. Do not change data or pending requests."
 )
@@ -54,6 +59,7 @@ def compose_model_instructions(
     attachment_summary: bool = False,
     request_kind: str | None = None,
     nutrition: bool = False,
+    resumed_steps: bool = False,
 ) -> str:
     """Order instructions for provider prompt caching.
 
@@ -67,6 +73,8 @@ def compose_model_instructions(
     instructions += playbook_for(request_kind) + nutrition_playbook(nutrition)
     if attachment_summary:
         instructions += LOCAL_ATTACHMENT_SUMMARY_NOTICE
+    if resumed_steps:
+        instructions += RESUMED_STEPS_NOTICE
     if not allow_mutations:
         instructions += _ADVISORY_RUN_NOTICE
     return instructions
@@ -140,6 +148,8 @@ class CoachRequestPayloadService:
             # window, so the summary notice applies to every turn after an upload.
             attachment_summary=has_prior_openai_attachments
             and (not retain_openai_attachment_context or bool(attachments)),
+            # Receipts exist at the first request only when the turn was requeued.
+            resumed_steps=bool(command_receipts),
         )
         projected_dialogue = compact_coach_dialogue(context, selection)
         dialogue_input = {
