@@ -83,6 +83,36 @@ class FoodDatabaseMirror:
                 stored.append(self._entries.get(db, str(food["id"])))
         return [entry for entry in stored if entry is not None]
 
+    def fill_gaps(self, food_id: str, source: dict[str, Any]) -> dict[str, Any] | None:
+        """Fill a stored food's empty core values from another database's food.
+
+        Only values on the same basis fill; known values stay. Each filled
+        value names its origin and fetch time under ``filled_fields``.
+        """
+        with self._db_lock, self._database_manager().unit_of_work() as db:
+            entry = self._entries.get(db, food_id)
+            if entry is None or not _same_basis(entry, source):
+                return entry
+            values = source["per_100"]
+            gaps = {
+                key: values[key]
+                for key, value in entry["per_100"].items()
+                if value is None and values.get(key) is not None
+            }
+            if gaps:
+                origin = str(source["id"]).split(":", 1)[0]
+                fetched_at = entry.pop("fetched_at")
+                entry["per_100"].update(gaps)
+                entry["filled_fields"] = {
+                    **entry.get("filled_fields", {}),
+                    **{
+                        key: {"origin": origin, "fetched_at": self._utc_now()}
+                        for key in gaps
+                    },
+                }
+                self._entries.upsert(db, entry, fetched_at)
+            return self._entries.get(db, food_id)
+
     def delete(self, food_id: str) -> None:
         with self._db_lock, self._database_manager().unit_of_work() as db:
             if not self._entries.delete(db, food_id):
@@ -108,10 +138,14 @@ def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, An
         filled[key] = food.get(key)
     per_100 = food.get("per_100")
     fresh: dict[str, Any] = per_100 if isinstance(per_100, dict) else {}
-    same_basis = food.get("basis_unit") is not None and (
-        food.get("basis_unit"),
-        food.get("basis_amount"),
-    ) == (stored.get("basis_unit"), stored.get("basis_amount"))
+    same_basis = _same_basis(food, stored)
+    # A value the fresh record has is its own again, not filled from elsewhere.
+    if "filled_fields" in filled:
+        filled["filled_fields"] = {
+            key: origin
+            for key, origin in filled["filled_fields"].items()
+            if fresh.get(key) is None
+        }
     filled["per_100"] = {
         **fresh,
         **{
@@ -121,3 +155,11 @@ def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, An
         },
     }
     return filled
+
+
+def _same_basis(food: dict[str, Any], other: dict[str, Any]) -> bool:
+    """Whether both records count their values on the same known basis."""
+    return food.get("basis_unit") is not None and (
+        food.get("basis_unit"),
+        food.get("basis_amount"),
+    ) == (other.get("basis_unit"), other.get("basis_amount"))

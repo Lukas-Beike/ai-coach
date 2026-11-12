@@ -344,7 +344,33 @@ class FoodDatabaseService:
             if stored is None:
                 raise
             return stored, LOCAL_DATABASE_STALE
-        return self._kept([food])[0], LIVE
+        kept = self._kept([food])[0]
+        # A re-check of a stored food fills its remaining gaps from Yazio.
+        return (self._fill_from_yazio(kept) if stored else kept), LIVE
+
+    def _fill_from_yazio(self, food: dict[str, Any]) -> dict[str, Any]:
+        """Fill an Open Food Facts food's empty core values from Yazio by EAN.
+
+        Only when Yazio is configured and knows the EAN; otherwise, and on any
+        failure, the food stays as it is.
+        """
+        if not (
+            self._mirror
+            and str(food["id"]).startswith("off:")
+            and any(food["per_100"].get(key) is None for key in NUTRIENT_COLUMNS)
+        ):
+            return food
+        source, _failed = self._yazio_barcode(str(food["id"])[4:])
+        filled = None
+        with contextlib.suppress(Exception):
+            filled = source and self._mirror.fill_gaps(food["id"], source)
+        if not filled:
+            return food
+        return (
+            filled
+            if "fetched_at" in food
+            else {key: value for key, value in filled.items() if key != "fetched_at"}
+        )
 
     def _kept(self, foods: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Store live foods and return them as kept, with their gaps filled."""
@@ -564,7 +590,7 @@ class FoodDatabaseService:
                 "Der Datenbankeintrag konnte nicht aktualisiert werden.",
                 reason="food_database_unavailable",
             )
-        return self._stored_food(refreshed)
+        return self._stored_food(self._fill_from_yazio(refreshed))
 
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):
