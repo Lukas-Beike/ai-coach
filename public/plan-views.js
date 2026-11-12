@@ -92,9 +92,10 @@ function plannedStepList(profile) {
   return h("ol", { className: "planned-steps", "aria-label": "Ablauf" }, rows);
 }
 
-// A step's exact length: "30 s", "1:30 min", "55 min", "1:10 h"; "400 m" below a kilometre.
+// A step's exact length: "30 s", "1:30 min", "55 min", "1:10 h"; "400 m", "1,25 km".
+const STEP_KM_FORMAT = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 });
 function plannedStepExtent(size, axis) {
-  if (axis === "distance") return size < 1000 ? `${Math.round(size)} m` : distanceLabel(size);
+  if (axis === "distance") return size < 1000 ? `${Math.round(size)} m` : `${STEP_KM_FORMAT.format(size / 1000)} km`;
   if (size < 60) return `${Math.round(size)} s`;
   return size < 3600 && Math.round(size) % 60 ? `${AppFormat.clock(size)} min` : AppFormat.duration(size);
 }
