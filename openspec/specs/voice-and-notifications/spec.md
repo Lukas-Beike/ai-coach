@@ -97,7 +97,7 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 - **WHEN** provider output is missing text, nonobject, or contains only whitespace
 - **THEN** the service returns a transcription failure instead of claiming success; valid text is trimmed and returned as `transcript`.
 
-Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `backend/providers/audio.py::VOICE_AUDIO_TYPES`, `backend/providers/model_assembly.py::AudioTranscriptionSettings`, `server.py` (provider assembly with `AudioTranscriptionSettings`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`.
+Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `backend/providers/audio.py::VOICE_AUDIO_TYPES`, `backend/providers/model_wiring.py::build_model_transport`, `server.py` (`build_model_transport` with `max_audio_bytes`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`.
 
 ### Requirement: Notification permission is opt-in and capability-aware
 The client SHALL show whether browser notifications are granted, denied, unsupported, or not enabled, and SHALL request permission only after the athlete explicitly activates the enable control.
@@ -165,4 +165,4 @@ The system SHALL transcribe voice input with OpenAI whichever model provider ans
 - **WHEN** no OpenAI key is configured
 - **THEN** the microphone control is disabled while the chat itself stays usable with a configured Claude key.
 
-Evidence: `backend/providers/model_assembly.py:ModelTransportAssembly.audio_transcription_client`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).
+Evidence: `backend/providers/model_wiring.py:build_model_transport`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).
