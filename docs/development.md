@@ -20,7 +20,9 @@ exceptions, so you run the Docker runbook commands that pass `.env` or mount
 as a commit message; pass that text through a file.
 `.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
-subagents.
+subagents. `scripts/hooks/thread_model_rule.py` blocks a T3 thread launch whose
+model or effort the rule in `scripts/hooks/thread-model-rule.json` does not
+allow; an effort above `high` is refused whatever the file says.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
