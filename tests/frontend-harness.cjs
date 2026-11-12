@@ -22,11 +22,12 @@ function provideElementHelpers(files, globals) {
   Object.assign(globals, { h, table });
 }
 
-// Runs whole public files (one name or a list, in order) and returns the context.
+// Runs whole public files (one name or a list, in order) and returns the context. The element
+// helpers arrive after the files ran, as components.js loads after them in index.html.
 function loadPublicScript(files, globals = {}) {
-  provideElementHelpers(files, globals);
   const context = contextFor(globals);
   for (const file of [files].flat()) new vm.Script(readPublic(file), { filename: file }).runInContext(context); // NOSONAR: test-only, runs the repository's own public/ files.
+  provideElementHelpers(files, context);
   return context;
 }
 
