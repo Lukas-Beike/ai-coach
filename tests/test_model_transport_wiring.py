@@ -43,10 +43,6 @@ class ModelTransportWiringTests(unittest.TestCase):
             logger=Mock(name="logger"),
             diagnostic_capture=Mock(name="diagnostics"),
             app_version="test-version",
-            responses_path="/responses",
-            json_media_type="application/json",
-            response_timeout_seconds=600,
-            request_timeout_seconds=180,
             max_audio_bytes=2048,
         )
 

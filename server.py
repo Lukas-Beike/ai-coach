@@ -284,7 +284,12 @@ from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
-from backend.providers.model_wiring import ModelTransportServices, build_model_transport
+from backend.providers.model_wiring import (
+    JSON_MEDIA_TYPE,
+    OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    ModelTransportServices,
+    build_model_transport,
+)
 from backend.providers.observed_opener import Opener, observed_opener
 from backend.providers.transport_wiring import build_provider_transport
 from backend.runtime import clock as runtime_clock
@@ -442,19 +447,11 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
-JSON_MEDIA_TYPE = "application/json"
-OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
 APP_VERSION = "2.1.4"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
-# The longest silence allowed between two parts of a streamed model response.
-# Long reasoning on a large plan may send nothing for minutes (athlete
-# decision 2026-11-11, #2073: 10 minutes instead of 3).
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
-# Plain OpenAI requests (impact classifier, remote conversation create/delete).
-OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -1164,10 +1161,6 @@ MODEL_TRANSPORT: ModelTransportServices = build_model_transport(
     logger=LOGGER,
     diagnostic_capture=DIAGNOSTIC_CAPTURE,
     app_version=APP_VERSION,
-    responses_path=OPENAI_RESPONSES_PATH,
-    json_media_type=JSON_MEDIA_TYPE,
-    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-    request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
     max_audio_bytes=MAX_AUDIO_BODY_BYTES,
 )
 APP.model_transport = MODEL_TRANSPORT

@@ -38,6 +38,16 @@ TRANSCRIPTION_MODEL = "gpt-transcribe"
 TRANSCRIPTION_TIMEOUT_SECONDS = 90
 
 
+JSON_MEDIA_TYPE = "application/json"
+OPENAI_RESPONSES_PATH = "/responses"
+# The longest silence allowed between two parts of a streamed model response.
+# Long reasoning on a large plan may send nothing for minutes (athlete
+# decision 2026-11-11, #2073: 10 minutes instead of 3).
+OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
+# Plain OpenAI requests (impact classifier, remote conversation create/delete).
+OPENAI_REQUEST_TIMEOUT_SECONDS = 180
+
+
 @dataclass(frozen=True)
 class ModelTransportServices:
     claude_models: Callable[[], ClaudeModelResolver]
@@ -63,11 +73,6 @@ def build_model_transport(
     logger: Any,
     diagnostic_capture: DiagnosticCapture,
     app_version: str,
-    responses_path: str,
-    json_media_type: str,
-    # Longest silence in a streamed response; a plain request has its own limit.
-    response_timeout_seconds: int,
-    request_timeout_seconds: int,
     max_audio_bytes: int,
 ) -> ModelTransportServices:
     """Fresh model adapters per call over the shared provider transport owners."""
@@ -105,7 +110,7 @@ def build_model_transport(
                 api_key=active.anthropic_api_key,
                 base_url=active.anthropic_base_url,
                 default_base_url=DEFAULT_ANTHROPIC_BASE_URL,
-                timeout_seconds=response_timeout_seconds,
+                timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
                 max_response_bytes=max_response_bytes(),
                 app_version=app_version,
             ),
@@ -122,8 +127,8 @@ def build_model_transport(
             api_key=active.openai_api_key,
             base_url=active.openai_base_url,
             default_base_url=DEFAULT_OPENAI_BASE_URL,
-            responses_path=responses_path,
-            response_timeout_seconds=request_timeout_seconds,
+            responses_path=OPENAI_RESPONSES_PATH,
+            response_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
             thinking_level=selected_thinking_level,
             http_client=http_client(),
             provider_state=provider_state(),
@@ -139,11 +144,11 @@ def build_model_transport(
                 api_key=active.openai_api_key,
                 base_url=active.openai_base_url,
                 default_base_url=DEFAULT_OPENAI_BASE_URL,
-                responses_path=responses_path,
-                timeout=response_timeout_seconds,
+                responses_path=OPENAI_RESPONSES_PATH,
+                timeout=OPENAI_RESPONSE_TIMEOUT_SECONDS,
                 max_bytes=max_response_bytes(),
                 app_version=app_version,
-                media_type=json_media_type,
+                media_type=JSON_MEDIA_TYPE,
             ),
             openai_stream.OpenAIStreamTelemetry(
                 provider_state(), diagnostic_capture, logger, monotonic, utc_now
