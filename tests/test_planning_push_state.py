@@ -10,6 +10,13 @@ from typing import Any
 
 from support import temp_database
 
+from backend.activities.hr_cap import (
+    HR_CAP_PERCENT,
+    LOW_PERCENT_KEY,
+    PERCENT_KEY,
+    SOURCE_DEFAULT,
+    SOURCE_KEY,
+)
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
@@ -401,12 +408,20 @@ class PushStateTests(unittest.TestCase):
             ("date", "2026-11-10"),
             ("description", "- 10m 150-160bpm"),
             ("target", "HR"),
-            ("hr_cap", {"percent": 80.0}),
         ):
             with self.subTest(field=field):
                 self.assertTrue(
                     pending({**RUN, field: value})["push_pending"]["garmin"]
                 )
+
+    def test_the_run_fingerprint_follows_the_cap_the_push_applies(self) -> None:
+        # A focus change switches the effective cap on or off: Garmin is pending.
+        cap = {PERCENT_KEY: 80.0, LOW_PERCENT_KEY: 65.0, SOURCE_KEY: SOURCE_DEFAULT}
+        capped = {**RUN, "session_focus": next(iter(HR_CAP_PERCENT)), "hr_cap": cap}
+        left_over = {**capped, "session_focus": "tempo"}
+
+        self.assertNotEqual(garmin_fingerprint(RUN), garmin_fingerprint(capped))
+        self.assertEqual(garmin_fingerprint(RUN), garmin_fingerprint(left_over))
 
     def test_a_run_step_garmin_never_takes_offers_no_garmin_push(self) -> None:
         for text in ("- 10m ramp 120-140bpm", "- 400mtr 1:30/400m Pace"):

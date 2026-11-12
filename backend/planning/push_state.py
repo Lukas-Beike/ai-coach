@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import TYPE_CHECKING, Any, Final
 
+from backend.activities.hr_cap import stored_cap
 from backend.activities.workout_text import structured_blocks
 from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import WAHOO_ID, ProviderId, RemoteEntityKind, Sport
@@ -106,7 +107,8 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
                 "date": str(payload.get("date") or "")[:10],
                 "description": str(payload.get("description") or ""),
                 "target": str(payload.get("target") or ""),
-                HR_CAP: payload.get(HR_CAP),
+                # The cap the push applies: one left over from another focus does not.
+                HR_CAP: stored_cap(payload),
                 "payload_version": garmin_run_workout.PAYLOAD_VERSION,
             }
         )
