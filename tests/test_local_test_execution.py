@@ -370,11 +370,11 @@ class SupervisorTests(unittest.TestCase):
         self.check_real_owned_descendant(parent_exits=False)
 
     def test_cleanup_stops_descendants_after_the_parent_exits(self):
-        # The first read of the ready file meets a Windows sharing violation (#2387).
+        # The first read of the existing ready file meets a Windows sharing violation (#2387).
         real_read, refused = Path.read_text, []
 
         def read_text(path, *args, **kwargs):
-            if path.name == "descendant.json" and not refused:
+            if path.name == "descendant.json" and not refused and path.exists():
                 refused.append(path)
                 raise PermissionError(13, "synthetic sharing violation")
             return real_read(path, *args, **kwargs)
@@ -404,12 +404,14 @@ class SupervisorTests(unittest.TestCase):
         cleaned = False
         try:
             deadline = time.monotonic() + 10
+            last_error = None
             while observed is None and time.monotonic() < deadline:
-                # Windows may still hold the freshly renamed file (sharing violation).
-                with contextlib.suppress(FileNotFoundError, PermissionError):
+                try:
                     observed = json.loads(ready.read_text())
-                time.sleep(0.02)
-            self.assertIsNotNone(observed, "owned descendant reached readiness")
+                except (FileNotFoundError, PermissionError) as error:
+                    last_error = error
+                    time.sleep(0.02)
+            self.assertIsNotNone(observed, f"owned descendant reached readiness: {last_error!r}")
             if os.name == "nt":
                 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                 kernel.OpenProcess.argtypes = [
