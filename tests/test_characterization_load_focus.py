@@ -137,6 +137,19 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         self.assertEqual(result["duration_hours"], 1.0)
         self.assertEqual(result["training_load"], 50.0)
 
+    def test_rollup_counts_strength_with_its_total_time(self) -> None:
+        # #2317: rest between sets is part of a strength session's duration.
+        durations = {"moving_duration_s": 1800, "elapsed_duration_s": 3600}
+        result = activity_rollup(
+            [
+                {"started_at_local": "2026-05-04", "sport": "strength", **durations},
+                {"started_at_local": "2026-05-04", "sport": "run", **durations},
+            ],
+            1,
+            TODAY,
+        )
+        self.assertEqual(result["duration_hours"], 1.5)
+
     def test_rollup_parses_numeric_strings_and_zeroes_structured_values(self) -> None:
         result = activity_rollup(
             [

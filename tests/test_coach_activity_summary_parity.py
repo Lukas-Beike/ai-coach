@@ -322,5 +322,25 @@ class CoachMergedSourceTests(unittest.TestCase):
         )
 
 
+class CoachStrengthDurationTests(unittest.TestCase):
+    def test_a_strength_row_names_its_total_time_and_a_run_its_moving_time(
+        self,
+    ) -> None:
+        # #2317: rest between sets is part of a strength session's duration.
+        durations = {"moving_duration_s": 1860, "elapsed_duration_s": 3480}
+        strength = compact_coach_activity(
+            {**RUN_SUMMARY, **durations, "sport": "strength"},
+            select=planning_context.selected,
+        )
+        run = compact_coach_activity(
+            {**RUN_SUMMARY, **durations}, select=planning_context.selected
+        )
+
+        self.assertEqual(3480, strength["elapsed_duration_s"])
+        self.assertNotIn("moving_duration_s", strength)
+        self.assertEqual(1860, run["moving_duration_s"])
+        self.assertNotIn("elapsed_duration_s", run)
+
+
 if __name__ == "__main__":
     unittest.main()

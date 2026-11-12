@@ -4,8 +4,8 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
-from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
+from backend.canonical.activity_summary import summary_leading_duration_s
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -64,11 +64,11 @@ def _daily_activity_history(
 def _training_time_history(
     summaries: Sequence[Mapping[str, Any]], dates: list[str]
 ) -> list[dict[str, Any]]:
-    """Daily moving time in hours; unknown stays a gap."""
+    """Daily training time in hours (strength with its total time); unknown stays a gap."""
     seconds: dict[str, float] = {}
     for summary in summaries:
         day = _day(summary.get("started_at_local"))
-        value = summary_duration_s(summary)
+        value = summary_leading_duration_s(summary)
         if day is None or value is None or not 0 < value <= 86400:
             continue
         seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + value

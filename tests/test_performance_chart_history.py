@@ -5,6 +5,7 @@ from datetime import date
 
 from performance_day_support import canonical_from_snapshot, garmin_inputs_from_payload
 
+from backend.performance import chart_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import analysis_history as _analysis_history
 from backend.performance.freshness import GarminSyncStatus
@@ -230,6 +231,27 @@ class AnalysisHistoryTests(unittest.TestCase):
         self.assertEqual(points["2026-10-01"], 1.5)
         self.assertIsNone(points["2026-10-02"])
         self.assertEqual(len(points), 90)
+
+    def test_training_time_counts_strength_with_its_total_time(self):
+        # #2317: strength leads with the elapsed time, a run keeps its moving time.
+        summaries = [
+            {
+                "sport": sport,
+                "started_at_local": f"2026-10-0{day}T07:00:00",
+                "elapsed_duration_s": elapsed,
+                "moving_duration_s": moving,
+            }
+            for sport, day, elapsed, moving in (
+                ("strength", 1, 3480, 1860),
+                ("run", 2, 3000, 2700),
+            )
+        ]
+        points = chart_history._training_time_history(
+            summaries, ["2026-10-01", "2026-10-02"]
+        )
+        self.assertEqual(
+            [point["value"] for point in points], [round(3480 / 3600, 2), 0.75]
+        )
 
     def test_raw_history_retains_older_dates_and_compact_rows_take_precedence(self):
         snapshot = {

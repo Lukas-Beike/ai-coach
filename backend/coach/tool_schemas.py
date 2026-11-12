@@ -413,7 +413,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "list_recent_activities",
-            "Read completed local sessions from every connected provider, newest first, without refreshing a provider. Each entry is one session summary: id is the local session ID (act_...) and record_ids maps each provider to its activity ID; values use neutral names and units (moving_duration_s, distance_m, training_load).",
+            "Read completed local sessions from every connected provider, newest first, without refreshing a provider. Each entry is one session summary: id is the local session ID (act_...) and record_ids maps each provider to its activity ID; values use neutral names and units (moving_duration_s, elapsed_duration_s, distance_m, training_load). A strength session's duration is its total time (elapsed_duration_s), because rest between sets is part of the work; name its moving time only as additional information. Other sports lead with the moving time.",
             {
                 "days": {"type": "integer", "minimum": 1, "maximum": 3660},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
@@ -421,7 +421,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_activity_details",
-            "Read the bounded, sanitized activity_detail.v1 document of exactly one completed local session from any connected provider, with per-value source labels. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed; activity_id accepts the local ID (act_...) or the provider activity ID. Never use this for generic activity summaries or all past activities.",
+            "Read the bounded, sanitized activity_detail.v1 document of exactly one completed local session from any connected provider, with per-value source labels. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed; activity_id accepts the local ID (act_...) or the provider activity ID. Never use this for generic activity summaries or all past activities. A strength session's duration is its total time (elapsed_duration_s); its moving time is additional information.",
             {"activity_id": {"type": "string", "minLength": 1, "maxLength": 200}},
             strict=True,
         ),

@@ -77,7 +77,13 @@ class WeeklyProgressTests(unittest.TestCase):
                 heart_rate_zone_times=_zones(100, 100, 100, 100, 100),
                 zone_models={"heart_rate_zone_times": "local"},
             ),
-            _summary("s1", "2026-09-24", sport="strength", moving_duration_s=900),
+            _summary(
+                "s1",
+                "2026-09-24",
+                sport="strength",
+                moving_duration_s=900,
+                elapsed_duration_s=2400,
+            ),
         ]
         result = self._progress(rows=rows)
         week = next(w for w in result["week_list"] if w["week_start"] == "2026-09-21")
@@ -95,6 +101,9 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertEqual(["heart_rate"], run["sensors"])
         strength = week["sports"]["strength"]
         self.assertEqual(1, strength["sessions"])
+        # A strength week counts the total time; other sports their moving time (#2317).
+        self.assertEqual(2400, strength["duration_s"]["value"])
+        self.assertEqual(1800, week["sports"]["run"]["duration_s"]["value"])
         self.assertIsNone(strength["intensity_3zone"]["seconds"])
         self.assertEqual(0, week["sports"]["run"]["session_rpe_load"]["rated_sessions"])
 
