@@ -3,15 +3,12 @@
 // arrays are flattened, and null, undefined and false are skipped.
 function h(tag, props = null, ...children) {
   const element = document.createElement(tag);
-  if (typeof props === "string") {
-    if (props) element.className = props;
-  } else if (props) {
-    for (const [key, value] of Object.entries(props)) {
-      if (value == null) continue;
-      if (key === "dataset") Object.assign(element.dataset, value);
-      else if (key.includes("-")) element.setAttribute(key, String(value));
-      else element[key] = value;
-    }
+  const entries = typeof props === "string" ? [["className", props || null]] : Object.entries(props || {});
+  for (const [key, value] of entries) {
+    if (value == null) continue;
+    if (key === "dataset") Object.assign(element.dataset, value);
+    else if (key.includes("-")) element.setAttribute(key, String(value));
+    else element[key] = value;
   }
   for (const child of children.flat()) if (child != null && child !== false) element.append(typeof child === "object" ? child : String(child));
   return element;
