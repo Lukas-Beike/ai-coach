@@ -9,6 +9,7 @@
         "summaryDate": "2026-10-10",
         "latestWeight": {"samplePk": 2, "calendarDate": "2026-10-10", "weight": 71500.0}
       }
-    ]
+    ],
+    "totalAverage": {"from": 1791417600000, "until": 1791676799999, "weight": 71800.0}
   }
 ]
