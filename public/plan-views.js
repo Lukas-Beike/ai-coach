@@ -1307,8 +1307,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const day = h("section", { className: `planned-day${dateKey === todayKey ? " is-today" : ""}`, dataset: { date: dateKey } });
     const heading = plannedDayHeading(plannedDayWeather(dayContext, dateKey), dateKey, todayKey);
     const notes = plannedDayNotes(dayContext, state.data?.competitions, dateKey);
+    const emptyText = dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant";
     const content = h("div", "planned-day-content", heading, notes.childElementCount ? notes : null,
-      dayEntries.length ? null : h("p", "planned-day-empty", dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant"));
+      dayEntries.length ? null : h("p", "planned-day-empty", emptyText));
     for (const group of plannedEntryGroups(dayEntries)) {
       content.append(group.entries.length > 1
         ? renderPlannedGroup(group.entries, dateKey, todayKey, dayContext, weekHasPlan)
