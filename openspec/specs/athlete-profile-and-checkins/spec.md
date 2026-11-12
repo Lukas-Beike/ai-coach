@@ -236,7 +236,7 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 
 #### Scenario: Thresholds
 - **WHEN** the athlete opens a sport's page
-- **THEN** the rows "Aerob (LT1)" and "Anaerob (LT2)" ("Anaerob (LT2) / FTP" for cycling) show the power or pace and the heart rate, LT2 from the current performance values with the date they apply from, LT1 from the performance thresholds; a small yellow "i" on each row opens its origin (LT2's provider; LT1's "gemessen", "aus der Herzfrequenzvariabilität", "Schätzung aus Zone 2" or "Schätzung aus festem Anteil von LT2" per value), and the box offers "Bearbeiten"; a missing value shows "—".
+- **THEN** the rows "Aerob (LT1)" and "Anaerob (LT2)" ("Anaerob (LT2) / FTP" for cycling) show the power or pace and the heart rate, LT2 from the current performance values with the date they apply from, LT1 from the performance thresholds; a small yellow "i" on each row opens its origin (LT2's provider, per value when they differ; LT1's "gemessen", "aus der Herzfrequenzvariabilität", "Schätzung aus Zone 2" or "Schätzung aus festem Anteil von LT2" per value), and the box offers "Bearbeiten"; a missing value shows "—".
 
 #### Scenario: LT1 without a measured value or zones
 - **WHEN** no first threshold is stored and the sport has no heart-rate, pace or power zones

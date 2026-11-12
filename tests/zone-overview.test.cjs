@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { extractFunctions } = require("./frontend-harness.cjs");
 
-const NAMES = ["zoneMetricValue", "ZONE_METRIC_LABELS", "ZONE_SPORTS", "POWER_ZONE_NAMES", "zoneConfigurationFor", "zoneLimitsOf", "zoneLimitsText", "zoneLimitValue", "zoneValueText", "zoneRows", "zoneRange", "zoneSourceText", "zoneEditorValues", "THRESHOLD_ORIGINS", "thresholdRows"];
+const NAMES = ["zoneMetricValue", "ZONE_METRIC_LABELS", "ZONE_SPORTS", "POWER_ZONE_NAMES", "zoneConfigurationFor", "zoneLimitsOf", "zoneLimitsText", "zoneLimitValue", "zoneValueText", "zoneRows", "zoneRange", "zoneSourceText", "zoneEditorValues", "THRESHOLD_ORIGINS", "lt2Origin", "thresholdRows"];
 
 // Garmin's heart-rate zones carry no sport: the server names their key for every sport (#2262).
 const GARMIN_HR = { key: "garmin|heart_rate|||2026-11-09", source: "garmin", label: "Garmin", sport: null, metric: "heart_rate", environment: null, threshold: 163, maximum: 186, limits: [130, 145, 155, 166, 186], percent_limits: null };
@@ -78,6 +78,9 @@ test("LT2 comes from the performance values, LT1 from the thresholds", () => {
   assert.equal(rows.validFrom, "2026-11-09T08:00:00Z");
   // The yellow "i" of each row names its origin.
   assert.deepEqual(plain(rows.origins), { lt1: "Puls aus der Herzfrequenzvariabilität · Leistung Schätzung aus Zone 2", lt2: "Von Garmin Connect" });
+  // Providers that differ per value are named per value.
+  const mixed = thresholdRows("ride", { ...metrics, bike_threshold_hr_bpm: { value: 160, source: "Wahoo" } }, {});
+  assert.equal(mixed.origins.lt2, "Leistung von Garmin Connect · Puls von Wahoo");
   const empty = thresholdRows("run", {}, {});
   assert.deepEqual([empty.lt1.main, empty.lt1.hr, empty.lt2.main, empty.lt2.hr, empty.origins.lt1, empty.origins.lt2], [null, null, null, null, null, null]);
 });

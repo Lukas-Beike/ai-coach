@@ -605,9 +605,17 @@ function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, 
     metric,
     lt1,
     lt2,
-    origins: { lt1: lt1Origins.join(" · ") || null, lt2: sources[0]?.source ? `Von ${sources[0].source}` : null },
+    origins: { lt1: lt1Origins.join(" · ") || null, lt2: lt2Origin(metric, metrics, spec) },
     validFrom: sources.map((item) => String(item.observed_at || "")).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) || null,
   };
+}
+
+// One provider names the row; providers that differ per value are named per value.
+function lt2Origin(metric, metrics, spec) {
+  const named = [[metric === "power" ? "Leistung" : "Pace", metrics[spec.lt2[0]]], ["Puls", metrics[spec.lt2[1]]]].filter(([, item]) => item?.value != null && item.source);
+  if (!named.length) return null;
+  if (new Set(named.map(([, item]) => item.source)).size === 1) return `Von ${named[0][1].source}`;
+  return named.map(([name, item]) => `${name} von ${item.source}`).join(" · ");
 }
 
 function thresholdMainText(metric, value) {
