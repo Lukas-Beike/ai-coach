@@ -215,6 +215,7 @@ for (const provider of ["openai", "anthropic"]) {
       await route.fulfill({ json: { status: "ok", generation: "fixture-generation" } });
     });
     await page.evaluate((selected) => renderModel({
+      provider: selected,
       selected: `${selected}-fixture`,
       options: [
         { id: "openai-fixture", provider: "openai", label: "OpenAI Fixture", model: "openai-fixture" },
@@ -225,6 +226,8 @@ for (const provider of ["openai", "anthropic"]) {
     const section = page.locator("details", { has: page.locator("#modelSelect") });
     await section.locator("summary").click();
     await expect(page.locator("#modelSelect")).toHaveValue(`${provider}-fixture`);
+    // Claude hides the OpenAI-only speed row; the reset stays.
+    await expect(page.locator("#serviceTierRow")).toHaveJSProperty("hidden", provider === "anthropic");
     const button = section.getByRole("button", { name: "Chat zurücksetzen", exact: true });
     await expect(button).toBeVisible();
     await expect(page.locator("#connection-openai").getByRole("button", { name: "Chat zurücksetzen" })).toHaveCount(0);
