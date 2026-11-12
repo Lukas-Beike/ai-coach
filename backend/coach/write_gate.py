@@ -119,7 +119,8 @@ def _words(text: str) -> list[str]:
 
 
 # Remote sync wording in normalized form; defense in depth for remote writes
-# only. A sync verb or the provider name asks for the sync on its own; planning
+# only. A sync verb or the provider name asks for the sync on its own (the bare
+# training term "Intervals" only as a target, see ``_names_sync``); planning
 # words such as "Kalender", "doppelt" or "Konflikt" never do ("Trag den Lauf in
 # den Kalender ein" asks for no write to Intervals.icu). A leading "^" anchors a
 # stem at a word start.
@@ -192,20 +193,37 @@ _POLITE_REQUEST = re.compile(
 
 
 # "Synchronisieren mache ich selbst": the athlete keeps the action (#2341).
-_SELF = re.compile(r"(?<![a-z])(?:selbst|selber|myself)(?![a-z])")
-_FIRST_PERSON = re.compile(r"(?<![a-z])(?:ich|i)(?![a-z])")
-# The training term ("5x4 min Intervals"), not the provider name Intervals.icu.
+_KEEP_VERBS = "|".join(
+    normalize(verb) for verb in _words("mach,erledig,übernehm,kümmer")
+)
+_SELF_KEPT = re.compile(
+    rf"(?<![a-z])(?:(?:{_KEEP_VERBS})[a-z]*\s+ich|"
+    rf"ich\s+(?:{_KEEP_VERBS}|sync|synchronisier|lad|schick|trag)[a-z]*)"
+    r"\s+(?:[a-z]+\s+){0,3}?(?:selbst|selber)(?![a-z])|"
+    r"(?<![a-z])i(?:'ll| will)?\s+(?:do|sync|upload|handle)\s+(?:it|that|this|them)"
+    r"\s+myself(?![a-z])"
+)
+# The training term ("5x4 min Intervals") names the provider only as a target
+# ("zu Intervals", "in den Intervals Kalender") or with a split "gleiche ... ab".
 _TRAINING_INTERVALS = re.compile(r"(?<![a-z])intervals(?!\.icu)(?![a-z])")
-# Split "abgleichen" ("gleiche ... mit Intervals ab"); "lade ... hoch" is a push verb.
-_SPLIT_ABGLEICH = re.compile(r"(?<![a-z])gleich[a-z]*\s.*(?<![a-z])ab(?![a-z])")
+_INTERVALS_TARGET = re.compile(
+    r"(?<![a-z])(?:an|in|ins|zu|zum|nach|to|into|on|onto)\s+"
+    r"(?:(?:den|dem|die|das|my|mein[a-z]*)\s+)?intervals(?![a-z])|"
+    r"(?<![a-z])gleich[a-z]*\s.*intervals\s+ab(?![a-z])"
+)
 
 
 def _negates(part: str) -> bool:
-    if _SELF.search(part) and _FIRST_PERSON.search(part):
-        return True
-    return bool(_NEGATION.search(part)) or any(
+    return bool(_NEGATION.search(part) or _SELF_KEPT.search(part)) or any(
         _SYNC_TARGET_PATTERN.search(_loose(normalize(phrase)))
         for phrase in _WITHOUT.findall(part)
+    )
+
+
+def _names_sync(part: str) -> bool:
+    """Whether a part names the sync; the bare training term needs a target."""
+    return _mentions_remote(_TRAINING_INTERVALS.sub(" ", part)) or bool(
+        _INTERVALS_TARGET.search(part)
     )
 
 
@@ -222,9 +240,9 @@ def remote_requested(text: str) -> bool:
     ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
     A negated or self-kept sync ("Synchronisieren mache ich selbst") blocks the
     whole message up to the next contrast word, and the training term
-    "Intervals" without ".icu" needs a push verb (#2341).
+    "Intervals" names the provider only as a target ("zu Intervals") (#2341).
     """
-    parts: list[tuple[str, bool]] = []
+    requested = blocked = False
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
             sentence.rstrip().endswith(("?", "？"))
@@ -232,31 +250,15 @@ def remote_requested(text: str) -> bool:
             and not _POLITE_REQUEST.search(sentence)
         ):
             continue
-        parts.extend(
-            (part, index > 0) for index, part in enumerate(_CONTRAST.split(sentence))
-        )
-    start = 0
-    for index, (part, _) in enumerate(parts):
-        if _mentions_remote(part) and _negates(part):
-            start = next(
-                (later for later in range(index + 1, len(parts)) if parts[later][1]),
-                len(parts),
-            )
-    return any(
-        _names_sync(part)
-        and not _negates(part)
-        and not _names_other_provider(part)
-        and not _describes_past(part)
-        for part, _ in parts[start:]
-    )
-
-
-def _names_sync(part: str) -> bool:
-    """Whether a part names the sync; the training term needs a push verb."""
-    return _mentions_remote(_TRAINING_INTERVALS.sub(" ", part)) or (
-        _mentions_remote(part)
-        and bool(_PUSH_VERBS.search(_loose(part)) or _SPLIT_ABGLEICH.search(part))
-    )
+        for index, part in enumerate(_CONTRAST.split(sentence)):
+            blocked = blocked and not index
+            if not _names_sync(part) or _names_other_provider(part):
+                continue
+            if _negates(part):
+                requested, blocked = False, True
+            elif not blocked and not _describes_past(part):
+                requested = True
+    return requested
 
 
 # One group per provider, named by its id. Garmin is named as the provider or
