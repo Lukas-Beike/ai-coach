@@ -196,7 +196,8 @@ def require_coach_scope(intent: dict[str, Any], *tokens: str) -> None:
             reason="intent_scope_denied",
         )
         # For the model only: the scope tokens one of which its _request lacks.
-        error.required_scope = list(tokens[:4])
+        # Set only here, so every other AppError keeps its attributes.
+        setattr(error, "required_scope", list(tokens[:4]))  # noqa: B010
         raise error
 
 

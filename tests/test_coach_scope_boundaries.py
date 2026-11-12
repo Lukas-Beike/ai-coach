@@ -23,7 +23,9 @@ class CoachScopeBoundaryTests(unittest.TestCase):
             "Die strukturierte Coach-Autorisierung umfasst dieses Objekt nicht.",
         )
         # The model learns which token its _request lacked; the text stays.
-        self.assertEqual(raised.exception.required_scope, ["intervals_sync"])
+        self.assertEqual(
+            getattr(raised.exception, "required_scope", None), ["intervals_sync"]
+        )
 
     def test_period_horizon_is_inclusive_and_bulk_starts_above_limit(self):
         at_limit = coach_execution_scope(

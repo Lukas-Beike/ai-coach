@@ -47,8 +47,6 @@ class AppError(Exception):
         self.reason = reason
         self.upstream_status: int | None = upstream_status
         self.retry_after_seconds: int | None = retry_after_seconds
-        # Scope tokens a Coach call lacked; told to the model, never the athlete.
-        self.required_scope: list[str] | None = None
 
 
 def upstream_public_status(upstream_status: int) -> tuple[int, str]:

@@ -83,7 +83,7 @@ class StructuredToolFailureTests(unittest.TestCase):
 
     def test_a_scope_denial_tells_the_model_which_token_was_missing(self) -> None:
         error = AppError(403, "Nicht umfasst.", reason="intent_scope_denied")
-        error.required_scope = ["planned_unit:u-1", "local_plan"]
+        setattr(error, "required_scope", ["planned_unit:u-1", "local_plan"])  # noqa: B010
 
         result = self.project(error)
 
