@@ -26,7 +26,7 @@ The repository pre-push hook SHALL run the outgoing secret scan first and stop w
 Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHookTests.test_clean_push_runs_both_checks_in_order`, `tests/test_pre_push_hook.py::PrePushHookTests.test_secret_scan_failure_stops_before_quality`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_regression_blocks_the_push`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_runs_on_committed_head_not_the_working_tree`.
 
 ### Requirement: Outgoing secret scan fails closed
-`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push. The refusal SHALL tell a missing `sonar` command apart from a finding, and for a finding name each flagged source by kind, object id or repository path, never its content.
+`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push. The refusal SHALL name its cause.
 
 #### Scenario: Intermediate commit content
 - **WHEN** a secret appears in a middle commit and is removed in the tip
