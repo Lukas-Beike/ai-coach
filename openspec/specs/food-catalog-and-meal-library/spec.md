@@ -465,3 +465,32 @@ The Coach SHALL be able to search the web for the still-empty core values of up 
 - **THEN** the result says web search is not available, nothing is written, and the Coach turn continues.
 
 Evidence: `backend/nutrition/web_search.py::NutritionWebSearchService.search`, `backend/nutrition/catalog.py::ProductCatalogService.search_web_values`, `backend/coach/read_tools.py` (`search_web_for_product_values`); `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_request_carries_only_product_data`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_values_are_kept_only_when_cited_plausible_and_missing`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_a_page_the_search_read_counts_without_an_inline_citation`, `tests/test_nutrition_web_search.py::NutritionWebSearchTests.test_failures_give_unavailable_without_provider_text`, `tests/test_coach_tool_coverage.py` (`search_web_for_product_values:success`).
+
+### Requirement: One product list with equal actions
+The product API SHALL list own products and stored database foods together, sorted by name, with origin, fetch date, favourite flag and missing core fields, searchable by name, brand and EAN. Every product SHALL be usable, editable, re-checkable and removable, and SHALL be markable as favourite.
+
+#### Scenario: Merged list
+- **WHEN** the athlete lists all products
+- **THEN** own products and stored database foods appear together by name, a food whose EAN an own product holds appears only as that product, and each names its origin and missing fields.
+
+#### Scenario: Favourite database entry
+- **WHEN** the athlete marks a stored database food as favourite and it is later re-checked
+- **THEN** it stays a favourite.
+
+#### Scenario: Edited database entry
+- **WHEN** the athlete edits a stored database food's value and the food is later re-checked
+- **THEN** the edited value stays, is marked as the athlete's own, and the edit can be undone from the change history with its earlier marks.
+
+#### Scenario: Database-owned fields
+- **WHEN** an edit of a stored database food changes its name, brand, EAN, basis or status
+- **THEN** it is refused and nothing changes.
+
+#### Scenario: Re-check of an own product
+- **WHEN** the athlete re-checks an own product with an EAN
+- **THEN** the database lookup fills only its empty fields, falling back to the next stored source when one is unavailable; without an EAN, or for an archived product, the re-check is refused with a clear message.
+
+#### Scenario: Using a database entry
+- **WHEN** the athlete uses a stored database food for a meal
+- **THEN** it is recorded like an own product with its values at that time.
+
+Evidence: `backend/db/repositories.py::NutritionProductRepository.list_all`, `backend/nutrition/catalog.py::ProductCatalogService.update_product`, `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/nutrition/components.py`, `backend/http_api/nutrition.py` (`scope=all`); `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`, `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`, `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite).
