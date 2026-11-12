@@ -15,6 +15,7 @@ import hashlib
 import json
 import threading
 import unittest
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -29,6 +30,7 @@ from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_models import REMOTE_COACH_WRITE_TOOLS
 from backend.coach.proposal_read import CoachProposalConfirmationService
 from backend.coach.sync_tools import CoachSyncToolService
+from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
@@ -86,6 +88,7 @@ class CardFlow:
     preparation: CoachStructuredToolPreparationService
     inline_refreshes: dict[str, Any]
     queue: SyncJobQueueService
+    tools: CoachStructuredToolExecutionService
 
 
 def wire_card_flow(case: unittest.TestCase) -> CardFlow:
@@ -206,6 +209,16 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
         preparation=preparation,
         inline_refreshes=inline_refreshes,
         queue=queue,
+        tools=CoachStructuredToolExecutionService(
+            database,
+            threading.RLock(),
+            KeyValueRepository(NOW.isoformat),
+            mock.Mock(),
+            mock.Mock(),
+            creation,
+            dispatcher,
+            nullcontext(),
+        ),
     )
 
 
@@ -271,6 +284,29 @@ def create_card(flow: CardFlow, call: dict[str, Any]) -> dict[str, Any]:
         client_turn_id=TURN,
         session_csrf_hash=SESSION,
     )["proposed_action"]
+
+
+def run_in_turn(flow: CardFlow, call: dict[str, Any]) -> dict[str, Any]:
+    """Run the call as the Coach turn does, after the write gate allowed it."""
+    return flow.tools.execute(
+        {"name": call["tool"], "arguments": call["arguments"]},
+        action=call["action"],
+        context={},
+        conversation_id=CONVERSATION,
+        client_turn_id=TURN,
+        session_csrf_hash=SESSION,
+        sync_job_ids=[],
+        cancel_event=None,
+    )
+
+
+def card_count(flow: CardFlow) -> int:
+    with flow.database.reader() as db:
+        return int(
+            db.execute("SELECT COUNT(*) AS n FROM coach_action_proposals").fetchone()[
+                "n"
+            ]
+        )
 
 
 def approve_card(flow: CardFlow, card: dict[str, Any]) -> dict[str, Any]:
@@ -484,6 +520,42 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
                     [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
                 )
                 self.assertTrue(json.loads(jobs[0]["payload"])[bound])
+
+    def test_a_named_sync_queues_the_same_job_without_a_card(self) -> None:
+        """The athlete's named sync is the approval (#2342); the job binds the
+        same stored state an approved card would."""
+        for tool, (build, provider, job_type, bound) in CARD_KINDS.items():
+            with self.subTest(tool=tool):
+                self.flow = wire_card_flow(self)
+
+                result = run_in_turn(self.flow, build(self.flow))
+
+                self.assertEqual("queued", result["status"], result)
+                self.assertEqual(0, card_count(self.flow))
+                jobs = queued_jobs(self.flow)
+                self.assertEqual(
+                    [(provider, job_type, "coach")],
+                    [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
+                )
+                self.assertTrue(json.loads(jobs[0]["payload"])[bound])
+
+    def test_an_explicit_garmin_removal_still_asks_on_a_card(self) -> None:
+        call = prepared_call(
+            self.flow,
+            "push_strength_to_garmin",
+            {"entries": [{"local_id": STRENGTH_IDS[0], "remove": True}]},
+            request_for(
+                "garmin",
+                ["garmin_sync", f"planned_unit:{STRENGTH_IDS[0]}"],
+                sync_scope=SELECTED,
+            ),
+        )
+
+        result = run_in_turn(self.flow, call)
+
+        self.assertEqual("approval_required", result["status"])
+        self.assertEqual(1, card_count(self.flow))
+        self.assertEqual([], queued_jobs(self.flow))
 
     def test_the_garmin_card_binds_each_selected_unit_to_its_payload_hash(self) -> None:
         card = create_card(self.flow, _garmin_call(self.flow))

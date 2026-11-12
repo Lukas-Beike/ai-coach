@@ -8,7 +8,10 @@ from contextlib import nullcontext
 from typing import Any
 
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_creation import (
+    CoachProposalCreationService,
+    remote_removal_lines,
+)
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.tool_specs import (
     EXTERNAL_FOOD_LOOKUP_TOOLS,
@@ -117,20 +120,30 @@ class CoachStructuredToolExecutionService:
                     session_csrf_hash=session_csrf_hash,
                 )
                 return {**proposal, "ok": True, "status": "approval_required"}
+            removals: list[str] = []
             if (
                 action.get("intent") == "remote_sync"
                 and (action.get("request") or {}).get("remote_write") is True
             ):
-                proposal = self._proposal_creation.create_remote_write(
-                    name,
-                    arguments,
-                    action,
-                    conversation_id=conversation_id,
-                    client_turn_id=client_turn_id,
-                    session_csrf_hash=session_csrf_hash,
+                binding = {
+                    "conversation_id": conversation_id,
+                    "client_turn_id": client_turn_id,
+                    "session_csrf_hash": session_csrf_hash,
+                }
+                # The athlete's named sync is the approval (#2342); only an
+                # explicit Garmin removal still asks on a card.
+                if _removes_garmin_workouts(name, arguments):
+                    proposal = self._proposal_creation.create_remote_write(
+                        name, arguments, action, **binding
+                    )
+                    return {**proposal, "ok": True, "status": "approval_required"}
+                prepared = self._proposal_creation.prepare_remote_write(
+                    name, arguments, action, **binding
                 )
-                return {**proposal, "ok": True, "status": "approval_required"}
-            return self._tool_dispatch.execute(
+                arguments = prepared["payload"]["arguments"]
+                action = prepared["payload"]["intent"]
+                removals = remote_removal_lines(prepared["details"])
+            result = self._tool_dispatch.execute(
                 name,
                 arguments,
                 intent=action,
@@ -140,3 +153,11 @@ class CoachStructuredToolExecutionService:
                 sync_job_ids=sync_job_ids,
                 cancel_event=cancel_event,
             )
+            return {**result, "remote_removals": removals} if removals else result
+
+
+def _removes_garmin_workouts(name: str, arguments: dict[str, Any]) -> bool:
+    entries = arguments.get("entries") if name == "push_strength_to_garmin" else None
+    return isinstance(entries, list) and any(
+        isinstance(entry, dict) and entry.get("remove") is True for entry in entries
+    )

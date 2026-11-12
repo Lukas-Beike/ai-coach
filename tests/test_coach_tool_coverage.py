@@ -2214,7 +2214,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
         self.assertEqual(proposals, [])
 
-    def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
+    def test_all_pending_sync_binds_the_units_pending_at_the_request(self):
+        # A named sync queues without a card (#2342); it binds the units pending
+        # when the athlete asked, as the card did when it was created.
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [self.workout()]
         )[0]
@@ -2230,32 +2232,19 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     remote_write=True,
                     sync_scope="all_pending",
                 ),
-                {"output_text": "Prüfe die Freigabe."},
+                {"output_text": "Synchronisierung beauftragt."},
             ],
         )
-        proposal = receipt["command_receipts"][0]["result"]["proposed_action"]
-        self.assertTrue(
-            any(
-                first["id"] in value
-                for value in proposal["object_ids"].get("targets", [])
-            )
-        )
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-11", "Added after approval preview")]
-        )
-        confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
-            proposal["id"], "synthetic-session"
-        )
-
-        with self.assertRaises(AppError) as rejected:
-            server.COACH_PROPOSALS.execution_service().execute(
-                confirmation["action_token"],
-                "synthetic-session",
-                confirmation["proposed_action"]["payload_hash"],
-            )
-
-        self.assertEqual(rejected.exception.reason, "intent_scope_denied")
-        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
+        self.assertEqual(receipt["proposed_actions"], [])
+        self.assertEqual(receipt["command_receipts"][0]["result"]["status"], "queued")
+        later = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout("2026-09-11", "Added after the request")]
+        )[0]
+        jobs = server.SYNC_JOB_QUEUE.service().list()
+        self.assertEqual(len(jobs), 1)
+        queued = json.dumps(jobs[0], default=str)
+        self.assertIn(first["id"], queued)
+        self.assertNotIn(later["id"], queued)
 
     def test_friday_correction_retry_and_sync_keep_sunday_unchanged(self):
         units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -2788,20 +2777,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     ],
                 )
                 self.auto_approve_remote_proposals = previous_auto_approval
-                # A selection with a malformed hash is refused when the card is
-                # created, so it never reaches approval.
-                if kwargs.get("remote_write") and name != "start_intervals_plan_sync":
-                    self.assertEqual(
-                        result["command_receipts"][0]["result"]["status"],
-                        "approval_required",
-                    )
-                    after = self.athlete_state()
-                    before.pop("coach_action_proposals")
-                    after.pop("coach_action_proposals")
-                    self.assertEqual(after, before)
-                else:
-                    self.assertEqual(result["status"], "failed")
-                    self.assertEqual(self.athlete_state(), before)
+                # Remote writes run without a card (#2342), so an invalid one
+                # fails like any other call and writes nothing.
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(self.athlete_state(), before)
 
 
 if __name__ == "__main__":

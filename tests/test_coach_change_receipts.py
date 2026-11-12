@@ -152,6 +152,28 @@ class ChangeSummaryTests(unittest.TestCase):
         self.assertEqual(len(summary["labels"]), 2)
         self.assertFalse(summary["undoable"])
 
+    def test_a_card_free_sync_lists_its_remote_removals_without_turn_undo(
+        self,
+    ) -> None:
+        removal = "Wird bei Intervals.icu entfernt: Lauf 13.11.2026"
+        summary = change_summary(
+            [
+                _step(
+                    "start_intervals_plan_sync",
+                    {
+                        "ok": True,
+                        "status": "queued",
+                        "sync_job_id": "job-1",
+                        "remote_removals": [removal],
+                    },
+                )
+            ]
+        )
+
+        assert summary is not None
+        self.assertEqual(summary["labels"][1:], [removal])
+        self.assertFalse(summary["undoable"])
+
     def test_an_applied_history_undo_is_listed_and_blocks_turn_undo(self) -> None:
         summary = change_summary(
             [

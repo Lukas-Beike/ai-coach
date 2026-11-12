@@ -115,7 +115,7 @@ class CoachProposalCreationService:
             }
         return result
 
-    def create_remote_write(
+    def prepare_remote_write(
         self,
         tool: str,
         arguments: dict[str, Any],
@@ -125,7 +125,11 @@ class CoachProposalCreationService:
         client_turn_id: str,
         session_csrf_hash: str,
     ) -> dict[str, Any]:
-        """Prepare an independently approved Coach remote-write request."""
+        """Bind a Coach remote write to stored state, as its card would show it.
+
+        Returns the payload to dispatch and the rows a card lists; a card-free
+        run dispatches exactly what an approved card would (#2342).
+        """
         if not conversation_id or not client_turn_id or not session_csrf_hash:
             raise AppError(
                 403, "Die Remote-Aktion ist nicht an eine Coach-Sitzung gebunden."
@@ -138,34 +142,53 @@ class CoachProposalCreationService:
             raise AppError(403, "Die Remote-Aktion hat keinen gültigen Nutzerauftrag.")
         payload: dict[str, Any] = {
             "tool": tool,
-            "arguments": dict(arguments),
-            "intent": intent,
+            "arguments": _approved_remote_arguments(
+                tool,
+                arguments,
+                intent,
+                database_manager=self._database_manager,
+                nutrition_diary_service=self._nutrition_diary_service,
+                today=self._today(),
+            ),
             "conversation_id": str(conversation_id)[:160],
             "client_turn_id": str(client_turn_id)[:160],
         }
-        payload["arguments"] = _approved_remote_arguments(
-            tool,
-            arguments,
-            intent,
-            database_manager=self._database_manager,
-            nutrition_diary_service=self._nutrition_diary_service,
-            today=self._today(),
-        )
         payload["intent"] = _card_authorized_intent(
             tool, payload["arguments"], intent, self._database_manager
         )
-        targets = sorted(
-            value
-            for value in payload["intent"].get("authorization_scope", [])
-            if isinstance(value, str)
-        )
-        approval_manifest = payload["arguments"].get("_approval_manifest")
-        approval_details = _remote_write_approval_details(
+        details = _remote_write_approval_details(
             tool,
             payload["arguments"],
             intent,
             self._database_manager,
             today=self._today(),
+        )
+        return {"payload": payload, "details": details}
+
+    def create_remote_write(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        *,
+        conversation_id: str,
+        client_turn_id: str,
+        session_csrf_hash: str,
+    ) -> dict[str, Any]:
+        """Prepare an independently approved Coach remote-write request."""
+        prepared = self.prepare_remote_write(
+            tool,
+            arguments,
+            intent,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+        )
+        payload = prepared["payload"]
+        targets = sorted(
+            value
+            for value in payload["intent"].get("authorization_scope", [])
+            if isinstance(value, str)
         )
         return self.create(
             {
@@ -173,7 +196,11 @@ class CoachProposalCreationService:
                 "target_system": remote_write_target(tool, payload["intent"]),
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
-                    tool, arguments, intent, approval_manifest, approval_details
+                    tool,
+                    arguments,
+                    intent,
+                    payload["arguments"].get("_approval_manifest"),
+                    prepared["details"],
                 ),
                 "payload": payload,
             },
@@ -737,6 +764,7 @@ def _label_intervals_removals(
     return details
 
 
+_REMOTE_COMPETITION_DELETE = "Remote-Wettkampfeintrag löschen"
 _COMPETITION_MANIFEST_CHANGED = (
     "Der Wettkampfbestand hat sich vor der Freigabe geändert."
 )
@@ -839,3 +867,24 @@ def _nutrition_approval_arguments(
         else nutrition.sync_status.approval_manifest(pending_limit=limit)
     )
     return {**arguments, "_approval_manifest": manifest}
+
+
+_REMOVAL_LABELS = frozenset(
+    {
+        "Wird bei Intervals.icu entfernt",
+        "Wird bei Garmin entfernt",
+        "Von Garmin entfernen",
+    }
+)
+
+
+def remote_removal_lines(details: list[dict[str, str]]) -> list[str]:
+    """The receipt lines for what a remote write deletes at the provider."""
+    lines = []
+    for detail in details:
+        sport = detail.get("sport")
+        if sport in _REMOVAL_LABELS:
+            lines.append(f"{sport}: {detail.get('name')} {detail.get('date')}".strip())
+        elif detail.get("name") == _REMOTE_COMPETITION_DELETE:
+            lines.append(f"{_REMOTE_COMPETITION_DELETE} ({detail.get('id')})")
+    return lines

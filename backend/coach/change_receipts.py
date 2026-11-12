@@ -146,7 +146,15 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
         undoable = (
             undoable and tool in _FULLY_TRACKED_TOOLS and bool(entry.get("changes"))
         )
-        _append_new(labels, [coach_effect_label(entry), *_gap_fill_lines(tool, entry)])
+        _append_new(
+            labels,
+            [
+                coach_effect_label(entry),
+                *_gap_fill_lines(tool, entry),
+                # A card-free sync names what it deletes at the provider (#2342).
+                *entry["result"].get("remote_removals", []),
+            ],
+        )
         _append_new(notes, _plan_notes(entry["result"]))
     if not labels:
         return None
