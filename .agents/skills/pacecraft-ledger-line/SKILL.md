@@ -12,9 +12,11 @@ python scripts/ledger_line.py --issue <n> --pr <m> [--note-file <file>]
 Prints one line for the orchestrator ledger:
 
 ```text
-<YYYY-MM-DD> #N closed via PR #M <short sha> prod +a/-b tests +c/-d other +e/-f: <note or PR title>
+<YYYY-MM-DD> #N closed|part via PR #M <short sha> prod +a/-b tests +c/-d other +e/-f: <note or PR title>
 ```
 
+- `closed` when the issue is closed, `part` while it stays open (a
+  `Part of #N` PR); run it after closing the issue.
 - The note is the first non-blank line of `--note-file`, else the PR title.
 - The balance comes from the merge commit (see
   [line-balance](../pacecraft-line-balance/SKILL.md)); fetch the base branch
