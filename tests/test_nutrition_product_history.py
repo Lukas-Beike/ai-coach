@@ -10,6 +10,7 @@ import threading
 import unittest
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
@@ -256,6 +257,53 @@ class NutritionProductHistoryTests(unittest.TestCase):
             self.undo(changes)
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(self.stored_food(food["id"])["per_100"]["fat_g"], 2)
+
+    def test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product(
+        self,
+    ) -> None:
+        food: dict[str, Any] = {
+            "id": "off:5711953068011",
+            "name": "Synthetic skyr",
+            "brands": "Synthetic",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 60, "carbs_g": 4, "protein_g": 11},
+        }
+        # The product exists first, so only a re-check can fill its gaps.
+        own = self.catalog.save_product(
+            {**PRODUCT, "fat_g": None, "salt_g": None, "brand": ""}
+        )
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(db, food, "2026-09-01")
+        _, edit = self.collected(
+            lambda: self.catalog.update_product(food["id"], {"kcal": 65, "fat_g": 0.3})
+        )
+        self.assertEqual(self.stored_food(food["id"])["per_100"]["kcal"], 65)
+
+        self.undo(edit)
+
+        entry = self.stored_food(food["id"])
+        self.assertEqual(
+            (entry["per_100"]["kcal"], entry["per_100"].get("fat_g")), (60, None)
+        )
+        self.assertEqual(entry["filled_fields"], {})
+
+        with patch.object(
+            self.library.food_database, "refresh_barcode", return_value=""
+        ):
+            refreshed, recheck = self.collected(
+                lambda: self.library.refresh_database_food(own["id"])
+            )
+        self.assertEqual(refreshed["product"]["brand"], "Synthetic")
+        self.assertEqual(
+            [(c["action"], c["entity_type"]) for c in recheck],
+            [("update", "nutrition_product")],
+        )
+
+        self.undo(recheck)
+
+        restored = self.catalog.get_product(own["id"])
+        self.assertEqual((restored["brand"], restored["filled_fields"]), ("", {}))
 
     def test_a_coach_turn_that_saves_a_product_is_undoable(self) -> None:
         summary = change_summary(

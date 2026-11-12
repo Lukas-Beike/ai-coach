@@ -11,6 +11,7 @@ from backend import change_history
 from backend.errors import AppError
 from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.food_mirror import FOOD_ENTITY_TYPE
 from backend.nutrition.macro_ranges import macro_ranges
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
@@ -59,6 +60,11 @@ class NutritionGetRoutes:
         term = query.get("q", [None])[0]
         if query.get("source", [None])[0] == "database":
             return {"ok": True, "foods": meal_library.list_database_foods(term)}
+        if query.get("scope", [None])[0] == "all":
+            return {
+                "ok": True,
+                "products": meal_library.product_catalog.list_all_products(term),
+            }
         if barcode:
             return meal_library.product_catalog.lookup_product({"barcode": barcode})
         return {
@@ -283,14 +289,13 @@ class NutritionPostRoutes:
         )
 
     def _refresh_database_food(self, handler: Any, _request: RouteRequest) -> None:
-        """Re-check one food database entry online now; gaps fill."""
+        """Re-check one food database entry or own product online now; gaps fill."""
         payload = _read_object(handler)
-        handler.send_json(
-            200,
-            self._meal_library_service().refresh_database_food(
+        with change_history.collect_changes() as changes:
+            result = self._meal_library_service().refresh_database_food(
                 str(payload.get("id") or "")
-            ),
-        )
+            )
+        handler.send_json(200, {**result, **_change(changes, PRODUCT_ENTITY)})
 
     def _forget_database_food(self, handler: Any, _request: RouteRequest) -> None:
         """Forget a food database entry."""
@@ -375,7 +380,14 @@ class NutritionPutRoutes:
             )
         handler.send_json(
             200,
-            {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},
+            {
+                "ok": True,
+                "product": updated,
+                **(
+                    _change(changes, PRODUCT_ENTITY)
+                    or _change(changes, FOOD_ENTITY_TYPE)
+                ),
+            },
         )
 
 

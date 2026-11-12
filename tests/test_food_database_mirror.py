@@ -14,8 +14,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import patch
 
+from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
+from backend import change_history
 from backend.db import row_factory
 from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
@@ -352,6 +354,112 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
         )
         self.assertEqual(refreshed["missing_fields"], ["sugar_g"])
         self.assertEqual(refreshed["stored_at"], self.now.isoformat())
+
+    def library(self):
+        _diary, library = build_nutrition_services(
+            self.manager,
+            threading.RLock(),
+            lambda: self.now.isoformat(),
+            lambda: self.now,
+            food_database=self.service,
+        )
+        return library
+
+    def test_a_re_check_keeps_the_athletes_edit_and_the_favorite(self):
+        catalog = self.library().product_catalog
+        food_id = f"off:{BARCODE}"
+        self.mirror.store([food()])
+        self.now += timedelta(days=1)
+        catalog.update_product(food_id, {"kcal": 500, "salt_g": 0.2})
+        catalog.set_favorite(food_id, True)
+        fresh = food()
+        fresh["per_100"] = {**fresh["per_100"], "salt_g": 0.4, "sugar_g": 6}
+        self.off.product = lambda barcode: fresh
+        self.now += timedelta(days=1)
+
+        refreshed = self.service.refresh_stored(food_id)
+
+        # The edited values stay; the others take the database's fresh values.
+        self.assertEqual(
+            {key: refreshed["per_100"][key] for key in ("kcal", "salt_g", "sugar_g")},
+            {"kcal": 500, "salt_g": 0.2, "sugar_g": 6},
+        )
+        self.assertEqual(sorted(refreshed["filled_fields"]), ["kcal", "salt_g"])
+        self.assertEqual(
+            {mark["origin"] for mark in refreshed["filled_fields"].values()},
+            {"manual"},
+        )
+        self.assertEqual(catalog.get_product(food_id)["favorite"], 1)
+        # Another basis ends the edit: the values no longer mean the same.
+        fresh["basis_unit"] = "ml"
+        self.now += timedelta(days=1)
+        other = self.service.refresh_stored(food_id)
+        self.assertEqual((other["per_100"]["kcal"], other["filled_fields"]), (540, {}))
+        self.assertEqual(catalog.get_product(food_id)["favorite"], 1)
+
+    def test_an_own_product_is_re_checked_by_its_ean_and_only_its_gaps_fill(self):
+        library = self.library()
+        own = library.product_catalog.save_product(
+            {
+                "name": "Mein Riegel",
+                "barcode": BARCODE,
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 520,
+                "source": "manual",
+            }
+        )
+
+        with change_history.collect_changes() as changes:
+            result = library.refresh_database_food(own["id"])
+
+        product = result["product"]
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
+        self.assertEqual(
+            [product[key] for key in ("brand", "kcal", "carbs_g", "fat_g")],
+            ["Knoppers", 520, 50, 33],
+        )
+        self.assertEqual(
+            set(product["filled_fields"]), {"brand", "carbs_g", "protein_g", "fat_g"}
+        )
+        self.assertNotIn("notice", result)
+        self.assertEqual(
+            [(c["action"], c["entity_type"]) for c in changes],
+            [("update", "nutrition_product")],
+        )
+        # The stored food is checked again online now; a second check has nothing to fill.
+        self.now += timedelta(days=1)
+        with change_history.collect_changes() as again:
+            second = library.refresh_database_food(own["id"])
+        self.assertEqual(self.off.calls, [("product", BARCODE)] * 2)
+        self.assertEqual(again, [])
+        self.assertIn("Keine leeren Felder", second["notice"])
+
+    def test_an_own_product_re_check_needs_an_ean_and_a_working_lookup(self):
+        catalog = self.library().product_catalog
+        product = {
+            "name": "Mein Riegel",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "source": "manual",
+        }
+        without = catalog.save_product(product)
+        with_ean = catalog.save_product(
+            {**product, "name": "Anders", "barcode": BARCODE}
+        )
+        self.off.offline = True
+
+        for label, target, status, reason in (
+            ("no EAN", without, 400, "nutrition_product_barcode_missing"),
+            ("lookup fails", with_ean, 502, "food_database_unavailable"),
+        ):
+            with self.subTest(label), self.assertRaises(AppError) as raised:
+                catalog.refresh_product(target)
+            self.assertEqual(
+                (raised.exception.status, raised.exception.reason), (status, reason)
+            )
+            self.assertEqual(catalog.get_product(target["id"]), target)
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
 
     def test_a_re_check_never_guesses_a_basis_and_keeps_further_fields(self):
         stored = {**food(), "servings": [{"name": "Riegel", "amount": 40}]}

@@ -60,6 +60,8 @@ NUTRIENT_COLUMNS = (
     "salt_g",
 )
 _DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
+# Origin of a field value the athlete entered; a re-check keeps it.
+MANUAL_ORIGIN = "manual"
 
 
 def database_origin(food_id: str) -> str:
@@ -183,6 +185,61 @@ def fill_empty_nutrients(
     return updates
 
 
+# A food whose EAN an own product holds is listed as that product only.
+_NOT_HELD_BY_OWN = (
+    "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
+    "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL))"
+)
+# Active own products and the database foods no own product holds.
+_LISTED = (
+    f"(CASE WHEN origin = 'own' THEN status = 'active' ELSE {_NOT_HELD_BY_OWN} END)"
+)
+
+
+def _term_clauses(
+    query: str | None, *, barcodes: bool = False
+) -> tuple[list[str], list[Any]] | None:
+    """SQL conditions for a product search, or None when nothing can match.
+
+    Every word must appear in the name or brand (or equal an EAN with
+    ``barcodes``), so "Arla Skyr" finds the saved product "Skyr" of brand
+    "Arla". An empty query lists all; a whitespace-only or overlong query
+    matches nothing rather than a broader set. Words shorter than three
+    characters must start a word, so "Ei" finds "Eier" but not "Reisnudeln".
+    Separators around a word are ignored, so "Haferflocken, Banane" and
+    "Müsli (Bio)" still match.
+    """
+    terms = [
+        term for word in (query or "").split() if (term := word.strip(",.()/-!?:;+&"))
+    ]
+    if query and not 1 <= len(terms) <= 20:
+        return None
+    clauses: list[str] = []
+    params: list[Any] = []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        patterns = (
+            (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
+            if len(term) < 3
+            else (f"%{escaped}%",)
+        )
+        ean = barcodes and term.isdigit()
+        clauses.append(
+            "("
+            + " OR ".join(
+                f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
+                for column in ("name", "brand")
+                for _ in patterns
+            )
+            + (" OR barcode = ?" if ean else "")
+            + ")"
+        )
+        params.extend(patterns * 2)
+        if ean:
+            params.append(term)
+    return clauses, params
+
+
 class NutritionProductRepository:
     """Persist athlete-confirmed food products independently from meal logs.
 
@@ -190,12 +247,14 @@ class NutritionProductRepository:
     a database lookup belong to FoodDatabaseEntryRepository.
     """
 
-    _SELECT = (
-        "SELECT id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
+    _COLUMNS = (
+        "id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
         "protein_g, fat_g, sugar_g, fiber_g, salt_g, source, source_url, external_id, "
-        "provenance, extraction_confidence, favorite, status, created_at, updated_at, details "
-        "FROM nutrition_products"
+        "provenance, extraction_confidence, favorite, status, created_at, updated_at, details"
     )
+    _SELECT = f"SELECT {_COLUMNS} FROM nutrition_products"
+    # Listings of own and database products name where each product comes from.
+    _LISTING_SELECT = f"SELECT {_COLUMNS}, origin, fetched_at FROM nutrition_products"
 
     @staticmethod
     def _row(row: Any) -> dict[str, Any]:
@@ -226,9 +285,7 @@ class NutritionProductRepository:
             + ", ".join(NUTRIENT_COLUMNS)
             + " FROM nutrition_products WHERE ("
             + " OR ".join(f"{key} IS NULL" for key in NUTRIENT_COLUMNS)
-            + ") AND (CASE WHEN origin = 'own' THEN status = 'active' ELSE "
-            "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
-            "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL)) END) "
+            + f") AND {_LISTED} "
             + (f"AND id IN ({','.join('?' * len(wanted))}) " if ids is not None else "")
             + "ORDER BY origin <> 'own', name COLLATE NOCASE, id LIMIT ?",
             (*wanted, max(1, min(int(limit), 100))),
@@ -263,36 +320,10 @@ class NutritionProductRepository:
         if barcode:
             clauses.append("barcode = ?")
             params.append(barcode)
-        # Every word must appear in the name or brand, so "Arla Skyr" finds
-        # the saved product "Skyr" of brand "Arla". An empty query lists all;
-        # a whitespace-only or overlong query matches nothing rather than a
-        # broader set. Words shorter than three characters must start a word,
-        # so "Ei" finds "Eier" but not "Reisnudeln". Separators around a word
-        # are ignored, so "Haferflocken, Banane" and "Müsli (Bio)" still match.
-        terms = [
-            term
-            for word in (query or "").split()
-            if (term := word.strip(",.()/-!?:;+&"))
-        ]
-        if query and not 1 <= len(terms) <= 20:
+        if (found := _term_clauses(query)) is None:
             return []
-        for term in terms:
-            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            patterns = (
-                (f"{escaped}%", *(f"%{sep}{escaped}%" for sep in " -/(,.+&"))
-                if len(term) < 3
-                else (f"%{escaped}%",)
-            )
-            clauses.append(
-                "("
-                + " OR ".join(
-                    f"{column} LIKE ? ESCAPE '\\' COLLATE NOCASE"
-                    for column in ("name", "brand")
-                    for _ in patterns
-                )
-                + ")"
-            )
-            params.extend(patterns * 2)
+        clauses.extend(found[0])
+        params.extend(found[1])
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = db.execute(
             self._SELECT
@@ -302,6 +333,47 @@ class NutritionProductRepository:
             (*params, max(1, min(int(limit), 100))),
         ).fetchall()
         return [self._row(row) for row in rows]
+
+    def list_all(
+        self, db: Any, *, query: str | None = None, limit: int = 1000
+    ) -> builtins.list[dict[str, Any]]:
+        """Active own products and stored database foods together, by name.
+
+        The search covers name, brand and EAN. Each product names its
+        ``origin``, ``fetched_at`` and ``missing_fields``.
+        """
+        if (found := _term_clauses(query, barcodes=True)) is None:
+            return []
+        rows = db.execute(
+            self._LISTING_SELECT
+            + f" WHERE {_LISTED}"
+            + "".join(f" AND {clause}" for clause in found[0])
+            + " ORDER BY name COLLATE NOCASE, id LIMIT ?",
+            (*found[1], max(1, min(int(limit), 1000))),
+        ).fetchall()
+        # SQLite folds the case of ASCII letters only; umlauts sort by casefold.
+        return sorted(
+            (self._listed(row) for row in rows),
+            key=lambda product: (product["name"].casefold(), product["id"]),
+        )
+
+    def get_database(self, db: Any, product_id: str) -> dict[str, Any] | None:
+        """A stored database food as a product, or None for any other id."""
+        row = db.execute(
+            self._LISTING_SELECT + " WHERE id = ? AND origin <> 'own'", (product_id,)
+        ).fetchone()
+        return self._listed(row) if row else None
+
+    def get_any(self, db: Any, product_id: str) -> dict[str, Any] | None:
+        """An own product, else a stored database food."""
+        return self.get(db, product_id) or self.get_database(db, product_id)
+
+    def _listed(self, row: Any) -> dict[str, Any]:
+        product = self._row(row)
+        product["missing_fields"] = [
+            key for key in NUTRIENT_COLUMNS if product[key] is None
+        ]
+        return product
 
     def get(self, db: Any, product_id: str) -> dict[str, Any] | None:
         row = db.execute(
@@ -396,10 +468,11 @@ class NutritionProductRepository:
         return filled
 
     def set_favorite(self, db: Any, product_id: str, favorite: bool) -> bool:
-        # Only the flag changes: saving a product again never resets it.
+        # Only the flag changes: saving a product or re-checking a stored
+        # database food never resets it.
         return (
             db.execute(
-                "UPDATE nutrition_products SET favorite=? WHERE id=? AND origin = 'own'",
+                "UPDATE nutrition_products SET favorite=? WHERE id=?",
                 (int(favorite), product_id),
             ).rowcount
             > 0
@@ -535,10 +608,7 @@ class FoodDatabaseEntryRepository:
             )
             params.extend((f"%{escaped}%", f"%{escaped}%"))
         # A food whose EAN an own product holds is listed as that product.
-        clauses.append(
-            "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
-            "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL))"
-        )
+        clauses.append(_NOT_HELD_BY_OWN)
         rows = db.execute(
             self._SELECT
             + "".join(f" AND {clause}" for clause in clauses)
@@ -626,6 +696,33 @@ class FoodDatabaseEntryRepository:
         details = json.loads(row["details"])
         for key in values:
             details.get("filled_fields", {}).pop(key, None)
+        db.execute(
+            "UPDATE nutrition_products SET "
+            + ", ".join(f"{key}=?" for key in values)
+            + ", details=? WHERE id=?",
+            (*values.values(), json.dumps(details, ensure_ascii=False), food_id),
+        )
+
+    def edit_nutrients(
+        self, db: Any, food_id: str, values: Mapping[str, Any], edited_at: str
+    ) -> None:
+        """Write the athlete's nutrient values; each one is marked ``manual``.
+
+        An emptied value is no longer marked.
+        """
+        row = db.execute(
+            "SELECT details FROM nutrition_products WHERE id=? AND origin <> 'own'",
+            (food_id,),
+        ).fetchone()
+        if row is None or not values:
+            return
+        details = json.loads(row["details"])
+        marks = details.setdefault("filled_fields", {})
+        for key, value in values.items():
+            if value is None:
+                marks.pop(key, None)
+            else:
+                marks[key] = {"origin": MANUAL_ORIGIN, "fetched_at": edited_at}
         db.execute(
             "UPDATE nutrition_products SET "
             + ", ".join(f"{key}=?" for key in values)

@@ -230,7 +230,8 @@ NUTRITION_PRODUCT_FIELDS = (
     "status",
 )
 # A stored database food: its nutrient values and the basis they count on. Only
-# the Coach's gap fill records it; a refetch replaces the values and so ends undo.
+# a gap fill and the athlete's edit record it; a refetch replaces the values and
+# so ends undo.
 FOOD_DATABASE_ENTRY_FIELDS = (
     "id",
     "basis_amount",

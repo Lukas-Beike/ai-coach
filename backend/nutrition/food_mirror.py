@@ -11,6 +11,7 @@ from typing import Any
 from backend import change_history
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import (
+    MANUAL_ORIGIN,
     NUTRIENT_COLUMNS,
     FoodDatabaseEntryRepository,
     database_origin,
@@ -86,7 +87,8 @@ class FoodDatabaseMirror:
 
         A fresh record takes every value it has. A value it lacks is kept
         from the stored record when both count on the same basis unit, so a
-        re-check fills gaps and never empties a known field.
+        re-check fills gaps and never empties a known field. A value the
+        athlete edited stays even when the fresh record has one.
         """
         if not foods:
             return []
@@ -182,20 +184,29 @@ def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, An
     per_100 = food.get("per_100")
     fresh: dict[str, Any] = per_100 if isinstance(per_100, dict) else {}
     same_basis = _same_basis(food, stored)
+    # The athlete's edits win over the database while the basis is the same.
+    edited = {
+        key
+        for key, origin in stored.get("filled_fields", {}).items()
+        if same_basis and origin.get("origin") == MANUAL_ORIGIN
+    }
     # A filled value stays filled only while it is carried over unchanged; a
     # fresh value or another basis ends its origin.
     if "filled_fields" in filled:
         filled["filled_fields"] = {
             key: origin
-            for key, origin in filled["filled_fields"].items()
-            if same_basis and fresh.get(key) is None
+            for key, origin in {
+                **filled["filled_fields"],
+                **{key: stored["filled_fields"][key] for key in edited},
+            }.items()
+            if same_basis and (fresh.get(key) is None or key in edited)
         }
     filled["per_100"] = {
         **fresh,
         **{
             key: value
             for key, value in (stored["per_100"].items() if same_basis else ())
-            if value is not None and fresh.get(key) is None
+            if value is not None and (fresh.get(key) is None or key in edited)
         },
     }
     return filled

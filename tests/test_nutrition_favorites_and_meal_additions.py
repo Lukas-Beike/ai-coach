@@ -11,6 +11,7 @@ from unittest.mock import Mock
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
+from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.errors import AppError
 
 
@@ -95,6 +96,62 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(AppError) as invalid:
                 self.library.product_catalog.set_favorite(product["id"], value)
             self.assertEqual(invalid.exception.status, 400)
+
+    def store_food(self, **per_100):
+        food = {
+            "id": "off:4000000000017",
+            "name": "Apfelmus",
+            "brands": "Hersteller",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 50, "carbs_g": 11, "protein_g": 0.3, "fat_g": 0.1},
+        }
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(
+                db, {**food, "per_100": {**food["per_100"], **per_100}}, "2026-10-01"
+            )
+        return food["id"]
+
+    def test_a_stored_database_food_is_a_favorite_that_re_checks_keep(self) -> None:
+        catalog = self.library.product_catalog
+        food_id = self.store_food()
+
+        favorite = catalog.set_favorite(food_id, True)
+
+        self.assertEqual(
+            (favorite["favorite"], favorite["origin"]), (1, "open_food_facts")
+        )
+        self.store_food(kcal=55)
+        self.assertEqual(
+            [(p["id"], p["favorite"], p["kcal"]) for p in catalog.list_all_products()],
+            [(food_id, 1, 55)],
+        )
+        self.assertEqual(catalog.set_favorite(food_id, False)["favorite"], 0)
+
+    def test_a_stored_database_food_is_used_like_an_own_product(self) -> None:
+        food_id = self.store_food()
+        entry = self.diary.log_product(food_id, 200, "g")
+
+        basis = entry["nutrition_basis"]
+        self.assertEqual((entry["kcal"], entry["carbs_g"]), (100, 22))
+        self.assertEqual(basis["kind"], "local_product")
+        # The meal keeps the food's values and origin at that time.
+        self.assertEqual(
+            (basis["product"]["origin"], basis["product"]["kcal"]),
+            ("open_food_facts", 50),
+        )
+        banana = self.product("Banane", kcal=90, carbs_g=20, protein_g=1, fat_g=0.3)
+        updated = self.diary.add_product_to_meal(entry["id"], banana["id"], 100, "g")
+        added = self.diary.add_product_to_meal(updated["id"], food_id, 100, "g")
+        self.assertEqual(added["kcal"], 240)
+        self.assertEqual(
+            [c["name"] for c in added["nutrition_basis"]["components"]][1:],
+            ["Banane", "Apfelmus"],
+        )
+        # A unit the food does not count in is refused.
+        with self.assertRaises(AppError) as mismatch:
+            self.diary.add_product_to_meal(entry["id"], food_id, 100, "ml")
+        self.assertEqual(mismatch.exception.reason, "food_unit_mismatch")
 
     def test_adding_a_product_turns_a_single_product_meal_into_a_composite(
         self,

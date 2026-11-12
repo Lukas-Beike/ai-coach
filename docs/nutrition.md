@@ -80,6 +80,18 @@ database cannot be reached, "Aus Datenbank entfernen" (remove from database) del
 the mirror entry. The mirror is part of backup, export and data deletion. The upgrade to
 schema v27 moves every former mirror row into the product table without loss.
 
+`GET /api/nutrition/products?scope=all` lists own products and stored database
+foods together, sorted by name, each with its `origin`, `fetched_at`, favourite
+flag, `missing_fields` and `filled_fields`; `q` searches name, brand and EAN. A
+food whose EAN an own product holds appears only as that product. Every entry
+has the same actions: a stored food can be a favourite (kept across re-checks),
+be used for a meal like an own product, and be edited. An edit changes only the
+nutrient values; each edited field is marked `manual`, a re-check keeps it
+instead of the database's value, and the edit is in the change history and can
+be undone. "Aktualisieren" of an own product with an EAN checks the databases
+again and fills only its empty fields (undoable); without an EAN it is refused
+and asks for one.
+
 ## Yazio product search (optional)
 
 Under **Mehr > Anbindungen** (More > Connections), "Verbindung prüfen" (check connection) explicitly checks the login. The status shows the last check result and its time; after a restart or a change of credentials, a new check is needed. Rejected logins can concern account or app credentials; the exact cause is not always known. On rate limiting or outage, try again later. Loading the status makes no request to Yazio.

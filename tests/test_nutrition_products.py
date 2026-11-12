@@ -13,6 +13,7 @@ from unittest.mock import Mock
 from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
+from backend import change_history
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.errors import AppError
@@ -222,6 +223,134 @@ class NutritionProductContractTests(unittest.TestCase):
             },
             {"sugar_g": "https://example.test/a", "fiber_g": "https://example.test/b"},
         )
+
+    def store_foods(self, *foods):
+        with self.manager.unit_of_work() as db:
+            for food in foods:
+                FoodDatabaseEntryRepository().upsert(db, food, "2026-10-01")
+
+    @staticmethod
+    def stored_food(food_id, name, brands="", **per_100):
+        return {
+            "id": food_id,
+            "name": name,
+            "brands": brands,
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 50, "carbs_g": 10, **per_100},
+        }
+
+    def test_the_merged_list_holds_own_products_and_stored_foods_by_name(self):
+        catalog = self.library.product_catalog
+        own = catalog.save_product(
+            self.product_payload(name="Zebra Riegel", brand="Streifen")
+        )
+        archived = catalog.save_product(
+            self.product_payload(name="Archiv", barcode="4006381333948")
+        )
+        catalog.archive_product(archived["id"])
+        self.store_foods(
+            self.stored_food("off:4000000000017", "apfelmus", "Hersteller"),
+            {
+                **self.stored_food(
+                    "yazio:0a1b2c3d-0000-4000-8000-000000000001", "Banane"
+                ),
+                "barcode": "4000000000024",
+            },
+            # The food of the own product's EAN is listed as that product only.
+            self.stored_food(f"off:{own['barcode']}", "Aaa Zwilling"),
+        )
+
+        listed = catalog.list_all_products()
+
+        self.assertEqual(
+            [item["name"] for item in listed], ["apfelmus", "Banane", "Zebra Riegel"]
+        )
+        by_name = {item["name"]: item for item in listed}
+        self.assertEqual(
+            [(item["origin"], item["favorite"]) for item in listed],
+            [("open_food_facts", 0), ("yazio", 0), ("own", 0)],
+        )
+        self.assertEqual(by_name["apfelmus"]["fetched_at"], "2026-10-01")
+        self.assertIsNone(by_name["Zebra Riegel"]["fetched_at"])
+        self.assertEqual(
+            by_name["apfelmus"]["missing_fields"],
+            ["protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g"],
+        )
+        self.assertEqual(by_name["Zebra Riegel"]["missing_fields"], [])
+        self.assertEqual(by_name["apfelmus"]["filled_fields"], {})
+        for query, expected in (
+            ("riegel", ["Zebra Riegel"]),
+            ("streifen", ["Zebra Riegel"]),
+            ("HERSTELLER apfel", ["apfelmus"]),
+            ("4000000000024", ["Banane"]),
+            (own["barcode"], ["Zebra Riegel"]),
+            ("Bananen", ["Banane"]),
+            ("Archiv", []),
+            ("  ", []),
+            ("nichts", []),
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(
+                    [item["name"] for item in catalog.list_all_products(query)],
+                    expected,
+                )
+        # The default own-product list is unchanged: no stored food, no EAN search.
+        self.assertEqual([p["name"] for p in catalog.list_products()], ["Zebra Riegel"])
+        self.assertEqual(catalog.list_products(query=own["barcode"]), [])
+
+    def test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own(self):
+        catalog = self.library.product_catalog
+        food_id = "off:4000000000017"
+        self.store_foods(self.stored_food(food_id, "Apfelmus", "Hersteller"))
+        edit = {
+            "kcal": 52,
+            "salt_g": 0.1,
+            "carbs_g": 10,
+            "name": "Anders",
+            "barcode": "1",
+        }
+
+        with change_history.collect_changes() as changes:
+            edited = catalog.update_product(food_id, edit)
+
+        # It stays the database entry; only the nutrient values change.
+        self.assertEqual(
+            [edited[key] for key in ("origin", "name", "barcode", "kcal", "salt_g")],
+            ["open_food_facts", "Apfelmus", "4000000000017", 52, 0.1],
+        )
+        manual = {"origin": "manual", "fetched_at": "2026-10-05T12:00:00+00:00"}
+        self.assertEqual(edited["filled_fields"], {"kcal": manual, "salt_g": manual})
+        self.assertEqual(edited["fetched_at"], "2026-10-01")
+        self.assertEqual(
+            [(c["action"], c["entity_type"]) for c in changes],
+            [("update", "food_database_entry")],
+        )
+        # An unchanged payload records nothing; an emptied value loses its mark.
+        with change_history.collect_changes() as again:
+            catalog.update_product(food_id, edit)
+        self.assertEqual(again, [])
+        cleared = catalog.update_product(food_id, {"salt_g": None})
+        self.assertEqual(
+            (cleared["salt_g"], list(cleared["filled_fields"])), (None, ["kcal"])
+        )
+
+    def test_invalid_edits_of_a_stored_database_food_change_nothing(self):
+        catalog = self.library.product_catalog
+        food_id = "off:4000000000017"
+        self.store_foods(self.stored_food(food_id, "Apfelmus"))
+        before = catalog.get_product(food_id)
+        for label, payload in (
+            ("negative", {"kcal": -1}),
+            ("text", {"kcal": "1"}),
+            ("too large", {"salt_g": 1000.5}),
+            ("boolean", {"fat_g": True}),
+            ("one bad value rejects all", {"kcal": 60, "salt_g": -2}),
+        ):
+            with self.subTest(label), self.assertRaises(AppError) as raised:
+                catalog.update_product(food_id, payload)
+            self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(catalog.get_product(food_id), before)
 
     def test_invalid_gap_fills_are_rejected_without_a_write(self):
         catalog = self.library.product_catalog
