@@ -1271,7 +1271,9 @@ function plannedActivityActions(actual, dateKey, title, entryKey) {
 // "Verschieben" (#2194): the next seven days from today with the unit's own day dimmed, and "…" for a
 // later date. One tap moves the local unit; its open card follows it to the new week with the receipt.
 function plannedUnitActions(entry, dateKey, todayKey) {
-  if (!entry.local_id || !entry.payload_hash || entry.is_completed_activity) return [];
+  if (!entry.local_id || entry.is_completed_activity) return [];
+  const coach = plannedDiscussButton(entry, dateKey);
+  if (!entry.payload_hash) return [h("div", "planned-activity-actions", coach)];
   const key = plannedEntryKey(entry, dateKey);
   const toggle = h("button", { type: "button", className: "secondary-button", "aria-expanded": "false" }, "Verschieben");
   const days = h("div", { className: "planned-move-days", role: "group", "aria-label": "Neuer Tag", hidden: true });
@@ -1315,7 +1317,22 @@ function plannedUnitActions(entry, dateKey, todayKey) {
   days.append(later, picker);
   const receipt = plannedMoveReceipts.get(key);
   if (receipt) status.append(receipt.text, ...(receipt.change?.id ? plannedMoveUndo(key, receipt, status) : []));
-  return [h("div", "planned-activity-actions", toggle), days, status];
+  return [h("div", "planned-activity-actions", toggle, coach), days, status];
+}
+
+// "Mit dem Coach besprechen" (#2193) opens the Coach with the unit named by date, sport, start, duration and
+// local id in the message field; the athlete adds the question and sends it. The stored name is never Coach input.
+function plannedDiscussButton(entry, dateKey) {
+  const id = String(entry.local_id);
+  const reference = [
+    activitySportLabel(calendarSportType(entry)),
+    plannedUnitStartTime(entry.starts_at_local),
+    plannedEntryDurationLabel(null, entry),
+    /^[\w:.-]{1,80}$/.test(id) ? `ID ${id}` : null,
+  ].filter(Boolean).join(", ");
+  const button = h("button", { type: "button", className: "secondary-button" }, "Mit dem Coach besprechen");
+  button.addEventListener("click", () => void globalThis.askCoach?.(`Zur geplanten Einheit am ${dateLabel(dateKey)} (${reference}): `, { send: false }));
+  return button;
 }
 
 // "Rückgängig" puts the unit back on its earlier day and shows that week again.
