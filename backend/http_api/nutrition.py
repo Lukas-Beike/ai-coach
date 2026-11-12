@@ -138,6 +138,10 @@ class NutritionPostRoutes:
                     f"{NUTRITION_PRODUCTS_PATH}/database/delete",
                     self._forget_database_food,
                 ),
+                (
+                    f"{NUTRITION_PRODUCTS_PATH}/database/refresh",
+                    self._refresh_database_food,
+                ),
             )
         ]
 
@@ -276,6 +280,16 @@ class NutritionPostRoutes:
         payload = _read_object(handler, PHOTO_REQUEST_MAX_BYTES)
         handler.send_json(
             200, self._meal_library_service().extract_packaging_photo(payload)
+        )
+
+    def _refresh_database_food(self, handler: Any, _request: RouteRequest) -> None:
+        """Re-check one food database entry online now; gaps fill."""
+        payload = _read_object(handler)
+        handler.send_json(
+            200,
+            self._meal_library_service().refresh_database_food(
+                str(payload.get("id") or "")
+            ),
         )
 
     def _forget_database_food(self, handler: Any, _request: RouteRequest) -> None:

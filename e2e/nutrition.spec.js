@@ -329,3 +329,36 @@ test("@responsive a failed diary load keeps the requested date, shows one error 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 });
+
+test("@responsive a stored database entry is refreshed on request and the list is read again", async ({ page }) => {
+  let salt = null;
+  let listed = 0;
+  const refreshes = [];
+  await page.route("**/api/nutrition/products**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/database/refresh")) {
+      refreshes.push(request.postDataJSON());
+      salt = 0.4;
+      return route.fulfill({ json: { ok: true, food: { id: "off:4006381333931" } } });
+    }
+    if (request.method() === "GET" && url.searchParams.get("source") === "database") {
+      listed += 1;
+      return route.fulfill({ json: { ok: true, foods: [{
+        id: "off:4006381333931", name: "Haselnuss Riegel", brands: "Beispiel", basis_amount: 100, basis_unit: "g",
+        per_100: { kcal: 540, carbs_g: 50, protein_g: 8, fat_g: 33, sugar_g: 40, fiber_g: 3, salt_g: salt },
+        data_origin: "local_database", stored_at: "2026-10-01T08:00:00+00:00",
+      }] } });
+    }
+    if (request.method() === "GET") return route.fulfill({ json: { ok: true, products: [] } });
+    return route.continue();
+  });
+  await page.goto("/#nutrition/products");
+  const card = page.locator("#nutritionDatabase .nutrition-product-card").filter({ hasText: "Haselnuss Riegel" });
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Aktualisieren" }).click();
+  await expect(page.locator("#nutritionProductStatus")).toContainText("„Haselnuss Riegel“ aktualisiert.");
+  expect(refreshes).toEqual([{ id: "off:4006381333931" }]);
+  // The list is read again after the refresh, so the filled value is shown.
+  await expect.poll(() => listed).toBeGreaterThan(1);
+});

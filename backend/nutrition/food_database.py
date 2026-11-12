@@ -5,6 +5,7 @@ The only durable effect is storing fetched external foods in the local mirror.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import json
 import math
@@ -19,6 +20,7 @@ from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
+from backend.db.repositories import NUTRIENT_COLUMNS
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
 from backend.nutrition.models import nutrition_number
@@ -342,9 +344,21 @@ class FoodDatabaseService:
             if stored is None:
                 raise
             return stored, LOCAL_DATABASE_STALE
-        if self._mirror:
-            self._mirror.store([food])
-        return food, LIVE
+        return self._kept([food])[0], LIVE
+
+    def _kept(self, foods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Store live foods and return them as kept, with their gaps filled."""
+        kept: list[dict[str, Any]] = []
+        # A failed write never breaks the lookup itself.
+        with contextlib.suppress(Exception):
+            kept = self._mirror.refresh(foods) if self._mirror else []
+        by_id = {
+            entry["id"]: {
+                key: value for key, value in entry.items() if key != "fetched_at"
+            }
+            for entry in kept
+        }
+        return [by_id.get(food["id"], food) for food in foods]
 
     def _search_source(
         self,
@@ -367,9 +381,7 @@ class FoodDatabaseService:
             if not local:
                 raise
             return local, LOCAL_DATABASE_STALE
-        if self._mirror:
-            self._mirror.store(foods)
-        return foods, LIVE
+        return self._kept(foods), LIVE
 
     def _off_product(
         self, barcode: str, *, refresh_legacy: bool = False
@@ -425,10 +437,7 @@ class FoodDatabaseService:
             return None, exc.reason or True
         if food is None or not _usable(food):
             return None, False
-        food = {**food, "barcode": barcode}
-        if self._mirror:
-            self._mirror.store([food])
-        return food, False
+        return self._kept([{**food, "barcode": barcode}])[0], False
 
     def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, str | bool]:
         """Mirror, then Yazio when configured, then Open Food Facts.
@@ -504,11 +513,58 @@ class FoodDatabaseService:
         ]
 
     def stored_foods(self, query: str | None = None) -> list[dict[str, Any]]:
-        """List mirrored foods (newest first without a query) for the athlete."""
+        """List mirrored foods (newest first without a query) for the athlete.
+
+        Each names its missing core fields, which a re-check may fill.
+        """
         if self._mirror is None:
             return []
         found = self._mirror.search((query or "").strip(), limit=50)
-        return self._labelled(found, LOCAL_DATABASE)
+        return [self._stored_food(food) for food in found]
+
+    def _stored_food(self, food: dict[str, Any]) -> dict[str, Any]:
+        labelled = self._labelled([food], LOCAL_DATABASE)[0]
+        return {
+            **labelled,
+            "missing_fields": [
+                key for key in NUTRIENT_COLUMNS if labelled["per_100"].get(key) is None
+            ],
+        }
+
+    def refresh_stored(self, food_id: Any) -> dict[str, Any]:
+        """Re-check one stored food online now; gaps fill, known values stay.
+
+        A failed fetch raises and leaves the stored food unchanged.
+        """
+        stored = (
+            self._mirror.get(food_id)
+            if self._mirror is not None and isinstance(food_id, str)
+            else None
+        )
+        if stored is None or self._mirror is None:
+            raise AppError(
+                404, "Datenbankeintrag nicht gefunden.", reason="food_not_found"
+            )
+        if food_id.startswith("off:"):
+            food = self._off.product(food_id[4:])
+        else:
+            food = self._require_yazio().product(food_id[6:])
+        refreshed = next(
+            (
+                entry
+                for entry in self._mirror.refresh([food])
+                if entry["id"] == food_id
+                and entry["fetched_at"] != stored["fetched_at"]
+            ),
+            None,
+        )
+        if refreshed is None:
+            raise AppError(
+                502,
+                "Der Datenbankeintrag konnte nicht aktualisiert werden.",
+                reason="food_database_unavailable",
+            )
+        return self._stored_food(refreshed)
 
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):

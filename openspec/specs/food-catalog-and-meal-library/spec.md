@@ -360,3 +360,41 @@ Stored database foods with an own product's EAN SHALL stay stored for lookups bu
 - **THEN** it is saved under a new id and the stored food is unchanged; a Coach scope naming a stored food is no product object.
 
 Evidence: `backend/db/repositories.py::fill_empty_product_fields`, `backend/db/repositories.py::NutritionProductRepository.fill_from_database_entries`, `backend/nutrition/catalog.py::ProductCatalogService.save_product`, `backend/db/repositories.py::FoodDatabaseEntryRepository.search`, `backend/coach/dialogue_action.py`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_own_products_ean_lists_no_entry_and_a_lookup_never_changes_it`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_a_new_own_product_takes_only_empty_fields_from_its_eans_foods`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_new_product_fills_its_gaps_from_stored_foods_of_its_ean`, `tests/test_coach_dialogue.py::CoachDialogueTests.test_a_stored_database_food_is_no_product_scope_object`.
+
+### Requirement: Re-checks fill gaps of stored foods
+A re-check of a stored database food, automatic or manual, SHALL take every value the fresh result has and SHALL keep a stored value where the fresh result has none. Stored foods SHALL name their missing core fields (energy, carbohydrates, protein, fat, sugar, fibre, salt).
+
+#### Scenario: Fresh result fills a gap
+- **WHEN** a stored food without salt is re-checked and the fresh result has salt
+- **THEN** the stored food has the fresh salt value and salt is no longer listed as missing.
+
+#### Scenario: Fresh result lacks a known value
+- **WHEN** a stored food with fibre is re-checked and the fresh result has no fibre
+- **THEN** the stored fibre value stays and only the fetch time and the other fresh values change.
+
+#### Scenario: Fresh result on another or unknown basis
+- **WHEN** the fresh result has an unknown or different basis unit or amount
+- **THEN** no stored nutrient value is carried over and the unit is not guessed; stored fields the fresh result lacks, such as servings, stay.
+
+Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.refresh`, `backend/nutrition/food_database.py::FoodDatabaseService.stored_foods`; `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_fills_gaps_and_keeps_known_values`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_never_guesses_a_basis_and_keeps_further_fields`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_legacy_barcode_entry_refreshes_once_and_falls_back_offline`.
+
+### Requirement: Manual re-check of a stored food
+The athlete SHALL be able to re-check one stored database food online now through a session- and CSRF-protected action that applies the gap-filling rule and returns the refreshed food. When the database cannot be reached or does not know the food, the action SHALL fail visibly and leave the stored food unchanged.
+
+#### Scenario: Manual re-check succeeds
+- **WHEN** the athlete presses "Aktualisieren" on a stored food
+- **THEN** the food is fetched online regardless of its age, its gaps are filled, and its fetch time is now.
+
+#### Scenario: Database unreachable
+- **WHEN** the online fetch fails during a manual re-check
+- **THEN** an error is returned and the stored food, its values and its fetch time are unchanged.
+
+#### Scenario: Unknown entry
+- **WHEN** the request names no stored food
+- **THEN** it is rejected without any online request.
+
+#### Scenario: Write fails
+- **WHEN** the fresh result cannot be stored
+- **THEN** an error is returned instead of a success message.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/http_api/nutrition.py::NutritionPostRoutes._refresh_database_food`, `public/nutrition.js::loadNutritionDatabase`; `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_failed_or_unknown_re_check_changes_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_whose_write_fails_is_reported`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_refresh_names_the_entry`, `e2e/nutrition.spec.js` ("a stored database entry is refreshed on request").
