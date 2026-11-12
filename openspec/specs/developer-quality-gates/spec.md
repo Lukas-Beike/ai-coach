@@ -26,7 +26,7 @@ The repository pre-push hook SHALL run the outgoing secret scan first and stop w
 Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHookTests.test_clean_push_runs_both_checks_in_order`, `tests/test_pre_push_hook.py::PrePushHookTests.test_secret_scan_failure_stops_before_quality`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_regression_blocks_the_push`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_runs_on_committed_head_not_the_working_tree`.
 
 ### Requirement: Outgoing secret scan fails closed
-`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push.
+`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push. The refusal SHALL name its cause.
 
 #### Scenario: Intermediate commit content
 - **WHEN** a secret appears in a middle commit and is removed in the tip
@@ -36,15 +36,19 @@ Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHook
 - **WHEN** an edited file contains untouched lines or lines merged in from the remote base
 - **THEN** those lines are not rescanned, while merge-resolution lines are
 
-#### Scenario: Scanner unavailable or object id malformed
-- **WHEN** the `sonar` command is not installed, or a pushed id is not 40 or 64 hex characters
+#### Scenario: Refusal names its cause
+- **WHEN** the `sonar` command is missing, or the scanner flags added lines of one file
+- **THEN** the refusal says the CLI was not found, or names the flagged file, without printing the flagged value
+
+#### Scenario: Scanner failure or object id malformed
+- **WHEN** the scanner fails on every source, or a pushed id is not 40 or 64 hex characters
 - **THEN** the push is refused with one fixed message that carries no repository or scanner content
 
 #### Scenario: Deletion or no outgoing object
 - **WHEN** only deleted refs are pushed or nothing is outgoing
 - **THEN** the scan passes without a scanner
 
-Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks before Git pushes). Tests: `tests/test_push_secrets.py::PushSecretTests.test_intermediate_deleted_content_is_checked`, `tests/test_push_secrets.py::PushSecretTests.test_merged_base_lines_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_merge_resolution_content_is_scanned`, `tests/test_push_secrets.py::PushSecretTests.test_new_and_binary_files_are_scanned_whole`, `tests/test_push_secrets.py::PushSecretTests.test_untouched_lines_of_an_edited_file_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_missing_scanner_blocks_push`, `tests/test_push_secrets.py::PushSecretTests.test_malformed_object_ids_are_rejected_before_any_git_call`, `tests/test_push_secrets.py::PushSecretTests.test_deleted_ref_and_noop_do_not_require_scanner`.
+Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks before Git pushes). Tests: `tests/test_push_secrets.py::PushSecretTests.test_intermediate_deleted_content_is_checked`, `tests/test_push_secrets.py::PushSecretTests.test_merged_base_lines_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_merge_resolution_content_is_scanned`, `tests/test_push_secrets.py::PushSecretTests.test_new_and_binary_files_are_scanned_whole`, `tests/test_push_secrets.py::PushSecretTests.test_untouched_lines_of_an_edited_file_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_missing_scanner_blocks_push`, `tests/test_push_secrets.py::PushSecretTests.test_refusal_names_the_cause_and_flagged_source_without_its_value`, `tests/test_push_secrets.py::PushSecretTests.test_malformed_object_ids_are_rejected_before_any_git_call`, `tests/test_push_secrets.py::PushSecretTests.test_deleted_ref_and_noop_do_not_require_scanner`.
 
 ### Requirement: Quality ratchet allows no new Ruff or mypy debt
 `tools/quality_baseline.py` SHALL run Ruff and mypy over every repository Python file and compare their findings with `tests/fixtures/quality_baseline.json`. A new finding SHALL fail; a baseline entry that no longer occurs SHALL also fail until removed. A tool crash or version mismatch SHALL be fatal and never recorded as debt.

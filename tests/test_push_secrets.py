@@ -1,4 +1,5 @@
 import contextlib
+import io
 import subprocess
 import sys
 import tempfile
@@ -42,15 +43,15 @@ class PushSecretTests(unittest.TestCase):
         def scanner(command, **kwargs):
             if command[0] == "synthetic-sonar":
                 contents = [Path(p).read_bytes() for p in command[3:]]
-                self.assertTrue(any(b"forbidden marker" in c for c in contents))
                 self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
-                return subprocess.CompletedProcess(command, 1)
+                hit = any(b"forbidden marker" in c for c in contents)
+                return subprocess.CompletedProcess(command, int(hit))
             return run(command, **kwargs)
 
         with (
             patch.object(scan, "find_sonar", return_value="synthetic-sonar"),
             patch.object(scan.subprocess, "run", side_effect=scanner),
-            self.assertRaises(RuntimeError),
+            self.assertRaisesRegex(scan.SecretFinding, "^added lines in fixture.py$"),
         ):
             scan.check(self.update(tip, base))
         self.assertEqual((self.root / "fixture.py").read_text(), "clean")
@@ -71,6 +72,39 @@ class PushSecretTests(unittest.TestCase):
             self.assertRaises(RuntimeError),
         ):
             scan.check(self.update(tip))
+
+    def test_refusal_names_the_cause_and_flagged_source_without_its_value(self):
+        base = self.commit("keep\n")
+        (self.root / "clean.txt").write_text("clean\n")
+        self.commit("keep\nsynthetic forbidden marker\n")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        run = subprocess.run
+
+        def scanner(command, **kwargs):
+            if command[0] == "synthetic-sonar":
+                hit = any(b"forbidden" in Path(p).read_bytes() for p in command[3:])
+                return subprocess.CompletedProcess(command, int(hit))
+            if command[0] == "broken-sonar":
+                return subprocess.CompletedProcess(command, 2)
+            return run(command, **kwargs)
+
+        cases = (
+            (None, "Sonar CLI not found"),
+            ("broken-sonar", "Outgoing Git secret check failed"),
+            ("synthetic-sonar", "Secret scan flagged added lines in fixture.py;"),
+        )
+        for found, message in cases:
+            with (
+                self.subTest(found=found),
+                patch.object(scan, "find_sonar", return_value=found),
+                patch.object(scan.subprocess, "run", side_effect=scanner),
+                patch.object(scan.sys, "stdin", io.StringIO(self.update(tip, base))),
+                contextlib.redirect_stderr(io.StringIO()) as stderr,
+            ):
+                self.assertEqual(scan.main(), 1)
+            self.assertIn(message, stderr.getvalue())
+            self.assertNotIn("forbidden", stderr.getvalue())
+            self.assertNotIn("clean.txt", stderr.getvalue())
 
     def test_unknown_remote_tip_still_scans_outgoing_history(self):
         base = self.commit("old")
@@ -137,6 +171,15 @@ class PushSecretTests(unittest.TestCase):
         tip = self.commit("keep\nBEGIN\n++body\nBEGIN\nEND\n")
         scanned = self.scanned_by(self.update(tip, base))
         self.assertIn(b"BEGIN\n++body\nBEGIN\nEND", scanned)
+
+    def test_same_new_blob_at_two_paths_passes(self):
+        base = self.commit("keep\n")
+        for name in ("one.txt", "two.txt"):
+            (self.root / name).write_text("same content\n")
+        scan.git("add", ".")
+        scan.git("commit", "-qm", "copies")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        self.assertIn(b"same content\n", self.scanned_by(self.update(tip, base)))
 
     def test_new_and_binary_files_are_scanned_whole(self):
         base = self.commit("keep\n")
