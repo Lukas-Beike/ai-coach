@@ -88,6 +88,10 @@ The authentication service SHALL limit login attempts and authenticated API requ
 - **WHEN** the resolved client exceeds 180 authenticated API requests in 60 seconds
 - **THEN** the API returns HTTP 429 with retry information
 
+#### Scenario: Limit windows and response
+- **WHEN** a client exceeds a limit: login 5 per 900 seconds, authenticated API 180 per 60 seconds counted only for requests with a valid session, or APP_PASSWORD re-entry 10 per 900 seconds with every attempt counted
+- **THEN** the request answers HTTP 429 with reason `rate_limited`, a `Retry-After` header and `retry_after_seconds`; the windows are in memory and a restart resets them, and public routes and requests without a session never count against the API limit
+
 Evidence: `backend/http_api/auth.py::resolve_client_ip`; `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.require_auth`; `backend/http_api/rate_limit.py::RateLimiter`. Tests: `tests/test_config.py::test_trusted_proxies_parse_addresses_and_networks`; `tests/test_session_auth_read_path.py::test_successful_logins_do_not_use_up_the_login_limit`; `tests/test_security_resource_limits.py::test_login_throttles_before_reading_and_counts_malformed_requests`; `tests/test_http_database_busy.py::test_rate_limit_errors_also_send_retry_after`.
 
 ### Requirement: Request body shape and size
@@ -106,6 +110,14 @@ The HTTP boundary SHALL enforce configured body-size limits and supported conten
 #### Scenario: Truncated stream
 - **WHEN** a streamed upload ends before its declared Content-Length
 - **THEN** the parser rejects the incomplete body without treating it as complete
+
+#### Scenario: Body limits per route class
+- **WHEN** a request declares its size in `Content-Length`, the only source of the body size
+- **THEN** ordinary JSON routes accept up to 1 000 000 bytes, the Coach chat routes 28 000 000, voice audio 8 000 000 and a backup restore 1 000 000 000 read in 1 MiB chunks; a route with its own limit states it in `docs/api-routes.md`
+
+#### Scenario: Missing or out-of-range size
+- **WHEN** `Content-Length` is missing, zero or above the route limit
+- **THEN** the request answers "Ungültige Größe des Anfrageinhalts." with HTTP 413 when the size also exceeds 1 000 000 bytes and HTTP 400 otherwise; a JSON route without `application/json` in `Content-Type` answers HTTP 415
 
 Evidence: `backend/http_api/requests.py::read_json`; `backend/http_api/requests.py::read_body_stream`; `backend/http_api/requests.py::read_audio_body`. Tests: `tests/test_server_http.py::test_http_request_helpers_are_dependency_light_and_preserve_limits`; `tests/test_server_http.py::test_streamed_body_checks_limits_before_reading_and_bounds_each_chunk`.
 
@@ -141,6 +153,14 @@ The API SHALL expose bounded redacted error text, a safe reason and request corr
 - **WHEN** a provider returns an upstream 401 or 403
 - **THEN** the public contract classifies it as upstream_auth with HTTP 502 rather than logging the athlete out
 
+#### Scenario: Error envelope
+- **WHEN** a classified application error is answered
+- **THEN** the JSON body has `error` (redacted German text of at most 1000 characters), `reason` (`[a-z0-9_]{1,80}`, else `request_failed`), `request_id` (12 hex characters) and, for HTTP 429 and 503 with a known delay, `retry_after_seconds` with a matching `Retry-After` header; route-specific errors are listed per route in `docs/api-routes.md`
+
+#### Scenario: Other upstream statuses
+- **WHEN** a provider answers 404, 429, 408 or 5xx, or another error status
+- **THEN** the public contract is HTTP 502 `upstream_not_found`, 429 `upstream_rate_limited`, 503 `upstream_unavailable` or 502 `upstream_rejected`
+
 Evidence: `backend/errors.py::public_error_payload`; `backend/errors.py::public_error_contract`; `backend/http_api/handler.py::RequestHandler._send_app_error`. Tests: `tests/test_http_database_busy.py::test_busy_writer_during_login_is_a_retryable_503`; `tests/test_http_database_busy.py::test_other_failures_stay_an_internal_500`; `tests/test_http_database_busy.py::test_rate_limit_errors_also_send_retry_after`.
 
 ### Requirement: Static and API routing boundaries
@@ -159,5 +179,9 @@ The server SHALL return API not-found errors for unmatched API paths, restrict s
 #### Scenario: Ordinary response
 - **WHEN** an API response is formatted with the default response policy
 - **THEN** it includes Cache-Control=no-store, nosniff and DENY framing protection
+
+#### Scenario: Static response headers
+- **WHEN** a static file is served
+- **THEN** it carries nosniff, DENY, an `ETag`, `Referrer-Policy: no-referrer` and the Content-Security-Policy `default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'`; a file requested with a non-blank `?v=` stamp is cached for a year as immutable, the shell, service worker and manifest use `no-cache`, other files one hour, and no response sends CORS headers
 
 Evidence: `backend/http_api/route_table.py::RouteTable`; `backend/http_api/handler.py::RequestHandler._get`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.
