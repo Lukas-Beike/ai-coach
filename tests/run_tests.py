@@ -331,6 +331,7 @@ def main() -> int:
         failures=len(result.failures),
         errors=len(result.errors),
         error_ids=[test.id() for test, _ in result.errors],
+        failure_ids=[test.id() for test, _ in result.failures],
         executed_ids=result.executed_ids,
         elapsed_seconds=elapsed,
     )
@@ -339,6 +340,10 @@ def main() -> int:
         f"Discovery: {len(tests)} tests; shard {args.shard}/{args.total}: "
         f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
     )
+    # Last, so a reader of the output's tail still sees which tests failed.
+    for kind, entries in (("FAILED", result.failures), ("ERROR", result.errors)):
+        for test, _trace in entries:
+            print(f"{kind}: {test.id()}")
     if args.record_durations:
         assert isinstance(result, ClassTimingResult)
         recorded = {
