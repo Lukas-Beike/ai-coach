@@ -21,6 +21,7 @@ from backend.activities.activity_summary import summary_local_date
 from backend.canonical.activity_summary import (
     stored_activity_key,
     summary_is_electric,
+    summary_leading_duration_s,
 )
 from backend.performance.session_rpe_load import session_load
 
@@ -32,13 +33,6 @@ def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
         return date.fromisoformat(summary_local_date(activity))
     except ValueError:
         return None
-
-
-def _activity_rollup_number(activity: dict[str, Any], key: str) -> float:
-    try:
-        return float(activity.get(key) or 0)
-    except TypeError, ValueError:
-        return 0.0
 
 
 def _tss_load(activity: Mapping[str, Any]) -> float | None:
@@ -117,6 +111,5 @@ def activity_rollup(
 
 
 def _rollup_seconds(activity: dict[str, Any]) -> float:
-    return _activity_rollup_number(
-        activity, "moving_duration_s"
-    ) or _activity_rollup_number(activity, "elapsed_duration_s")
+    # A strength session counts with its total time, like its compact row (#2317).
+    return summary_leading_duration_s(activity) or 0.0
