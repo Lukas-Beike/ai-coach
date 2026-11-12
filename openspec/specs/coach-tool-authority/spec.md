@@ -38,6 +38,10 @@ The system SHALL require each mutating dialogue step to reference stored athlete
 - **WHEN** a requested edit names a different target ID or affects dates outside its inclusive authorized period
 - **THEN** scope validation rejects it rather than widening authority from the model's summary.
 
+#### Scenario: Request envelope bounds
+- **WHEN** a mutating dialogue step carries its `_request` envelope (fields and schema bounds in `openspec/COACH_TOOLS.md`, generated)
+- **THEN** the validator also rejects a field set other than the eight required fields (`request_fields`), `source_message_ids` that are not 1 to 24 stored athlete message ids including the current one (`request_provenance`), an unknown `target` (`request_target`), a blank `summary` or one over 2000 characters (`request_summary`), a blank `scope` item or one over 160 characters (`request_scope`), a blank `constraints` item or one over 1000 characters (`request_constraints`), a non-boolean `remote_write` or unknown `sync_scope` (`request_sync`), and a `period` whose ISO dates are not 0 to 730 days apart (`request_period`)
+
 Evidence: `backend/coach/authorization.py:validate_request`, `backend/coach/authorization.py:require_coach_scope`, `backend/coach/authorization.py:dialogue_tools`; `backend/coach/dialogue_action.py:CoachDialogueActionService.classify`; `backend/coach/chat_turn.py:CoachChatTurnService._background_may_write`; `tests/test_coach_dialogue.py:test_request_provenance_rejects_assistant_or_missing_current_message`, `tests/test_coach_dialogue.py:test_different_target_id_cannot_escape_action_scope`, `tests/test_coach_dialogue.py:test_out_of_period_change_is_rejected`; `tests/test_coach_chat_turn.py:test_background_resume_without_stored_athlete_message_is_read_only`.
 
 ### Requirement: CA3 Direct local writes with impact checks
