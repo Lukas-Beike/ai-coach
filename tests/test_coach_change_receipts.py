@@ -98,6 +98,7 @@ class ChangeSummaryTests(unittest.TestCase):
                                     {"field": "salt_g", "value": 0.4, "origin": "web"},
                                     {"field": "kcal", "value": 540, "origin": "yazio"},
                                     {"field": "fat_g", "value": 9, "origin": "manual"},
+                                    {"field": "fiber_g", "value": 2, "origin": "bls"},
                                 ],
                             }
                         ],
@@ -114,7 +115,7 @@ class ChangeSummaryTests(unittest.TestCase):
                     "Profil aktualisiert",
                     "Trainingsvorlagen bearbeitet (2)",
                     "Produktlücken gefüllt (1)",
-                    "Riegel: Salz 0,4 (Web), Energie 540 (Yazio), Fett 9 (eigene Angabe)",
+                    "Riegel: Salz 0,4 (Web), Energie 540 (Yazio), Fett 9 (eigene Angabe), Ballaststoffe 2 (BLS)",
                 ],
                 "undoable": True,
                 "undone_at": None,
