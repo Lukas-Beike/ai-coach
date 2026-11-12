@@ -48,11 +48,16 @@ The system SHALL schedule configured startup refreshes in calendar, Garmin, weat
 Evidence: `backend/sync/scheduler.py:StartupSyncScheduler.schedule`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_startup_sync_scheduler.py:test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`, `tests/test_wahoo_runtime_acceptance.py:test_connected_account_flows_from_the_scheduler_to_the_status`.
 
 ### Requirement: Automatic cadence and eligibility
-The system SHALL wait 300 seconds before each automatic loop pass, schedule eligible providers in weather, calendar, Garmin, Wahoo order, and then attempt the morning Body Battery refresh. Calendar, Garmin, and Wahoo SHALL use the latest parseable attempt or success marker with a 3600-second due interval. Weather SHALL use forecast cache expiry and retry backoff instead of a daily marker.
+The system SHALL wait 300 seconds before each automatic loop pass, schedule eligible providers in weather, calendar, Garmin, Wahoo order, and then attempt the morning Body Battery refresh. Calendar, Wahoo, and Garmin without a Personal API key SHALL use the latest parseable attempt or success marker with a 3600-second due interval. With a key, Garmin SHALL follow its change check. Weather SHALL use forecast cache expiry and retry backoff instead of a daily marker.
 
 #### Scenario: Due automatic pass
 - **WHEN** a configured provider has no recent valid attempt or success marker and is not blocked
 - **THEN** its refresh is queued and a scheduled refresh attempt marker is recorded.
+
+#### Scenario: Garmin change check
+- **WHEN** a Personal API key is configured and Garmin is neither blocked, active nor held by a retry
+- **THEN** Garmin is due when the check finds a new activity or a newly published night, or, at most hourly, from 12:00 athlete-local time when no Garmin refresh succeeded that day
+- **AND** the check reads the newest activity ids of today and yesterday and, until today's night is stored, today's sleep entry through the Personal API, every 10 minutes and every 30 minutes between 23:00 and 05:00 athlete-local time; an unchanged result writes and queues nothing, a change a successful refresh did not store is held back for an hour, a failure doubles the wait up to eight times and never undercuts a `Retry-After` wait, a rejected key or endpoint makes the refresh due at that pace so its failure surfaces, and the morning reading waits for the stored night or 12:00.
 
 #### Scenario: Loop failure and shutdown
 - **WHEN** scheduling raises an error or the stop event is set during its wait
@@ -60,7 +65,7 @@ The system SHALL wait 300 seconds before each automatic loop pass, schedule elig
 
 Detailed contract: Maintenance, provider-specific blocking, active refresh jobs, and missing configuration SHALL prevent enqueueing where applicable.
 
-Evidence: `backend/sync/scheduler.py:DailySyncLoop.run`, `backend/sync/scheduler.py:DailySyncScheduler._schedule_provider`, `backend/sync/daily.py:daily_sync_is_due`; `tests/test_daily_sync_loop.py:test_sleeps_before_scheduling_then_refreshes_each_iteration`, `tests/test_daily_sync_scheduler.py:test_skips_active_jobs_and_not_due_markers`, `tests/test_wahoo_runtime_acceptance.py:test_daily_scheduler_honours_the_marker_interval`.
+Evidence: `backend/sync/scheduler.py:DailySyncLoop.run`, `backend/sync/scheduler.py:DailySyncScheduler._schedule_provider`, `backend/sync/daily.py:daily_sync_is_due`, `backend/sync/garmin_change_check.py:GarminChangeCheck`; `tests/test_daily_sync_loop.py:test_sleeps_before_scheduling_then_refreshes_each_iteration`, `tests/test_daily_sync_scheduler.py:test_skips_active_jobs_and_not_due_markers`, `tests/test_wahoo_runtime_acceptance.py:test_daily_scheduler_honours_the_marker_interval`, `tests/test_garmin_change_check.py`.
 
 ### Requirement: Provider-specific current refresh windows
 The system SHALL keep automatic provider windows distinct. Garmin SHALL initially cover 84 days, catch up from the oldest required collection coverage in contiguous windows of at most 90 days, and widen the first daily read to at least seven days for late corrections.

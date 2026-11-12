@@ -234,7 +234,7 @@ class GarminRemoteReader:
     def available(self) -> bool:
         return self._client_factory.available() or self._personal_configured()
 
-    def _personal(self) -> GarminPersonalClient | None:
+    def personal_client(self) -> GarminPersonalClient | None:
         """The cached Personal API client; a changed key builds a new one."""
         key = str(getattr(self._config, "garmin_personal_api_key", "") or "").strip()
         with self._personal_lock:
@@ -525,7 +525,7 @@ class GarminRemoteReader:
         exact cause.
         """
         tokens = self._garmin_tokens
-        personal = self._personal()
+        personal = self.personal_client()
         if personal is not None:
             self._check_personal_key(personal)
             # The accepted key starts without a pause from the rejected one.
@@ -607,7 +607,7 @@ class GarminRemoteReader:
         serves: with a key they never log the SDK in, so they cannot record a
         skipped SDK either.
         """
-        personal = self._personal()
+        personal = self.personal_client()
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
         if personal is not None and (personal_only or not self._sdk_configured()):
             return GarminTransportClient(personal, None), login_argument

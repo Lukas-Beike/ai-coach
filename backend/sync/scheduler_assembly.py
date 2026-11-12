@@ -63,6 +63,8 @@ class DailySyncLoopSettings:
     logger: logging.Logger
     # Enables the idle WAL checkpoint of the loop when given.
     database_manager: Callable[[], DatabaseManager] | None = None
+    # Whether the morning reading runs on this pass (the Garmin change check).
+    morning_due: Callable[[], bool] | None = None
 
 
 class SyncSchedulerAssembly:
@@ -107,6 +109,7 @@ class SyncSchedulerAssembly:
         self._morning_body_battery_service = daily_loop.morning_body_battery_service
         self._logger = daily_loop.logger
         self._database_manager = daily_loop.database_manager
+        self._morning_due = daily_loop.morning_due
         self._provider_runtime = provider_runtime
 
     def daily_scheduler(self) -> scheduler.DailySyncScheduler:
@@ -228,6 +231,7 @@ class SyncSchedulerAssembly:
                 if self._database_manager is None
                 else functools.partial(self._checkpoint_wal, self._database_manager)
             ),
+            morning_due=self._morning_due,
         )
 
     def _checkpoint_wal(self, database_manager: Callable[[], DatabaseManager]) -> None:

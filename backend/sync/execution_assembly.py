@@ -47,6 +47,8 @@ class GarminJobDependencies:
     strength_push_service: Callable[[], Any] | None = None
     wellness_history_service: Callable[[], Any] | None = None
     stream_backfill_service: Callable[[], Any] | None = None
+    # The light change check that schedules the automatic refresh (#2303).
+    change_check: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)

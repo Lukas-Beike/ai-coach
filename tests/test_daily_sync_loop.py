@@ -68,6 +68,24 @@ class DailySyncLoopTests(unittest.TestCase):
         )
         self.assertEqual(sleeper.calls, [300, 300, 300])
 
+    def test_morning_refresh_waits_while_the_change_check_says_so(self):
+        scheduler = Mock()
+        morning = Mock()
+        answers = iter([False, True])
+        loop = DailySyncLoop(
+            scheduler,
+            morning,
+            sleep=LimitedSleeper(2),
+            logger=Mock(spec=logging.Logger),
+            morning_due=lambda: next(answers),
+        )
+
+        with self.assertRaises(StopLoop):
+            loop.run()
+
+        self.assertEqual(2, scheduler.schedule.call_count)
+        self.assertEqual(1, morning.refresh.call_count)
+
     def test_maintenance_error_skips_morning_refresh_and_continues(self):
         scheduler = Mock()
         scheduler.schedule.side_effect = [

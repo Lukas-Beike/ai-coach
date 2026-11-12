@@ -136,6 +136,7 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
             garmin.sync_service(),
             deps.garmin_automatic_sync_days,
             deps.garmin_resync_gate,
+            None if garmin.change_check is None else garmin.change_check(),
         )
 
     def full_resync() -> GarminFullResync:

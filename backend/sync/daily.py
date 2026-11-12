@@ -110,6 +110,17 @@ class DailySyncMarkerService:
                 registry=self._registry,
             )
 
+    def last_success(self, source: str) -> datetime | None:
+        """Return the provider's last successful refresh time, if readable."""
+        with self._database_manager.reader() as db:
+            marker = self._key_value_repository.get(
+                db, daily_marker_key(source, registry=self._registry)
+            )
+        try:
+            return datetime.fromisoformat(str(marker or ""))
+        except ValueError:
+            return None
+
     def mark(self, source: str, now: datetime | None = None) -> None:
         """Store the provider's last successful refresh time."""
         with self._database_manager.unit_of_work() as db:
