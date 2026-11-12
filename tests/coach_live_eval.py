@@ -1,16 +1,17 @@
 """On-demand live evaluation of the Coach dialogue catalogue (issue #2221).
 
 Never part of the test suite, CI or pre-push (the name does not start with
-``test_``). It runs by hand against a local Responses proxy, the whole catalogue
-once, one phrasing per case, at most ``--max-calls`` model calls (default 150,
-the write gate's classifier included). Each case gets a fresh temporary
+``test_``). It runs by hand with a dedicated evaluation key in
+``COACH_EVAL_API_KEY`` (or against a loopback endpoint), the whole catalogue
+once, one phrasing per case, at most 150 model calls (the write gate's
+classifier included) and an estimated 5 USD per run. Each case gets a fresh temporary
 database holding the catalogue's synthetic state; the real Coach turn loop
 executes the model's tool calls against it. Providers are unconfigured and no
 remote proposal is ever approved, so nothing leaves the temporary storage.
 Scoring is mechanical; there is no judge model. Output goes to stdout only.
 
-    python tests/coach_live_eval.py --base-url http://127.0.0.1:8317/v1 \
-        --model <id> [--thinking low] [--cases c01-pending-adjust,...]
+    python tests/coach_live_eval.py --base-url https://api.openai.com/v1 \
+        --model <id> --price-input <usd> --price-output <usd> [--thinking low]
 
 The case definition is ``tests/coach_eval_cases.json``; the table in
 ``docs/coach-dialogue-evaluation.md`` is generated from it
@@ -647,7 +648,7 @@ def snapshot(server: Any) -> dict[str, Any]:
 
 @contextlib.contextmanager
 def case_server(base_url: str, model: str, thinking: str, api_key: str):
-    """A fresh temporary application with the real Coach loop and the proxy as model."""
+    """A fresh temporary application with the real Coach loop and the live model."""
     from unittest.mock import Mock, patch
 
     import server_test_support as fixtures
@@ -694,7 +695,7 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
                 side_effect=dated_dialogue_service,
             )
         )
-        # The proxy has no POST /v1/conversations; ordinary turns need none.
+        # No remote conversation: ordinary turns need none.
         stack.enter_context(
             patch.object(
                 server.COACH_CONVERSATION,
@@ -895,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
         "base_url": args.base_url,
         "model": args.model,
         "thinking": args.thinking,
-        "api_key": args.api_key or "local-proxy-no-key",
+        "api_key": args.api_key or "loopback-no-key",
     }
     results: list[dict[str, Any]] = []
     not_run: list[str] = []
