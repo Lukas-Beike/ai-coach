@@ -195,7 +195,7 @@ function nutritionCard(item, template) {
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
   // The default (typed in by hand, stored locally) is not repeated under every meal; any other source or state is shown.
   const isDefaultSource = !template && item.source === "manual" && item.sync_state !== "synced" && basisLabel === sourceLabel;
-  const sourceText = basisLabel && !isDefaultSource ? basisLabel + (template ? "" : syncLabel) : "";
+  const sourceText = basisLabel && !isDefaultSource ? `${basisLabel}${template ? "" : syncLabel}` : "";
   const card = h("article", "nutrition-card",
     h("h3", null, template ? item.name : nutritionMealTitle(item)),
     h("p", null, item.description),
@@ -385,7 +385,7 @@ function nutritionEmptyRunRow({ start, end }) {
 
 function nutritionChartDayRow(day, scale) {
   const row = h("div", "nutrition-week-chart-day",
-    h("strong", { "aria-label": day.end_date ? `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}` : null }, nutritionExpenditureDate(day.date).slice(0, 5)));
+    h("strong", { "aria-label": (day.end_date && `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}`) || null }, nutritionExpenditureDate(day.date).slice(0, 5)));
   for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
     const value = day[key];
     const track = h("span", "nutrition-week-chart-track");
@@ -396,7 +396,9 @@ function nutritionChartDayRow(day, scale) {
     } else track.classList.add("is-missing");
     const amountText = value == null ? "–" : nutritionWeekValue(value, "kcal");
     const coverage = day.end_date ? `${day[key + "_days"]} von 7 Tagen` : "";
-    row.append(h("div", { className: `nutrition-week-chart-series is-${kind}`, "aria-label": coverage ? `${label}: ${amountText}, ${coverage}` : `${label}: ${amountText}${value == null ? " (keine Daten)" : ""}` },
+    let ariaLabel = `${label}: ${amountText}${value == null ? " (keine Daten)" : ""}`;
+    if (coverage) ariaLabel = `${label}: ${amountText}, ${coverage}`;
+    row.append(h("div", { className: `nutrition-week-chart-series is-${kind}`, "aria-label": ariaLabel },
       track, h("span", null, amountText, coverage ? [h("br"), h("small", null, coverage)] : null)));
   }
   return row;
