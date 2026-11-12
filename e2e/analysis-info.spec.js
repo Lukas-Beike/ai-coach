@@ -6,7 +6,8 @@ async function performanceFixture(page, changes, route = "running") {
   await page.route("**/api/performance", async (request) => {
     const response = await request.fetch();
     const data = await response.json();
-    Object.assign(data.performance, { metrics: {} }, typeof changes === "function" ? changes(data.performance) : changes);
+    // The thresholds (LT1, #2427) derive from the metrics, so they are emptied with them.
+    Object.assign(data.performance, { metrics: {}, thresholds: {} }, typeof changes === "function" ? changes(data.performance) : changes);
     await request.fulfill({ response, json: data });
   });
   await page.goto(`/#analysis/${route}`);
