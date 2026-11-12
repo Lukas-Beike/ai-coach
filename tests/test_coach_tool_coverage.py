@@ -1633,7 +1633,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_nutrition"],
             message="Ja, speichere diese Mahlzeitvorlage.",
-        )["template"]
+        )
+        # Saved directly with a receipt, no approval card (#2339).
+        self.assertNotIn("proposed_action", template)
+        template = template["template"]
         read = self.run_tool("read_nutrition", {})
         self.assertEqual(read["templates"][0]["id"], template["id"])
         self.assertEqual(read["entry_count"], 0)
@@ -1674,7 +1677,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_nutrition_product"],
             message="Die angezeigten Angaben stimmen; speichere das Produkt lokal.",
-        )["product"]
+        )
+        # Saved directly with a receipt, no approval card (#2339).
+        self.assertNotIn("proposed_action", saved)
+        self.assertEqual(
+            server.COACH_PROPOSALS.read_service().current("synthetic-session"), []
+        )
+        saved = saved["product"]
 
         self.assertEqual(saved["name"], "Synthetic cocoa whey")
         self.assertEqual(saved["barcode"], "4006381333931")
