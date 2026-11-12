@@ -5,13 +5,16 @@ const { test } = require("node:test");
 const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
 
 function text(node) {
+  if (typeof node === "string") return node;
   return [node.textContent, ...(node.children || []).map(text)].join(" ");
 }
 
 function loadDetailRenderer(makeScrollRegionFocusable = (region) => region) {
-  return extractFunctions("activity-details.js", ["node", "STRENGTH_SOURCES", "strengthExerciseLabel", "strengthNumber", "strengthSeconds", "strengthAmount", "renderStrengthSets"], {
+  const document = fakeDocument();
+  return extractFunctions("activity-details.js", ["STRENGTH_SOURCES", "strengthExerciseLabel", "strengthNumber", "strengthSeconds", "strengthAmount", "renderStrengthSets"], {
     AppFormat: require("../public/format.js"),
-    document: fakeDocument(),
+    document,
+    h: extractFunctions("components.js", ["h"], { document }).h,
     makeScrollRegionFocusable,
   }).renderStrengthSets;
 }

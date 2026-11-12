@@ -827,7 +827,7 @@ function plannedWeekMetrics(planned, actual) {
   return totals.childElementCount > columns.length + 1 ? totals : null;
 }
 
-function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
+function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, svgNode, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   // The lists are re-rendered as a whole; only the outcome of a user action is announced.
   function announcePlanChange(message) {
     const region = $("#planListStatus");
@@ -1076,9 +1076,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const top = Math.max(...values, 1) * 1.1;
     const baseLabel = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
     const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP oder Schwellenpuls (LSHF))` : baseLabel;
-    const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
-    svg.append(analysisSvg("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
-    svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
+    const svg = svgNode("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
+    svg.append(svgNode("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
+    svg.append(svgNode("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
     let offset = 0;
     for (const item of segments) {
       const size = extent(item);
@@ -1087,7 +1087,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       offset += size;
       const shape = calendarProfileShape(item, x, width, top);
       if (!shape) continue;
-      shape.append(analysisSvg("title", {}, `${axis === "distance" ? distanceLabel(size) : formatDuration(size)} · ${item.label || ""}`));
+      shape.append(svgNode("title", {}, `${axis === "distance" ? distanceLabel(size) : formatDuration(size)} · ${item.label || ""}`));
       svg.append(shape);
     }
     return svg;
@@ -1101,7 +1101,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     // A hairline gap keeps neighbouring intervals apart without hiding a short one.
     const gap = Math.min(0.6, width / 4);
     const start = x + gap / 2, end = x + width - gap / 2;
-    return analysisSvg("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
+    return svgNode("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
   }
 
   // The detail view's larger profile with its axis from start to the whole duration or distance.

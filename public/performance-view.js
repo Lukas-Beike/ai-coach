@@ -127,14 +127,14 @@ const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_m
 
 // One row per metric with a value, in the given order.
 function currentPerformanceRows(metrics, items) {
-  const body = reportNode("tbody");
+  const body = h("tbody");
   for (const [key, label] of items) {
     const metric = metrics?.[key];
     if (metric?.value == null) continue;
-    const row = reportNode("tr"); row.dataset.metric = key;
-    const heading = reportNode("th", label); heading.scope = "row";
+    const row = h("tr"); row.dataset.metric = key;
+    const heading = h("th", null, label); heading.scope = "row";
     if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
-    row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
+    row.append(heading, h("td", null, analysisValue(metric.value, metric.unit || "")));
     body.append(row);
   }
   return body;
@@ -162,8 +162,8 @@ function renderCurrentPerformance(metrics, history, status = []) {
   metrics = withFirstThresholds(currentPerformanceValues(metrics, history), status);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
-  root.replaceChildren(reportNode("h3", "Aktuelle Werte"));
-  for (const text of status) root.append(reportNode("p", text, "empty"));
+  root.replaceChildren(h("h3", null, "Aktuelle Werte"));
+  for (const text of status) root.append(h("p", "empty", text));
   const groups = [
     ["Laufen", "run", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
@@ -182,17 +182,17 @@ function renderCurrentPerformance(metrics, history, status = []) {
       ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
   ];
-  const grid = reportNode("div", null, "current-performance-groups");
+  const grid = h("div", "current-performance-groups");
   // Laufen and Radfahren each show their own table (#2265); the caption names it for screen readers.
   for (const [sport, analysisSport, items] of groups) {
-    const table = reportNode("table", null, "current-performance-table");
+    const table = h("table", "current-performance-table");
     table.dataset.analysisSport = analysisSport;
-    table.append(reportNode("caption", sport, "sr-only"));
+    table.append(h("caption", "sr-only", sport));
     const body = currentPerformanceRows(metrics, items);
     // A status message (e.g. a failed read) keeps the section visible.
     root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
     if (!body.childElementCount) {
-      const none = reportNode("p", "Noch keine aktuellen Werte.", "muted");
+      const none = h("p", "muted", "Noch keine aktuellen Werte.");
       none.dataset.analysisSport = analysisSport;
       grid.append(none);
       continue;
@@ -220,29 +220,29 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;
-  const predictionHeading = reportNode("h4", "Laufprognosen");
+  const predictionHeading = h("h4", null, "Laufprognosen");
   predictionHeading.append(" ", createEstimateChip());
   root.append(predictionHeading);
   root.dataset.analysisEmpty = String(!predictions.length);
   if (!predictions.length) {
-    root.append(reportNode("p", racePredictionEmptyReason(values), "muted"));
+    root.append(h("p", "muted", racePredictionEmptyReason(values)));
   } else {
-    const table = reportNode("table", null, "race-predictions-table");
-    const head = reportNode("thead");
-    const header = reportNode("tr");
+    const table = h("table", "race-predictions-table");
+    const head = h("thead");
+    const header = h("tr");
     for (const label of ["Distanz", "Gesch\u00e4tzte Zeit"]) {
-      const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
+      const cell = h("th", null, label); cell.scope = "col"; header.append(cell);
     }
     head.append(header); table.append(head);
-    const body = reportNode("tbody");
+    const body = h("tbody");
     for (const { label, metric, withSeconds } of predictions) {
-      const row = reportNode("tr");
-      const distance = reportNode("th", label); distance.scope = "row";
-      row.append(distance, reportNode("td", predictionTime(metric.value, withSeconds)));
+      const row = h("tr");
+      const distance = h("th", null, label); distance.scope = "row";
+      row.append(distance, h("td", null, predictionTime(metric.value, withSeconds)));
       body.append(row);
     }
     table.append(body);
-    const scroll = makeScrollRegionFocusable(reportNode("div", null, "table-scroll"), "Geschätzte Zeiten nach Distanz");
+    const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Geschätzte Zeiten nach Distanz");
     scroll.append(table); root.append(scroll);
   }
   renderAnalysisSegments(state.route);

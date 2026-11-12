@@ -4,20 +4,13 @@
   let dialog;
   let generation = 0;
 
-  function node(tag, text, className) {
-    const element = document.createElement(tag);
-    if (text != null) element.textContent = text;
-    if (className) element.className = className;
-    return element;
-  }
-
   function chart(times, values, label, unit) {
     if (!Array.isArray(times) || !Array.isArray(values) || times.length !== values.length) return null;
     const points = times.map((time, index) => [time, values[index]])
       .filter(([time, value]) => typeof time === "number" && typeof value === "number" && Number.isFinite(time) && Number.isFinite(value));
     if (points.length < 2) return null;
-    const section = node("section", null, "activity-series");
-    section.append(node("h3", `${label} (${unit})`));
+    const section = h("section", "activity-series");
+    section.append(h("h3", null, `${label} (${unit})`));
     const svg = document.createElementNS(SVG_NS, "svg");
     const width = 680; const height = 220; const left = 64; const right = 12; const top = 16; const bottom = 34;
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -50,14 +43,14 @@
       return `${command}${x(time).toFixed(1)},${y(value).toFixed(1)}`;
     }).join(" "));
     svg.append(path);
-    section.append(svg, node("p", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`, "muted"));
-    const details = node("details", null, "activity-values"); details.append(node("summary", `Alle ${points.length} Messwerte ansehen`));
-    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), `${label} in ${unit}: Messwerte`); const table = node("table");
-    table.append(node("caption", `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
-    const thead = node("thead"); const heading = node("tr"); ["Zeit", label].forEach((value) => { const cell = node("th", value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
-    const body = node("tbody");
+    section.append(svg, h("p", "muted", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`));
+    const details = h("details", "activity-values"); details.append(h("summary", null, `Alle ${points.length} Messwerte ansehen`));
+    const tableWrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), `${label} in ${unit}: Messwerte`); const table = h("table");
+    table.append(h("caption", null, `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
+    const thead = h("thead"); const heading = h("tr"); ["Zeit", label].forEach((value) => { const cell = h("th", null, value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
+    const body = h("tbody");
     times.forEach((time, index) => { if (typeof time !== "number" || !Number.isFinite(time)) { return; }
-      const row = node("tr"); const timeCell = node("th", `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(node("td", typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
+      const row = h("tr"); const timeCell = h("th", null, `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(h("td", null, typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
     table.append(body); tableWrap.append(table); details.append(tableWrap); section.append(details);
     return section;
   }
@@ -84,7 +77,7 @@
     renderAerobic(payload, content);
     renderRunningForm(payload, content);
     renderPower(payload, content);
-    for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
+    for (const item of payload.equipment || []) content.append(h("p", null, `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
     renderBundle(payload.session_bundle, api, content, reload, notice);
     renderFeedback(payload.activity_feedback, session, api, activityId, content, payload.session_rpe_load);
   }
@@ -95,7 +88,7 @@
   function rpeOption(value) {
     const anchor = RPE_ANCHORS[value];
     const number = value.toLocaleString("de-DE");
-    const option = node("option", anchor ? `${number} · ${anchor}` : number);
+    const option = h("option", null, anchor ? `${number} · ${anchor}` : number);
     option.value = String(value);
     return option;
   }
@@ -113,7 +106,7 @@
 
   function rpeSelect(value) {
     const select = document.createElement("select"); select.name = "session_rpe";
-    const empty = node("option", "Keine Angabe"); empty.value = ""; select.append(empty);
+    const empty = h("option", null, "Keine Angabe"); empty.value = ""; select.append(empty);
     for (let step = 0; step <= 20; step += 1) select.append(rpeOption(step / 2));
     setRpe(select, value);
     return select;
@@ -125,8 +118,8 @@
   function purposeSelect(marked, detected) {
     const select = document.createElement("select"); select.name = "purpose";
     const detectedLabel = PURPOSES.find(([key]) => key === detected)?.[1];
-    const automatic = node("option", !marked && detectedLabel ? `Automatisch · ${detectedLabel}` : "Automatisch"); automatic.value = ""; select.append(automatic);
-    for (const [key, label] of PURPOSES) { const option = node("option", label); option.value = key; select.append(option); }
+    const automatic = h("option", null, !marked && detectedLabel ? `Automatisch · ${detectedLabel}` : "Automatisch"); automatic.value = ""; select.append(automatic);
+    for (const [key, label] of PURPOSES) { const option = h("option", null, label); option.value = key; select.append(option); }
     select.value = PURPOSES.some(([key]) => key === marked) ? marked : "";
     return select;
   }
@@ -146,14 +139,14 @@
   }
 
   function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {
-    const section = node("section", null, "activity-feedback"); section.append(node("h3", "Dein Feedback"));
+    const section = h("section", "activity-feedback"); section.append(h("h3", null, "Dein Feedback"));
     const form = document.createElement("form"); form.className = "activity-feedback-form";
-    const purposeLabel = node("label", "Art der Einheit"); const purpose = purposeSelect(feedback?.purpose, session?.purpose); purposeLabel.append(purpose);
-    const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = rpeSelect(feedback?.session_rpe); rpeLabel.append(rpe);
-    const reasonLabel = node("label", "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
-    const notesLabel = node("label", "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
-    const status = node("p", "", "muted"); status.setAttribute("role", "status"); const save = node("button", "Feedback speichern"); save.type = "submit";
-    const load = node("p"); load.dataset.sessionRpeLoad = "";
+    const purposeLabel = h("label", null, "Art der Einheit"); const purpose = purposeSelect(feedback?.purpose, session?.purpose); purposeLabel.append(purpose);
+    const rpeLabel = h("label", null, "Session-RPE (0–10)"); const rpe = rpeSelect(feedback?.session_rpe); rpeLabel.append(rpe);
+    const reasonLabel = h("label", null, "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
+    const notesLabel = h("label", null, "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
+    const status = h("p", "muted", ""); status.setAttribute("role", "status"); const save = h("button", null, "Feedback speichern"); save.type = "submit";
+    const load = h("p"); load.dataset.sessionRpeLoad = "";
     const showLoad = (value) => { load.textContent = sessionLoadText(value); load.hidden = !load.textContent; };
     showLoad(sessionLoad);
     form.append(purposeLabel, rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
@@ -202,11 +195,11 @@
   function renderBundle(bundle, api, content, reload, notice) {
     const members = bundle?.members || []; const candidates = bundle?.merge_candidates || [];
     if (!reload || !bundle) return;
-    const section = node("section", null, "activity-bundle"); section.append(node("h3", "Aufzeichnungen"));
-    const status = node("p", notice?.text || "", "muted"); status.setAttribute("role", "status");
+    const section = h("section", "activity-bundle"); section.append(h("h3", null, "Aufzeichnungen"));
+    const status = h("p", "muted", notice?.text || ""); status.setAttribute("role", "status");
     const buttons = [];
     const action = (label, body, done) => {
-      const button = node("button", label, "secondary-button"); button.type = "button"; buttons.push(button);
+      const button = h("button", "secondary-button", label); button.type = "button"; buttons.push(button);
       button.addEventListener("click", async () => {
         buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
         try {
@@ -217,9 +210,9 @@
       return button;
     };
     const list = (entries, label, body, done) => {
-      const items = node("ul", null, "activity-bundle-list");
+      const items = h("ul", "activity-bundle-list");
       for (const entry of entries) {
-        const item = node("li", recordingText(entry));
+        const item = h("li", null, recordingText(entry));
         if (label) { item.append(" ", action(label, body(entry), done)); }
         items.append(item);
       }
@@ -228,16 +221,16 @@
     const several = members.length > 1;
     section.append(list(members, several ? "Trennen" : null, (entry) => ({ action: "split", member_id: entry.session_id }), "Aufzeichnung getrennt. "));
     if (several && !bundle.athlete_confirmed) section.append(action("Zuordnung bestätigen", { action: "confirm" }, "Zuordnung bestätigt. "));
-    if (candidates.length) { section.append(node("h4", "Am selben Tag")); section.append(list(candidates, "Zusammenführen", (entry) => ({ action: "merge", other_id: entry.session_id }), "Aktivitäten zusammengeführt. ")); }
+    if (candidates.length) { section.append(h("h4", null, "Am selben Tag")); section.append(list(candidates, "Zusammenführen", (entry) => ({ action: "merge", other_id: entry.session_id }), "Aktivitäten zusammengeführt. ")); }
     if (notice?.change?.id) status.append(undoButton(api, notice.change, status, reload));
-    const remove = node("button", "Aktivität löschen", "secondary-button"); remove.type = "button"; buttons.push(remove);
+    const remove = h("button", "secondary-button", "Aktivität löschen"); remove.type = "button"; buttons.push(remove);
     remove.addEventListener("click", async () => {
       const confirmed = await requestConfirmation("Diese Aktivität mit allen Aufzeichnungen lokal löschen? Bei den Anbietern bleibt sie erhalten.", { title: "Aktivität löschen?", confirmLabel: "Löschen" });
       if (!confirmed) return;
       buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
       try {
         const result = await api(`/api/activities/${encodeURIComponent(bundle.activity_id)}/session`, { method: "POST", body: JSON.stringify({ action: "delete", confirmed: true }) });
-        const deleted = node("p", "Aktivität gelöscht. ", "muted"); deleted.setAttribute("role", "status");
+        const deleted = h("p", "muted", "Aktivität gelöscht. "); deleted.setAttribute("role", "status");
         if (result.change?.id) deleted.append(undoButton(api, result.change, deleted, reload));
         content.replaceChildren(deleted); reload.deleted?.();
       } catch (error) { buttons.forEach((item) => { item.disabled = false; }); status.textContent = error.message; }
@@ -248,7 +241,7 @@
 
   // Undo of a session correction restores the touched sessions, then the detail reloads.
   function undoButton(api, change, status, reload) {
-    const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
+    const undo = h("button", "message-undo", "Rückgängig"); undo.type = "button";
     undo.addEventListener("click", async () => {
       undo.disabled = true;
       try {
@@ -261,7 +254,7 @@
 
   // Undo restores the feedback rows as they were before this save or removal.
   function feedbackUndoButton(api, change, activityId, status, begin, restored) {
-    const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
+    const undo = h("button", "message-undo", "Rückgängig"); undo.type = "button";
     undo.addEventListener("click", async () => {
       undo.disabled = true; const generation = begin();
       try {
@@ -282,25 +275,25 @@
       AppFormat.distance(metrics.distance_m),
       metrics.load != null ? `Belastung ${metrics.load}` : null,
     ].filter(Boolean);
-    content.append(node("p", values.join(" · ")));
+    content.append(h("p", null, values.join(" · ")));
   }
 
   // The recognised route of the session as "label, n. Mal"; the athlete can rename it.
   function renderRoute(route, api, content) {
     if (!route) return;
-    const line = node("p");
+    const line = h("p");
     let label = route.label;
     const show = () => {
-      const rename = node("button", "Umbenennen", "secondary-button"); rename.type = "button";
+      const rename = h("button", "secondary-button", "Umbenennen"); rename.type = "button";
       rename.addEventListener("click", edit);
       line.replaceChildren(`${label}, ${route.repeat_index}. Mal `, rename);
     };
     const edit = () => {
       const form = document.createElement("form");
       const input = document.createElement("input"); input.maxLength = 60; input.required = true; input.value = label; input.setAttribute("aria-label", "Streckenname");
-      const save = node("button", "Speichern"); save.type = "submit";
-      const cancel = node("button", "Abbrechen", "secondary-button"); cancel.type = "button"; cancel.addEventListener("click", show);
-      const status = node("span", null, "muted"); status.setAttribute("role", "status");
+      const save = h("button", null, "Speichern"); save.type = "submit";
+      const cancel = h("button", "secondary-button", "Abbrechen"); cancel.type = "button"; cancel.addEventListener("click", show);
+      const status = h("span", "muted"); status.setAttribute("role", "status");
       form.addEventListener("submit", async (event) => {
         event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
         try {
@@ -318,9 +311,9 @@
   // Per provider: the load state and the data coverage, with readable channel names.
   function providerFacts(entry) {
     const label = entry.label || entry.provider;
-    const facts = [node("p", entry.fetched_at ? `${label} · Detaildaten geladen: ${formatTime(entry.fetched_at)}` : `${label} · Detaildaten wurden noch nicht geladen.`, "muted")];
+    const facts = [h("p", "muted", entry.fetched_at ? `${label} · Detaildaten geladen: ${formatTime(entry.fetched_at)}` : `${label} · Detaildaten wurden noch nicht geladen.`)];
     const coverage = Object.entries(entry.coverage || {}).map(([name, value]) => `${COVERAGE_LABELS[name] || name}: ${value?.valid_points} von ${value?.points}`);
-    if (coverage.length) facts.push(node("p", `Datenabdeckung ${label} · ${coverage.join(" · ")} Messwerten`, "muted"));
+    if (coverage.length) facts.push(h("p", "muted", `Datenabdeckung ${label} · ${coverage.join(" · ")} Messwerten`));
     return facts;
   }
 
@@ -334,19 +327,19 @@
     const loaded = providers.filter((entry) => entry.fetched_at);
     if (providers.length) {
       const latest = loaded.map((entry) => entry.fetched_at).sort().at(-1);
-      notes.push(node("p", loaded.length ? `Quelle: ${loaded.map((entry) => entry.label || entry.provider).join(", ")} · Stand ${formatTime(latest)}` : "Detaildaten noch nicht geladen", "muted"));
+      notes.push(h("p", "muted", loaded.length ? `Quelle: ${loaded.map((entry) => entry.label || entry.provider).join(", ")} · Stand ${formatTime(latest)}` : "Detaildaten noch nicht geladen"));
     }
     for (const entry of providers) {
       const label = entry.label || entry.provider;
-      if (entry.stale) notes.push(node("p", `${label}: Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.`, "muted"));
-      if (entry.load_error?.message) notes.push(node("p", `${label}: ${entry.load_error.message} Automatischer Ladeversuch: ${formatTime(entry.load_error.observed_at)}`, "activity-analysis-error"));
+      if (entry.stale) notes.push(h("p", "muted", `${label}: Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.`));
+      if (entry.load_error?.message) notes.push(h("p", "activity-analysis-error", `${label}: ${entry.load_error.message} Automatischer Ladeversuch: ${formatTime(entry.load_error.observed_at)}`));
       facts.push(...providerFacts(entry));
     }
     // The simplified-charts note changes how the charts read, so it stays outside the folded details.
-    if (detail.display_sampled) notes.push(node("p", "Diagramme vereinfacht dargestellt", "muted"));
+    if (detail.display_sampled) notes.push(h("p", "muted", "Diagramme vereinfacht dargestellt"));
     if (facts.length) {
-      const details = node("details", null, "provenance-details");
-      details.append(node("summary", "Herkunft im Detail"), ...facts);
+      const details = h("details", "provenance-details");
+      details.append(h("summary", null, "Herkunft im Detail"), ...facts);
       notes.push(details);
     }
     return notes;
@@ -354,14 +347,14 @@
 
   // One explicit detail load per provider entry the server marks refreshable.
   function refreshActions(payload, { api, isCurrent, onStatus, onLoaded, onSetup = () => {} }) {
-    const actions = node("div", null, "dialog-actions");
+    const actions = h("div", "dialog-actions");
     const activityId = String(payload?.session?.activity_id || "");
     for (const entry of payload?.detail_data?.providers || []) {
       const label = entry.label || entry.provider;
       if (!entry.refreshable || !activityId) {
         if (state.data?.configured?.[entry.provider] !== false) continue;
-        const hint = node("p", `${label} ist nicht konfiguriert. `, "muted provider-setup-hint");
-        const link = node("a", "Anbindung einrichten");
+        const hint = h("p", "muted provider-setup-hint", `${label} ist nicht konfiguriert. `);
+        const link = h("a", null, "Anbindung einrichten");
         link.href = "#more/connections";
         link.dataset.connection = entry.provider;
         link.addEventListener("click", onSetup);
@@ -369,7 +362,7 @@
         actions.append(hint);
         continue;
       }
-      const button = node("button", `${label}: Detaildaten ${entry.fetched_at ? "aktualisieren" : "laden"}`, "secondary-button");
+      const button = h("button", "secondary-button", `${label}: Detaildaten ${entry.fetched_at ? "aktualisieren" : "laden"}`);
       button.type = "button";
       button.addEventListener("click", async () => {
         const buttons = [...actions.querySelectorAll("button")];
@@ -431,9 +424,9 @@
     const dynamics = runningDynamics(metricValues(payload));
     const drift = formDriftLines(payload.analysis?.form_drift);
     if (!dynamics.length && !drift.length) return;
-    content.append(node("h3", "Laufdynamik"));
-    if (dynamics.length) content.append(node("p", dynamics.map(([label, text]) => `${label} ${text}`).join(" · ")));
-    for (const line of drift) content.append(node("p", line));
+    content.append(h("h3", null, "Laufdynamik"));
+    if (dynamics.length) content.append(h("p", null, dynamics.map(([label, text]) => `${label} ${text}`).join(" · ")));
+    for (const line of drift) content.append(h("p", null, line));
   }
 
   function renderSeries(session, streams, content) {
@@ -448,17 +441,17 @@
       const series = chart(streams.time_s, values, label, unit);
       if (series) { content.append(series); charts += 1; }
     }
-    if (!charts) content.append(node("p", "Keine darstellbaren Messreihen vorhanden. Fehlende Sensorwerte werden nicht als Null interpretiert."));
+    if (!charts) content.append(h("p", null, "Keine darstellbaren Messreihen vorhanden. Fehlende Sensorwerte werden nicht als Null interpretiert."));
   }
 
 
   function renderLaps(laps, content) {
     if (laps?.laps?.length) {
-      content.append(node("h3", "Intervalle / Runden"));
-      const list = node("ol", null, "activity-laps");
+      content.append(h("h3", null, "Intervalle / Runden"));
+      const list = h("ol", "activity-laps");
       laps.laps.forEach((lap, index) => {
         const seconds = lap.moving_duration_s ?? lap.end_offset_s - lap.start_offset_s;
-        list.append(node("li", [
+        list.append(h("li", null, [
           lap.name || `Intervall ${index + 1}`,
           Number.isFinite(seconds) ? `${Math.round(seconds)} s` : null,
           lap.avg_power != null ? `${Math.round(lap.avg_power)} W` : null,
@@ -500,55 +493,55 @@
 
   function renderStrengthSets(strength, content) {
     if (!strength?.exercises?.length) return;
-    content.append(node("h3", "Kraftsätze"));
+    content.append(h("h3", null, "Kraftsätze"));
     const sets = Number(strength.active_sets) || 0;
-    content.append(node("p", [
+    content.append(h("p", "muted", [
       `${sets} ${sets === 1 ? "Satz" : "Sätze"}`,
       strength.total_reps != null ? `${strength.total_reps} Wdh.` : null,
       strength.volume_kg != null ? `${strengthNumber(strength.volume_kg)} kg Volumen` : null,
       STRENGTH_SOURCES[strength.source],
-    ].filter(Boolean).join(" · "), "muted"));
-    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), "Kraftsätze");
-    const table = node("table");
-    table.append(node("caption", "Ausgeführte Sätze je Übung"));
-    const thead = node("thead"); const heading = node("tr");
-    ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
+    ].filter(Boolean).join(" · ")));
+    const tableWrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), "Kraftsätze");
+    const table = h("table");
+    table.append(h("caption", null, "Ausgeführte Sätze je Übung"));
+    const thead = h("thead"); const heading = h("tr");
+    ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = h("th", null, label); cell.scope = "col"; heading.append(cell); });
     thead.append(heading); table.append(thead);
     strength.exercises.forEach((exercise) => {
       const setList = Array.isArray(exercise.set_list) ? exercise.set_list : [];
       // One row group per exercise, so its header covers exactly its own sets.
-      const body = node("tbody");
+      const body = h("tbody");
       setList.forEach((set, index) => {
-        const row = node("tr");
+        const row = h("tr");
         if (index === 0) {
           // One header per exercise spans its sets, so every set row keeps its exercise.
-          const nameCell = node("th", strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
+          const nameCell = h("th", null, strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
         }
-        row.append(node("td", String(index + 1)), node("td", strengthAmount(set)), node("td", strengthNumber(set.weight_kg)), node("td", strengthSeconds(set.rest_s)));
+        row.append(h("td", null, String(index + 1)), h("td", null, strengthAmount(set)), h("td", null, strengthNumber(set.weight_kg)), h("td", null, strengthSeconds(set.rest_s)));
         body.append(row);
       });
       table.append(body);
     });
     tableWrap.append(table); content.append(tableWrap);
     const omitted = Number(strength.omitted_exercises) || 0;
-    if (omitted) content.append(node("p", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`, "muted"));
+    if (omitted) content.append(h("p", "muted", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`));
   }
 
   function renderIntervalQuality(payload, content) {
     const quality = payload.analysis?.interval_quality;
     if (quality) {
-      content.append(node("h3", "Trainingsqualität"));
-      if (quality.reason) content.append(node("p", quality.reason));
+      content.append(h("h3", null, "Trainingsqualität"));
+      if (quality.reason) content.append(h("p", null, quality.reason));
       if (quality.steps?.length) {
-        content.append(node("p", `${quality.aligned_steps}/${quality.planned_steps} Schritte zugeordnet · ${quality.missing_steps} fehlen`));
-        const list = node("ol", null, "activity-laps");
-        quality.steps.forEach((step) => list.append(node("li", step.status === "ok"
+        content.append(h("p", null, `${quality.aligned_steps}/${quality.planned_steps} Schritte zugeordnet · ${quality.missing_steps} fehlen`));
+        const list = h("ol", "activity-laps");
+        quality.steps.forEach((step) => list.append(h("li", null, step.status === "ok"
           ? `${step.target}: ${step.mean} ${step.unit} · ${step.seconds_in_target} s im Ziel · Abweichung ${step.average_deviation_percent}% · Abdeckung ${Math.round(step.coverage * 100)}%`
           : `${step.target}: ${step.reason || "Messabdeckung unzureichend"}`)));
         content.append(list);
-        quality.repeat_groups?.forEach((group) => content.append(node("p", `${group.target}: ${group.repetitions} vergleichbare Wiederholungen · Abfall ${group.fade_percent}%`)));
+        quality.repeat_groups?.forEach((group) => content.append(h("p", null, `${group.target}: ${group.repetitions} vergleichbare Wiederholungen · Abfall ${group.fade_percent}%`)));
       }
-      content.append(node("p", "Einzelziele verwenden ±5%; vorgegebene Bereiche bleiben unverändert. Ziele stammen aus der ersten Detailabfrage. Frühere Vorlagenänderungen sind nicht rekonstruierbar.", "muted"));
+      content.append(h("p", "muted", "Einzelziele verwenden ±5%; vorgegebene Bereiche bleiben unverändert. Ziele stammen aus der ersten Detailabfrage. Frühere Vorlagenänderungen sind nicht rekonstruierbar."));
     }
   }
 
@@ -556,7 +549,7 @@
   function renderAerobic(payload, content) {
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
-      const driftHeading = node("h3", "Herzfrequenzdrift");
+      const driftHeading = h("h3", null, "Herzfrequenzdrift");
       driftHeading.append(" ", createEstimateChip());
       content.append(driftHeading);
       let description = aerobic.reason;
@@ -564,8 +557,8 @@
         const longSession = aerobic.long_session ? " · lange Einheit" : "";
         description = `Drift ${aerobic.drift_percent}% · gleichmäßige Leistung pro Schlag ${aerobic.efficiency} ${aerobic.unit}${longSession}`;
       }
-      content.append(node("p", description));
-      content.append(node("p", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung.", "muted"));
+      content.append(h("p", null, description));
+      content.append(h("p", "muted", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung."));
     }
   }
 
@@ -573,13 +566,13 @@
   function renderPower(payload, content) {
     const power = payload.analysis?.power_profile;
     if (power) {
-      content.append(node("h3", "Beobachtete Bestleistung"));
+      content.append(h("h3", null, "Beobachtete Bestleistung"));
       for (const point of power.points || []) {
         const duration = point.duration_seconds < 60 ? `${point.duration_seconds} s` : `${point.duration_seconds / 60} min`;
         const measurement = point.watts == null ? "keine lückenlose Messung" : `${point.watts} W`;
-        content.append(node("p", `${duration}: ${measurement}`));
+        content.append(h("p", null, `${duration}: ${measurement}`));
       }
-      content.append(node("p", "Zeitgewichtete Mittelwerte aus den Originaldaten dieser Aufzeichnung. Keine FTP-, Critical-Power- oder W′-Schätzung; Nullleistung zählt, Sensorausfälle und Stopps unterbrechen das Fenster.", "muted"));
+      content.append(h("p", "muted", "Zeitgewichtete Mittelwerte aus den Originaldaten dieser Aufzeichnung. Keine FTP-, Critical-Power- oder W′-Schätzung; Nullleistung zählt, Sensorausfälle und Stopps unterbrechen das Fenster."));
     }
   }
 
@@ -592,17 +585,17 @@
     delete navigationState.activityDetail;
     history.replaceState(navigationState, "", location.href);
     history.pushState({ ...navigationState, activityDetail: activityId }, "", location.href);
-    dialog = node("dialog", null, "activity-detail-dialog");
+    dialog = h("dialog", "activity-detail-dialog");
     dialog.setAttribute("aria-labelledby", "activityDetailTitle");
-    const title = node("h2", activity.name || "Aktivitätsdetails");
+    const title = h("h2", null, activity.name || "Aktivitätsdetails");
     title.id = "activityDetailTitle";
-    const back = node("button", "Zurück zum Kalender", "secondary-button");
+    const back = h("button", "secondary-button", "Zurück zum Kalender");
     back.type = "button";
     back.addEventListener("click", close);
-    const content = node("div");
-    const status = node("p", "Lokale Daten werden geladen …", "muted");
+    const content = h("div");
+    const status = h("p", "muted", "Lokale Daten werden geladen …");
     status.setAttribute("role", "status");
-    const actions = node("div");
+    const actions = h("div");
     dialog.append(back, title, content, status, actions);
     document.body.append(dialog);
     const currentDialog = dialog;

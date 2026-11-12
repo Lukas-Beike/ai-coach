@@ -1,22 +1,8 @@
 /* One session's details in its calendar card (#2258). Charts follow the Garmin Connect app: one filled area per channel, average line and tap readout. */
 (() => {
-  const SVG_NS = "http://www.w3.org/2000/svg";
   const WIDTH = 340; const HEIGHT = 150; const LEFT = 40; const RIGHT = 8; const TOP = 10; const BOTTOM = 22;
   // The latest load of each panel; an older answer for the same panel is dropped.
   const panelLoads = new WeakMap();
-
-  function node(tag, text, className) {
-    const element = document.createElement(tag);
-    if (text != null) element.textContent = text;
-    if (className) element.className = className;
-    return element;
-  }
-
-  function svgNode(tag, attributes = {}) {
-    const element = document.createElementNS(SVG_NS, tag);
-    for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
-    return element;
-  }
 
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const numberText = (value, digits = 0) => AppFormat.number(value, { digits }) ?? "—";
@@ -177,13 +163,13 @@
       y: (value) => TOP + (channel.invert ? share(value) : 1 - share(value)) * (HEIGHT - TOP - BOTTOM),
     };
 
-    const section = node("section", null, `activity-analysis-chart is-${channel.color}`);
-    const header = node("div", null, "activity-analysis-chart-header");
-    header.append(node("h4", channel.label));
-    const stats = node("p", null, "activity-analysis-chart-stats");
-    const readout = node("span", null, "activity-analysis-readout");
+    const section = h("section", `activity-analysis-chart is-${channel.color}`);
+    const header = h("div", "activity-analysis-chart-header");
+    header.append(h("h4", null, channel.label));
+    const stats = h("p", "activity-analysis-chart-stats");
+    const readout = h("span", "activity-analysis-readout");
     const summaryText = chartSummary(channel, sorted, valid);
-    stats.append(node("span", summaryText), readout);
+    stats.append(h("span", null, summaryText), readout);
     header.append(stats);
 
     const svg = svgNode("svg", { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: "img", "aria-label": `${channel.label}: ${summaryText}, über ${clock(span)}` });
@@ -260,10 +246,10 @@
       ...ActivityDetails.runningDynamics(metrics),
     ].filter(([, value]) => value);
     if (!values.length) return null;
-    const grid = node("dl", null, "activity-analysis-stats");
+    const grid = h("dl", "activity-analysis-stats");
     for (const [label, value] of values) {
-      const item = node("div");
-      item.append(node("dt", label), node("dd", value));
+      const item = h("div");
+      item.append(h("dt", null, label), h("dd", null, value));
       grid.append(item);
     }
     return grid;
@@ -274,20 +260,20 @@
       .map((bucket) => ({ id: String(bucket.label || `Z${bucket.index}`), secs: bucket.seconds }));
     const total = items.reduce((sum, item) => sum + item.secs, 0);
     if (!total) return null;
-    const section = node("section", null, "activity-analysis-zones");
-    section.append(node("h4", title));
-    const rows = node("ol");
+    const section = h("section", "activity-analysis-zones");
+    section.append(h("h4", null, title));
+    const rows = h("ol");
     for (const item of [...items].reverse()) {
       const share = item.secs / total;
-      const row = node("li");
+      const row = h("li");
       row.dataset.zone = item.id.match(/^Z\d/)?.[0] || "";
-      const bar = node("span", null, "activity-analysis-zone-bar");
+      const bar = h("span", "activity-analysis-zone-bar");
       bar.style.setProperty("--zone-share", `${Math.round(share * 1000) / 10}%`);
-      row.append(node("span", item.id.slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
+      row.append(h("span", "activity-analysis-zone-label", item.id.slice(0, 20)), bar, h("span", "activity-analysis-zone-value", `${clock(item.secs)} · ${Math.round(share * 100)} %`));
       rows.append(row);
     }
     // Derived zones use the zone settings of the session day, as the reports (#1743).
-    section.append(rows, node("p", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`, "muted"));
+    section.append(rows, h("p", "muted", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`));
     return section;
   }
 
@@ -305,22 +291,10 @@
       ["Anstieg", (lap) => (finite(lap.elevation_gain_m) ? `${numberText(lap.elevation_gain_m)} m` : null)],
     ].filter(([, read]) => items.some((lap) => read(lap) != null));
     if (!columns.length) return null;
-    const section = node("section", null, "activity-analysis-laps");
-    section.append(node("h4", "Runden"));
-    const wrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), "Runden dieser Einheit");
-    const table = node("table");
-    const head = node("tr");
-    ["#", ...columns.map(([label]) => label)].forEach((label) => { const cell = node("th", label); cell.scope = "col"; head.append(cell); });
-    const thead = node("thead"); thead.append(head);
-    const body = node("tbody");
-    items.forEach((lap, index) => {
-      const row = node("tr");
-      const label = node("th", String(index + 1)); label.scope = "row";
-      row.append(label, ...columns.map(([, read]) => node("td", read(lap) ?? "—")));
-      body.append(row);
-    });
-    table.append(thead, body); wrap.append(table); section.append(wrap);
-    return section;
+    const wrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), "Runden dieser Einheit");
+    const rows = items.map((lap, index) => [h("th", { scope: "row" }, String(index + 1)), ...columns.map(([, read]) => read(lap) ?? "—")]);
+    wrap.append(table(["#", ...columns.map(([label]) => label)], rows));
+    return h("section", "activity-analysis-laps", h("h4", null, "Runden"), wrap);
   }
 
   function renderPanel(panel, summary, payload, token) {
@@ -334,15 +308,15 @@
     if (stats) panel.append(stats);
     const driftLines = ActivityDetails.formDriftLines(payload?.analysis?.form_drift);
     if (driftLines.length) {
-      const drift = node("div");
-      drift.append(...driftLines.map((line) => node("p", line)));
+      const drift = h("div");
+      drift.append(...driftLines.map((line) => h("p", null, line)));
       panel.append(drift);
     }
     // The running dynamics share the time axis of the other channels.
     const streams = payload?.streams && { ...payload.streams, channels: { ...payload.streams.channels, ...payload.running_dynamics_streams } };
     const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
     if (charts.length) {
-      const grid = node("div", null, "activity-analysis-charts");
+      const grid = h("div", "activity-analysis-charts");
       grid.append(...charts);
       panel.append(grid);
     }
@@ -350,14 +324,14 @@
       if (section) panel.append(section);
     }
     if (!payload) return;
-    if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
+    if (streams && !charts.length) panel.append(h("p", "muted", "Keine darstellbaren Messreihen"));
     panel.append(...ActivityDetails.providerNotes(payload));
     appendRefresh(panel, summary, payload, token);
   }
 
   // The newest activities are preloaded after each provider refresh; older ones load through these actions.
   function appendRefresh(panel, summary, payload, token) {
-    const status = node("p", "", "muted"); status.setAttribute("role", "status");
+    const status = h("p", "muted", ""); status.setAttribute("role", "status");
     const isCurrent = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.append(ActivityDetails.refreshActions(payload, {
       api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary),

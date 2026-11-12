@@ -114,7 +114,7 @@ test("an analysis chart without data is omitted and its title is collected once 
     "analysis.js",
     ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart"],
     {
-      reportNode: (tag, text, className) => ({ tag, text, className }),
+      h: (tag, className, text) => ({ tag, text, className }),
     },
   );
   const empty = [{ label: "Garmin", points: [{ date: "2026-10-10", value: null }] }];
@@ -147,10 +147,10 @@ test("an analysis segment is empty only when every content container reports no 
 });
 
 test("the analysis empty card offers one action that depends on the connected sources", () => {
-  const reportNode = (tag, text, className) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
+  const h = (tag, className, text) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
   const state = { data: {} };
   const { analysisEmptyCard, analysisDataSourceConnected } = extractFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
-    state, reportNode, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
+    state, h, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
     ANALYSIS_EMPTY_TITLES: { load: "Noch keine Belastungsdaten", recovery: "Noch keine Erholungsdaten" },
     createEmptyState: (title, cause, action) => ({ title, cause, action }),
   });
@@ -190,11 +190,11 @@ test("a filled analysis chart is kept and is not listed as missing", () => {
 });
 
 test("body overview uses profile body fat without creating a dated measurement", () => {
-  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
+  const makeNode = (tag, _className, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "18.5" } } };
   const { bodyProfileFat, renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
-    state, document: { getElementById: () => root }, reportNode: makeNode,
+    state, document: { getElementById: () => root }, h: makeNode,
     isPreferredSource: () => true, analysisValidPoint: (p) => p.value != null,
     dateLabel: (v) => v, analysisValue: (v, unit) => `${v} ${unit}`,
     analysisPeriodControls: () => makeNode("nav"), bodyHistoryPeriod: "twelveWeeks",
@@ -211,11 +211,11 @@ test("body overview uses profile body fat without creating a dated measurement",
 
 
 test("body overview falls back to Garmin when the profile fat is absent", () => {
-  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
+  const makeNode = (tag, _className, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "" } } };
   const { renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
-    state, document: { getElementById: () => root }, reportNode: makeNode,
+    state, document: { getElementById: () => root }, h: makeNode,
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
     analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => makeNode("nav"),
@@ -253,10 +253,10 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 
 test("current performance shows the status lines below its heading", () => {
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
-  const reportNode = (tag, text, className) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
+  const h = (tag, className, text) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
   const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "currentPerformanceRows", "withFirstThresholds", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
-    reportNode,
+    h,
     rememberAnalysisSectionState() {},
     makeAnalysisSectionCollapsible() {},
     analysisValidPoint: () => true,
@@ -371,8 +371,9 @@ test("the coverage line counts the days or weeks that have a value", () => {
 test("the table behind a chart scrolls in a named region that the keyboard can reach", () => {
   const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
   const document = fakeDocument();
-  const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "reportNode", "analysisValidPoint", "analysisAxisCaption"], {
+  const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "analysisValidPoint", "analysisAxisCaption"], {
     document,
+    ...(({ h, table }) => ({ h, table }))(extractFunctions("components.js", ["h", "table"], { document })),
     makeScrollRegionFocusable,
     dateLabel: (date) => date,
     analysisPointValue: (_item, point) => String(point.value),
@@ -382,6 +383,23 @@ test("the table behind a chart scrolls in a named region that the keyboard can r
   appendAnalysisTable(section, "Ruhepuls", [{ label: "Garmin", points: [{ date: "2026-10-10", value: 48 }] }], "bpm");
   const region = section.children[0].children.find((child) => child.className === "analysis-chart-table");
   assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Ruhepuls: Einzelwerte"]);
+});
+
+test("the element helpers keep values as text and map class, properties, attributes and data", () => {
+  const document = { ...fakeDocument(), createElementNS: (namespace, tag) => Object.assign(new FakeElement(tag), { namespace }) };
+  const { h, table, svgNode } = extractFunctions("components.js", ["h", "SVG_NS", "svgNode", "table"], { document });
+  const plain = h("p", "muted", "<b>", 0, null, false, ["a", h("i")]);
+  assert.deepEqual([plain.className, plain.children.length, plain.children[0], plain.children[1]], ["muted", 4, "<b>", "0"]);
+  const button = h("button", { type: "button", className: "x", "aria-expanded": "false", dataset: { zone: "z2" }, title: undefined }, "Mehr");
+  assert.deepEqual([button.type, button.className, button.attributes["aria-expanded"], button.dataset.zone, button.title], ["button", "x", "false", "z2", ""]);
+  const chip = h("span", "status-chip");
+  const grid = table(["Tag", "Wert"], [[h("th", { scope: "row" }, "Mo"), chip], ["Di", 0]], { caption: "Werte" });
+  const [caption, head, body] = grid.children;
+  assert.deepEqual([caption.tag, head.children[0].children.map((cell) => cell.scope), body.children[0].children.map((cell) => cell.tag)], ["caption", ["col", "col"], ["th", "td"]]);
+  assert.equal(body.children[0].children[1].children[0], chip, "a non-cell node is wrapped in a td");
+  assert.deepEqual(body.children[1].children.map((cell) => cell.children[0]), ["Di", "0"]);
+  const label = svgNode("text", { x: 4 }, 0);
+  assert.deepEqual([label.namespace, label.attributes.x, label.textContent], ["http://www.w3.org/2000/svg", "4", 0]);
 });
 
 // Runs the real weekly aggregations; results are copied out of the sandbox for literal comparison.
