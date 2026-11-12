@@ -16,8 +16,9 @@ function workerAssets() {
   return JSON.parse(match[1]);
 }
 
-test("every service-worker asset exists in public/ and is referenced from index.html", () => {
+test("every service-worker asset exists in public/ and is referenced from index.html or the stylesheet", () => {
   const assets = workerAssets().filter((asset) => asset !== "/");
+  const styles = read("styles.css");
   assert.ok(assets.length > 0);
   // Icons only the manifest names are cached for the offline install.
   const manifestIcons = new Set(JSON.parse(read("manifest.webmanifest")).icons.map((icon) => icon.src).filter((src) => !index.includes(`"${src}`)));
@@ -26,7 +27,7 @@ test("every service-worker asset exists in public/ and is referenced from index.
     assert.ok(fs.existsSync(path.join(publicDir, file)), `${asset} is cached but missing from public/`);
     if (manifestIcons.has(asset)) continue;
     if (file === "manifest.webmanifest") assert.ok(index.includes(`href="/${file}"`), `${file} is not linked from index.html`);
-    else assert.ok(index.includes(`"${asset}"`), `${asset} is not referenced from index.html with the same version`);
+    else assert.ok(index.includes(`"${asset}"`) || styles.includes(`url("${asset}")`), `${asset} is not referenced from index.html or styles.css`);
   }
 });
 

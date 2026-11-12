@@ -703,14 +703,16 @@ class ServerFrontendTests(ServerTestCase):
         index_refs = versioned_asset_refs(index)
         self.assertTrue(index_refs)
         self.assertEqual(len(index_refs), len(set(index_refs)))
-        # The shell, the unversioned manifest and its icons are cached; every
-        # other precache entry is exactly one stamped reference of index.html.
+        # The shell, the unversioned manifest, its icons and the stylesheet's
+        # font are cached; every other precache entry is exactly one stamped
+        # reference of index.html.
         unstamped = {
             "/",
             "/manifest.webmanifest",
             "/icon-192.png",
             "/icon-512.png",
             "/icon-maskable-512.png",
+            "/InterVariable.woff2",
         }
         self.assertEqual(unstamped, set(cached) - set(index_refs))
         self.assertEqual(set(index_refs), set(cached) - unstamped)

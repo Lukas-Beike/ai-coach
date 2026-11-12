@@ -55,7 +55,15 @@ test("the calendar tab shows a calendar and a selected tab is one filled style @
   await expect(segment).toBeVisible();
   await expect(range).toBeVisible();
   const [segmentBackground, segmentColor] = await style(segment);
-  expect(segmentColor).toBe("rgb(255, 255, 255)");
+  // The text on an accent fill is the paired token, in either theme.
+  const onAccent = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement("i"));
+    probe.style.color = "var(--on-accent)";
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  expect(segmentColor).toBe(onAccent);
   // The background of a button eases in; wait for it instead of reading the first frame.
   await expect(range).toHaveCSS("background-color", segmentBackground);
   await expect(range).toHaveCSS("color", segmentColor);

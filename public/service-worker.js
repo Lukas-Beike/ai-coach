@@ -36,6 +36,7 @@ const ASSETS = [
   "/icon-512.png",
   "/icon-maskable-512.png",
   "/apple-touch-icon.png",
+  "/InterVariable.woff2",
   "/manifest.webmanifest"
 ];
 const CACHED_PATHS = new Set(ASSETS.map((asset) => asset.split("?")[0]));
