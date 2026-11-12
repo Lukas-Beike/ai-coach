@@ -130,6 +130,8 @@ test("a failed image keeps the draft, shows the error and releases the loading s
 // Composite meals, unknown values and the Coach draft of a product.
 const MEAL_FUNCTIONS = ["nutritionNumber", "nutritionDatabaseLabel", "nutritionBasisLabel", "nutritionComponentSource", "nutritionComponentDetails", "addNutritionProductToCoachDraft"];
 
+const textOf = (node) => (typeof node === "string" ? node : `${node.textContent}${node.children.map(textOf).join("")}`);
+
 // An element that refuses HTML, so a name can only reach the page as text.
 class TextOnlyElement extends FakeElement {
   set innerHTML(_value) { throw new Error("innerHTML must not be used"); }
@@ -143,6 +145,7 @@ function mealSetup(use) {
   const document = { createElement: (tag) => new TextOnlyElement(tag), querySelector: () => input };
   const context = extractFunctions("nutrition.js", MEAL_FUNCTIONS, {
     document, state, events,
+    h: extractFunctions("components.js", ["h"], { document }).h,
     AppFormat: { number: (value) => String(value) },
     Event: class { constructor(type) { this.type = type; } },
     nutritionProductUseAmount: () => use,
@@ -161,8 +164,8 @@ test("composite meal components are shown as text with unknown values and source
     { amount: null, nutrition_basis: null },
   ] } });
   const [summary, list] = details.children;
-  assert.equal(summary.textContent, "Zutaten anzeigen (2)");
-  const [known, unknown] = list.children.map((row) => row.children.map((cell) => cell.textContent));
+  assert.equal(textOf(summary), "Zutaten anzeigen (2)");
+  const [known, unknown] = list.children.map((row) => row.children.map(textOf));
   assert.deepEqual(known, [name, "· 40 g", " · 150 kcal · KH 25 g · Protein – g · Fett – g", "Verpackungsangabe"]);
   assert.deepEqual(unknown, ["Unbenannte Zutat", "· –", " · – kcal · KH – g · Protein – g · Fett – g", "Quelle unbekannt"]);
   assert.equal(context.nutritionComponentDetails({ nutrition_basis: { kind: "composite", components: [] } }), null);

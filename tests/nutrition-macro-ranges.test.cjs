@@ -2,7 +2,8 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
 
-const context = extractFunctions("nutrition.js", ["nutritionTotalTile"], { document: fakeDocument(), todayIso: () => "2026-11-02", nutritionNumber: String, setValueWithUnit: (node, text) => { node.textContent = text; } });
+const document = fakeDocument();
+const context = extractFunctions("nutrition.js", ["nutritionTotalTile"], { document, h: extractFunctions("components.js", ["h"], { document }).h, todayIso: () => "2026-11-02", nutritionNumber: String, setValueWithUnit: (node, text) => { node.textContent = text; } });
 
 test("marks complete values outside a range and avoids premature low warnings", () => {
   const day = { date: "2026-11-01", total_protein_g: 100, macro_ranges: { protein_g: [153, 207] } };

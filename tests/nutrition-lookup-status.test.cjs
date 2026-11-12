@@ -94,8 +94,10 @@ const withClass = (node, name) => descendants(node).filter((child) => child.clas
 
 function listContext() {
   const targets = { "#nutritionProducts": new FakeElement(), "#nutritionLookupResult": new FakeElement() };
+  const document = { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null };
   const context = extractFunctions("nutrition.js", LIST_FUNCTIONS, {
-    document: { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null },
+    document,
+    h: extractFunctions("components.js", ["h"], { document }).h,
     api: async () => ({}),
     useNutritionProduct() {}, saveNutritionProduct() {}, refreshNutritionProduct() {}, deleteNutritionProduct() {}, reloadNutritionProducts() {},
     showNutritionProductError() {},
@@ -148,11 +150,11 @@ test("every card shows its origin, its missing fields and the same actions and s
   assert.equal(textOf(withClass(food, "nutrition-origin")[0]), "Datenbank · Stand 01.10.2026");
   assert.equal(withClass(own, "nutrition-incomplete").length, 0);
   const missing = withClass(food, "nutrition-incomplete")[0];
-  assert.equal(missing.textContent, "⚠ fehlt: Zucker, Salz");
+  assert.equal(textOf(missing), "⚠ fehlt: Zucker, Salz");
   assert.equal(missing.attributes["aria-label"], "Unvollständig, es fehlen: Zucker, Salz");
   assert.match(textOf(food), /EAN 4006381333931 · Basis: 100 ml/);
   for (const card of [own, food]) {
-    assert.deepEqual(withClass(card, "nutrition-actions")[0].children.map((button) => button.textContent), ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]);
+    assert.deepEqual(withClass(card, "nutrition-actions")[0].children.map(textOf), ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]);
     assert.equal(withClass(card, "nutrition-favorite").length, 1);
   }
   assert.equal(withClass(food, "nutrition-favorite")[0].attributes["aria-pressed"], "false");
@@ -175,7 +177,7 @@ test("a live lookup hit is not a stored product: it only offers saving it locall
   const { context, lookup } = listContext();
   context.renderNutritionProducts([{ id: "off:4006381333931", name: "Bio Haferdrink", brands: "Beispiel", source: "open_food_facts", local: false, per_100: { kcal: 46 } }], { local: false, targetId: "#nutritionLookupResult" });
   const [card] = lookup.children;
-  assert.deepEqual(card.children.filter((child) => child.tag === "button").map((button) => button.textContent), ["Lokal speichern"]);
+  assert.deepEqual(card.children.filter((child) => child.tag === "button").map(textOf), ["Lokal speichern"]);
   assert.equal(withClass(card, "nutrition-favorite").length, 0);
   assert.equal(textOf(withClass(card, "nutrition-origin")[0]), "Datenbank");
 });

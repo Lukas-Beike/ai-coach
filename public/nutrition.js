@@ -89,14 +89,10 @@ function nutritionNumber(value) {
 
 // A diary write reports its text with "Rückgängig" while the change can still be undone.
 function showNutritionReceipt(status, message, change, afterUndo) {
-  const text = document.createElement("span");
-  text.textContent = `${message} `;
+  const text = h("span", null, `${message} `);
   status.replaceChildren(text);
   if (!change?.id) return;
-  const undo = document.createElement("button");
-  undo.type = "button";
-  undo.className = "message-undo";
-  undo.textContent = "Rückgängig";
+  const undo = h("button", { type: "button", className: "message-undo" }, "Rückgängig");
   undo.addEventListener("click", async () => {
     undo.disabled = true;
     try {
@@ -151,8 +147,7 @@ function nutritionComponentSource(basis) {
 function setValueWithUnit(element, text) {
   const split = text.lastIndexOf(" ");
   if (split < 1) { element.textContent = text; return element; }
-  const unit = document.createElement("span"); unit.className = "nutrition-unit"; unit.textContent = text.slice(split + 1);
-  element.replaceChildren(text.slice(0, split), " ", unit);
+  element.replaceChildren(text.slice(0, split), " ", h("span", "nutrition-unit", text.slice(split + 1)));
   return element;
 }
 
@@ -177,21 +172,13 @@ function nutritionBasisLabel(basis, item, sourceLabel) {
 function nutritionComponentDetails(item) {
   const components = item.nutrition_basis?.kind === "composite" ? item.nutrition_basis.components : [];
   if (!Array.isArray(components) || !components.length) return null;
-  const details = document.createElement("details");
-  details.className = "nutrition-components";
-  const summary = document.createElement("summary");
-  summary.textContent = `Zutaten anzeigen (${components.length})`;
-  const list = document.createElement("ul");
-  list.className = "nutrition-component-list";
-  for (const component of components) {
-    const row = document.createElement("li");
-    const name = document.createElement("strong"); name.textContent = component.name || "Unbenannte Zutat";
-    const amount = document.createElement("span"); amount.textContent = ` · ${component.amount ?? "–"} ${component.unit || ""}`.trim();
-    const nutrients = document.createElement("span"); nutrients.textContent = ` · ${nutritionNumber(component.kcal)} kcal · KH ${nutritionNumber(component.carbs_g)} g · Protein ${nutritionNumber(component.protein_g)} g · Fett ${nutritionNumber(component.fat_g)} g`;
-    const source = document.createElement("small"); source.textContent = nutritionComponentSource(component.nutrition_basis);
-    row.append(name, amount, nutrients, source); list.append(row);
-  }
-  details.append(summary, list); return details;
+  return h("details", "nutrition-components",
+    h("summary", null, `Zutaten anzeigen (${components.length})`),
+    h("ul", "nutrition-component-list", components.map((component) => h("li", null,
+      h("strong", null, component.name || "Unbenannte Zutat"),
+      h("span", null, ` · ${component.amount ?? "–"} ${component.unit || ""}`.trim()),
+      h("span", null, ` · ${nutritionNumber(component.kcal)} kcal · KH ${nutritionNumber(component.carbs_g)} g · Protein ${nutritionNumber(component.protein_g)} g · Fett ${nutritionNumber(component.fat_g)} g`),
+      h("small", null, nutritionComponentSource(component.nutrition_basis))))));
 }
 
 function nutritionMealTitle(item) {
@@ -202,31 +189,22 @@ function nutritionMealTitle(item) {
 }
 
 function nutritionCard(item, template) {
-  const card = document.createElement("article");
-  card.className = "nutrition-card";
-  const title = document.createElement("h3");
-  const mealTitle = nutritionMealTitle(item);
-  title.textContent = template ? item.name : mealTitle;
-  const description = document.createElement("p");
-  description.textContent = item.description;
-  const values = document.createElement("p");
-  values.textContent = `${nutritionNumber(item.kcal)} kcal · KH ${nutritionNumber(item.carbs_g)} g · Protein ${nutritionNumber(item.protein_g)} g · Fett ${nutritionNumber(item.fat_g)} g${template ? " / Portion" : ""}`;
-  const source = document.createElement("small");
   const sourceLabels = { coach: "Coach-Schätzung", photo: "Foto-Schätzung", voice: "Sprach-Schätzung", manual: "Manuelle Angabe" };
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
   // The default (typed in by hand, stored locally) is not repeated under every meal; any other source or state is shown.
   const isDefaultSource = !template && item.source === "manual" && item.sync_state !== "synced" && basisLabel === sourceLabel;
-  if (basisLabel && !isDefaultSource) source.textContent = basisLabel + (template ? "" : syncLabel);
-  card.append(title, description, values);
-  if (source.textContent) card.append(source);
+  const sourceText = basisLabel && !isDefaultSource ? basisLabel + (template ? "" : syncLabel) : "";
+  const card = h("article", "nutrition-card",
+    h("h3", null, template ? item.name : nutritionMealTitle(item)),
+    h("p", null, item.description),
+    h("p", null, `${nutritionNumber(item.kcal)} kcal · KH ${nutritionNumber(item.carbs_g)} g · Protein ${nutritionNumber(item.protein_g)} g · Fett ${nutritionNumber(item.fat_g)} g${template ? " / Portion" : ""}`),
+    sourceText ? h("small", null, sourceText) : null);
   if (!template) {
     const details = nutritionComponentDetails(item);
     if (details) card.append(details);
-    const remove = document.createElement("button");
-    remove.type = "button"; remove.className = "secondary-button"; remove.textContent = "Löschen";
-    remove.setAttribute("aria-label", `Mahlzeit löschen: ${item.description}`);
+    const remove = h("button", { type: "button", className: "secondary-button", "aria-label": `Mahlzeit löschen: ${item.description}` }, "Löschen");
     remove.addEventListener("click", () => void deleteNutritionEntry(item));
     card.append(remove);
   }
@@ -236,23 +214,11 @@ function nutritionCard(item, template) {
 function nutritionExpenditureSection() {
   let section = document.querySelector("#nutritionExpenditure");
   if (section) return section;
-  section = document.createElement("section");
-  section.id = "nutritionExpenditure";
-  section.className = "nutrition-tools";
-  section.setAttribute("aria-label", "Garmin-Energieverbrauch");
-  const heading = document.createElement("h3");
-  heading.textContent = "Energieverbrauch";
-  const status = document.createElement("output");
-  status.id = "nutritionExpenditureStatus";
-  status.className = "tab-sync-detail";
-  status.setAttribute("aria-live", "polite");
-  const totals = document.createElement("div");
-  totals.id = "nutritionExpenditureTotals";
-  totals.className = "nutrition-totals";
-  const date = document.createElement("p");
-  date.id = "nutritionExpenditureDate";
-  date.className = "fine-print";
-  section.append(heading, status, totals, date);
+  section = h("section", { id: "nutritionExpenditure", className: "nutrition-tools", "aria-label": "Garmin-Energieverbrauch" },
+    h("h3", null, "Energieverbrauch"),
+    h("output", { id: "nutritionExpenditureStatus", className: "tab-sync-detail", "aria-live": "polite" }),
+    h("div", { id: "nutritionExpenditureTotals", className: "nutrition-totals" }),
+    h("p", { id: "nutritionExpenditureDate", className: "fine-print" }));
   document.querySelector("#nutritionTotals").insertAdjacentElement("afterend", section);
   return section;
 }
@@ -299,29 +265,15 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
     return value != null && Number.isFinite(value) ? `${AppFormat.number(value, { digits: 0 })} kcal` : null;
   };
-  const totalTile = document.createElement("div");
-  totalTile.className = "nutrition-total";
-  totalTile.style.gridColumn = "1 / -1";
   const kcalValue = (rawValue) => {
-    const value = document.createElement("strong");
+    const value = h("strong");
     const text = formatKcal(rawValue);
     if (text == null) markValueMissing(value); else setValueWithUnit(value, text);
     return value;
   };
-  const totalValue = kcalValue(expenditure?.total_kcal);
-  const totalCaption = document.createElement("span");
-  totalCaption.textContent = "Tagesverbrauch";
-  totalTile.append(totalValue, totalCaption);
-
-  const componentTile = (rawValue, caption) => {
-    const tile = document.createElement("div");
-    tile.className = "nutrition-total";
-    const value = kcalValue(rawValue);
-    const label = document.createElement("span");
-    label.textContent = caption;
-    tile.append(value, label);
-    return tile;
-  };
+  const componentTile = (rawValue, caption) => h("div", "nutrition-total", kcalValue(rawValue), h("span", null, caption));
+  const totalTile = componentTile(expenditure?.total_kcal, "Tagesverbrauch");
+  totalTile.style.gridColumn = "1 / -1";
   const projected = expenditure?.projected_total_kcal;
   const hasProjection = projected != null && Number.isFinite(Number(projected));
   const projectionTile = hasProjection ? componentTile(projected, "Prognose Tagesverbrauch") : null;
@@ -358,9 +310,8 @@ function appendNutritionTotals(totals, day) {
 }
 
 function nutritionTotalTile(label, key, unit, day, hasEntries) {
-  const tile = document.createElement("div");
-  tile.className = "nutrition-total";
-  const value = document.createElement("strong");
+  const tile = h("div", "nutrition-total");
+  const value = h("strong");
   const complete = hasEntries ? day[`total_${key}`] : null;
   const range = day.macro_ranges?.[key];
   if (complete != null && Array.isArray(range) && range.length === 2) {
@@ -371,18 +322,13 @@ function nutritionTotalTile(label, key, unit, day, hasEntries) {
   const total = hasEntries ? (complete ?? day.known_macro_totals?.[key] ?? day.known_intake_totals?.[key]) : null;
   if (total == null) markValueMissing(value);
   else setValueWithUnit(value, `${nutritionNumber(total)} ${unit}`);
-  const caption = document.createElement("span");
-  caption.textContent = label + (complete == null && total != null ? " · unvollständig" : "");
-  tile.append(value, caption);
+  tile.append(value, h("span", null, label + (complete == null && total != null ? " · unvollständig" : "")));
   return tile;
 }
 
 function appendNutritionMacroNote(totals, entriesWithoutMacros) {
   if (entriesWithoutMacros > 0) {
-    const note = document.createElement("p");
-    note.className = "nutrition-total-note";
-    note.textContent = entriesWithoutMacros === 1 ? "1 Eintrag ohne vollständige Makros" : `${entriesWithoutMacros} Einträge ohne vollständige Makros`;
-    totals.append(note);
+    totals.append(h("p", "nutrition-total-note", entriesWithoutMacros === 1 ? "1 Eintrag ohne vollständige Makros" : `${entriesWithoutMacros} Einträge ohne vollständige Makros`));
   }
 }
 
@@ -432,39 +378,26 @@ function nutritionChartRows(chartDays) {
 }
 
 function nutritionEmptyRunRow({ start, end }) {
-  const row = document.createElement("div"); row.className = "nutrition-week-chart-day is-empty";
-  const date = document.createElement("strong");
   const first = nutritionExpenditureDate(start).slice(0, 5);
   const last = nutritionExpenditureDate(end).slice(0, 5);
-  date.textContent = first === last ? first : `${first}–${last}`;
-  const text = document.createElement("span"); text.textContent = "keine Daten";
-  row.append(date, text);
-  return row;
+  return h("div", "nutrition-week-chart-day is-empty", h("strong", null, first === last ? first : `${first}–${last}`), h("span", null, "keine Daten"));
 }
 
 function nutritionChartDayRow(day, scale) {
-  const row = document.createElement("div"); row.className = "nutrition-week-chart-day";
-  const date = document.createElement("strong"); date.textContent = nutritionExpenditureDate(day.date).slice(0, 5);
-  if (day.end_date) date.setAttribute("aria-label", `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}`);
-  row.append(date);
+  const row = h("div", "nutrition-week-chart-day",
+    h("strong", { "aria-label": day.end_date ? `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}` : null }, nutritionExpenditureDate(day.date).slice(0, 5)));
   for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
     const value = day[key];
-    const series = document.createElement("div"); series.className = `nutrition-week-chart-series is-${kind}`;
-    const track = document.createElement("span"); track.className = "nutrition-week-chart-track";
+    const track = h("span", "nutrition-week-chart-track");
     if (Number.isFinite(value) && value >= 0) {
-      const bar = document.createElement("span"); bar.className = "nutrition-week-chart-bar";
+      const bar = h("span", "nutrition-week-chart-bar");
       bar.style.width = `${value / scale * 100}%`;
       track.append(bar);
     } else track.classList.add("is-missing");
-    const amount = document.createElement("span"); amount.textContent = value == null ? "–" : `${nutritionWeekValue(value, "kcal")}`;
-    series.setAttribute("aria-label", `${label}: ${amount.textContent}${value == null ? " (keine Daten)" : ""}`);
-    if (day.end_date) {
-      const coverage = document.createElement("small");
-      coverage.textContent = `${day[key + "_days"]} von 7 Tagen`;
-      series.setAttribute("aria-label", `${label}: ${amount.textContent}, ${coverage.textContent}`);
-      amount.append(document.createElement("br"), coverage);
-    }
-    series.append(track, amount); row.append(series);
+    const amountText = value == null ? "–" : nutritionWeekValue(value, "kcal");
+    const coverage = day.end_date ? `${day[key + "_days"]} von 7 Tagen` : "";
+    row.append(h("div", { className: `nutrition-week-chart-series is-${kind}`, "aria-label": coverage ? `${label}: ${amountText}, ${coverage}` : `${label}: ${amountText}${value == null ? " (keine Daten)" : ""}` },
+      track, h("span", null, amountText, coverage ? [h("br"), h("small", null, coverage)] : null)));
   }
   return row;
 }
@@ -485,12 +418,9 @@ function renderNutritionWeek(week) {
     ["Ø Kalorienbilanz pro Tag", week.balance_days > 0 && balance != null ? Math.sign(balance) * Math.round(Math.abs(balance / week.balance_days)) || 0 : null, "kcal", week.balance_days, true],
     ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"], ["Ø Zucker", "sugar_g", "g"], ["Ø Salz", "salt_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
-    const tile = document.createElement("div"); tile.className = "nutrition-total";
-    const number = document.createElement("strong");
+    const number = h("strong");
     if (value == null) markValueMissing(number); else setValueWithUnit(number, nutritionWeekValue(value, unit, isBalance));
-    const caption = document.createElement("span"); caption.textContent = label;
-    const coverage = document.createElement("small"); coverage.textContent = `${days} von ${dayCount} Tagen${isBalance && days < dayCount ? " · Teilbilanz" : ""}`;
-    tile.append(number, caption, coverage); return tile;
+    return h("div", "nutrition-total", number, h("span", null, label), h("small", null, `${days} von ${dayCount} Tagen${isBalance && days < dayCount ? " · Teilbilanz" : ""}`));
   }));
   document.querySelector("#nutritionWeekStatus").textContent = week.balance_days === dayCount ? `Alle ${dayCount} Tage auswertbar.` : `${week.balance_days} von ${dayCount} Tagen mit Aufnahme und Gesamtverbrauch auswertbar. Für die übrigen Tage bleibt die Bilanz offen.`;
   const chartDays = nutritionChartDays(week.days);
@@ -498,14 +428,9 @@ function renderNutritionWeek(week) {
   const scale = Math.max(1, ...chartDays.flatMap((day) => [day.intake_kcal, day.expenditure_kcal].filter((value) => Number.isFinite(value) && value >= 0)));
   document.querySelector("#nutritionWeekChart").replaceChildren(...nutritionChartRows(chartDays).map((entry) => (entry.empty ? nutritionEmptyRunRow(entry) : nutritionChartDayRow(entry.day, scale))));
   document.querySelector("#nutritionWeekChartSection").hidden = false;
-  document.querySelector("#nutritionWeekDays").replaceChildren(...week.days.map((day) => {
-    const row = document.createElement("tr");
-    const date = document.createElement("th"); date.scope = "row"; date.textContent = nutritionExpenditureDate(day.date).slice(0, 5); row.append(date);
-    for (const key of ["intake_kcal", "expenditure_kcal", "balance_kcal"]) {
-      const cell = document.createElement("td"); cell.textContent = day[key] == null ? "–" : nutritionWeekValue(day[key], "", key === "balance_kcal"); row.append(cell);
-    }
-    return row;
-  }));
+  document.querySelector("#nutritionWeekDays").replaceChildren(...week.days.map((day) => h("tr", null,
+    h("th", { scope: "row" }, nutritionExpenditureDate(day.date).slice(0, 5)),
+    ...["intake_kcal", "expenditure_kcal", "balance_kcal"].map((key) => h("td", null, day[key] == null ? "–" : nutritionWeekValue(day[key], "", key === "balance_kcal"))))));
   document.querySelector("#nutritionWeekDetails").hidden = false;
 }
 
@@ -584,13 +509,10 @@ function showNutritionDayLoadError(status, cached, error, dateInput, requestedDa
   }
   // The requested day stays in the date field so ← and → still have a day to move from.
   dateInput.value = requestedDate;
-  const retry = document.createElement("button");
-  retry.type = "button";
-  retry.className = "secondary-button";
-  retry.textContent = "Erneut laden";
+  const retry = h("button", { type: "button", className: "secondary-button" }, "Erneut laden");
   retry.addEventListener("click", () => void loadNutrition());
   status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
-  status.append(document.createElement("br"), retry);
+  status.append(h("br"), retry);
   clearNutritionExpenditure("");
   nutritionExpenditureSection().hidden = true;
 }
@@ -746,12 +668,11 @@ function normalizeNutritionProduct(product = {}) {
 }
 
 function nutritionProductForm(product = {}) {
-  const form = document.createElement("form");
-  form.className = "nutrition-product-form";
+  const form = h("form", "nutrition-product-form");
   form.innerHTML = `<input name="id" type="hidden"><input name="source" type="hidden"><input name="source_url" type="hidden"><input name="external_id" type="hidden"><input name="provenance" type="hidden"><input name="warnings" type="hidden"><label>Marke<input name="brand" maxlength="120"></label><label>EAN/GTIN<input name="barcode" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14"></label><div class="nutrition-product-grid"><label>Name<input name="name" required maxlength="160"></label><label>kcal<input name="kcal" type="number" min="0" step="any"></label><label>Kohlenhydrate (g)<input name="carbs_g" type="number" min="0" step="any"></label><label>Protein (g)<input name="protein_g" type="number" min="0" step="any"></label><label>Fett (g)<input name="fat_g" type="number" min="0" step="any"></label><label>Bezugsmenge<input name="basis_amount" type="number" min="0.1" step="0.1" value="100"></label><label>Einheit<select name="basis_unit"><option value="g">pro 100 g</option><option value="ml">pro 100 ml</option><option value="portion">pro Portion</option></select></label></div><p class="fine-print" data-extraction-confidence></p><ul class="nutrition-warning-checklist" data-extraction-warnings aria-label="Hinweise zur Prüfung" hidden></ul><p class="fine-print">Leere Nährwerte bleiben unbekannt. Bitte prüfe jede erkannte Zahl vor dem Speichern.</p><div class="nutrition-actions"><button type="submit" class="push-button">Produkt lokal speichern</button><button type="button" class="secondary-button" data-product-cancel>Abbrechen</button></div>`;
   populateNutritionProductFields(form, product);
   form.elements.source.value = product.source || "packaging_label";
-  const confidenceInput = document.createElement("input"); confidenceInput.name = "confidence"; confidenceInput.type = "hidden"; confidenceInput.value = nutritionProductValue(product.confidence); form.append(confidenceInput);
+  form.append(h("input", { name: "confidence", type: "hidden", value: nutritionProductValue(product.confidence) }));
   form.elements.basis_amount.required = true;
   form.elements.basis_unit.required = true;
   setNutritionProductBasis(form, product);
@@ -777,18 +698,14 @@ function populateNutritionProductFields(form, product) {
   }
   const grid = form.querySelector(".nutrition-product-grid");
   for (const [key, label] of [["sugar_g", "Zucker (g)"], ["fiber_g", "Ballaststoffe (g)"], ["salt_g", "Salz (g)"]]) {
-    const wrapper = document.createElement("label");
-    wrapper.append(document.createTextNode(label));
-    const input = document.createElement("input"); input.name = key; input.type = "number"; input.min = "0"; input.step = "any";
-    input.value = nutritionProductValue(product[key]); wrapper.append(input); grid.append(wrapper);
+    grid.append(h("label", null, label, h("input", { name: key, type: "number", min: "0", step: "any", value: nutritionProductValue(product[key]) })));
   }
 }
 
 function setNutritionProductBasis(form, product) {
   if (!product.basis_amount) form.elements.basis_amount.value = "";
   if (product.basis_unit) return;
-  const option = document.createElement("option"); option.value = ""; option.textContent = "Bezugsmenge auswählen"; option.selected = true; option.disabled = true;
-  form.elements.basis_unit.prepend(option);
+  form.elements.basis_unit.prepend(h("option", { value: "", selected: true, disabled: true }, "Bezugsmenge auswählen"));
   form.elements.basis_unit.value = "";
 }
 
@@ -806,7 +723,7 @@ function setNutritionProductConfidence(form, product) {
   confidenceLine.textContent = Number.isFinite(confidence) ? `Erkennungssicherheit: ${Math.round(confidence * 100)} %. ${warning}` : warning;
   const checklist = form.querySelector("[data-extraction-warnings]");
   const warnings = Array.isArray(product.warnings) ? product.warnings.map((text) => String(text ?? "").trim()).filter(Boolean) : [];
-  checklist.replaceChildren(...warnings.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
+  checklist.replaceChildren(...warnings.map((text) => h("li", null, text)));
   checklist.hidden = warnings.length === 0;
   for (const [field, score] of Object.entries(product.field_confidence || {})) {
     const input = form.elements.namedItem(field);
@@ -856,8 +773,8 @@ function nutritionOriginText(product) {
 }
 
 function nutritionIncompleteMark(label, text) {
-  const mark = document.createElement("span"); mark.className = "nutrition-incomplete"; mark.setAttribute("role", "img");
-  mark.setAttribute("aria-label", label); mark.textContent = text;
+  const mark = h("span", { className: "nutrition-incomplete", "aria-label": label }, text);
+  mark.setAttribute("role", "img");
   return mark;
 }
 
@@ -904,17 +821,17 @@ async function deleteNutritionProduct(product) {
 
 function appendNutritionProductActions(card, product, local) {
   if (!local || product.local === false) {
-    const button = document.createElement("button"); button.type = "button"; button.className = "secondary-button"; button.textContent = "Lokal speichern";
+    const button = h("button", { type: "button", className: "secondary-button" }, "Lokal speichern");
     button.addEventListener("click", () => saveNutritionProduct(product)); card.append(button);
   } else if (product.id) {
-    const actions = document.createElement("div"); actions.className = "nutrition-actions";
+    const actions = h("div", "nutrition-actions");
     for (const [label, primary, run] of [
       ["Verwenden", true, () => useNutritionProduct(product)],
       ["Bearbeiten", false, () => saveNutritionProduct(product)],
       ["Aktualisieren", false, (button) => refreshNutritionProduct(product, button)],
       ["Löschen", false, () => deleteNutritionProduct(product)],
     ]) {
-      const button = document.createElement("button"); button.type = "button"; button.className = primary ? "push-button" : "secondary-button"; button.textContent = label;
+      const button = h("button", { type: "button", className: primary ? "push-button" : "secondary-button" }, label);
       button.addEventListener("click", () => run(button)); actions.append(button);
       // Without a known unit an amount cannot be counted against the values.
       if (label === "Verwenden" && !product.basis_unit) { button.disabled = true; button.title = "Bezugsmenge unbekannt"; }
@@ -925,10 +842,7 @@ function appendNutritionProductActions(card, product, local) {
 
 function nutritionFavoriteButton(product) {
   const favorite = Boolean(product.favorite);
-  const button = document.createElement("button"); button.type = "button"; button.className = "nutrition-favorite";
-  button.textContent = favorite ? "★" : "☆";
-  button.setAttribute("aria-pressed", String(favorite));
-  button.setAttribute("aria-label", `${favorite ? "Favorit entfernen" : "Als Favorit markieren"}: ${product.name}`);
+  const button = h("button", { type: "button", className: "nutrition-favorite", "aria-pressed": String(favorite), "aria-label": `${favorite ? "Favorit entfernen" : "Als Favorit markieren"}: ${product.name}` }, favorite ? "★" : "☆");
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
@@ -943,36 +857,30 @@ function nutritionFavoriteButton(product) {
 }
 
 function nutritionProductSection(key, title, products, searching) {
-  const section = document.createElement("details");
-  section.className = "nutrition-product-section"; section.dataset.section = key;
+  const section = h("details", { className: "nutrition-product-section", dataset: { section: key } });
   // A new search opens the sections with hits once; later toggles are kept.
   if (searching) nutritionProductSectionsOpen[key] = products.length > 0;
   section.open = nutritionProductSectionsOpen[key];
   section.addEventListener("toggle", () => { nutritionProductSectionsOpen[key] = section.open; });
-  const summary = document.createElement("summary"); summary.append(`${title} (${products.length})`);
   const incomplete = products.filter((product) => nutritionMissingFields(product).length).length;
-  if (incomplete) summary.append(" ", nutritionIncompleteMark(`${incomplete} unvollständig`, `⚠ ${incomplete}`));
-  const list = document.createElement("div"); list.className = "nutrition-list";
-  list.append(...products.map((product) => nutritionProductCard(product, true)));
-  section.append(summary, list);
+  section.append(
+    h("summary", null, `${title} (${products.length})`, incomplete ? [" ", nutritionIncompleteMark(`${incomplete} unvollständig`, `⚠ ${incomplete}`)] : null),
+    h("div", "nutrition-list", products.map((product) => nutritionProductCard(product, true))));
   return section;
 }
 
 function nutritionProductCard(product, local) {
-  const card = document.createElement("article");
-  card.className = "nutrition-card nutrition-product-card";
-  const title = document.createElement("h3"); title.textContent = [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt";
   const kcalLabel = product.kcal == null ? "kcal unbekannt" : `${product.kcal} kcal`;
-  const detail = document.createElement("p"); detail.textContent = `${kcalLabel} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`;
-  const origin = document.createElement("span"); origin.className = "nutrition-origin"; origin.textContent = nutritionOriginText(product);
-  const marks = document.createElement("div"); marks.className = "nutrition-product-marks"; marks.append(origin);
   const missing = nutritionMissingFields(product);
-  if (missing.length) marks.append(nutritionIncompleteMark(`Unvollständig, es fehlen: ${missing.join(", ")}`, `⚠ fehlt: ${missing.join(", ")}`));
-  const basis = document.createElement("small");
-  basis.textContent = [product.barcode ? `EAN ${product.barcode}` : "", product.basis_amount && product.basis_unit ? `Basis: ${product.basis_amount} ${product.basis_unit}` : "Bezugsmenge unbekannt"].filter(Boolean).join(" · ");
-  const head = document.createElement("div"); head.className = "nutrition-product-head"; head.append(title);
-  if (local && product.id && product.local !== false) head.append(nutritionFavoriteButton(product));
-  card.append(head, detail, marks, basis);
+  const card = h("article", "nutrition-card nutrition-product-card",
+    h("div", "nutrition-product-head",
+      h("h3", null, [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt"),
+      local && product.id && product.local !== false ? nutritionFavoriteButton(product) : null),
+    h("p", null, `${kcalLabel} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`),
+    h("div", "nutrition-product-marks",
+      h("span", "nutrition-origin", nutritionOriginText(product)),
+      missing.length ? nutritionIncompleteMark(`Unvollständig, es fehlen: ${missing.join(", ")}`, `⚠ fehlt: ${missing.join(", ")}`) : null),
+    h("small", null, [product.barcode ? `EAN ${product.barcode}` : "", product.basis_amount && product.basis_unit ? `Basis: ${product.basis_amount} ${product.basis_unit}` : "Bezugsmenge unbekannt"].filter(Boolean).join(" · ")));
   appendNutritionProductActions(card, product, local);
   return card;
 }
@@ -1006,17 +914,14 @@ async function useNutritionProduct(product) {
   const select = document.querySelector("#nutritionProductUseMeal");
   const addButton = document.querySelector("#nutritionProductUseAdd");
   const status = document.querySelector("#nutritionProductUseStatus");
-  const snack = document.createElement("option"); snack.value = ""; snack.textContent = "Neuer Snack";
-  select.replaceChildren(snack); addButton.disabled = true; status.textContent = "";
+  select.replaceChildren(h("option", { value: "" }, "Neuer Snack")); addButton.disabled = true; status.textContent = "";
   dialog.showModal();
   const generation = state.sessionGeneration;
   try {
     const day = await api(`/api/nutrition/day?date=${encodeURIComponent(document.querySelector("#nutritionDate").value || todayIso())}`);
     if (generation !== state.sessionGeneration || useSequence !== nutritionProductUseSequence) return;
     for (const meal of day.entries || []) {
-      const option = document.createElement("option"); option.value = meal.id;
-      option.textContent = [nutritionMealTitle(meal), String(meal.description || "").slice(0, 40)].filter(Boolean).join(" · ");
-      select.append(option);
+      select.append(h("option", { value: meal.id }, [nutritionMealTitle(meal), String(meal.description || "").slice(0, 40)].filter(Boolean).join(" · ")));
     }
   } catch (error) {
     if (generation === state.sessionGeneration && useSequence === nutritionProductUseSequence) status.textContent = `Mahlzeiten konnten nicht geladen werden: ${error.message}`;
