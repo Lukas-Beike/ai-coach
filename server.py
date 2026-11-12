@@ -494,10 +494,10 @@ MAX_BACKUP_BYTES = 1_000_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 MIN_EXPORT_FREE_BYTES = 10_000_000
 EXPORT_TIME_LIMIT_SECONDS = 120
-# The Responses API counts both visible output and reasoning tokens against
-# max_output_tokens. Keep ordinary replies bounded, but leave enough room for
-# an explicitly requested multi-week training plan.
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
+# The longest silence allowed between two parts of a streamed model response.
+# Long reasoning on a large plan may send nothing for minutes (athlete
+# decision 2026-11-11, #2073: 10 minutes instead of 3).
+OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
