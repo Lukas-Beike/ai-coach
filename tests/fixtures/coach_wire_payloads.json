@@ -22,9 +22,7 @@
      "role": "user"
     }
    ],
-   "instructions": {
-    "sha256": "c2c5cdd1b799b5cdfbd04e84d0be9fbf277980814e2f7a232311e04c6caebe9b"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -33,9 +31,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -47,9 +43,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "c2c5cdd1b799b5cdfbd04e84d0be9fbf277980814e2f7a232311e04c6caebe9b"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -58,9 +52,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -70,9 +62,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":5,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Den Giro entfernen\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -81,16 +71,12 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
    "input": "{\"athlete_message\":\"Den Giro entfernen\",\"previous_assistant_message\":\"Fertig.\"}",
-   "instructions": {
-    "sha256": "882042284eeba07cfadc3e765bcfac9eb2e15d95f620c6e0614c5323bd0068df"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 1024,
    "model": "gpt-6-luna",
    "reasoning": {
@@ -174,9 +160,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -185,9 +169,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -214,9 +196,7 @@
      "role": "user"
     }
    ],
-   "instructions": {
-    "sha256": "0572afbcfcc0f79aabb2df320b072007c52c6ff8e9e467b2c90cd7a0ebd46e16"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -225,9 +205,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -251,9 +229,7 @@
      "role": "user"
     }
    ],
-   "instructions": {
-    "sha256": "5c94fcaaa26fb9689633a50b15c3e614bb881b32c46c89dac0938126e75373ab"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -262,9 +238,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -304,9 +278,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "0572afbcfcc0f79aabb2df320b072007c52c6ff8e9e467b2c90cd7a0ebd46e16"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -315,9 +287,7 @@
    },
    "store": true,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -360,9 +330,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":1,\"messages\":[],\"pending_request\":null,\"confirmed_results\":[],\"attachment_evidence\":[]},\"current_message\":\"Wie war meine Woche?\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -371,9 +339,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -383,9 +349,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -394,9 +358,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -404,9 +366,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":7,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Erkläre die Woche\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 32000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -415,9 +375,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -427,9 +385,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":9,\"messages\":[{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":3,\"role\":\"user\",\"content\":\"Plan ansehen\"},{\"id\":4,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":5,\"role\":\"user\",\"content\":\"Den Giro entfernen\"},{\"id\":6,\"role\":\"assistant\",\"content\":\"Fertig.\"},{\"id\":7,\"role\":\"user\",\"content\":\"Erkläre die Woche\"},{\"id\":8,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-tokens\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]},{\"client_turn_id\":\"wire-delete\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"delete_competition\",\"ok\":true,\"status\":\"deleted\",\"reason\":null,\"scope\":[\"competition:synthetic-competition\"],\"scope_truncated\":false,\"artifact_id\":null}]},{\"client_turn_id\":\"wire-tools\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null},{\"tool\":\"read_training_state\",\"ok\":true,\"status\":null,\"reason\":null,\"scope\":[],\"scope_truncated\":false,\"artifact_id\":null}]}],\"attachment_evidence\":[]},\"current_message\":\"Noch mal lesen\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -438,9 +394,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -469,9 +423,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -480,9 +432,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -527,9 +477,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "4c80218959d69e502ac6aa9d9784fcd4d18b73e53f6f70bbc93b0a1f286320d0"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -538,9 +486,7 @@
    },
    "store": false,
    "tool_choice": "none",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ],
@@ -550,9 +496,7 @@
     "reasoning.encrypted_content"
    ],
    "input": "{\"dialogue\":{\"local_date\":\"2026-09-07\",\"timezone\":\"Europe/Berlin\",\"current_user_message_id\":3,\"messages\":[{\"id\":1,\"role\":\"user\",\"content\":\"Wie war meine Woche?\"},{\"id\":2,\"role\":\"assistant\",\"content\":\"Fertig.\"}],\"pending_request\":null,\"confirmed_results\":[{\"client_turn_id\":\"wire-plain\",\"status\":\"completed\",\"sync_job_ids\":[],\"steps\":[]}],\"attachment_evidence\":[]},\"current_message\":\"Plan ansehen\",\"confirmed_steps\":[]}",
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -561,9 +505,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -592,9 +534,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -603,9 +543,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   },
   {
@@ -650,9 +588,7 @@
      "type": "function_call_output"
     }
    ],
-   "instructions": {
-    "sha256": "92c633473ef3ecb6b85e8f20d1879682c5b9c744c2b40f2f4984dbca1bb62239"
-   },
+   "instructions": "<instructions>",
    "max_output_tokens": 16000,
    "model": "gpt-6-luna",
    "parallel_tool_calls": false,
@@ -661,9 +597,7 @@
    },
    "store": false,
    "tool_choice": "auto",
-   "tools": {
-    "sha256": "9908abe32994ee936f544e4d5ee5645313294ca5c9d115d4edbd6ae1d0485449"
-   },
+   "tools": "<tools>",
    "truncation": "auto"
   }
  ]
