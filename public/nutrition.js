@@ -195,7 +195,8 @@ function nutritionCard(item, template) {
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
   // The default (typed in by hand, stored locally) is not repeated under every meal; any other source or state is shown.
   const isDefaultSource = !template && item.source === "manual" && item.sync_state !== "synced" && basisLabel === sourceLabel;
-  const sourceText = basisLabel && !isDefaultSource ? `${basisLabel}${template ? "" : syncLabel}` : "";
+  const sourceSuffix = template ? "" : syncLabel;
+  const sourceText = basisLabel && !isDefaultSource ? basisLabel + sourceSuffix : "";
   const card = h("article", "nutrition-card",
     h("h3", null, template ? item.name : nutritionMealTitle(item)),
     h("p", null, item.description),
@@ -389,11 +390,13 @@ function nutritionChartDayRow(day, scale) {
   for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
     const value = day[key];
     const track = h("span", "nutrition-week-chart-track");
-    if (Number.isFinite(value) && value >= 0) {
+    const measured = Number.isFinite(value) && value >= 0;
+    track.classList.toggle("is-missing", !measured);
+    if (measured) {
       const bar = h("span", "nutrition-week-chart-bar");
       bar.style.width = `${value / scale * 100}%`;
       track.append(bar);
-    } else track.classList.add("is-missing");
+    }
     const amountText = value == null ? "–" : nutritionWeekValue(value, "kcal");
     const coverage = day.end_date ? `${day[key + "_days"]} von 7 Tagen` : "";
     let ariaLabel = `${label}: ${amountText}${value == null ? " (keine Daten)" : ""}`;
