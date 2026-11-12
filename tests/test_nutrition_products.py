@@ -259,17 +259,20 @@ class NutritionProductContractTests(unittest.TestCase):
             },
             # The food of the own product's EAN is listed as that product only.
             self.stored_food(f"off:{own['barcode']}", "Aaa Zwilling"),
+            # An umlaut sorts with its vowel, not after Z.
+            self.stored_food("off:4000000000031", "Äpfel getrocknet"),
         )
 
         listed = catalog.list_all_products()
 
         self.assertEqual(
-            [item["name"] for item in listed], ["apfelmus", "Banane", "Zebra Riegel"]
+            [item["name"] for item in listed],
+            ["Äpfel getrocknet", "apfelmus", "Banane", "Zebra Riegel"],
         )
         by_name = {item["name"]: item for item in listed}
         self.assertEqual(
             [(item["origin"], item["favorite"]) for item in listed],
-            [("open_food_facts", 0), ("yazio", 0), ("own", 0)],
+            [("open_food_facts", 0), ("open_food_facts", 0), ("yazio", 0), ("own", 0)],
         )
         self.assertEqual(by_name["apfelmus"]["fetched_at"], "2026-10-01")
         self.assertIsNone(by_name["Zebra Riegel"]["fetched_at"])

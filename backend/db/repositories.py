@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -240,6 +241,12 @@ def _term_clauses(
     return clauses, params
 
 
+def _name_key(name: str) -> str:
+    """A product name as German readers sort it: no case, umlauts as vowels."""
+    folded = unicodedata.normalize("NFKD", name.casefold().replace("ß", "ss"))
+    return "".join(c for c in folded if not unicodedata.combining(c))
+
+
 class NutritionProductRepository:
     """Persist athlete-confirmed food products independently from meal logs.
 
@@ -351,10 +358,10 @@ class NutritionProductRepository:
             + " ORDER BY name COLLATE NOCASE, id LIMIT ?",
             (*found[1], max(1, min(int(limit), 1000))),
         ).fetchall()
-        # SQLite folds the case of ASCII letters only; umlauts sort by casefold.
+        # SQLite folds ASCII case only; "Äpfel" belongs under A, not after Z.
         return sorted(
             (self._listed(row) for row in rows),
-            key=lambda product: (product["name"].casefold(), product["id"]),
+            key=lambda product: (_name_key(product["name"]), product["id"]),
         )
 
     def get_database(self, db: Any, product_id: str) -> dict[str, Any] | None:
