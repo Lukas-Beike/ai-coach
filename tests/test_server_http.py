@@ -128,12 +128,21 @@ class ServerHttpTests(ServerTestCase):
             server.HTTP_API.request_handler_class().dependencies,
             route_table=RouteTable(replace(r, handle=refuse) for r in table.routes),
         )
-        httpd = ThreadingHTTPServer(
-            ("127.0.0.1", 0), create_request_handler(dependencies)
-        )
-        self.addCleanup(httpd.server_close)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        self.addCleanup(httpd.shutdown)
+
+        def serve(dependencies):
+            httpd = ThreadingHTTPServer(
+                ("127.0.0.1", 0), create_request_handler(dependencies)
+            )
+            self.addCleanup(httpd.server_close)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            self.addCleanup(httpd.shutdown)
+            return httpd.server_address[1]
+
+        port = serve(dependencies)
+        # A restore in progress: the maintenance gate refuses every operation.
+        restoring = runtime_maintenance.MaintenanceGate()
+        restoring.restoring = True
+        maintenance_port = serve(replace(dependencies, maintenance_gate=restoring))
         config = replace(server.CONFIG, app_password="synthetic-password-123")
         without_session = http_auth.SessionAuthService(
             Mock(), threading.RLock(), config, True, RateLimiter()
@@ -143,15 +152,15 @@ class ServerHttpTests(ServerTestCase):
         )
         cookie = {"Cookie": f"{http_auth.SESSION_COOKIE}={create_test_session(server)}"}
 
-        def statuses(auth, access, headers):
+        def statuses(auth, access, headers, port=port):
             found = {}
             with patch.object(server, "get_session_auth_service", return_value=auth):
                 for route in table.routes:
-                    if route.access is not access:
+                    if access is not None and route.access is not access:
                         continue
                     path = re.sub(r"\{.*?\}", "abc-123", route.path)
                     connection = http.client.HTTPConnection(
-                        "127.0.0.1", httpd.server_address[1], timeout=10
+                        "127.0.0.1", port, timeout=10
                     )
                     body = None if route.method == "GET" else b"{}"
                     connection.request(route.method, path, body=body, headers=headers)
@@ -168,6 +177,31 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual({401}, set(anonymous.values()), anonymous)
         self.assertEqual({403}, set(missing_csrf.values()), missing_csrf)
         self.assertEqual([], called)
+        # During a restore every PUT and every gated POST answers 503 before its
+        # handler; GET routes and the ungated POST routes still reach theirs.
+        during_restore = statuses(
+            http_auth.SessionAuthService(
+                server.database_manager(), server.DB_LOCK, config, True, RateLimiter()
+            ),
+            None,
+            {**cookie, "X-CSRF-Token": "csrf"},
+            maintenance_port,
+        )
+        refused = {
+            (r.method, re.sub(r"\{.*?\}", "abc-123", r.path))
+            for r in table.routes
+            if r.method == "PUT" or (r.method == "POST" and r.gated)
+        }
+        self.assertEqual(
+            {key: 503 for key in refused},
+            {key: status for key, status in during_restore.items() if key in refused},
+        )
+        self.assertEqual(
+            sorted(
+                path for method, path in during_restore if (method, path) not in refused
+            ),
+            sorted(called),
+        )
 
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
         for method in ("GET", "POST", "PUT"):

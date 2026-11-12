@@ -1,6 +1,8 @@
 """Keep the generated route table in docs/api-routes.md current.
 
-Run ``python tests/test_api_routes_doc.py --write`` to regenerate it.
+Run ``python tests/test_api_routes_doc.py --write`` to regenerate it. Every route
+handler's docstring is a purpose line followed by its ``Request:``, ``Response:``
+and ``Errors:`` paragraphs.
 """
 
 import inspect
@@ -14,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server_test_support import server
 
-from backend.http_api.route_table import route_reference
+from backend.http_api.route_table import CONTRACT_LABELS, route_reference
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "api-routes.md"
 BEGIN = "<!-- BEGIN GENERATED ROUTES -->\n"
@@ -40,12 +42,17 @@ class ApiRoutesDocTests(unittest.TestCase):
             "Regenerate with: python tests/test_api_routes_doc.py --write",
         )
 
-    def test_every_route_handler_states_its_purpose(self):
+    def test_every_route_handler_states_its_purpose_and_contract(self):
+        def contract(route):
+            paragraphs = (inspect.getdoc(route.handle) or "").split("\n\n")
+            return [p.split(" ", 1)[0] for p in paragraphs[1:4]]
+
         self.assertEqual(
             [
                 f"{route.method} {route.path}"
                 for route in server.HTTP_API.route_table.routes
                 if not inspect.getdoc(route.handle)
+                or contract(route) != list(CONTRACT_LABELS)
             ],
             [],
         )
