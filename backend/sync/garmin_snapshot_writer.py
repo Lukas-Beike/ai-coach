@@ -62,6 +62,8 @@ ANALYSIS_SOURCES: Final = frozenset(
     }
 )
 NUTRITION_SOURCES: Final = frozenset({"daily_stats", "weight"})
+# The values of the day the change check stores by day (#2303).
+DAYTIME_SOURCES: Final = frozenset({"daily_stats", "body_battery"})
 
 
 class GarminSnapshotWriter:

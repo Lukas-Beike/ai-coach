@@ -281,6 +281,9 @@ class GarminAssembly:
                     ),
                     local_now=self._athlete_clock.now,
                     logger=self._logger,
+                    store_daytime=lambda day, values: (
+                        self.nutrition_refresh_service().store_daytime(day, values)
+                    ),
                 )
             return self._change_check
 

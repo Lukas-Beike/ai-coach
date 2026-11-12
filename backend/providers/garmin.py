@@ -606,6 +606,25 @@ def fetch_targeted_nutrition(
     return _with_resting_energy(client, bounded, external_call), complete
 
 
+def fetch_daytime_values(client: Any, day: date) -> dict[str, list[dict[str, Any]]]:
+    """Read one day's summary and Body Battery report, the values of the day (#2303).
+
+    Errors propagate, so the caller's backoff and ``Retry-After`` apply.
+    """
+    stats, _complete = fetch_targeted_nutrition(
+        client,
+        "daily_stats",
+        day,
+        day,
+        external_call=lambda _provider, _source, call, _context: call(),
+    )
+    battery = client.get_body_battery(day.isoformat(), day.isoformat())
+    return {
+        "daily_stats": stats,
+        "body_battery": normalize_range_records("body_battery", battery or []),
+    }
+
+
 def _normalize_targeted_analysis_response(source: str, value: Any) -> Any:
     if not isinstance(value, (dict, list)):
         raise TypeError(f"Invalid Garmin {source} response")
