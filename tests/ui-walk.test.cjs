@@ -31,7 +31,7 @@ test("ui walk reports errors per view and compares load times with the previous 
   const walk = await load();
   const result = {
     loadMs: { "phone coach": 800, "phone plan": 1200 },
-    errors: { "phone coach": 0, "phone plan": 2 },
+    errors: { "phone login": 1, "phone coach": 0, "phone plan": 2, "phone other": 0 },
     calendar: { phone: ["month", "next week"] },
     marks: { cache: "pacecraft-new", assetVersions: ["a"] },
     logout: { phone: 200 },
@@ -39,6 +39,8 @@ test("ui walk reports errors per view and compares load times with the previous 
   const lines = walk.reportLines(result);
   assert.ok(lines.includes("ok phone coach 800 ms"));
   assert.ok(lines.includes("FAIL phone plan 1200 ms, 2 error(s)"));
+  assert.ok(lines.includes("FAIL phone login 1 error(s)"));
+  assert.ok(!lines.some((line) => line.includes("phone other")));
   assert.ok(lines.includes("info calendar phone: month, next week"));
   assert.ok(lines.includes("ok logout phone 200"));
   const compared = walk.compareLines(result, { marks: { cache: "pacecraft-old" }, loadMs: { "phone coach": 700 } });

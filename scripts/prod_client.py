@@ -65,6 +65,7 @@ class Session:
         self.url = base_url(url)
         self.jar = http.cookiejar.CookieJar()
         context = ssl.create_default_context(cafile=ca_file)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.jar),
             urllib.request.HTTPSHandler(context=context),

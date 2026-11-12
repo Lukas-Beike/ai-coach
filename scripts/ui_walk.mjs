@@ -116,13 +116,16 @@ async function walk({ chromium, url, password, outDir }) {
       await page.getByLabel("Passwort", { exact: true }).fill(password);
       await page.getByRole("button", { name: "Anmelden" }).click();
       await page.locator("#appShell").waitFor({ state: "visible", timeout: 30000 });
+      // Every error counts against a step: login, a view (with its calendar walk), or the rest.
+      result.errors[`${name} login`] = errors.length;
+      let counted = errors.length;
       const shot = (label) => page.screenshot({ path: path.join(outDir, `${name}-${label}.png`), fullPage: false });
       for (const route of VIEWS) {
-        const before = errors.length;
         result.loadMs[`${name} ${route}`] = await rendered(page, route);
         await shot(route);
-        result.errors[`${name} ${route}`] = errors.length - before;
         if (route === "plan") result.calendar[name] = await walkCalendar(page, shot);
+        result.errors[`${name} ${route}`] = errors.length - counted;
+        counted = errors.length;
       }
       if (!result.marks) {
         const serviceWorker = await (await page.request.get("/service-worker.js")).text();
@@ -135,6 +138,7 @@ async function walk({ chromium, url, password, outDir }) {
         return response.status;
       });
       result.logout[name] = logout;
+      result.errors[`${name} other`] = errors.length - counted;
       await context.close();
     }
   } finally {
@@ -149,6 +153,9 @@ export function reportLines(result) {
     const errors = result.errors[key];
     const suffix = errors ? ", " + errors + " error(s)" : "";
     lines.push(`${errors ? "FAIL" : "ok"} ${key} ${ms} ms${suffix}`);
+  }
+  for (const [key, errors] of Object.entries(result.errors)) {
+    if (errors && !(key in result.loadMs)) lines.push(`FAIL ${key} ${errors} error(s)`);
   }
   for (const [name, steps] of Object.entries(result.calendar)) lines.push(`info calendar ${name}: ${steps.join(", ") || "no controls found"}`);
   lines.push(`info service-worker cache ${result.marks?.cache || "missing"}, ${result.marks?.assetVersions.length || 0} asset versions`);

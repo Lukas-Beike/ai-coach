@@ -25,6 +25,7 @@ def tls_days(url: str, ca_file: str | None) -> float:
     parts = urlsplit(url)
     host, port = parts.hostname or "", parts.port or 443
     context = ssl.create_default_context(cafile=ca_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     try:
         with (
             socket.create_connection((host, port), timeout=15) as raw,
