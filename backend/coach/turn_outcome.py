@@ -19,6 +19,7 @@ from backend.coach.outcomes import (
     coach_failure_lines,
     unresolved_coach_steps,
 )
+from backend.coach.response_transport import ModelTurn
 from backend.coach.service import (
     effects_from_receipts,
     mark_resolved_receipts,
@@ -26,7 +27,6 @@ from backend.coach.service import (
 )
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.openai_responses import response_text
 
 _READ_ONLY_JOB_TYPES = frozenset({"refresh", "activity_details", "historical_backfill"})
 _READ_ONLY_REFRESH_TOOLS = frozenset({"start_provider_refresh"})
@@ -467,7 +467,7 @@ class CoachStructuredOutcomeService:
 
     def finalize(
         self,
-        response: dict[str, Any],
+        turn: ModelTurn,
         command_receipts: list[dict[str, Any]],
         *,
         question: str,
@@ -481,7 +481,7 @@ class CoachStructuredOutcomeService:
         mark_resolved_receipts(command_receipts, failures)
         effects = effects_from_receipts(command_receipts, set(self._internal_tools))
         text, incomplete_answer, missing_answer = self._text(
-            response, question, failures, effects, command_receipts
+            turn, question, failures, effects, command_receipts
         )
         if budget_exhausted:
             text += "\n" + _BUDGET_EXHAUSTED_NOTE
@@ -510,13 +510,13 @@ class CoachStructuredOutcomeService:
 
     @staticmethod
     def _text(
-        response: dict[str, Any],
+        turn: ModelTurn,
         question: str,
         failures: list[dict[str, Any]],
         effects: list[dict[str, Any]],
         command_receipts: list[dict[str, Any]],
     ) -> tuple[str, bool, bool]:
-        text = question or response_text(response)
+        text = question or turn.text
         jobs = _sync_jobs(effects, command_receipts)
         notices = [
             job.status_line(job_id) for job_id, job in jobs.items() if job.reported()
@@ -530,7 +530,7 @@ class CoachStructuredOutcomeService:
             in {"remote_coach_write", "local_coach_write"}
             for entry in command_receipts
         )
-        incomplete_answer = response.get("status") == "incomplete"
+        incomplete_answer = turn.incomplete
         missing_answer = not text or incomplete_answer
         if incomplete_answer:
             text += "\nDie Antwort wurde nicht abgeschlossen. Bitte den Coach um Fortsetzung bitten."

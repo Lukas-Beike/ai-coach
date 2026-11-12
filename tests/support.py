@@ -20,6 +20,7 @@ import snapshot_seed
 from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
+from backend.coach.responses_adapter import model_turn, request_payload
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE, DatabaseManager
 from backend.db.schema import initialize_schema
@@ -119,6 +120,22 @@ class IntervalsRequestRecorder:
         return [
             call for call in self.calls if call["method"] in {"POST", "PUT", "DELETE"}
         ]
+
+
+def wire_step(step):
+    """Serve a dict-based model script (Responses payloads in, replies out) over the seam.
+
+    The returned callable takes a ModelRequest and returns a ModelTurn, so a test
+    keeps asserting the wire payload it would have received.
+    """
+
+    def serve(request, *args, **kwargs):
+        reply = step(request_payload(request), *args, **kwargs)
+        if isinstance(reply, Exception):
+            raise reply
+        return model_turn(reply)
+
+    return serve
 
 
 def latest_tool_outputs(payload: dict[str, Any]) -> list[dict[str, Any]]:

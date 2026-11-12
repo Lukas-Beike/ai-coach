@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, Mock, patch
 from support import latest_tool_outputs
 
 from backend import change_history
+from backend.coach.response_transport import ModelRequest, ModelTurn
+from backend.coach.responses_adapter import request_payload
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -468,7 +470,7 @@ class ChokePointTests(unittest.TestCase):
         self.failure = Mock()
         self.jobs = Mock()
         self.response = Mock()
-        self.response.respond.return_value = {"output": []}
+        self.response.respond.return_value = ModelTurn()
         self.classifier = Mock(return_value=verdict())
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachStructuredToolRoundService(
@@ -506,7 +508,7 @@ class ChokePointTests(unittest.TestCase):
             client_turn_id="synthetic-turn",
             session_csrf_hash="synthetic-session",
             cancel_event=None,
-            request_payload={"input": [], "model": "synthetic-model"},
+            request=ModelRequest(model="synthetic-model", instructions="synthetic"),
             model_instructions="synthetic-instructions",
             message=message,
             attachments=[],
@@ -642,17 +644,11 @@ class ChokePointTests(unittest.TestCase):
 
     def test_denied_round_completes_and_tells_model_nothing_was_saved(self) -> None:
         state = self.state("Wie war mein Schlaf?")
-        response = {
-            "id": "response-one",
-            "output": [
-                {
-                    "type": "function_call",
-                    "name": "delete_competition",
-                    "call_id": "call-one",
-                    "arguments": "{}",
-                }
-            ],
-        }
+        response = ModelTurn(
+            tool_calls=[
+                {"name": "delete_competition", "call_id": "call-one", "arguments": "{}"}
+            ]
+        )
         with patch(
             "backend.coach.structured_tool_round.structured_tool_call_metadata",
             return_value=self.metadata("delete_competition"),
@@ -662,7 +658,7 @@ class ChokePointTests(unittest.TestCase):
             )
 
         self.assertEqual(result[1:4], (1, "", False))
-        followup = self.response.respond.call_args.args[0]
+        followup = request_payload(self.response.respond.call_args.args[0])
         output = json.loads(latest_tool_outputs(followup)[0]["output"])
         self.assertEqual(output["status"], "not_performed")
         self.assertEqual(output["gate_reason"], "impact_not_confirmed")
@@ -676,7 +672,7 @@ class ChokePointTests(unittest.TestCase):
             "Trag meinen Wettkampf am 12.5. ein", command_receipts=receipts
         )
         self.service.run(
-            {"output": []}, rounds=0, question="", cancelled=False, state=state
+            ModelTurn(), rounds=0, question="", cancelled=False, state=state
         )
 
         result = self.execute(state, "save_competition")[2]

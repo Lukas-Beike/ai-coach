@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any
 
@@ -14,10 +14,11 @@ from backend.coach.limits import COACH_LONG_PLAN_MAX_OUTPUT_TOKENS
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
+    ModelRequest,
+    ModelTurn,
     raise_if_chat_cancelled,
 )
 from backend.errors import AppError
-from backend.providers.openai_responses import response_text
 
 
 def _discard_delta(_delta: str) -> None:
@@ -56,9 +57,9 @@ class CoachStructuredResponseService:
 
     def respond(
         self,
-        payload: dict[str, Any],
+        request: ModelRequest,
         *,
-        request_payload: dict[str, Any],
+        turn_request: ModelRequest,
         context: dict[str, Any],
         message: str,
         command_receipts: list[dict[str, Any]],
@@ -68,7 +69,7 @@ class CoachStructuredResponseService:
         on_text_delta: Callable[[str], None] | None,
         cancel_event: threading.Event | None,
         recovery_state: dict[str, bool],
-    ) -> dict[str, Any]:
+    ) -> ModelTurn:
         state = _ResponseState()
 
         on_delta = partial(state.emit_delta, on_text_delta=on_text_delta)
@@ -89,8 +90,8 @@ class CoachStructuredResponseService:
         while attempt < 3:
             raise_if_chat_cancelled(cancel_event)
             try:
-                response = self._transport.stream_request(
-                    payload,
+                turn = self._transport.stream_request(
+                    request,
                     on_delta if on_text_delta is not None else _discard_delta,
                     cancel_event,
                     on_response_id=reached,
@@ -98,8 +99,8 @@ class CoachStructuredResponseService:
             except AppError as exc:
                 if not self._recovery.recover_if_invalid(
                     exc,
-                    payload,
-                    request_payload,
+                    request,
+                    turn_request,
                     context=context,
                     message=message,
                     command_receipts=command_receipts,
@@ -113,19 +114,19 @@ class CoachStructuredResponseService:
                         state,
                         cancel_event,
                         attempt,
-                        remote_conversation=bool(request_payload.get("conversation")),
+                        remote_conversation=bool(turn_request.conversation_id),
                     )
                 attempt += 1
                 continue
-            if not self._spent_on_reasoning(response, payload, state):
-                return response
+            if not self._spent_on_reasoning(turn, request, state):
+                return turn
             # Reasoning used the whole budget before any text or tool call, so
             # nothing was streamed or executed and the request can be repeated.
             # The larger-budget request does not consume a transport retry, so
             # it is always sent even after earlier retryable failures.
             limit = self._reasoning_retry_max_output_tokens
-            payload = {**payload, "max_output_tokens": limit}
-            request_payload["max_output_tokens"] = limit
+            request = replace(request, max_output_tokens=limit)
+            turn_request.max_output_tokens = limit
         raise AppError(
             502,
             "Der KI-Dienst konnte die Antwort nicht fertigstellen.",
@@ -152,21 +153,15 @@ class CoachStructuredResponseService:
         self._retry_policy.wait(delay, cancel_event, attempt, exc.reason)
 
     def _spent_on_reasoning(
-        self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState
+        self, turn: ModelTurn, request: ModelRequest, state: _ResponseState
     ) -> bool:
-        details = response.get("incomplete_details")
         return (
-            response.get("status") == "incomplete"
-            and isinstance(details, dict)
-            and details.get("reason") == "max_output_tokens"
+            turn.stop_reason == "max_tokens"
             and not state.request_delta_emitted
             # A server-side conversation already stored this input and output.
-            and not payload.get("conversation")
-            and not response_text(response)
-            and not any(
-                isinstance(item, dict) and item.get("type") == "function_call"
-                for item in response.get("output") or []
-            )
-            and (payload.get("max_output_tokens") or 0)
+            and not request.conversation_id
+            and not turn.text
+            and not turn.tool_calls
+            and (request.max_output_tokens or 0)
             < self._reasoning_retry_max_output_tokens
         )

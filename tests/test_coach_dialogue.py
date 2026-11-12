@@ -18,6 +18,7 @@ from support import (
     latest_tool_outputs,
     metric_export_stopped,
     reset_application_state,
+    wire_step,
 )
 
 from backend.activities.hr_cap import effective_caps
@@ -194,8 +195,10 @@ class DialogueHarness:
             ) as transport_factory,
         ):
             transport = transport_factory.return_value
-            transport.request.side_effect = response
-            transport.stream_request.side_effect = response
+            # The write gate's classifier is not a Coach request; it is not recorded.
+            transport.request.side_effect = wire_step(response)
+            recorder = Mock(side_effect=response)
+            transport.stream_request.side_effect = wire_step(recorder)
             receipt = server.COACH_TURNS.chat_turn_service().run(
                 message,
                 client_turn_id=turn or f"turn-{self.counter}",
@@ -240,7 +243,7 @@ class DialogueHarness:
                             "reason": error.reason or "approval_failed",
                         }
                     )
-        return receipt, transport.stream_request
+        return receipt, recorder
 
     def state(self):
         return server.PLANNING_WORKFLOWS.structured_training_state_service().read()

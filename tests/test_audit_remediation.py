@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
 import test_coach_dialogue as dialogue
-from support import canonical_backfill_stopped
+from support import canonical_backfill_stopped, wire_step
 
 from backend.coach import dialogue as coach_dialogue
 from backend.coach import streams as coach_streams
@@ -485,7 +485,9 @@ with patch.object(Path, 'read_text', deny):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.stream_request.side_effect = response
+            transport_factory.return_value.stream_request.side_effect = wire_step(
+                response
+            )
             result = server.COACH_TURNS.chat_turn_service().run(
                 "Read refreshed data",
                 client_turn_id="refresh-context",
@@ -493,9 +495,9 @@ with patch.object(Path, 'read_text', deny):
             )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(context.call_count, 2)
-        instructions = transport_factory.return_value.stream_request.call_args.args[0][
-            "instructions"
-        ]
+        instructions = transport_factory.return_value.stream_request.call_args.args[
+            0
+        ].instructions
         # The refreshed context replaces the stale one; static rules lead for
         # prompt caching and the per-turn context follows them.
         self.assertTrue(instructions.startswith(coach_dialogue.INSTRUCTIONS))

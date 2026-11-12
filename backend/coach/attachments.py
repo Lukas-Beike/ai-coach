@@ -434,38 +434,6 @@ def validate_attachments(value):
     return attachments
 
 
-def model_input(text, attachments):
-    if not attachments:
-        return text
-    parts = [{"type": "input_text", "text": text}]
-    for item in attachments:
-        summary_key = item["type"] if item["type"] in {"gpx", "fit"} else None
-        evidence = {"untrusted_attachment_name": item["name"]}
-        if summary_key:
-            evidence[summary_key] = item.get("summary")
-        parts.append(
-            {"type": "input_text", "text": json.dumps(evidence, ensure_ascii=False)}
-        )
-        if item["type"] in {"gpx", "fit"}:
-            data, mime = openai_attachment_data(item)
-            parts.append(
-                {
-                    "type": "input_file",
-                    "filename": item["name"] + ".json",
-                    "file_data": f"data:{mime};base64,{data}",
-                }
-            )
-        elif item["type"] == "image":
-            parts.append(
-                {
-                    "type": "input_image",
-                    "image_url": f"data:{item['mime']};base64,{openai_attachment_data(item)[0]}",
-                    "detail": "auto",
-                }
-            )
-    return [{"role": "user", "content": parts}]
-
-
 def openai_attachment_data(item):
     """Return the provider-safe representation without changing persisted bytes.
 

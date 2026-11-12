@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from support import wire_step
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach import attachments as coach_attachments
@@ -17,9 +18,9 @@ from backend.coach.attachments import (
     _fit_session_summary,
     fit_summary,
     gpx_summary,
-    model_input,
     validate_attachments,
 )
+from backend.coach.responses_adapter import model_input
 from backend.errors import AppError
 from backend.providers import openai_requests, openai_stream
 from backend.providers.fit_file import _fit_crc16, _fit_data_record
@@ -685,7 +686,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 ),
             ),
         ):
-            transport_factory.return_value.stream_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = wire_step(
+                respond
+            )
             server.COACH_TURNS.chat_turn_service().run(
                 "Analyze",
                 client_turn_id="worker-turn",
@@ -706,12 +709,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         captured = []
         endpoint = Mock()
 
-        def create(path, _payload):
-            if path != "/conversations":
-                raise AssertionError(path)
-            return {"id": "conv-remote"}
-
-        endpoint.request.side_effect = create
+        endpoint.create_conversation.return_value = "conv-remote"
 
         def respond(payload, *_args, **kwargs):
             captured.append(payload)
@@ -734,7 +732,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 server.COACH_CONVERSATION, "response_transport"
             ) as transport_factory,
         ):
-            transport_factory.return_value.stream_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = wire_step(
+                respond
+            )
             receipt = server.COACH_TURNS.chat_turn_service().run(
                 "Analyze",
                 client_turn_id=turn,
@@ -747,7 +747,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         receipt, captured, endpoint = self._real_conversation_turn("plain-turn")
 
         self.assertEqual(receipt["status"], "completed")
-        endpoint.request.assert_not_called()
+        endpoint.create_conversation.assert_not_called()
         self.assertNotIn("conversation", captured[0])
         self.assertIsNone(server.key_value_service().get("openai_conversation_id"))
         with server.database_manager().reader() as db:
@@ -763,7 +763,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
 
         self.assertEqual(receipt["status"], "completed")
-        endpoint.request.assert_called_once()
+        endpoint.create_conversation.assert_called_once()
         self.assertEqual(captured[0]["conversation"], "conv-remote")
         self.assertEqual(
             server.key_value_service().get("openai_conversation_id"), "conv-remote"
@@ -807,7 +807,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 ),
             ),
         ):
-            transport_factory.return_value.stream_request.side_effect = respond
+            transport_factory.return_value.stream_request.side_effect = wire_step(
+                respond
+            )
             server.COACH_TURNS.chat_turn_service().run(
                 "Analyze the route",
                 client_turn_id="route-turn",

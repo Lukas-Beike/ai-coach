@@ -9,8 +9,9 @@ import unittest
 import zlib
 
 from backend.coach.attachment_privacy import hidden_position_indexes
-from backend.coach.attachments import model_input, validate_attachments
+from backend.coach.attachments import validate_attachments
 from backend.coach.image_metadata import strip_image_metadata
+from backend.coach.responses_adapter import model_input
 
 STEP_DEGREES = 0.0009  # about 100 m of latitude
 POINTS = 40

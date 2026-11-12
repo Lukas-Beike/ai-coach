@@ -247,14 +247,9 @@ class CoachConversationProvisionService:
         self.remote_delete_thread: threading.Thread | None = None
 
     def _create_remote(self) -> str:
-        result = self._client.request(
-            "/conversations",
-            {"metadata": {"app": "intervals-coach", "purpose": "personal-coach"}},
+        return self._client.create_conversation(
+            {"app": "intervals-coach", "purpose": "personal-coach"}
         )
-        conversation_id = result.get("id")
-        if not isinstance(conversation_id, str):
-            raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
-        return conversation_id
 
     @staticmethod
     def is_local_binding(conversation_id: str) -> bool:

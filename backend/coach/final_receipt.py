@@ -9,6 +9,7 @@ from typing import Any
 from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
 from backend.coach.receipt_compaction import compact_receipt
+from backend.coach.response_transport import ModelTurn
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -39,7 +40,7 @@ class CoachFinalReceiptService:
         receipt: dict[str, Any],
         *,
         status: str,
-        response: dict[str, Any],
+        turn: ModelTurn,
         client_turn_id: str,
         command_receipts: list[dict[str, Any]],
         sync_job_ids: list[str],
@@ -53,10 +54,8 @@ class CoachFinalReceiptService:
             **receipt,
             "status": status,
             "awaiting_clarification": awaiting_clarification,
-            "response_status": response.get("status")
-            if response.get("status")
-            in {"completed", "incomplete", "failed", "cancelled"}
-            else None,
+            "response_status": ("incomplete" if turn.incomplete else turn.stop_reason)
+            or None,
             "client_turn_id": client_turn_id,
             "command_receipts": command_receipts,
             "sync_job_ids": sync_job_ids,

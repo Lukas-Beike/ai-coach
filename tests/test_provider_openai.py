@@ -1399,6 +1399,25 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             ),
         )
 
+    def test_conversation_create_sends_the_metadata_and_requires_an_id(self):
+        http = _ClientHTTP({"id": "conv-new"})
+        client = self._client(http)
+
+        self.assertEqual(client.create_conversation({"app": "synthetic"}), "conv-new")
+
+        args, _kwargs = http.calls[0]
+        self.assertEqual(
+            args,
+            (
+                "POST",
+                "https://api.example.test/v1/conversations",
+                {"metadata": {"app": "synthetic"}},
+            ),
+        )
+        with self.assertRaises(AppError) as raised:
+            self._client(_ClientHTTP({"id": None})).create_conversation({})
+        self.assertEqual(raised.exception.status, 502)
+
     def test_conversation_delete_keeps_remote_write_boundary_and_timeout(self):
         http = _ClientHTTP({"deleted": True})
         client = self._client(http)

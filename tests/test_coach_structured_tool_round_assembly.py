@@ -4,6 +4,7 @@ import threading
 import unittest
 from unittest.mock import Mock
 
+from backend.coach.response_transport import ModelTurn
 from backend.coach.structured_tool_round_assembly import (
     CoachStructuredToolRoundAssembly,
     StructuredToolRoundContract,
@@ -89,13 +90,11 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         )
         return assembly, dependencies
 
-
     def test_write_gate_uses_read_only_tools_logger_and_lazy_transport(self):
         assembly, deps = self.make_assembly()
-        deps["response_transport"].return_value.request.return_value = {
-            "output_text": '{"requests": [{"domain": "planning", '
-            '"delete": false, "bulk": true}]}'
-        }
+        deps["response_transport"].return_value.request.return_value = ModelTurn(
+            text='{"requests": [{"domain": "planning", "delete": false, "bulk": true}]}'
+        )
 
         gate = assembly.service()._write_gate
 
@@ -107,9 +106,9 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
             classifier("Plan neu aufbauen", "", ""),
             ImpactVerdict(frozenset({"planning"}), bulk=frozenset({"planning"})),
         )
-        payload = deps["response_transport"].return_value.request.call_args.args[0]
-        self.assertEqual(payload["model"], "synthetic-model")
-        self.assertEqual(payload["reasoning"], {"effort": "low"})
+        request = deps["response_transport"].return_value.request.call_args.args[0]
+        self.assertEqual(request.model, "synthetic-model")
+        self.assertEqual(request.reasoning_effort, "low")
 
 
 if __name__ == "__main__":

@@ -59,6 +59,7 @@ from backend.canonical.vocabulary import (
     Sport,
     StreamChannel,
 )
+from backend.coach.responses_adapter import model_turn, request_payload
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
@@ -377,21 +378,23 @@ def _fixture_simulate_openai_mode():
 class FixtureResponseTransport:
     """Provider-free adapter for the canned browser conversation fixture."""
 
-    def request(self, payload):
+    def request(self, request):
         _fixture_simulate_openai_mode()
-        return fixture_coach_response(payload)
+        return model_turn(fixture_coach_response(request_payload(request)))
 
     def stream_request(
-        self, payload, on_text_delta, cancel_event=None, on_response_id=None
+        self, request, on_text_delta, cancel_event=None, on_response_id=None
     ):
         # Only "E2E fixture: slow stream" emits synthetic text deltas (~3 s);
         # every other message keeps the previous no-delta behavior.
         _fixture_simulate_openai_mode()
-        return fixture_coach_response(
-            payload,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            on_response_id=on_response_id,
+        return model_turn(
+            fixture_coach_response(
+                request_payload(request),
+                on_text_delta=on_text_delta,
+                cancel_event=cancel_event,
+                on_response_id=on_response_id,
+            )
         )
 
 

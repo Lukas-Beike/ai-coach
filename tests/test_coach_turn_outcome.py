@@ -9,18 +9,25 @@ from unittest.mock import Mock
 
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.coach.response_transport import ModelTurn
+from backend.coach.responses_adapter import model_turn
 from backend.coach.turn_outcome import CoachStructuredOutcomeService
 
 
 class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
     @staticmethod
-    def response(text: str = "Done", *, status: str = "completed") -> dict:
-        return {
-            "status": status,
-            "output": [
-                {"type": "message", "content": [{"type": "output_text", "text": text}]}
-            ],
-        }
+    def response(text: str = "Done", *, status: str = "completed") -> ModelTurn:
+        return model_turn(
+            {
+                "status": status,
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                ],
+            }
+        )
 
     @staticmethod
     def success(tool: str = "save_checkin") -> dict:
@@ -43,7 +50,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             },
         }
 
-    def finalize(self, response: dict, receipts: list[dict], **options):
+    def finalize(self, response: ModelTurn, receipts: list[dict], **options):
         return server.COACH_TURNS.outcome_service().finalize(
             response,
             receipts,

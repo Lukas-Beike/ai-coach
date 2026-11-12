@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from backend import change_history
@@ -22,7 +22,12 @@ from backend.coach.request_payload import (
     RESUMED_STEPS_NOTICE,
     compose_model_instructions,
 )
-from backend.coach.response_transport import raise_if_chat_cancelled
+from backend.coach.response_transport import (
+    ModelRequest,
+    ModelStep,
+    ModelTurn,
+    raise_if_chat_cancelled,
+)
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
@@ -79,7 +84,7 @@ class StructuredCoachRoundState:
     client_turn_id: str
     session_csrf_hash: str
     cancel_event: threading.Event | None
-    request_payload: dict[str, Any]
+    request: ModelRequest
     model_instructions: str
     message: str
     attachments: list[dict[str, Any]]
@@ -93,8 +98,8 @@ class StructuredCoachRoundState:
     request_kind: str | None = None
     # Set when the model still requested tools after the last allowed round.
     budget_exhausted: bool = False
-    # Stateless chaining: every item sent so far in this turn, resent each round.
-    chain_items: list[dict[str, Any]] = field(default_factory=list)
+    # Stateless chaining: the tool rounds so far in this turn, resent each round.
+    steps: list[ModelStep] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -149,20 +154,6 @@ def _log_budget_exhausted(state: StructuredCoachRoundState, rounds: int) -> None
     )
 
 
-def _replayable_output(response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Output items a stateless request may resend.
-
-    A reasoning item needs its encrypted content: the provider kept nothing to
-    look it up by id.
-    """
-    return [
-        dict(item)
-        for item in response.get("output") or []
-        if isinstance(item, dict)
-        and (item.get("type") != "reasoning" or item.get("encrypted_content"))
-    ]
-
-
 class CoachStructuredToolRoundService:
     """Own tool execution, durable round progress, and provider follow-up."""
 
@@ -202,7 +193,7 @@ class CoachStructuredToolRoundService:
             state.write_gate = self._write_gate.open_turn(
                 message=state.message,
                 context=state.context,
-                model=state.request_payload.get("model"),
+                model=state.request.model,
                 command_receipts=state.command_receipts,
             )
         return state.write_gate
@@ -369,9 +360,7 @@ class CoachStructuredToolRoundService:
         selection = select_coach_context(
             state.message,
             state.context,
-            attachments=bool(
-                state.attachments or state.request_payload.get("conversation")
-            ),
+            attachments=bool(state.attachments or state.request.conversation_id),
             has_receipts=True,
             request_kind=state.request_kind,
         )
@@ -394,7 +383,7 @@ class CoachStructuredToolRoundService:
         scope = coach_execution_scope(
             action, background_horizon_days=self._limits.background_horizon_days
         )
-        state.request_payload["max_output_tokens"] = (
+        state.request.max_output_tokens = (
             self._limits.long_plan_max_output_tokens
             if scope["planning"]
             else self._limits.default_max_output_tokens
@@ -403,81 +392,64 @@ class CoachStructuredToolRoundService:
 
     def _followup_response(
         self,
-        response: dict[str, Any],
+        turn: ModelTurn,
         *,
-        outputs: list[dict[str, Any]],
+        outputs: list[dict[str, str]],
         state: StructuredCoachRoundState,
         question: str,
         cancelled: bool,
         rounds: int,
-    ) -> dict[str, Any]:
-        followup = {
-            **state.request_payload,
-            "instructions": state.model_instructions,
-            "input": outputs,
-            "tool_choice": "none" if question or cancelled else "auto",
-        }
+    ) -> ModelTurn:
+        followup = replace(
+            state.request,
+            instructions=state.model_instructions,
+            tool_choice="none" if question or cancelled else "auto",
+        )
         if any(
             step.get("tool") == "read_coach_context"
             and (step.get("result") or {}).get("ok")
             for step in state.command_receipts
         ):
-            followup["tools"] = state.tools
-        followup = self._chained(followup, response, state)
+            followup.tools = state.tools
+        followup = self._continued(followup, turn, outputs, state)
         result = self._respond(followup, state)
-        calls = self._journal.function_calls(result)
+        calls = result.tool_calls
         # Only a model still asking for tools after the last round leaves work
         # unfinished; one that answers after saving in that round is done.
         if rounds < self._limits.max_rounds or not calls or question or cancelled:
             return result
         state.budget_exhausted = True
         _log_budget_exhausted(state, rounds)
-        final = {
-            **followup,
-            "instructions": state.model_instructions + _TOOL_BUDGET_NOTICE,
-            "input": [
-                {
-                    "type": "function_call_output",
-                    "call_id": item.get("call_id"),
-                    "output": _NOT_EXECUTED,
-                }
-                for item in calls
-            ],
-            "tool_choice": "none",
-        }
-        return self._respond(self._chained(final, result, state), state)
+        final = replace(
+            followup,
+            instructions=state.model_instructions + _TOOL_BUDGET_NOTICE,
+            tool_choice="none",
+        )
+        not_executed = [
+            {"call_id": str(item.get("call_id") or ""), "output": _NOT_EXECUTED}
+            for item in calls
+        ]
+        return self._respond(self._continued(final, result, not_executed, state), state)
 
     @staticmethod
-    def _chained(
-        request: dict[str, Any],
-        response: dict[str, Any],
+    def _continued(
+        request: ModelRequest,
+        turn: ModelTurn,
+        results: list[dict[str, str]],
         state: StructuredCoachRoundState,
-    ) -> dict[str, Any]:
+    ) -> ModelRequest:
         """Continue a turn: the conversation holds its items, else resend them."""
-        if request.get("conversation"):
-            return request
-        # Nothing is stored remotely: resend the turn's items so far, the
-        # model's calls and (encrypted) reasoning, and the new tool outputs.
-        if not state.chain_items:
-            first = state.request_payload.get("input")
-            state.chain_items = (
-                [dict(item) for item in first if isinstance(item, dict)]
-                if isinstance(first, list)
-                else [{"role": "user", "content": str(first or "")}]
-            )
-        state.chain_items = [
-            *state.chain_items,
-            *_replayable_output(response),
-            *request["input"],
-        ]
-        return {**request, "input": list(state.chain_items)}
+        if request.conversation_id:
+            return replace(request, steps=[ModelStep([], results)])
+        state.steps = [*state.steps, ModelStep(turn.opaque_state, results)]
+        return replace(request, steps=list(state.steps))
 
     def _respond(
-        self, followup: dict[str, Any], state: StructuredCoachRoundState
-    ) -> dict[str, Any]:
+        self, followup: ModelRequest, state: StructuredCoachRoundState
+    ) -> ModelTurn:
         return self._response.respond(
             followup,
-            request_payload=state.request_payload,
+            turn_request=state.request,
             context=state.context,
             message=state.message,
             command_receipts=state.command_receipts,
@@ -491,17 +463,17 @@ class CoachStructuredToolRoundService:
 
     def run(
         self,
-        response: dict[str, Any],
+        turn: ModelTurn,
         *,
         rounds: int,
         question: str,
         cancelled: bool,
         state: StructuredCoachRoundState,
-    ) -> tuple[dict[str, Any], int, str, bool, str]:
+    ) -> tuple[ModelTurn, int, str, bool, str]:
         """Run bounded tool rounds while preserving durable replay checkpoints."""
         self._turn_write_gate(state)
         while rounds < self._limits.max_rounds:
-            calls = self._journal.function_calls(response)
+            calls = turn.tool_calls
             if not calls:
                 break
             pending = self._journal.start_round(state.client_turn_id, calls)
@@ -509,7 +481,7 @@ class CoachStructuredToolRoundService:
                 item.get("name") in {"clarify_coach_request", "cancel_coach_request"}
                 for item in calls
             )
-            outputs: list[dict[str, Any]] = []
+            outputs: list[dict[str, str]] = []
             for item in calls:
                 raise_if_chat_cancelled(state.cancel_event)
                 name, call_id, result, _ = self._execute_tool_call(
@@ -533,8 +505,8 @@ class CoachStructuredToolRoundService:
                 )
             rounds += 1
             self._journal.finish_round(state.client_turn_id, rounds)
-            response = self._followup_response(
-                response,
+            turn = self._followup_response(
+                turn,
                 outputs=outputs,
                 state=state,
                 question=question,
@@ -543,4 +515,4 @@ class CoachStructuredToolRoundService:
             )
             if question or cancelled:
                 break
-        return response, rounds, question, cancelled, state.model_instructions
+        return turn, rounds, question, cancelled, state.model_instructions

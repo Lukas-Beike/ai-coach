@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -882,27 +882,6 @@ CLASSIFIER_SCHEMA: dict[str, Any] = {
 }
 
 
-def _text_value(value: Any) -> str:
-    return value if isinstance(value, str) and value.strip() else ""
-
-
-def _item_texts(item: Any) -> Iterator[str]:
-    content = item.get("content") if isinstance(item, Mapping) else None
-    for part in content if isinstance(content, list) else ():
-        yield _text_value(part.get("text") if isinstance(part, Mapping) else None)
-
-
-def _response_text(response: Any) -> str:
-    if not isinstance(response, Mapping):
-        return ""
-    direct = _text_value(response.get("output_text"))
-    if direct:
-        return direct
-    output = response.get("output")
-    items = output if isinstance(output, list) else ()
-    return next((text for item in items for text in _item_texts(item) if text), "")
-
-
 def _verdict(parsed: Any) -> ImpactVerdict:
     if not isinstance(parsed, dict):
         return NO_IMPACT
@@ -926,48 +905,22 @@ def _verdict(parsed: Any) -> ImpactVerdict:
     )
 
 
-def build_openai_impact_classifier(
-    create_response: Callable[[dict[str, Any]], Any],
-    *,
-    model: str,
-    reasoning_effort: str | None = None,
-) -> ImpactClassifier:
-    """Build a classifier over an injected Responses API call.
+def classifier_input(
+    current_text: str, previous_assistant_text: str, origin_text: str = ""
+) -> str:
+    """The bounded text the impact classifier reads, as compact JSON."""
+    message = {
+        "athlete_message": current_text[:_CLASSIFIER_TEXT_LIMIT],
+        "previous_assistant_message": previous_assistant_text[-_HISTORY_TAIL:],
+    }
+    if origin_text:
+        message["original_athlete_request"] = origin_text[:_CLASSIFIER_TEXT_LIMIT]
+    return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
 
-    ``create_response`` sends the payload and returns the parsed response.
-    Invalid output confirms nothing; transport errors propagate to
-    ``check_write``, which fails closed.
-    """
 
-    def classify(
-        current_text: str, previous_assistant_text: str, origin_text: str = ""
-    ) -> ImpactVerdict:
-        message = {
-            "athlete_message": current_text[:_CLASSIFIER_TEXT_LIMIT],
-            "previous_assistant_message": previous_assistant_text[-_HISTORY_TAIL:],
-        }
-        if origin_text:
-            message["original_athlete_request"] = origin_text[:_CLASSIFIER_TEXT_LIMIT]
-        payload: dict[str, Any] = {
-            "model": model,
-            "instructions": CLASSIFIER_INSTRUCTIONS,
-            "input": json.dumps(message, ensure_ascii=False, separators=(",", ":")),
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "write_impact",
-                    "strict": True,
-                    "schema": CLASSIFIER_SCHEMA,
-                }
-            },
-            "store": False,
-            "max_output_tokens": 1024,
-        }
-        if reasoning_effort:
-            payload["reasoning"] = {"effort": reasoning_effort}
-        try:
-            return _verdict(json.loads(_response_text(create_response(payload))))
-        except ValueError:
-            return NO_IMPACT
-
-    return classify
+def parse_verdict(text: str) -> ImpactVerdict:
+    """Read the classifier's answer; invalid output confirms nothing."""
+    try:
+        return _verdict(json.loads(text))
+    except ValueError:
+        return NO_IMPACT

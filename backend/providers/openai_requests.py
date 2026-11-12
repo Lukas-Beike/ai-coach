@@ -243,6 +243,14 @@ class OpenAIResponsesClient:
         )
         return self._responses_prepared(request_payload, cancel_event=cancel_event)
 
+    def create_conversation(self, metadata: Mapping[str, str]) -> str:
+        """Create a remote conversation and return its id."""
+        result = self.request("/conversations", {"metadata": dict(metadata)})
+        conversation_id = result.get("id")
+        if not isinstance(conversation_id, str):
+            raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
+        return conversation_id
+
     def delete_conversation(self, conversation_id: str) -> bool:
         """Delete an explicitly identified remote conversation, when configured."""
         if not self.api_key or not conversation_id:

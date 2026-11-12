@@ -15,18 +15,6 @@ class StructuredToolRoundJournalTests(unittest.TestCase):
         self.job_store = Mock(spec=CoachJobStore)
         self.journal = CoachStructuredToolRoundJournal(self.job_store)
 
-    def test_function_calls_filters_non_dict_and_non_function_items(self) -> None:
-        calls = [{"type": "function_call", "name": "read_profile"}]
-
-        self.assertEqual(
-            self.journal.function_calls(
-                {"output": [None, "text", {"type": "message"}, *calls]}
-            ),
-            calls,
-        )
-        self.assertEqual(self.journal.function_calls({"output": [1, "x", None]}), [])
-        self.assertEqual(self.journal.function_calls({}), [])
-
     def test_start_round_projects_missing_ids_and_names_as_strings(self) -> None:
         calls = [
             {"call_id": "c-1", "name": "read_profile"},

@@ -114,7 +114,7 @@ class CoachStructuredTurnService:
             attachments=attachments,
             request_kind=request_kind,
         ).name
-        model_instructions, request_payload = self._deps.payload.build(
+        model_instructions, request = self._deps.payload.build(
             message=message,
             context=context,
             command_receipts=command_receipts,
@@ -129,9 +129,9 @@ class CoachStructuredTurnService:
             request_kind=request_kind,
         )
         recovery_state = {"conversation_recovered": False}
-        response = self._deps.response.respond(
-            request_payload,
-            request_payload=request_payload,
+        turn = self._deps.response.respond(
+            request,
+            turn_request=request,
             context=context,
             message=message,
             command_receipts=command_receipts,
@@ -150,11 +150,11 @@ class CoachStructuredTurnService:
             "allow_mutations": allow_mutations,
             "tools": tools,
             "model_instructions": model_instructions,
-            "request_payload": request_payload,
+            "request": request,
             "recovery_state": recovery_state,
             "attachments": attachments,
             "background_owned": background_owned,
-            "response": response,
+            "turn": turn,
             "context_profile": context_profile,
             "request_kind": request_kind,
             "conversation_id": conversation_id,
@@ -201,7 +201,7 @@ class CoachStructuredTurnService:
             client_turn_id=client_turn_id,
             session_csrf_hash=session_csrf_hash,
             cancel_event=cancel_event,
-            request_payload=state["request_payload"],
+            request=state["request"],
             model_instructions=state["model_instructions"],
             message=message,
             attachments=state["attachments"],
@@ -211,8 +211,8 @@ class CoachStructuredTurnService:
             context_profile=state["context_profile"],
             request_kind=state["request_kind"],
         )
-        response, rounds, question, cancelled, _ = self._deps.rounds.run(
-            state["response"],
+        turn, rounds, question, cancelled, _ = self._deps.rounds.run(
+            state["turn"],
             rounds=int(receipt.get("tool_rounds") or 0),
             question="",
             cancelled=False,
@@ -220,7 +220,7 @@ class CoachStructuredTurnService:
         )
         budget_exhausted = round_state.budget_exhausted
         status, text, failures = self._deps.outcome.finalize(
-            response,
+            turn,
             command_receipts,
             question=question,
             cancelled=cancelled,
@@ -232,7 +232,7 @@ class CoachStructuredTurnService:
         final_receipt = self._deps.final_receipt.build(
             receipt,
             status=status,
-            response=response,
+            turn=turn,
             client_turn_id=client_turn_id,
             command_receipts=command_receipts,
             sync_job_ids=sync_job_ids,
