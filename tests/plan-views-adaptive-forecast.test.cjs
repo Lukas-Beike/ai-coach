@@ -38,7 +38,7 @@ function renderAdaptiveNotice(data) {
   const detail = new FakeElement("small");
   notice.querySelector = () => detail;
   const state = { data };
-  const views = loadPublicScript("plan-views.js").AppPlanViews.create({
+  const views = loadPublicScript("plan-views.js", {
     $: (selector) => (selector === "#coachAdaptivePlanningNotice" ? notice : null),
     state,
     formatTime,
