@@ -457,7 +457,7 @@ from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.activity_weather_store import home_coordinates
 from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
-from backend.weather.wiring import build_weather
+from backend.weather.wiring import WeatherServices, build_weather
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -764,7 +764,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
         daily_sources=DailyPlanningSources(
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
             external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
-            weather_service=lambda: WEATHER_ASSEMBLY.service(),
+            weather_service=lambda: WEATHER.service(),
             morning_body_battery_service=morning_body_battery_service,
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
@@ -1393,13 +1393,13 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
         ),
     )
 )
-WEATHER_ASSEMBLY = build_weather(APP)
-WEATHER_SYNC = build_weather_sync(APP, WEATHER_ASSEMBLY)
+WEATHER: WeatherServices = build_weather(APP)
+WEATHER_SYNC = build_weather_sync(APP, WEATHER)
 
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            weather_service=WEATHER_ASSEMBLY.service,
+            weather_service=WEATHER.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
@@ -2058,7 +2058,7 @@ PUBLIC_STATE = PublicStateAssembly(
             sync_job_queue=lambda: SYNC_JOB_QUEUE,
         ),
         projections=PublicStateProjectionOwners(
-            weather=lambda: WEATHER_ASSEMBLY,
+            weather=lambda: WEATHER,
             workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
             provider_resync=lambda: PROVIDER_RESYNC,
             coach_conversation=lambda: COACH_CONVERSATION,

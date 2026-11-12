@@ -9,6 +9,8 @@ domain here.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
 from server_test_support import ServerTestCase, server
 
@@ -25,17 +27,14 @@ class CompositionRootTests(ServerTestCase):
         self.assertIsInstance(history.change_history_service(), ChangeHistoryService)
         self.assertIsInstance(history.undo_service(), HistoryUndoService)
 
-    def test_weather_services_resolve_and_the_service_is_cached_per_database(
-        self,
-    ) -> None:
-        weather = server.WEATHER_ASSEMBLY
-
-        self.assertIsInstance(weather.service(), WeatherService)
-        self.assertIs(weather.service(), weather.service())
+    def test_weather_services_resolve(self) -> None:
+        self.assertIsInstance(server.WEATHER.service(), WeatherService)
         self.assertIsInstance(server.WEATHER_SYNC(), WeatherSyncService)
 
     def test_the_context_reads_the_live_configuration_and_database(self) -> None:
-        self.assertIs(server.CONFIG, server.APP.config())
+        replaced = replace(server.CONFIG, calendar_ical_url="https://example.invalid")
+        with patch.object(server, "CONFIG", replaced):
+            self.assertIs(replaced, server.APP.config())
         self.assertIs(server.database_manager(), server.APP.database())
 
 

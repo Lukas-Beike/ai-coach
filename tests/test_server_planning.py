@@ -323,7 +323,7 @@ class ServerPlanningTests(ServerTestCase):
             ]
         )[0]
         with patch.object(
-            server.WEATHER_ASSEMBLY.service(),
+            server.WEATHER.service(),
             "state",
             return_value={
                 "days": [
@@ -368,7 +368,7 @@ class ServerPlanningTests(ServerTestCase):
             ]
         )
         with patch.object(
-            server.WEATHER_ASSEMBLY.service(),
+            server.WEATHER.service(),
             "state",
             return_value={
                 "days": [

@@ -639,7 +639,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             for node in server_tree.body
             if isinstance(node, ast.Assign)
             and any(
-                isinstance(target, ast.Name) and target.id == "WEATHER_ASSEMBLY"
+                isinstance(target, ast.Name) and target.id == "WEATHER"
                 for target in node.targets
             )
         )

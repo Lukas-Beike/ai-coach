@@ -29,12 +29,8 @@ def build_weather(ctx: AppContext) -> WeatherServices:
             runtime_clock.utc_now,
             ctx.logger,
             forecast_days=WEATHER_FORECAST_DAYS,
-            air_quality_client=air_quality.AirQualityClient(
-                ctx.provider_transport.json_http_client().request
-            ),
-            pollen_client=dwd_pollen.DwdPollenClient(
-                ctx.provider_transport.json_http_client().request
-            ),
+            air_quality_client=air_quality.AirQualityClient(request),
+            pollen_client=dwd_pollen.DwdPollenClient(request),
         )
 
     def service() -> weather.WeatherService:
