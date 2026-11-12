@@ -81,7 +81,7 @@ test("@responsive each navigation item is a stable hash link that opens and focu
   await expect.poll(() => page.evaluate(() => Boolean(state.data))).toBe(true);
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
   await expect(page.locator("svg.icon-sprite")).toHaveCount(1);
-  for (const [name, hash, panel] of [["Kalender", "#plan/overview", "workoutsPanel"], ["Analyse", "#analysis/performance", "dataPanel"], ["Mehr", "#more", "settingsPanel"], ["Coach", "#coach", "chatPanel"]]) {
+  for (const [name, hash, panel] of [["Kalender", "#plan/overview", "workoutsPanel"], ["Analyse", "#analysis/running", "dataPanel"], ["Mehr", "#more", "settingsPanel"], ["Coach", "#coach", "chatPanel"]]) {
     const item = page.locator(`.desktop-nav:visible .nav-item[aria-label="${name}"], .bottom-nav:visible .nav-item[aria-label="${name}"]`);
     await expect(item, name).toHaveAttribute("href", hash);
     await item.click();

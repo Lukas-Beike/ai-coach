@@ -125,20 +125,35 @@ function performanceDataStatus(performance) {
 // Device-computed estimates; thresholds are entered or device-reported values and carry no chip.
 const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_ml_kg_min"]);
 
+// One row per metric with a value, in the given order.
+function currentPerformanceRows(metrics, items) {
+  const body = reportNode("tbody");
+  for (const [key, label] of items) {
+    const metric = metrics?.[key];
+    if (metric?.value == null) continue;
+    const row = reportNode("tr"); row.dataset.metric = key;
+    const heading = reportNode("th", label); heading.scope = "row";
+    if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
+    row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
+    body.append(row);
+  }
+  return body;
+}
+
 function renderCurrentPerformance(metrics, history, status = []) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
-  root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
+  root.replaceChildren(reportNode("h3", "Aktuelle Werte"));
   for (const text of status) root.append(reportNode("p", text, "empty"));
   const groups = [
-    ["Laufen", [
+    ["Laufen", "run", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
       ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
-    ["Radfahren", [
+    ["Radfahren", "ride", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
@@ -146,26 +161,24 @@ function renderCurrentPerformance(metrics, history, status = []) {
     ]],
   ];
   const grid = reportNode("div", null, "current-performance-groups");
-  for (const [sport, items] of groups) {
+  // Laufen and Radfahren each show their own table (#2265); the caption names it for screen readers.
+  for (const [sport, analysisSport, items] of groups) {
     const table = reportNode("table", null, "current-performance-table");
-    table.append(reportNode("caption", sport));
-    const body = reportNode("tbody");
-    for (const [key, label] of items) {
-      const metric = metrics?.[key];
-      if (metric?.value == null) continue;
-      const row = reportNode("tr"); row.dataset.metric = key;
-      const heading = reportNode("th", label); heading.scope = "row";
-      if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
-      row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
-      body.append(row);
+    table.dataset.analysisSport = analysisSport;
+    table.append(reportNode("caption", sport, "sr-only"));
+    const body = currentPerformanceRows(metrics, items);
+    // A status message (e.g. a failed read) keeps the section visible.
+    root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
+    if (!body.childElementCount) {
+      const none = reportNode("p", "Noch keine aktuellen Werte.", "muted");
+      none.dataset.analysisSport = analysisSport;
+      grid.append(none);
+      continue;
     }
-    if (!body.childElementCount) continue;
     table.append(body);
     grid.append(table);
   }
-  // A status message (e.g. a failed read) keeps the section visible.
-  root.dataset.analysisEmpty = String(!grid.childElementCount && !status.length);
-  if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "muted"));
+  root.dataset.analysisEmpty = String(root.dataset.analysisEmptyRunning === "true" && root.dataset.analysisEmptyCycling === "true");
   root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
 }

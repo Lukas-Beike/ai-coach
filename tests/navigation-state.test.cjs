@@ -92,7 +92,8 @@ test("the routes name their panels and the segments the views offer", () => {
   assert.equal(routes["plan/overview"], "workoutsPanel");
   assert.equal(routes["plan/library"], "workoutsPanel");
   assert.equal(routes.analysis, "dataPanel");
-  assert.equal(routes["analysis/performance"], "dataPanel");
+  assert.equal(routes["analysis/running"], "dataPanel");
+  assert.equal(routes["analysis/cycling"], "dataPanel");
   assert.equal(routes["more/profile"], "profilePanel");
 });
 
@@ -100,7 +101,9 @@ test("a hash names a known route in any case, and a removed route falls back to 
   const { context } = router();
   const { routeFromHash, hashContainsKnownRoute } = context.AppRouter;
   assert.equal(routeFromHash("#Plan/Overview"), "plan/overview");
-  assert.equal(routeFromHash("#analysis/performance"), "analysis/performance");
+  assert.equal(routeFromHash("#analysis/running"), "analysis/running");
+  // The former Leistung link opens Laufen (#2265).
+  assert.equal(routeFromHash("#analysis/performance"), "analysis/running");
   for (const removed of ["#today", "#activities", "#planned", "#performance", "#analysis/history", "", "#unknown"]) {
     assert.equal(routeFromHash(removed), "coach", removed);
     assert.equal(hashContainsKnownRoute(removed), false, removed);
@@ -115,7 +118,7 @@ test("the route parts fall back to the first plan segment and the connections se
   assert.equal(planSegmentFromRoute("plan/other"), "overview");
   assert.equal(moreSegmentFromRoute("more/operations"), "operations");
   assert.equal(moreSegmentFromRoute("more"), "connections");
-  assert.equal(baseRoute("analysis/performance"), "analysis");
+  assert.equal(baseRoute("analysis/running"), "analysis");
   assert.equal(baseRoute(null), "coach");
 });
 
@@ -152,9 +155,9 @@ test("an unknown route opens the Coach, and a hash change applies the hash route
   await context.AppRouter.navigate("nowhere");
   assert.equal(context.AppState.state.route, "coach");
   assert.equal(panels.get("chatPanel").classes.has("active"), true);
-  location.hash = "#analysis/performance";
+  location.hash = "#analysis/cycling";
   await context.AppRouter.syncFromHash();
-  assert.equal(context.AppState.state.route, "analysis/performance");
+  assert.equal(context.AppState.state.route, "analysis/cycling");
   assert.equal(panels.get("dataPanel").classes.has("active"), true);
 });
 

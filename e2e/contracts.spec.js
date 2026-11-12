@@ -753,10 +753,13 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(charts.locator("svg")).toHaveCount(4);
   const running = charts.locator('[data-analysis-section="development-Lauf"]').locator("..");
   const cycling = charts.locator('[data-analysis-section="development-Rad"]').locator("..");
-  await expect(running.getByRole("heading", { name: "Laufen", exact: true })).toBeVisible();
-  await expect(cycling.getByRole("heading", { name: "Rad", exact: true })).toBeVisible();
-  await expect(running.getByRole("button", { name: "Laufen: Informationen", exact: true })).toBeVisible();
-  await expect(cycling.getByRole("button", { name: "Rad: Informationen", exact: true })).toBeVisible();
+  // Each sport's development sits in its own segment (#2265).
+  await expect(running.getByRole("heading", { name: "Entwicklung", exact: true })).toBeVisible();
+  await expect(running.getByRole("button", { name: "Entwicklung: Informationen", exact: true })).toBeVisible();
+  await expect(cycling).toBeHidden();
+  await page.locator('[data-analysis-segment="cycling"]').click();
+  await expect(cycling.getByRole("heading", { name: "Entwicklung", exact: true })).toBeVisible();
+  await expect(cycling.getByRole("button", { name: "Entwicklung: Informationen", exact: true })).toBeVisible();
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
   await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");

@@ -43,9 +43,9 @@ test("@responsive cycling power profile loads only on performance and keeps unkn
   await waitForInitialState(page);
   expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 0, [TRAINING_RECORDS]: 0 });
 
-  await routeTo(page, "#analysis/performance");
+  await routeTo(page, "#analysis/cycling");
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile")).toBeVisible();
   await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
   await expect(page.locator("#cyclingPowerProfile [data-power-duration='5'] td")).toHaveText("250 W");
   await expect(page.locator("#cyclingPowerProfile [data-power-duration='3600'] td")).toHaveText("210 W");
@@ -57,10 +57,10 @@ test("@responsive cycling power profile loads only on performance and keeps unkn
 test("@responsive cold start on performance fetches only the power profile", async ({ page }) => {
   await mockReports(page);
   const reportCounts = trackReportRequests(page);
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/cycling");
   await expect(page.locator("#appShell")).toBeVisible();
   await page.waitForFunction(() => AppState.state.initialStateLoaded);
-  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile")).toBeVisible();
   await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
   expect(reportCounts()).toEqual({ [ENDURANCE]: 0, [POWER_PROFILES]: 1, [TRAINING_RECORDS]: 0 });
 });
@@ -70,8 +70,8 @@ test("@responsive cycling power profile stays cached across navigation and chart
   const reportCounts = trackReportRequests(page);
   await waitForInitialState(page);
 
-  await routeTo(page, "#analysis/performance");
-  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await routeTo(page, "#analysis/cycling");
+  await expect(page.locator("#cyclingPowerProfile")).toBeVisible();
   await expect(page.locator("#cyclingPowerProfile tbody tr")).toHaveCount(5);
   const afterFirstVisit = reportCounts();
   await page.evaluate(() => renderAnalysisHistory(state.data.performance.history));
@@ -79,9 +79,9 @@ test("@responsive cycling power profile stays cached across navigation and chart
 
   await routeTo(page, "#coach");
   await expect(page.locator("#chatPanel")).toHaveClass(/active/);
-  await routeTo(page, "#analysis/performance");
+  await routeTo(page, "#analysis/cycling");
   await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-  await expect(page.locator("#performancePredictions")).toBeVisible();
+  await expect(page.locator("#cyclingPowerProfile")).toBeVisible();
   expect(reportCounts()).toEqual(afterFirstVisit);
 });
 

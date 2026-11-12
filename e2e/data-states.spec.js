@@ -5,8 +5,9 @@ const { waitForSettledState } = require("./helpers/settled-state");
 // #1783: loading, not configured, no data yet and failed reads look different.
 const POWER_PROFILES = "/api/analysis/power-profiles";
 const ANALYSIS_TABS = [
+  ["running", "Noch keine Laufdaten"],
+  ["cycling", "Noch keine Raddaten"],
   ["load", "Noch keine Belastungsdaten"],
-  ["performance", "Noch keine Leistungsdaten"],
   ["recovery", "Noch keine Erholungsdaten"],
 ];
 
@@ -36,8 +37,8 @@ test("@responsive an empty install shows one empty card with one action per anal
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   // The action follows the connection state: no source leads to the connections, a source to a sync.
-  // Leistung has no period window, so a connected source offers the sync.
-  await page.evaluate(() => { location.hash = "#analysis/performance"; });
+  // Laufen has no period window, so a connected source offers the sync.
+  await page.evaluate(() => { location.hash = "#analysis/running"; });
   await expect(card).toBeVisible();
   await page.evaluate(() => { AppState.state.data.garmin = { ...AppState.state.data.garmin, configured: false }; AppState.state.data.wahoo = { ...AppState.state.data.wahoo, connected: false }; renderAnalysisSegments(AppState.state.route); });
   await expect(card.locator("span")).toHaveText("Garmin oder Wahoo ist nicht verbunden.");
@@ -56,7 +57,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
       ? route.fulfill({ status: 503, json: { error: "E2E fixture: Leistungsprofil nicht erreichbar" } })
       : route.fulfill({ json: { windows: { "90": { power: [{ sport: "Ride", duration_seconds: 5, watts: 640, status: "ok", date: "2026-10-01", source: "Garmin Connect" }] } } } });
   });
-  await openAnalysis(page, "performance");
+  await openAnalysis(page, "cycling");
   const profile = page.locator("#cyclingPowerProfile");
   const error = profile.locator(".error-state");
   await expect(error).toBeVisible();
@@ -82,7 +83,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
 test("@responsive a hanging analysis read times out into the retry state", async ({ page }) => {
   test.setTimeout(60_000);
   await page.route(`**${POWER_PROFILES}`, () => { /* never answers */ });
-  await openAnalysis(page, "performance");
+  await openAnalysis(page, "cycling");
   const profile = page.locator("#cyclingPowerProfile");
   await expect(profile.locator(".loading-state")).toHaveText("Leistungsprofil wird geladen…");
   await expect(profile.locator(".loading-state")).toHaveAttribute("aria-busy", "true");

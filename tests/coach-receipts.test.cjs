@@ -136,7 +136,7 @@ test("action destination precedes a slow refresh and preserves newer navigation"
       state: { route: "coach", coachActionProposals: [{ id: "proposal-1" }] },
       api: async (url) => {
         if (url.endsWith("/confirm")) return { action_token: "token", proposed_action: { payload_hash: "hash" } };
-        if (navigateDuringExecution) context.state.route = "analysis/performance";
+        if (navigateDuringExecution) context.state.route = "analysis/running";
         return { ok: true, status: "applied" };
       },
       renderCoachActionReview() {}, addCoachReceipt() {}, toast() {},

@@ -9,7 +9,8 @@ const NAV_ROUTES = Object.freeze({
   "nutrition/week": "nutritionPanel",
   "nutrition/products": "nutritionPanel",
   analysis: "dataPanel",
-  "analysis/performance": "dataPanel",
+  "analysis/running": "dataPanel",
+  "analysis/cycling": "dataPanel",
   "analysis/load": "dataPanel",
   "nutrition/body": "nutritionPanel",
   "analysis/recovery": "dataPanel",
@@ -46,8 +47,9 @@ globalThis.AppRouter = (() => {
   let configured = false;
   let hashchangeRegistered = false;
 
-  // Removed views whose content lives elsewhere now: the single sessions are in the calendar (#2258).
-  const ROUTE_ALIASES = Object.freeze({ "analysis/sessions": "plan/overview" });
+  // Removed views whose content lives elsewhere now: the single sessions are in the calendar (#2258),
+  // the former Leistung segment is split by sport and its links open Laufen (#2265).
+  const ROUTE_ALIASES = Object.freeze({ "analysis/sessions": "plan/overview", "analysis/performance": "analysis/running" });
 
   function routeFromHash(hash = globalThis.location.hash) {
     const rawRoute = String(hash || "").replace(/^#/, "").toLowerCase();

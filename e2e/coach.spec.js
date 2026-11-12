@@ -4,7 +4,7 @@ const { AxeBuilder } = require("@axe-core/playwright");
 const navigation = [
   ["Coach", "chatPanel", "coach"],
   ["Kalender", "workoutsPanel", "plan/overview"],
-  ["Analyse", "dataPanel", "analysis/performance"],
+  ["Analyse", "dataPanel", "analysis/running"],
   ["Ernährung", "nutritionPanel", "nutrition/diary"],
   ["Mehr", "settingsPanel", "more"],
 ];
@@ -219,20 +219,21 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     }
 
     await page.getByRole("link", { name: "Analyse", exact: true }).click();
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await expect(page.getByRole("link", { name: "Verlauf", exact: true })).toHaveCount(0);
     await expect(page.locator("#activityFilters, #activityFromDate, #activityToDate")).toHaveCount(0);
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
     await page.goBack();
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#more$/);
+    // An old Leistung link opens Laufen (#2265).
     await page.goto("/#analysis/performance");
     await expect(page.locator("#dataPanel")).toHaveClass(/active/);
-    await expect(page).toHaveURL(/#analysis\/performance$/);
+    await expect(page).toHaveURL(/#analysis\/running$/);
     await page.goto("/#unknown-route");
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
     await expect(page).toHaveURL(/#coach$/);

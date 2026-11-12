@@ -33,7 +33,7 @@ test("@responsive Garmin metric export sits in Anbindungen and shows its receipt
 });
 
 test("@responsive chart readings keep their coordinates and legible labels", async ({ page }) => {
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/running");
   await expect(page.locator("#appShell")).toBeVisible();
   const result = await page.evaluate(() => {
     const points = [{ date: "2026-10-01", value: 53.5 }, { date: "2026-10-04", value: 54 }, { date: "2026-10-08", value: 54.5 }];
@@ -87,10 +87,10 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   test.setTimeout(120000);
   const seed = await request.get("/api/fixture/features");
   expect(seed.ok(), await seed.text()).toBeTruthy();
-  await page.goto("/#analysis/performance");
+  await page.goto("/#analysis/running");
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator("#strengthProgress, #strengthTemplates")).toHaveCount(0);
-  await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/running", { historyMode: "replace" }); });
   await expect(page.locator("#analysisHistoryCharts")).toBeVisible();
   await expect(page.locator("#sessionPerformance")).toBeHidden();
   await expect(page.locator("#trainingReport")).toHaveCount(0);
@@ -128,7 +128,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   expect((await zones.boundingBox()).y).toBeGreaterThan((await report.boundingBox()).y);
   await page.evaluate(() => renderSyncStatus({ running: false, message: null }));
   await expect(zones.locator("progress")).toHaveCount(7);
-  await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
+  await page.evaluate(async () => { await AppRouter.navigate("analysis/cycling", { historyMode: "replace" }); });
   const periods = await page.evaluate(() => {
     const history = state.data.performance.history;
     const focus = state.data.performance.training_focus;
