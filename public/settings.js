@@ -211,11 +211,8 @@ async function downloadDatabaseBackup() {
       "Datenbank-Backup konnte nicht erstellt werden.",
       130_000,
     );
-    const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = `pacecraft-database-${todayIso()}.backup`;
-    link.click();
+    h("a", { href: url, download: `pacecraft-database-${todayIso()}.backup` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
   } finally { if (button) button.disabled = false; }
@@ -305,11 +302,8 @@ async function downloadPrivacyExport() {
       "Privacy-Export konnte nicht erstellt werden.",
       130_000,
     );
-    const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = `pacecraft-export-${todayIso()}.zip`;
-    link.click();
+    h("a", { href: url, download: `pacecraft-export-${todayIso()}.zip` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
   } catch (error) { toast(error.message, true); } finally {
@@ -520,11 +514,8 @@ function renderZoneWarnings(warnings) {
     node.replaceChildren();
     return;
   }
-  const title = document.createElement("strong");
-  title.textContent = zoneWarningTitle(warnings);
   // Phrasing content only: <output> holds one line per threshold.
-  const lines = items.flatMap((item) => [document.createElement("br"), document.createTextNode(`• ${zoneWarningLine(item)}`)]);
-  node.replaceChildren(title, ...lines);
+  node.replaceChildren(h("strong", null, zoneWarningTitle(warnings)), ...items.flatMap((item) => [h("br"), `• ${zoneWarningLine(item)}`]));
 }
 
 // Pure: the configuration in effect today for one sport, metric and environment, Garmin's
@@ -636,63 +627,40 @@ function thresholdMainText(metric, value) {
 }
 
 function zoneEditButton(label, attributes) {
-  const button = reportNode("button", label, "zone-edit");
-  button.type = "button";
-  Object.assign(button.dataset, attributes);
-  return button;
+  return h("button", { type: "button", className: "zone-edit", dataset: attributes }, label);
 }
 
 function thresholdBox(sport) {
   const rows = thresholdRows(sport);
-  const box = reportNode("section", null, "zone-box");
-  box.dataset.zoneBox = "thresholds";
-  const heading = reportNode("h3", "Schwellen");
-  if (rows.validFrom) heading.append(reportNode("small", `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`));
-  const grid = reportNode("div", null, "zone-thresholds");
-  grid.append(reportNode("span"), reportNode("span", rows.metric === "power" ? "Leistung" : "Pace", "zone-muted"), reportNode("span", "Puls", "zone-muted"));
+  const heading = h("h3", null, "Schwellen", rows.validFrom ? h("small", null, `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`) : null);
+  const grid = h("div", "zone-thresholds", h("span"), h("span", "zone-muted", rows.metric === "power" ? "Leistung" : "Pace"), h("span", "zone-muted", "Puls"));
   const lt2Label = sport === "ride" ? "LT2 / FTP" : "LT2";
   const lines = [{ label: "LT1", values: rows.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, main: "lt2-main", hr: "lt2-hr" }];
   for (const { label, values, ...names } of lines) {
-    const main = reportNode("b", thresholdMainText(rows.metric, values.main));
-    const hr = reportNode("b", values.hr == null ? "—" : `${Math.round(values.hr)} bpm`);
-    main.dataset.threshold = names.main;
-    hr.dataset.threshold = names.hr;
-    grid.append(reportNode("span", label, "zone-muted"), main, hr);
+    grid.append(h("span", "zone-muted", label),
+      h("b", { dataset: { threshold: names.main } }, thresholdMainText(rows.metric, values.main)),
+      h("b", { dataset: { threshold: names.hr } }, values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
   }
   let lt1Line = rows.lt1Source;
   if (lt1Line && rows.lt1Derived) lt1Line += rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
   const source = [lt1Line, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
-  const foot = reportNode("p", source || null, "zone-source");
-  foot.append(zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
-  box.append(heading, grid, foot);
-  return box;
+  const foot = h("p", "zone-source", source || null, zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
+  return h("section", { className: "zone-box", dataset: { zoneBox: "thresholds" } }, heading, grid, foot);
 }
 
 function zoneKindBox(sport, metric, environment = null) {
   const item = zoneConfigurationFor(sport, metric, environment);
-  const box = reportNode("section", null, "zone-box");
-  box.dataset.zoneBox = environment ? `${metric}-${environment}` : metric;
-  const heading = reportNode("h3", environment ? `${ZONE_KIND_TITLES[metric]} · Indoor` : ZONE_KIND_TITLES[metric]);
   const basis = { power: sport === "run" ? "% der Schwellenleistung" : "% der FTP", heart_rate: "bpm", pace: "% der Schwellenpace" }[metric];
-  heading.append(reportNode("small", basis));
-  box.append(heading);
+  const heading = h("h3", null, environment ? `${ZONE_KIND_TITLES[metric]} · Indoor` : ZONE_KIND_TITLES[metric], h("small", null, basis));
+  const box = h("section", { className: "zone-box", dataset: { zoneBox: environment ? `${metric}-${environment}` : metric } }, heading);
   const attributes = { zoneEdit: metric, zoneEnvironment: environment || "" };
   if (!item) {
-    const empty = reportNode("p", "Noch keine Werte – ", "zone-source");
-    empty.append(zoneEditButton("Anlegen", attributes));
-    box.append(empty);
+    box.append(h("p", "zone-source", "Noch keine Werte – ", zoneEditButton("Anlegen", attributes)));
     return box;
   }
-  const list = reportNode("ul", null, "zone-list");
-  for (const row of zoneRows(item, metric === "pace" ? zoneMetricValue(ZONE_SPORTS[sport].lt2[0]) : null)) {
-    const line = reportNode("li");
-    line.dataset.zone = row.zone;
-    line.append(reportNode("i"), reportNode("span", row.name), reportNode("em", row.range));
-    list.append(line);
-  }
-  const foot = reportNode("p", zoneSourceText(item), "zone-source");
-  foot.append(zoneEditButton("Bearbeiten", attributes));
-  box.append(list, foot);
+  const rows = zoneRows(item, metric === "pace" ? zoneMetricValue(ZONE_SPORTS[sport].lt2[0]) : null);
+  box.append(h("ul", "zone-list", ...rows.map((row) => h("li", { dataset: { zone: row.zone } }, h("i"), h("span", null, row.name), h("em", null, row.range)))),
+    h("p", "zone-source", zoneSourceText(item), zoneEditButton("Bearbeiten", attributes)));
   return box;
 }
 
@@ -788,10 +756,8 @@ function renderZoneEditor() {
   $("#zoneRemoveButton").dataset.key = local?.key || "";
   const sources = $("#zoneSources");
   sources.replaceChildren(...selected.map((item) => {
-    const line = document.createElement("li");
     const threshold = item.threshold == null ? "" : ` · Schwelle ${item.threshold}`;
-    line.textContent = `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`;
-    return line;
+    return h("li", null, `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`);
   }));
 }
 
@@ -845,19 +811,14 @@ async function removeZones() {
 
 function showZoneReceipt(message, change) {
   const receipt = $("#zoneReceipt");
-  const text = document.createElement("span");
-  text.textContent = `${message}. `;
-  receipt.replaceChildren(text);
+  receipt.replaceChildren(h("span", null, `${message}. `));
   if (change?.id) {
-    const undo = document.createElement("button");
-    undo.type = "button";
-    undo.className = "message-undo";
-    undo.textContent = "Rückgängig";
+    const undo = h("button", { type: "button", className: "message-undo" }, "Rückgängig");
     undo.addEventListener("click", async () => {
       undo.disabled = true;
       try {
         await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
-        receipt.replaceChildren(document.createTextNode("Zurückgenommen."));
+        receipt.replaceChildren("Zurückgenommen.");
         await loadZones();
       } catch (error) {
         undo.disabled = false;

@@ -1,3 +1,37 @@
+// One element builder (#2111): props is a class name or an object of properties
+// (`aria-*`/`data-*` become attributes, `dataset` merges); children are nodes or text.
+function h(tag, props = null, ...children) {
+  const element = document.createElement(tag);
+  if (typeof props === "string") {
+    if (props) element.className = props;
+  } else if (props) {
+    for (const [key, value] of Object.entries(props)) {
+      if (value == null) continue;
+      if (key === "dataset") Object.assign(element.dataset, value);
+      else if (key.includes("-")) element.setAttribute(key, String(value));
+      else element[key] = value;
+    }
+  }
+  for (const child of children) if (child != null) element.append(typeof child === "object" ? child : String(child));
+  return element;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgNode(tag, attributes = {}, content = "") {
+  const element = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
+  if (content) element.textContent = content;
+  return element;
+}
+
+// A data table: column headers get scope=col; a cell is a node (kept as is) or text in a td.
+function table(columns, rows, { className = "", caption = "" } = {}) {
+  const head = h("tr", null, ...columns.map((label) => h("th", { scope: "col" }, label)));
+  const body = h("tbody", null, ...rows.map((cells) => h("tr", null, ...cells.map((cell) => (cell && typeof cell === "object" ? cell : h("td", null, cell))))));
+  return h("table", className, caption ? h("caption", null, caption) : null, h("thead", null, head), body);
+}
+
 const dialogFocusReturn = new WeakMap();
 
 function showAccessibleDialog(dialog, initialFocus = null) {

@@ -56,40 +56,20 @@ function updateStatusSources(changes) {
 }
 
 function statusStripLine(item) {
-  const text = document.createElement("span");
-  text.className = "status-strip-text";
-  const title = document.createElement("strong");
-  title.textContent = item.title;
-  text.append(title);
   const stand = item.stand ? statusStandLabel(statusStandAt()) : "";
   const detail = [item.detail, stand].filter(Boolean).join(" ");
-  if (detail) {
-    const detailNode = document.createElement("span");
-    detailNode.className = "status-strip-detail";
-    detailNode.textContent = ` ${detail}`;
-    text.append(detailNode);
-  }
-  return text;
+  return h("span", "status-strip-text", h("strong", null, item.title), detail ? h("span", "status-strip-detail", ` ${detail}`) : null);
 }
 
 function statusStripAction(item) {
   if (!item.action) return null;
-  const link = document.createElement("a");
-  link.className = "status-strip-action";
-  link.href = item.action.href;
-  if (item.action.connection) link.dataset.connection = item.action.connection;
-  link.textContent = item.action.label;
-  return link;
+  const dataset = item.action.connection ? { connection: item.action.connection } : null;
+  return h("a", { className: "status-strip-action", href: item.action.href, dataset }, item.action.label);
 }
 
 function statusStripDismiss(item) {
   if (!item.dismiss) return null;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "secondary-button status-strip-dismiss";
-  button.setAttribute("aria-label", "Für diese Sitzung ausblenden");
-  button.title = "Für diese Sitzung ausblenden";
-  button.textContent = "✕";
+  const button = h("button", { type: "button", className: "secondary-button status-strip-dismiss", "aria-label": "Für diese Sitzung ausblenden", title: "Für diese Sitzung ausblenden" }, "✕");
   button.addEventListener("click", () => {
     item.dismiss();
     // The focused button is gone with the notice; keep the keyboard user on the page.
@@ -100,12 +80,8 @@ function statusStripDismiss(item) {
 }
 
 function statusStripListEntry(item, top) {
-  const entry = document.createElement("li");
-  entry.dataset.level = item.level;
-  entry.dataset.statusKey = item.key;
-  if (top) entry.dataset.top = "true";
-  entry.append(statusStripLine(item), ...[statusStripAction(item), statusStripDismiss(item)].filter(Boolean));
-  return entry;
+  const dataset = { level: item.level, statusKey: item.key, ...(top ? { top: "true" } : {}) };
+  return h("li", { dataset }, statusStripLine(item), statusStripAction(item), statusStripDismiss(item));
 }
 
 function renderStatusStrip() {
@@ -139,36 +115,13 @@ function renderStatusStrip() {
   if (strip.getAttribute("role") !== (alert ? "alert" : "status")) strip.setAttribute("role", alert ? "alert" : "status");
   strip.setAttribute("aria-live", alert ? "assertive" : "polite");
 
-  const main = document.createElement("div");
-  main.className = "status-strip-main";
-  const dot = document.createElement("span");
-  dot.className = "status-strip-dot";
-  dot.setAttribute("aria-hidden", "true");
-  const more = document.createElement("button");
-  more.type = "button";
-  more.className = "status-strip-more secondary-button";
-  more.setAttribute("aria-controls", "statusStripList");
-  const expanded = expandedNow;
-  more.setAttribute("aria-expanded", String(expanded));
-  const suffix = items.length === 1 ? "Hinweis" : "Hinweise";
-  const allLabel = document.createElement("span");
-  allLabel.className = "status-strip-more-all";
-  allLabel.textContent = `${items.length} ${suffix}`;
-  more.append(allLabel);
-  if (rest.length) {
-    const moreLabel = document.createElement("span");
-    moreLabel.className = "status-strip-more-rest";
-    moreLabel.textContent = `+${rest.length} ${rest.length === 1 ? "Hinweis" : "Hinweise"}`;
-    more.prepend(moreLabel);
-  }
+  const hints = (count) => `${count} ${count === 1 ? "Hinweis" : "Hinweise"}`;
+  const more = h("button", { type: "button", className: "status-strip-more secondary-button", "aria-controls": "statusStripList", "aria-expanded": String(expandedNow) },
+    rest.length ? h("span", "status-strip-more-rest", `+${hints(rest.length)}`) : null,
+    h("span", "status-strip-more-all", hints(items.length)));
   more.addEventListener("click", toggleStatusStripList);
-  main.append(dot, statusStripLine(top), ...[statusStripAction(top), statusStripDismiss(top)].filter(Boolean), more);
-
-  const list = document.createElement("ul");
-  list.id = "statusStripList";
-  list.className = "status-strip-list";
-  list.hidden = !expanded;
-  list.append(...items.map((item, index) => statusStripListEntry(item, index === 0)));
+  const main = h("div", "status-strip-main", h("span", { className: "status-strip-dot", "aria-hidden": "true" }), statusStripLine(top), statusStripAction(top), statusStripDismiss(top), more);
+  const list = h("ul", { id: "statusStripList", className: "status-strip-list", hidden: !expandedNow }, ...items.map((item, index) => statusStripListEntry(item, index === 0)));
   strip.replaceChildren(main, list);
 }
 

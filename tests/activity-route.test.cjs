@@ -8,7 +8,8 @@ function text(item) {
 }
 
 function loadRenderRoute() {
-  return extractFunctions("activity-details.js", ["node", "renderRoute"], { document: fakeDocument() }).renderRoute;
+  const document = fakeDocument();
+  return extractFunctions("activity-details.js", ["renderRoute"], { document, h: extractFunctions("components.js", ["h"], { document }).h }).renderRoute;
 }
 
 const ROUTE = { label: "Hausrunde", repeat_index: 5, repeat_count: 6, route_id: "r3" };
