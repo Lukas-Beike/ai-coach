@@ -591,12 +591,12 @@ with patch.object(Path, 'read_text', deny):
                         "garmin", "refresh", {"days": 1}
                     )
                     server.SYNC_JOB_QUEUE.store().claim()
-                    backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
+                    backup = server.BACKUP.backup_service().read_bytes()
                     server.SYNC_JOB_QUEUE.outcome_service().update(
                         job["id"], "completed"
                     )
                     self.assertTrue(
-                        server.BACKUP_ASSEMBLY.restore_service().restore(backup)[
+                        server.BACKUP.restore_service().restore(backup)[
                             "restored"
                         ]
                     )

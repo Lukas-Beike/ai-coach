@@ -6,12 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
-from backend.backup.assembly import (
-    BackupAssembly,
-    BackupStorageDependencies,
-    RestoreLifecycleDependencies,
-    RestoreValidationDependencies,
+from backend.backup.database import (
+    EXPORT_TIME_LIMIT_SECONDS,
+    MAX_BACKUP_BYTES,
+    MIN_EXPORT_FREE_BYTES,
 )
+from backend.backup.wiring import build_backup
+from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.privacy import (
     PrivacyArchiveSettings,
     PrivacyAssembly,
@@ -21,6 +22,7 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
+from backend.sync.worker import shared_sync_job_wake_event
 
 
 class PrivacyAssemblyTests(unittest.TestCase):
@@ -92,69 +94,81 @@ class PrivacyModuleBoundaryTests(unittest.TestCase):
         self.assertNotIn("import server", source)
 
 
-class BackupAssemblyTests(unittest.TestCase):
+class BackupBuilderTests(unittest.TestCase):
     def test_restore_reuses_shared_workers_queue_and_database_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             database_path = data_dir / "database.sqlite"
             manager = Mock(name="manager")
             lock = Mock(name="database_lock")
-            queue = Mock(name="sync_queue")
-            coach_store = Mock(name="coach_store")
-            failures = Mock(name="coach_failures")
-            sync_wake = Mock(name="sync_wake")
-            coach_wake = Mock(name="coach_wake")
-            active_lock = {"value": lock}
-            assembly = BackupAssembly(
-                dependencies=BackupAssembly.Inputs(
-                    storage=BackupStorageDependencies(
-                        database_manager=lambda: manager,
-                        database_path=lambda: database_path,
-                        data_dir=lambda: data_dir,
-                        database_lock=lambda: active_lock["value"],
-                        maximum_bytes=1000,
-                        minimum_free_bytes=10,
-                        time_limit_seconds=5,
-                        logger=Mock(),
-                    ),
-                    validation=RestoreValidationDependencies(
-                        app_password=lambda: "synthetic-password",
-                        sqlcipher_available=lambda: False,
-                        sqlite_backend=Mock(),
-                        configure_cipher=Mock(),
-                        row_factory=Mock(),
-                        schema_is_current=Mock(),
-                        startup_invariants=Mock(),
-                    ),
-                    lifecycle=RestoreLifecycleDependencies(
-                        profile_mutation_coordinator=threading.RLock(),
-                        maintenance_gate=lambda: Mock(name="maintenance_gate"),
-                        sync_jobs=lambda: queue,
-                        coach_jobs=lambda: coach_store,
-                        coach_failures=lambda: failures,
-                        sync_wake_event=lambda: sync_wake,
-                        coach_wake_event=coach_wake,
-                        redact=Mock(),
-                        diagnostics_suspended=MagicMock(),
-                        canonical_backfill_start=Mock(),
-                    ),
-                )
-            )
+            ctx = Mock(name="context")
+            ctx.database = lambda: manager
+            ctx.database_lock = lock
+            ctx.database_path = lambda: database_path
+            ctx.data_dir = lambda: data_dir
+            ctx.config.return_value.app_password = "synthetic-password"
+            ctx.sqlcipher_available = lambda: False
+            ctx.profile_mutation_coordinator = threading.RLock()
+            backup_services = build_backup(ctx)
 
-            backup = assembly.backup_service()
+            backup = backup_services.backup_service()
             replacement_lock = Mock(name="replacement_lock")
-            active_lock["value"] = replacement_lock
-            restore = assembly.restore_service()
+            ctx.database_lock = replacement_lock
+            restore = backup_services.restore_service()
 
             self.assertIs(backup._manager, manager)
             self.assertIs(backup._database_lock, lock)
-            self.assertIs(restore._dependencies.database_lock, replacement_lock)
-            self.assertIs(restore._dependencies.sync_jobs, queue)
-            self.assertIs(restore._dependencies.coach_jobs, coach_store)
-            self.assertIs(restore._dependencies.coach_failures, failures)
-            self.assertIs(restore._dependencies.sync_wake, sync_wake)
-            self.assertIs(restore._dependencies.coach_wake, coach_wake)
-            self.assertEqual(restore._dependencies.config.database_path, database_path)
+            self.assertEqual(backup._config.maximum_bytes, MAX_BACKUP_BYTES)
+            self.assertEqual(backup._config.minimum_free_bytes, MIN_EXPORT_FREE_BYTES)
+            self.assertEqual(
+                backup._config.time_limit_seconds, EXPORT_TIME_LIMIT_SECONDS
+            )
+            dependencies = restore._dependencies
+            self.assertIs(dependencies.database_lock, replacement_lock)
+            self.assertIs(dependencies.maintenance_gate, ctx.maintenance)
+            self.assertIs(
+                dependencies.profile_mutation_coordinator,
+                ctx.profile_mutation_coordinator,
+            )
+            self.assertIs(dependencies.sync_jobs, ctx.sync_job_queue.service())
+            self.assertIs(
+                dependencies.coach_jobs, ctx.coach_background_jobs.job_store()
+            )
+            self.assertIs(
+                dependencies.coach_failures,
+                ctx.coach_background_jobs.turn_failure_service(),
+            )
+            self.assertIs(dependencies.sync_wake, shared_sync_job_wake_event())
+            self.assertIs(dependencies.coach_wake, COACH_JOB_WORKER.wake_event)
+            self.assertEqual(dependencies.config.database_path, database_path)
+            self.assertEqual(dependencies.config.data_dir, data_dir)
+            self.assertIs(
+                dependencies.validation._config.sqlite_backend, ctx.sqlite_backend
+            )
+            self.assertEqual(
+                dependencies.validation._config.app_password, "synthetic-password"
+            )
+
+    def test_restore_reaches_late_owners_only_when_it_runs(self) -> None:
+        ctx = Mock(name="context")
+        ctx.data_dir = lambda: Path("data")
+        ctx.database_path = lambda: Path("data") / "database.sqlite"
+        dependencies = build_backup(ctx).restore_service()._dependencies
+
+        ctx.diagnostic_capture.suspended.assert_not_called()
+        ctx.canonical_backfill.worker.start.assert_not_called()
+        ctx.coach_conversation.reset_service.assert_not_called()
+        dependencies.diagnostics_suspended()
+        dependencies.canonical_backfill_start()
+        cancel = dependencies.cancel_coach_turns
+        assert cancel is not None
+        cancel()
+        ctx.diagnostic_capture.suspended.assert_called_once_with()
+        ctx.canonical_backfill.worker.start.assert_called_once_with()
+        cancel_turns = ctx.coach_conversation.reset_service().cancel_running_turns
+        cancel_turns.assert_called_once_with()
+        self.assertIs(dependencies.refresh_credentials, ctx.refresh_config)
+        self.assertIs(dependencies.redact, ctx.redactor.redact_text)
 
 
 if __name__ == "__main__":

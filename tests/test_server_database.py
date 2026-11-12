@@ -1387,8 +1387,8 @@ class ServerDatabaseTests(ServerTestCase):
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
-                valid_backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
-                restored = server.BACKUP_ASSEMBLY.restore_service().restore(
+                valid_backup = server.BACKUP.backup_service().read_bytes()
+                restored = server.BACKUP.restore_service().restore(
                     valid_backup
                 )
                 self.assertEqual(restored["status"], "ok")
@@ -1413,7 +1413,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(AppError) as error:
-                    server.BACKUP_ASSEMBLY.restore_service().restore(
+                    server.BACKUP.restore_service().restore(
                         incomplete_path.read_bytes()
                     )
                 self.assertEqual(error.exception.status, 400)
@@ -1436,7 +1436,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(AppError) as error:
-                    server.BACKUP_ASSEMBLY.restore_service().restore(
+                    server.BACKUP.restore_service().restore(
                         unexpected_path.read_bytes()
                     )
                 self.assertEqual(error.exception.status, 400)

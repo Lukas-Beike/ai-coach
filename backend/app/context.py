@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from backend.athlete.clock import AthleteLocalClock
@@ -45,6 +46,15 @@ class AppContext:
     database_lock: Any
     # Observed opener for a raw provider request (log and diagnostic capture).
     observed_opener: Callable[[str], Opener]
+    # The live data directory, database path and cipher availability: tests
+    # and a restore swap them, so they are read on every use.
+    data_dir: Callable[[], Path]
+    database_path: Callable[[], Path]
+    sqlcipher_available: Callable[[], bool]
+    sqlite_backend: Any
+    profile_mutation_coordinator: Any
+    # Recompute the configuration from the environment and stored credentials.
+    refresh_config: Callable[[], Any]
     athlete: Any = None
     athlete_profile: Any = None
     canonical_read: Any = None
@@ -56,3 +66,8 @@ class AppContext:
     provider_sync: Any = None
     settings: Any = None
     model_transport: Any = None
+    diagnostic_capture: Any = None
+    sync_job_queue: Any = None
+    coach_background_jobs: Any = None
+    coach_conversation: Any = None
+    canonical_backfill: Any = None
