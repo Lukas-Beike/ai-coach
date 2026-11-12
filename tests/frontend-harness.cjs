@@ -64,14 +64,18 @@ class FakeElement {
     Object.defineProperty(this.style, "setProperty", { value: (name, value) => { this.style[name] = value; } });
     this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(" "); } };
     // Properties set after construction count as explicit, whatever their value.
-    return new Proxy(this, { set: (target, key, value) => { if (!String(key).startsWith("_")) target._explicit.add(key); return Reflect.set(target, key, value); } });
+    const set = (target, key, value) => {
+      if (!String(key).startsWith("_")) target._explicit.add(key);
+      return Reflect.set(target, key, value);
+    };
+    return new Proxy(this, { set }); // NOSONAR: test fake; only a proxy sees properties explicitly set to "" or false.
   }
   get textContent() { return this._text; }
   set textContent(value) { this._text = value; this.children = value === "" || value == null ? [] : [value]; }
   get childElementCount() { return this.children.filter((child) => typeof child !== "string").length; }
   get lastElementChild() { return this.children.findLast((child) => typeof child !== "string") ?? null; }
   get isConnected() { return true; }
-  remove() {}
+  remove() { /* Detached nodes are not modelled; the tree stays as built. */ }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this._text = ""; this.children = items; }
   setAttribute(name, value) { this.attributes[name] = value; }
