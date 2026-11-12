@@ -143,8 +143,15 @@ class FoodDatabaseMirror:
         entry = self._entries.get(db, entity_id)
         if current is None or target is None or entry is None:
             raise AppError(409, "Der Datenbankeintrag ist nicht mehr verfügbar.")
+        # Only the fields the undone change wrote: others keep value and origin.
         self._entries.restore_nutrients(
-            db, entity_id, {k: v for k, v in target.items() if k in NUTRIENT_COLUMNS}
+            db,
+            entity_id,
+            {
+                key: value
+                for key, value in target.items()
+                if key in NUTRIENT_COLUMNS and current.get(key) != value
+            },
         )
         restored = self._entries.get(db, entity_id)
         return food_history_value(restored) if restored else {}
