@@ -11,7 +11,6 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,9 +26,7 @@ from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
 from backend.backup.database import (
-    EXPORT_TIME_LIMIT_SECONDS,
     MAX_BACKUP_BYTES,
-    MIN_EXPORT_FREE_BYTES,
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.backup.wiring import build_backup
@@ -259,15 +256,7 @@ from backend.planning.workflows_assembly import (
     PlanningServiceOwners,
     PlanningWorkflowAssembly,
 )
-from backend.privacy import (
-    PrivacyArchiveSettings,
-    PrivacyAssembly,
-    PrivacyAthleteSources,
-    PrivacyClock,
-    PrivacyContextSources,
-    PrivacyPlanningSources,
-    PrivacyStateDependencies,
-)
+from backend.privacy import build_privacy
 from backend.provider_credentials import (
     GARMIN_SOURCE_DB,
     GARMIN_TOKENS_KEY,
@@ -451,7 +440,6 @@ APP_NAME = "Pacecraft · AI Coach"
 APP_VERSION = "2.1.4"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
-MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -792,62 +780,39 @@ APP = AppContext(
 HISTORY = build_history(APP)
 
 
-def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
-    return DIAGNOSTIC_CAPTURE.suspended()
-
-
 def start_canonical_backfill() -> None:
     return CANONICAL_BACKFILL.worker.start()
-
-
-def cancel_running_coach_turns() -> None:
-    return COACH_CONVERSATION.reset_service().cancel_running_turns()
 
 
 def server_log_files() -> RecentLogEntriesService:
     return DIAGNOSTICS.recent_log_entries_service()
 
 
-PRIVACY_ASSEMBLY = PrivacyAssembly(
-    dependencies=PrivacyAssembly.Inputs(
-        athlete=PrivacyAthleteSources(
-            profile_service=ATHLETE_DATA.profile,
-        ),
-        planning=PrivacyPlanningSources(
-            competition_service=PLANNING_DATA.competition,
-        ),
-        context=PrivacyContextSources(
-            adaptive_preview_service=lambda: (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service()
-            ),
-        ),
-        clock=PrivacyClock(
-            local_now=lambda: ATHLETE_CLOCK.now(),
-            utc_now=runtime_clock.utc_now,
-        ),
-        state=PrivacyStateDependencies(
-            database_manager=database_manager,
-            database_lock=lambda: DB_LOCK,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-            openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
-            logger=LOGGER,
-            diagnostics_suspended=suspend_diagnostic_flushes,
-            refresh_credentials=lambda: refresh_runtime_config(),
-            cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
-            disconnect_wahoo=lambda: disconnect_wahoo_grant(),
-            cancel_coach_turns=cancel_running_coach_turns,
-            log_files=server_log_files,
-        ),
-        archive=PrivacyArchiveSettings(
-            data_dir=lambda: DATA_DIR,
-            database_path=lambda: DB_PATH,
-            maximum_export_bytes=MAX_PRIVACY_EXPORT_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-        ),
-    )
+PRIVACY = build_privacy(
+    database_manager=database_manager,
+    database_lock=lambda: DB_LOCK,
+    key_values=KEY_VALUE_REPOSITORY,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+    profile_service=ATHLETE_DATA.profile,
+    competition_service=PLANNING_DATA.competition,
+    adaptive_preview_service=lambda: (
+        PLANNING_WORKFLOWS.adaptive_replan_preview_service()
+    ),
+    planning_revision_service=PLANNING_REVISION_SERVICE,
+    openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
+    logger=LOGGER,
+    local_now=lambda: ATHLETE_CLOCK.now(),
+    utc_now=runtime_clock.utc_now,
+    data_dir=lambda: DATA_DIR,
+    database_path=lambda: DB_PATH,
+    diagnostics_suspended=lambda: APP.diagnostic_capture.suspended(),
+    refresh_credentials=lambda: refresh_runtime_config(),
+    cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
+    disconnect_wahoo=lambda: disconnect_wahoo_grant(),
+    cancel_coach_turns=lambda: (
+        APP.coach_conversation.reset_service().cancel_running_turns()
+    ),
+    log_files=server_log_files,
 )
 BACKUP = build_backup(APP)
 
@@ -2222,8 +2187,8 @@ HTTP_API = HttpApiAssembly(
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(
                 backup=BACKUP.backup_service,
-                export=PRIVACY_ASSEMBLY.archive_export_service,
-                delete=PRIVACY_ASSEMBLY.delete_service,
+                export=PRIVACY.archive_export_service,
+                delete=PRIVACY.delete_service,
                 restore=BACKUP.restore_service,
                 max_backup_bytes=MAX_BACKUP_BYTES,
             ),

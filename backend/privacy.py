@@ -1,4 +1,4 @@
-"""Local privacy deletion and the privacy service composition."""
+"""Local privacy deletion, the privacy export and their builder."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 
 from backend.activities.route_store import clear_routes
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
+from backend.backup.database import EXPORT_TIME_LIMIT_SECONDS, MIN_EXPORT_FREE_BYTES
 from backend.backup.export import (
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
@@ -34,6 +35,7 @@ from backend.provider_credentials import (
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
 
+MAX_PRIVACY_EXPORT_BYTES = 100_000_000
 PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
 GPS_TRACKS_DELETE_CONFIRMATION_TEXT = "GPS-SPUREN LÖSCHEN"
 
@@ -448,133 +450,79 @@ class PrivacyDeleteService:
 
 
 @dataclass(frozen=True)
-class PrivacyAthleteSources:
-    profile_service: Callable[[], ProfileService]
+class PrivacyServices:
+    delete_service: Callable[[], PrivacyDeleteService]
+    archive_export_service: Callable[[], PrivacyArchiveExportService]
 
 
-@dataclass(frozen=True)
-class PrivacyPlanningSources:
-    competition_service: Callable[[], CompetitionService]
+def build_privacy(
+    *,
+    database_manager: Callable[[], DatabaseManager],
+    database_lock: Callable[[], AbstractContextManager[Any]],
+    key_values: KeyValueRepository,
+    maintenance_gate: Callable[[], MaintenanceGate],
+    profile_service: Callable[[], ProfileService],
+    competition_service: Callable[[], CompetitionService],
+    adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService],
+    planning_revision_service: PlanningRevisionService,
+    openai_client: Callable[[], OpenAIResponsesClient],
+    logger: logging.Logger,
+    local_now: Callable[[], datetime],
+    utc_now: Callable[[], str],
+    data_dir: Callable[[], Path],
+    database_path: Callable[[], Path],
+    diagnostics_suspended: Callable[[], AbstractContextManager[None]],
+    refresh_credentials: Callable[[], Any],
+    cancel_garmin_login: Callable[[], None],
+    disconnect_wahoo: Callable[[], dict[str, Any]],
+    cancel_coach_turns: Callable[[], None],
+    log_files: Callable[[], RecentLogEntriesService],
+) -> PrivacyServices:
+    """The privacy export and the maintenance-gated local data purge.
 
+    Every owner is read when a service is built, so a restore, a swapped data
+    directory or a replaced gate is seen by the next call. The late owners
+    (diagnostics, Garmin, Wahoo, Coach) are only reached when the purge runs.
+    """
 
-@dataclass(frozen=True)
-class PrivacyContextSources:
-    adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService]
-
-
-@dataclass(frozen=True)
-class PrivacyClock:
-    local_now: Callable[[], datetime]
-    utc_now: Callable[[], str]
-
-
-@dataclass(frozen=True)
-class PrivacyStateDependencies:
-    database_manager: Callable[[], DatabaseManager]
-    database_lock: Callable[[], AbstractContextManager[Any]]
-    key_value_repository: KeyValueRepository
-    maintenance_gate: Callable[[], MaintenanceGate]
-    planning_revision_service: PlanningRevisionService
-    openai_client: Callable[[], OpenAIResponsesClient]
-    logger: logging.Logger
-    diagnostics_suspended: Callable[[], AbstractContextManager[None]]
-    refresh_credentials: Callable[[], Any] | None = None
-    cancel_garmin_login: Callable[[], None] | None = None
-    disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
-    cancel_coach_turns: Callable[[], None] | None = None
-    log_files: Callable[[], RecentLogEntriesService] | None = None
-
-
-@dataclass(frozen=True)
-class PrivacyArchiveSettings:
-    data_dir: Callable[[], Path]
-    database_path: Callable[[], Path]
-    maximum_export_bytes: int
-    minimum_free_bytes: int
-    time_limit_seconds: int
-
-
-class PrivacyAssembly:
-    """Compose the privacy projections and maintenance-gated delete use case."""
-
-    @dataclass(frozen=True)
-    class Inputs:
-        athlete: PrivacyAthleteSources
-        planning: PrivacyPlanningSources
-        context: PrivacyContextSources
-        clock: PrivacyClock
-        state: PrivacyStateDependencies
-        archive: PrivacyArchiveSettings
-
-    def __init__(self, *, dependencies: PrivacyAssembly.Inputs) -> None:
-        athlete = dependencies.athlete
-        planning = dependencies.planning
-        context = dependencies.context
-        clock = dependencies.clock
-        state = dependencies.state
-        archive = dependencies.archive
-        self._database_manager = state.database_manager
-        self._database_lock = state.database_lock
-        self._key_value_repository = state.key_value_repository
-        self._profile_service = athlete.profile_service
-        self._competition_service = planning.competition_service
-        self._adaptive_preview_service = context.adaptive_preview_service
-        self._local_now = clock.local_now
-        self._utc_now = clock.utc_now
-        self._maintenance_gate = state.maintenance_gate
-        self._planning_revision_service = state.planning_revision_service
-        self._openai_client = state.openai_client
-        self._logger = state.logger
-        self._diagnostics_suspended = state.diagnostics_suspended
-        self._refresh_credentials = state.refresh_credentials
-        self._cancel_garmin_login = state.cancel_garmin_login
-        self._disconnect_wahoo = state.disconnect_wahoo
-        self._cancel_coach_turns = state.cancel_coach_turns
-        self._log_files = state.log_files
-        self._data_dir = archive.data_dir
-        self._database_path = archive.database_path
-        self._maximum_export_bytes = archive.maximum_export_bytes
-        self._minimum_free_bytes = archive.minimum_free_bytes
-        self._time_limit_seconds = archive.time_limit_seconds
-
-    def delete_service(self) -> PrivacyDeleteService:
+    def delete_service() -> PrivacyDeleteService:
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
-                database_manager=self._database_manager(),
-                database_lock=self._database_lock(),
-                key_value_repository=self._key_value_repository,
-                maintenance_gate=self._maintenance_gate(),
-                profile_mutation_coordinator=self._profile_service().mutation_coordinator,
-                planning_revision_service=self._planning_revision_service,
-                openai_client=self._openai_client(),
-                logger=self._logger,
-                diagnostics_suspended=self._diagnostics_suspended,
-                refresh_credentials=self._refresh_credentials,
-                cancel_garmin_login=self._cancel_garmin_login,
-                disconnect_wahoo=self._disconnect_wahoo,
-                cancel_coach_turns=self._cancel_coach_turns,
-                recovery_copies=RecoveryCopies(
-                    self._data_dir(), self._database_path().name
-                ),
-                log_files=None if self._log_files is None else self._log_files(),
-                utc_now=self._utc_now,
+                database_manager=database_manager(),
+                database_lock=database_lock(),
+                key_value_repository=key_values,
+                maintenance_gate=maintenance_gate(),
+                profile_mutation_coordinator=profile_service().mutation_coordinator,
+                planning_revision_service=planning_revision_service,
+                openai_client=openai_client(),
+                logger=logger,
+                diagnostics_suspended=diagnostics_suspended,
+                refresh_credentials=refresh_credentials,
+                cancel_garmin_login=cancel_garmin_login,
+                disconnect_wahoo=disconnect_wahoo,
+                cancel_coach_turns=cancel_coach_turns,
+                recovery_copies=RecoveryCopies(data_dir(), database_path().name),
+                log_files=log_files(),
+                utc_now=utc_now,
             )
         )
 
-    def archive_export_service(self) -> PrivacyArchiveExportService:
+    def archive_export_service() -> PrivacyArchiveExportService:
         return PrivacyArchiveExportService(
-            self._database_manager(),
-            self._key_value_repository,
-            self._profile_service(),
-            self._competition_service(),
-            self._adaptive_preview_service(),
+            database_manager(),
+            key_values,
+            profile_service(),
+            competition_service(),
+            adaptive_preview_service(),
             PrivacyArchiveExportConfig(
-                self._data_dir(),
-                self._database_path(),
-                lambda: self._local_now().date(),
-                self._utc_now,
-                maximum_bytes=self._maximum_export_bytes,
-                minimum_free_bytes=self._minimum_free_bytes,
-                time_limit_seconds=self._time_limit_seconds,
+                data_dir(),
+                database_path(),
+                lambda: local_now().date(),
+                utc_now,
+                maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
+                minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
+                time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
             ),
         )
+
+    return PrivacyServices(delete_service, archive_export_service)
