@@ -143,18 +143,18 @@ class TargetTests(unittest.TestCase):
 
     def test_pace_is_slower_first_and_converts_miles(self) -> None:
         self.assertEqual(
-            ("pace.zone", 3.3333, 3.3333), values(first_step("5:00/KM PACE", "pace"))
+            ("pace.zone", 3.333, 3.333), values(first_step("5:00/KM PACE", "pace"))
         )
         self.assertEqual(
-            ("pace.zone", 3.3333, 3.7037),
+            ("pace.zone", 3.333, 3.704),
             values(first_step("4:30/KM-5:00/KM PACE", "pace")),
         )
         self.assertEqual(
-            ("pace.zone", 3.3333, 3.7037),
+            ("pace.zone", 3.333, 3.704),
             values(first_step("5:00-4:30/KM PACE", "pace")),
         )
         self.assertEqual(
-            ("pace.zone", 2.6822, 2.6822),
+            ("pace.zone", 2.682, 2.682),
             values(first_step("10:00/MI PACE", "pace")),
         )
 
@@ -278,6 +278,23 @@ class ComparableTests(unittest.TestCase):
             ],
             comparable_steps(sent),
         )
+
+    def test_a_pace_on_the_rounding_edge_stays_equal_after_read_back(self) -> None:
+        # 4:46/km is 3.49650... m/s: sent as 3.497, so read-back drift stays equal.
+        sent = run_workout(
+            name="n",
+            description="",
+            blocks=[block(step("4:46/KM PACE", "pace"))],
+        )
+        read_back = deepcopy(sent)
+        target = read_back["workoutSegments"][0]["workoutSteps"][0]
+        target["targetValueOne"] -= 0.00001
+        target["targetValueTwo"] += 0.00001
+
+        self.assertEqual(
+            3.497, sent["workoutSegments"][0]["workoutSteps"][0]["targetValueOne"]
+        )
+        self.assertEqual(comparable_steps(sent), comparable_steps(read_back))
 
     def test_differences_are_visible(self) -> None:
         blocks = [block(step("200W"), step("210W"), repeat=2)]

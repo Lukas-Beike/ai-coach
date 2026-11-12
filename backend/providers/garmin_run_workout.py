@@ -240,7 +240,8 @@ def _executable(
         where, kind, str(step.get("target") or "").strip().upper(), targets
     )
     key = _TARGET_KEYS[kind]
-    digits = 4 if kind == "pace" else 0
+    # Pace is sent at the precision comparable_steps compares (0.001 m/s).
+    digits = 3 if kind == "pace" else 0
     return {
         "type": "ExecutableStepDTO",
         "stepOrder": order,
