@@ -18,6 +18,7 @@ from backend.coach.proposal_creation import (
 )
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
@@ -28,7 +29,6 @@ from backend.planning.push_state import (
 )
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
-from backend.db.repositories import KeyValueRepository
 from backend.sync.garmin_strength_push import (
     APP_WORKOUT_CLEANUP_KEY,
     GarminStrengthPushService,
