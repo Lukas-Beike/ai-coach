@@ -205,22 +205,22 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`, `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`; `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`, `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`, `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`; `backend/coach/planning_action_tools.py:CoachPlanningActionToolService._undo_training_change`; `tests/test_coach_planning_action_tools.py:CoachPlanningActionToolServiceTests.test_create_undo_with_apply_is_only_offered_as_a_card`, `tests/test_coach_planning_action_tools.py:CoachUndoToolPersistenceTests.test_update_undo_with_apply_still_runs_directly`.
 
 ### Requirement: CA11 Server-side plan checks before Coach plan writes
-The system SHALL check the resulting future plan of every Coach tool write that creates or moves planned units against the plan rules, roll back a write that adds a new or riskier illness_hard finding the athlete did not accept, or a new strength_incomplete, focus_missing or hr_cap_invalid finding (which can never be accepted), and return the other new findings as notes with their evidence strength. Explicit athlete UI/API edits are not checked.
+The system SHALL check the resulting future plan of every Coach tool write that creates or moves planned units against the plan rules, roll back a write that adds a new or riskier illness_hard finding the athlete did not accept, or a new strength_incomplete, focus_missing, hr_cap_invalid, template_missing or template_mismatch finding (which can never be accepted), and return the other new findings as notes with their evidence strength. Explicit athlete UI/API edits are not checked.
 
 #### Scenario: Checked tools and rules
 - **WHEN** `apply_training_patch`, `apply_training_changes`, `replace_training_plan`, `apply_workout_library_plan`, `commit_training_plan` or the approved `apply_adaptive_replan` writes planned units
 - **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (planned load = duration x intensity^2 per sport, run and ride, against the stored M6 load of completed sessions), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard, intensity_distribution, leg_strength_before_key_session and leg_strength_frequency.
 
 #### Scenario: Blocking violation
-- **WHEN** a Coach plan write would add an unaccepted illness_hard finding, or a strength_incomplete, focus_missing or hr_cap_invalid finding
+- **WHEN** a Coach plan write would add an unaccepted illness_hard finding, or a strength_incomplete, focus_missing, hr_cap_invalid, template_missing or template_mismatch finding
 - **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn. For `apply_adaptive_replan` the check wraps only the local apply (its preview and next-message approval rules are unchanged); a block rolls the whole apply back, nothing is applied, the optional Intervals.icu illness sync does not run and the Coach tells the athlete; new notes come back as `plan_check_notes`.
 
 #### Scenario: Missing required fields
-- **WHEN** a Coach plan write creates, moves or changes a unit and adds a strength_incomplete, focus_missing or hr_cap_invalid finding
+- **WHEN** a Coach plan write creates, moves or changes a unit and adds a strength_incomplete, focus_missing, hr_cap_invalid, template_missing or template_mismatch finding
 - **THEN** the transaction is rolled back and the tool result is a failure with the findings; `accept_plan_findings` cannot waive them. For `apply_adaptive_replan` such a gap passes only on a unit that already had it before the write.
 
 #### Scenario: Notes
-- **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, intensity_distribution, leg_strength_before_key_session, leg_strength_frequency, calendar_load or all_day_event findings
+- **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, intensity_distribution, leg_strength_before_key_session, leg_strength_frequency, calendar_load, all_day_event or template_scaled findings
 - **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike or load_spike is a notice up to 30 % and a warning beyond.
 
 #### Scenario: All-day events
