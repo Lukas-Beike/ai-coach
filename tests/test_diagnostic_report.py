@@ -51,6 +51,8 @@ class _Database:
         if any(table in query for table in _OTHER_TABLES):
             return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
         table = query.rsplit("FROM ", 1)[1]
+        if table == "kv WHERE key = ?":
+            return SimpleNamespace(fetchone=lambda: None)
         if table.startswith("kv WHERE key IN"):
             return SimpleNamespace(
                 fetchall=lambda: [
@@ -180,6 +182,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "database",
                 "wahoo",
                 "plan_sync",
+                "garmin_past_workout_removal",
                 "canonical_coverage",
                 "canonical_backfill",
                 "canonical_read",
@@ -199,6 +202,17 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "logs",
                 "debug_capture",
                 "note",
+            },
+        )
+        self.assertEqual(
+            report["garmin_past_workout_removal"],
+            {
+                "one_time_done": False,
+                "checked": 0,
+                "removed": 0,
+                "last_run_at": None,
+                "last_outcome": None,
+                "past_links_pending": 0,
             },
         )
         self.assertEqual(
@@ -289,8 +303,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # The provider composition adds five reads (sessions, observations and
         # three domain tables) to the same snapshot; the stream backfill counts
         # add two (Garmin records, the stream cursor); the provider sync times add
-        # two (refresh history, push jobs); the schema version adds one.
-        self.assertEqual(len(self.db.queries), 23)
+        # two (refresh history, push jobs); the schema version adds one; the
+        # Garmin past-workout removal adds its stored state.
+        self.assertEqual(len(self.db.queries), 24)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
@@ -301,6 +316,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "activity_feedback",
                 "change_history",
                 "kv WHERE key IN (?, ?, ?)",
+                "kv WHERE key = ?",
                 "provider_sync_cursors WHERE provider=? AND stream=?",
             ],
         )

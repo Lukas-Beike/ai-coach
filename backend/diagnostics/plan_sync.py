@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from backend.db.repositories import KeyValueRepository
+from backend.sync.garmin_strength_push import APP_WORKOUT_CLEANUP_KEY
 from backend.sync.jobs import job_dto, read_job
+
+_OUTCOMES = frozenset({"ok", "failed", "skipped"})
 
 _JOB_LIMIT = 10
 _UNIT_LIMIT = 50
@@ -69,3 +74,33 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
             for unit in units
         ],
     }
+
+
+def summarize_garmin_removal(db: Any) -> dict[str, Any]:
+    """Counts only: the one-time removal's state, removals and the last run.
+
+    ``past_links_pending`` counts the past linked workouts the last run left,
+    by the athlete-local day the removal uses.
+    """
+    try:
+        state = json.loads(
+            KeyValueRepository(str).get(db, APP_WORKOUT_CLEANUP_KEY) or "{}"
+        )
+    except TypeError, ValueError:
+        state = {}
+    state = state if isinstance(state, dict) else {}
+    last_run = state.get("last_run_at")
+    checked = state.get("checked")
+    outcome = state.get("last_outcome")
+    return {
+        "one_time_done": state.get("done") is True,
+        "checked": len(checked) if isinstance(checked, list) else 0,
+        "removed": _count(state.get("removed")),
+        "last_run_at": last_run if isinstance(last_run, str) else None,
+        "last_outcome": outcome if outcome in _OUTCOMES else None,
+        "past_links_pending": _count(state.get("pending")),
+    }
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
