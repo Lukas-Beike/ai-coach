@@ -15,12 +15,18 @@ from unittest.mock import patch
 
 from server_test_support import ServerTestCase, server
 
+from backend.backup.database import DatabaseBackupService
+from backend.backup.restore import DatabaseRestoreService
+from backend.backup.restore_validation import DatabaseRestoreValidationService
+from backend.coach.job_store import CoachJobStore
+from backend.coach.turn_failures import CoachTurnFailureService
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.sync.queue import SyncJobQueueService
 from backend.sync.weather import WeatherSyncService
 from backend.weather.service import WeatherService
 
@@ -50,6 +56,23 @@ class CompositionRootTests(ServerTestCase):
             nutrition.intervals_sync_service(), IntervalsNutritionSyncService
         )
         self.assertIs(nutrition.food_mirror(), nutrition.food_mirror())
+
+    def test_backup_services_resolve_over_the_live_owners(self) -> None:
+        backup = server.BACKUP
+
+        self.assertIsInstance(backup.backup_service(), DatabaseBackupService)
+        self.assertIsInstance(
+            backup.restore_validation_service(), DatabaseRestoreValidationService
+        )
+        restore = backup.restore_service()
+        self.assertIsInstance(restore, DatabaseRestoreService)
+        self.assertEqual(restore._dependencies.config.database_path, server.DB_PATH)
+        self.assertEqual(restore._dependencies.config.data_dir, server.DATA_DIR)
+        self.assertIsInstance(restore._dependencies.sync_jobs, SyncJobQueueService)
+        self.assertIsInstance(restore._dependencies.coach_jobs, CoachJobStore)
+        self.assertIsInstance(
+            restore._dependencies.coach_failures, CoachTurnFailureService
+        )
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

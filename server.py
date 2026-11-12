@@ -27,13 +27,13 @@ from backend.athlete.checkins import (
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
-from backend.backup.assembly import (
-    BackupAssembly,
-    BackupStorageDependencies,
-    RestoreLifecycleDependencies,
-    RestoreValidationDependencies,
+from backend.backup.database import (
+    EXPORT_TIME_LIMIT_SECONDS,
+    MAX_BACKUP_BYTES,
+    MIN_EXPORT_FREE_BYTES,
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
+from backend.backup.wiring import build_backup
 from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
@@ -133,7 +133,6 @@ from backend.config import (
 from backend.db import manager as database_manager_runtime
 from backend.db import row_factory as database_row_factory
 from backend.db.bootstrap import (
-    apply_startup_invariants,
     initialize_application_database,
 )
 from backend.db.key_value import KeyValueService
@@ -155,7 +154,7 @@ from backend.db.repositories import (
     ProfileRepository,
     TrainingPlanRepository,
 )
-from backend.db.schema import configure_cipher, database_schema_is_current
+from backend.db.schema import configure_cipher
 from backend.diagnostics.assembly import (
     DiagnosticGarminServices,
     DiagnosticLocalProjections,
@@ -473,10 +472,7 @@ APP_NAME = "Pacecraft · AI Coach"
 APP_VERSION = "2.1.4"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
-MAX_BACKUP_BYTES = 1_000_000_000
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
-MIN_EXPORT_FREE_BYTES = 10_000_000
-EXPORT_TIME_LIMIT_SECONDS = 120
 # The longest silence allowed between two parts of a streamed model response.
 # Long reasoning on a large plan may send nothing for minutes (athlete
 # decision 2026-11-11, #2073: 10 minutes instead of 3).
@@ -801,7 +797,13 @@ APP = AppContext(
     redactor=REDACTOR,
     operation_context=sync_observation.OPERATION_CONTEXT,
     database_lock=DB_LOCK,
-    # Defined below; looked up when a provider client is built.
+    data_dir=lambda: DATA_DIR,
+    database_path=lambda: DB_PATH,
+    sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
+    sqlite_backend=sqlite_backend,
+    profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
+    # Defined below; looked up when a provider client is built or on use.
+    refresh_config=lambda: refresh_runtime_config(),
     observed_opener=lambda service: observed_provider_opener(service),
     athlete=ATHLETE_DATA,
     athlete_profile=ATHLETE_PROFILE_SERVICE,
@@ -870,49 +872,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
         ),
     )
 )
-BACKUP_ASSEMBLY = BackupAssembly(
-    dependencies=BackupAssembly.Inputs(
-        storage=BackupStorageDependencies(
-            database_manager=database_manager,
-            database_path=lambda: DB_PATH,
-            data_dir=lambda: DATA_DIR,
-            database_lock=lambda: DB_LOCK,
-            maximum_bytes=MAX_BACKUP_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-            logger=LOGGER,
-        ),
-        validation=RestoreValidationDependencies(
-            app_password=lambda: CONFIG.app_password,
-            sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
-            sqlite_backend=sqlite_backend,
-            configure_cipher=configure_cipher,
-            row_factory=database_row_factory,
-            schema_is_current=database_schema_is_current,
-            startup_invariants=lambda db: apply_startup_invariants(
-                db,
-                key_values=KEY_VALUE_REPOSITORY,
-                now=runtime_clock.utc_now(),
-                default_profile_json=json.dumps(DEFAULT_PROFILE),
-                provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
-            ),
-        ),
-        lifecycle=RestoreLifecycleDependencies(
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
-            sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
-            coach_jobs=lambda: COACH_BACKGROUND_JOBS.job_store(),
-            coach_failures=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
-            sync_wake_event=shared_sync_job_wake_event,
-            coach_wake_event=COACH_JOB_WORKER.wake_event,
-            redact=REDACTOR.redact_text,
-            diagnostics_suspended=suspend_diagnostic_flushes,
-            canonical_backfill_start=start_canonical_backfill,
-            refresh_credentials=lambda: refresh_runtime_config(),
-            cancel_coach_turns=cancel_running_coach_turns,
-        ),
-    )
-)
+BACKUP = build_backup(APP)
 
 
 def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
@@ -989,6 +949,7 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
     timer_context=background_writer,
 )
+APP.diagnostic_capture = DIAGNOSTIC_CAPTURE
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
     database_manager=database_manager,
@@ -1103,6 +1064,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
         ),
     )
 )
+APP.sync_job_queue = SYNC_JOB_QUEUE
 
 EXTERNAL_CALENDAR = ExternalCalendarAssembly(
     dependencies=ExternalCalendarAssembly.Inputs(
@@ -1282,6 +1244,7 @@ COACH_CONVERSATION = CoachConversationAssembly(
         json_media_type=JSON_MEDIA_TYPE,
     ),
 )
+APP.coach_conversation = COACH_CONVERSATION
 COACH_LOCAL = CoachLocalAssembly(
     dependencies=CoachLocalAssembly.Inputs(
         state=CoachLocalState(
@@ -1966,6 +1929,7 @@ COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
         ),
     )
 )
+APP.coach_background_jobs = COACH_BACKGROUND_JOBS
 
 
 COACH_TURNS = CoachTurnAssembly(
@@ -2176,6 +2140,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
         ATHLETE_DATA.profile().get_from_db(db).get("weather_location", ""),
     ),
 )
+APP.canonical_backfill = CANONICAL_BACKFILL
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
     dependencies=DiagnosticsAssembly.Inputs(
@@ -2347,10 +2312,10 @@ HTTP_API = HttpApiAssembly(
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(
-                backup=BACKUP_ASSEMBLY.backup_service,
+                backup=BACKUP.backup_service,
                 export=PRIVACY_ASSEMBLY.archive_export_service,
                 delete=PRIVACY_ASSEMBLY.delete_service,
-                restore=BACKUP_ASSEMBLY.restore_service,
+                restore=BACKUP.restore_service,
                 max_backup_bytes=MAX_BACKUP_BYTES,
             ),
             sync=HttpSyncServices(

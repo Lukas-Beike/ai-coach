@@ -608,7 +608,7 @@
  "test_planning_workout_export.WorkoutValidationEdgeTests": 0.0,
  "test_planning_workouts.PlanningWorkoutTests": 0.004,
  "test_power_profile.PowerProfileTests": 0.875,
- "test_privacy_backup_assemblies.BackupAssemblyTests": 0.002,
+ "test_privacy_backup_assemblies.BackupBuilderTests": 0.002,
  "test_privacy_backup_assemblies.PrivacyAssemblyTests": 0.002,
  "test_privacy_data_export.PrivacyDataExportServiceTests": 0.001,
  "test_privacy_delete_confirmation.PrivacyDeleteConfirmationTests": 0.072,
