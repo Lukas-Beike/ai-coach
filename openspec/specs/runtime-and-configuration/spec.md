@@ -112,7 +112,7 @@ Evidence: `backend/config.py` (`load_local_env`, `_parse_local_env_line`, `secur
 
 ### Requirement: Ordered startup and durable-work recovery
 
-Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, enqueue configured startup refreshes, then start the workers, the canonical backfill and daily scheduling before serving the main loop. The canonical re-projection and the follow-up stages that decode streams SHALL start no new record or session after a short batch time, so logins, Coach turns and provider syncs keep working while a version bump recomputes stored values.
+Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, enqueue configured startup refreshes, then start the workers, the canonical backfill and daily scheduling before serving the main loop. The canonical re-projection and the stream-decoding follow-up stages SHALL start no new record or session after a short batch time; those stages SHALL compute before taking the writer, so logins, Coach turns and syncs keep working during a recompute.
 
 
 #### Scenario: Normal start
@@ -123,11 +123,15 @@ Startup SHALL validate secure configuration, initialize the database, recover in
 - **WHEN** a method version bump makes the canonical backfill recompute every stored session
 - **THEN** startup finishes, and a login, a Coach turn or a provider sync waiting for the writer gets it within its normal timeout because each batch stops at the batch time
 
+#### Scenario: Recompute outside the writer
+- **WHEN** a follow-up stage recomputes changed sessions
+- **THEN** the writer stays free while their streams are decoded and computed; the writer transaction re-checks each session's fingerprint and writes only results whose inputs are unchanged
+
 #### Scenario: Database initialization alone
 - **WHEN** the schema/bootstrap service initializes persistent state
 - **THEN** it does not independently repeat job recovery that belongs to runtime startup
 
-Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_startup_sync_scheduler.py::test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`.
+Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`; `backend/sync/canonical_backfill.py::precomputed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_session_analysis_stage.py::test_sessions_are_analysed_before_the_writer_is_taken`; `tests/test_session_metrics.py::test_metrics_are_computed_before_the_writer_is_taken`; `tests/test_activity_routes.py::test_tracks_are_decoded_before_the_writer_is_taken`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_startup_sync_scheduler.py::test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`.
 
 ### Requirement: Startup preparation before workers
 
