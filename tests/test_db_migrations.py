@@ -1,5 +1,6 @@
 """Schema gate: the production baseline reaches the live schema; all else stays unchanged."""
 
+import hashlib
 import json
 import sqlite3
 import sys
@@ -18,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from support import temp_database
 
 from backend.canonical.vocabulary import ProviderId
-from backend.db import migrations, schema_history
+from backend.db import migrations, repositories, schema_history
 from backend.db.bootstrap import initialize_application_database
 from backend.db.migrations import OlderSchemaError, migrate_schema
 from backend.db.repositories import FoodDatabaseEntryRepository, KeyValueRepository
@@ -125,6 +126,10 @@ EAN_OWN, EAN_OTHER = "4006381333931", "4000000000017"
 YAZIO_ID = "yazio:0f0f0f0f-0000-4000-8000-000000000001"
 OWN_FOOD_ID = "off:4000000000024"
 NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g")
+
+
+# SHA-256 of the baseline's product rows after the v26 to v27 step (#2364).
+V27_PRODUCT_ROWS_DIGEST = "45f2e88b3a0e022417d55050c06790272c63dab4ecaabd64ba99aa98445423d7"
 
 
 def mirror_food(food_id: str, unit: str | None, **per_100: float | None) -> dict:
@@ -316,21 +321,49 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             [("open_food_facts", 2), ("own", 2), ("yazio", 2)],
         )
 
+    def test_v27_product_step_is_frozen_against_live_repository_changes(self):
+        # #2364: the step neither calls the live product repositories nor
+        # moves with them; its rows match the result recorded for schema v27.
+        db = self.connect()
+        populated_baseline_database(db)
+        with (
+            mock.patch.object(
+                repositories.FoodDatabaseEntryRepository, "upsert", side_effect=AssertionError
+            ),
+            mock.patch.object(
+                repositories.NutritionProductRepository,
+                "fill_from_database_entries",
+                side_effect=AssertionError,
+            ),
+            mock.patch.object(
+                repositories, "fill_empty_product_fields", side_effect=AssertionError
+            ),
+        ):
+            migrate_schema(db)
+        rows = [
+            dict(row)
+            for row in db.execute("SELECT * FROM nutrition_products ORDER BY id")
+        ]
+        self.assertEqual(
+            hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest(),
+            V27_PRODUCT_ROWS_DIGEST,
+        )
+
     def test_failing_baseline_upgrade_rolls_back_and_a_retry_succeeds(self):
         db = self.connect()
         populated_baseline_database(db)
         before = list(db.iterdump())
-        upsert = FoodDatabaseEntryRepository.upsert
+        store = migrations._v27_store_food
         calls = []
 
-        def failing_upsert(repository, *args, **kwargs):
+        def failing_store(*args, **kwargs):
             calls.append(1)
             if len(calls) == 3:
                 raise RuntimeError("injected migration failure")
-            return upsert(repository, *args, **kwargs)
+            return store(*args, **kwargs)
 
         with (
-            mock.patch.object(FoodDatabaseEntryRepository, "upsert", failing_upsert),
+            mock.patch.object(migrations, "_v27_store_food", failing_store),
             self.assertRaisesRegex(RuntimeError, "injected"),
         ):
             migrate_schema(db)
