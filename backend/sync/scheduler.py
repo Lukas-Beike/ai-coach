@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 from collections.abc import Callable, Mapping
@@ -114,13 +115,13 @@ class DailySyncScheduler:
     ) -> None:
         if not policy.configured():
             return
-        if provider_id in self._daily_marker_ids and not self._markers.is_due(
-            provider_id
-        ):
-            return
         if policy.blocked() or self._queue.active(provider_id):
             return
         if self._retry_held is not None and self._retry_held(provider_id):
+            return
+        # Last, so a provider check that reads remotely runs only when the
+        # refresh could be queued.
+        if not self._refresh_due(provider_id, policy):
             return
         self._queue.enqueue(
             provider_id,
@@ -128,6 +129,14 @@ class DailySyncScheduler:
             policy.refresh_payload("daily", self._config.auto_update_label),
             requested_by="scheduler",
         )
+
+    def _refresh_due(self, provider_id: str, policy: ProviderSchedulePolicy) -> bool:
+        """The hourly marker, unless the policy decides itself (``refresh_due``)."""
+        if provider_id not in self._daily_marker_ids:
+            return True
+        marker_due = functools.partial(self._markers.is_due, provider_id)
+        decide = getattr(policy, "refresh_due", None)
+        return bool(decide(marker_due)) if callable(decide) else marker_due()
 
 
 class DailySyncLoop:
@@ -143,7 +152,10 @@ class DailySyncLoop:
         stop_event: threading.Event | None = None,
         housekeeping: Callable[[], object] | None = None,
         wal_checkpoint: Callable[[], object] | None = None,
+        morning_due: Callable[[], bool] | None = None,
     ) -> None:
+        # False while the Garmin change check waits for the night (#2303).
+        self._morning_due = morning_due
         self._housekeeping = housekeeping
         self._wal_checkpoint = wal_checkpoint
         self._daily_scheduler = daily_scheduler
@@ -167,7 +179,8 @@ class DailySyncLoop:
             self._run_wal_checkpoint()
             try:
                 self._daily_scheduler.schedule()
-                self._morning_battery.refresh()
+                if self._morning_due is None or self._morning_due():
+                    self._morning_battery.refresh()
             except AppError as exc:
                 if exc.reason != "maintenance":
                     self._logger.error(

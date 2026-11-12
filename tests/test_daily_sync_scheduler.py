@@ -175,15 +175,17 @@ class DailySyncSchedulerTests(unittest.TestCase):
         scheduler.schedule()
 
         self.assertEqual(self.queue.jobs, [])
-        self.assertEqual(markers.checked, ["calendar", "garmin"])
+        # An active job skips the provider before its due check (#2303).
+        self.assertEqual(markers.checked, [])
 
     def test_a_held_provider_gets_no_refresh_until_its_retry_is_due(self):
         held = {"garmin"}
         queue = _Queue()
+        markers = _Markers()
         scheduler = DailySyncScheduler(
             _Profile(),
             queue,
-            _Markers(),
+            markers,
             _Garmin(),
             MaintenanceGate(),
             config=DailySyncSchedulerConfig(
@@ -197,10 +199,53 @@ class DailySyncSchedulerTests(unittest.TestCase):
         scheduler.schedule()
         self.assertNotIn("garmin", [job[0] for job in queue.jobs])
         self.assertIn("calendar", [job[0] for job in queue.jobs])
+        # A held provider's due check (the Garmin change check) never runs.
+        self.assertNotIn("garmin", markers.checked)
 
         held.clear()
         scheduler.schedule()
         self.assertIn("garmin", [job[0] for job in queue.jobs])
+
+    def test_a_policy_with_its_own_due_check_replaces_the_hourly_marker(self):
+        class ChangeChecked:
+            def __init__(self, due):
+                self.due = due
+                self.asked = 0
+
+            def configured(self):
+                return True
+
+            def blocked(self):
+                return False
+
+            def refresh_due(self, marker_due):
+                self.asked += 1
+                return self.due
+
+            def refresh_payload(self, _trigger, reason):
+                return {"reason": reason}
+
+        for due in (True, False):
+            with self.subTest(due=due):
+                policy = ChangeChecked(due)
+                queue = _Queue()
+                markers = _Markers({"garmin": not due})
+                DailySyncScheduler(
+                    _Profile(),
+                    queue,
+                    markers,
+                    _Garmin(),
+                    MaintenanceGate(),
+                    config=DailySyncSchedulerConfig(
+                        calendar_url_enabled=False,
+                        garmin_automatic_sync_days=2,
+                        auto_update_label="automatic refresh",
+                    ),
+                    schedule_policies={"garmin": policy},
+                ).schedule()
+                self.assertEqual(1, policy.asked)
+                self.assertEqual([], markers.checked)
+                self.assertEqual(due, bool(queue.jobs))
 
     def test_a_failing_due_check_skips_neither_later_providers_nor_morning_refresh(
         self,

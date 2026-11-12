@@ -203,10 +203,15 @@ class GarminPersonalClient:
         try:
             response = self._opener(request, REQUEST_TIMEOUT_SECONDS)
         except HTTPError as error:
+            headers = error.headers
+            retry_after = provider_http.parse_retry_after(
+                headers.get("Retry-After") if headers is not None else None
+            )
             error.close()
-            # The body may echo request data; only the status leaves this module.
+            # The body may echo request data; only the status and the named wait
+            # leave this module.
             raise provider_http.classify_provider_status(
-                int(error.code), GARMIN_ID
+                int(error.code), GARMIN_ID, retry_after=retry_after
             ) from None
         try:
             return provider_http.read_bounded_response(response, max_bytes)
@@ -329,6 +334,30 @@ class GarminPersonalClient:
                 )
             activities.extend(rows)
         raise provider_http.ProviderInvalidResponse("Garmin activity paging exceeded")
+
+    def newest_activity_ids(self, startdate: str, enddate: str) -> list[str]:
+        """The ids of the newest activity page in the range, in one request.
+
+        Not an SDK method: the change check reads it to spot a new activity.
+        """
+        rows = self._get(
+            "/activitylist-service/activities/search/activities",
+            {
+                "startDate": _day(startdate),
+                "endDate": _day(enddate),
+                "start": 0,
+                "limit": ACTIVITY_PAGE_SIZE,
+            },
+        )
+        if rows is None:
+            return []
+        if not isinstance(rows, list):
+            raise provider_http.ProviderInvalidResponse("Invalid Garmin activity page")
+        return [
+            str(row["activityId"])
+            for row in rows
+            if isinstance(row, dict) and row.get("activityId") is not None
+        ]
 
     def get_activity(self, activity_id: str) -> Any:
         return self._get(f"/activity-service/activity/{quote(str(int(activity_id)))}")

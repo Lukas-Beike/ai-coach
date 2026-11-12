@@ -197,6 +197,15 @@ class FakePersonalApi:
         ]
 
 
+def _throttled(headers: Message) -> Any:
+    """An opener answering every request with HTTP 429 and these headers."""
+
+    def opener(request: Any, timeout: float) -> Any:
+        raise HTTPError(request.full_url, 429, "Too Many", headers, io.BytesIO())
+
+    return opener
+
+
 def _client(
     api: FakePersonalApi, clock: list[float] | None = None
 ) -> GarminPersonalClient:
@@ -305,6 +314,36 @@ class PersonalClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 401)
         self.assertEqual(raised.exception.category, "authentication")
         self.assertNotIn("wrong-synthetic-key", str(raised.exception))
+
+    def test_throttling_carries_the_named_wait_and_ids_take_one_request(
+        self,
+    ) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+        self.assertEqual(["900001"], client.newest_activity_ids(DAY, DAY))
+        self.assertEqual(
+            ["/activitylist-service/activities/search/activities"], api.data_paths()
+        )
+
+        for header, wait in (("120", 120.0), ("soon", None), (None, None)):
+            with self.subTest(header=header):
+                headers = Message()
+                if header is not None:
+                    headers["Retry-After"] = header
+
+                with self.assertRaises(provider_http.ProviderHTTPError) as raised:
+                    GarminPersonalClient(
+                        SYNTHETIC_KEY, opener=_throttled(headers)
+                    ).verify_key()
+                self.assertEqual("rate_limited", raised.exception.category)
+                self.assertEqual(wait, raised.exception.retry_after)
+        self.assertEqual(
+            30.0,
+            provider_http.parse_retry_after(
+                "Thu, 12 Nov 2026 10:00:30 GMT",
+                now=datetime(2026, 11, 12, 10, tzinfo=UTC).timestamp(),
+            ),
+        )
 
     def test_families_use_the_personal_paths(self) -> None:
         api = FakePersonalApi()

@@ -87,6 +87,22 @@ def morning_sleep_element(
     return {"calendarDate": checkin_date.isoformat(), "dailySleepDTO": dto}
 
 
+def has_night(elements: Any, day: date) -> bool:
+    """Whether a sleep element of ``day`` holds a recorded sleep duration."""
+    for element in elements if isinstance(elements, list) else []:
+        if not isinstance(element, dict) or element.get("calendarDate") != (
+            day.isoformat()
+        ):
+            continue
+        night = element.get("dailySleepDTO")
+        seconds = (night if isinstance(night, dict) else element).get(
+            "sleepTimeSeconds"
+        )
+        if isinstance(seconds, (int, float)) and seconds > 0:
+            return True
+    return False
+
+
 def merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     """Merge bounded-window results without discarding older snapshot records."""
     return merge_records(incoming, previous)

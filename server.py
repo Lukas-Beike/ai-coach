@@ -1663,6 +1663,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
         stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
+        change_check=GARMIN_ASSEMBLY.change_check,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
@@ -1728,6 +1729,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
             database_manager=database_manager,
+            morning_due=lambda: GARMIN_ASSEMBLY.change_check().morning_due(),
         ),
     ),
     provider_runtime=provider_runtime,

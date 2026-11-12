@@ -7,6 +7,7 @@ an application error by their caller.
 
 from __future__ import annotations
 
+import email.utils
 import json
 import re
 import secrets
@@ -359,13 +360,28 @@ class ProviderHTTPError(Exception):
 
 
 def classify_provider_status(
-    status: int, service: str, detail: Any = ""
+    status: int, service: str, detail: Any = "", retry_after: float | None = None
 ) -> ProviderHTTPError:
     """Classify an HTTP response without leaking its body to callers."""
     category = {429: "rate_limited", 401: "authentication", 403: "authentication"}.get(
         status, "http"
     )
-    return ProviderHTTPError(service, category, status, redact_provider_text(detail))
+    return ProviderHTTPError(
+        service, category, status, redact_provider_text(detail), retry_after
+    )
+
+
+def parse_retry_after(value: Any, now: float | None = None) -> float | None:
+    """Return the wait a ``Retry-After`` value names, as seconds or an HTTP date."""
+    text = str(value or "").strip()
+    if text.isdigit():
+        return float(text)
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except TypeError, ValueError, IndexError:
+        return None
+    current = time.time() if now is None else now
+    return max(0.0, when.timestamp() - current)
 
 
 def read_bounded_response(
