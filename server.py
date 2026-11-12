@@ -1262,7 +1262,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
         ),
     )
 )
-MODEL_TRANSPORT = ModelTransportAssembly(
+MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
     dependencies=ModelTransportAssembly.Inputs(
         providers=ModelProviderOwners(
             config=lambda: CONFIG,
