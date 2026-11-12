@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { extractFunctions } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement } = require("./frontend-harness.cjs");
 
 function harness(apiImpl) {
   const elements = {
@@ -11,23 +11,24 @@ function harness(apiImpl) {
     "#nutritionBarcodeDialog": { close() {} },
   };
   const rendered = [];
-  const databaseLoads = [];
   const context = extractFunctions("nutrition.js", ["nutritionProductLoadSequence", "nutritionLookupResultShown", "isCurrentNutritionProductLoad", "prepareNutritionProductLookup", "showNutritionProductLoadError", "loadNutritionProducts", "lookupNutritionProduct"], {
     state: { sessionGeneration: 1 },
     document: { querySelector: (selector) => elements[selector] || null },
     api: apiImpl,
-    renderNutritionProducts: (products) => rendered.push(products),
+    renderNutritionProducts: (products, options) => rendered.push([products, options]),
     saveNutritionProduct: async () => {},
-    loadNutritionDatabase: async (query) => { databaseLoads.push(query); },
     normalizeNutritionProduct: (product) => product,
   });
-  return { context, elements, rendered, databaseLoads };
+  return { context, elements, rendered };
 }
 
-test("a product search also lists the stored database entries for the same query", async () => {
-  const { context, databaseLoads } = harness(async () => ({ products: [] }));
-  await context.loadNutritionProducts("hafer");
-  assert.deepEqual(databaseLoads, ["hafer"]);
+test("the product list is one request for all products, and a search is passed on to the sections", async () => {
+  const urls = [];
+  const { context, rendered } = harness(async (url) => { urls.push(url); return { products: [{ id: "p1" }] }; });
+  await context.loadNutritionProducts("");
+  await context.loadNutritionProducts("hafer & co");
+  assert.deepEqual(urls, ["/api/nutrition/products?scope=all", "/api/nutrition/products?scope=all&q=hafer%20%26%20co"]);
+  assert.deepEqual(rendered.map(([, options]) => options.search), [false, true]);
 });
 
 const LOCAL_LOOKUP = { ok: true, source: "manual", local: true, product: { id: "p1", name: "Haferdrink" } };
@@ -61,9 +62,9 @@ test("an explicit product search still replaces the lookup result", async () => 
   const { context, elements } = harness(async (url) => (url.includes("/lookup") ? LOCAL_LOOKUP : { products: [] }));
   await context.lookupNutritionProduct("4006381333931");
   await context.loadNutritionProducts("hafer");
-  assert.equal(elements["#nutritionProductStatus"].textContent, "Keine lokalen Produkte gefunden.");
+  assert.equal(elements["#nutritionProductStatus"].textContent, "Keine Produkte gefunden.");
   await context.loadNutritionProducts("", { background: true });
-  assert.equal(elements["#nutritionProductStatus"].textContent, "Keine lokalen Produkte gefunden.");
+  assert.equal(elements["#nutritionProductStatus"].textContent, "Keine Produkte gefunden.");
 });
 
 test("online nutrients fill the product editor without replacing zero or local values", () => {
@@ -80,4 +81,131 @@ test("product editor follows the barcode result before the product lists", () =>
   const html = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
   assert.ok(html.indexOf('id="nutritionLookupResult"') < html.indexOf('id="nutritionExtraction"'));
   assert.ok(html.indexOf('id="nutritionExtraction"') < html.indexOf('id="nutritionProducts"'));
+});
+
+// The product page: one merged list in two sections (#2267).
+const LIST_FUNCTIONS = ["NUTRITION_FIELD_NAMES", "NUTRITION_PRODUCT_SECTIONS", "nutritionProductSectionsOpen", "nutritionIsDatabaseProduct", "nutritionMissingFields", "nutritionProductDate", "nutritionOriginText", "nutritionIncompleteMark", "nutritionProductSection", "nutritionProductCard", "renderNutritionProducts", "appendNutritionProductActions", "nutritionFavoriteButton", "normalizeNutritionProduct", "nutritionDatabaseSource"];
+const OWN = { id: "own-1", name: "Whey", brand: "Fixture", barcode: "4000000000017", basis_amount: 100, basis_unit: "g", origin: "own", fetched_at: null, favorite: 1, kcal: 380, carbs_g: 5, protein_g: 72, fat_g: 6, sugar_g: 2, fiber_g: 1, salt_g: 0.1, missing_fields: [] };
+const FOOD = { id: "off:4006381333931", name: "Haferdrink", brand: "Beispiel", barcode: "4006381333931", basis_amount: 100, basis_unit: "ml", origin: "open_food_facts", source: "open_food_facts", fetched_at: "2026-10-01T08:00:00+00:00", favorite: 0, kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: null, fiber_g: 0, salt_g: null, missing_fields: ["sugar_g", "salt_g"] };
+
+const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
+const descendants = (node) => node.children.filter((child) => typeof child !== "string").flatMap((child) => [child, ...descendants(child)]);
+const withClass = (node, name) => descendants(node).filter((child) => child.className.split(" ").includes(name));
+
+function listContext() {
+  const targets = { "#nutritionProducts": new FakeElement(), "#nutritionLookupResult": new FakeElement() };
+  const context = extractFunctions("nutrition.js", LIST_FUNCTIONS, {
+    document: { createElement: (tag) => new FakeElement(tag), querySelector: (selector) => targets[selector] || null },
+    api: async () => ({}),
+    useNutritionProduct() {}, saveNutritionProduct() {}, refreshNutritionProduct() {}, deleteNutritionProduct() {}, reloadNutritionProducts() {},
+    showNutritionProductError() {},
+  });
+  return { context, target: targets["#nutritionProducts"], lookup: targets["#nutritionLookupResult"] };
+}
+
+test("both sections start collapsed and name their total and their incomplete entries", () => {
+  const { context, target } = listContext();
+  context.renderNutritionProducts([OWN, FOOD]);
+  const [favorites, all] = target.children;
+  assert.deepEqual([favorites, all].map((section) => section.open), [false, false]);
+  assert.deepEqual([favorites, all].map((section) => textOf(section.children[0])), ["Favoriten (1)", "Alle Produkte (2) ⚠ 1"]);
+  assert.equal(withClass(all.children[0], "nutrition-incomplete")[0].attributes["aria-label"], "1 unvollständig");
+  assert.equal(withClass(favorites.children[0], "nutrition-incomplete").length, 0);
+  assert.equal(all.children[1].children.length, 2);
+  assert.equal(favorites.children[1].children.length, 1);
+});
+
+test("an opened section stays open on the next render until the page is left", () => {
+  const { context, target } = listContext();
+  context.renderNutritionProducts([OWN, FOOD]);
+  target.children[1].open = true;
+  target.children[1].listeners.toggle();
+  context.renderNutritionProducts([OWN, FOOD]);
+  assert.deepEqual(target.children.map((section) => section.open), [false, true]);
+});
+
+test("while searching, only sections with hits are open and the search does not change what stays open", () => {
+  const { context, target } = listContext();
+  context.renderNutritionProducts([FOOD], { search: true });
+  assert.deepEqual(target.children.map((section) => section.open), [false, true]);
+  target.children[1].listeners.toggle();
+  context.renderNutritionProducts([FOOD]);
+  assert.deepEqual(target.children.map((section) => section.open), [false, false]);
+});
+
+test("every card shows its origin, its missing fields and the same actions and star", () => {
+  const { context, target } = listContext();
+  context.renderNutritionProducts([OWN, FOOD]);
+  const [own, food] = target.children[1].children[1].children;
+  assert.equal(textOf(withClass(own, "nutrition-origin")[0]), "eigen");
+  assert.equal(textOf(withClass(food, "nutrition-origin")[0]), "Datenbank · Stand 01.10.2026");
+  assert.equal(withClass(own, "nutrition-incomplete").length, 0);
+  const missing = withClass(food, "nutrition-incomplete")[0];
+  assert.equal(missing.textContent, "⚠ fehlt: Zucker, Salz");
+  assert.equal(missing.attributes["aria-label"], "Unvollständig, es fehlen: Zucker, Salz");
+  assert.match(textOf(food), /EAN 4006381333931 · Basis: 100 ml/);
+  for (const card of [own, food]) {
+    assert.deepEqual(withClass(card, "nutrition-actions")[0].children.map((button) => button.textContent), ["Verwenden", "Bearbeiten", "Aktualisieren", "Löschen"]);
+    assert.equal(withClass(card, "nutrition-favorite").length, 1);
+  }
+  assert.equal(withClass(food, "nutrition-favorite")[0].attributes["aria-pressed"], "false");
+});
+
+test("a live lookup hit is not a stored product: it only offers saving it locally", () => {
+  const { context, lookup } = listContext();
+  context.renderNutritionProducts([{ id: "off:4006381333931", name: "Bio Haferdrink", brands: "Beispiel", source: "open_food_facts", local: false, per_100: { kcal: 46 } }], { local: false, targetId: "#nutritionLookupResult" });
+  const [card] = lookup.children;
+  assert.deepEqual(card.children.filter((child) => child.tag === "button").map((button) => button.textContent), ["Lokal speichern"]);
+  assert.equal(withClass(card, "nutrition-favorite").length, 0);
+  assert.equal(textOf(withClass(card, "nutrition-origin")[0]), "Datenbank");
+});
+
+test("a stored database entry keeps its id, a live hit loses it", () => {
+  const { context } = listContext();
+  assert.equal(context.normalizeNutritionProduct(FOOD).id, "off:4006381333931");
+  const live = context.normalizeNutritionProduct({ id: "off:4006381333931", source: "open_food_facts", name: "Haferdrink" });
+  assert.equal(live.id, undefined);
+  assert.equal(live.external_id, "off:4006381333931");
+});
+
+// The actions behind the four buttons.
+function actionContext(responses) {
+  const calls = [];
+  const status = new FakeElement();
+  const context = extractFunctions("nutrition.js", ["nutritionIsDatabaseProduct", "reloadNutritionProducts", "showNutritionProductError", "refreshNutritionProduct", "deleteNutritionProduct"], {
+    document: { querySelector: () => status },
+    api: async (url, options) => { calls.push([url, JSON.parse(options.body)]); const response = responses[url]; if (response instanceof Error) throw response; return response || {}; },
+    requestConfirmation: async (question) => { calls.push(["confirm", question]); return true; },
+    showNutritionReceipt: (_status, message) => { status.textContent = message; },
+    loadNutritionProducts: async () => {},
+  });
+  return { context, calls, status };
+}
+
+test("deleting a database entry removes it from the database after its own confirmation", async () => {
+  const { context, calls, status } = actionContext({});
+  await context.deleteNutritionProduct({ id: "off:1", name: "Haferdrink", origin: "open_food_facts" });
+  assert.deepEqual(calls, [["confirm", "Eintrag „Haferdrink“ aus der Datenbank entfernen? Eigene Produkte bleiben erhalten."], ["/api/nutrition/products/database/delete", { id: "off:1", confirmed: true }]]);
+  assert.equal(status.textContent, "Eintrag „Haferdrink“ aus der Datenbank entfernt.");
+});
+
+test("deleting an own product archives it after confirmation", async () => {
+  const { context, calls } = actionContext({});
+  await context.deleteNutritionProduct({ id: "own-1", name: "Whey", origin: "own" });
+  assert.deepEqual(calls.map(([target]) => target), ["confirm", "/api/nutrition/products/archive"]);
+});
+
+test("re-checking an own product without an EAN names the EAN and the editor", async () => {
+  const error = Object.assign(new Error("server text"), { reason: "nutrition_product_barcode_missing" });
+  const { context, status } = actionContext({ "/api/nutrition/products/database/refresh": error });
+  const button = new FakeElement("button");
+  await context.refreshNutritionProduct({ id: "own-1", name: "Whey", origin: "own" }, button);
+  assert.equal(status.textContent, "Für Aktualisieren wird eine EAN gebraucht. Unter Bearbeiten eintragen.");
+  assert.equal(button.disabled, false);
+});
+
+test("a re-check shows the outcome the server reports", async () => {
+  const { context, status } = actionContext({ "/api/nutrition/products/database/refresh": { ok: true, notice: "Nichts zu ergänzen." } });
+  await context.refreshNutritionProduct({ id: "off:1", name: "Haferdrink", origin: "open_food_facts" }, new FakeElement("button"));
+  assert.equal(status.textContent, "„Haferdrink“ aktualisiert. Nichts zu ergänzen.");
 });
