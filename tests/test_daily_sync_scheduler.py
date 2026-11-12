@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.scheduler import (
     DailySyncLoop,
     DailySyncScheduler,
@@ -119,15 +120,17 @@ class DailySyncSchedulerTests(unittest.TestCase):
         self.queue = queue or _Queue()
         self.markers = markers or _Markers()
         return DailySyncScheduler(
-            profile or _Profile(),
             self.queue,
             self.markers,
-            garmin or _Garmin(),
             maintenance_gate or MaintenanceGate(),
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=calendar_enabled,
-                garmin_automatic_sync_days=2,
                 auto_update_label="automatic refresh",
+            ),
+            schedule_policies=build_schedule_policies(
+                profile=profile or _Profile(),
+                garmin=garmin or _Garmin(),
+                calendar_enabled=calendar_enabled,
+                garmin_automatic_sync_days=2,
             ),
         )
 
@@ -183,15 +186,17 @@ class DailySyncSchedulerTests(unittest.TestCase):
         queue = _Queue()
         markers = _Markers()
         scheduler = DailySyncScheduler(
-            _Profile(),
             queue,
             markers,
-            _Garmin(),
             MaintenanceGate(),
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=True,
-                garmin_automatic_sync_days=2,
                 auto_update_label="automatic refresh",
+            ),
+            schedule_policies=build_schedule_policies(
+                profile=_Profile(),
+                garmin=_Garmin(),
+                calendar_enabled=True,
+                garmin_automatic_sync_days=2,
             ),
             retry_held=lambda provider: provider in held,
         )
@@ -231,14 +236,10 @@ class DailySyncSchedulerTests(unittest.TestCase):
                 queue = _Queue()
                 markers = _Markers({"garmin": not due})
                 DailySyncScheduler(
-                    _Profile(),
                     queue,
                     markers,
-                    _Garmin(),
                     MaintenanceGate(),
                     config=DailySyncSchedulerConfig(
-                        calendar_url_enabled=False,
-                        garmin_automatic_sync_days=2,
                         auto_update_label="automatic refresh",
                     ),
                     schedule_policies={"garmin": policy},

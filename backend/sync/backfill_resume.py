@@ -18,8 +18,8 @@ from typing import Any, Final
 from backend.athlete.local_date import iso_date_prefix
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.schedule_policies import ProviderSchedulePolicy
 from backend.sync.state import SyncStateRepository
 
 # A chain without an active job is queued again at most this often.

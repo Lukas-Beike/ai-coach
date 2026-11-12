@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
+from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.scheduler import StartupSyncScheduler, StartupSyncSchedulerConfig
 
 
@@ -104,15 +105,17 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         self.garmin = garmin or _Garmin()
         self.sync_state = sync_state or _SyncState()
         return StartupSyncScheduler(
-            self.profile,
             self.queue,
-            self.garmin,
             self.sync_state,
             config=StartupSyncSchedulerConfig(
-                calendar_enabled=calendar_enabled,
-                garmin_automatic_sync_days=9,
                 sync_chunk_days=45,
                 sync_earliest_date=date(2000, 1, 1),
+            ),
+            schedule_policies=build_schedule_policies(
+                profile=self.profile,
+                garmin=self.garmin,
+                calendar_enabled=calendar_enabled,
+                garmin_automatic_sync_days=9,
             ),
         )
 

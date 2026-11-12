@@ -460,6 +460,7 @@ class DailyLoopAssemblyTests(unittest.TestCase):
                     Mock(),
                     database_manager=None if manager is None else lambda: manager,
                 ),
+                providers=Mock(),
             )
         )
         with patch.object(assembly, "daily_scheduler"):

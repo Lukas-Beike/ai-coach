@@ -443,6 +443,7 @@ from backend.sync.scheduler_assembly import (
     SyncScheduleOwners,
     SyncSchedulePersistence,
     SyncSchedulePolicy,
+    SyncScheduleProviders,
     SyncSchedulerAssembly,
 )
 from backend.sync.selected_assembly import (
@@ -1735,8 +1736,15 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
             database_manager=database_manager,
             morning_due=lambda: GARMIN_ASSEMBLY.change_check().morning_due(),
         ),
+        providers=SyncScheduleProviders(
+            garmin_resync_gate=GARMIN_RESYNC_GATE,
+            weather_refresh_due=lambda: WEATHER_ASSEMBLY.sync_service().refresh_due(),
+            wahoo=SYNC_JOB_DEPENDENCIES.wahoo,
+            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+            all_sync_days=ALL_SYNC_DAYS,
+            garmin_change_check=GARMIN_ASSEMBLY.change_check,
+        ),
     ),
-    provider_runtime=provider_runtime,
 )
 
 SYNC_COMMANDS = SyncCommandAssembly(

@@ -285,14 +285,10 @@ class AcmeOrchestrationCase(unittest.TestCase):
 
     def daily_scheduler(self, policies: Mapping[str, Any]) -> DailySyncScheduler:
         return DailySyncScheduler(
-            Mock(),
             self.queue,
             self.markers,
-            Mock(),
             self.gate,
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=False,
-                garmin_automatic_sync_days=-1,
                 auto_update_label=AUTO_UPDATE_LABEL,
             ),
             schedule_policies=policies,
@@ -301,13 +297,9 @@ class AcmeOrchestrationCase(unittest.TestCase):
 
     def startup_scheduler(self, policies: Mapping[str, Any]) -> StartupSyncScheduler:
         return StartupSyncScheduler(
-            Mock(),
             self.queue,
             Mock(),
-            Mock(),
             config=StartupSyncSchedulerConfig(
-                calendar_enabled=False,
-                garmin_automatic_sync_days=-1,
                 sync_chunk_days=30,
                 sync_earliest_date=date(2026, 1, 1),
             ),
