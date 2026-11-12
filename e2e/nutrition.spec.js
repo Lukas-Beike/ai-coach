@@ -32,9 +32,10 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
     await expect.poll(() => page.evaluate(() => !state.busy && !state.chatServerOperationId && !state.chatRequest)).toBe(true);
   };
   await send("E2E nutrition: confirm meal");
-  await expect(page.locator("#coachActionReview")).toBeVisible();
-  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  // Saved directly with a receipt, no approval card (#2339).
   await expect(page.locator("#coachActionReview")).toBeHidden();
+  await expect(page.locator("#messages .message.assistant .message-changes").last()).toContainText("Mahlzeitvorlage gespeichert");
+  await showNutrition("nutrition/diary");
   await expect(page.locator('[data-nutrition-segment="diary"]')).toHaveAttribute("aria-current", "page");
   await page.locator('[data-nutrition-segment="diary"]').click();
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
@@ -43,9 +44,9 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(1);
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
   await send("E2E nutrition: update meal");
-  await expect(page.locator("#coachActionReview")).toBeVisible();
-  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  // Saved directly with a receipt, no approval card (#2339).
   await expect(page.locator("#coachActionReview")).toBeHidden();
+  await expect(page.locator("#messages .message.assistant .message-changes").last()).toContainText("Mahlzeitvorlage gespeichert");
   await send("E2E nutrition: delete meal");
   await showNutrition("nutrition/diary");
   await expect(page.locator("#nutritionTotals")).toContainText("200 kcal");
@@ -69,10 +70,9 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   await expect(databaseCard).toContainText("174 kcal");
   await expect(databaseCard).toContainText("Datenbankberechnung");
   await send("E2E nutrition: confirm database meal");
-  await expect(page.locator("#coachActionReview")).toContainText("174");
-  await expect(page.locator("#coachActionReview")).toContainText("Max Rubner-Institut");
-  await page.locator("#coachActionReview").getByRole("button", { name: "Mahlzeitvorlage speichern" }).click();
+  // Saved directly with a receipt, no approval card (#2339).
   await expect(page.locator("#coachActionReview")).toBeHidden();
+  await expect(page.locator("#messages .message.assistant .message-changes").last()).toContainText("Mahlzeitvorlage gespeichert");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
