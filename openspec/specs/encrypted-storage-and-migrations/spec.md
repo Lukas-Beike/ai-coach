@@ -40,7 +40,7 @@ The database SHALL recognize the version-and-shape pair of the baseline, the sch
 
 #### Scenario: Baseline food mirror becomes canonical products
 - **WHEN** a v26 database with own products and mirrored foods is upgraded
-- **THEN** every own product keeps its row as origin `own`, every mirrored food becomes a product of its database's origin with its fetch time and all fields, an own product with the EAN or id of mirrored foods wins and only its empty fields are filled, and the mirror table is gone.
+- **THEN** every own product keeps its row as origin `own`, every mirrored food becomes a product of its database's origin with its fetch time and all fields, an own product with the EAN or id of mirrored foods wins and only its empty fields are filled, and the mirror table is gone. The step uses its own frozen copy of the v27 table and row move, so changes to the live product DDL or repositories never change its result.
 
 #### Scenario: Failing baseline upgrade
 - **WHEN** the baseline upgrade fails after moving some rows
@@ -50,7 +50,7 @@ The database SHALL recognize the version-and-shape pair of the baseline, the sch
 - **WHEN** a reader needs the exact current schema or the acceptance rule
 - **THEN** `docs/schema-reference.md` states the signature and digest rule, how a new database is created and the startup state, and carries the current version, shape digest and DDL generated from `backend/db/schema.py`; the baseline shape is the frozen fixture `tests/fixtures/schema_v26.sql.txt`, and a test fails when the generated reference is out of date
 
-Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py::test_populated_baseline_reaches_the_live_schema_with_its_rows`, `tests/test_db_migrations.py::test_schema_reference_is_current`, `tests/test_db_migrations.py::test_baseline_mirror_rows_become_canonical_products_without_loss`, `tests/test_db_migrations.py::test_failing_baseline_upgrade_rolls_back_and_a_retry_succeeds`, `tests/test_db_migrations.py::test_upgraded_database_restarts_with_the_same_build_unchanged`, `tests/test_db_migrations.py::test_frozen_baseline_fixture_is_the_recorded_production_shape`, `tests/test_db_migrations.py::test_a_previous_shape_upgrades_in_one_step_with_its_rows`, `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py::test_populated_baseline_reaches_the_live_schema_with_its_rows`, `tests/test_db_migrations.py::test_schema_reference_is_current`, `tests/test_db_migrations.py::test_baseline_mirror_rows_become_canonical_products_without_loss`, `tests/test_db_migrations.py::test_v27_product_step_is_frozen_against_live_repository_changes`, `tests/test_db_migrations.py::test_failing_baseline_upgrade_rolls_back_and_a_retry_succeeds`, `tests/test_db_migrations.py::test_upgraded_database_restarts_with_the_same_build_unchanged`, `tests/test_db_migrations.py::test_frozen_baseline_fixture_is_the_recorded_production_shape`, `tests/test_db_migrations.py::test_a_previous_shape_upgrades_in_one_step_with_its_rows`, `tests/test_db_encrypted_upgrade_matrix.py`.
 
 ### Requirement: Unknown schema preservation
 
