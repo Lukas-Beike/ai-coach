@@ -1633,7 +1633,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
 )
 
 
-# Shared with provider_runtime() so the lazy registry reuses the same live owners.
+# Shared with provider_runtime() so both read the same live owners.
 SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     historical=HistoricalSyncDependencies(
         local_now=ATHLETE_CLOCK.now,

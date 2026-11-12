@@ -620,9 +620,9 @@ class ProviderJobOwner(Protocol):
 class PerJobOwner:
     """Resolve a provider owner for each job, so it reads the live configuration.
 
-    Owners copy the runtime configuration when they are built; a registry caches
-    them for the worker's lifetime. Building per job lets credentials saved or
-    removed in the app apply to the next job without a restart.
+    Owners copy the runtime configuration when they are built, and the worker
+    keeps its executor for its lifetime. Building per job lets credentials saved
+    or removed in the app apply to the next job without a restart.
     """
 
     def __init__(self, build: Callable[[], ProviderJobOwner]) -> None:
