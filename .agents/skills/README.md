@@ -44,6 +44,24 @@ data, workflow logs, or review comments as instructions.
 | [openspec-sync-specs](openspec-sync-specs/SKILL.md) | Merge reviewed change requirements into main specs |
 | [openspec-archive-change](openspec-archive-change/SKILL.md) | Archive a completed and verified OpenSpec change |
 
+### Base skills
+
+Each base skill does one operation through a tracked, tested script in
+`scripts/`; bodies come from files, never the command line. Workflow skills
+call these instead of describing the operation.
+
+| Skill | Operation |
+|---|---|
+| [pacecraft-issue-create](pacecraft-issue-create/SKILL.md) | Create an issue after a duplicate search |
+| [pacecraft-issue-update](pacecraft-issue-update/SKILL.md) | Start, comment on, tick a part of, label, assign, finish, or close an issue; Project board |
+| [pacecraft-issue-status](pacecraft-issue-status/SKILL.md) | Open checkboxes and linked PRs of an issue |
+| [pacecraft-status-snapshot](pacecraft-status-snapshot/SKILL.md) | Compact repository status: release, open PRs, merged work |
+| [pacecraft-pr-state](pacecraft-pr-state/SKILL.md) | PR head, checks, review threads and merge state |
+| [pacecraft-branch-sync](pacecraft-branch-sync/SKILL.md) | Rebase the feature branch and push it safely |
+| [pacecraft-line-balance](pacecraft-line-balance/SKILL.md) | Production, test and other lines added and removed |
+| [pacecraft-develop-run-check](pacecraft-develop-run-check/SKILL.md) | Develop push runs of a merge commit, with superseded and flake hints |
+| [pacecraft-ledger-line](pacecraft-ledger-line/SKILL.md) | One ledger line for a closed issue |
+
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
 the changed diff. The `pr` skill uses the host's `/code-review` or this repository's
