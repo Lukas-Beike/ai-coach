@@ -774,7 +774,7 @@ class SessionAnalysisStageTests(unittest.TestCase):
 
         def slow_analysis(*args: Any, **kwargs: Any) -> Any:
             computing.set()
-            time.sleep(0.1)
+            time.sleep(0.2)
             return analyse(*args, **kwargs)
 
         worker = CanonicalBackfillWorker(
@@ -791,8 +791,8 @@ class SessionAnalysisStageTests(unittest.TestCase):
             worker.start()
             self.addCleanup(worker.stop)
             self.assertTrue(computing.wait(5))
-            # The 20 sessions take 2 s; a login waits at most 1 s here.
-            with self.manager.unit_of_work(timeout=1.0) as db:
+            # The 20 sessions take 4 s; a login waits at most 2 s here.
+            with self.manager.unit_of_work(timeout=2.0) as db:
                 self.key_values.set(db, "synthetic_login", "1")
             worker.join(30)
         with self.manager.reader() as db:

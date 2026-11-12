@@ -2514,6 +2514,10 @@ def main() -> None:
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
             COACH_BACKGROUND_JOBS.turn_failure_service()
         )
+        # The startup writes on this thread come before any worker that can start
+        # the canonical backfill (a finished sync job does): a batch holding the
+        # writer must not fail startup with DatabaseBusyError (#2287).
+        SYNC_SCHEDULERS.startup_scheduler().schedule()
         sync_worker = sync_job_worker()
         sync_worker.start()
         COACH_JOB_WORKER.start(
@@ -2524,9 +2528,6 @@ def main() -> None:
                 COACH_BACKGROUND_JOBS.turn_failure_service()
             ),
         )
-        SYNC_SCHEDULERS.startup_scheduler().schedule()
-        # After the startup writes on this thread: a backfill batch holding the
-        # writer must not fail startup with DatabaseBusyError (#2287).
         CANONICAL_BACKFILL.worker.start()
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)

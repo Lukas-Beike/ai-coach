@@ -7,7 +7,8 @@ stream and lap sets, whether a provider detail is stale, the frozen target
 snapshot and the locally resolved thresholds, before any set is decoded. Only
 sessions whose stored ``activity_detail_analysis`` row is not a version-3 row
 with that fingerprint are recomputed, at most ``batch_size`` per transaction and
-no more than the backfill's batch time allows (#2287), so a pass without changes decodes nothing and writes nothing.
+no more than the backfill's batch time allows (#2287), so a pass without
+changes decodes nothing and writes nothing.
 
 A session without such a row is computed when it has a stream or lap set; a
 version-3 row whose session lost its sets is rewritten without an analysis.

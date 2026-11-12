@@ -99,9 +99,10 @@ DEFAULT_BATCH_SIZE: Final = 200
 MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
-# A follow-up stage that decodes streams in the writer stops its batch after this
-# long, so a waiting login, Coach turn or provider sync gets the writer within
-# seconds (#2287). Foreground writers wait up to 20 s.
+# A backfill batch starts no new raw record or session after this long: the
+# re-projection and the follow-up stages that decode streams in the writer, so a
+# waiting login, Coach turn or provider sync gets the writer within seconds
+# (#2287). Foreground writers wait up to 20 s.
 BATCH_SECONDS: Final = 2.0
 
 _LOGGER = logging.getLogger("intervals_coach")
@@ -344,12 +345,16 @@ class CanonicalBackfill:
     def _reproject_step(
         self, db: Any, state: dict[str, Any], *, zone: tzinfo, now: str, budget: int
     ) -> tuple[int, bool]:
-        """Re-project up to ``budget`` items; return (items written, backfill finished)."""
+        """Re-project up to ``budget`` items; return (items written, backfill finished).
+
+        A new raw record starts only within ``BATCH_SECONDS`` of the batch start.
+        """
         written = 0
         scanned = 0
+        deadline = time.monotonic() + BATCH_SECONDS
         while True:
             if state["reproject_current"] is None:
-                if scanned >= budget:
+                if scanned >= budget or (scanned and time.monotonic() >= deadline):
                     return written, False
                 scanned += 1
                 if _start_reprojection(db, state) is None:

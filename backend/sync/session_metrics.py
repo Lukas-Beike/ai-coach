@@ -9,7 +9,8 @@ recomputed, at most ``batch_size`` per transaction within the batch time
 computed session upserts one derived observation per metric it has, owned by
 the session; its other rows and the rows of sessions that are gone are
 retired. Sessions computed without any value keep their fingerprint in the
-stage state, so they are not decoded again until an input changes. Streams missing from storage are not fetched here.
+stage state, so they are not decoded again until an input changes. Streams
+missing from storage are not fetched here.
 """
 
 from __future__ import annotations

@@ -52,7 +52,7 @@ Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_cred
 
 ### Requirement: Ordered startup and durable-work recovery
 
-Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers, enqueue configured startup refreshes, then start the canonical backfill and daily scheduling before serving the main loop. A canonical backfill batch SHALL release the writer within seconds, so logins, Coach turns and provider syncs keep working while a version bump recomputes stored values.
+Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, enqueue configured startup refreshes, then start the workers, the canonical backfill and daily scheduling before serving the main loop. The canonical re-projection and the follow-up stages that decode streams SHALL start no new record or session after a short batch time, so logins, Coach turns and provider syncs keep working while a version bump recomputes stored values.
 
 
 #### Scenario: Normal start

@@ -51,7 +51,8 @@ class ServerRuntimeTests(ServerTestCase):
 
     def test_startup_writes_its_jobs_before_the_canonical_backfill_starts(self):
         # A backfill batch holding the writer must not fail the startup writes on
-        # the main thread with DatabaseBusyError (exit code 1, #2287).
+        # the main thread with DatabaseBusyError (exit code 1, #2287). A finished
+        # sync job also starts the backfill, so the sync worker starts after them.
         calls = Mock()
         calls.http.return_value.serve_forever.side_effect = KeyboardInterrupt
         with (
@@ -81,11 +82,17 @@ class ServerRuntimeTests(ServerTestCase):
             if name
             in {
                 "schedulers.startup_scheduler().schedule",
+                "sync_worker().start",
                 "backfill.worker.start",
             }
         ]
         self.assertEqual(
-            ["schedulers.startup_scheduler().schedule", "backfill.worker.start"], order
+            [
+                "schedulers.startup_scheduler().schedule",
+                "sync_worker().start",
+                "backfill.worker.start",
+            ],
+            order,
         )
 
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
