@@ -67,7 +67,7 @@ Startup SHALL validate secure configuration, initialize the database, recover in
 - **WHEN** the schema/bootstrap service initializes persistent state
 - **THEN** it does not independently repeat job recovery that belongs to runtime startup
 
-Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_runtime.py::test_startup_writes_its_jobs_before_the_canonical_backfill_starts`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_provider_runtime_assembly.py`.
+Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_provider_runtime_assembly.py`.
 
 ### Requirement: Coordinated maintenance and generation invalidation
 
