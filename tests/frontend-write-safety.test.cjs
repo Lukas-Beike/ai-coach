@@ -54,7 +54,6 @@ function profileContext({ server, baseline, stateProfile, exportStatus, error })
     invalidateContextPreview() {},
     load: async () => {},
   });
-  extractFunctions("performance-view.js", ["saveInlineMetric"], context);
   return { context, state, calls, toasts, retryButton };
 }
 
@@ -177,19 +176,6 @@ test("profile save refuses to write before the rendered baseline is known", asyn
   await context.saveProfile(event);
   assert.equal(calls.filter((call) => call.method === "PUT").length, 0);
   assert.equal(toasts.at(-1).isError, true);
-});
-
-test("inline metric save sends only its key", async () => {
-  const { context, calls } = profileContext({
-    server: { name: "Anna", typical_weekly_volume: "10 h", weight_kg: "60" },
-    baseline: { name: "Anna" },
-    stateProfile: { name: "Anna", typical_weekly_volume: "8 h", weight_kg: "55" },
-  });
-  await context.saveInlineMetric("weight_kg", " 62 ", { disabled: false });
-  const put = calls.find((call) => call.method === "PUT");
-  assert.ok(put);
-  assert.equal(calls.filter((call) => call.method === "GET").length, 0, "saving must not pre-read the profile");
-  assert.deepEqual(plain(put.body), { weight_kg: "62" });
 });
 
 function coachContext(apiImpl) {

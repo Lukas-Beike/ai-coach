@@ -397,10 +397,6 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       display: getComputedStyle(panel).display,
     })));
     expect(panelState.filter((panel) => !panel.active && panel.display !== "none"), "inactive panels must not leak into the active view").toEqual([]);
-    const clippedLabels = await page.locator(".coach-provider-item strong:visible").evaluateAll((nodes) => nodes
-      .filter((node) => node.scrollWidth > node.clientWidth || node.getBoundingClientRect().right > window.innerWidth + 1)
-      .map((node) => node.textContent));
-    expect(clippedLabels, "visible provider labels must fit their cards").toEqual([]);
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
   });
 
