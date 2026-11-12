@@ -670,7 +670,7 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
 
 def _seed_nutrition(server: Any, setup: dict[str, Any]) -> None:
     """Own products and diary entries through the real services."""
-    nutrition = server.NUTRITION_ASSEMBLY
+    nutrition = server.NUTRITION_SERVICES
     for product in setup.get("products", []):
         nutrition.meal_library_service().product_catalog.save_product(
             {"basis_amount": 100, "basis_unit": "g", "source": "manual", **product}
