@@ -22,8 +22,9 @@ test("saving a measured first threshold confirms, clears the entry and leaves no
   });
   await openMore(page, "profile");
   const form = page.locator("#profileForm");
-  const sources = form.locator("details.profile-section").filter({ has: page.locator('[name="first_threshold_hr"]') });
-  if (!(await sources.evaluate((element) => element.open))) await sources.locator("summary").click();
+  // #2262: the entry sits behind "Bearbeiten" on LT1 in Zonen & Schwellen.
+  await page.locator("#zoneSettings > summary").click();
+  await page.locator('#zoneOverview [data-zone-box="thresholds"]').getByRole("button", { name: "Bearbeiten" }).click();
 
   await form.locator('[name="first_threshold_hr"]').fill("150");
   await form.locator('[name="first_threshold_on"]').fill("2026-11-01");

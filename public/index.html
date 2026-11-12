@@ -209,7 +209,7 @@
         </nav>
         <form id="profileForm" class="profile-form" aria-describedby="profileContextNotice">
           <p id="profileContextNotice" class="context-sharing-notice" role="note"><strong>Coach-Kontext:</strong> Die folgenden Profil-, Ziel- und Verfügbarkeitsangaben werden lokal gespeichert und können in Coach-Anfragen an OpenAI eingehen. Prüfe sie vor dem Speichern.</p>
-          <details class="profile-section collapsible-section" open>
+          <details class="profile-section collapsible-section">
             <summary class="collapsible-summary"><span class="collapsible-summary-title">Person</span><span id="profileSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
             <div class="form-grid"><label>Name<input name="name" autocomplete="name"></label></div>
             <fieldset class="chip-field"><legend>Sportarten</legend><div class="chip-group"><label class="chip"><input type="checkbox" name="sports" value="Cycling"><span>Radfahren</span></label><label class="chip"><input type="checkbox" name="sports" value="Running"><span>Laufen</span></label><label class="chip"><input type="checkbox" name="sports" value="Swimming"><span>Schwimmen</span></label><label class="chip"><input type="checkbox" name="sports" value="Strength"><span>Krafttraining</span></label><label class="chip"><input type="checkbox" name="sports" value="Triathlon"><span>Triathlon</span></label><label class="chip"><input type="checkbox" name="sports" value="Other"><span>Andere</span></label></div></fieldset>
@@ -227,6 +227,35 @@
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
+          </details>
+          <details id="zoneSettings" class="profile-section collapsible-section">
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Zonen &amp; Schwellen</span><span id="zoneSummary" class="collapsible-summary-meta"></span></summary>
+            <output id="zoneWarnings" class="provider-key-hint error" hidden></output>
+            <div id="zoneSportTabs" class="segmented-control zone-sport-tabs" role="group" aria-label="Sportart"><button type="button" data-zone-sport="ride" aria-pressed="true">Radfahren</button><button type="button" data-zone-sport="run" aria-pressed="false">Laufen</button><button type="button" data-zone-sport="swim" aria-pressed="false">Schwimmen</button></div>
+            <div id="zoneOverview" class="zone-overview"></div>
+            <p id="zoneReceipt" class="fine-print settings-message" aria-live="polite" hidden></p>
+            <fieldset id="firstThresholdEditor" class="profile-subsection zone-editor" hidden><legend>Erste Schwelle (LT1)</legend>
+              <label>Messwert (bpm)<input name="first_threshold_hr" type="number" min="60" max="220" step="1" inputmode="numeric"></label>
+              <label>Messdatum<input name="first_threshold_on" type="date"></label>
+              <label><span id="firstThresholdStoredLabel">Gespeichert (% LSHF)</span><input name="first_threshold_pct" type="number" min="40" max="100" step="0.1" inputmode="decimal"></label>
+              <div id="firstThresholdEstimate" class="profile-estimate" hidden><output id="firstThresholdEstimateText"></output><button id="firstThresholdAdopt" type="button" class="secondary-button">Übernehmen</button></div>
+              <p class="fine-print profile-help">Garmin schreibt RR-Intervalle nur, wenn die HRV-Aufzeichnung für den Brustgurt aktiviert ist.</p>
+            </fieldset>
+            <div id="zoneEditor" class="zone-editor" hidden>
+              <div class="form-grid" hidden>
+                <label>Sportart<select id="zoneSport" form="zoneForm"><option value="ride">Radfahren</option><option value="run">Laufen</option><option value="swim">Schwimmen</option></select></label>
+                <label>Messgröße<select id="zoneMetric" form="zoneForm"><option value="power">Leistung</option><option value="heart_rate">Herzfrequenz</option><option value="pace">Pace</option></select></label>
+              </div>
+              <ul id="zoneSources" class="fine-print"></ul>
+              <div class="form-grid">
+                <label>Umgebung<select id="zoneEnvironment" form="zoneForm"><option value="">Alle</option><option value="indoor">Indoor</option></select></label>
+                <label id="zoneThresholdField"><span id="zoneThresholdLabel">FTP (W)</span><input id="zoneThreshold" form="zoneForm" type="number" min="1" step="any"></label>
+                <label id="zoneMaximumField" hidden>Maximale Herzfrequenz (bpm)<input id="zoneMaximum" form="zoneForm" type="number" min="1" step="any"></label>
+              </div>
+              <label><span id="zoneLimitsLabel">Zonenobergrenzen (% der FTP)</span><input id="zoneLimits" form="zoneForm" inputmode="decimal" autocomplete="off" required></label>
+              <div class="form-grid"><label>Gilt ab<input id="zoneValidFrom" form="zoneForm" type="date" required></label><label id="zoneFromBeginningField" class="chip" hidden><input id="zoneFromBeginning" form="zoneForm" type="checkbox"><span>Gilt von Anfang an</span></label></div>
+              <div class="settings-inline-action"><button id="zoneSaveButton" form="zoneForm" type="submit" class="secondary-button">Lokal speichern</button><button id="zoneRemoveButton" type="button" class="secondary-button danger-button" hidden>Lokale Zonen entfernen</button></div>
+            </div>
           </details>
           <details class="profile-section collapsible-section">
             <summary class="collapsible-summary"><span class="collapsible-summary-title">Training</span><span id="profileTrainingSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
@@ -247,13 +276,6 @@
             <fieldset class="profile-subsection"><legend>Bevorzugte Quelle</legend>
               <label>Gewicht und Körperfett<select name="preferred_source_body"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
             </fieldset>
-            <fieldset class="profile-subsection"><legend>Erste Schwelle</legend>
-              <label>Messwert (bpm)<input name="first_threshold_hr" type="number" min="60" max="220" step="1" inputmode="numeric"></label>
-              <label>Messdatum<input name="first_threshold_on" type="date"></label>
-              <label><span id="firstThresholdStoredLabel">Gespeichert (% LSHF)</span><input name="first_threshold_pct" type="number" min="40" max="100" step="0.1" inputmode="decimal"></label>
-              <div id="firstThresholdEstimate" class="profile-estimate" hidden><output id="firstThresholdEstimateText"></output><button id="firstThresholdAdopt" type="button" class="secondary-button">Übernehmen</button></div>
-              <p class="fine-print profile-help">Garmin schreibt RR-Intervalle nur, wenn die HRV-Aufzeichnung für den Brustgurt aktiviert ist.</p>
-            </fieldset>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"></label>
             <div class="form-grid">
             <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
@@ -264,26 +286,7 @@
           <button id="retryBodyGarmin" type="button" class="secondary-button" hidden>Körperwerte erneut an Garmin senden</button>
           <div class="save-bar"><span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span><span class="save-clean">Gespeichert</span><button type="submit">Athletenkontext speichern</button></div>
         </form>
-        <details id="zoneSettings" class="profile-section collapsible-section">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zonen &amp; Schwellen</span></summary>
-          <output id="zoneWarnings" class="provider-key-hint error" hidden></output>
-          <form id="zoneForm" class="profile-form">
-            <div class="form-grid">
-              <label>Sportart<select id="zoneSport"><option value="ride">Radfahren</option><option value="run">Laufen</option><option value="swim">Schwimmen</option></select></label>
-              <label>Messgröße<select id="zoneMetric"><option value="power">Leistung</option><option value="heart_rate">Herzfrequenz</option><option value="pace">Pace</option></select></label>
-              <label>Umgebung<select id="zoneEnvironment"><option value="">Alle</option><option value="indoor">Indoor</option></select></label>
-            </div>
-            <ul id="zoneSources" class="fine-print"></ul>
-            <div class="form-grid">
-              <label id="zoneThresholdField"><span id="zoneThresholdLabel">FTP (W)</span><input id="zoneThreshold" type="number" min="1" step="any"></label>
-              <label id="zoneMaximumField" hidden>Maximale Herzfrequenz (bpm)<input id="zoneMaximum" type="number" min="1" step="any"></label>
-            </div>
-            <label><span id="zoneLimitsLabel">Zonenobergrenzen (% der FTP)</span><input id="zoneLimits" inputmode="decimal" autocomplete="off" required></label>
-            <div class="form-grid"><label>Gilt ab<input id="zoneValidFrom" type="date" required></label><label id="zoneFromBeginningField" class="chip" hidden><input id="zoneFromBeginning" type="checkbox"><span>Gilt von Anfang an</span></label></div>
-            <div class="settings-inline-action"><button id="zoneSaveButton" type="submit" class="secondary-button">Lokal speichern</button><button id="zoneRemoveButton" type="button" class="secondary-button danger-button" hidden>Lokale Zonen entfernen</button></div>
-            <p id="zoneReceipt" class="fine-print settings-message" aria-live="polite" hidden></p>
-          </form>
-        </details>
+        <form id="zoneForm" hidden></form>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>

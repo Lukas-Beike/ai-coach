@@ -13,7 +13,9 @@ async function openMore(page, segment) {
 
 test("@responsive sports are toggle chips of at least 44 px and need no hint", async ({ page }) => {
   await openMore(page, "profile");
-  const chips = page.locator("#profileForm .chip");
+  // Every profile section starts closed (#2262).
+  await page.locator("#profileForm > details.profile-section").first().locator(":scope > summary").click();
+  const chips = page.locator("#profileForm .chip-field .chip");
   await expect(chips).toHaveCount(6);
   for (const chip of await chips.all()) expect((await chip.locator("span").boundingBox()).height).toBeGreaterThanOrEqual(44);
   await expect(page.locator("#profileForm")).not.toContainText("Strg");
@@ -38,12 +40,13 @@ test("@responsive sports are toggle chips of at least 44 px and need no hint", a
   await expect(page.locator("#profileDirtyIndicator")).toBeHidden();
 });
 
-test("@responsive the profile has four summarised sections and a save bar that stays in view", async ({ page }) => {
+test("@responsive the profile has five closed summarised sections and a save bar that stays in view", async ({ page }) => {
   await openMore(page, "profile");
   const sections = page.locator("#profileForm > details.profile-section");
-  await expect(sections).toHaveCount(4);
-  await expect(sections.first()).toHaveAttribute("open", "");
-  for (const summary of await sections.locator("> summary .collapsible-summary-meta").all()) expect((await summary.textContent()).trim()).not.toBe("");
+  await expect(sections).toHaveCount(5);
+  // Every section starts closed (#2262); the zone summary is empty without a stale threshold.
+  for (const section of await sections.all()) await expect(section).not.toHaveAttribute("open", "");
+  for (const summary of await sections.locator("> summary .collapsible-summary-meta:not(#zoneSummary)").all()) expect((await summary.textContent()).trim()).not.toBe("");
   await sections.evaluateAll((nodes) => nodes.forEach((node) => { node.open = true; }));
   await page.getByLabel("Name", { exact: true }).fill("Fixture Athlete");
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -60,7 +63,7 @@ test("@responsive the profile has four summarised sections and a save bar that s
 
 test("@responsive a closed profile section opens when it holds the invalid value", async ({ page }) => {
   await openMore(page, "profile");
-  const sources = page.locator("#profileForm > details.profile-section").nth(3);
+  const sources = page.locator("#profileForm > details.profile-section").nth(4);
   await expect(sources).not.toHaveAttribute("open", "");
   await sources.evaluate((node) => { node.querySelector('[name="sleep_target_hours"]').value = "99"; });
   await page.locator("#profileForm").evaluate((form) => form.dispatchEvent(new Event("input", { bubbles: true })));

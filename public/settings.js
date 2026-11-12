@@ -426,9 +426,19 @@ const ZONE_METRIC_LABELS = {
   heart_rate: { threshold: "Schwellenpuls (LSHF, bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
   pace: { threshold: "", limits: "Zonenobergrenzen (% der Schwellenpace)", key: "percent_limits" },
 };
+// One page per sport with its zone kinds (#2262); the performance values name its thresholds.
+const ZONE_SPORTS = {
+  ride: { kinds: ["power", "heart_rate"], lt2: ["cycling_ftp_watts", "bike_threshold_hr_bpm"], maximum: "cycling_max_hr_bpm", power: "cycling_ftp_watts" },
+  run: { kinds: ["pace", "heart_rate", "power"], lt2: ["run_threshold_pace_seconds_per_km", "run_threshold_hr_bpm"], maximum: "running_max_hr_bpm", power: "run_threshold_watts" },
+  swim: { kinds: ["pace", "heart_rate"], lt2: [null, null], maximum: null, power: null },
+};
+const ZONE_KIND_TITLES = { power: "Leistungszonen", heart_rate: "Pulszonen", pace: "Pacezonen" };
+const POWER_ZONE_NAMES = ["Regeneration", "Grundlage", "Tempo", "Schwelle", "VO2max", "Anaerob", "Neuromuskulär"];
 let zoneConfigurations = [];
 let zoneEffective = [];
 let zoneToday = "";
+let zoneSport = "ride";
+let zoneDataLoad = null;
 
 async function loadZones() {
   try {
@@ -436,7 +446,7 @@ async function loadZones() {
     zoneConfigurations = result.configurations || [];
     zoneEffective = result.effective || [];
     zoneToday = result.today || "";
-    renderZoneEditor();
+    renderZoneOverview();
     renderZoneWarnings(result.threshold_warnings);
     // The strip follows a save or removal at once, not only the next bootstrap.
     if (state.data) state.data.threshold_warnings = result.threshold_warnings ?? null;
@@ -445,6 +455,16 @@ async function loadZones() {
     renderZoneWarnings(null);
     toast(error.message, true);
   }
+}
+
+// Analyse reads the zones once for its LT1 values; the profile page reloads them on opening.
+function ensureZoneData() {
+  zoneDataLoad ||= api("/api/zones").then((result) => {
+    zoneConfigurations = result.configurations || [];
+    zoneEffective = result.effective || [];
+    zoneToday = result.today || "";
+  }, () => { zoneDataLoad = null; });
+  return zoneDataLoad;
 }
 
 const SDK_FAILURE_TEXT = {
@@ -478,7 +498,17 @@ function thresholdStatusItem(warnings) {
   };
 }
 
+// The closed section names the stale values; it no longer opens by itself (#2262).
+function renderZoneSummary(warnings) {
+  const node = $("#zoneSummary");
+  if (!node) return;
+  const count = Array.isArray(warnings?.items) ? warnings.items.length : 0;
+  node.textContent = count ? `${count} ${count === 1 ? "Wert" : "Werte"} veraltet` : "";
+  node.classList.toggle("is-warning", count > 0);
+}
+
 function renderZoneWarnings(warnings) {
+  renderZoneSummary(warnings);
   const node = $("#zoneWarnings");
   if (!node) return;
   const items = Array.isArray(warnings?.items) ? warnings.items : [];
@@ -492,37 +522,237 @@ function renderZoneWarnings(warnings) {
   // Phrasing content only: <output> holds one line per threshold.
   const lines = items.flatMap((item) => [document.createElement("br"), document.createTextNode(`• ${zoneWarningLine(item)}`)]);
   node.replaceChildren(title, ...lines);
-  const section = $("#zoneSettings");
-  if (section) section.open = true;
 }
 
-function selectedZoneConfigurations() {
-  const sport = $("#zoneSport").value;
-  const metric = $("#zoneMetric").value;
-  const environment = $("#zoneEnvironment").value || null;
-  // The server picks the configuration in effect today, Garmin defaults included.
-  const effective = zoneEffective.find((item) => item.sport === sport && item.metric === metric && item.environment === environment);
-  return zoneConfigurations.filter((item) => item.key === effective?.key);
+// Pure: the configuration in effect today for one sport, metric and environment, Garmin's
+// zones for all sports included (the server picks it and names its key).
+function zoneConfigurationFor(sport, metric, environment = null, configurations = zoneConfigurations, effective = zoneEffective) {
+  const chosen = effective.find((item) => item.sport === sport && item.metric === metric && (item.environment || null) === environment);
+  return chosen ? configurations.find((item) => item.key === chosen.key) || null : null;
+}
+
+function zoneLimitsOf(item) {
+  return item[ZONE_METRIC_LABELS[item.metric].key] || item.limits || item.percent_limits || [];
 }
 
 function zoneLimitsText(item) {
-  return (item[ZONE_METRIC_LABELS[item.metric].key] || item.limits || item.percent_limits || []).join(", ");
+  return zoneLimitsOf(item).join(", ");
+}
+
+function zoneMetricValue(key) {
+  const value = key ? Number(state.data?.performance?.metrics?.[key]?.value) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+// Pure: a zone's upper limit in its unit (W, bpm, s/km), or null.
+function zoneLimitValue(item, limit, thresholdPace) {
+  const value = Number(limit);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (item.metric === "pace") return thresholdPace ? thresholdPace * 100 / value : null;
+  if (item.metric === "heart_rate" && item.limits) return value;
+  const base = item.percent_basis === "maximum" ? item.maximum : item.threshold;
+  return Number(base) > 0 ? Number(base) * value / 100 : null;
+}
+
+function zoneValueText(metric, value) {
+  if (value == null) return "—";
+  if (metric === "pace") return formatPace(value).replace(" min/km", "");
+  return `${Math.round(value)}${metric === "power" ? " W" : ""}`;
+}
+
+// Pure: the rows of one zone kind: name and range with the percent of each upper limit.
+function zoneRows(item, thresholdPace = null) {
+  const limits = zoneLimitsOf(item);
+  const percent = !(item.metric === "heart_rate" && item.limits);
+  const values = limits.map((limit) => zoneLimitValue(item, limit, thresholdPace));
+  return Array.from({ length: limits.length + 1 }, (_, index) => {
+    const name = `Z${index + 1}${item.metric === "power" && POWER_ZONE_NAMES[index] ? ` ${POWER_ZONE_NAMES[index]}` : ""}`;
+    const upper = values[index];
+    const lower = index ? values[index - 1] : null;
+    let range;
+    if (item.metric === "pace") {
+      range = index === 0 ? `langsamer als ${zoneValueText("pace", upper)}` : index === limits.length ? `schneller als ${zoneValueText("pace", lower)}` : `${zoneValueText("pace", lower)}–${zoneValueText("pace", upper)}`;
+    } else if (index === 0) range = `bis ${zoneValueText(item.metric, upper)}`;
+    else if (index === limits.length) range = `ab ${zoneValueText(item.metric, lower == null ? null : lower + 1)}${item.metric === "heart_rate" && item.maximum ? ` · max ${Math.round(item.maximum)}` : ""}`;
+    else range = `${lower == null ? "—" : Math.round(lower + 1)}–${zoneValueText(item.metric, upper)}`;
+    const share = percent && index < limits.length ? ` · ${AppFormat.number(limits[index])} %` : "";
+    return { zone: `Z${Math.min(index + 1, 5)}`, name, range: `${range}${share}` };
+  });
+}
+
+function zoneSourceText(item) {
+  if (item.source === "local") return "Lokal gespeichert";
+  const provider = item.label || "Garmin";
+  return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
+}
+
+// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values; LT1 is the
+// stored share of the threshold heart rate and the power or pace at the top of zone 2.
+function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, profile = state.data?.profile || {}) {
+  const spec = ZONE_SPORTS[sport];
+  const metric = sport === "ride" ? "power" : "pace";
+  const value = (key) => {
+    const number = Number(key ? metrics[key]?.value : NaN);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  const lt2 = { main: value(spec.lt2[0]), hr: value(spec.lt2[1]) };
+  const share = Number(profile.first_threshold_pct);
+  const zones = zoneConfigurationFor(sport, metric);
+  const zoneTwo = zones ? zoneLimitValue(zones, zoneLimitsOf(zones)[1], lt2.main) : null;
+  const lt1 = { main: zoneTwo, hr: lt2.hr && share > 0 ? lt2.hr * share / 100 : null };
+  const sources = [metrics[spec.lt2[0]], metrics[spec.lt2[1]]].filter((item) => item?.value != null);
+  return {
+    metric,
+    lt1,
+    lt2,
+    lt1Source: share > 0 ? (profile.first_threshold_origin === "estimated" ? "LT1 aus der Herzfrequenzvariabilität (App)" : "LT1 gemessen") : null,
+    lt1Derived: zoneTwo != null,
+    lt2Source: sources[0]?.source || null,
+    validFrom: sources.map((item) => item.observed_at).filter(Boolean).sort().at(-1) || null,
+  };
+}
+
+function zoneNode(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text != null) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+function zoneEditButton(label, attributes) {
+  const button = zoneNode("button", label, "zone-edit");
+  button.type = "button";
+  Object.assign(button.dataset, attributes);
+  return button;
+}
+
+function thresholdBox(sport) {
+  const rows = thresholdRows(sport);
+  const box = zoneNode("section", null, "zone-box");
+  box.dataset.zoneBox = "thresholds";
+  const heading = zoneNode("h3", "Schwellen");
+  if (rows.validFrom) heading.append(zoneNode("small", `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`));
+  const grid = zoneNode("div", null, "zone-thresholds");
+  grid.append(zoneNode("span"), zoneNode("span", rows.metric === "power" ? "Leistung" : "Pace", "zone-muted"), zoneNode("span", "Puls", "zone-muted"));
+  for (const [label, values, key] of [["LT1", rows.lt1, "lt1"], [sport === "ride" ? "LT2 / FTP" : "LT2", rows.lt2, "lt2"]]) {
+    const main = rows.metric === "pace" && values.main != null ? `${zoneValueText("pace", values.main)} /km` : zoneValueText(rows.metric, values.main);
+    grid.append(zoneNode("span", label, "zone-muted"), zoneNode("b", main), zoneNode("b", values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
+    grid.lastElementChild.dataset.threshold = `${key}-hr`;
+    grid.children[grid.children.length - 2].dataset.threshold = `${key}-main`;
+  }
+  const source = [rows.lt1Source && `${rows.lt1Source}${rows.lt1Derived ? `, ${rows.metric === "power" ? "Leistung" : "Pace"} aus Zone 2` : ""}`, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
+  const foot = zoneNode("p", source || null, "zone-source");
+  foot.append(zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
+  box.append(heading, grid, foot);
+  return box;
+}
+
+function zoneKindBox(sport, metric, environment = null) {
+  const item = zoneConfigurationFor(sport, metric, environment);
+  const box = zoneNode("section", null, "zone-box");
+  box.dataset.zoneBox = `${metric}${environment ? `-${environment}` : ""}`;
+  const heading = zoneNode("h3", `${ZONE_KIND_TITLES[metric]}${environment ? " · Indoor" : ""}`);
+  const basis = { power: sport === "run" ? "% der Schwellenleistung" : "% der FTP", heart_rate: "bpm", pace: "% der Schwellenpace" }[metric];
+  heading.append(zoneNode("small", basis));
+  box.append(heading);
+  const attributes = { zoneEdit: metric, zoneEnvironment: environment || "" };
+  if (!item) {
+    const empty = zoneNode("p", "Noch keine Werte – ", "zone-source");
+    empty.append(zoneEditButton("Anlegen", attributes));
+    box.append(empty);
+    return box;
+  }
+  const list = zoneNode("ul", null, "zone-list");
+  for (const row of zoneRows(item, metric === "pace" ? zoneMetricValue(ZONE_SPORTS[sport].lt2[0]) : null)) {
+    const line = zoneNode("li");
+    line.dataset.zone = row.zone;
+    line.append(zoneNode("i"), zoneNode("span", row.name), zoneNode("em", row.range));
+    list.append(line);
+  }
+  const foot = zoneNode("p", zoneSourceText(item), "zone-source");
+  foot.append(zoneEditButton("Bearbeiten", attributes));
+  box.append(list, foot);
+  return box;
+}
+
+function renderZoneOverview() {
+  const root = $("#zoneOverview");
+  if (!root) return;
+  document.querySelectorAll("#zoneSportTabs [data-zone-sport]").forEach((button) => {
+    const active = button.dataset.zoneSport === zoneSport;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const boxes = [thresholdBox(zoneSport)];
+  for (const metric of ZONE_SPORTS[zoneSport].kinds) {
+    boxes.push(zoneKindBox(zoneSport, metric));
+    // Indoor zones of their own stay visible beside the general ones.
+    if (zoneConfigurationFor(zoneSport, metric, "indoor")) boxes.push(zoneKindBox(zoneSport, metric, "indoor"));
+  }
+  // The editors move under a box when opened; they go back before the boxes are replaced.
+  const editors = [$("#firstThresholdEditor"), $("#zoneEditor")];
+  editors.forEach((editor) => { editor.hidden = true; });
+  $("#zoneReceipt").after(...editors);
+  root.replaceChildren(...boxes);
+}
+
+function showZoneSport(sport) {
+  if (!ZONE_SPORTS[sport]) return;
+  zoneSport = sport;
+  renderZoneOverview();
+}
+
+// "Bearbeiten" opens the existing form under its box, prefilled with the values in effect.
+function openZoneEditor(button) {
+  const box = button.closest("[data-zone-box]");
+  if (button.dataset.zoneEdit === "lt1") {
+    const editor = $("#firstThresholdEditor");
+    $("#zoneEditor").hidden = true;
+    editor.hidden = false;
+    box.after(editor);
+    editor.querySelector("input")?.focus();
+    return;
+  }
+  $("#zoneSport").value = zoneSport;
+  $("#zoneMetric").value = button.dataset.zoneEdit;
+  $("#zoneEnvironment").value = button.dataset.zoneEnvironment || "";
+  renderZoneEditor();
+  const editor = $("#zoneEditor");
+  $("#firstThresholdEditor").hidden = true;
+  editor.hidden = false;
+  box.after(editor);
+  $("#zoneLimits").focus();
+}
+
+function selectedZoneConfigurations() {
+  const shown = zoneConfigurationFor($("#zoneSport").value, $("#zoneMetric").value, $("#zoneEnvironment").value || null);
+  return shown ? zoneConfigurations.filter((item) => item.key === shown.key) : [];
+}
+
+// Pure: the editor values in effect today, or the current threshold from the performance
+// values when the kind has no zones yet (#2262).
+function zoneEditorValues(sport, metric, shown, metricValue = zoneMetricValue) {
+  if (shown) return { threshold: shown.threshold ?? "", maximum: shown.maximum ?? "", limits: zoneLimitsText(shown) };
+  const spec = ZONE_SPORTS[sport] || {};
+  const threshold = { power: metricValue(spec.power), heart_rate: metricValue(spec.lt2?.[1]) }[metric] ?? "";
+  return { threshold, maximum: metric === "heart_rate" ? metricValue(spec.maximum) ?? "" : "", limits: "" };
 }
 
 function renderZoneEditor() {
+  const sport = $("#zoneSport").value;
   const metric = $("#zoneMetric").value;
   const labels = ZONE_METRIC_LABELS[metric];
   const selected = selectedZoneConfigurations();
   const local = selected.find((item) => item.source === "local");
-  const shown = local || selected[0];
+  const values = zoneEditorValues(sport, metric, local || selected[0]);
   $("#zoneThresholdLabel").textContent = labels.threshold;
   $("#zoneThresholdField").hidden = !labels.threshold;
   $("#zoneThreshold").required = Boolean(labels.threshold);
   $("#zoneMaximumField").hidden = metric !== "heart_rate";
   $("#zoneLimitsLabel").textContent = labels.limits;
-  $("#zoneThreshold").value = shown?.threshold ?? "";
-  $("#zoneMaximum").value = shown?.maximum ?? "";
-  $("#zoneLimits").value = shown ? zoneLimitsText(shown) : "";
+  $("#zoneThreshold").value = values.threshold;
+  $("#zoneMaximum").value = values.maximum;
+  $("#zoneLimits").value = values.limits;
   $("#zoneRemoveButton").hidden = !local;
   $("#zoneFromBeginningField").hidden = selected.length > 0;
   $("#zoneFromBeginning").checked = false;
