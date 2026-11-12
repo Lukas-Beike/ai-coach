@@ -119,6 +119,9 @@ class GarminCanonicalMetrics:
     cycling_ftp_watts: float | None = None
     cycling_vo2max: float | None = None
     running_vo2max: float | None = None
+    # The day of each VO2max reading, so it is dated by its own measurement (#2345).
+    cycling_vo2max_on: date | None = None
+    running_vo2max_on: date | None = None
     run_threshold_watts: float | None = None
     run_threshold_pace_seconds_per_km: int | None = None
     run_threshold_hr_bpm: float | None = None
@@ -386,6 +389,8 @@ def _metrics(
         cycling_ftp_watts=_latest_value(by_kind[MetricKind.FTP], Sport.RIDE),
         cycling_vo2max=_bounded(_latest_value(vo2, Sport.RIDE), _VO2MAX_RANGE),
         running_vo2max=_bounded(_running_vo2max(vo2), _VO2MAX_RANGE),
+        cycling_vo2max_on=_reading_day(_latest(vo2, Sport.RIDE), _VO2MAX_RANGE),
+        running_vo2max_on=_reading_day(_running_vo2max_reading(vo2), _VO2MAX_RANGE),
         run_threshold_watts=_bounded(
             _latest_value(_run_threshold_power(by_kind), Sport.RUN),
             _RUN_THRESHOLD_POWER_RANGE,
@@ -668,30 +673,50 @@ def _daily_values(observations: Iterable[Observation]) -> dict[date, float]:
     return {day: item.value.value for day, item in sorted(days.items())}
 
 
-def _latest_value(
+def _latest(
     observations: Iterable[Observation], sport: Sport | None = None
-) -> float | None:
-    """Return the value of the latest observation of ``sport`` (None means no sport)."""
-    latest = max(
+) -> Observation | None:
+    """Return the latest observation of ``sport`` (None means no sport)."""
+    return max(
         (item for item in observations if item.sport is sport),
         key=_order,
         default=None,
     )
+
+
+def _latest_value(
+    observations: Iterable[Observation], sport: Sport | None = None
+) -> float | None:
+    """Return the value of the latest observation of ``sport`` (None means no sport)."""
+    latest = _latest(observations, sport)
     return None if latest is None else latest.value.value
 
 
-def _running_vo2max(observations: Iterable[Observation]) -> float | None:
+def _running_vo2max_reading(observations: Iterable[Observation]) -> Observation | None:
     """Return the newest running or generic VO2max; running wins on the same day.
 
     The legacy reader took the generic value of the current snapshot unless it held
     a running one, so an older running value must not hide a newer generic one.
     """
-    latest = max(
+    return max(
         (item for item in observations if item.sport in (Sport.RUN, None)),
         key=lambda item: (item.observed_on, item.sport is Sport.RUN, *_order(item)[1:]),
         default=None,
     )
+
+
+def _running_vo2max(observations: Iterable[Observation]) -> float | None:
+    latest = _running_vo2max_reading(observations)
     return None if latest is None else latest.value.value
+
+
+def _reading_day(
+    observation: Observation | None, bounds: tuple[float, float]
+) -> date | None:
+    """The day of a reading whose value is shown (inside ``bounds``)."""
+    if observation is None or _bounded(observation.value.value, bounds) is None:
+        return None
+    return observation.observed_on
 
 
 def _bounded(value: float | None, bounds: tuple[float, float]) -> float | None:

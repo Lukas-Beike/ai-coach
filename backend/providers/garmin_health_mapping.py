@@ -230,7 +230,9 @@ from backend.providers.garmin_weight_walk import (
 # Version 21: one readiness alias order (``score`` first), gear
 # ``maximumMeter`` beside ``maximumMeters``, and an endurance ``groupMap`` that
 # is a mapping keyed by day or a list of dated entries.
-MAPPER_VERSION: Final = 22
+# Version 23: maxmet daily rows are dated by their sport objects (``generic.calendarDate``),
+# so the stored range re-projects every day, today included, with its precise value.
+MAPPER_VERSION: Final = 23
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -993,6 +995,34 @@ def _endurance_records(payload: object) -> object:
     return payload
 
 
+def _max_metric_records(payload: object) -> object:
+    """Date Garmin's maxmet daily rows by their sport objects (#2345).
+
+    The daily endpoint leaves the row undated and dates each object
+    (``generic.calendarDate``, ``cycling.calendarDate``; ``cycling`` is null on
+    days without a cycling value), so the row takes the date of its first dated
+    object. Rows keep their order and shape, so record ids stay stable.
+    """
+
+    def dated(row: object) -> object:
+        if not isinstance(row, Mapping) or row.get(_DATE_FIELD) is not None:
+            return row
+        day = next(
+            (
+                item[_DATE_FIELD]
+                for group in _GROUPED_SECTIONS["max_metrics"]
+                if isinstance(item := row.get(group.key), Mapping)
+                and item.get(_DATE_FIELD) is not None
+            ),
+            None,
+        )
+        return row if day is None else {_DATE_FIELD: day, **row}
+
+    return (
+        [dated(row) for row in payload] if isinstance(payload, list) else dated(payload)
+    )
+
+
 def _daily_stats_records(payload: object) -> object:
     """Replace undated wrappers by their dated records, as the legacy daily reader.
 
@@ -1262,6 +1292,10 @@ class _HealthMapping:
         elif name == _BODY_BATTERY:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
             self._map_body_battery_levels(payload)
+        elif name == "max_metrics":
+            self._map_grouped(
+                name, _max_metric_records(payload), _GROUPED_SECTIONS[name]
+            )
         else:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
 

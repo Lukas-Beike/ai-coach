@@ -23,6 +23,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.performance import garmin_canonical
 from backend.providers import canonical_plans
 from backend.providers.garmin_health_mapping import (
     GARMIN_LABEL,
@@ -40,6 +41,58 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers" / "garmin"
 ZONE = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 6, 0, tzinfo=ZONE)
 DAY = "2026-10-10"
+
+# #2345: the recorded shape of Garmin's maxmet daily range (one row per day): the row
+# is undated, each sport object carries its own calendarDate, cycling is null on days
+# without a cycling value, and generic is the running VO2max. Synthetic values.
+MAX_METRICS_DAILY: Final = [
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-10",
+            "vo2MaxPreciseValue": 53.9,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": None,
+        "heatAltitudeAcclimation": {
+            "acclimationPercentage": 0,
+            "altitudeAcclimation": 0,
+            "heatAcclimationPercentage": 0,
+        },
+    },
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-11",
+            "vo2MaxPreciseValue": 54.1,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": {
+            "calendarDate": "2026-11-11",
+            "vo2MaxPreciseValue": 58.6,
+            "vo2MaxValue": 59.0,
+            "fitnessAge": None,
+            "maxMetCategory": 1,
+        },
+        "heatAltitudeAcclimation": None,
+    },
+    {
+        "userId": 12345678,
+        "generic": {
+            "calendarDate": "2026-11-12",
+            "vo2MaxPreciseValue": 54.3,
+            "vo2MaxValue": 54.0,
+            "fitnessAge": None,
+            "maxMetCategory": 0,
+        },
+        "cycling": None,
+        "heatAltitudeAcclimation": None,
+    },
+]
 
 SNAPSHOT_SECTIONS = (
     "sleep",
@@ -1899,7 +1952,7 @@ class PersonalApiShapeTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 22)
+        self.assertEqual(MAPPER_VERSION, 23)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
@@ -2014,6 +2067,42 @@ class ContractTests(unittest.TestCase):
                 result = _map(sections)
                 self.assertEqual(_issues(result), expected_issues)
                 self.assertEqual(len(result.records), count)
+
+
+class GarminMaxMetricsDailyTests(unittest.TestCase):
+    """#2345: Garmin's maxmet daily rows date each sport object, not the row."""
+
+    def _observations(self, payload: object) -> list[Observation]:
+        result = map_garmin_health(
+            {"max_metrics": payload},
+            zone=ZONE,
+            retrieved_at=datetime(2026, 11, 12, 9, 0, tzinfo=ZONE),
+        )
+        self.assertEqual(result.issues, ())
+        return [item for item in result.records if item.kind is MetricKind.VO2MAX]
+
+    def test_the_current_day_reading_is_stored_on_its_own_day(self) -> None:
+        rows = self._observations(MAX_METRICS_DAILY)
+        by_day = {
+            (item.observed_on.isoformat(), item.sport): item.value.value
+            for item in rows
+        }
+        self.assertEqual(
+            by_day,
+            {
+                ("2026-11-10", None): 53.9,
+                ("2026-11-11", None): 54.1,
+                ("2026-11-11", Sport.RIDE): 58.6,
+                ("2026-11-12", None): 54.3,
+            },
+        )
+
+    def test_running_and_cycling_stay_distinct_in_the_current_metrics(self) -> None:
+        rows = self._observations(MAX_METRICS_DAILY)
+        by_kind = {kind: () for kind in garmin_canonical._READ_KINDS}
+        by_kind[MetricKind.VO2MAX] = tuple(rows)
+        metrics = garmin_canonical._metrics(by_kind)
+        self.assertEqual((metrics.running_vo2max, metrics.cycling_vo2max), (54.3, 58.6))
 
 
 if __name__ == "__main__":

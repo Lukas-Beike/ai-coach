@@ -322,32 +322,53 @@ def _garmin_section_vo2_values(
     ]
 
 
+VO2Reading = tuple[str, float | int]
+
+
 def _garmin_collect_vo2_values(
-    value: Any, values: dict[str, list[float | int]], path: tuple[str, ...] = ()
+    value: Any,
+    values: dict[str, list[VO2Reading]],
+    path: tuple[str, ...] = (),
+    day: str = "",
 ) -> None:
+    """Collect each VO2max with its own day: Garmin's maxmet daily rows date every
+    sport object (``generic.calendarDate``) and leave the row undated (#2345)."""
     if isinstance(value, dict):
+        day = garmin_record_observation_date(value) or day
         for context, item in _garmin_section_vo2_values(value, path):
             number = _garmin_vo2_value(item)
             if number is not None:
-                values[_garmin_sport_category(_garmin_key(" ".join(context)))].append(
-                    number
-                )
+                category = _garmin_sport_category(_garmin_key(" ".join(context)))
+                values[category].append((day, number))
         for key, item in value.items():
-            _garmin_collect_vo2_values(item, values, (*path, str(key)))
+            _garmin_collect_vo2_values(item, values, (*path, str(key)), day)
     elif isinstance(value, list):
         for item in value[:100]:
-            _garmin_collect_vo2_values(item, values, path)
+            _garmin_collect_vo2_values(item, values, path, day)
+
+
+def _newest(readings: list[VO2Reading]) -> VO2Reading | None:
+    """The reading of the newest day; on the same day the later one in the payload."""
+    return max(reversed(readings), key=lambda reading: reading[0], default=None)
 
 
 def _garmin_vo2_metrics(
     max_metrics: Any,
-) -> tuple[float | int | None, float | int | None]:
-    values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
+) -> tuple[
+    tuple[float | int | None, float | int | None], tuple[str | None, str | None]
+]:
+    """Cycling and running VO2max with the day each was measured (None without one)."""
+    values: dict[str, list[VO2Reading]] = {"cycling": [], "running": [], "generic": []}
     _garmin_collect_vo2_values(max_metrics, values)
-    running = values["generic"][-1] if values["generic"] else None
-    if values["running"]:
-        running = values["running"][-1]
-    return values["cycling"][-1] if values["cycling"] else None, running
+    cycling = _newest(values["cycling"])
+    running = _newest(values["running"]) or _newest(values["generic"])
+    return (
+        (cycling and cycling[1], running and running[1]),
+        (
+            cycling[0] or None if cycling else None,
+            running[0] or None if running else None,
+        ),
+    )
 
 
 def _garmin_store_race_value(
@@ -489,14 +510,16 @@ def garmin_payload_performance_metrics(
     stored; read paths use ``garmin_performance_metrics``.
     """
     max_metrics = payload.get("max_metrics")
+    vo2, vo2_days = _garmin_vo2_metrics(
+        max_metrics if isinstance(max_metrics, (dict, list)) else {}
+    )
     return assemble_garmin_metrics(
         performance_freshness.GarminSyncStatus.from_state(payload),
         current_date,
         garmin_weight.garmin_weight_metric(payload),
-        _garmin_vo2_metrics(
-            max_metrics if isinstance(max_metrics, (dict, list)) else {}
-        ),
+        vo2,
         _garmin_payload_race_values(payload),
         _garmin_payload_thresholds(payload),
         _garmin_payload_max_hr_samples(payload),
+        vo2_observed=vo2_days,
     )

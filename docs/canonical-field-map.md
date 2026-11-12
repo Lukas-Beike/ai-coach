@@ -1590,7 +1590,7 @@ Conventions used in the tables of this part:
 
 Status: Live. `map_garmin_health` is called per stored element by `canonical_plans.py` (ingest and re-projection,
 one-element list per list section, the record itself for single-record sections) and by `snapshot_projection.py`.
-Mapper version: **22** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
+Mapper version: **23** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
 training sections and the endurance `groupMap`, see "Training sections" below), which is replayed by this module.
 Inputs: the Garmin snapshot as a mapping section name → record or list of records (`GARMIN_HEALTH_SECTION_NAMES`);
 `zone` = athlete zone (`ZoneInfo`), `retrieved_at` = fetch time of that section (`garmin_section_retrieved_at`: the
@@ -1701,8 +1701,11 @@ The categorical `level` of the same reading becomes a `readiness_level` code (se
 
 #### Maximum oxygen uptake (`max_metrics`)
 
-Row `{calendarDate, generic, cycling, running}`; each object is read separately (`_Group.key`). Record id suffix =
-group key.
+Row `{generic, cycling, running}`; each object is read separately (`_Group.key`). Record id suffix =
+group key. The daily endpoint (`get_max_metrics_range`, recorded shape `max_metrics_daily`) leaves the row undated and
+dates each object (`generic.calendarDate`; `cycling` is null on days without a cycling value), so a row without its own
+`calendarDate` takes its first dated object's day (`_max_metric_records`, mapper 23, #2345). `generic` is Garmin's
+running VO2max. The legacy performance history dates each sport's newest reading by its own day.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|

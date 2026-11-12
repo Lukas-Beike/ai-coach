@@ -2,6 +2,8 @@ import copy
 import unittest
 from datetime import date
 
+from test_garmin_health_mapping import MAX_METRICS_DAILY
+
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.garmin_metrics import (
@@ -111,6 +113,23 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         self.assertEqual(
             result["running_vo2max_ml_kg_min"]["source"], GARMIN_PERFORMANCE_SOURCE
         )
+
+    def test_maxmet_daily_rows_date_each_vo2max_by_its_own_reading(self):
+        # #2345: the recorded daily shape dates the sport objects, not the row; the
+        # newest reading of each sport wins whatever the row order.
+        rows = MAX_METRICS_DAILY
+        for order in (rows, list(reversed(rows))):
+            result = garmin_payload_performance_metrics(
+                {"max_metrics": order}, CURRENT_DATE
+            )
+            running = result["running_vo2max_ml_kg_min"]
+            cycling = result["cycling_vo2max_ml_kg_min"]
+            self.assertEqual(
+                (running["value"], running["observed_at"]), (54.3, "2026-11-12")
+            )
+            self.assertEqual(
+                (cycling["value"], cycling["observed_at"]), (58.6, "2026-11-11")
+            )
 
     def test_precise_vo2max_wins_over_its_rounded_twin(self):
         # Garmin sends both fields in one section; the precise one keeps its decimal (#2263).
