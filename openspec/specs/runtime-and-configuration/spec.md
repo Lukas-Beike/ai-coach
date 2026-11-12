@@ -52,18 +52,22 @@ Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_cred
 
 ### Requirement: Ordered startup and durable-work recovery
 
-Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers/canonical backfill, enqueue configured startup refreshes and start daily scheduling before serving the main loop.
+Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, enqueue configured startup refreshes, then start the workers, the canonical backfill and daily scheduling before serving the main loop. The canonical re-projection and the follow-up stages that decode streams SHALL start no new record or session after a short batch time, so logins, Coach turns and provider syncs keep working while a version bump recomputes stored values.
 
 
 #### Scenario: Normal start
 - **WHEN** secure initialization succeeds
 - **THEN** job recovery is performed by the startup owner, workers start, and configured startup refreshes (calendar, Garmin, Wahoo, weather) are scheduled; Intervals.icu, an output target, is not read
 
+#### Scenario: Long recompute after an upgrade
+- **WHEN** a method version bump makes the canonical backfill recompute every stored session
+- **THEN** startup finishes, and a login, a Coach turn or a provider sync waiting for the writer gets it within its normal timeout because each batch stops at the batch time
+
 #### Scenario: Database initialization alone
 - **WHEN** the schema/bootstrap service initializes persistent state
 - **THEN** it does not independently repeat job recovery that belongs to runtime startup
 
-Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_provider_runtime_assembly.py`.
+Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_provider_runtime_assembly.py`.
 
 ### Requirement: Coordinated maintenance and generation invalidation
 

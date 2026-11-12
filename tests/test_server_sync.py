@@ -126,6 +126,11 @@ class ServerSyncTests(ServerTestCase):
                 "start",
                 side_effect=lambda *_: order.append("coach-worker"),
             ),
+            patch.object(
+                server.CANONICAL_BACKFILL.worker,
+                "start",
+                side_effect=lambda: order.append("canonical-backfill"),
+            ),
             patch.object(server.COACH_JOB_WORKER, "stop") as coach_stop,
             patch.object(server.COACH_JOB_WORKER, "join") as coach_join,
             patch.object(sync_worker_runtime.SyncJobWorker, "stop") as sync_stop,
@@ -183,15 +188,18 @@ class ServerSyncTests(ServerTestCase):
             server.PUBLIC_DIR / "index.html",
         )
         thread_factory.assert_called_once_with(target=daily_loop.run, daemon=True)
+        # The startup jobs are written on this thread before any worker that can
+        # start the canonical backfill, whose batches hold the writer (#2287).
         self.assertEqual(
             order,
             [
                 "schema",
                 "sync-recovery",
                 "coach-recovery",
+                "startup-sync",
                 "sync-worker",
                 "coach-worker",
-                "startup-sync",
+                "canonical-backfill",
             ],
         )
         daily_loop.stop.assert_called_once_with()
