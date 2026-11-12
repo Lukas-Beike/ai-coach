@@ -153,7 +153,7 @@ class _Scan:
     """One read of every session's inputs, without decoding a stream."""
 
     sessions: Mapping[str, Sequence[ActivityRecord]]
-    summaries: list[Mapping[str, Any]]
+    summaries: Sequence[Mapping[str, Any]]
     stream_keys: Mapping[str, Sequence[Any]]
     stored: Mapping[str, Mapping[str, Mapping[str, Any]]]
     state: dict[str, Any]
@@ -290,12 +290,7 @@ class SessionMetricsStage:
         now = self._clock()
         prepared, self._prepared = self._prepared, None
         scan = self._scan(db)
-        summaries, stored, state, plan = (
-            scan.summaries,
-            scan.stored,
-            scan.state,
-            scan.plan,
-        )
+        stored, state, plan = scan.stored, scan.state, scan.plan
         keep, next_empty = plan.keep, plan.empty
         tally = _Tally()
         done_ids: set[str] = set()
@@ -333,7 +328,7 @@ class SessionMetricsStage:
         )
         done = not pending
         counts = {
-            "sessions": len(summaries),
+            "sessions": len(scan.summaries),
             "with_streams": len(scan.stream_keys),
             "computed": computed,
             "pending": len(pending),
