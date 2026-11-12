@@ -118,8 +118,9 @@ dedicated, paid evaluation API key with its own budget limit, passed only as the
 `COACH_EVAL_API_KEY` environment variable for that run (athlete decision
 2026-11-12, #2221; the local proxy no longer exists). A run stops before the next
 model call once it reaches 150 calls (`--max-calls`, the write gate's classifier
-included) or an estimated 5 USD (`--max-cost-usd`, from the response token
-counts and the model's prices per million tokens given as `--price-input` and
+included) or when that call, priced like the dearest call so far, would pass an
+estimated 5 USD (`--max-cost-usd`, from the response token counts and the
+model's prices per million tokens given as `--price-input` and
 `--price-output`), and lists the cases not run. Only a loopback endpoint or the
 OpenAI API is accepted. Each case runs the real Coach turn loop on a fresh
 temporary database with the catalogue's synthetic state; providers stay

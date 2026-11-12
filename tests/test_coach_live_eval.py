@@ -750,8 +750,8 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Antwort A", text)
 
     def test_the_cost_ceiling_ends_the_run_before_the_next_call(self):
-        # 3 input tokens at 1 USD per token: 3 USD per call, so the third call
-        # would pass the 5 USD ceiling and is never sent.
+        # 3 input tokens at 1 USD per token: 3 USD per call. A second call of
+        # the same cost would pass the 5 USD ceiling, so it is never sent.
         def costly():
             return ModelTurn(text="Antwort", usage={"input_tokens": 3})
 
@@ -764,9 +764,9 @@ class CommandLineTests(unittest.TestCase):
                 *self.ARGS, "--cases", cases, "--price-input", "1000000"
             )
         self.assertEqual(code, 0)
-        self.assertIn("Model calls: 2 of 150", text)
-        self.assertIn("Estimated cost: 6.00 of 5.00 USD", text)
-        self.assertIn("2 passed, 0 failed, 2 not run", text)
+        self.assertIn("Model calls: 1 of 150", text)
+        self.assertIn("Estimated cost: 3.00 of 5.00 USD", text)
+        self.assertIn("1 passed, 0 failed, 3 not run", text)
 
     def test_the_openai_api_needs_the_key_and_prices_and_no_other_host_is_used(self):
         openai = ("--base-url", "https://api.openai.com/v1", "--model", "m")

@@ -342,6 +342,8 @@ class CallCounter:
         # USD per million input and output tokens.
         self.prices = prices
         self.cost = 0.0
+        # The dearest call so far; the next call is assumed to cost as much.
+        self.max_call_cost = 0.0
         self.calls = 0
         self.blocked = False
         self.tool_names: list[str] = []
@@ -349,16 +351,18 @@ class CallCounter:
 
     @property
     def exhausted(self) -> bool:
-        return self.calls >= self.cap or self.cost >= self.cost_cap
+        return self.calls >= self.cap or self.cost + self.max_call_cost > self.cost_cap
 
     def record(self, turn: Any) -> Any:
         self.tool_names += [call["name"] for call in turn.tool_calls]
         usage = getattr(turn, "usage", None) or {}
         tokens_in = usage.get("input_tokens") or 0
         tokens_out = usage.get("output_tokens") or 0
-        self.cost += (
+        call_cost = (
             tokens_in * self.prices[0] + tokens_out * self.prices[1]
         ) / 1_000_000
+        self.cost += call_cost
+        self.max_call_cost = max(self.max_call_cost, call_cost)
         return turn
 
 
