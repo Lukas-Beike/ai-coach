@@ -59,3 +59,49 @@ test("@responsive session focus chip and select on a planned unit", async ({ pag
   await entry.locator("select[name='session_focus']").selectOption("");
   expect((await cleared).ok()).toBeTruthy();
 });
+
+test("@responsive a planned strength unit lists every stored exercise and keeps its labels whole", async ({ page }) => {
+  // #2370: the card lists the stored structure, every exercise in plan order.
+  await page.setViewportSize({ width: 412, height: 900 });
+  await page.goto("/#plan/overview");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  const structure = [
+    { name: "Bankdrücken", sets: 3, reps: 8, kg: 40, rest_s: 90, warmup: { sets: 1, reps: 10, kg: 20 } },
+    { name: "Rudern vorgebeugt", sets: 3, reps: 10, kg: 30, rest_s: 90 },
+    { name: "Schulterdrücken", sets: 3, reps: 8, rpe: 8 },
+    { name: "Klimmzug", sets: 3, reps: 6, kg: 0, note: "langsam ablassen" },
+    { name: "Liegestütz", sets: 2, reps: 15 },
+    { name: "Unterarmstütz", sets: 3, reps: 45, rest_s: 60 },
+  ];
+  await page.evaluate((exercises) => {
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    state.data.training_calendar = [{ local_id: "pu_strength_2370", date: today, starts_at_local: `${today}T17:00:00`, name: "Oberkörper kurz", type: "WeightTraining", sport: "strength", description: "Bankdrücken: 3x8 @ 40 kg\nRudern vorgebeugt: 3x10 @ 30 kg\nSchulterdrücken: 3x8", planned_duration_s: 2400, session_focus: "upper", focus_origin: "set", strength_structure: exercises }];
+    renderPlanned(state.data.training_calendar);
+    for (let node = document.querySelector('.planned-entry[data-entry-key]'); node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;
+  }, structure);
+  const entry = page.locator(".planned-entry").filter({ hasText: "Oberkörper kurz" }).first();
+  const rows = entry.locator(".planned-strength-plan li");
+  await expect(rows).toHaveText([
+    "Bankdrücken Aufwärmen 1 × 10 @ 20 kg, dann 3 × 8 @ 40 kg · 90 s Pause",
+    "Rudern vorgebeugt 3 × 10 @ 30 kg · 90 s Pause",
+    "Schulterdrücken 3 × 8 @ RPE 8",
+    "Klimmzug 3 × 6 @ ohne Zusatzgewicht · langsam ablassen",
+    "Liegestütz 2 × 15",
+    "Unterarmstütz 3 × 45 · 60 s Pause",
+  ]);
+  // The description is generated from the same structure, so it is not repeated.
+  await expect(entry.locator(".planned-description")).toHaveCount(0);
+  // No word of a field label is broken across lines.
+  const broken = await entry.locator(".planned-focus-field").evaluateAll((labels) => labels.flatMap((label) => {
+    const text = label.firstChild;
+    const words = [...text.textContent.matchAll(/\S+/g)];
+    return words.filter((word) => {
+      const range = document.createRange();
+      range.setStart(text, word.index);
+      range.setEnd(text, word.index + word[0].length);
+      return range.getClientRects().length > 1;
+    }).map((word) => word[0]);
+  }));
+  expect(broken).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
