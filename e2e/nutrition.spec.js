@@ -146,7 +146,9 @@ test("@responsive packaging extraction requires editable basis values before exp
     } });
   });
   await page.goto("/#nutrition/products");
-  await page.locator("#nutritionLabelInput").setInputFiles({ name: "label.jpg", mimeType: "image/jpg", buffer: onePixel });
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator("#nutritionLabelButton").click();
+  await (await chooser).setFiles({ name: "label.jpg", mimeType: "image/jpg", buffer: onePixel });
   await expect.poll(() => extractionPayload?.image_data_url).toMatch(/^data:image\/jpeg;base64,/);
   const editor = page.locator("#nutritionExtraction");
   await expect(editor).toBeVisible();
@@ -176,6 +178,7 @@ test("@responsive closing the barcode dialog stops a late Android Chromium camer
   await page.goto("/#nutrition/products");
   await page.locator("#nutritionBarcodeButton").click();
   await expect(page.locator("#nutritionBarcodeDialog")).toBeVisible();
+  await expect(page.locator("#nutritionBarcodeDialog #nutritionBarcodeVideo")).toBeAttached();
   await page.locator("#nutritionBarcodeCancel").click();
   await page.evaluate(() => window.__nutritionCamera.resolve({ getTracks: () => [{ stop: () => { window.__nutritionCamera.stopped += 1; } }] }));
   await expect.poll(() => page.evaluate(() => window.__nutritionCamera.stopped)).toBe(1);

@@ -21,7 +21,7 @@ The client SHALL validate supported image type and size, decode and bound image 
 - **WHEN** a small image cannot be decoded by the browser but is selected as a general Coach attachment
 - **THEN** the existing bounded attachment fallback can retain it for server validation, and a later valid selection remains usable.
 
-Evidence: `public/nutrition.js::prepareNutritionImage`, `public/nutrition.js::resizeNutritionImage`, `public/coach.js::prepareChatAttachment`; `tests/test_nutrition_frontend_contract.py::NutritionFrontendContractTests.test_camera_processing_is_bounded_and_rejects_before_state_mutation`, `e2e/nutrition.spec.js::@responsive a small undecodable image falls back to attachment and allows a valid image afterwards`. Browser decoding behavior is inspected, not executed here.
+Evidence: `public/nutrition.js::prepareNutritionImage`, `public/nutrition.js::resizeNutritionImage`, `public/coach.js::prepareChatAttachment`; `tests/nutrition-camera.test.cjs::a photo within the limits keeps its bytes and reports image/jpg as image/jpeg`, `tests/nutrition-camera.test.cjs::the attachment draft is replaced only after every file is prepared`, `e2e/nutrition.spec.js::@responsive a small undecodable image falls back to attachment and allows a valid image afterwards`. Browser decoding behavior is inspected, not executed here.
 
 ### Requirement: Server image validation rejects unsupported content before provider I/O
 The system SHALL accept packaging-photo data only as supported base64 JPEG, PNG, or WebP data URLs whose decoded nonempty bytes fit five MiB and match the declared image signature.
@@ -106,4 +106,4 @@ The client SHALL request barcode camera access only after an explicit scan actio
 - **WHEN** the camera promise resolves after the scan dialog closed or its session was superseded
 - **THEN** the newly returned stream is stopped and cannot restart the closed scanner.
 
-Evidence: `public/nutrition.js::scanNutritionBarcode`, `public/nutrition.js::stopNutritionBarcode`, `public/nutrition.js::resetNutritionView`; `tests/test_nutrition_frontend_contract.py::NutritionFrontendContractTests.test_barcode_camera_stops_tracks_on_close_and_start_failure`, `e2e/nutrition.spec.js::@responsive closing the barcode dialog stops a late Android Chromium camera stream`.
+Evidence: `public/nutrition.js::scanNutritionBarcode`, `public/nutrition.js::stopNutritionBarcode`, `public/nutrition.js::resetNutritionView`; `tests/nutrition-camera.test.cjs::closing the barcode dialog stops the camera tracks and releases the video`, `e2e/nutrition.spec.js::@responsive closing the barcode dialog stops a late Android Chromium camera stream`.
