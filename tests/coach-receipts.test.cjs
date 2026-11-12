@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 const RECEIPT_TOOLS = ["HIDDEN_CHAT_RECEIPT_TOOLS", "COACH_RECEIPT_LABELS", "SYNC_JOB_RECEIPT_LABELS", "receiptIsVisible", "syncJobReceipt", "commandReceiptTitle", "commandReceiptMessage", "commandReceiptStatus", "commandReceipt", "addStructuredCoachReceipts"];
 const EXECUTE_ACTIONS = ["coachActionReceipt", "isHttpClientRejection", "reconcileCoachActionProposal", "executeCoachActionProposal", "showCoachReceiptArea", "lockUnknownCoachActionOutcome", "rejectCoachActionProposal"];
@@ -162,8 +162,8 @@ test("approval preview renders every bound remote-write value as text", () => {
     name: "Nutrition", date: "2026-09-24", id: "race-1", kcal: "450 kcal", entries: "2",
     carbs: "60 g", protein: "20 g", fat: "10 g", keep: "ride-1", delete: "ride-2",
   }] });
-  assert.match(list.children[0].textContent, /ID: race-1/);
-  assert.match(list.children[0].textContent, /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
+  assert.match(textOf(list.children[0]), /ID: race-1/);
+  assert.match(textOf(list.children[0]), /450 kcal.*2 Einträge.*60 g.*ride-1.*ride-2/);
 });
 
 test("a Coach action announces itself in one toast with its failures first", () => {

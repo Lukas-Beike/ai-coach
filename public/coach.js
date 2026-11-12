@@ -1326,18 +1326,10 @@ function coachWorkingLabel() {
 }
 
 function createCoachWorkingIndicator() {
-  const node = document.createElement("div");
-  node.id = "coachWorking";
-  node.className = "coach-working";
-  node.setAttribute("aria-hidden", "true");
-  node.setAttribute("aria-label", coachWorkingLabel());
-  const dots = document.createElement("span");
-  dots.className = "working-dots";
-  dots.setAttribute("aria-hidden", "true");
+  const node = h("div", { id: "coachWorking", className: "coach-working", "aria-hidden": "true", "aria-label": coachWorkingLabel() });
+  const dots = h("span", { className: "working-dots", "aria-hidden": "true" });
   dots.innerHTML = "<i></i><i></i><i></i>";
-  const label = document.createElement("span");
-  label.textContent = coachWorkingLabel();
-  node.append(dots, label);
+  node.append(dots, h("span", null, coachWorkingLabel()));
   return node;
 }
 
@@ -1366,31 +1358,20 @@ function coachActionStatus(proposal) {
 }
 
 function coachActionDiff(proposal) {
-  const entries = document.createElement("ul");
-  for (const entry of Array.isArray(proposal.diff) ? proposal.diff : []) {
-    const item = document.createElement("li");
-    item.textContent = [
-      entry.name, entry.date, entry.sport, entry.scope, entry.units,
-      entry.id && `ID: ${entry.id}`,
-      entry.kcal, entry.entries && `${entry.entries} Einträge`,
-      entry.carbs, entry.protein, entry.fat, entry.source,
-      entry.keep && `Behalten: ${entry.keep}`,
-      entry.delete && `Löschen: ${entry.delete}`,
-    ].filter(Boolean).join(" · ");
-    entries.append(item);
-  }
-  return entries;
+  return h("ul", null, (Array.isArray(proposal.diff) ? proposal.diff : []).map((entry) => h("li", null, [
+    entry.name, entry.date, entry.sport, entry.scope, entry.units,
+    entry.id && `ID: ${entry.id}`,
+    entry.kcal, entry.entries && `${entry.entries} Einträge`,
+    entry.carbs, entry.protein, entry.fat, entry.source,
+    entry.keep && `Behalten: ${entry.keep}`,
+    entry.delete && `Löschen: ${entry.delete}`,
+  ].filter(Boolean).join(" · ") || null)));
 }
 
 function coachActionButtons(proposal) {
   const localWrite = proposal.action_type === "local_coach_write";
   const remoteWrite = proposal.action_type === "remote_coach_write";
-  const actions = document.createElement("div");
-  actions.className = "coach-action-card-actions";
-  const later = document.createElement("button");
-  later.type = "button";
-  later.className = "secondary-button";
-  later.textContent = remoteWrite || localWrite ? "Nicht freigeben" : "Später prüfen";
+  const later = h("button", { type: "button", className: "secondary-button" }, remoteWrite || localWrite ? "Nicht freigeben" : "Später prüfen");
   later.addEventListener("click", () => {
     if (remoteWrite || localWrite) {
       later.disabled = true;
@@ -1410,8 +1391,7 @@ function coachActionButtons(proposal) {
     state.coachActionProposals = state.coachActionProposals.filter((item) => item.id !== proposal.id);
     renderCoachActionReview();
   });
-  const confirm = document.createElement("button");
-  confirm.type = "button";
+  const confirm = h("button", { type: "button" });
   if (remoteWrite) {
     confirm.textContent = "Remote-Änderung freigeben";
   } else if (localWrite) {
@@ -1422,17 +1402,12 @@ function coachActionButtons(proposal) {
     confirm.textContent = "Änderung zurücknehmen";
   }
   confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
-  actions.append(later, confirm);
-  return actions;
+  return h("div", "coach-action-card-actions", later, confirm);
 }
 
 function coachActionCard(proposal) {
-  const card = document.createElement("div");
-  card.className = "coach-action-card";
-  card.dataset.proposalStatus = proposal.status;
-  const description = document.createElement("p");
-  description.textContent = coachActionDescription(proposal);
-  card.append(description);
+  const description = h("p", null, coachActionDescription(proposal));
+  const card = h("div", { className: "coach-action-card", dataset: { proposalStatus: proposal.status } }, description);
   // An unknown type is an error card without any button: it can neither be confirmed nor cancelled here.
   if (!["undo_change", "remote_coach_write", "local_coach_write"].includes(proposal.action_type)) {
     card.dataset.proposalStatus = "unknown";
@@ -1440,26 +1415,16 @@ function coachActionCard(proposal) {
     return card;
   }
   if (state.coachActionUnknownIds?.has(proposal.id)) {
-    const status = document.createElement("p");
-    status.textContent = "Ausführung unklar. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.";
-    const check = document.createElement("button");
-    check.type = "button";
-    check.className = "secondary-button";
-    check.textContent = "Status prüfen";
+    const check = h("button", { type: "button", className: "secondary-button" }, "Status prüfen");
     check.addEventListener("click", () => {
       check.disabled = true;
       void reconcileCoachActionProposal(proposal.id);
     });
-    const actions = document.createElement("div");
-    actions.className = "coach-action-card-actions";
-    actions.append(check);
-    card.append(status, actions);
+    card.append(h("p", null, "Ausführung unklar. Die Freigabe bleibt gesperrt, bis der Status geprüft ist."), h("div", "coach-action-card-actions", check));
     return card;
   }
   if (!["preview", "ready"].includes(proposal.status) || coachActionExpired(proposal)) {
-    const status = document.createElement("p");
-    status.textContent = coachActionStatus(proposal);
-    card.append(status);
+    card.append(h("p", null, coachActionStatus(proposal)));
     return card;
   }
   card.append(coachActionDiff(proposal), coachActionButtons(proposal));
@@ -1588,31 +1553,23 @@ function rejectCoachActionProposal(proposal, button, error, confirmStage = false
 }
 
 function createPendingMessage(entry, index = 0) {
-  const node = document.createElement("div");
-  node.className = "message user pending";
-  const text = document.createElement("div");
-  text.textContent = entry.message;
-  const label = document.createElement("span");
-  label.className = "pending-label";
-  label.textContent = index === 0 ? "Als Nächstes" : "Wird nach der aktuellen Antwort gesendet";
-  const actions = document.createElement("div");
-  actions.className = "pending-actions";
   const position = index + 1;
-  actions.append(
-    pendingQueueButton("Bearbeiten", `Bearbeiten: wartende Nachricht ${position}`, () => editQueuedChatMessage(entry.id)),
-    pendingQueueButton("Entfernen", `Entfernen: wartende Nachricht ${position}`, () => removeQueuedChatMessage(entry.id)),
+  return h(
+    "div",
+    "message user pending",
+    h("div", null, entry.message || null),
+    h("span", "pending-label", index === 0 ? "Als Nächstes" : "Wird nach der aktuellen Antwort gesendet"),
+    h(
+      "div",
+      "pending-actions",
+      pendingQueueButton("Bearbeiten", `Bearbeiten: wartende Nachricht ${position}`, () => editQueuedChatMessage(entry.id)),
+      pendingQueueButton("Entfernen", `Entfernen: wartende Nachricht ${position}`, () => removeQueuedChatMessage(entry.id)),
+    ),
   );
-  node.append(text, label, actions);
-  return node;
 }
 
 function pendingQueueButton(text, name, onClick) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "pending-action";
-  button.textContent = text;
-  button.setAttribute("aria-label", name);
-  button.title = name;
+  const button = h("button", { type: "button", className: "pending-action", "aria-label": name, title: name }, text);
   button.addEventListener("click", onClick);
   return button;
 }
@@ -1708,11 +1665,7 @@ function appendHistoryPageButton(root, area) {
   if (chat) chatHistoryObserver?.disconnect();
   const cursor = state.data?.[chat ? "messages_next_cursor" : "library_next_cursor"];
   if (!cursor) return;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "secondary-button";
-  button.dataset.pageArea = area;
-  button.textContent = chat ? "Weitere Nachrichten laden" : "Weitere Bibliothekseinheiten laden";
+  const button = h("button", { type: "button", className: "secondary-button", dataset: { pageArea: area } }, chat ? "Weitere Nachrichten laden" : "Weitere Bibliothekseinheiten laden");
   let autoLoad = false;
   button.addEventListener("click", async () => {
     if (chat) chatHistoryObserver?.disconnect();
@@ -1785,44 +1738,31 @@ function restoreRejectedMessage(message) {
 
 function appendMessageRetry(node, message) {
   if (!message.error) return;
-  const error = document.createElement("p");
-  error.className = "message-error";
-  error.textContent = message.error;
-  const retry = document.createElement("button");
-  retry.type = "button";
-  retry.textContent = "Als Entwurf übernehmen";
+  const retry = h("button", { type: "button" }, "Als Entwurf übernehmen");
   retry.addEventListener("click", () => restoreRejectedMessage(message));
-  node.append(error, retry);
+  node.append(h("p", "message-error", message.error), retry);
 }
 
 function messageActionButton(icon, label) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "message-action";
-  button.setAttribute("aria-label", label);
-  button.title = label;
+  const button = h("button", { type: "button", className: "message-action", "aria-label": label, title: label });
   button.innerHTML = `<svg class="message-action-icon" aria-hidden="true"><use href="#icon-${icon}"></use></svg>`;
   return button;
 }
 
 function renderMessageNode(message, latest = false) {
-  const node = document.createElement("div");
-  node.className = `message ${message.role}`;
+  const node = h("div", `message ${message.role}`);
   if (message.id != null) node.dataset.messageId = String(message.id);
   if (message.role === "assistant") node.innerHTML = markdownToHtml(message.content);
   else {
     node.textContent = message.content;
     if (message.attachment_names) {
-      const label = document.createElement("small");
-      label.textContent = messageAttachmentLabel(message.attachment_names);
-      node.append(label);
+      node.append(h("small", null, messageAttachmentLabel(message.attachment_names) || null));
     }
   }
   appendMessageRetry(node, message);
   appendFailedTurnRetry(node, message, latest);
   appendMessageChanges(node, message);
-  const actions = document.createElement("div");
-  actions.className = "message-actions";
+  const actions = h("div", "message-actions");
   const copy = messageActionButton("copy", "Nachricht kopieren");
   copy.addEventListener("click", async () => {
     try {
@@ -1851,20 +1791,12 @@ function renderMessageNode(message, latest = false) {
 function appendMessageChanges(node, message) {
   const changes = message.role === "assistant" ? message.coach_changes : null;
   if (!Array.isArray(changes?.labels) || !changes.labels.length) return;
-  const line = document.createElement("div");
-  line.className = `message-changes${changes.undone_at ? " is-undone" : ""}`;
-  const icon = document.createElement("span");
-  icon.className = "message-changes-icon";
+  const line = h("div", `message-changes${changes.undone_at ? " is-undone" : ""}`);
+  const icon = h("span", "message-changes-icon");
   icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${changes.undone_at ? "M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" : "m5 12 5 5 9-10"}"></path></svg>`;
-  const text = document.createElement("span");
-  text.className = "message-changes-text";
-  text.textContent = changes.undone_at ? `Zurückgenommen: ${changes.labels.join(" · ")}` : changes.labels.join(" · ");
-  line.append(icon, text);
+  line.append(icon, h("span", "message-changes-text", changes.undone_at ? `Zurückgenommen: ${changes.labels.join(" · ")}` : changes.labels.join(" · ")));
   if (changes.undoable && !changes.undone_at && message.client_turn_id) {
-    const undo = document.createElement("button");
-    undo.type = "button";
-    undo.className = "message-undo";
-    undo.textContent = "Rückgängig";
+    const undo = h("button", { type: "button", className: "message-undo" }, "Rückgängig");
     undo.addEventListener("click", () => undoCoachTurn(message.client_turn_id, undo));
     line.append(undo);
   }
@@ -1891,12 +1823,9 @@ function appendPlanNotes(node, planNotes) {
   for (const note of Array.isArray(planNotes) ? planNotes : []) {
     const label = planNoteLabels[note?.code];
     if (!label) continue;
-    const detail = document.createElement("div");
-    detail.className = `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`;
     const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
     const dateLabel = dates ? " · " + dates : "";
-    detail.textContent = `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`;
-    node.append(detail);
+    node.append(h("div", `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`, `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`));
   }
 }
 
@@ -1932,10 +1861,7 @@ function appendFailedTurnRetry(node, message, latest) {
   // Attachments are not kept after a turn, so only a text request can be sent again.
   if (!request?.content || messageAttachmentLabel(request.attachment_names)) return;
   node.classList.add("is-failed");
-  const retry = document.createElement("button");
-  retry.type = "button";
-  retry.className = "secondary-button message-retry";
-  retry.textContent = "Erneut senden";
+  const retry = h("button", { type: "button", className: "secondary-button message-retry" }, "Erneut senden");
   retry.addEventListener("click", () => resendChatText(String(request.content), message.coach_request_kind));
   node.append(retry);
 }
@@ -1964,10 +1890,7 @@ function resendChatText(text, requestKind = null) {
 }
 
 function profileSetupButton() {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "secondary-button";
-  button.textContent = "Profil ausfüllen";
+  const button = h("button", { type: "button", className: "secondary-button" }, "Profil ausfüllen");
   button.addEventListener("click", () => resendChatText("Hilf mir, mein Profil und meine Ziele auszufüllen."));
   return button;
 }
@@ -1975,8 +1898,7 @@ function profileSetupButton() {
 function appendChatStream(root, streamVisible) {
   const phase = state.chatRequest?.phase;
   if (!streamVisible) return false;
-  const node = document.createElement("div");
-  node.className = `message assistant streaming${phase === "recovering" ? " is-recovering" : ""}`;
+  const node = h("div", `message assistant streaming${phase === "recovering" ? " is-recovering" : ""}`);
   node.innerHTML = markdownToHtml(state.chatStreamText);
   root.append(node);
   return true;
@@ -2195,16 +2117,11 @@ const CONTEXT_KEY_LABELS = {
 const CONTEXT_HIDDEN_KEYS = new Set(["field", "role"]);
 
 function contextPreNode(text) {
-  const pre = document.createElement("pre");
-  pre.textContent = text;
-  return pre;
+  return h("pre", null, text || null);
 }
 
 function contextTextNode(text) {
-  const node = document.createElement("p");
-  node.className = "context-preview-text";
-  node.textContent = text;
-  return node;
+  return h("p", "context-preview-text", text);
 }
 
 function contextScalarText(key, value) {
@@ -2219,33 +2136,20 @@ const CONTEXT_PREVIEW_MAX_DEPTH = 3;
 const CONTEXT_PREVIEW_MAX_ITEMS = 25;
 
 function contextListNode(items, depth) {
-  const list = document.createElement("ul");
-  list.className = "context-preview-list";
-  for (const item of items.slice(0, CONTEXT_PREVIEW_MAX_ITEMS)) {
-    const entry = document.createElement("li");
-    entry.append(contextValueNode(item, "", depth + 1));
-    list.append(entry);
-  }
-  if (items.length > CONTEXT_PREVIEW_MAX_ITEMS) {
-    const more = document.createElement("li");
-    more.textContent = `… ${(items.length - CONTEXT_PREVIEW_MAX_ITEMS).toLocaleString("de-DE")} weitere Einträge`;
-    list.append(more);
-  }
-  return list;
+  return h(
+    "ul",
+    "context-preview-list",
+    items.slice(0, CONTEXT_PREVIEW_MAX_ITEMS).map((item) => h("li", null, contextValueNode(item, "", depth + 1))),
+    items.length > CONTEXT_PREVIEW_MAX_ITEMS && h("li", null, `… ${(items.length - CONTEXT_PREVIEW_MAX_ITEMS).toLocaleString("de-DE")} weitere Einträge`),
+  );
 }
 
 function contextObjectNode(object, depth) {
-  const list = document.createElement("dl");
-  list.className = "context-preview-values";
-  for (const [key, item] of Object.entries(object)) {
-    if (CONTEXT_HIDDEN_KEYS.has(key)) continue;
-    const term = document.createElement("dt");
-    term.textContent = CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ");
-    const definition = document.createElement("dd");
-    definition.append(contextValueNode(item, key, depth + 1));
-    list.append(term, definition);
-  }
-  return list;
+  const entries = Object.entries(object).filter(([key]) => !CONTEXT_HIDDEN_KEYS.has(key));
+  return h("dl", "context-preview-values", entries.flatMap(([key, item]) => [
+    h("dt", null, CONTEXT_KEY_LABELS[key] || key.replaceAll("_", " ") || null),
+    h("dd", null, contextValueNode(item, key, depth + 1)),
+  ]));
 }
 
 function contextValueNode(value, key = "", depth = 0) {
@@ -2284,14 +2188,8 @@ function renderContextPreview(preview) {
   ];
   sections.forEach(([title, value], index) => {
     if (value == null) return;
-    const details = document.createElement("details");
+    const details = h("details", null, h("summary", null, title), h("div", "context-preview-body", typeof value === "string" ? contextPreNode(value) : contextValueNode(value)));
     if (index < 4) details.open = true;
-    const summary = document.createElement("summary");
-    summary.textContent = title;
-    const body = document.createElement("div");
-    body.className = "context-preview-body";
-    body.append(typeof value === "string" ? contextPreNode(value) : contextValueNode(value));
-    details.append(summary, body);
     content.append(details);
   });
   status.classList.remove("error");
@@ -2426,36 +2324,22 @@ function renderChatAttachments() {
   if (!list) return;
   list.replaceChildren();
   for (const [index, item] of (state.chatAttachments || []).entries()) {
-    const chip = document.createElement("div");
-    chip.className = "chat-attachment";
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("class", "chat-attachment-icon");
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("aria-hidden", "true");
-    icon.setAttribute("focusable", "false");
-    const iconPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    iconPath.setAttribute("d", "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5");
-    icon.append(iconPath);
-    const name = document.createElement("span");
-    name.className = "chat-attachment-name";
-    name.textContent = item.name;
-    name.title = item.name;
-    const meta = document.createElement("span");
-    meta.className = "chat-attachment-meta";
-    meta.textContent = `${chatAttachmentKind(item.name)} · ${chatAttachmentSize(item)}`;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "chat-attachment-remove";
-    remove.textContent = "×";
-    remove.setAttribute("aria-label", `Anhang ${item.name} entfernen`);
-    remove.title = `Anhang ${item.name} entfernen`;
+    const icon = svgNode("svg", { class: "chat-attachment-icon", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
+    icon.append(svgNode("path", { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5" }));
+    const remove = h("button", { type: "button", className: "chat-attachment-remove", "aria-label": `Anhang ${item.name} entfernen`, title: `Anhang ${item.name} entfernen` }, "×");
     remove.addEventListener("click", () => {
       state.chatAttachments.splice(index, 1);
       renderChatAttachments();
       updateChatControls();
     });
-    chip.append(icon, name, meta, remove);
-    list.append(chip);
+    list.append(h(
+      "div",
+      "chat-attachment",
+      icon,
+      h("span", { className: "chat-attachment-name", title: item.name }, item.name),
+      h("span", "chat-attachment-meta", `${chatAttachmentKind(item.name)} · ${chatAttachmentSize(item)}`),
+      remove,
+    ));
   }
   list.hidden = !list.childElementCount;
   updateChatComposerVisibility();

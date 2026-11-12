@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 function harness() {
   return extractFunctions("coach.js", ["coachActionCard", "coachActionDescription", "coachActionExpired", "coachActionStatus", "coachActionDiff", "coachActionButtons"], {
@@ -12,13 +12,13 @@ function harness() {
   });
 }
 
-// The text a textContent assignment leaves as a string child is read through textContent itself.
+// The element helper leaves text as string children, so a leaf's text is read with textOf.
 function elements(node) {
   return node.children.filter((child) => typeof child !== "string");
 }
 
 function texts(node) {
-  return [node.textContent, ...elements(node).flatMap(texts)];
+  return elements(node).length ? elements(node).flatMap(texts) : [textOf(node)];
 }
 
 function tagNames(node) {

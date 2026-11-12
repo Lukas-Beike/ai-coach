@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 test("equipment count labels use singular for exactly one and German thousands separators", () => {
   const context = extractFunctions("analysis.js", ["analysisCountLabel"]);
@@ -47,12 +47,12 @@ function descendants(node) {
 test("the context preview shows readable values and keeps deeply nested provider data as compact text", () => {
   const contextValueNode = contextValueNodeFor();
   const readable = contextValueNode({ unlabelled_key: "ok", flag: true, empty: [], missing: null });
-  const text = descendants(readable).map((node) => node.textContent).filter(Boolean);
+  const text = descendants(readable).filter((node) => !node.childElementCount).map(textOf).filter(Boolean);
   assert.deepEqual(text, ["unlabelled key", "ok", "flag", "Ja", "empty", "Keine Angaben", "missing", "–"]);
   const nested = descendants(contextValueNode({ a: { b: { c: { d: 1 } } } }));
-  assert.deepEqual(nested.filter((node) => node.tag === "pre").map((node) => node.textContent), ['{\n  "d": 1\n}']);
+  assert.deepEqual(nested.filter((node) => node.tag === "pre").map(textOf), ['{\n  "d": 1\n}']);
   assert.equal(contextValueNode("Langer Text", "content").tag, "pre");
   const longList = contextValueNode(Array.from({ length: 30 }, (_, index) => index));
   assert.equal(longList.children.length, 26);
-  assert.equal(longList.children[25].textContent, "… 5 weitere Einträge");
+  assert.equal(textOf(longList.children[25]), "… 5 weitere Einträge");
 });
