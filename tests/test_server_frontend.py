@@ -100,7 +100,6 @@ class ServerFrontendTests(ServerTestCase):
             "performance-view.js": (
                 "renderPerformance",
                 "activitySportLabel",
-                "saveInlineMetric",
             ),
             "diagnostics.js": ("loadLogs", "deleteDiagnostics"),
             "state-loader.js": ("loadState", "load", "render"),

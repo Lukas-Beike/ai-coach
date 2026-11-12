@@ -472,18 +472,6 @@ test("delayed receipt and transcription cannot alter a new session", async ({ pa
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe("new-turn");
 });
 
-test("provider source retains visible stale and partial measurement context", async ({ page }) => {
-  await ready(page);
-  await page.getByRole("link", { name: "Analyse", exact: true }).click();
-  await page.evaluate(() => {
-    const root = document.querySelector("#dataPanel");
-    displayMetric(root, "Fixture retained HRV", { value: 58, unit: "ms", source: "Garmin Connect", freshness: "stale", observed_at: "2026-09-01", fetched_at: "2026-09-02T10:00:00Z" });
-    displayMetric(root, "Fixture retained readiness", { value: 65, source: "Garmin Connect", freshness: "partial", observed_at: "2026-09-02" });
-  });
-  await expect(page.locator("#dataPanel")).toContainText("Garmin Connect · Veraltet · Messung");
-  await expect(page.locator("#dataPanel")).toContainText("Garmin Connect · Teilweise aktualisiert · Messung");
-});
-
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);

@@ -15,7 +15,6 @@ const STATUS_SOURCE_RANK = {
   thresholds: 8,
   intervals_key: 9,
 };
-const STATUS_LEVEL_ORDER = { working: 0, critical: 1, warning: 2, info: 3 };
 const STATUS_STAND_REFRESH_MS = 60_000;
 
 const statusSources = new Map();
