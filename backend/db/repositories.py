@@ -62,7 +62,7 @@ NUTRIENT_COLUMNS = (
 _DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
 
 
-def _database_origin(food_id: str) -> str:
+def database_origin(food_id: str) -> str:
     return _DATABASE_ORIGINS[food_id.split(":", 1)[0]]
 
 
@@ -100,7 +100,7 @@ def fill_empty_product_fields(
     if not updates:
         return False
     details = json.loads(row["details"])
-    origin = _database_origin(str(food["id"]))
+    origin = database_origin(str(food["id"]))
     details.setdefault("filled_fields", {}).update(
         {key: {"origin": origin, "fetched_at": fetched_at} for key in updates}
     )
@@ -447,7 +447,7 @@ class FoodDatabaseEntryRepository:
         """
         payload = {key: value for key, value in food.items() if key != "fetched_at"}
         food_id = str(payload["id"])
-        origin = _database_origin(food_id)
+        origin = database_origin(food_id)
         barcode = (
             str(payload.get("barcode") or "")
             if origin == "yazio"

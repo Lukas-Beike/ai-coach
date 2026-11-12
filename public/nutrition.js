@@ -918,8 +918,8 @@ async function loadNutritionDatabase(query = "") {
         refresh.disabled = true;
         const status = document.querySelector("#nutritionProductStatus");
         try {
-          await api("/api/nutrition/products/database/refresh", { method: "POST", body: JSON.stringify({ id: food.id }) });
-          status.textContent = `„${food.name}“ aktualisiert.`;
+          const result = await api("/api/nutrition/products/database/refresh", { method: "POST", body: JSON.stringify({ id: food.id }) });
+          status.textContent = [`„${food.name}“ aktualisiert.`, result.food?.notice].filter(Boolean).join(" ");
           await loadNutritionDatabase(query);
         } catch (error) { refresh.disabled = false; status.textContent = `Eintrag konnte nicht aktualisiert werden: ${error.message}`; }
       });

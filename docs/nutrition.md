@@ -39,11 +39,13 @@ possible, the stored version is used with its date ("Stand vom …", as of …).
 A re-check takes every value the fresh result has and keeps a stored value
 where it has none, so it fills gaps such as salt or fibre and never empties a
 known field; stored entries name their missing core fields (`missing_fields`).
-When an Open Food Facts entry is re-checked and core fields are still empty,
-the app asks Yazio for the same EAN (only when Yazio is configured, athlete
+When the athlete re-checks an Open Food Facts entry ("Aktualisieren") and core
+fields are still empty, the app asks Yazio for the same EAN (only when Yazio is configured, athlete
 decision 2026-11-11) and fills only those empty fields, only from a Yazio
 product on the same basis; each filled field names `yazio` and its fetch time
-under `filled_fields`, and a later Open Food Facts value replaces it.
+under `filled_fields`, and a later Open Food Facts value or a change of basis
+ends it. A Yazio failure is named in the status line; lookups and calculations
+make no extra Yazio request.
 For the Coach, matches carry the origin `data_origin` (`live`,
 `local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
 section lists the stored entries; "Lokal speichern" (save locally) takes over an

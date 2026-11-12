@@ -358,6 +358,32 @@ class LookupChainTests(unittest.TestCase):
             (refreshed["per_100"]["salt_g"], refreshed["filled_fields"]), (0.02, {})
         )
 
+    def test_a_basis_change_ends_a_yazio_fill(self):
+        self.mirror.store([off_food()])
+        with_salt = yazio_food()
+        with_salt["per_100"]["salt_g"] = 0.01
+        self.yazio.barcode_food = with_salt
+        self.now += timedelta(days=1)
+        self.service.refresh_stored(f"off:{BARCODE}")
+        in_ml = off_food()
+        in_ml["basis_unit"] = "ml"
+        self.off.product = lambda barcode: in_ml
+        self.now += timedelta(days=1)
+
+        refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+
+        self.assertIsNone(refreshed["per_100"]["salt_g"])
+        self.assertEqual(refreshed["filled_fields"], {})
+
+    def test_lookups_and_calculations_ask_yazio_at_most_once(self):
+        self.mirror.store([off_food()])
+        self.now += timedelta(days=100)
+
+        self.service.lookup({"barcode": BARCODE})
+        self.service.resolve(f"off:{BARCODE}")
+
+        self.assertEqual(self.yazio.calls, [("barcode", BARCODE)])
+
     def test_yazio_fills_nothing_without_a_match_on_the_same_basis(self):
         portion = yazio_food()
         portion["basis_unit"] = "ml"
@@ -376,6 +402,7 @@ class LookupChainTests(unittest.TestCase):
                 refreshed = self.service.refresh_stored(f"off:{BARCODE}")
                 self.assertIsNone(refreshed["per_100"]["salt_g"])
                 self.assertNotIn("filled_fields", refreshed)
+                self.assertEqual("notice" in refreshed, case == "failure")
 
     def test_a_complete_re_check_does_not_ask_yazio(self):
         complete = off_food()

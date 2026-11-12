@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import FoodDatabaseEntryRepository
+from backend.db.repositories import FoodDatabaseEntryRepository, database_origin
 from backend.errors import AppError
 
 # Nutrition values rarely change; older entries are re-checked online when used.
@@ -100,7 +100,7 @@ class FoodDatabaseMirror:
                 if value is None and values.get(key) is not None
             }
             if gaps:
-                origin = str(source["id"]).split(":", 1)[0]
+                origin = database_origin(str(source["id"]))
                 fetched_at = entry.pop("fetched_at")
                 entry["per_100"].update(gaps)
                 entry["filled_fields"] = {
@@ -139,12 +139,13 @@ def _filled(food: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, An
     per_100 = food.get("per_100")
     fresh: dict[str, Any] = per_100 if isinstance(per_100, dict) else {}
     same_basis = _same_basis(food, stored)
-    # A value the fresh record has is its own again, not filled from elsewhere.
+    # A filled value stays filled only while it is carried over unchanged; a
+    # fresh value or another basis ends its origin.
     if "filled_fields" in filled:
         filled["filled_fields"] = {
             key: origin
             for key, origin in filled["filled_fields"].items()
-            if fresh.get(key) is None
+            if same_basis and fresh.get(key) is None
         }
     filled["per_100"] = {
         **fresh,
