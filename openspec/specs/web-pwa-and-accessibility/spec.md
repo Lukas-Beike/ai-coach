@@ -289,7 +289,7 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 
 #### Scenario: Move a planned unit
 - **WHEN** the athlete opens a planned unit that is not a completed session and taps "Verschieben"
-- **THEN** a strip of the next seven days from today (the unit's own day disabled) and "…" for the system date picker appear; one tap moves the local unit, the opened card follows it to its new week with "Verschoben auf <Tag, Datum>" and "Rückgängig", and undo puts it back with "Zurückgenommen."; a unit already sent shows its pending sync and nothing is written remotely.
+- **THEN** a strip of the next seven days from today (the unit's own day disabled) and "…" for the system date picker appear, both ending with the last day the calendar shows; one tap moves the local unit, the opened card follows it to its new week with "Verschoben auf <Tag, Datum>" and "Rückgängig", and undo puts it back with "Zurückgenommen."; a unit already sent shows its pending sync and nothing is written remotely.
 
 #### Scenario: Provider send state of plan entries
 - **WHEN** the athlete views a pending planned unit, a strength unit Garmin cannot receive, or a changed Wahoo library workout

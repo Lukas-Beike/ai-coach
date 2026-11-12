@@ -1230,7 +1230,7 @@ function plannedUnitActions(entry, dateKey, todayKey) {
     toggle.setAttribute("aria-expanded", String(!days.hidden));
   });
   const move = async (target) => {
-    if (!target || target === dateKey) return;
+    if (!target || target === dateKey || (plannedLastDateKey && target > plannedLastDateKey)) return;
     const buttons = [...days.querySelectorAll("button, input")];
     buttons.forEach((item) => { item.disabled = true; });
     status.replaceChildren();
@@ -1247,6 +1247,7 @@ function plannedUnitActions(entry, dateKey, todayKey) {
   };
   for (let offset = 0; offset < 7; offset += 1) {
     const day = addDateKey(todayKey, offset);
+    if (plannedLastDateKey && day > plannedLastDateKey) break;
     const date = dateFromKey(day);
     const button = h("button", { type: "button", className: "planned-move-day", disabled: day === dateKey, dataset: { day }, "aria-label": DETAIL_DATE_FORMAT.format(date) },
       h("span", null, MOVE_WEEKDAY_FORMAT.format(date)), h("b", null, String(date.getDate())));
@@ -1254,7 +1255,7 @@ function plannedUnitActions(entry, dateKey, todayKey) {
     days.append(button);
   }
   // The system date picker opens from "…"; without showPicker the field itself is shown.
-  const picker = h("input", { type: "date", className: "planned-move-picker", min: todayKey, tabIndex: -1, "aria-label": "Anderes Datum" });
+  const picker = h("input", { type: "date", className: "planned-move-picker", min: todayKey, max: plannedLastDateKey || null, tabIndex: -1, "aria-label": "Anderes Datum" });
   picker.addEventListener("change", () => void move(picker.value));
   const later = h("button", { type: "button", className: "planned-move-day", "aria-label": "Anderes Datum" }, "…");
   later.addEventListener("click", () => {
@@ -1606,6 +1607,8 @@ let selectedWeekKey = "";
 let calendarView = "week";
 let selectedDayKey = "";
 let renderedCalendar = [];
+// The last day the calendar shows; a move stays inside it, so the moved card and its receipt stay visible.
+let plannedLastDateKey = "";
 
 // Keeps the shown week (and in the month view the selected day, which sets the week) inside the loaded weeks.
 // The past has no limit: older weeks stay selectable and their sessions load on demand (#2258).
@@ -1669,6 +1672,7 @@ function renderPlanned(trainingCalendar) {
   const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
   const lastWeekKey = addDateKey(currentWeekKey, 7 * futureWeeks);
   const lastDateKey = addDateKey(lastWeekKey, 6);
+  plannedLastDateKey = lastDateKey;
   keepPlannedSelection(todayKey, lastDateKey);
   const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
   if (snapshot === plannedRenderSnapshot && root.childElementCount) {

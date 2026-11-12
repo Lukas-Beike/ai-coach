@@ -254,6 +254,8 @@ test("@responsive Verschieben moves a planned unit to a tapped day and Rückgän
   const strip = pane.getByRole("group", { name: "Neuer Tag" });
   await expect(strip.locator(".planned-move-day[data-day]")).toHaveCount(7);
   await expect(strip.locator(`.planned-move-day[data-day="${days.next}"]`)).toBeDisabled();
+  // The date picker ends with the last day the calendar shows, so a moved unit stays visible.
+  await expect(strip.locator(".planned-move-picker")).toHaveAttribute("max", await page.evaluate(() => plannedLastDateKey));
   for (const tile of await strip.locator(".planned-move-day").all()) expect((await tile.boundingBox()).height).toBeGreaterThanOrEqual(44);
   await strip.locator(`.planned-move-day[data-day="${target}"]`).click();
   await expect.poll(() => posts.length).toBe(1);
