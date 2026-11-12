@@ -172,6 +172,15 @@ class PushSecretTests(unittest.TestCase):
         scanned = self.scanned_by(self.update(tip, base))
         self.assertIn(b"BEGIN\n++body\nBEGIN\nEND", scanned)
 
+    def test_same_new_blob_at_two_paths_passes(self):
+        base = self.commit("keep\n")
+        for name in ("one.txt", "two.txt"):
+            (self.root / name).write_text("same content\n")
+        scan.git("add", ".")
+        scan.git("commit", "-qm", "copies")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        self.assertIn(b"same content\n", self.scanned_by(self.update(tip, base)))
+
     def test_new_and_binary_files_are_scanned_whole(self):
         base = self.commit("keep\n")
         (self.root / "new.txt").write_text("fresh line\nsecond\n")

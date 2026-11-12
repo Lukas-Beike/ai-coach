@@ -176,7 +176,7 @@ def check(updates: str) -> int:
                     raise RuntimeError("Sonar failed on every source")
                 raise SecretFinding("; ".join(labels) or "a batch, no single source")
             for filename, _ in batch:
-                Path(filename).unlink()
+                Path(filename).unlink(missing_ok=True)
     print("Outgoing Git secret scan passed")
     return 0
 
