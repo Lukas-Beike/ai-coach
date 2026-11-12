@@ -57,6 +57,7 @@ class FakeElement {
     Object.assign(this, { tag, tagName: tag.toUpperCase(), children: [], attributes: {}, dataset: {}, style: {}, listeners: {}, className: "", textContent: "", value: "", title: "", disabled: false });
     this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(" "); } };
   }
+  get childElementCount() { return this.children.filter((child) => typeof child !== "string").length; }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
   setAttribute(name, value) { this.attributes[name] = value; }

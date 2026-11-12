@@ -1,6 +1,5 @@
 /* Local activity view of the served activity_detail.v1 document. Provider reads require an explicit durable refresh job. */
 (() => {
-  const SVG_NS = "http://www.w3.org/2000/svg";
   let dialog;
   let generation = 0;
 
@@ -9,13 +8,8 @@
     const points = times.map((time, index) => [time, values[index]])
       .filter(([time, value]) => typeof time === "number" && typeof value === "number" && Number.isFinite(time) && Number.isFinite(value));
     if (points.length < 2) return null;
-    const section = h("section", "activity-series");
-    section.append(h("h3", null, `${label} (${unit})`));
-    const svg = document.createElementNS(SVG_NS, "svg");
     const width = 680; const height = 220; const left = 64; const right = 12; const top = 16; const bottom = 34;
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `${label}, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt`);
+    const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${label}, Zeitachse in Minuten; Messwerte und Lücken sind in der Tabelle aufgeführt` });
     const min = Math.min(...points.map((point) => point[1]));
     const max = Math.max(...points.map((point) => point[1]));
     const start = points[0][0];
@@ -28,31 +22,32 @@
     const x = (time) => left + (time - start) / duration * (width - left - right);
     const ticks = [axisMax, level, level - axisSpan / 2];
     ticks.forEach((value) => {
-      const line = document.createElementNS(SVG_NS, "line"); line.setAttribute("x1", String(left)); line.setAttribute("x2", String(width - right)); line.setAttribute("y1", String(y(value))); line.setAttribute("y2", String(y(value))); line.setAttribute("class", "activity-gridline"); svg.append(line);
-      const tick = document.createElementNS(SVG_NS, "text"); tick.setAttribute("x", String(left - 8)); tick.setAttribute("y", String(y(value) + 4)); tick.setAttribute("text-anchor", "end"); tick.textContent = Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 }); svg.append(tick);
+      svg.append(svgNode("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "activity-gridline" }));
+      svg.append(svgNode("text", { x: left - 8, y: y(value) + 4, "text-anchor": "end" }, Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 })));
     });
     const xTicks = [start, start + duration / 2, points.at(-1)[0]];
-    xTicks.forEach((time) => { const tick = document.createElementNS(SVG_NS, "text"); tick.setAttribute("x", String(x(time))); tick.setAttribute("y", String(height - 8)); tick.setAttribute("text-anchor", "middle"); tick.textContent = `${Math.round(time / 60)} min`; svg.append(tick); });
-    const path = document.createElementNS(SVG_NS, "path");
+    xTicks.forEach((time) => svg.append(svgNode("text", { x: x(time), y: height - 8, "text-anchor": "middle" }, `${Math.round(time / 60)} min`)));
     let continuing = false;
-    path.setAttribute("d", times.map((time, index) => {
+    const path = times.map((time, index) => {
       const value = values[index];
       if (typeof time !== "number" || typeof value !== "number" || !Number.isFinite(time) || !Number.isFinite(value)) { continuing = false; return ""; }
       const command = continuing ? "L" : "M";
       continuing = true;
       return `${command}${x(time).toFixed(1)},${y(value).toFixed(1)}`;
-    }).join(" "));
-    svg.append(path);
-    section.append(svg, h("p", "muted", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`));
-    const details = h("details", "activity-values"); details.append(h("summary", null, `Alle ${points.length} Messwerte ansehen`));
-    const tableWrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), `${label} in ${unit}: Messwerte`); const table = h("table");
-    table.append(h("caption", null, `${label} in ${unit}; fehlende Werte sind als Lücke markiert.`));
-    const thead = h("thead"); const heading = h("tr"); ["Zeit", label].forEach((value) => { const cell = h("th", null, value); cell.scope = "col"; heading.append(cell); }); thead.append(heading); table.append(thead);
-    const body = h("tbody");
-    times.forEach((time, index) => { if (typeof time !== "number" || !Number.isFinite(time)) { return; }
-      const row = h("tr"); const timeCell = h("th", null, `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`); timeCell.scope = "row"; row.append(timeCell); const value = values[index]; row.append(h("td", null, typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke")); body.append(row); });
-    table.append(body); tableWrap.append(table); details.append(tableWrap); section.append(details);
-    return section;
+    }).join(" ");
+    svg.append(svgNode("path", { d: path }));
+    const tableWrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), `${label} in ${unit}: Messwerte`);
+    const rows = [];
+    times.forEach((time, index) => {
+      if (typeof time !== "number" || !Number.isFinite(time)) return;
+      const value = values[index];
+      const reading = typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString("de-DE", { maximumFractionDigits: 2 })} ${unit}` : "Lücke";
+      rows.push([h("th", { scope: "row" }, `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`), reading]);
+    });
+    tableWrap.append(table(["Zeit", label], rows, { caption: `${label} in ${unit}; fehlende Werte sind als Lücke markiert.` }));
+    return h("section", "activity-series", h("h3", null, `${label} (${unit})`), svg,
+      h("p", "muted", `${Math.round(min * 10) / 10}–${Math.round(max * 10) / 10} ${unit} · ${Math.round(start / 60)}–${Math.round(points.at(-1)[0] / 60)} min · ${times.length - points.length} fehlende Messpunkte`),
+      h("details", "activity-values", h("summary", null, `Alle ${points.length} Messwerte ansehen`), tableWrap));
   }
 
   // Served metric values by key; metrics the document does not carry stay absent.
@@ -88,9 +83,7 @@
   function rpeOption(value) {
     const anchor = RPE_ANCHORS[value];
     const number = value.toLocaleString("de-DE");
-    const option = h("option", null, anchor ? `${number} · ${anchor}` : number);
-    option.value = String(value);
-    return option;
+    return h("option", { value: String(value) }, anchor ? `${number} · ${anchor}` : number);
   }
 
   function setRpe(select, value) {
@@ -105,8 +98,7 @@
   }
 
   function rpeSelect(value) {
-    const select = document.createElement("select"); select.name = "session_rpe";
-    const empty = h("option", null, "Keine Angabe"); empty.value = ""; select.append(empty);
+    const select = h("select", { name: "session_rpe" }, h("option", { value: "" }, "Keine Angabe"));
     for (let step = 0; step <= 20; step += 1) select.append(rpeOption(step / 2));
     setRpe(select, value);
     return select;
@@ -116,10 +108,9 @@
   const PURPOSES = [["training", "Training"], ["race", "Wettkampf"], ["commute", "Pendeln"], ["warmup", "Einfahren"], ["cooldown", "Ausfahren"]];
 
   function purposeSelect(marked, detected) {
-    const select = document.createElement("select"); select.name = "purpose";
     const detectedLabel = PURPOSES.find(([key]) => key === detected)?.[1];
-    const automatic = h("option", null, !marked && detectedLabel ? `Automatisch · ${detectedLabel}` : "Automatisch"); automatic.value = ""; select.append(automatic);
-    for (const [key, label] of PURPOSES) { const option = h("option", null, label); option.value = key; select.append(option); }
+    const automatic = h("option", { value: "" }, !marked && detectedLabel ? `Automatisch · ${detectedLabel}` : "Automatisch");
+    const select = h("select", { name: "purpose" }, automatic, PURPOSES.map(([key, label]) => h("option", { value: key }, label)));
     select.value = PURPOSES.some(([key]) => key === marked) ? marked : "";
     return select;
   }
@@ -139,17 +130,17 @@
   }
 
   function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {
-    const section = h("section", "activity-feedback"); section.append(h("h3", null, "Dein Feedback"));
-    const form = document.createElement("form"); form.className = "activity-feedback-form";
-    const purposeLabel = h("label", null, "Art der Einheit"); const purpose = purposeSelect(feedback?.purpose, session?.purpose); purposeLabel.append(purpose);
-    const rpeLabel = h("label", null, "Session-RPE (0–10)"); const rpe = rpeSelect(feedback?.session_rpe); rpeLabel.append(rpe);
-    const reasonLabel = h("label", null, "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
-    const notesLabel = h("label", null, "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
-    const status = h("p", "muted", ""); status.setAttribute("role", "status"); const save = h("button", null, "Feedback speichern"); save.type = "submit";
-    const load = h("p"); load.dataset.sessionRpeLoad = "";
+    const purpose = purposeSelect(feedback?.purpose, session?.purpose);
+    const rpe = rpeSelect(feedback?.session_rpe);
+    const reason = h("input", { name: "deviation_reason", maxLength: 500, value: feedback?.deviation_reason || "" });
+    const notes = h("textarea", { name: "notes", rows: 3, maxLength: 4000, value: feedback?.notes || "" });
+    const status = h("p", "muted", ""); status.setAttribute("role", "status");
+    const save = h("button", { type: "submit" }, "Feedback speichern");
+    const load = h("p", { dataset: { sessionRpeLoad: "" } });
     const showLoad = (value) => { load.textContent = sessionLoadText(value); load.hidden = !load.textContent; };
     showLoad(sessionLoad);
-    form.append(purposeLabel, rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
+    const form = h("form", "activity-feedback-form", h("label", null, "Art der Einheit", purpose), h("label", null, "Session-RPE (0–10)", rpe), h("label", null, "Abweichungsgrund", reason), h("label", null, "Notizen", notes), save);
+    content.append(h("section", "activity-feedback", h("h3", null, "Dein Feedback"), load, form, status));
     let shown = feedback;
     const fill = (value) => { purpose.value = PURPOSES.some(([key]) => key === value?.purpose) ? value.purpose : ""; setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
     // The save and undo responses carry the load recomputed from the saved feedback and its provider fallback.
@@ -195,11 +186,11 @@
   function renderBundle(bundle, api, content, reload, notice) {
     const members = bundle?.members || []; const candidates = bundle?.merge_candidates || [];
     if (!reload || !bundle) return;
-    const section = h("section", "activity-bundle"); section.append(h("h3", null, "Aufzeichnungen"));
+    const section = h("section", "activity-bundle", h("h3", null, "Aufzeichnungen"));
     const status = h("p", "muted", notice?.text || ""); status.setAttribute("role", "status");
     const buttons = [];
     const action = (label, body, done) => {
-      const button = h("button", "secondary-button", label); button.type = "button"; buttons.push(button);
+      const button = h("button", { className: "secondary-button", type: "button" }, label); buttons.push(button);
       button.addEventListener("click", async () => {
         buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
         try {
@@ -223,7 +214,7 @@
     if (several && !bundle.athlete_confirmed) section.append(action("Zuordnung bestätigen", { action: "confirm" }, "Zuordnung bestätigt. "));
     if (candidates.length) { section.append(h("h4", null, "Am selben Tag")); section.append(list(candidates, "Zusammenführen", (entry) => ({ action: "merge", other_id: entry.session_id }), "Aktivitäten zusammengeführt. ")); }
     if (notice?.change?.id) status.append(undoButton(api, notice.change, status, reload));
-    const remove = h("button", "secondary-button", "Aktivität löschen"); remove.type = "button"; buttons.push(remove);
+    const remove = h("button", { className: "secondary-button", type: "button" }, "Aktivität löschen"); buttons.push(remove);
     remove.addEventListener("click", async () => {
       const confirmed = await requestConfirmation("Diese Aktivität mit allen Aufzeichnungen lokal löschen? Bei den Anbietern bleibt sie erhalten.", { title: "Aktivität löschen?", confirmLabel: "Löschen" });
       if (!confirmed) return;
@@ -241,7 +232,7 @@
 
   // Undo of a session correction restores the touched sessions, then the detail reloads.
   function undoButton(api, change, status, reload) {
-    const undo = h("button", "message-undo", "Rückgängig"); undo.type = "button";
+    const undo = h("button", { className: "message-undo", type: "button" }, "Rückgängig");
     undo.addEventListener("click", async () => {
       undo.disabled = true;
       try {
@@ -254,7 +245,7 @@
 
   // Undo restores the feedback rows as they were before this save or removal.
   function feedbackUndoButton(api, change, activityId, status, begin, restored) {
-    const undo = h("button", "message-undo", "Rückgängig"); undo.type = "button";
+    const undo = h("button", { className: "message-undo", type: "button" }, "Rückgängig");
     undo.addEventListener("click", async () => {
       undo.disabled = true; const generation = begin();
       try {
@@ -284,16 +275,16 @@
     const line = h("p");
     let label = route.label;
     const show = () => {
-      const rename = h("button", "secondary-button", "Umbenennen"); rename.type = "button";
+      const rename = h("button", { className: "secondary-button", type: "button" }, "Umbenennen");
       rename.addEventListener("click", edit);
       line.replaceChildren(`${label}, ${route.repeat_index}. Mal `, rename);
     };
     const edit = () => {
-      const form = document.createElement("form");
-      const input = document.createElement("input"); input.maxLength = 60; input.required = true; input.value = label; input.setAttribute("aria-label", "Streckenname");
-      const save = h("button", null, "Speichern"); save.type = "submit";
-      const cancel = h("button", "secondary-button", "Abbrechen"); cancel.type = "button"; cancel.addEventListener("click", show);
+      const input = h("input", { maxLength: 60, required: true, value: label, "aria-label": "Streckenname" });
+      const save = h("button", { type: "submit" }, "Speichern");
+      const cancel = h("button", { className: "secondary-button", type: "button" }, "Abbrechen"); cancel.addEventListener("click", show);
       const status = h("span", "muted"); status.setAttribute("role", "status");
+      const form = h("form", null, input, " ", save, " ", cancel, " ", status);
       form.addEventListener("submit", async (event) => {
         event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
         try {
@@ -301,7 +292,7 @@
           label = result.label; show();
         } catch (error) { status.textContent = error.message; save.disabled = false; }
       });
-      form.append(input, " ", save, " ", cancel, " ", status); line.replaceChildren(form); input.focus();
+      line.replaceChildren(form); input.focus();
     };
     show(); content.append(line);
   }
@@ -338,9 +329,7 @@
     // The simplified-charts note changes how the charts read, so it stays outside the folded details.
     if (detail.display_sampled) notes.push(h("p", "muted", "Diagramme vereinfacht dargestellt"));
     if (facts.length) {
-      const details = h("details", "provenance-details");
-      details.append(h("summary", null, "Herkunft im Detail"), ...facts);
-      notes.push(details);
+      notes.push(h("details", "provenance-details", h("summary", null, "Herkunft im Detail"), facts));
     }
     return notes;
   }
@@ -353,17 +342,12 @@
       const label = entry.label || entry.provider;
       if (!entry.refreshable || !activityId) {
         if (state.data?.configured?.[entry.provider] !== false) continue;
-        const hint = h("p", "muted provider-setup-hint", `${label} ist nicht konfiguriert. `);
-        const link = h("a", null, "Anbindung einrichten");
-        link.href = "#more/connections";
-        link.dataset.connection = entry.provider;
+        const link = h("a", { href: "#more/connections", dataset: { connection: entry.provider } }, "Anbindung einrichten");
         link.addEventListener("click", onSetup);
-        hint.append(link);
-        actions.append(hint);
+        actions.append(h("p", "muted provider-setup-hint", `${label} ist nicht konfiguriert. `, link));
         continue;
       }
-      const button = h("button", "secondary-button", `${label}: Detaildaten ${entry.fetched_at ? "aktualisieren" : "laden"}`);
-      button.type = "button";
+      const button = h("button", { className: "secondary-button", type: "button" }, `${label}: Detaildaten ${entry.fetched_at ? "aktualisieren" : "laden"}`);
       button.addEventListener("click", async () => {
         const buttons = [...actions.querySelectorAll("button")];
         buttons.forEach((item) => { item.disabled = true; });
@@ -502,11 +486,8 @@
       STRENGTH_SOURCES[strength.source],
     ].filter(Boolean).join(" · ")));
     const tableWrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), "Kraftsätze");
-    const table = h("table");
-    table.append(h("caption", null, "Ausgeführte Sätze je Übung"));
-    const thead = h("thead"); const heading = h("tr");
-    ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = h("th", null, label); cell.scope = "col"; heading.append(cell); });
-    thead.append(heading); table.append(thead);
+    const grid = h("table", null, h("caption", null, "Ausgeführte Sätze je Übung"),
+      h("thead", null, h("tr", null, ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].map((label) => h("th", { scope: "col" }, label)))));
     strength.exercises.forEach((exercise) => {
       const setList = Array.isArray(exercise.set_list) ? exercise.set_list : [];
       // One row group per exercise, so its header covers exactly its own sets.
@@ -515,14 +496,14 @@
         const row = h("tr");
         if (index === 0) {
           // One header per exercise spans its sets, so every set row keeps its exercise.
-          const nameCell = h("th", null, strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
+          row.append(h("th", { scope: "rowgroup", rowSpan: setList.length }, strengthExerciseLabel(exercise)));
         }
         row.append(h("td", null, String(index + 1)), h("td", null, strengthAmount(set)), h("td", null, strengthNumber(set.weight_kg)), h("td", null, strengthSeconds(set.rest_s)));
         body.append(row);
       });
-      table.append(body);
+      grid.append(body);
     });
-    tableWrap.append(table); content.append(tableWrap);
+    tableWrap.append(grid); content.append(tableWrap);
     const omitted = Number(strength.omitted_exercises) || 0;
     if (omitted) content.append(h("p", "muted", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`));
   }
@@ -549,9 +530,7 @@
   function renderAerobic(payload, content) {
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
-      const driftHeading = h("h3", null, "Herzfrequenzdrift");
-      driftHeading.append(" ", createEstimateChip());
-      content.append(driftHeading);
+      content.append(h("h3", null, "Herzfrequenzdrift", " ", createEstimateChip()));
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
         const longSession = aerobic.long_session ? " · lange Einheit" : "";
@@ -585,12 +564,9 @@
     delete navigationState.activityDetail;
     history.replaceState(navigationState, "", location.href);
     history.pushState({ ...navigationState, activityDetail: activityId }, "", location.href);
-    dialog = h("dialog", "activity-detail-dialog");
-    dialog.setAttribute("aria-labelledby", "activityDetailTitle");
-    const title = h("h2", null, activity.name || "Aktivitätsdetails");
-    title.id = "activityDetailTitle";
-    const back = h("button", "secondary-button", "Zurück zum Kalender");
-    back.type = "button";
+    dialog = h("dialog", { className: "activity-detail-dialog", "aria-labelledby": "activityDetailTitle" });
+    const title = h("h2", { id: "activityDetailTitle" }, activity.name || "Aktivitätsdetails");
+    const back = h("button", { className: "secondary-button", type: "button" }, "Zurück zum Kalender");
     back.addEventListener("click", close);
     const content = h("div");
     const status = h("p", "muted", "Lokale Daten werden geladen …");
