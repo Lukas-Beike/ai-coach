@@ -7,8 +7,9 @@ description: Base skill. Headless read-only walk through the running app at phon
 
 Needs the repository's Playwright install (`npm ci` and
 `npx playwright install chromium` once). The app address and the secret file
-come from the session at run time; the output directory lies outside the
-repository (the session scratchpad).
+come from the session at run time; the secret file, the output directory and
+the previous walk must lie in the system temp directory (the session
+scratchpad); the script refuses any other path.
 
 ```powershell
 node scripts/ui_walk.mjs --url <app address> --password-file <secret file> --out-dir <scratchpad>/walk [--compare <previous walk>/ui-walk.json]

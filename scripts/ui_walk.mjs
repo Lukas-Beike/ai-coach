@@ -10,6 +10,7 @@
 // It presses no control that saves, syncs, deletes or sends. Exit 0 no error,
 // 1 a view failed or logged errors, 2 bad input or login refused.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -18,11 +19,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const VIEWS = ["coach", "plan", "analysis", "nutrition", "more"];
 export const WIDTHS = { phone: { width: 412, height: 915 }, desktop: { width: 1280, height: 900 } };
 
-export function outsideRepo(target) {
+// Every file the walk reads or writes lives in the system temp directory (the
+// session scratchpad), never in the repository or anywhere else a path could reach.
+export function scratchPath(target) {
   const resolved = path.resolve(target);
-  const relative = path.relative(ROOT, resolved);
-  if (!relative || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-    throw new Error("the output directory must stay outside the repository");
+  const scratch = path.resolve(os.tmpdir());
+  const inside = (base) => resolved === base || resolved.startsWith(base + path.sep);
+  if (!inside(scratch) || inside(ROOT)) {
+    throw new Error("files must be in the system temp directory");
   }
   return resolved;
 }
@@ -37,7 +41,7 @@ export function baseUrl(text) {
 export function releaseMarks(serviceWorker, indexHtml) {
   const cache = /const CACHE = "([^"]+)"/.exec(serviceWorker)?.[1] || null;
   const versions = [...indexHtml.matchAll(/\?v=([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
-  return { cache, assetVersions: [...new Set(versions)].sort() };
+  return { cache, assetVersions: [...new Set(versions)].sort((a, b) => a.localeCompare(b)) };
 }
 
 export function compareLines(current, previous) {
@@ -98,7 +102,7 @@ async function walkCalendar(page, shot) {
 }
 
 async function walk({ chromium, url, password, outDir }) {
-  const result = { loadMs: {}, errors: {}, calendar: {}, marks: null };
+  const result = { loadMs: {}, errors: {}, calendar: {}, marks: null, logout: {} };
   const browser = await chromium.launch();
   try {
     for (const [name, viewport] of Object.entries(WIDTHS)) {
@@ -130,7 +134,7 @@ async function walk({ chromium, url, password, outDir }) {
         const response = await fetch("/api/logout", { method: "POST", headers: { "X-CSRF-Token": decodeURIComponent(token), "Content-Type": "application/json" }, body: "{}" });
         return response.status;
       });
-      result.logout = { ...(result.logout || {}), [name]: logout };
+      result.logout[name] = logout;
       await context.close();
     }
   } finally {
@@ -143,7 +147,8 @@ export function reportLines(result) {
   const lines = [];
   for (const [key, ms] of Object.entries(result.loadMs)) {
     const errors = result.errors[key];
-    lines.push(`${errors ? "FAIL" : "ok"} ${key} ${ms} ms${errors ? `, ${errors} error(s)` : ""}`);
+    const suffix = errors ? ", " + errors + " error(s)" : "";
+    lines.push(`${errors ? "FAIL" : "ok"} ${key} ${ms} ms${suffix}`);
   }
   for (const [name, steps] of Object.entries(result.calendar)) lines.push(`info calendar ${name}: ${steps.join(", ") || "no controls found"}`);
   lines.push(`info service-worker cache ${result.marks?.cache || "missing"}, ${result.marks?.assetVersions.length || 0} asset versions`);
@@ -161,15 +166,21 @@ async function main() {
   try {
     if (!values.url || !values["password-file"] || !values["out-dir"]) throw new Error("--url, --password-file and --out-dir are required");
     url = baseUrl(values.url);
-    outDir = outsideRepo(values["out-dir"]);
-    password = fs.readFileSync(values["password-file"], "utf8").trim();
+    outDir = scratchPath(values["out-dir"]);
+    password = fs.readFileSync(scratchPath(values["password-file"]), "utf8").trim();
     if (!password) throw new Error("the secret file is empty");
   } catch (error) {
     console.log(`FAIL ${error.code === "ENOENT" ? "cannot read the secret file" : error.message}`);
     return 2;
   }
   fs.mkdirSync(outDir, { recursive: true });
-  const previous = values.compare ? JSON.parse(fs.readFileSync(values.compare, "utf8")) : null;
+  let previous = null;
+  try {
+    previous = values.compare ? JSON.parse(fs.readFileSync(scratchPath(values.compare), "utf8")) : null;
+  } catch (error) {
+    console.log(`FAIL cannot read the previous walk (${error.message})`);
+    return 2;
+  }
   const { chromium } = await import("@playwright/test");
   let result;
   try {
@@ -185,5 +196,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main().then((code) => { process.exitCode = code; });
+  process.exitCode = await main();
 }

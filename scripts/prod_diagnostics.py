@@ -57,39 +57,44 @@ def numbers(value: Any) -> dict[str, int | float]:
     }
 
 
-def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
-    database = report.get("database") or {}
-    sync = report.get("sync") or {}
-    plan = report.get("plan_sync") or {}
-    jobs = plan.get("recent_jobs") or []
-    error_classes: dict[str, int] = {}
+def plan_errors(jobs: list[dict[str, Any]]) -> dict[str, int]:
+    """Error kinds (never error text) of the recent plan-sync jobs and their items."""
+    kinds: dict[str, int] = {}
     for job in jobs:
         for item in [job, *(job.get("items") or [])]:
-            kind = item.get("error_class")
+            kind = str(item.get("error_class") or "")[:64]
             if kind:
-                error_classes[str(kind)[:64]] = error_classes.get(str(kind)[:64], 0) + 1
-    stuck = sum(
+                kinds[kind] = kinds.get(kind, 0) + 1
+    return kinds
+
+
+def stuck_jobs(jobs: list[dict[str, Any]], now: datetime) -> int:
+    return sum(
         1
         for job in jobs
         if job.get("status") in OPEN_JOB
         and (hours_since(job.get("created_at"), now) or 0) > STUCK_HOURS
     )
-    providers = {
-        name: {
-            "last_sync_hours": hours_since(times.get("last_sync_at"), now),
-            "last_plan_sync_hours": hours_since(times.get("last_plan_sync_at"), now),
-        }
-        for name, times in (sync.get("providers") or {}).items()
-        if isinstance(times, dict)
-    }
+
+
+def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
+    database = report.get("database") or {}
+    sync = report.get("sync") or {}
+    plan = report.get("plan_sync") or {}
+    jobs = plan.get("recent_jobs") or []
     calendar = report.get("external_calendar") or {}
+    memory = numbers((report.get("runtime") or {}).get("process_memory"))
     return {
         "kind": "diagnostics",
         "generated_at": now.isoformat(timespec="seconds"),
         "version": (report.get("app") or {}).get("version"),
         "schema": database.get("schema_version"),
         "sync_error_set": bool(sync.get("last_error")),
-        "providers": providers,
+        "providers": {
+            name: {"last_sync_hours": hours_since(times.get("last_sync_at"), now)}
+            for name, times in (sync.get("providers") or {}).items()
+            if isinstance(times, dict)
+        },
         "calendar_sync_hours": hours_since(calendar.get("last_sync_at"), now)
         if calendar.get("configured")
         else None,
@@ -99,42 +104,23 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
         "units_with_error": sum(
             1 for unit in plan.get("unsynced_units") or [] if unit.get("has_error")
         ),
-        "plan_error_classes": error_classes,
-        "stuck_jobs": stuck,
-        "memory": {
-            key: value
-            for key, value in numbers(
-                (report.get("runtime") or {}).get("process_memory")
-            ).items()
-            if key in MEMORY
-        },
+        "plan_error_classes": plan_errors(jobs),
+        "stuck_jobs": stuck_jobs(jobs, now),
+        "memory": {key: memory[key] for key in MEMORY if key in memory},
     }
 
 
-def checks(
-    result: dict[str, Any],
-    previous: dict[str, Any] | None,
-    expect_version: str | None,
-    expect_schema: int | None,
-) -> list[tuple[str, str]]:
-    lines: list[tuple[str, str]] = []
+def mark(ok: bool, text: str) -> tuple[str, str]:
+    return ("ok" if ok else "FAIL", text)
 
-    def add(ok: bool, text: str) -> None:
-        lines.append(("ok" if ok else "FAIL", text))
 
-    add(
-        expect_version in (None, result["version"]),
-        f"version {result['version']}"
-        + (f" (expected {expect_version})" if expect_version else ""),
-    )
-    add(
-        expect_schema in (None, result["schema"]),
-        f"schema {result['schema']}"
-        + (f" (expected {expect_schema})" if expect_schema is not None else ""),
-    )
-    add(
-        not result["sync_error_set"], f"sync last_error set: {result['sync_error_set']}"
-    )
+def expected(name: str, value: Any, wanted: Any) -> tuple[str, str]:
+    suffix = "" if wanted is None else f" (expected {wanted})"
+    return mark(wanted in (None, value), f"{name} {value}{suffix}")
+
+
+def freshness_lines(result: dict[str, Any]) -> list[tuple[str, str]]:
+    lines = []
     for name, ages in result["providers"].items():
         age = ages["last_sync_hours"]
         # Intervals.icu is output-only, and an unconfigured provider never syncs.
@@ -142,27 +128,36 @@ def checks(
             text = "never" if age is None else f"{age:.1f} h ago"
             lines.append(("info", f"provider {name} last sync {text}"))
         else:
-            add(age <= STALE_HOURS, f"provider {name} last sync {age:.1f} h ago")
-    if result["calendar_sync_hours"] is not None:
-        age = result["calendar_sync_hours"]
-        add(age <= STALE_HOURS, f"calendar last sync {age:.1f} h ago")
-    add(result["stuck_jobs"] == 0, f"stuck plan-sync jobs: {result['stuck_jobs']}")
+            lines.append(
+                mark(age <= STALE_HOURS, f"provider {name} last sync {age:.1f} h ago")
+            )
+    age = result["calendar_sync_hours"]
+    if age is not None:
+        lines.append(mark(age <= STALE_HOURS, f"calendar last sync {age:.1f} h ago"))
+    return lines
+
+
+def plan_line(result: dict[str, Any]) -> tuple[str, str]:
     kinds = ", ".join(
         f"{k} {v}" for k, v in sorted(result["plan_error_classes"].items())
     )
-    lines.append(
-        (
-            "info",
-            f"plan sync: {result['unsynced_total']} unsynced, "
-            f"{result['units_with_error']} with error"
-            + (f"; error kinds: {kinds}" if kinds else ""),
-        )
+    text = (
+        f"plan sync: {result['unsynced_total']} unsynced, "
+        f"{result['units_with_error']} with error"
     )
+    return ("info", f"{text}; error kinds: {kinds}" if kinds else text)
+
+
+def comparison_lines(
+    result: dict[str, Any], previous: dict[str, Any] | None
+) -> list[tuple[str, str]]:
+    """Record counts must not drop against the previous result; memory is shown."""
     before = (previous or {}).get("counts") or {}
+    lines = []
     for name, count in result["counts"].items():
         old = before.get(name)
         if isinstance(count, int) and isinstance(old, int):
-            add(count >= old, f"count {name} {old} -> {count}")
+            lines.append(mark(count >= old, f"count {name} {old} -> {count}"))
         else:
             lines.append(("info", f"count {name} {count}"))
     old_memory = (previous or {}).get("memory") or {}
@@ -172,6 +167,38 @@ def checks(
             ("info", f"memory {name} {value}" + (f" (was {was})" if was else ""))
         )
     return lines
+
+
+def checks(
+    result: dict[str, Any],
+    previous: dict[str, Any] | None,
+    expect_version: str | None,
+    expect_schema: int | None,
+) -> list[tuple[str, str]]:
+    return [
+        expected("version", result["version"], expect_version),
+        expected("schema", result["schema"], expect_schema),
+        mark(
+            not result["sync_error_set"],
+            f"sync last_error set: {result['sync_error_set']}",
+        ),
+        *freshness_lines(result),
+        mark(
+            result["stuck_jobs"] == 0, f"stuck plan-sync jobs: {result['stuck_jobs']}"
+        ),
+        plan_line(result),
+        (
+            "info",
+            "workout library: "
+            + (
+                ", ".join(
+                    f"{k} {v}" for k, v in sorted(result["library_state"].items())
+                )
+                or "no counts"
+            ),
+        ),
+        *comparison_lines(result, previous),
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:

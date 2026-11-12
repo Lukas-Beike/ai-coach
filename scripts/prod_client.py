@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import ssl
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -33,24 +34,26 @@ def base_url(text: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def outside_repo(path: str) -> Path:
-    """Result files hold production facts and stay outside the repository."""
+def scratch_path(path: str) -> Path:
+    """Result and log files live in the system temp directory (the session
+    scratchpad), never in the repository or anywhere else a path could reach."""
     target = Path(path).resolve()
-    if target == ROOT or ROOT in target.parents:
-        raise ProdError("result files must stay outside the repository")
+    scratch = Path(tempfile.gettempdir()).resolve()
+    if not target.is_relative_to(scratch) or target.is_relative_to(ROOT):
+        raise ProdError("result and log files must be in the system temp directory")
     return target
 
 
 def write_result(path: str | None, result: dict[str, Any]) -> None:
     if path:
-        outside_repo(path).write_text(json.dumps(result, indent=2), encoding="utf-8")
+        scratch_path(path).write_text(json.dumps(result, indent=2), encoding="utf-8")
 
 
 def read_result(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        return json.loads(scratch_path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProdError(f"cannot read the previous result file {path}") from exc
 
@@ -108,7 +111,7 @@ class Session:
 
     def login(self, password_file: str) -> None:
         try:
-            password = Path(password_file).read_text(encoding="utf-8").strip()
+            password = scratch_path(password_file).read_text(encoding="utf-8").strip()
         except OSError:
             raise ProdError("cannot read the secret file") from None
         if not password:

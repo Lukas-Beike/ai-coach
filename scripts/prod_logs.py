@@ -1,6 +1,6 @@
 """Count warning and error log entries by event name; never print log text.
 
-    python scripts/prod_logs.py --log-file <container log saved outside the repo> [--since ISO]
+    python scripts/prod_logs.py --log-file <container log in the system temp directory> [--since ISO]
     python scripts/prod_logs.py --url <app address> --password-file <secret file> [--since ISO]
 
 The first form reads container logs saved from the Unraid MCP; the second the
@@ -16,10 +16,9 @@ import json
 import re
 import sys
 from collections import Counter
-from pathlib import Path
 from typing import Any
 
-from prod_client import ProdError, Session
+from prod_client import ProdError, Session, scratch_path
 
 EVENT = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")
 LEVEL = re.compile(r"\b(ERROR|WARNING|CRITICAL)\b")
@@ -44,26 +43,33 @@ def event_name(entry: dict[str, Any]) -> str:
     return name if EVENT.match(name) else "unnamed"
 
 
+def classify(
+    raw: dict[str, Any] | str, since: str | None
+) -> tuple[str, str, int] | None:
+    """Level, event name and Garmin cleanup count of one entry, or None to skip it."""
+    entry = parse(raw) if isinstance(raw, str) else raw
+    if entry is None:
+        match = LEVEL.search(raw) if isinstance(raw, str) else None
+        return (match[1], "unparsed", 0) if match else None
+    stamp = str(entry.get("timestamp") or "")
+    if since and stamp and stamp < since:
+        return None
+    name = event_name(entry)
+    count = (entry.get("context") or {}).get("count") if name == CLEANUP else 0
+    level = str(entry.get("level") or "").upper()
+    return level, name, count if isinstance(count, int) else 0
+
+
 def summarize(entries: list[dict[str, Any] | str], since: str | None) -> dict[str, Any]:
     levels: Counter[str] = Counter()
     events: Counter[tuple[str, str]] = Counter()
     cleanup = 0
     for raw in entries:
-        entry = parse(raw) if isinstance(raw, str) else raw
-        if entry is None:
-            match = LEVEL.search(raw) if isinstance(raw, str) else None
-            if match:
-                levels[match[1]] += 1
-                events[(match[1], "unparsed")] += 1
+        found = classify(raw, since)
+        if found is None:
             continue
-        stamp = str(entry.get("timestamp") or "")
-        if since and stamp and stamp < since:
-            continue
-        level = str(entry.get("level") or "").upper()
-        name = event_name(entry)
-        if name == CLEANUP:
-            count = (entry.get("context") or {}).get("count")
-            cleanup += count if isinstance(count, int) else 0
+        level, name, count = found
+        cleanup += count
         if level in LEVELS:
             levels[level] += 1
             events[(level, name)] += 1
@@ -87,7 +93,9 @@ def report(summary: dict[str, Any]) -> list[str]:
 def load(args: argparse.Namespace) -> list[dict[str, Any] | str]:
     if args.log_file:
         try:
-            text = Path(args.log_file).read_text(encoding="utf-8", errors="replace")
+            text = scratch_path(args.log_file).read_text(
+                encoding="utf-8", errors="replace"
+            )
         except OSError:
             raise ProdError("cannot read the log file") from None
         return list(text.splitlines())

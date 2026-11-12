@@ -7,11 +7,12 @@ const { spawnSync } = require("node:child_process");
 const SCRIPT = path.join(__dirname, "..", "scripts", "ui_walk.mjs");
 const load = () => import(require("node:url").pathToFileURL(SCRIPT).href);
 
-test("ui walk keeps output outside the repository and needs an http(s) address", async () => {
+test("ui walk keeps files in the temp directory and needs an http(s) address", async () => {
   const walk = await load();
-  assert.throws(() => walk.outsideRepo(path.join(__dirname, "..", "shots")), /outside the repository/);
-  assert.throws(() => walk.outsideRepo(path.join(__dirname, "..")), /outside the repository/);
-  assert.equal(walk.outsideRepo(path.join(os.tmpdir(), "walk")), path.join(os.tmpdir(), "walk"));
+  assert.throws(() => walk.scratchPath(path.join(__dirname, "..", "shots")), /system temp directory/);
+  assert.throws(() => walk.scratchPath(path.join(__dirname, "..")), /system temp directory/);
+  assert.throws(() => walk.scratchPath(path.join(os.tmpdir(), "..", "elsewhere")), /system temp directory/);
+  assert.equal(walk.scratchPath(path.join(os.tmpdir(), "walk")), path.resolve(os.tmpdir(), "walk"));
   assert.equal(walk.baseUrl("https://app.example.test:8090/some/path"), "https://app.example.test:8090");
   assert.throws(() => walk.baseUrl("file:///etc/passwd"), /http\(s\) URL/);
 });

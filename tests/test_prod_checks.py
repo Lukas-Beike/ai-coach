@@ -151,6 +151,7 @@ class ProdChecksTests(unittest.TestCase):
         self.assertIn("ok provider garmin last sync", text)
         self.assertIn("info provider wahoo last sync never", text)
         self.assertIn("2 unsynced, 1 with error; error kinds: HTTPError 2", text)
+        self.assertIn("info workout library: pending 1", text)
         self.assertIn("ok logout 200", text)
         self.assertEqual(FakeApp.state["logouts"], 1)
         self.assertEqual(json.loads(result.read_text())["counts"]["messages"], 40)
@@ -184,7 +185,7 @@ class ProdChecksTests(unittest.TestCase):
             "--out", str(inside),
         )  # fmt: skip
         self.assertEqual(code, 2)
-        self.assertIn("outside the repository", text)
+        self.assertIn("system temp directory", text)
         self.assertFalse(inside.exists())
 
     def test_guards_hold_and_detect_a_missing_csrf_check(self):
@@ -227,6 +228,11 @@ class ProdChecksTests(unittest.TestCase):
         self.assertNotIn("old", text)
         self.assertNotIn("token=abc", text)
         self.assertNotIn("payload", text)
+        code, text = self.run_main(
+            prod_logs, "--log-file", str(Path(prod_client.ROOT) / "README.md")
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("system temp directory", text)
 
 
 if __name__ == "__main__":

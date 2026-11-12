@@ -1,7 +1,6 @@
 """Compare the GHCR digests of a release tag and `latest`, read-only.
 
-    python scripts/image_verify.py --tag 2.1.2 [--image ghcr.io/lukas-beike/pacecraft]
-        [--running sha256:...]
+    python scripts/image_verify.py --tag 2.1.2 [--running sha256:...]
 
 Prints both digests (and, with --running, whether the running container's
 digest matches). Exit 0 the tag exists and `latest` (and the running digest)
@@ -16,8 +15,11 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
-IMAGE = "ghcr.io/lukas-beike/pacecraft"
+# Only this repository is ever read: no host or name comes from arguments.
+REGISTRY = "https://ghcr.io"
+REPOSITORY = "lukas-beike/pacecraft"
 ACCEPT = (
     "application/vnd.oci.image.index.v1+json, "
     "application/vnd.docker.distribution.manifest.list.v2+json, "
@@ -25,18 +27,11 @@ ACCEPT = (
     "application/vnd.docker.distribution.manifest.v2+json"
 )
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+TAG = re.compile(r"^\w[\w.-]{0,127}$")
 
 
 class RegistryError(RuntimeError):
     pass
-
-
-def split_image(image: str) -> tuple[str, str]:
-    host, _, name = image.partition("/")
-    if not name or "." not in host:
-        raise RegistryError("image must look like <registry host>/<owner>/<name>")
-    return host, name
 
 
 def fetch(request: urllib.request.Request) -> tuple[int, dict, bytes]:
@@ -50,17 +45,19 @@ def fetch(request: urllib.request.Request) -> tuple[int, dict, bytes]:
         raise RegistryError(f"registry unreachable ({type(exc).__name__})") from None
 
 
-def anonymous_token(host: str, name: str) -> str:
-    url = f"https://{host}/token?scope=repository:{name}:pull"
+def anonymous_token() -> str:
+    url = f"{REGISTRY}/token?scope=repository:{REPOSITORY}:pull"
     code, _, body = fetch(urllib.request.Request(url))
     if code != 200:
         raise RegistryError(f"anonymous pull token refused ({code})")
     return str(json.loads(body).get("token") or "")
 
 
-def digest(host: str, name: str, tag: str, token: str) -> str | None:
+def digest(tag: str, token: str) -> str | None:
+    if not TAG.match(tag):
+        raise RegistryError("bad tag")
     request = urllib.request.Request(
-        f"https://{host}/v2/{name}/manifests/{tag}", method="HEAD"
+        f"{REGISTRY}/v2/{REPOSITORY}/manifests/{quote(tag, safe='')}", method="HEAD"
     )
     request.add_header("Accept", ACCEPT)
     request.add_header("Authorization", f"Bearer {token}")
@@ -78,16 +75,14 @@ def digest(host: str, name: str, tag: str, token: str) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--image", default=IMAGE)
     parser.add_argument("--running")
     args = parser.parse_args(argv)
     if not TAG.match(args.tag) or (args.running and not DIGEST.match(args.running)):
         parser.error("bad --tag or --running digest")
     try:
-        host, name = split_image(args.image)
-        token = anonymous_token(host, name)
-        release = digest(host, name, args.tag, token)
-        latest = digest(host, name, "latest", token)
+        token = anonymous_token()
+        release = digest(args.tag, token)
+        latest = digest("latest", token)
     except RegistryError as exc:
         print(f"FAIL {exc}")
         return 2
