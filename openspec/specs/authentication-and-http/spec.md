@@ -117,7 +117,7 @@ The HTTP boundary SHALL enforce configured body-size limits and supported conten
 
 #### Scenario: Missing or out-of-range size
 - **WHEN** `Content-Length` is missing, zero or above the route limit
-- **THEN** the request answers "Ungültige Größe des Anfrageinhalts." with HTTP 413 when the size also exceeds 1 000 000 bytes and HTTP 400 otherwise; a JSON route without `application/json` in `Content-Type` answers HTTP 415
+- **THEN** a JSON or body route answers "Ungültige Größe des Anfrageinhalts." with HTTP 413 when the size also exceeds 1 000 000 bytes and HTTP 400 otherwise, voice audio answers "Ungültige Größe der Audioaufnahme." with HTTP 413 only above 8 000 000 bytes, and a JSON route without `application/json` in `Content-Type` answers HTTP 415
 
 Evidence: `backend/http_api/requests.py::read_json`; `backend/http_api/requests.py::read_body_stream`; `backend/http_api/requests.py::read_audio_body`. Tests: `tests/test_server_http.py::test_http_request_helpers_are_dependency_light_and_preserve_limits`; `tests/test_server_http.py::test_streamed_body_checks_limits_before_reading_and_bounds_each_chunk`.
 
@@ -182,6 +182,6 @@ The server SHALL return API not-found errors for unmatched API paths, restrict s
 
 #### Scenario: Static response headers
 - **WHEN** a static file is served
-- **THEN** it carries nosniff, DENY, an `ETag`, `Referrer-Policy: no-referrer` and the Content-Security-Policy `default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'`; a file requested with a non-blank `?v=` stamp is cached for a year as immutable, the shell, service worker and manifest use `no-cache`, other files one hour, and no response sends CORS headers
+- **THEN** it carries nosniff, DENY, an `ETag`, `Referrer-Policy: no-referrer` and the Content-Security-Policy `default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'`; a stamped asset requested with a non-blank `?v=` is cached for a year as immutable, the shell, service worker and manifest use `no-cache`, other files one hour, and no response sends CORS headers
 
 Evidence: `backend/http_api/route_table.py::RouteTable`; `backend/http_api/handler.py::RequestHandler._get`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.
