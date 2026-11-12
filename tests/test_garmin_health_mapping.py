@@ -2099,7 +2099,9 @@ class GarminMaxMetricsDailyTests(unittest.TestCase):
 
     def test_running_and_cycling_stay_distinct_in_the_current_metrics(self) -> None:
         rows = self._observations(MAX_METRICS_DAILY)
-        by_kind = {kind: () for kind in garmin_canonical._READ_KINDS}
+        by_kind: dict[MetricKind, tuple[Observation, ...]] = {
+            kind: () for kind in garmin_canonical._READ_KINDS
+        }
         by_kind[MetricKind.VO2MAX] = tuple(rows)
         metrics = garmin_canonical._metrics(by_kind)
         self.assertEqual((metrics.running_vo2max, metrics.cycling_vo2max), (54.3, 58.6))
