@@ -24,7 +24,9 @@ Each strength exercise SHALL resolve to one Garmin catalogue exercise before exp
 - **WHEN** an exercise matches neither field, name nor alias at export
 - **THEN** that unit is not uploaded and its result names the exercise with up to five catalogue suggestions.
 
-Evidence: `backend/providers/garmin_strength_workout.py:resolve_exercise`, `backend/planning/exercise_mappings.py:remembered_exercises`, `backend/planning/strength_structure.py`; `tests/test_garmin_strength_push.py` (MappingTests, StructureTests), `tests/test_planning_push_state.py:test_a_confirmed_exercise_is_remembered_for_other_units`.
+Detailed contract (matching): names are compared after Unicode decomposition, case folding, removal of accents and collapsing of spaces. After the exact catalogue name, the exercise name is matched in three loose steps: ignoring spaces, hyphens and a plural "s" of words longer than three letters; through the fixed alias list; as the single catalogue entry that contains every word of the name with the fewest words ("Pull Face" finds "Face Pull", "Row" stays open). Suggestions are up to five catalogue names containing a word of the text over two letters, the longest word first.
+
+Evidence: `backend/providers/garmin_strength_workout.py:resolve_exercise`, `backend/providers/garmin_strength_workout.py:_loose_match`, `backend/providers/garmin_strength_workout.py:suggestions`, `tests/test_garmin_strength_push.py:test_word_fallback_needs_one_closest_entry`, `tests/test_garmin_strength_push.py:test_every_alias_names_a_catalogue_exercise`, `backend/planning/exercise_mappings.py:remembered_exercises`, `backend/planning/strength_structure.py`; `tests/test_garmin_strength_push.py` (MappingTests, StructureTests), `tests/test_planning_push_state.py:test_a_confirmed_exercise_is_remembered_for_other_units`.
 
 ### Requirement: Explicit Garmin strength push
 A strength planned unit SHALL reach Garmin only through an explicit `plan_push` job for provider `garmin` with the preview payload hash. Each unit SHALL be validated and mapped locally before any remote call, become one strength workout (a repeat group per exercise, a warm-up group before it when the exercise has warm-up sets, weight sent in kilograms, relative load as note, timed rest) and be scheduled on its date. Ids SHALL be stored in `remote_links`.
@@ -49,7 +51,19 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 - **WHEN** a unit is stale, deleted, archived, in the past, not strength or has no structure
 - **THEN** it is reported as conflict or error and no Garmin login or write happens for it.
 
-Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
+#### Scenario: Whole job refused
+- **WHEN** the job asks for `repair`, Garmin is not configured, the Garmin sync lock is not free within 30 seconds, or no SDK login is available (fixture mode, or the Personal API key only)
+- **THEN** the job fails with 400 `invalid_job_request`, 409 `not_configured`, 409 `garmin_busy` or 409 `garmin_sdk_required` ("Garmin-Workouts brauchen die Garmin-Anmeldung (SDK); die Personal API kann nicht schreiben."), and `garmin_sdk_required` is never retried automatically.
+
+#### Scenario: Run stopped
+- **WHEN** an entry stopped the run
+- **THEN** every later entry fails with "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
+
+Detailed contract (result): the job result is `{ok, status, results, failed_object_ids, retry_scope}` with `status` `ok`, `partial` (some entries failed) or `error` (all failed). Each result has the `library_workout_id` and a `status`: `synced` (with `remote_id` and `date`, or `action: "removed"`), `already_synced` (a removal with no link left), `conflict` ("Einheit nicht gefunden", "Seit der Vorschau geändert") or `error` with a fixed message. A link stores the workout id as remote id and the schedule id as external id.
+
+Detailed contract (document): `workoutName` has at most 80 characters (default "Krafteinheit") and `description` at most 1000; the sport is strength training (type id 5) in one segment. Each exercise is a repeat group (iterations = sets) with one step of end condition `reps`, the catalogue `category` and `exerciseName`, and a `rest` step of end condition `time` when a rest is set; a warm-up group of step type `warmup` precedes it when warm-up sets exist. `weightValue` is sent only above 0 kg with the unit `{unitId: 8, unitKey: "kilogram", factor: 1000.0}`; the step note is "<n> % 1RM", "RPE <n>" or "<n> RIR" plus the exercise note, at most 100 characters. The document version (2) is part of the pushed fingerprint, the SHA-256 of name, date, normalized exercises and that version.
+
+Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`, `backend/providers/garmin_strength_workout.py:strength_workout`, `backend/providers/garmin_strength_workout.py:PAYLOAD_VERSION`, `backend/planning/push_state.py:garmin_fingerprint`, `backend/sync/refresh.py:sync_job_error_class`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests), `tests/test_garmin_payload_version_guard.py:test_document_changes_come_with_a_payload_version_bump`, `tests/test_sync_job_outcomes.py:test_a_garmin_sdk_requirement_is_final_and_never_requeued`.
 
 ### Requirement: Calendar sync button
 Each calendar week SHALL show one sync button, "Woche synchronisieren", while a future, not yet completed unit of that week still needs a push to a configured provider, or a leftover of that week waits for removal. Intervals.icu waits when the unit's state is local or sync_error, or its event has another category than it gets now. Garmin waits when a strength unit with a valid structure differs from the pushed one. Planned unit cards SHALL carry no sync button.
@@ -70,7 +84,13 @@ Each calendar week SHALL show one sync button, "Woche synchronisieren", while a 
 - **WHEN** every unit of a week is synced everywhere, in a sync conflict, in the past, already matched to a recorded activity, or waits only for a provider that is not configured, and no leftover belongs to the week
 - **THEN** the week shows no sync button.
 
-Evidence: `backend/planning/push_state.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `backend/http_api/planned_unit_focus_post.py`, `public/plan-views.js:plannedPushTargets`, `public/plan-views.js:plannedWeekSyncJobs`, `public/plan-views.js:plannedWeekSyncButton`, `public/plan-views.js:plannedGarminBlocked`; `tests/test_planning_push_state.py`, `tests/plan-views-sync-button.test.cjs`, `tests/test_workout_export_intervals.py:test_strength_is_sent_and_read_back_as_a_note`, `e2e/calendar-week-sync.spec.js`, `e2e/planned-sync-button.spec.js`.
+#### Scenario: Leftovers without a pending unit
+- **WHEN** a provider has leftovers and no visible upcoming unit waits for that provider
+- **THEN** the visible unit nearest to today carries them, so the calendar can always offer the removal; a deleted or archived unit never carries them.
+
+Detailed contract: each listed planned unit carries `payload_hash` (the hash the `plan_push` job checks), `push_pending` (per provider; Intervals.icu: state local, sync_error or remote_missing, another event category, or an exported heart-rate range that moved with the threshold; Garmin: present only for a pushable strength unit, true when the pushed fingerprint differs), `push_blocked` (`{garmin: "no_structure" | "unmapped"}` or empty), `push_unmapped` (per unmapped exercise its `index`, `name` and up to five `suggestions`) and `push_cleanup` (per provider the leftovers its sync removes: `id`, `name`, `date`, and for Intervals.icu the `hash`).
+
+Evidence: `backend/planning/push_state.py`, `backend/planning/push_state.py:attach_push_state`, `backend/planning/push_state.py:_carry_unclaimed_cleanup`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `backend/http_api/planned_unit_focus_post.py`, `public/plan-views.js:plannedPushTargets`, `public/plan-views.js:plannedWeekSyncJobs`, `public/plan-views.js:plannedWeekSyncButton`, `public/plan-views.js:plannedGarminBlocked`; `tests/test_planning_push_state.py`, `tests/test_planning_push_state.py:test_leftovers_ride_on_a_unit_even_when_no_provider_waits`, `tests/test_planning_push_state.py:test_a_deleted_unit_nearest_today_never_carries_the_leftovers`, `tests/plan-views-sync-button.test.cjs`, `tests/test_workout_export_intervals.py:test_strength_is_sent_and_read_back_as_a_note`, `e2e/calendar-week-sync.spec.js`, `e2e/planned-sync-button.spec.js`.
 
 ### Requirement: Safe Garmin write outcomes
 A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Apart from the removal of past workouts after a refresh, removal SHALL happen only for a `remove` entry, which the job contract accepts for Garmin and Wahoo and refuses for Intervals.icu, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
@@ -86,6 +106,10 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 #### Scenario: Explicit removal
 - **WHEN** a job entry carries `remove: true` for a linked unit
 - **THEN** only its schedule and workout are deleted and the link is dropped; unrelated Garmin calendar items stay.
+
+#### Scenario: Entry rejected by Garmin
+- **WHEN** Garmin answers 4xx other than 401, 408 and 429 for one entry
+- **THEN** only that entry fails with "Garmin hat das Workout abgelehnt (HTTP <status>)." and the next entries are still sent.
 
 #### Scenario: Garmin outage
 - **WHEN** Garmin answers a server error, throttling or authentication failure

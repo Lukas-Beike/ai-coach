@@ -38,7 +38,7 @@ The system SHALL read Garmin through the official read-only Personal API when it
 - **WHEN** the SDK login fails or requires MFA while a Personal API key is configured
 - **THEN** the Personal API families still sync and only the SDK-only families are skipped.
 
-Detailed contract: The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned.
+Detailed contract: The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned. Every Personal API path and SDK call of each family, with its arguments, timeout and error mapping, is in `docs/provider-endpoints.md`; the app sets no timeout or retry of its own around an SDK call, and one failing family does not stop the others.
 
 Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/providers/garmin_personal.py:wrap_daily_sleep`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`; `tests/test_garmin_personal_transport.py`, `tests/test_garmin_personal_transport.py:test_heart_rate_zones_use_the_personal_api_when_a_key_exists`, `tests/test_garmin_personal_transport.py:test_sdk_only_families_stay_on_the_sdk_with_a_key`, `tests/test_garmin_health_mapping.py:test_personal_api_zones_map_like_the_sdk_zones`.
 
