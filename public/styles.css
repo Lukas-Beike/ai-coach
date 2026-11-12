@@ -896,7 +896,7 @@ h2 {
 .planned-badge.is-focus-derived { border-style: dashed; color: var(--muted); }
 .planned-focus-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
 /* The label sits above its select, so a phone never breaks it inside a word (#2370). */
-.planned-focus-field { display: grid; flex: 1 1 9rem; gap: 4px; font-size: .78rem; font-weight: 700; }
+.planned-focus-field { display: grid; flex: 0 1 12rem; gap: 4px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; width: 100%; padding: 4px 8px; }
 .planned-strength-plan { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; color: var(--muted); font-size: .8rem; line-height: 1.5; }
 .planned-strength-plan strong { color: var(--ink); font-weight: 600; }
