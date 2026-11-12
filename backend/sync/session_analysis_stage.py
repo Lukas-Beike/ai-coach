@@ -236,6 +236,8 @@ class SessionAnalysisStage:
         self._reader = reader or CanonicalTableReader()
         self._batch_size = batch_size
         self._prepared: dict[str, tuple[str, _Analysed]] | None = None
+        # The clock reading the prefetch froze targets with.
+        self._prepared_at: str | None = None
 
     @property
     def stage(self) -> str:
@@ -253,7 +255,7 @@ class SessionAnalysisStage:
                     fingerprint,
                     self._analyse(db, session, fingerprint, context),
                 )
-        self._prepared = prepared
+        self._prepared, self._prepared_at = prepared, now
 
     def run_batch(self, db: Any) -> BatchReport:
         """Write up to one batch of changed sessions in the caller's transaction.
@@ -263,11 +265,18 @@ class SessionAnalysisStage:
         """
         now = self._clock()
         prepared, self._prepared = self._prepared, None
+        prepared_at, self._prepared_at = self._prepared_at, None
         summaries, total, changed = self._changed(db)
         tally = _Tally()
         context = _FreezeContext(summaries, self._planned_units, now)
         if prepared:
-            prepared = self._current_targets(db, changed, prepared, context)
+            # Freeze again at the prefetch's time, so equal targets compare equal.
+            prepared = self._current_targets(
+                db,
+                changed,
+                prepared,
+                _FreezeContext(summaries, self._planned_units, prepared_at or now),
+            )
         computed = 0
         for (session, _), analysed in precomputed_batch(
             [
