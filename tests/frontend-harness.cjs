@@ -81,4 +81,4 @@ function fakeDocument() {
 // Text of a fake node and its descendants; the element helper appends text as string children.
 const textOf = (node) => (typeof node === "string" ? node : `${node.textContent || ""}${node.children.map(textOf).join("")}`);
 
-module.exports = { loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
+module.exports = { babelParse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
