@@ -1,5 +1,6 @@
 // One element builder (#2111): props is a class name or an object of properties
-// (`aria-*`/`data-*` become attributes, `dataset` merges); children are nodes or text.
+// (`aria-*`/`data-*` become attributes, `dataset` merges); children are nodes or text,
+// arrays are flattened, and null, undefined and false are skipped.
 function h(tag, props = null, ...children) {
   const element = document.createElement(tag);
   if (typeof props === "string") {
@@ -12,7 +13,7 @@ function h(tag, props = null, ...children) {
       else element[key] = value;
     }
   }
-  for (const child of children) if (child != null) element.append(typeof child === "object" ? child : String(child));
+  for (const child of children.flat()) if (child != null && child !== false) element.append(typeof child === "object" ? child : String(child));
   return element;
 }
 
@@ -21,14 +22,14 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 function svgNode(tag, attributes = {}, content = "") {
   const element = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
-  if (content) element.textContent = content;
+  element.textContent = content;
   return element;
 }
 
-// A data table: column headers get scope=col; a cell is a node (kept as is) or text in a td.
+// A data table: column headers get scope=col; a td or th cell is kept, anything else goes into a td.
 function table(columns, rows, { className = "", caption = "" } = {}) {
   const head = h("tr", null, ...columns.map((label) => h("th", { scope: "col" }, label)));
-  const body = h("tbody", null, ...rows.map((cells) => h("tr", null, ...cells.map((cell) => (cell && typeof cell === "object" ? cell : h("td", null, cell))))));
+  const body = h("tbody", null, ...rows.map((cells) => h("tr", null, ...cells.map((cell) => (["TD", "TH"].includes(cell?.tagName) ? cell : h("td", null, cell))))));
   return h("table", className, caption ? h("caption", null, caption) : null, h("thead", null, head), body);
 }
 

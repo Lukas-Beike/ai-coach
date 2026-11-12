@@ -385,6 +385,23 @@ test("the table behind a chart scrolls in a named region that the keyboard can r
   assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Ruhepuls: Einzelwerte"]);
 });
 
+test("the element helpers keep values as text and map class, properties, attributes and data", () => {
+  const document = { ...fakeDocument(), createElementNS: (namespace, tag) => Object.assign(new FakeElement(tag), { namespace }) };
+  const { h, table, svgNode } = extractFunctions("components.js", ["h", "SVG_NS", "svgNode", "table"], { document });
+  const plain = h("p", "muted", "<b>", 0, null, false, ["a", h("i")]);
+  assert.deepEqual([plain.className, plain.children.length, plain.children[0], plain.children[1]], ["muted", 4, "<b>", "0"]);
+  const button = h("button", { type: "button", className: "x", "aria-expanded": "false", dataset: { zone: "z2" }, title: undefined }, "Mehr");
+  assert.deepEqual([button.type, button.className, button.attributes["aria-expanded"], button.dataset.zone, button.title], ["button", "x", "false", "z2", ""]);
+  const chip = h("span", "status-chip");
+  const grid = table(["Tag", "Wert"], [[h("th", { scope: "row" }, "Mo"), chip], ["Di", 0]], { caption: "Werte" });
+  const [caption, head, body] = grid.children;
+  assert.deepEqual([caption.tag, head.children[0].children.map((cell) => cell.scope), body.children[0].children.map((cell) => cell.tag)], ["caption", ["col", "col"], ["th", "td"]]);
+  assert.equal(body.children[0].children[1].children[0], chip, "a non-cell node is wrapped in a td");
+  assert.deepEqual(body.children[1].children.map((cell) => cell.children[0]), ["Di", "0"]);
+  const label = svgNode("text", { x: 4 }, 0);
+  assert.deepEqual([label.namespace, label.attributes.x, label.textContent], ["http://www.w3.org/2000/svg", "4", 0]);
+});
+
 // Runs the real weekly aggregations; results are copied out of the sandbox for literal comparison.
 const WEEKLY = ["analysisValidPoint", "analysisWeeklyPoints", "analysisWeeklyPerformancePoints", "analysisWeeklySumPoints", "analysisWeeklyMeanPoints", "analysisWeeklyLastPoints", "bodyWeeklyPoints"];
 const weekly = () => extractFunctions("analysis.js", WEEKLY, {

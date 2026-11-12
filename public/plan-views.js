@@ -827,7 +827,7 @@ function plannedWeekMetrics(planned, actual) {
   return totals.childElementCount > columns.length + 1 ? totals : null;
 }
 
-function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
+function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, svgNode, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   // The lists are re-rendered as a whole; only the outcome of a user action is announced.
   function announcePlanChange(message) {
     const region = $("#planListStatus");
