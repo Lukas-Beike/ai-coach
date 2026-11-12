@@ -1800,7 +1800,7 @@ RUN_LTHR = RunLthr(
 
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
-    return PlanGuardService(
+    guard = PlanGuardService(
         estimate_unit=_planned_unit_estimator(),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
@@ -1854,6 +1854,14 @@ def _plan_guard_service() -> PlanGuardService:
         lambda: (
             PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
         )
+    )
+    # Units come only from the athlete's library templates (#2379).
+    return guard.with_templates(
+        lambda: {
+            str(item["id"]): item
+            for item in PLANNING_DATA.workout_library().list(1000)
+            if not item.get("date")
+        }
     )
 
 

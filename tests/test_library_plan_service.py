@@ -309,6 +309,8 @@ class LibraryPlanServiceTests(unittest.TestCase):
                     "duration_minutes": 45,
                     "target": "power",
                     "source": "library",
+                    # The unit keeps its template (#2379).
+                    "template_id": ids[0],
                     "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
                 },
                 {
@@ -320,6 +322,7 @@ class LibraryPlanServiceTests(unittest.TestCase):
                     "duration_minutes": 10,
                     "target": "AUTO",
                     "source": "library",
+                    "template_id": ids[1],
                     "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
                 },
             ],

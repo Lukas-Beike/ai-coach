@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
-from backend.canonical.planning_fields import SESSION_FOCUS_KEYS
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS, TEMPLATE_ID
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -121,9 +121,11 @@ def prepare_structured_training_change(
                 "target",
                 "rationale",
                 "starts_at_local",
+                TEMPLATE_ID,
                 *SESSION_FOCUS_KEYS,
             )
-            if key not in {"starts_at_local", *SESSION_FOCUS_KEYS} or key in normalized
+            if key not in {"starts_at_local", TEMPLATE_ID, *SESSION_FOCUS_KEYS}
+            or key in normalized
         },
     }
     if "plan_id" in change:

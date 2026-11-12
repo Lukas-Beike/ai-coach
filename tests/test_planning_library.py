@@ -43,6 +43,7 @@ EXPECTED_LIBRARY_FIELDS = {
     "remote_event_category",
     "category",
     "paired_event_id",
+    "template_id",
 }
 
 

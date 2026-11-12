@@ -136,6 +136,17 @@ STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
         "properties": _EXERCISE_PROPERTIES,
     },
 }
+TEMPLATE_ID_SCHEMA: dict[str, Any] = {
+    "type": ["string", "null"],
+    "description": (
+        "Id of the training-library template (list_workout_library) this unit "
+        "comes from; required for every new unit and for a changed structure; "
+        "null on a change keeps the current link. "
+        "Keep its exercises or steps in order; only sets, reps, loads, durations "
+        "and targets may change. No fitting template: propose one to the athlete "
+        "and create it with manage_training_templates first."
+    ),
+}
 HR_CAP_SCHEMA: dict[str, Any] = {
     "type": ["object", "null"],
     "additionalProperties": False,
@@ -524,6 +535,7 @@ def build_structured_tool_schemas(
                                     "strength_intensity",
                                     "strength_structure",
                                     "hr_cap",
+                                    "template_id",
                                 ],
                                 "properties": {
                                     "date": {
@@ -558,6 +570,7 @@ def build_structured_tool_schemas(
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                     "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                     "hr_cap": HR_CAP_SCHEMA,
+                                    "template_id": TEMPLATE_ID_SCHEMA,
                                 },
                             },
                         },
@@ -606,6 +619,7 @@ def build_structured_tool_schemas(
                                     "strength_intensity",
                                     "strength_structure",
                                     "hr_cap",
+                                    "template_id",
                                 ],
                                 "properties": {
                                     "date": {
@@ -633,6 +647,7 @@ def build_structured_tool_schemas(
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                     "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                     "hr_cap": HR_CAP_SCHEMA,
+                                    "template_id": TEMPLATE_ID_SCHEMA,
                                 },
                             },
                         },
@@ -679,6 +694,7 @@ def build_structured_tool_schemas(
                             "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                             "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                             "hr_cap": HR_CAP_SCHEMA,
+                            "template_id": TEMPLATE_ID_SCHEMA,
                         },
                         "additionalProperties": False,
                     },

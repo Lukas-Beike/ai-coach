@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -49,6 +49,8 @@ class PublicPlanDependencies:
     zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
     # (db) -> the plan-zone thresholds, read inside the plan's read snapshot.
     sport_thresholds: Callable[[Any], Sequence[Observation]] = lambda _db: ()
+    # Library template names by id, for the planned units' "Vorlage" (#2379).
+    template_names: Callable[[], Mapping[str, str]] = dict
 
 
 class PublicPlanStateService:
@@ -56,6 +58,7 @@ class PublicPlanStateService:
 
     def __init__(self, dependencies: PublicPlanDependencies) -> None:
         self._planned_units = dependencies.planned_units
+        self._template_names = dependencies.template_names
         self._activity_feedback = dependencies.activity_feedback
         self._weather = dependencies.weather
         self._adaptive_followup = dependencies.adaptive_followup
@@ -147,7 +150,9 @@ class PublicPlanStateService:
         return {**row, "workout_profile": profile}
 
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
-        local_planned = self._planned_units.list(500, push_state=True)
+        local_planned = _with_template_names(
+            self._template_names(), self._planned_units.list(500, push_state=True)
+        )
         canonical_planned = calendar_canonical.canonical_planned_workouts(local_planned)
         activities = self._activity_rows.compact() if self._activity_rows else []
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
@@ -196,3 +201,13 @@ class PublicPlanStateService:
             ),
             "coach_quick_actions": self._coach_quick_actions.state(),
         }
+
+
+def _with_template_names(names: Mapping[str, str], units: list[Any]) -> list[Any]:
+    """Each unit with the name of the library template it comes from (#2379)."""
+    return [
+        {**unit, "template_name": names[str(unit["template_id"])]}
+        if isinstance(unit, dict) and names.get(str(unit.get("template_id") or ""))
+        else unit
+        for unit in units
+    ]

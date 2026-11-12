@@ -1139,7 +1139,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const pill = document.createElement("span");
     pill.className = `planned-detail-status is-${status}`;
     pill.textContent = statusLabel;
-    head.append(name, line, pill);
+    head.append(name, line);
+    // The library template the unit comes from (#2379).
+    if (entry?.template_name) {
+      const template = document.createElement("span");
+      template.className = "planned-detail-line planned-detail-template";
+      template.textContent = `Vorlage: ${entry.template_name}`;
+      head.append(template);
+    }
+    head.append(pill);
     return head;
   }
 

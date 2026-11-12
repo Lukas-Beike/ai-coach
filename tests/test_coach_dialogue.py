@@ -40,6 +40,28 @@ server = fixtures.server
 WRITE_IMPACT = "write_impact"  # name of the write gate's classifier schema
 
 
+def _fixture_template(case, workout):
+    """The library template a harness workout comes from (#2379).
+
+    Created on first use per sport, with the workout's content, and marked
+    synced so it is no pending sync work of its own.
+    """
+    templates = case.__dict__.setdefault("templates", {})
+    sport = workout["sport"]
+    if sport not in templates:
+        template = server.PLANNING_DATA.workout_library().create_template(
+            {k: v for k, v in workout.items() if k not in {"date", "rationale"}}
+        )
+        templates[sport] = template["id"]
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "UPDATE workout_library SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (template["id"],),
+            )
+    return templates[sport]
+
+
 class DialogueHarness:
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="coach-dialogue-test-")
@@ -103,6 +125,8 @@ class DialogueHarness:
             workout["session_focus"] = "easy"
             if sport == "Run":
                 workout["hr_cap"] = effective_caps(None)["easy"]
+        if sport in {"WeightTraining", "Run", "Ride"}:
+            workout["template_id"] = _fixture_template(self, workout)
         return workout
 
     def request(
@@ -251,6 +275,7 @@ class DialogueHarness:
 
 class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_clarification_blocks_writes_in_either_tool_order(self):
+        self.workout()  # its library template exists before the snapshot
         for write_first in (True, False):
             with self.subTest(write_first=write_first):
                 before = self.state()
@@ -2130,7 +2155,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         text = result["message"]["content"]
         self.assertIn("KI-Dienst ist vorübergehend nicht verfügbar", text)
         self.assertIn("erneut", text)
-        self.assertIn("Bereits erfolgreich ausgeführt: Plansynchronisierung beauftragt", text)
+        self.assertIn(
+            "Bereits erfolgreich ausgeführt: Plansynchronisierung beauftragt", text
+        )
         self.assertIn("Abschluss ist in dieser Antwort noch nicht bestätigt", text)
         self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
         self.assertEqual(
@@ -2816,6 +2843,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         save.assert_called_once()
 
     def test_new_workout_requires_local_creation_scope(self):
+        self.workout()  # its library template exists before the snapshot
         before = self.state()
         result, _ = self.turn(
             "Morgen Oberkörper",

@@ -9,6 +9,8 @@ STRENGTH_INTENSITY: Final = "strength_intensity"
 STRENGTH_STRUCTURE: Final = "strength_structure"
 # The heart-rate cap of an easy run unit: percent of the threshold HR plus bpm.
 HR_CAP: Final = "hr_cap"
+# The undated library template a planned unit was planned from (#2379).
+TEMPLATE_ID: Final = "template_id"
 # The two classification keys; the structure is a third local key of strength and
 # the cap a fourth one of easy runs.
 FOCUS_ONLY_KEYS: Final = (SESSION_FOCUS, STRENGTH_INTENSITY)

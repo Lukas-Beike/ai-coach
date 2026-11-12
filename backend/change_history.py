@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
+from backend.canonical.planning_fields import TEMPLATE_ID
 from backend.errors import AppError
 
 RETENTION_DAYS = 180
@@ -146,6 +147,7 @@ PLANNED_UNIT_FIELDS = {
     "remote_event_external_id",
     "remote_event_category",
     "local_deleted",
+    TEMPLATE_ID,
     *FOCUS_KEYS,
 }
 COMPETITION_FIELDS = {
@@ -428,7 +430,7 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
         ("first_threshold_pct",),
         ("first_threshold_origin",),
     ),
-    "planned_unit": (("starts_at_local",), FOCUS_KEYS),
+    "planned_unit": (("starts_at_local",), FOCUS_KEYS, (TEMPLATE_ID,)),
     "workout_library": (FOCUS_KEYS,),
     # Gap fills of stored foods were recorded before the origin marks were.
     "food_database_entry": (("filled_fields",),),

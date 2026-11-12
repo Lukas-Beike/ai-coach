@@ -615,7 +615,14 @@ class ScriptedLoopTests(unittest.TestCase):
                             "expected_payload_hash": strength["expected_payload_hash"],
                         }
                     ],
-                    "workouts": [live._workout("2026-09-09", "Lockerer Lauf", "Run")],
+                    "workouts": [
+                        live._workout(
+                            "2026-09-09",
+                            "Lockerer Lauf",
+                            "Run",
+                            template_id=live.template_id(server, "Run"),
+                        )
+                    ],
                     "expected_revision": now["planning_revision"],
                 },
                 [f"planned_unit:{strength['local_id']}", "local_plan"],
@@ -636,7 +643,14 @@ class ScriptedLoopTests(unittest.TestCase):
                 "apply_training_patch",
                 {
                     "changes": [],
-                    "workouts": [live._workout("2026-09-09", "Lauf", "Run")],
+                    "workouts": [
+                        live._workout(
+                            "2026-09-09",
+                            "Lauf",
+                            "Run",
+                            template_id=live.template_id(server, "Run"),
+                        )
+                    ],
                     "expected_revision": state()["planning_revision"],
                 },
                 ["local_plan"],
@@ -653,7 +667,12 @@ class ScriptedLoopTests(unittest.TestCase):
                 {
                     "changes": [],
                     "workouts": [
-                        live._workout("2026-09-08", "Oberkörper", "WeightTraining")
+                        live._workout(
+                            "2026-09-08",
+                            "Oberkörper",
+                            "WeightTraining",
+                            template_id=live.template_id(server, "WeightTraining"),
+                        )
                     ],
                     "expected_revision": state()["planning_revision"],
                 },

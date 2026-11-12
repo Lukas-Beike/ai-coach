@@ -16,6 +16,7 @@ from backend.canonical.planning_fields import (
     FOCUS_ONLY_KEYS,
     HR_CAP,
     STRENGTH_STRUCTURE,
+    TEMPLATE_ID,
 )
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
@@ -46,9 +47,13 @@ UPDATE_SQL = (
 FOCUS_UPDATE_SQL = "UPDATE planned_units SET payload=?, updated_at=? WHERE local_id=?"
 
 
+# Local keys no provider receives: the classification and the template link.
+_LOCAL_LINK_KEYS = {*FOCUS_ONLY_KEYS, TEMPLATE_ID}
+
+
 def _is_focus_only(values: dict[str, Any]) -> bool:
-    return set(values) - {"action"} <= set(FOCUS_ONLY_KEYS) and bool(
-        set(values) & set(FOCUS_ONLY_KEYS)
+    return set(values) - {"action"} <= _LOCAL_LINK_KEYS and bool(
+        set(values) & _LOCAL_LINK_KEYS
     )
 
 
@@ -59,7 +64,7 @@ def _without_unset_focus(
     return {
         key: value
         for key, value in current.items()
-        if key not in FOCUS_KEYS or key in target
+        if key not in {*FOCUS_KEYS, TEMPLATE_ID} or key in target
     }
 
 
@@ -70,7 +75,11 @@ def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) ->
     """
     if stored_cap(restored) != stored_cap(current):
         return False
-    ignored = {*(key for key in FOCUS_KEYS if key != HR_CAP), "sync_status"}
+    ignored = {
+        *(key for key in FOCUS_KEYS if key != HR_CAP),
+        TEMPLATE_ID,
+        "sync_status",
+    }
 
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
         result = {key: value for key, value in payload.items() if key not in ignored}

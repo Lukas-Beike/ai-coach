@@ -483,6 +483,175 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(set(result["context"]), {"recovery"})
         self.assertEqual(self.athlete_state(), before)
 
+    def test_planned_units_come_only_from_the_library_templates(self):
+        # Athlete rule (#2379): no ad-hoc unit; a variant only scales load and
+        # the receipt says so; an older unit without a template still moves.
+        press = {"name": "Bankdrücken", "sets": 3, "reps": 8, "kg": 50}
+        row = {"name": "Rudern", "sets": 3, "reps": 10, "kg": 40}
+        upper = {
+            "date": "2026-09-09",
+            "name": "Oberkörper kurz",
+            "sport": "WeightTraining",
+            "description": "Bankdrücken, Rudern",
+            "duration_minutes": 30,
+            "target": "AUTO",
+            "rationale": "Synthetic training goal",
+            "session_focus": "upper",
+            "strength_intensity": "moderate",
+            "strength_structure": [press, row],
+        }
+        period = {"start": "2026-09-09", "end": "2026-09-10"}
+
+        def plan(workout):
+            return lambda _: self.call(
+                "apply_training_patch",
+                {
+                    "changes": [],
+                    "workouts": [workout],
+                    "expected_revision": self.state()["planning_revision"],
+                },
+                ["local_plan"],
+                period=period,
+            )
+
+        adhoc, _ = self.turn(
+            "Plane mir morgen Oberkörper kurz.",
+            [plan(upper), {"output_text": "Keine Vorlage."}],
+        )
+        self.assertEqual(adhoc["status"], "failed")
+        failure = adhoc["command_receipts"][0]["result"]
+        self.assertEqual(
+            [item["code"] for item in failure["findings"]], ["template_missing"]
+        )
+        self.assertIn("manage_training_templates", failure["findings"][0]["message"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+
+        # No fitting template: the Coach creates it first, then plans from it.
+        self.run_tool(
+            "manage_training_templates",
+            {
+                "templates": [
+                    {
+                        "action": "create",
+                        **{
+                            k: v
+                            for k, v in upper.items()
+                            if k not in {"date", "rationale"}
+                        },
+                    }
+                ]
+            },
+            ["local_template"],
+            message="Ja, lege die Vorlage Oberkörper kurz an.",
+        )
+        template = next(
+            item
+            for item in server.PLANNING_DATA.workout_library().list()
+            if item["name"] == "Oberkörper kurz"
+        )
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [],
+                "workouts": [{**upper, "template_id": template["id"]}],
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period=period,
+        )
+        planned = server.PLANNING_DATA.planned_unit().list()[0]
+        self.assertEqual(planned["template_id"], template["id"])
+        self.assertEqual(
+            [item["name"] for item in planned["strength_structure"]],
+            ["Bankdrücken", "Rudern"],
+        )
+
+        # A lighter variant keeps the exercises and names the scaling.
+        lighter = {
+            **upper,
+            "date": "2026-09-10",
+            "template_id": template["id"],
+            "strength_structure": [{**press, "kg": 40}, row],
+        }
+        variant = self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [],
+                "workouts": [lighter],
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period=period,
+        )
+        self.assertEqual(
+            [note["code"] for note in variant["plan_check_notes"]], ["template_scaled"]
+        )
+        swapped, _ = self.turn(
+            "Plane die Variante mit Klimmzügen.",
+            [
+                plan(
+                    {
+                        **lighter,
+                        "strength_structure": [press, {**row, "name": "Klimmzug"}],
+                    }
+                ),
+                {"output_text": "Andere Übungen."},
+            ],
+        )
+        self.assertEqual(
+            [
+                item["code"]
+                for item in swapped["command_receipts"][0]["result"]["findings"]
+            ],
+            ["template_mismatch"],
+        )
+
+        # An older unit without a template still moves.
+        # Stored before the rule, as the planning service does without a template.
+        older = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": "2026-09-11",
+                "name": "Alter Lauf",
+                "sport": "Run",
+                "description": "- 40m Z2 HR Older free run",
+                "duration_minutes": 40,
+                "target": "HR",
+                "session_focus": "easy",
+                "hr_cap": effective_caps(None)["easy"],
+            }
+        )
+        self.assertNotIn(
+            "template_id",
+            next(
+                u
+                for u in server.PLANNING_DATA.planned_unit().list()
+                if u["id"] == older["id"]
+            ),
+        )
+        state = self.state()
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [
+                    {
+                        "local_id": older["id"],
+                        "action": "update",
+                        "date": "2026-09-12",
+                        # A move names no template; null keeps the stored link.
+                        "template_id": None,
+                        "expected_payload_hash": next(
+                            u["expected_payload_hash"]
+                            for u in state["planned_units"]
+                            if u["local_id"] == older["id"]
+                        ),
+                    }
+                ],
+                "expected_revision": state["planning_revision"],
+            },
+            ["planned_unit:" + older["id"]],
+            period={"start": "2026-09-11", "end": "2026-09-12"},
+        )
+
     @covers(
         "manage_training_templates:create",
         "manage_training_templates:update",
@@ -553,10 +722,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             templates = server.PLANNING_DATA.workout_library().list(
                 include_archived=True
             )
+            template = [item for item in templates if item["id"] == local_id]
             if action == "delete":
-                self.assertEqual(templates, [])
+                self.assertEqual(template, [])
             else:
-                self.assertEqual(templates[0]["archived"], action == "archive")
+                self.assertEqual(template[0]["archived"], action == "archive")
             self.assertEqual(self.state()["planned_units"], planned_before)
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
@@ -980,8 +1150,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Ja, diese vorgeschlagene Anpassung übernehmen.",
         )
         self.assertEqual(applied["updated"], 1)
-        self.assertLess(
-            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 90
+        # A strength unit keeps its exercises and weights and gets the light
+        # intensity (athlete decision on #2379); the 30 available minutes still
+        # shorten it.
+        stored = server.PLANNING_DATA.planned_unit().list()[0]
+        self.assertEqual(
+            (stored["duration_minutes"], stored["strength_intensity"]), (30, "light")
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
@@ -2290,15 +2464,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             u for u in initial["planned_units"] if u["local_id"] == sunday
         )
         period = {"start": "2026-09-11", "end": "2026-09-13"}
-        change = {
-            "local_id": friday,
-            "action": "update",
+        easy_run = {
             "sport": "Run",
             "name": "Synthetic easy 8 km run",
             "description": "- 50m Z1 HR Synthetic very easy run",
             "duration_minutes": 50,
             "session_focus": "easy",
             "hr_cap": effective_caps(None)["easy"],
+        }
+        # The Coach switches the unit to a library template (#2379).
+        template = server.PLANNING_DATA.workout_library().create_template(easy_run)
+        change = {
+            "local_id": friday,
+            "action": "update",
+            **easy_run,
+            "template_id": template["id"],
             "expected_payload_hash": next(
                 u["expected_payload_hash"]
                 for u in initial["planned_units"]
@@ -2557,6 +2737,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )[0]
         for field, sport in (("sport", "Run"), ("type", "Swim")):
             state = self.state()
+            template = server.PLANNING_DATA.workout_library().create_template(
+                {
+                    "sport": sport,
+                    "name": f"Synthetic {sport}",
+                    "description": self.workout(sport="Ride")["description"],
+                    "duration_minutes": 30,
+                }
+            )
             self.run_tool(
                 "apply_training_patch",
                 {
@@ -2565,6 +2753,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                             "local_id": unit["id"],
                             "action": "update",
                             field: sport,
+                            "template_id": template["id"],
                             # A changed sport drops the focus; Run needs a new one.
                             **(
                                 {
