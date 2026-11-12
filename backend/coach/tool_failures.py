@@ -51,6 +51,9 @@ class CoachStructuredToolFailureService:
             r"request_[a-z_]{1,72}", validation_reason
         ):
             result["validation_reason"] = validation_reason
+        required = getattr(exc, "required_scope", None)
+        if isinstance(required, list) and all(isinstance(t, str) for t in required):
+            result["required_scope"] = required
         findings = getattr(exc, "findings", None)
         if isinstance(findings, list):
             result["findings"] = findings

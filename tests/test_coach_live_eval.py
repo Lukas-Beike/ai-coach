@@ -1411,6 +1411,36 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("error:RuntimeError", text)
         self.assertNotIn(secret_text, text)
 
+    def test_a_refused_plan_write_names_its_blocking_codes_not_its_text(self):
+        receipt = {
+            "command_receipts": [
+                {
+                    "tool": "apply_training_patch",
+                    "result": {
+                        "ok": False,
+                        "reason": "plan_check_failed",
+                        "error": "raw message text",
+                        "findings": [
+                            {"code": "template_missing", "message": "hint"},
+                            {"code": "focus_missing", "message": "hint"},
+                        ],
+                    },
+                },
+                {"tool": "read_training_state", "result": {"ok": True}},
+                {
+                    "tool": "save_checkin",
+                    "result": {"ok": False, "reason": "invalid_checkin"},
+                },
+            ]
+        }
+        self.assertEqual(
+            live._failed_tools(receipt),
+            [
+                "apply_training_patch:plan_check_failed[focus_missing,template_missing]",
+                "save_checkin:invalid_checkin",
+            ],
+        )
+
     def test_the_report_names_failures_safety_and_never_raw_errors(self):
         args = Mock(base_url="http://127.0.0.1:1/v1", model="m", thinking="low")
         counter = live.CallCounter(300)

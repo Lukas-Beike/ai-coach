@@ -626,6 +626,38 @@ def _strength_content(unit: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _mismatch_evidence(
+    unit: Mapping[str, Any], template: Mapping[str, Any], sport: Sport
+) -> dict[str, Any]:
+    """What the variant must keep, so the Coach can correct a refused write."""
+    evidence: dict[str, Any] = {
+        "template_structure": _readable_structure(template),
+        "unit_structure": _readable_structure(unit),
+    }
+    template_sport = planned_sport_environment(template)[0]
+    if template_sport is not sport:
+        evidence["template_sport"] = template_sport.value
+        evidence["unit_sport"] = sport.value
+    return evidence
+
+
+def _readable_structure(unit: Mapping[str, Any]) -> list[str]:
+    """``_structure_of`` as short labels: exercise names, or step kind and basis."""
+    labels = []
+    structure = _structure_of(unit) or []
+    for item in structure[:8]:
+        if isinstance(item, str):
+            labels.append(item)
+            continue
+        kind, ramp, distance = item
+        labels.append(
+            f"{kind}{' ramp' if ramp else ''} {'distance' if distance else 'time'}"
+        )
+    if len(structure) > 8:
+        labels.append(f"+{len(structure) - 8} more")
+    return labels
+
+
 def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
     """The part of a unit a variant keeps: exercise names, or step kinds in order.
 
@@ -699,6 +731,7 @@ def template_conformance(
         if _structure_of(unit) != _structure_of(template) or (
             planned_sport_environment(template)[0] is not sport
         ):
+            evidence.update(_mismatch_evidence(unit, template, sport))
             message = (
                 f"Planned unit differs from its library template {evidence['template']!r} "
                 "beyond load and intensity. " + _TEMPLATE_HINT

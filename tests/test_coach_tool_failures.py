@@ -81,6 +81,15 @@ class StructuredToolFailureTests(unittest.TestCase):
             "secret exception text", str(self.receipts[0]["diagnostic_error"])
         )
 
+    def test_a_scope_denial_tells_the_model_which_token_was_missing(self) -> None:
+        error = AppError(403, "Nicht umfasst.", reason="intent_scope_denied")
+        setattr(error, "required_scope", ["planned_unit:u-1", "local_plan"])  # noqa: B010
+
+        result = self.project(error)
+
+        self.assertEqual(result["required_scope"], ["planned_unit:u-1", "local_plan"])
+        self.assertEqual(result["error"], "Nicht umfasst.")
+
     def test_empty_app_error_reason_uses_400_fallback(self) -> None:
         result = self.project(AppError(400, "Bad request", reason=""))
 
