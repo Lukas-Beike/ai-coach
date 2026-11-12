@@ -62,19 +62,6 @@ outputs outside tracked source; report only bounded status/shape metadata, model
 and pass/fail. Do not expose raw proxy errors or logs. Stop after the necessary
 check rather than running bulk evaluations against subscription quota.
 
-## Coach live evaluation
-
-Exception (athlete decision 2026-11-12, #2221): the tracked harness
-`tests/coach_live_eval.py` may run the whole dialogue catalogue of
-[coach-dialogue-evaluation.md](coach-dialogue-evaluation.md) once per run,
-started by hand only, with at most 150 model calls (the write gate's classifier
-included). Its tool calls run through the real Coach loop on a temporary
-database with mocked or unconfigured providers, so no remote write is ever
-dispatched and no remote proposal is approved. Outputs go to stdout or an
-untracked path; the counts of a baseline run are recorded as an issue comment.
-Every other rule here stays: the routing check first, no credential files, stop
-on unknown routing or paid fallbacks, no other bulk evaluation, host-side only.
-
 The verified app provider clients accepted JSON Responses, streaming function
 calls, and a synthetic tool-result round trip. Full Coach compatibility failed:
 `POST /v1/conversations` returned 404. Coach creates the remote conversation only for turns that retain attachment

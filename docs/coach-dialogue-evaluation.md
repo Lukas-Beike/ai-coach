@@ -112,17 +112,25 @@ reading athlete data or exposing credentials.
 
 ## Live evaluation
 
-`tests/coach_live_eval.py` runs the whole catalogue once against a local
-Responses proxy, one phrasing per case, by hand only. It is never part of the
-test suite, CI or pre-push. A run makes at most 150 model calls (`--max-calls`,
-the write gate's classifier included), then stops and lists the cases not run.
-Each case runs the real Coach turn loop on a fresh temporary database with the
-catalogue's synthetic state; providers stay unconfigured and no remote proposal
-is approved. Scoring is mechanical (effects, constraints, extra writes,
-unnecessary clarifications, safety failures); the report adds a small sample of
-answer texts for the athlete to read. Output goes to stdout. The setup and the
-proxy rules are in the [proxy runbook](cliproxyapi-probes.md).
+`tests/coach_live_eval.py` runs the whole catalogue once, one phrasing per case,
+by hand only. It is never part of the test suite, CI or pre-push. It uses a
+dedicated, paid evaluation API key with its own budget limit, passed only as the
+`COACH_EVAL_API_KEY` environment variable for that run (athlete decision
+2026-11-12, #2221; the local proxy no longer exists). A run stops before the next
+model call once it reaches 150 calls (`--max-calls`, the write gate's classifier
+included) or an estimated 5 USD (`--max-cost-usd`, from the response token
+counts and the model's prices per million tokens given as `--price-input` and
+`--price-output`), and lists the cases not run. Only a loopback endpoint or the
+OpenAI API is accepted. Each case runs the real Coach turn loop on a fresh
+temporary database with the catalogue's synthetic state; providers stay
+unconfigured and no remote proposal is approved. Scoring is mechanical (effects,
+constraints, extra writes, unnecessary clarifications, safety failures); the
+report adds a small sample of answer texts for the athlete to read and never
+prints the key or raw error text. Output goes to stdout; the counts of a
+baseline run are recorded on the issue.
 
 ```powershell
-python tests/coach_live_eval.py --base-url http://127.0.0.1:8317/v1 --model <id> --thinking low
+$env:COACH_EVAL_API_KEY = '<evaluation key>'  # never stored or logged
+python tests/coach_live_eval.py --base-url https://api.openai.com/v1 --model <id> --thinking low --price-input <usd> --price-output <usd>
+Remove-Item Env:COACH_EVAL_API_KEY
 ```

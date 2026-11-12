@@ -749,6 +749,71 @@ class CommandLineTests(unittest.TestCase):
         self.assertNotIn("8317", text)
         self.assertIn("Antwort A", text)
 
+    def test_the_cost_ceiling_ends_the_run_before_the_next_call(self):
+        # 3 input tokens at 1 USD per token: 3 USD per call, so the third call
+        # would pass the 5 USD ceiling and is never sent.
+        def costly():
+            return ModelTurn(text="Antwort", usage={"input_tokens": 3})
+
+        cases = "c13-ambiguous-unit,c12-drop-request,c11-hypothetical-pending,c10-advice-only"
+        with (
+            patch.object(live, "fetch_model_ids", return_value=["m"]),
+            scripted([costly, costly, costly]),
+        ):
+            code, text = run_main(
+                *self.ARGS, "--cases", cases, "--price-input", "1000000"
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("Model calls: 2 of 150", text)
+        self.assertIn("Estimated cost: 6.00 of 5.00 USD", text)
+        self.assertIn("2 passed, 0 failed, 2 not run", text)
+
+    def test_the_openai_api_needs_the_key_and_prices_and_no_other_host_is_used(self):
+        openai = ("--base-url", "https://api.openai.com/v1", "--model", "m")
+        with (
+            patch.object(live, "fetch_model_ids", return_value=["m"]) as models,
+            patch.object(live, "run_case") as run_case,
+            patch.dict(live.os.environ, {"COACH_EVAL_API_KEY": ""}),
+        ):
+            code, text = run_main(*openai, "--price-input", "1", "--price-output", "1")
+            self.assertEqual(code, 2)
+            self.assertIn("COACH_EVAL_API_KEY", text)
+            code, text = run_main(
+                "--base-url", "https://example.com/v1", "--model", "m"
+            )
+            self.assertEqual(code, 2)
+            self.assertIn("loopback endpoint or the OpenAI API", text)
+            code, text = run_main(*self.ARGS, "--max-cost-usd", "6")
+            self.assertEqual(code, 2)
+        with (
+            patch.object(live, "fetch_model_ids", return_value=["m"]) as models,
+            patch.object(live, "run_case") as run_case,
+            patch.dict(live.os.environ, {"COACH_EVAL_API_KEY": "sk-synthetic"}),
+        ):
+            code, text = run_main(*openai)
+            self.assertEqual(code, 2)
+            self.assertIn("--price-input", text)
+            run_case.return_value = {
+                "id": "c10-advice-only",
+                "passed": True,
+                "safety": [],
+                "misses": [],
+                "unnecessary_clarifications": 0,
+                "turns": [{"tools": [], "text": "ok"}],
+            }
+            code, text = run_main(
+                *openai,
+                "--cases",
+                "c10-advice-only",
+                "--price-input",
+                "1",
+                "--price-output",
+                "1",
+            )
+        self.assertEqual(code, 0)
+        models.assert_called_with("https://api.openai.com/v1", "sk-synthetic")
+        self.assertNotIn("sk-synthetic", text)
+
     def test_an_unexpected_error_fails_its_case_and_keeps_the_report(self):
         secret_text = "raw upstream detail"
         with (

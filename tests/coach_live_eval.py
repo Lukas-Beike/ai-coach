@@ -38,6 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 CASES_PATH = Path(__file__).with_name("coach_eval_cases.json")
 MAX_CALLS = 150
+# Athlete decision 2026-11-12 (#2221): a paid evaluation key, at most 5 USD a run.
+MAX_COST_USD = 5.0
+OPENAI_HOST = "api.openai.com"
 SAMPLE_CASES = 5
 FTP_WATTS = 250
 EASY_CAP_PERCENT = 87.0  # backend.activities.hr_cap.HR_CAP_PERCENT["easy"]
@@ -327,15 +330,34 @@ def score_case(
 class CallCounter:
     """Counts every Responses request and refuses the one past the cap."""
 
-    def __init__(self, cap: int) -> None:
+    def __init__(
+        self,
+        cap: int,
+        cost_cap: float = MAX_COST_USD,
+        prices: tuple[float, float] = (0.0, 0.0),
+    ) -> None:
         self.cap = cap
+        self.cost_cap = cost_cap
+        # USD per million input and output tokens.
+        self.prices = prices
+        self.cost = 0.0
         self.calls = 0
         self.blocked = False
         self.tool_names: list[str] = []
         self.texts: list[str] = []
 
+    @property
+    def exhausted(self) -> bool:
+        return self.calls >= self.cap or self.cost >= self.cost_cap
+
     def record(self, turn: Any) -> Any:
         self.tool_names += [call["name"] for call in turn.tool_calls]
+        usage = getattr(turn, "usage", None) or {}
+        tokens_in = usage.get("input_tokens") or 0
+        tokens_out = usage.get("output_tokens") or 0
+        self.cost += (
+            tokens_in * self.prices[0] + tokens_out * self.prices[1]
+        ) / 1_000_000
         return turn
 
 
@@ -347,7 +369,7 @@ class CountingTransport:
         self._counter = counter
 
     def _count(self) -> None:
-        if self._counter.calls >= self._counter.cap:
+        if self._counter.exhausted:
             # The turn loop may swallow the exception; run_case checks the flag.
             self._counter.blocked = True
             raise CapReached
@@ -732,16 +754,24 @@ def run_case(
 # --- CLI and report ------------------------------------------------------------
 
 
-def fetch_model_ids(base_url: str) -> list[str]:
+def fetch_model_ids(base_url: str, api_key: str = "") -> list[str]:
     """GET <base_url>/models; raises OSError or ValueError when unusable."""
-    request = urllib.request.Request(base_url + "/models", method="GET")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    request = urllib.request.Request(base_url + "/models", headers=headers)
     with urllib.request.urlopen(request, timeout=10) as response:
         body = json.loads(response.read(1_000_000))
     return [str(item["id"]) for item in body["data"]]
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def _preflight(args: argparse.Namespace) -> str | None:
-    """None when the proxy answers and lists the model, else one line saying why."""
+    """None when the endpoint answers and lists the model, else one line saying why.
+
+    A loopback endpoint or the OpenAI API only; the OpenAI API needs the
+    evaluation key and the model's prices, so the cost ceiling can hold.
+    """
     from backend.config import validated_openai_base_url
     from backend.errors import AppError
 
@@ -749,20 +779,22 @@ def _preflight(args: argparse.Namespace) -> str | None:
         args.base_url = validated_openai_base_url(args.base_url)
     except AppError:
         return "Base URL must be http on loopback or https."
-    if urlsplit(args.base_url).scheme == "https" and urlsplit(
-        args.base_url
-    ).hostname not in {
-        "127.0.0.1",
-        "localhost",
-        "::1",
-    }:
-        return "Only loopback proxies are used for this evaluation."
+    host = urlsplit(args.base_url).hostname
+    if host not in _LOOPBACK and host != OPENAI_HOST:
+        return "Only a loopback endpoint or the OpenAI API is used for this evaluation."
+    if host == OPENAI_HOST and not (
+        args.api_key and args.price_input > 0 and args.price_output > 0
+    ):
+        return (
+            "The OpenAI API needs COACH_EVAL_API_KEY and both --price-input and "
+            "--price-output; nothing was run."
+        )
     try:
-        models = fetch_model_ids(args.base_url)
+        models = fetch_model_ids(args.base_url, args.api_key)
     except OSError, ValueError, KeyError, TypeError, urllib.error.URLError:
-        return f"Proxy at {urlsplit(args.base_url).hostname} is unreachable; nothing was run."
+        return f"Endpoint at {host} is unreachable; nothing was run."
     if args.model not in models:
-        return f"Model {args.model} is not listed by the proxy; nothing was run."
+        return f"Model {args.model} is not listed by the endpoint; nothing was run."
     return None
 
 
@@ -783,6 +815,7 @@ def render_report(
         f"- Model: {args.model}",
         f"- Thinking level: {args.thinking}",
         f"- Model calls: {counter.calls} of {counter.cap}",
+        f"- Estimated cost: {counter.cost:.2f} of {counter.cost_cap:.2f} USD",
         f"- Cases: {len(passed)} passed, {len(failed)} failed, {len(not_run)} not run",
         f"- Safety failures: {safety}",
         f"- Unnecessary clarifications: {unnecessary}",
@@ -834,11 +867,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--thinking", default="low")
     parser.add_argument("--cases", default="")
     parser.add_argument("--max-calls", type=int, default=MAX_CALLS)
+    parser.add_argument("--max-cost-usd", type=float, default=MAX_COST_USD)
+    # USD per million tokens, from the provider's price list for --model.
+    parser.add_argument("--price-input", type=float, default=0.0)
+    parser.add_argument("--price-output", type=float, default=0.0)
     args = parser.parse_args(argv)
+    args.api_key = os.environ.get("COACH_EVAL_API_KEY", "")
     cases = load_cases()
     chosen = [c for c in args.cases.split(",") if c]
     unknown = sorted(set(chosen) - {c["id"] for c in cases})
-    if unknown or not 0 < args.max_calls <= MAX_CALLS:
+    if (
+        unknown
+        or not 0 < args.max_calls <= MAX_CALLS
+        or not 0 < args.max_cost_usd <= MAX_COST_USD
+    ):
         print(f"Unknown case ids or call cap out of range: {unknown}")
         return 2
     problem = _preflight(args)
@@ -846,12 +888,14 @@ def main(argv: list[str] | None = None) -> int:
         print(problem)
         return 2
     selected = [c for c in cases if not chosen or c["id"] in chosen]
-    counter = CallCounter(args.max_calls)
+    counter = CallCounter(
+        args.max_calls, args.max_cost_usd, (args.price_input, args.price_output)
+    )
     settings = {
         "base_url": args.base_url,
         "model": args.model,
         "thinking": args.thinking,
-        "api_key": os.environ.get("COACH_EVAL_API_KEY", "local-proxy-no-key"),
+        "api_key": args.api_key or "local-proxy-no-key",
     }
     results: list[dict[str, Any]] = []
     not_run: list[str] = []
