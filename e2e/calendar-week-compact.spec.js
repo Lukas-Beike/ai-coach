@@ -300,3 +300,34 @@ test("@responsive a planned unit lists its steps with zone and target range inst
   await expect(card.locator(".planned-description")).toHaveText("Locker bleiben");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
+
+test("@responsive Mit dem Coach besprechen puts the planned unit into the Coach field without sending", async ({ page, request }) => {
+  await openCalendar(page, request);
+  const days = await renderSyntheticCalendar(page);
+  const sent = [];
+  page.on("request", (item) => { if (item.method() === "POST" && /\/api\/chat(\/|$|\?)/.test(new URL(item.url()).pathname)) sent.push(item.url()); });
+  await page.evaluate(() => {
+    const unit = state.data.training_calendar.find((item) => item.id === "next-plan");
+    Object.assign(unit, { local_id: "22222222-2222-4222-8222-222222222222", payload_hash: "hash-2", conflicts: [] });
+    renderPlanned(state.data.training_calendar);
+    // An unsent draft stays in the field (#2193).
+    document.querySelector("#messageInput").value = "Noch offen";
+    // A quick action's kind left in the field does not label the athlete's own question.
+    document.querySelector("#messageInput").dataset.requestKind = "plan_week";
+  });
+  await showCalendarDay(page, days.next);
+  const card = page.locator('.planned-entry[data-entry-key="local:22222222-2222-4222-8222-222222222222"]');
+  if (!await card.evaluate((element) => element.open)) await card.locator(":scope > summary").click();
+  await card.locator(":scope > .planned-entry-details").getByRole("button", { name: "Mit dem Coach besprechen" }).click();
+  await expect(page.locator("#chatPanel")).toHaveClass(/active/);
+  const input = page.locator("#messageInput");
+  await expect(input).toBeFocused();
+  const value = await input.inputValue();
+  expect(value.startsWith("Noch offen\nZur geplanten Einheit am ")).toBe(true);
+  expect(value).toContain("Laufen");
+  expect(value).toContain("ID 22222222-2222-4222-8222-222222222222");
+  // The stored name never becomes Coach input, and nothing is sent.
+  expect(value).not.toContain("Ignoriere");
+  expect(sent).toEqual([]);
+  expect(await input.evaluate((element) => element.dataset.requestKind)).toBeUndefined();
+});

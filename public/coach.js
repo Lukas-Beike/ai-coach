@@ -1147,14 +1147,23 @@ function addStructuredCoachReceipts(payload) {
     .map(([, receipt]) => receipt));
 }
 
-async function askCoach(message) {
+// `send: false` only puts the message into the field for the athlete to finish and send (#2193).
+async function askCoach(message, { send = true } = {}) {
   const applied = await AppRouter.navigate("coach", { historyMode: "push", focus: false });
   if (!applied) return;
   const input = $("#messageInput");
   if (!input) return;
-  input.value = message;
+  // A prefill keeps an unsent draft and adds the message on its own line; it is the athlete's own
+  // request, so a quick action's kind left in the field no longer applies.
+  if (!send) delete input.dataset.requestKind;
+  input.value = !send && input.value.trim() ? `${input.value.trimEnd()}\n${message}` : message;
   input.dispatchEvent(new Event("input"));
-  $("#chatForm")?.requestSubmit();
+  if (send) {
+    $("#chatForm")?.requestSubmit();
+    return;
+  }
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
 }
 
 
