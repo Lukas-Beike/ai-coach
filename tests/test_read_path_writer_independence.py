@@ -195,10 +195,10 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
                 "profile.json", "athlete_checkins.jsonl"
             ),
             "diagnostic_report": lambda: without_process_measurements(
-                server.DIAGNOSTICS_ASSEMBLY.report_service().report()
+                server.DIAGNOSTICS.report_service().report()
             ),
             "coach_history_diagnostics": lambda: (
-                server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+                server.DIAGNOSTICS.coach_history_service().history()
             ),
             "wahoo_status": lambda: server.WAHOO_CONNECTION.service().status(),
         }

@@ -55,6 +55,12 @@ class AppContext:
     profile_mutation_coordinator: Any
     # Recompute the configuration from the environment and stored credentials.
     refresh_config: Callable[[], Any]
+    # The live log file path (tests and a restore swap it) and the release identity.
+    log_path: Callable[[], Path]
+    app_name: str
+    app_version: str
+    # The provider observability state bound to the active database.
+    provider_state: Callable[[], Any]
     athlete: Any = None
     athlete_profile: Any = None
     canonical_read: Any = None
@@ -71,3 +77,9 @@ class AppContext:
     coach_background_jobs: Any = None
     coach_conversation: Any = None
     canonical_backfill: Any = None
+    garmin: Any = None
+    external_calendar: Any = None
+    coach_local: Any = None
+    workout_library_sync: Any = None
+    # The structured Coach dialogue tool definitions; diagnostics lists their names.
+    coach_dialogue_tools: Any = None

@@ -38,7 +38,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
         self.assertEqual(
-            server.DIAGNOSTICS_ASSEMBLY.report_service().report()["morning_checkin"],
+            server.DIAGNOSTICS.report_service().report()["morning_checkin"],
             result,
         )
 
@@ -301,7 +301,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 ],
             )
         self.assertEqual(result["status"], "failed")
-        history = server.DIAGNOSTICS_ASSEMBLY.report_service().report()[
+        history = server.DIAGNOSTICS.report_service().report()[
             "coach_commands"
         ]
         self.assertEqual(history[0]["error"]["type"], "RuntimeError")
@@ -323,7 +323,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             ],
         )
         self.assertEqual(result["status"], "partial")
-        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+        history = server.DIAGNOSTICS.coach_history_service().history()
         self.assertEqual(history[0]["response_status"], "incomplete")
         self.assertEqual(history[0]["steps"][0]["error"]["status"], 404)
         self.assertEqual(history[0]["steps"][0]["tool"], "save_activity_feedback")
