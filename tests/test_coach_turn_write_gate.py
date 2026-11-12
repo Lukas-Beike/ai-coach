@@ -173,6 +173,20 @@ class TurnWriteGateTests(unittest.TestCase):
             denied(gate, "update_profile", {})["gate_reason"], "impact_not_confirmed"
         )
 
+    def test_a_resumed_gap_fill_counts_each_product_once(self) -> None:
+        # Receipts keep the product ids: two calls for p1 are one product, so a
+        # further call for p1 is not bulk; a second product is (#2336).
+        fill = "fill_nutrition_product_gaps"
+        receipts = [
+            {"tool": fill, "record_count": 1, "record_ids": ["p1"]},
+            {"tool": fill, "record_count": 1, "record_ids": ["p1"]},
+        ]
+        for products, allowed in ((["p1"], True), (["p2"], False)):
+            with self.subTest(products=products):
+                gate, _factory = make_gate("Trag die Lücken ein", receipts=receipts)
+                arguments = {"products": [{"id": item} for item in products]}
+                self.assertEqual(gate.denial(fill, arguments) is None, allowed)
+
     def test_remote_writes_need_a_named_sync_and_never_the_classifier(self) -> None:
         classifier = Mock(return_value=verdict(sorted(DOMAINS), True, True))
         gate, factory = make_gate("Passt das so?", classifier=classifier)

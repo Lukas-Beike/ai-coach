@@ -23,8 +23,10 @@ from backend.coach.write_gate import (
     build_turn_authority,
     check_write,
     classifier_input,
+    count_records,
     illness_override_confirmed,
     parse_verdict,
+    resumed_records,
 )
 from backend.providers.model_seam import ModelRequest, ModelTurn
 
@@ -199,15 +201,16 @@ class CoachTurnWriteGate:
         writes = [
             entry for entry in command_receipts if entry.get("tool") in TOOL_DOMAIN
         ]
-        self._state = TurnGateState(
-            writes_count=len(writes),
-            records_count=sum(_entry_records(entry) for entry in writes),
-        )
+        self._state = TurnGateState(writes_count=len(writes))
         for entry in writes:
             tool = str(entry["tool"])
-            self._state.tool_records[tool] = self._state.tool_records.get(
-                tool, 0
-            ) + _entry_records(entry)
+            ids = frozenset(str(item) for item in entry.get("record_ids") or ())
+            count_records(
+                self._state,
+                tool,
+                resumed_records(self._state, tool, _entry_records(entry), ids),
+                ids,
+            )
         self._model = model
         self._read_only_tools = read_only_tools
         self._classifier_factory = classifier_factory

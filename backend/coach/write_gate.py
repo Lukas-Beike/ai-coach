@@ -575,25 +575,34 @@ def record_count(tool_name: str, arguments: Mapping[str, Any] | None) -> int:
     if keys is None or not isinstance(arguments, Mapping):
         return 1
     if tool_name in DISTINCT_RECORD_TOOLS:
-        return max(1, len(record_ids(tool_name, arguments)))
+        return _new_records(tool_name, arguments, frozenset())
     return max(1, sum(len(_items(arguments, key)) for key in keys))
 
 
-def record_ids(tool_name: str, arguments: Mapping[str, Any] | None) -> frozenset[str]:
-    """The record ids a call names; an item without an id is a record of its own."""
-    if not isinstance(arguments, Mapping):
-        return frozenset()
-    items = [
-        item
-        for key in RECORD_LISTS.get(tool_name, ())
-        for item in _items(arguments, key)
-    ]
-    return frozenset(
-        str(item["id"])
-        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
-        else f"#{index}"
-        for index, item in enumerate(items)
+def _record_keys(
+    tool_name: str, arguments: Mapping[str, Any] | None
+) -> tuple[frozenset[str], int]:
+    """The record ids a call names, and how many items name no id."""
+    items = (
+        [
+            item
+            for key in RECORD_LISTS.get(tool_name, ())
+            for item in _items(arguments, key)
+        ]
+        if isinstance(arguments, Mapping)
+        else []
     )
+    ids = [
+        str(item["id"])
+        for item in items
+        if isinstance(item, Mapping) and item.get("id") not in (None, "")
+    ]
+    return frozenset(ids), len(items) - len(ids)
+
+
+def record_ids(tool_name: str, arguments: Mapping[str, Any] | None) -> frozenset[str]:
+    """The record ids a call names, as the receipt keeps them."""
+    return _record_keys(tool_name, arguments)[0]
 
 
 def _canonical(value: Any) -> str:
@@ -623,10 +632,38 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
 def _new_records(
     tool_name: str, arguments: Mapping[str, Any] | None, seen_ids: frozenset[str]
 ) -> int:
-    """Records a call adds; a distinct-record tool skips ids already touched."""
+    """Records a call adds; a distinct-record tool skips ids already touched.
+
+    An item without an id is always a record of its own; a call naming only
+    touched ids adds none, any other call at least one.
+    """
     if tool_name not in DISTINCT_RECORD_TOOLS:
         return record_count(tool_name, arguments)
-    return len(record_ids(tool_name, arguments) - seen_ids)
+    ids, anonymous = _record_keys(tool_name, arguments)
+    added = len(ids - seen_ids) + anonymous
+    return added if added or ids else 1
+
+
+def count_records(
+    state: TurnGateState, tool_name: str, records: int, ids: frozenset[str]
+) -> None:
+    """Add a call's records to the turn: live, and again when a turn resumes."""
+    state.records_count += records
+    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
+    if tool_name in DISTINCT_RECORD_TOOLS:
+        state.tool_record_ids[tool_name] = (
+            state.tool_record_ids.get(tool_name, frozenset()) | ids
+        )
+
+
+def resumed_records(
+    state: TurnGateState, tool_name: str, stored: int, ids: frozenset[str]
+) -> int:
+    """Records an earlier call of a resumed turn adds, counted as it was live."""
+    if tool_name not in DISTINCT_RECORD_TOOLS or not ids:
+        return stored
+    anonymous = max(0, stored - len(ids))
+    return len(ids - state.tool_record_ids.get(tool_name, frozenset())) + anonymous
 
 
 def call_impact(
@@ -831,7 +868,7 @@ def check_write(
         return GateDecision(
             False, domain, REMOTE_INTERVALS_DENIAL, state.classifier_used
         )
-    seen = frozenset(state.tool_record_ids.get(tool_name, ()))
+    seen = state.tool_record_ids.get(tool_name, frozenset())
     records = _new_records(tool_name, arguments, seen)
     impact = (
         frozenset()
@@ -853,10 +890,7 @@ def check_write(
     if denied:
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
-    state.records_count += records
-    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
-    if tool_name in DISTINCT_RECORD_TOOLS:
-        state.tool_record_ids[tool_name] = seen | record_ids(tool_name, arguments)
+    count_records(state, tool_name, records, record_ids(tool_name, arguments))
     return GateDecision(True, domain, "ok", state.classifier_used)
 
 

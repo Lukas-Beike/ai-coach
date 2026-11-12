@@ -36,7 +36,7 @@ from backend.coach.tool_specs import (
     TOOL_DOMAIN,
 )
 from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
-from backend.coach.write_gate import ILLNESS_CODE, record_count
+from backend.coach.write_gate import ILLNESS_CODE, record_count, record_ids
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.plan_guard_service import (
@@ -341,6 +341,8 @@ class CoachStructuredToolRoundService:
                     "record_count": record_count(name, metadata.get("arguments"))
                     if name in TOOL_DOMAIN
                     else 0,
+                    # The record ids, so a resumed turn counts a product once.
+                    "record_ids": sorted(record_ids(name, metadata.get("arguments"))),
                 }
             )
             self._jobs.merge_receipt(

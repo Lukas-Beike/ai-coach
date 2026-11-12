@@ -569,6 +569,8 @@ class DestructiveTierTests(unittest.TestCase):
             ({"products": [{"id": "p1"}]}, frozenset({"p1"}), set()),
             ({"products": [{"id": "p1"}, {"id": "p2"}]}, frozenset(), {"bulk"}),
             ({"products": [{"id": "p2"}]}, frozenset({"p1"}), {"bulk"}),
+            # An item without an id is always a product of its own.
+            ({"products": [{}]}, frozenset({"p1"}), {"bulk"}),
         ):
             with self.subTest(arguments=arguments, seen=seen):
                 self.assertEqual(
