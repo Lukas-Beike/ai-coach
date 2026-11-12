@@ -1113,17 +1113,10 @@ function renderProviderMetrics(metrics, root, start, end, missing) {
 let bodyHistoryPeriod = "twelveWeeks";
 
 function bodyWeeklyPoints(points, start, end) {
-  const weeks = [];
-  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    const offset = Math.min(6, Math.round((Date.parse(end) - Date.parse(weekStart)) / 86400000));
-    const boundedEnd = addDateKey(weekStart, offset);
-    const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
+  return analysisWeeklyPoints(points, start, end, (readings) => {
     const latest = readings.at(-1);
-    weeks.push(latest
-      ? { ...latest, date: boundedEnd, weekReadings: readings.length, observedDate: latest.observed_at || latest.date }
-      : { date: boundedEnd, value: null, weekReadings: 0 });
-  }
-  return weeks;
+    return { ...latest, weekReadings: readings.length, observedDate: latest.observed_at || latest.date };
+  }, { weekReadings: 0 });
 }
 
 function bodySeriesPoints(item, window, period = bodyHistoryPeriod) {
@@ -1717,54 +1710,45 @@ function appendEquipmentLifetime(card, lifetime, usageKm, targetKm) {
   card.append(progress, reportNode("p", `${analysisValue(usage, "km")} von ${analysisValue(target, "km")} \u00b7 ${analysisPercent(percent)}${overage ? " \u00b7 Ziel \u00fcberschritten" : ""}`));
 }
 
-function analysisWeeklyPerformancePoints(points, start, end, median = false) {
+// One bucket per seven days from `start`, the last one cut at `end`. `summarize` turns a week's valid
+// readings into the fields of its point; a week without any is a gap (value null) carrying `gap`.
+function analysisWeeklyPoints(points, start, end, summarize, gap = {}) {
   const weeks = [];
   for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    let weekEnd = addDateKey(weekStart, 6);
-    if (weekEnd > end) weekEnd = end;
-    const readings = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point)).sort((a, b) => a.date.localeCompare(b.date));
-    if (!readings.length) { weeks.push({ date: weekEnd, value: null }); continue; }
+    let date = addDateKey(weekStart, 6);
+    if (date > end) date = end;
+    const readings = points.filter((point) => point.date >= weekStart && point.date <= date && analysisValidPoint(point));
+    weeks.push(readings.length ? { ...summarize(readings), date } : { date, value: null, ...gap });
+  }
+  return weeks;
+}
+
+function analysisWeeklyPerformancePoints(points, start, end, median = false) {
+  return analysisWeeklyPoints(points, start, end, (readings) => {
+    readings.sort((a, b) => a.date.localeCompare(b.date));
     const latest = readings.at(-1);
     const values = readings.map((point) => Number(point.value)).sort((a, b) => a - b);
     const middle = Math.floor(values.length / 2);
     let value = latest.value;
     if (median) value = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
-    weeks.push({ date: weekEnd, value, observedDate: latest.date, ...(median ? { count: readings.length } : {}) });
-  }
-  return weeks;
+    return { value, observedDate: latest.date, ...(median ? { count: readings.length } : {}) };
+  });
 }
 
 function analysisWeeklySumPoints(points, start, end) {
-  const weeks = [];
-  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    let weekEnd = addDateKey(weekStart, 6);
-    if (weekEnd > end) weekEnd = end;
-    const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
-    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
-  }
-  return weeks;
+  return analysisWeeklyPoints(points, start, end, (known) => ({
+    value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) * 10) / 10, observedDate: known.at(-1).date,
+  }));
 }
 
 function analysisWeeklyMeanPoints(points, start, end) {
-  const weeks = [];
-  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    let weekEnd = addDateKey(weekStart, 6);
-    if (weekEnd > end) weekEnd = end;
-    const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
-    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) / known.length * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
-  }
-  return weeks;
+  return analysisWeeklyPoints(points, start, end, (known) => ({
+    value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) / known.length * 10) / 10, observedDate: known.at(-1).date,
+  }));
 }
 
 function analysisWeeklyLastPoints(points, start, end) {
-  const weeks = [];
-  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
-    let weekEnd = addDateKey(weekStart, 6);
-    if (weekEnd > end) weekEnd = end;
-    const last = points.findLast((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
-    weeks.push(last ? { ...last, date: weekEnd, observedDate: last.date } : { date: weekEnd, value: null });
-  }
-  return weeks;
+  return analysisWeeklyPoints(points, start, end, (known) => ({ ...known.at(-1), observedDate: known.at(-1).date }));
 }
 
 function trainingFocusDistribution(title, readings, unit, info) {

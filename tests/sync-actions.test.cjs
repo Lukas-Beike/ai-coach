@@ -174,3 +174,175 @@ test("a local sync is listed once even when its job is also running", () => {
   const root = connectionProgress({ sync: { jobs: [{ status: "running", provider: "weather" }] } }, { weather: true });
   assert.deepEqual(root.children.map(itemText), ["Open-Meteo | Wetter wird aktualisiert…"]);
 });
+
+// Runs one manual sync with stable page elements and records what the athlete can observe:
+// the request, the button while the job runs, the toasts, the reloads and the final button state.
+function observedSync(action, { job, daysValue = "", syncDays, postResult = { id: "job-1" }, failPost = null } = {}) {
+  const buttons = new Map();
+  const button = (selector) => {
+    if (!buttons.has(selector)) {
+      const element = { disabled: false, textContent: "", busy: false, classList: { add: (name) => { element.busy = name === "busy" || element.busy; }, remove: (name) => { if (name === "busy") element.busy = false; } } };
+      buttons.set(selector, element);
+    }
+    return buttons.get(selector);
+  };
+  const dirty = { removed: false };
+  const log = { posts: [], toasts: [], loads: 0, invalidations: 0, renders: 0, whileRunning: null };
+  const context = extractFunctions("sync-status.js", [...PROVIDER_ERRORS, "providerSyncKey", "providerSyncRunning", "retryProvider"], {
+    state: { localSync: {}, data: { sync_settings: { garmin_days: syncDays } }, route: "settings" },
+    $: (selector) => {
+      if (selector === "#garminSyncDays") return { value: daysValue, removeAttribute: () => { dirty.removed = true; } };
+      return selector.endsWith("Button") ? button(selector) : null;
+    },
+    api: async (url, options) => {
+      if (options?.method === "POST") {
+        if (failPost) throw new Error(failPost);
+        log.whileRunning = Object.fromEntries([...buttons].map(([selector, element]) => [selector, { disabled: element.disabled, text: element.textContent, busy: element.busy }]));
+        log.posts.push({ url, body: options.body });
+        return postResult;
+      }
+      return job;
+    },
+    toast: (message, isError) => log.toasts.push({ message, isError: Boolean(isError) }),
+    load: async () => { log.loads += 1; },
+    renderSettings: () => { log.renders += 1; },
+    invalidateContextPreview: () => { log.invalidations += 1; },
+    providerIds: () => ({ garmin: "garmin", wahoo: "wahoo", intervals: "intervals" }),
+    AppApi: { messageForReason: (_reason, fallback) => fallback },
+  });
+  loadPublicScript("sync-actions.js", context);
+  return { context, log, buttons, dirty, run: () => vm.runInContext(`${action}()`, context) };
+}
+
+test("a Garmin sync sends the chosen days, shows progress and ends idle", async () => {
+  const run = observedSync("syncGarmin", { job: { status: "completed" }, daysValue: "30", syncDays: 84 });
+  await run.run();
+  assert.deepEqual(run.log.posts, [{ url: "/api/garmin/sync", body: "{\"days\":\"30\"}" }]);
+  assert.deepEqual(run.log.whileRunning["#garminSyncButton"], { disabled: true, text: "Garmin wird synchronisiert…", busy: false });
+  assert.equal(run.dirty.removed, true);
+  assert.deepEqual(run.log.toasts, [{ message: "Garmin synchronisiert", isError: false }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads, run.context.state.localSync.garmin], [1, 1, false]);
+  const button = run.buttons.get("#garminSyncButton");
+  assert.deepEqual([button.disabled, button.textContent], [false, "Garmin synchronisieren"]);
+});
+
+test("a Garmin sync falls back to the saved window and then to 84 days, and a partial job says so", async () => {
+  const saved = observedSync("syncGarmin", { job: { status: "partial" }, syncDays: 42 });
+  await saved.run();
+  assert.equal(saved.log.posts[0].body, "{\"days\":42}");
+  assert.equal(saved.log.toasts[0].message, "Garmin teilweise synchronisiert");
+  const none = observedSync("syncGarmin", { job: { status: "completed" } });
+  await none.run();
+  assert.equal(none.log.posts[0].body, "{\"days\":84}");
+});
+
+test("a calendar sync shows progress, restores its label and reloads once", async () => {
+  const run = observedSync("syncExternalCalendar", { job: { status: "partial" } });
+  await run.run();
+  assert.deepEqual(run.log.posts, [{ url: "/api/external-calendar/sync", body: "{}" }]);
+  assert.deepEqual(run.log.whileRunning["#externalCalendarSyncButton"], { disabled: true, text: "Synchronisierung läuft…", busy: false });
+  assert.deepEqual(run.log.toasts, [{ message: "Kalender teilweise synchronisiert", isError: false }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads, run.context.state.localSync.externalCalendar], [1, 1, false]);
+  const button = run.buttons.get("#externalCalendarSyncButton");
+  assert.deepEqual([button.disabled, button.textContent], [false, "Synchronisieren"]);
+});
+
+test("a weather sync pulses while it runs and redraws the settings afterwards", async () => {
+  const run = observedSync("syncWeather", { job: { status: "completed" } });
+  await run.run();
+  assert.deepEqual(run.log.posts, [{ url: "/api/weather/sync", body: "{}" }]);
+  assert.deepEqual(run.log.whileRunning["#weatherSyncButton"], { disabled: true, text: "Wetter wird aktualisiert…", busy: true });
+  assert.deepEqual(run.log.toasts, [{ message: "Open-Meteo-Wetter aktualisiert", isError: false }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads, run.log.renders, run.context.state.localSync.weather, run.buttons.get("#weatherSyncButton").busy], [1, 1, 1, false, false]);
+  const partial = observedSync("syncWeather", { job: { status: "partial" } });
+  await partial.run();
+  assert.equal(partial.log.toasts[0].message, "Open-Meteo teilweise aktualisiert");
+});
+
+test("a Wahoo sync shows progress, names its result and redraws the settings", async () => {
+  const run = observedSync("syncWahoo", { job: { status: "completed" } });
+  await run.run();
+  assert.deepEqual(run.log.posts, [{ url: "/api/wahoo/sync", body: "{}" }]);
+  assert.deepEqual(run.log.whileRunning["#wahooSyncButton"], { disabled: true, text: "Synchronisierung läuft…", busy: false });
+  assert.deepEqual(run.log.toasts, [{ message: "Wahoo synchronisiert", isError: false }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads, run.log.renders, run.context.state.localSync.wahoo], [1, 1, 1, false]);
+});
+
+test("a Wahoo sync without a job id reports it and reloads", async () => {
+  const run = observedSync("syncWahoo", { job: { status: "completed" }, postResult: {} });
+  await run.run();
+  assert.deepEqual(run.log.toasts, [{ message: "Die Jobbestätigung fehlt.", isError: true }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads, run.log.renders, run.context.state.localSync.wahoo], [0, 1, 1, false]);
+});
+
+test("a failed start request shows its error, reloads and frees the button", async () => {
+  for (const [action, selector, label] of [["syncGarmin", "#garminSyncButton", "Garmin synchronisieren"], ["syncExternalCalendar", "#externalCalendarSyncButton", "Synchronisieren"], ["syncWeather", "#weatherSyncButton", null], ["syncWahoo", "#wahooSyncButton", null]]) {
+    const run = observedSync(action, { job: { status: "completed" }, failPost: "Netzwerk weg" });
+    await run.run();
+    assert.deepEqual(run.log.toasts, [{ message: "Netzwerk weg", isError: true }], action);
+    assert.deepEqual([run.log.invalidations, run.log.loads], [0, 1], action);
+    assert.deepEqual(Object.values(run.context.state.localSync), [false], action);
+    const button = run.buttons.get(selector);
+    if (label) assert.deepEqual([button.disabled, button.textContent], [false, label], action);
+    else assert.equal(run.log.renders, 1, action);
+  }
+});
+
+test("a failed job toasts once, reloads once and skips the context refresh", async () => {
+  const run = observedSync("syncExternalCalendar", { job: { status: "failed", reason: "x" } });
+  await run.run();
+  assert.deepEqual(run.log.toasts, [{ message: "Kalender-Synchronisierung fehlgeschlagen.", isError: true }]);
+  assert.deepEqual([run.log.invalidations, run.log.loads], [0, 1]);
+});
+
+test("a sync without its button does nothing", async () => {
+  const run = observedSync("syncGarmin", { job: { status: "completed" } });
+  run.context.$ = () => null;
+  await run.run();
+  assert.deepEqual([run.log.posts.length, run.log.loads, run.context.state.localSync.garmin], [0, 0, undefined]);
+});
+
+// Runs one model or thinking-level select change the way the page binds it.
+function observedSelectSave(save, failure = null) {
+  const log = { requests: [], toasts: [], loads: 0, whileRunning: null };
+  const select = { disabled: false, value: "gpt-x", selectedIndex: 1, options: [{ text: "Alt" }, { text: "Neu" }] };
+  const context = extractFunctions("settings.js", ["saveSelectSetting"], {
+    api: async (url, options) => {
+      log.whileRunning = select.disabled;
+      if (failure) throw new Error(failure);
+      log.requests.push({ url, method: options.method, body: options.body });
+      return {};
+    },
+    toast: (message, isError) => log.toasts.push({ message, isError: Boolean(isError) }),
+    load: async () => { log.loads += 1; },
+    event: { currentTarget: select },
+  });
+  extractFunctions("sync-actions.js", ["runAction"], context);
+  return { log, select, run: () => vm.runInContext(save.code, context) };
+}
+
+const SELECT_SAVES = [
+  { label: "model", code: 'saveSelectSetting(event, "model", "model", "Aktiv")', url: "/api/settings/model", body: "{\"model\":\"gpt-x\"}", toast: "Aktiv: Neu" },
+  { label: "service tier", code: 'saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit")', url: "/api/settings/service-tier", body: "{\"service_tier\":\"gpt-x\"}", toast: "Geschwindigkeit: Neu" },
+  { label: "thinking level", code: 'saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level")', url: "/api/settings/thinking-level", body: "{\"thinking_level\":\"gpt-x\"}", toast: "Thinking Level: Neu" },
+];
+
+test("saving the model, speed or thinking level locks the select, names the active option and reloads", async () => {
+  for (const save of SELECT_SAVES) {
+    const run = observedSelectSave(save);
+    await run.run();
+    assert.deepEqual(run.log.requests, [{ url: save.url, method: "PUT", body: save.body }], save.label);
+    assert.equal(run.log.whileRunning, true, save.label);
+    assert.deepEqual(run.log.toasts, [{ message: save.toast, isError: false }], save.label);
+    assert.deepEqual([run.log.loads, run.select.disabled], [1, false], save.label);
+  }
+});
+
+test("a failed model, speed or thinking-level save shows the error, reloads and unlocks the select", async () => {
+  for (const save of SELECT_SAVES) {
+    const run = observedSelectSave(save, "Modell abgelehnt");
+    await run.run();
+    assert.deepEqual(run.log.toasts, [{ message: "Modell abgelehnt", isError: true }], save.label);
+    assert.deepEqual([run.log.loads, run.select.disabled], [1, false], save.label);
+  }
+});

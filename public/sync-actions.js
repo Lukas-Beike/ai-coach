@@ -1,81 +1,66 @@
-async function syncGarmin() {
-  const button = $("#garminSyncButton");
-  if (!button) return;
-  if (state.localSync.garmin) return;
-  state.localSync.garmin = true;
-  button.disabled = true;
-  button.textContent = "Garmin wird synchronisiert…";
+// One athlete action on a control: busy state, `run` (returns the success toast), reload, error toast and cleanup.
+// `flag` locks a state.localSync entry against a second tap; `rerender` lets the settings redraw the control.
+async function runAction(control, run, { flag, busyText, idleText, pulse, invalidate, rerender } = {}) {
+  if (!control || (flag && state.localSync[flag])) return;
+  if (flag) state.localSync[flag] = true;
+  control.disabled = true;
+  if (busyText) control.textContent = busyText;
+  if (pulse) control.classList.add("busy");
   try {
-    $("#garminSyncDays")?.removeAttribute?.("data-dirty");
-    const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
-    const result = await api("/api/garmin/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
-    const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Garmin-Synchronisierung fehlgeschlagen."));
-    toast(`Garmin ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
-    invalidateContextPreview();
-    await load();
-  } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.garmin = false; button.disabled = false; button.textContent = "Garmin synchronisieren"; }
-}
-
-async function syncExternalCalendar() {
-  const button = $("#externalCalendarSyncButton");
-  if (!button) return;
-  if (state.localSync.externalCalendar) return;
-  state.localSync.externalCalendar = true;
-  button.disabled = true;
-  button.textContent = "Synchronisierung läuft…";
-  try {
-    const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
-    const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Kalender-Synchronisierung fehlgeschlagen."));
-    toast(`Kalender ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
-    invalidateContextPreview();
-    await load();
-  } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.externalCalendar = false; button.disabled = false; button.textContent = "Synchronisieren"; }
-}
-
-async function syncWeather() {
-  const button = $("#weatherSyncButton");
-  if (!button) return;
-  if (state.localSync.weather) return;
-  state.localSync.weather = true;
-  button.disabled = true;
-  button.classList.add("busy");
-  button.textContent = "Wetter wird aktualisiert…";
-  try {
-    const result = await api("/api/weather/sync", { method: "POST", body: "{}" });
-    const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Wetter-Synchronisierung fehlgeschlagen."));
-    toast(completed.status === "partial" ? "Open-Meteo teilweise aktualisiert" : "Open-Meteo-Wetter aktualisiert");
-    invalidateContextPreview();
+    toast(await run());
+    if (invalidate) invalidateContextPreview();
     await load();
   } catch (error) { toast(error.message, true); await load(); }
   finally {
-    state.localSync.weather = false;
-    button.classList.remove("busy");
-    renderSettings(state.data || {});
+    if (flag) state.localSync[flag] = false;
+    if (pulse) control.classList.remove("busy");
+    if (rerender) renderSettings(state.data || {});
+    else {
+      control.disabled = false;
+      if (idleText) control.textContent = idleText;
+    }
   }
 }
 
-async function syncWahoo() {
-  const button = $("#wahooSyncButton");
-  if (!button) return;
-  if (state.localSync.wahoo) return;
-  state.localSync.wahoo = true;
-  button.disabled = true;
-  button.textContent = "Synchronisierung läuft…";
-  try {
-    const result = await api("/api/wahoo/sync", { method: "POST", body: "{}" });
-    if (!result?.id) throw new Error("Die Jobbestätigung fehlt.");
-    const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Wahoo-Synchronisierung fehlgeschlagen."));
-    toast(`Wahoo ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
-    invalidateContextPreview();
-    await load();
-  } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.wahoo = false; renderSettings(state.data || {}); }
+// Starts a provider job and follows it to the end; a failed job throws its own cause.
+async function runSyncJob(path, body, failure, requireId = false) {
+  const result = await api(path, { method: "POST", body });
+  if (requireId && !result?.id) throw new Error("Die Jobbestätigung fehlt.");
+  const completed = await waitForSyncJob(result.id);
+  if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, failure));
+  return completed;
+}
+
+const partially = (job) => (job.status === "partial" ? "teilweise " : "");
+
+function syncGarmin() {
+  return runAction($("#garminSyncButton"), async () => {
+    $("#garminSyncDays")?.removeAttribute?.("data-dirty");
+    const days = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
+    const job = await runSyncJob("/api/garmin/sync", JSON.stringify({ days }), "Garmin-Synchronisierung fehlgeschlagen.");
+    return `Garmin ${partially(job)}synchronisiert`;
+  }, { flag: providerIds().garmin, busyText: "Garmin wird synchronisiert…", idleText: "Garmin synchronisieren", invalidate: true });
+}
+
+function syncExternalCalendar() {
+  return runAction($("#externalCalendarSyncButton"), async () => {
+    const job = await runSyncJob("/api/external-calendar/sync", "{}", "Kalender-Synchronisierung fehlgeschlagen.");
+    return `Kalender ${partially(job)}synchronisiert`;
+  }, { flag: "externalCalendar", busyText: "Synchronisierung läuft…", idleText: "Synchronisieren", invalidate: true });
+}
+
+function syncWeather() {
+  return runAction($("#weatherSyncButton"), async () => {
+    const job = await runSyncJob("/api/weather/sync", "{}", "Wetter-Synchronisierung fehlgeschlagen.");
+    return job.status === "partial" ? "Open-Meteo teilweise aktualisiert" : "Open-Meteo-Wetter aktualisiert";
+  }, { flag: "weather", busyText: "Wetter wird aktualisiert…", pulse: true, invalidate: true, rerender: true });
+}
+
+function syncWahoo() {
+  return runAction($("#wahooSyncButton"), async () => {
+    const job = await runSyncJob("/api/wahoo/sync", "{}", "Wahoo-Synchronisierung fehlgeschlagen.", true);
+    return `Wahoo ${partially(job)}synchronisiert`;
+  }, { flag: providerIds().wahoo, busyText: "Synchronisierung läuft…", invalidate: true, rerender: true });
 }
 
 function fullResyncButtonSelector(source) {

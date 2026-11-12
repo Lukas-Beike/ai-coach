@@ -62,15 +62,15 @@ function router({ hash = "" } = {}) {
   return { context, panels, items, listeners, history, location, handlers, calls };
 }
 
-test("the app state starts with its defaults and a tab-bound token", () => {
+test("the app state starts with its defaults and refuses to mint tokens without a secure generator", () => {
   const { context } = router();
   const state = context.AppState.state;
   assert.ok(Object.isFrozen(context.AppState));
   assert.equal(state.chatScrollRestoring, false);
   assert.equal(state.planSegment, "overview");
   assert.equal(state.route, null);
-  assert.equal(state.syncPoll.leaseToken, "tab-00000000-0000-4000-8000-000000000000");
-  assert.throws(() => loadPublicScript("state.js", {}), /Secure random generator unavailable/);
+  assert.equal(context.AppState.secureToken("tab"), "tab-00000000-0000-4000-8000-000000000000");
+  assert.throws(() => loadPublicScript("state.js", {}).AppState.secureToken("tab"), /Secure random generator unavailable/);
 });
 
 test("the route and plan segment are set through the state owner", () => {

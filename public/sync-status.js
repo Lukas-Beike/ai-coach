@@ -103,32 +103,6 @@ function connectStateEvents() {
   };
 }
 
-function syncPollLeaseAvailable() {
-  try {
-    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
-    if (current && current.expires_at > Date.now() && current.token !== state.syncPoll.leaseToken) return false;
-    const lease = { token: state.syncPoll.leaseToken, expires_at: Date.now() + SYNC_POLL_LEASE_MS };
-    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify(lease));
-    const verified = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
-    return verified?.token === state.syncPoll.leaseToken;
-  } catch {
-    // Deliberately ignore storage-access exceptions: privacy settings can deny
-    // localStorage, and sync must remain available without the optional lease.
-    return true;
-  }
-}
-
-function releaseSyncPollLease() {
-  try {
-    const current = JSON.parse(localStorage.getItem(SYNC_POLL_LEASE_KEY) || "null");
-    if (current?.token === state.syncPoll.leaseToken) localStorage.removeItem(SYNC_POLL_LEASE_KEY);
-  } catch { }
-}
-
-function broadcastSyncMessage(message) {
-  try { state.syncPoll.channel?.postMessage(message); } catch { }
-}
-
 function changedSyncAreas(nextVersions) {
   // A version that a load was already requested for is not requested again.
   const previous = { ...state.data?.state_versions, ...state.requestedStateVersions };
@@ -177,10 +151,9 @@ function renderMaintenanceStatus(maintenance) {
   });
 }
 
-function handleSyncStatus(status, broadcast = false) {
+function handleSyncStatus(status) {
   if (!status || typeof status !== "object") return;
   if ($('details[data-more-segment-panel="connections"]')?.open) void loadYazioStatus();
-  if (broadcast) broadcastSyncMessage({ type: "status", status });
   if (status.operation_id && status.running) {
     state.syncPoll.operationId = status.operation_id;
   }
@@ -209,34 +182,21 @@ async function pollSyncStatus() {
     scheduleSyncPoll(SYNC_POLL_RETRY_MS);
     return;
   }
-  // Check the in-flight poll before taking the lease so an early return cannot leave a lease behind.
   if (state.syncPoll.controller) return;
-  if (!syncPollLeaseAvailable()) {
-    scheduleSyncPoll(SYNC_POLL_RETRY_MS);
-    return;
-  }
   const controller = new AbortController();
   state.syncPoll.controller = controller;
   try {
     const status = await api("/api/sync/status", { signal: controller.signal });
-    handleSyncStatus(status, true);
+    handleSyncStatus(status);
     scheduleSyncPoll(status.running ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_IDLE_MS);
   } catch (error) {
     if (error.name !== "AbortError") scheduleSyncPoll(SYNC_POLL_RETRY_MS);
   } finally {
     if (state.syncPoll.controller === controller) state.syncPoll.controller = null;
-    releaseSyncPollLease();
   }
 }
 
 function setupSyncStatusMonitoring() {
-  if ("BroadcastChannel" in globalThis) {
-    state.syncPoll.channel = new BroadcastChannel(SYNC_POLL_CHANNEL);
-    state.syncPoll.channel.addEventListener("message", (event) => {
-      const message = event.data || {};
-      if (message.type === "status") handleSyncStatus(message.status);
-    });
-  }
   scheduleSyncPoll(0);
 }
 
@@ -244,7 +204,6 @@ function handleSyncVisibility() {
   if (document.visibilityState !== "visible") {
     disconnectStateEvents();
     state.syncPoll.controller?.abort();
-    releaseSyncPollLease();
     return;
   }
   connectStateEvents();

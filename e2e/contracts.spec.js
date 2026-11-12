@@ -685,30 +685,6 @@ test("JSON and audio errors retain status, reason and retry delay", async ({ pag
   }
 });
 
-test("another tab takes over an expired polling lease after the leader closes", async ({ page, context }) => {
-  await ready(page);
-  const follower = await context.newPage();
-  await installReadFixture(follower, fixture);
-  await ready(follower);
-  for (const tab of [page, follower]) await tab.evaluate(() => {
-    clearTimeout(state.syncPoll.timer);
-    state.syncPoll.controller?.abort();
-    state.syncPoll.channel?.close();
-  });
-  await page.evaluate(() => {
-    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify({ token: state.syncPoll.leaseToken, expires_at: Date.now() + 60000 }));
-  });
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(false);
-  await page.close();
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(true);
-  await follower.evaluate(() => {
-    localStorage.setItem(SYNC_POLL_LEASE_KEY, JSON.stringify({ token: "closed-fixture-tab", expires_at: Date.now() - 1 }));
-  });
-  expect(await follower.evaluate(() => syncPollLeaseAvailable())).toBe(true);
-  await follower.evaluate(() => releaseSyncPollLease());
-  expect(await follower.evaluate(() => localStorage.getItem(SYNC_POLL_LEASE_KEY))).toBe(null);
-});
-
 test("only current pending proposals expose an explicit confirmation action", async ({ page }) => {
   await ready(page);
   for (const status of ["preview", "ready", "used", "expired"]) {
