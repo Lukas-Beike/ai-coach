@@ -5,14 +5,8 @@ from unittest.mock import Mock, patch
 
 from backend.errors import AppError
 from backend.http_api import sync_commands
-from backend.http_api.sync_commands import (
-    SyncCommandEndpoint,
-    handles_sync_path,
-    needs_sync_body,
-)
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.contracts import nutrition_approval_item
-from backend.sync.provider_registry import ProviderRegistry
-from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 
 
 class SyncCommandEndpointTests(unittest.TestCase):
@@ -155,16 +149,11 @@ class SyncCommandEndpointTests(unittest.TestCase):
             ],
         )
 
-    def test_route_table_is_derived_once_per_registry_not_per_request(self):
-        registry = ProviderRegistry(DEFAULT_PROVIDER_DESCRIPTORS)
-        with patch.object(
-            sync_commands,
-            "_build_path_routes",
-            wraps=sync_commands._build_path_routes,
-        ) as build:
+    def test_route_table_is_derived_once_not_per_request(self):
+        with patch.object(sync_commands, "_build_path_routes") as build:
             for _ in range(5):
-                self.assertTrue(handles_sync_path(registry, "/api/garmin/sync"))
-                self.assertTrue(needs_sync_body(registry, "/api/garmin/sync"))
+                self.assertTrue(SyncCommandEndpoint.handles("/api/garmin/sync"))
+                self.assertTrue(SyncCommandEndpoint.needs_body("/api/garmin/sync"))
                 SyncCommandEndpoint(
                     self.queue,
                     self.state,
@@ -173,9 +162,8 @@ class SyncCommandEndpointTests(unittest.TestCase):
                     {"intervals": 90, "garmin": 30},
                     -1,
                     provider_configured=lambda provider: True,
-                    registry=registry,
                 )
-        self.assertEqual(build.call_count, 1)
+        build.assert_not_called()
 
 
 if __name__ == "__main__":

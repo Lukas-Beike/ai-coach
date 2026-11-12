@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 
 from backend.errors import AppError
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 TRAINING_PLAN_SCOPE_PREFIX = "training_plan:"
 LOCAL_REQUEST_TARGET = "local"
@@ -19,20 +19,16 @@ def coach_session_key(session_csrf_hash: str) -> str:
     return hashlib.sha256(str(session_csrf_hash or "").encode("utf-8")).hexdigest()
 
 
-def request_target_enum(
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-) -> list[str]:
+def request_target_enum() -> list[str]:
     """Return the request targets: local, the output-only write targets, then refresh providers by rank."""
     return [
         LOCAL_REQUEST_TARGET,
-        *registry.coach_write_targets(),
-        *registry.coach_refresh_targets(),
+        *DEFAULT_PROVIDER_REGISTRY.coach_write_targets(),
+        *DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets(),
     ]
 
 
-def request_schema(
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-) -> dict[str, Any]:
+def request_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
@@ -56,7 +52,7 @@ def request_schema(
             },
             "target": {
                 "type": "string",
-                "enum": request_target_enum(registry),
+                "enum": request_target_enum(),
             },
             "scope": {"type": "array", "items": {"type": "string"}, "maxItems": 400},
             "period": {
@@ -137,14 +133,12 @@ def validate_request(
     value: Any,
     user_ids: set[int],
     current_user_id: int,
-    *,
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> dict[str, Any]:
     """Validate provenance and bounds, never the user's choice of words."""
     if not isinstance(value, dict) or set(value) != set(REQUEST_SCHEMA["required"]):
         raise ValueError("request_fields")
     _validate_request_provenance(value, user_ids, current_user_id)
-    _validate_request_text(value, request_target_enum(registry))
+    _validate_request_text(value, request_target_enum())
     _validate_request_sync(value)
     _validate_request_period(value["period"])
     return deepcopy(value)
@@ -153,11 +147,9 @@ def validate_request(
 def dialogue_tools(
     tools: list[dict[str, Any]],
     read_tools: set[str],
-    *,
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> list[dict[str, Any]]:
     result = deepcopy(tools)
-    request = request_schema(registry)
+    request = request_schema()
     for tool in result:
         if tool["name"] not in read_tools:
             tool["parameters"]["properties"]["_request"] = deepcopy(request)

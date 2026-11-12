@@ -21,7 +21,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
 from backend.runtime.clock import utc_now as system_utc_now
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 PROVIDERS = frozenset(DEFAULT_PROVIDER_REGISTRY.ids())
 JOB_TYPES = frozenset(
@@ -251,18 +251,16 @@ def validate_job_request(
     provider: Any,
     job_type: Any,
     payload: Any = None,
-    *,
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> dict[str, Any]:
     """Validate and copy the bounded provider-job envelope."""
     provider_value = str(provider or "").strip().casefold()
-    if provider_value not in registry.ids():
+    if provider_value not in DEFAULT_PROVIDER_REGISTRY.ids():
         raise JobValidationError("Unsupported provider.")
     type_value = str(job_type or "").strip().casefold()
     if type_value not in JOB_TYPES:
         raise JobValidationError("Unsupported job type.")
     # The refresh normalizer does not consult supports_job, so gate it here.
-    if type_value == "refresh" and not registry.supports_job(
+    if type_value == "refresh" and not DEFAULT_PROVIDER_REGISTRY.supports_job(
         provider_value, type_value
     ):
         raise JobValidationError("Unsupported job type.")
@@ -283,7 +281,6 @@ def normalize_sync_job_request(
     payload: Any = None,
     *,
     all_sync_days: int,
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     enforce_period_limit: bool = False,
 ) -> dict[str, Any]:
     """Validate and normalize the provider-specific payload persisted for a job.
@@ -292,34 +289,27 @@ def normalize_sync_job_request(
     refresh requests. Persisted jobs are normalized again at execution without
     it, so a job queued under an older limit still runs.
     """
-    envelope = validate_job_request(provider, job_type, payload, registry=registry)
+    envelope = validate_job_request(provider, job_type, payload)
     provider_value = envelope["provider"]
     type_value = envelope["type"]
     values = envelope["payload"]
-    if type_value in BACKFILL_JOB_TYPES and not registry.supports_job(
+    if type_value in BACKFILL_JOB_TYPES and not DEFAULT_PROVIDER_REGISTRY.supports_job(
         provider_value, type_value
     ):
         raise JobValidationError(_BACKFILL_PROVIDER_MESSAGES[type_value])
     if type_value == "activity_details":
-        normalized_payload = _normalize_activity_details_job(
-            provider_value, values, registry
-        )
+        normalized_payload = _normalize_activity_details_job(provider_value, values)
     elif type_value == "nutrition_sync":
-        normalized_payload = _normalize_nutrition_sync_job(
-            provider_value, values, registry
-        )
+        normalized_payload = _normalize_nutrition_sync_job(provider_value, values)
     elif type_value == "competition_push":
-        normalized_payload = _normalize_competition_push_job(
-            provider_value, values, registry
-        )
+        normalized_payload = _normalize_competition_push_job(provider_value, values)
     elif type_value == "plan_push":
-        normalized_payload = _normalize_plan_push_job(provider_value, values, registry)
+        normalized_payload = _normalize_plan_push_job(provider_value, values)
     else:
         normalized_payload = _normalize_refresh_job(
             provider_value,
             values,
             all_sync_days,
-            registry,
             enforce_period_limit,
             historical=type_value in BACKFILL_JOB_TYPES,
         )
@@ -331,9 +321,9 @@ def normalize_sync_job_request(
 
 
 def _normalize_activity_details_job(
-    provider: str, values: dict[str, Any], registry: ProviderRegistry
+    provider: str, values: dict[str, Any]
 ) -> dict[str, Any]:
-    supported = registry.supports_job(provider, "activity_details")
+    supported = DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "activity_details")
     if not supported or set(values) != {"activity_id"}:
         raise JobValidationError("Ungültiger Aktivitätsdetailauftrag.")
     value = values.get("activity_id")
@@ -343,10 +333,10 @@ def _normalize_activity_details_job(
 
 
 def _normalize_nutrition_sync_job(
-    provider: str, values: dict[str, Any], registry: ProviderRegistry
+    provider: str, values: dict[str, Any]
 ) -> dict[str, Any]:
     allowed_fields = {"date", "pending_limit", "approval_manifest"}
-    supported = registry.supports_job(provider, "nutrition_sync")
+    supported = DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "nutrition_sync")
     if not supported or set(values) - allowed_fields:
         raise JobValidationError("Ungültiger Ernährungssynchronisierungsauftrag.")
     if "approval_manifest" in values:
@@ -448,9 +438,9 @@ def _validate_nutrition_approval_hash(entry: dict[str, Any]) -> None:
 
 
 def _normalize_competition_push_job(
-    provider: str, values: dict[str, Any], registry: ProviderRegistry
+    provider: str, values: dict[str, Any]
 ) -> dict[str, Any]:
-    if not registry.supports_job(provider, "competition_push"):
+    if not DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "competition_push"):
         raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
     if set(values) - {"reason", "approval_manifest"}:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
@@ -504,10 +494,8 @@ def _normalize_plan_push_entry(entry: Any, *, removable: bool) -> dict[str, Any]
     return {"library_workout_id": workout_id, "expected_payload_hash": payload_hash}
 
 
-def _normalize_plan_push_job(
-    provider: str, values: dict[str, Any], registry: ProviderRegistry
-) -> dict[str, Any]:
-    if not registry.supports_job(provider, "plan_push"):
+def _normalize_plan_push_job(provider: str, values: dict[str, Any]) -> dict[str, Any]:
+    if not DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "plan_push"):
         raise JobValidationError(
             "Plan-Push-Jobs sind nur für Intervals.icu, Wahoo und Garmin zulässig."
         )
@@ -537,13 +525,12 @@ def _normalize_refresh_job(
     provider_value: str,
     values: dict[str, Any],
     all_sync_days: int,
-    registry: ProviderRegistry,
     enforce_period_limit: bool,
     *,
     historical: bool = False,
 ) -> dict[str, Any]:
     # A backfill chain carries its count of consecutive empty chunks in the job.
-    allowed = registry.refresh_fields(provider_value)
+    allowed = DEFAULT_PROVIDER_REGISTRY.refresh_fields(provider_value)
     if historical:
         allowed = allowed | {"empty_chunks", "end_date"}
     if set(values) - allowed:
@@ -557,7 +544,9 @@ def _normalize_refresh_job(
     if "days" in values:
         max_days = MAX_JOB_REFRESH_DAYS
         if enforce_period_limit:
-            max_days = min(max_days, registry.max_sync_days(provider_value))
+            max_days = min(
+                max_days, DEFAULT_PROVIDER_REGISTRY.max_sync_days(provider_value)
+            )
         normalized_payload["days"] = _normalize_refresh_days(
             values["days"], all_sync_days, max_days
         )
@@ -654,14 +643,12 @@ class SyncJobStore:
         now: Callable[[], str],
         uuid_factory: Callable[[], str],
         *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         foreground_busy: Callable[[], bool] | None = None,
         held_providers: Callable[[], Collection[str]] | None = None,
     ):
         self._database_manager = database_manager
         self._now = now
         self._uuid_factory = uuid_factory
-        self._registry = registry
         self._foreground_busy = foreground_busy
         # Providers whose queued jobs stay unclaimed (a running full resync).
         self._held_providers = held_providers
@@ -746,7 +733,6 @@ class SyncJobStore:
                 envelope.get("provider"),
                 envelope.get("type"),
                 envelope.get("payload"),
-                registry=self._registry,
             )
         except (AttributeError, ValueError) as exc:
             raise SyncJobInvalidOperationError(str(exc)) from exc

@@ -8,7 +8,7 @@ from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.outcomes import unresolved_coach_steps
 from backend.errors import AppError
 from backend.sync.authority import PlanningAuthorityService
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 class CoachStructuredToolPreparationService:
@@ -19,13 +19,10 @@ class CoachStructuredToolPreparationService:
         dialogue_action: CoachDialogueActionService,
         planning_authority: PlanningAuthorityService,
         read_only_tools: frozenset[str],
-        *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._dialogue_action = dialogue_action
         self._planning_authority = planning_authority
         self._read_only_tools = read_only_tools
-        self._registry = registry
 
     def prepare(
         self,
@@ -83,8 +80,8 @@ class CoachStructuredToolPreparationService:
     def _waits_for_completion(self, target: Any) -> bool:
         """Return whether the target's descriptor makes a Coach refresh wait."""
         return (
-            target in self._registry.coach_refresh_targets()
-            and self._registry.get(target).coach_waits_for_completion
+            target in DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
+            and DEFAULT_PROVIDER_REGISTRY.get(target).coach_waits_for_completion
         )
 
     def _request_is_paused(

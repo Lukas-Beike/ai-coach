@@ -5,8 +5,6 @@ from __future__ import annotations
 import threading
 import unittest
 
-from provider_runtime_fakes import ACME_ID
-
 from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.sync.gates import (
@@ -17,6 +15,7 @@ from backend.sync.gates import (
     resetting_providers,
     resync_gate,
 )
+from backend.sync.provider_table import WEATHER_ID
 
 
 class ResyncGateMappingTests(unittest.TestCase):
@@ -27,17 +26,17 @@ class ResyncGateMappingTests(unittest.TestCase):
 
     def test_unmapped_provider_is_rejected_instead_of_falling_back(self) -> None:
         with self.assertRaises(AppError) as raised:
-            resync_gate(ACME_ID)
+            resync_gate(WEATHER_ID)
         self.assertEqual(400, raised.exception.status)
         with self.assertRaises(AppError) as raised:
             resync_gate(INTERVALS_ID, {})
         self.assertEqual(400, raised.exception.status)
 
     def test_injected_mapping_replaces_defaults(self) -> None:
-        acme_gate = ProviderResyncGate("Acme mock")
-        gates = {ACME_ID: acme_gate}
+        garmin_gate = ProviderResyncGate("Garmin")
+        gates = {GARMIN_ID: garmin_gate}
 
-        self.assertIs(resync_gate(ACME_ID, gates), acme_gate)
+        self.assertIs(resync_gate(GARMIN_ID, gates), garmin_gate)
         with self.assertRaises(AppError):
             resync_gate(INTERVALS_ID, gates)
 

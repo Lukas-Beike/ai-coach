@@ -83,13 +83,13 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
 class ResyncFieldKeysTests(unittest.TestCase):
     def test_rejects_descriptor_without_four_state_keys(self):
         with self.assertRaisesRegex(ValueError, "needs keys for"):
-            resync_field_keys({"acme-mock": ("a", "b", "c")})
+            resync_field_keys({"wahoo": ("a", "b", "c")})
 
     def test_names_keys_by_role_in_declared_order(self):
         self.assertEqual(
-            resync_field_keys({"acme-mock": ("r", "s", "t", "e")}),
+            resync_field_keys({"wahoo": ("r", "s", "t", "e")}),
             {
-                "acme-mock": {
+                "wahoo": {
                     "running": "r",
                     "status": "s",
                     "last_at": "t",

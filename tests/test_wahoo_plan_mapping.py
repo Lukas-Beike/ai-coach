@@ -283,7 +283,6 @@ class AssemblyReferenceTests(unittest.TestCase):
                 key_values=Mock(),
                 daily_markers=Mock(),
                 observer=Mock(),
-                registry=Mock(),
                 zone_provider=Mock(),
                 now=lambda: datetime(2026, 10, 13, tzinfo=UTC),
                 logger=Mock(),

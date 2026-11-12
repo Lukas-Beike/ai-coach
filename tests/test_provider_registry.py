@@ -23,14 +23,10 @@ from backend.sync.freshness import (
 )
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.jobs import JOB_TYPES, PROVIDERS
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import (
     DEFAULT_PROVIDER_DESCRIPTORS,
     Capability,
-    FreshnessArea,
-    ManualSyncRoute,
-    ProviderDescriptor,
-    SchedulePolicy,
 )
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
@@ -77,28 +73,6 @@ def _empty_database() -> sqlite3.Connection:
         """
     )
     return db
-
-
-def _area(area: str = "activities", label: str = "Mock") -> FreshnessArea:
-    return FreshnessArea(area=area, label=label, stale_after_s=TWO_DAYS, read_only=True)
-
-
-def _descriptor(
-    provider_id: str = "wahoo-mock",
-    *,
-    areas: tuple[FreshnessArea, ...] | None = None,
-    max_sync_days: int = 30,
-    capabilities: frozenset[Capability] = frozenset({Capability.ACTIVITIES}),
-    resync_keys: tuple[str, ...] = (),
-) -> ProviderDescriptor:
-    return ProviderDescriptor(
-        provider_id=provider_id,
-        label="Mock provider",
-        capabilities=capabilities,
-        freshness_areas=(_area(),) if areas is None else areas,
-        max_sync_days=max_sync_days,
-        resync_keys=resync_keys,
-    )
 
 
 class DefaultDescriptorParityTests(unittest.TestCase):
@@ -251,34 +225,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                 self.assertIn(len(entry.resync_keys), (0, 4))
 
 
-class RegistryContractTests(unittest.TestCase):
-    def test_mock_provider_flows_through_every_lookup(self) -> None:
-        mock = _descriptor(
-            "wahoo-mock",
-            areas=(_area("activities", "Wahoo mock · Training"),),
-            max_sync_days=30,
-        )
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, mock))
-
-        self.assertEqual(
-            ("intervals", "garmin", "weather", "calendar", "wahoo", "wahoo-mock"),
-            registry.ids(),
-        )
-        self.assertIn("wahoo-mock", registry.ids_with(Capability.ACTIVITIES))
-        self.assertEqual(
-            ("wahoo-mock", _area("activities", "Wahoo mock · Training")),
-            registry.freshness_areas()[-1],
-        )
-        self.assertEqual(30, registry.max_sync_days("wahoo-mock"))
-        self.assertIs(mock, registry.get("wahoo-mock"))
-
-    def test_mock_provider_does_not_leak_into_default_registry(self) -> None:
-        self.assertNotIn("wahoo-mock", DEFAULT_PROVIDER_REGISTRY.ids())
-        self.assertNotIn(
-            "wahoo-mock", DEFAULT_PROVIDER_REGISTRY.ids_with(Capability.ACTIVITIES)
-        )
-        self.assertNotIn("wahoo-mock", PROVIDER_REFRESH_LABELS)
-
+class RegistryLookupTests(unittest.TestCase):
     def test_unknown_provider_lookup_raises_key_error(self) -> None:
         with self.assertRaises(KeyError):
             DEFAULT_PROVIDER_REGISTRY.get("unknown")
@@ -292,13 +239,6 @@ class RegistryContractTests(unittest.TestCase):
             90,
             DEFAULT_PROVIDER_REGISTRY.max_sync_days(["intervals"]),  # type: ignore[arg-type]
         )
-
-    def test_empty_registry_returns_empty_views(self) -> None:
-        registry = ProviderRegistry(())
-        self.assertEqual((), registry.all())
-        self.assertEqual((), registry.ids())
-        self.assertEqual((), registry.freshness_areas())
-        self.assertEqual((), registry.ids_with(Capability.ACTIVITIES))
 
 
 INTERVALS_JOB_TYPES = frozenset({"plan_push", "competition_push", "nutrition_sync"})
@@ -499,110 +439,7 @@ class OrchestrationParityTests(unittest.TestCase):
                 )
 
 
-class CustomOrchestrationDescriptorTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.mock = _descriptor(
-            "wahoo-mock",
-            areas=(_area("activities", "Wahoo mock · Training"),),
-            max_sync_days=30,
-            resync_keys=(
-                "wahoo_mock_full_resync_running",
-                "wahoo_mock_full_resync_status",
-                "wahoo_mock_full_resync_at",
-                "wahoo_mock_full_resync_error",
-            ),
-        )
-        self.mock = dataclasses.replace(
-            self.mock,
-            job_types=frozenset({"refresh"}),
-            refresh_fields=frozenset({"days", "reason"}),
-            default_sync_days=30,
-            schedule=SchedulePolicy(daily_rank=5, startup_rank=0, daily_marker=True),
-            coach_rank=10,
-            manual_sync=ManualSyncRoute(
-                path="/api/wahoo-mock/sync",
-                uses_sync_period=True,
-                payload=(("reason", "manual"),),
-            ),
-            full_resync_path="/api/wahoo-mock/full-resync",
-        )
-        self.plain = _descriptor("plain-mock")
-        self.registry = ProviderRegistry(
-            (*DEFAULT_PROVIDER_DESCRIPTORS, self.mock, self.plain)
-        )
-
-    def test_custom_descriptor_flows_through_every_orchestration_helper(self) -> None:
-        registry = self.registry
-        self.assertTrue(registry.supports_job("wahoo-mock", "refresh"))
-        self.assertFalse(registry.supports_job("wahoo-mock", "historical_backfill"))
-        self.assertEqual(
-            frozenset({"days", "reason"}), registry.refresh_fields("wahoo-mock")
-        )
-        self.assertEqual(
-            {"garmin": 84, "wahoo": 84, "wahoo-mock": 30},
-            registry.sync_period_defaults(),
-        )
-        self.assertEqual(
-            ("weather", "calendar", "garmin", "wahoo", "wahoo-mock"),
-            registry.daily_order(),
-        )
-        self.assertEqual(
-            ("calendar", "wahoo-mock", "garmin", "weather", "wahoo"),
-            registry.startup_order(),
-        )
-        self.assertIn("wahoo-mock", registry.daily_marker_ids())
-        self.assertEqual(
-            ("garmin", "calendar", "weather", "wahoo", "wahoo-mock"),
-            registry.coach_refresh_targets(),
-        )
-        self.assertEqual(
-            (
-                "wahoo_mock_full_resync_running",
-                "wahoo_mock_full_resync_status",
-                "wahoo_mock_full_resync_at",
-                "wahoo_mock_full_resync_error",
-            ),
-            registry.resync_key_map()["wahoo-mock"],
-        )
-        self.assertEqual(
-            ("/api/wahoo-mock/sync", "wahoo-mock"),
-            registry.manual_routes()[-1],
-        )
-        self.assertEqual(
-            ("/api/wahoo-mock/full-resync", "wahoo-mock"),
-            registry.full_resync_routes()[-1],
-        )
-        self.assertEqual(
-            "Der Zeitraum für wahoo-mock muss -1 oder zwischen 1 und 30 Tagen liegen.",
-            registry.period_error_message("wahoo-mock"),
-        )
-
-    def test_unranked_descriptor_is_skipped_by_ordering_helpers(self) -> None:
-        self.assertNotIn("plain-mock", self.registry.daily_order())
-        self.assertNotIn("plain-mock", self.registry.startup_order())
-        self.assertNotIn("plain-mock", self.registry.coach_refresh_targets())
-        self.assertNotIn("plain-mock", self.registry.daily_marker_ids())
-        self.assertNotIn("plain-mock", self.registry.sync_period_defaults())
-        self.assertNotIn("plain-mock", self.registry.resync_key_map())
-        self.assertFalse(
-            self.registry.supports_job("plain-mock", "historical_backfill")
-        )
-        self.assertEqual(
-            frozenset({"reason"}), self.registry.refresh_fields("plain-mock")
-        )
-
-    def test_custom_descriptor_does_not_leak_into_default_registry(self) -> None:
-        self.assertFalse(
-            DEFAULT_PROVIDER_REGISTRY.supports_job("wahoo-mock", "refresh")
-        )
-        self.assertNotIn(
-            "wahoo-mock", DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
-        )
-        self.assertNotIn(
-            "/api/wahoo-mock/sync",
-            [path for path, _ in DEFAULT_PROVIDER_REGISTRY.manual_routes()],
-        )
-
+class UnknownProviderTests(unittest.TestCase):
     def test_period_message_for_unknown_provider_uses_default_window(self) -> None:
         self.assertEqual(
             "Der Zeitraum für unknown muss -1 oder zwischen 1 und 90 Tagen liegen.",

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import json
 import logging
 import sqlite3
 import threading
@@ -92,6 +93,14 @@ EXPECTED_PAIRS: Final = frozenset(
 COACH_ONLY: Final = frozenset({(INTERVALS_ID, "nutrition_sync")})
 # Providers whose descriptor carries a not_configured_message.
 CONFIGURABLE: Final = frozenset({INTERVALS_ID, GARMIN_ID, WAHOO_ID})
+
+# Manual route -> provider, request body and the refresh payload it queues.
+MANUAL_ROUTES: Final[dict[str, tuple[str, dict[str, Any] | None, dict[str, Any]]]] = {
+    "/api/garmin/sync": (GARMIN_ID, {"days": 7}, {"days": 7, "reason": "manual"}),
+    "/api/wahoo/sync": (WAHOO_ID, None, {"reason": "manual"}),
+    "/api/weather/sync": (WEATHER_ID, None, {"reason": "manuell", "force": True}),
+    "/api/external-calendar/sync": (CALENDAR_ID, None, {"reason": "manuell"}),
+}
 
 # (provider, type) -> request payload and the provider service call it must reach.
 CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
@@ -299,7 +308,7 @@ class Harness:
         self.executor = SyncJobExecutionAssembly(dependencies=jobs).executor()
         self.endpoint = SyncCommandEndpoint(
             self.queue,
-            mock.Mock(),
+            state_repository,
             mock.Mock(),
             lambda: "operation-1",
             {GARMIN_ID: 7, WAHOO_ID: 7},
@@ -398,6 +407,61 @@ class ProviderJobWiringTests(unittest.TestCase):
                 harness.post(provider, job_type, CASES[provider, job_type][0])
 
                 self.assertEqual("completed", harness.run_next()["status"])
+
+
+class ManualRouteWiringTests(unittest.TestCase):
+    def test_the_matrix_lists_exactly_the_manual_routes_of_the_table(self) -> None:
+        self.assertEqual(
+            {(path, provider) for path, (provider, _, _) in MANUAL_ROUTES.items()},
+            set(DEFAULT_PROVIDER_REGISTRY.manual_routes()),
+        )
+
+    def test_every_manual_route_queues_its_refresh_and_reaches_its_provider(
+        self,
+    ) -> None:
+        for path, (provider, body, queued) in sorted(MANUAL_ROUTES.items()):
+            with self.subTest(path=path):
+                harness = Harness(self)
+
+                status, job = harness.endpoint.execute(path, body)
+
+                self.assertEqual(202, status)
+                self.assertEqual(
+                    (provider, "refresh", "queued"),
+                    (job["provider"], job["type"], job["status"]),
+                )
+                with harness.database.reader() as db:
+                    stored = db.execute(
+                        "SELECT payload FROM sync_jobs WHERE id=?", (job["id"],)
+                    ).fetchone()[0]
+                self.assertEqual(queued, json.loads(stored))
+                self.assertEqual("completed", harness.run_next()["status"])
+                self.assertIn(CASES[provider, "refresh"][1], harness.calls)
+
+    def test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job(
+        self,
+    ) -> None:
+        for path, (provider, body, _) in sorted(MANUAL_ROUTES.items()):
+            with self.subTest(path=path):
+                harness = Harness(self, intervals_key="", garmin=False, wahoo=False)
+                message = DEFAULT_PROVIDER_REGISTRY.get(provider).not_configured_message
+
+                if message is None:
+                    harness.endpoint.execute(path, body)
+                    self.assertEqual(1, harness.stored_jobs())
+                    continue
+                with self.assertRaises(AppError) as caught:
+                    harness.endpoint.execute(path, body)
+
+                self.assertEqual(
+                    (409, "not_configured", message),
+                    (
+                        caught.exception.status,
+                        caught.exception.reason,
+                        caught.exception.message,
+                    ),
+                )
+                self.assertEqual(0, harness.stored_jobs())
 
 
 class ConfiguredCheckTests(unittest.TestCase):

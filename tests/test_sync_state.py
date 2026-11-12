@@ -3,12 +3,10 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.state import SyncStateRepository
 
 NOW = "2026-09-20T12:00:00+00:00"
@@ -94,25 +92,6 @@ class SyncStateRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repository.set_sync_period("other", 90, ALL_DAYS), 90)
         with self.database_manager.unit_of_work() as db:
             self.assertEqual(self.key_values.get(db, "other_sync_days"), "90")
-
-    def test_sync_period_uses_injected_registry_and_defaults_for_registered_provider(
-        self,
-    ):
-        repository = SyncStateRepository(
-            self.database_manager,
-            self.key_values,
-            lambda: NOW,
-            registry=ProviderRegistry([acme_descriptor()]),
-        )
-        defaults = {ACME_ID: 14}
-
-        self.assertEqual(repository.sync_period(ACME_ID, defaults, ALL_DAYS), 14)
-        self.assertEqual(repository.set_sync_period(ACME_ID, 60, ALL_DAYS), 60)
-        self.assertEqual(repository.sync_period(ACME_ID, defaults, ALL_DAYS), 60)
-        with self.assertRaises(ValueError):
-            repository.set_sync_period(ACME_ID, 61, ALL_DAYS)
-        with self.assertRaises(KeyError):
-            repository.sync_period("intervals", defaults, ALL_DAYS)
 
     def test_cursor_defaults_and_update_use_existing_cursor_contract(self):
         self.assertEqual(

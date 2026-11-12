@@ -4,31 +4,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from backend.sync import persistence_assembly
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 class SyncPersistenceAssemblyTests(unittest.TestCase):
-    def test_injected_registry_reaches_state_and_daily_marker_services(self):
-        registry = Mock()
-        assembly = persistence_assembly.SyncPersistenceAssembly(
-            database_manager=Mock(return_value=Mock()),
-            key_values=Mock(),
-            utc_now=Mock(),
-            athlete_clock=Mock(),
-        )
-
-        with (
-            patch.object(persistence_assembly, "SyncStateRepository") as state_factory,
-            patch.object(
-                persistence_assembly, "DailySyncMarkerService"
-            ) as marker_factory,
-        ):
-            assembly.state_repository(registry=registry)
-            assembly.daily_markers(registry=registry)
-
-        self.assertIs(state_factory.call_args.kwargs["registry"], registry)
-        self.assertIs(marker_factory.call_args.kwargs["registry"], registry)
-
     def test_services_resolve_the_current_manager_on_each_call(self):
         manager = Mock()
         manager_provider = Mock(side_effect=[manager, manager])
@@ -57,14 +35,12 @@ class SyncPersistenceAssemblyTests(unittest.TestCase):
             manager,
             key_values,
             utc_now,
-            registry=DEFAULT_PROVIDER_REGISTRY,
         )
         athlete_clock.assert_called_once_with()
         marker_factory.assert_called_once_with(
             manager,
             key_values,
             athlete_clock.return_value.now,
-            registry=DEFAULT_PROVIDER_REGISTRY,
         )
         self.assertEqual(manager_provider.call_count, 2)
 

@@ -6,7 +6,6 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.db.schema import initialize_schema
@@ -34,8 +33,7 @@ from backend.sync.jobs import (
     retry_delay,
     validate_job_request,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 # Provider-level rejection text per job type, as the live validators raise it.
 # Type-level errors (unknown job type, field errors) are not listed here.
@@ -56,7 +54,7 @@ PROBE_PAYLOADS = {
 }
 
 
-def _probe_message(provider, job_type, registry=DEFAULT_PROVIDER_REGISTRY):
+def _probe_message(provider, job_type):
     """Return the validator's rejection text for a probe job, or None if accepted."""
     try:
         normalize_sync_job_request(
@@ -64,18 +62,15 @@ def _probe_message(provider, job_type, registry=DEFAULT_PROVIDER_REGISTRY):
             job_type,
             PROBE_PAYLOADS.get(job_type),
             all_sync_days=-1,
-            registry=registry,
         )
     except JobValidationError as exc:
         return str(exc)
     return None
 
 
-def _refresh_message(provider, payload, registry=DEFAULT_PROVIDER_REGISTRY):
+def _refresh_message(provider, payload):
     try:
-        normalize_sync_job_request(
-            provider, "refresh", payload, all_sync_days=-1, registry=registry
-        )
+        normalize_sync_job_request(provider, "refresh", payload, all_sync_days=-1)
     except JobValidationError as exc:
         return str(exc)
     return None
@@ -1605,47 +1600,6 @@ class RegistryValidatorParityTests(unittest.TestCase):
                         message == UNSUPPORTED_JOB_FIELDS_ERROR,
                         field not in allowed,
                     )
-
-
-class TestOnlyProviderValidationTests(unittest.TestCase):
-    """The acme-mock provider is accepted only by the registry that declares it."""
-
-    def setUp(self):
-        self.registry = ProviderRegistry(
-            (*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor())
-        )
-
-    def test_test_only_provider_is_accepted_only_by_its_declaring_registry(self):
-        envelope = validate_job_request(
-            ACME_ID, " REFRESH ", {"reason": "manual"}, registry=self.registry
-        )
-        self.assertEqual(
-            envelope,
-            {"provider": ACME_ID, "type": "refresh", "payload": {"reason": "manual"}},
-        )
-        with self.assertRaisesRegex(JobValidationError, "Unsupported provider"):
-            validate_job_request(ACME_ID, "refresh", {"reason": "manual"})
-
-    def test_test_only_provider_fields_and_job_types_follow_its_descriptor(self):
-        result = normalize_sync_job_request(
-            ACME_ID,
-            "refresh",
-            {"reason": "manual"},
-            all_sync_days=-1,
-            registry=self.registry,
-        )
-        self.assertEqual(result["payload"], {"reason": "manual"})
-        self.assertEqual(
-            _refresh_message(ACME_ID, {"days": 3}, self.registry),
-            UNSUPPORTED_JOB_FIELDS_ERROR,
-        )
-        for job_type, message in PROVIDER_REJECTIONS.items():
-            if job_type == "refresh":
-                continue
-            with self.subTest(job_type=job_type):
-                self.assertEqual(
-                    _probe_message(ACME_ID, job_type, self.registry), message
-                )
 
 
 if __name__ == "__main__":

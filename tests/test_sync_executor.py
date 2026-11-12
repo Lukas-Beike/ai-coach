@@ -13,9 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
-from provider_runtime_fakes import ACME_ID, FakeJobOwner, acme_descriptor
-
-from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.sync.executor import (
     CalendarWeatherJobAdapter,
@@ -28,7 +26,6 @@ from backend.sync.executor import (
     SyncJobExecutor,
     dispatch_provider_job,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 
 
@@ -260,7 +257,6 @@ class SyncJobExecutorTests(unittest.TestCase):
                 "historical_sync",
                 "outcome_service",
                 "all_sync_days",
-                "registry",
                 "after_job",
             },
         )
@@ -731,139 +727,82 @@ class DispatchProviderJobTests(unittest.TestCase):
         weather.sync.assert_not_called()
 
 
-class AcmeMockProviderJobTests(unittest.TestCase):
-    """Drive orchestration with a test-only provider that no production code names."""
+def _fake_owner(result: dict[str, Any] | None = None) -> Mock:
+    """A provider job owner that records its calls and returns a fixed outcome."""
+    return Mock(execute=Mock(return_value=result or {"status": "completed"}))
+
+
+class ProviderJobOwnerDispatchTests(unittest.TestCase):
+    """Drive orchestration through a fake owner registered under a real provider."""
 
     def setUp(self) -> None:
-        self.owner = FakeJobOwner({"status": "completed", "rows": 3})
-        self.job = {"id": "job-acme", "provider": ACME_ID, "type": "refresh"}
+        self.owner = _fake_owner({"status": "completed", "rows": 3})
+        self.job = {
+            "id": "job-wahoo",
+            "provider": WAHOO_ID,
+            "type": "refresh",
+            "payload": {"reason": "wahoo sync"},
+        }
         self.envelope = {
-            "provider": ACME_ID,
+            "provider": WAHOO_ID,
             "type": "refresh",
-            "payload": {"reason": "acme sync"},
+            "payload": {"reason": "wahoo sync"},
         }
 
-    def test_dispatch_routes_the_acme_owner_by_provider_id(self) -> None:
-        result = dispatch_provider_job({ACME_ID: self.owner}, self.job, self.envelope)
+    def executor(self, owner: Mock, **extra: Any) -> SyncJobExecutor:
+        return SyncJobExecutor(
+            job_owners={WAHOO_ID: owner},
+            historical_sync=extra.pop("historical_sync", Mock()),
+            outcome_service=cast(Any, extra.pop("outcomes", RecordingOutcomes())),
+            all_sync_days=-1,
+        )
+
+    def test_dispatch_routes_the_owner_by_provider_id(self) -> None:
+        result = dispatch_provider_job({WAHOO_ID: self.owner}, self.job, self.envelope)
 
         self.assertEqual(result, {"status": "completed", "rows": 3})
-        self.assertEqual(
-            self.owner.calls,
-            [
-                {
-                    "job": self.job,
-                    "payload": {"reason": "acme sync"},
-                    "reason": "acme sync",
-                    "job_type": "refresh",
-                }
-            ],
+        self.owner.execute.assert_called_once_with(
+            self.job, {"reason": "wahoo sync"}, "wahoo sync", job_type="refresh"
         )
 
-    def test_executor_accepts_job_owners_by_keyword_and_runs_the_acme_owner(
-        self,
-    ) -> None:
-        executor = SyncJobExecutor(
-            job_owners={ACME_ID: self.owner},
-            historical_sync=Mock(),
-            outcome_service=cast(Any, RecordingOutcomes()),
-            all_sync_days=-1,
-        )
-
-        with patch(
-            "backend.sync.executor.normalize_sync_job_request",
-            return_value=self.envelope,
-        ) as normalize:
-            result = executor.execute(self.job)
+    def test_executor_normalizes_the_stored_job_and_runs_the_owner(self) -> None:
+        result = self.executor(self.owner).execute(self.job)
 
         self.assertEqual(result, {"status": "completed", "rows": 3})
-        normalize.assert_called_once_with(
-            ACME_ID,
-            "refresh",
-            {},
-            all_sync_days=-1,
-            registry=DEFAULT_PROVIDER_REGISTRY,
-        )
-        self.assertEqual(self.owner.calls[0]["job_type"], "refresh")
-
-    def test_injected_registry_normalizes_the_acme_job_and_default_rejects_it(
-        self,
-    ) -> None:
-        registry = ProviderRegistry(
-            (*DEFAULT_PROVIDER_REGISTRY.all(), acme_descriptor())
-        )
-        job = {
-            "id": "job-acme",
-            "provider": ACME_ID,
-            "type": "refresh",
-            "payload": {"reason": "acme sync"},
-        }
-        injected_owner = FakeJobOwner({"status": "completed", "rows": 3})
-        injected = SyncJobExecutor(
-            job_owners={ACME_ID: injected_owner},
-            historical_sync=Mock(),
-            outcome_service=cast(Any, RecordingOutcomes()),
-            all_sync_days=-1,
-            registry=registry,
+        self.owner.execute.assert_called_once_with(
+            self.job, {"reason": "wahoo sync"}, "wahoo sync", job_type="refresh"
         )
 
-        self.assertEqual(injected.execute(job), {"status": "completed", "rows": 3})
-        self.assertEqual(injected_owner.calls[0]["payload"], {"reason": "acme sync"})
-
-        default_owner = FakeJobOwner()
-        default = SyncJobExecutor(
-            job_owners={ACME_ID: default_owner},
-            historical_sync=Mock(),
-            outcome_service=cast(Any, RecordingOutcomes()),
-            all_sync_days=-1,
-        )
-        with self.assertRaises(AppError) as raised:
-            default.execute(job)
-        self.assertEqual(raised.exception.status, 400)
-        self.assertEqual(raised.exception.reason, "invalid_job_request")
-        self.assertEqual(default_owner.calls, [])
-
-    def test_run_completes_the_acme_job_and_queues_its_declared_follow_up(
-        self,
-    ) -> None:
-        owner = FakeJobOwner(
-            {"status": "completed", "historical_next_end": "2026-01-01"}
-        )
+    def test_run_completes_the_job_and_queues_its_declared_follow_up(self) -> None:
+        expected = {"status": "completed", "historical_next_end": "2026-01-01"}
         outcomes = RecordingOutcomes()
         historical = Mock()
-        executor = SyncJobExecutor(
-            job_owners={ACME_ID: owner},
-            historical_sync=historical,
-            outcome_service=cast(Any, outcomes),
-            all_sync_days=-1,
-        )
 
-        with patch(
-            "backend.sync.executor.normalize_sync_job_request",
-            return_value=self.envelope,
-        ):
-            executor.run(self.job)
+        self.executor(
+            _fake_owner(expected), outcomes=outcomes, historical_sync=historical
+        ).run(self.job)
 
-        expected = {"status": "completed", "historical_next_end": "2026-01-01"}
-        self.assertEqual(outcomes.complete_calls, [("job-acme", expected)])
+        self.assertEqual(outcomes.complete_calls, [("job-wahoo", expected)])
         historical.queue_next.assert_called_once_with(self.job, expected, "completed")
         self.assertEqual(outcomes.failure_calls, [])
 
     def test_unknown_provider_is_rejected_by_normalization_before_dispatch(
         self,
     ) -> None:
+        job = {**self.job, "provider": "unregistered"}
         executor = SyncJobExecutor(
-            job_owners={ACME_ID: self.owner},
+            job_owners={"unregistered": self.owner},
             historical_sync=Mock(),
             outcome_service=cast(Any, RecordingOutcomes()),
             all_sync_days=-1,
         )
 
         with self.assertRaises(AppError) as raised:
-            executor.execute(self.job)
+            executor.execute(job)
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.reason, "invalid_job_request")
-        self.assertEqual(self.owner.calls, [])
+        self.owner.execute.assert_not_called()
 
 
 class BackfillChainHookTests(unittest.TestCase):
@@ -874,14 +813,14 @@ class BackfillChainHookTests(unittest.TestCase):
     ) -> list[dict[str, Any]]:
         hooked: list[dict[str, Any]] = []
         executor = SyncJobExecutor(
-            job_owners={ACME_ID: FakeJobOwner(result)},
+            job_owners={GARMIN_ID: _fake_owner(result)},
             historical_sync=Mock(),
             outcome_service=cast(Any, RecordingOutcomes(fallback_status)),
             all_sync_days=-1,
             after_job=lambda job: hooked.append(dict(job)),
         )
-        job = {"id": "job-chain", "provider": ACME_ID, "type": job_type}
-        envelope = {"provider": ACME_ID, "type": job_type, "payload": {}}
+        job = {"id": "job-chain", "provider": GARMIN_ID, "type": job_type}
+        envelope = {"provider": GARMIN_ID, "type": job_type, "payload": {}}
         with patch(
             "backend.sync.executor.normalize_sync_job_request", return_value=envelope
         ):
