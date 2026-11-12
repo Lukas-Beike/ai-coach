@@ -1763,7 +1763,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             [unit["date"] for unit in self.state()["planned_units"]], ["2026-09-12"]
         )
-        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+        history = server.DIAGNOSTICS.coach_history_service().history()
         self.assertEqual(
             history[0]["steps"][0]["error"]["validation_reason"], "request_provenance"
         )

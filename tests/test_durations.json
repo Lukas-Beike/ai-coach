@@ -327,7 +327,7 @@
  "test_diagnostic_logs.LegacyGeminiRedactionTests": 0.001,
  "test_diagnostic_logs.RecentLogEntriesServiceTests": 0.018,
  "test_diagnostic_report.DiagnosticReportServiceTests": 0.017,
- "test_diagnostics_assembly.DiagnosticsAssemblyTests": 0.005,
+ "test_diagnostics_wiring.DiagnosticsBuilderTests": 0.005,
  "test_equipment_post_route.EquipmentPostRoutesTests": 0.002,
  "test_errors.AppErrorTests": 0.001,
  "test_errors.ErrorConstantTests": 0.001,

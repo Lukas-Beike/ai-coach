@@ -97,7 +97,6 @@ from backend.coach.read_tools_assembly import (
     CoachReadToolPolicy,
     CoachReadToolsAssembly,
 )
-from backend.coach.service import command_receipt
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
 )
@@ -155,15 +154,8 @@ from backend.db.repositories import (
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher
-from backend.diagnostics.assembly import (
-    DiagnosticGarminServices,
-    DiagnosticLocalProjections,
-    DiagnosticProviderHealth,
-    DiagnosticReportSettings,
-    DiagnosticRuntimeDependencies,
-    DiagnosticsAssembly,
-)
 from backend.diagnostics.logs import RecentLogEntriesService
+from backend.diagnostics.wiring import build_diagnostics
 from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.wiring import build_history
 from backend.http_api import server as http_server
@@ -805,6 +797,10 @@ APP = AppContext(
     # Defined below; looked up when a provider client is built or on use.
     refresh_config=lambda: refresh_runtime_config(),
     observed_opener=lambda service: observed_provider_opener(service),
+    log_path=lambda: LOG_PATH,
+    app_name=APP_NAME,
+    app_version=APP_VERSION,
+    provider_state=provider_state_service,
     athlete=ATHLETE_DATA,
     athlete_profile=ATHLETE_PROFILE_SERVICE,
     planning=PLANNING_DATA,
@@ -828,7 +824,7 @@ def cancel_running_coach_turns() -> None:
 
 
 def server_log_files() -> RecentLogEntriesService:
-    return DIAGNOSTICS_ASSEMBLY.recent_log_entries_service()
+    return DIAGNOSTICS.recent_log_entries_service()
 
 
 PRIVACY_ASSEMBLY = PrivacyAssembly(
@@ -1034,6 +1030,7 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
         run_zones=lambda: RUN_LTHR.zones_resolver(),
     )
 )
+APP.garmin = GARMIN_ASSEMBLY
 
 
 def _coach_foreground_busy() -> bool:
@@ -1093,6 +1090,7 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
         ),
     )
 )
+APP.external_calendar = EXTERNAL_CALENDAR
 
 
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
@@ -1268,6 +1266,7 @@ COACH_LOCAL = CoachLocalAssembly(
         ),
     )
 )
+APP.coach_local = COACH_LOCAL
 PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
     dependencies=PlannedUnitSyncAssembly.Inputs(
         owners=PlannedUnitOwners(
@@ -1320,6 +1319,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
         uuid_factory=uuid.uuid4,
     )
 )
+APP.workout_library_sync = WORKOUT_LIBRARY_SYNC
 SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
     dependencies=SelectedWorkoutSyncAssembly.Inputs(
         providers=SelectedWorkoutProviders(
@@ -1655,6 +1655,7 @@ CHAT_PAGE_MAX = 100
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
 )
+APP.coach_dialogue_tools = COACH_DIALOGUE_TOOLS
 
 
 def _block_lessons() -> list[dict[str, object]]:
@@ -2143,47 +2144,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
 )
 APP.canonical_backfill = CANONICAL_BACKFILL
 
-DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
-    dependencies=DiagnosticsAssembly.Inputs(
-        runtime=DiagnosticRuntimeDependencies(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            config=lambda: CONFIG,
-            settings=SETTINGS,
-            app_name=APP_NAME,
-            app_version=APP_VERSION,
-        ),
-        provider_health=DiagnosticProviderHealth(
-            provider_state=provider_state_service,
-            provider_freshness=PROVIDER_SYNC.freshness_service,
-            redactor=REDACTOR,
-        ),
-        garmin=DiagnosticGarminServices(
-            projection=GARMIN_ASSEMBLY.projection_service,
-            client_factory=GARMIN_ASSEMBLY.client_factory,
-            fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-            sync_state=GARMIN_ASSEMBLY.sync_state_service,
-            change_check=lambda: GARMIN_ASSEMBLY.change_check().status(),
-        ),
-        local_projections=DiagnosticLocalProjections(
-            profile=ATHLETE_DATA.profile,
-            external_calendar_sync=EXTERNAL_CALENDAR.sync_service,
-            external_calendar_reader=EXTERNAL_CALENDAR.reader,
-            morning_checkin=COACH_LOCAL.morning_checkin_state_service,
-            workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
-            canonical_coverage=lambda: CANONICAL_READ,
-            canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
-            canonical_read=lambda: CANONICAL_READ,
-        ),
-        report=DiagnosticReportSettings(
-            utc_now=runtime_clock.utc_now,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            log_path=lambda: LOG_PATH,
-            receipt_parser=command_receipt,
-            allowed_tools=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
-        ),
-    )
-)
+DIAGNOSTICS = build_diagnostics(APP)
 
 
 PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
@@ -2301,8 +2262,8 @@ HTTP_API = HttpApiAssembly(
                 state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
             ),
             diagnostics=HttpDiagnosticsServices(
-                recent_logs=DIAGNOSTICS_ASSEMBLY.recent_log_entries_service,
-                report=DIAGNOSTICS_ASSEMBLY.report_service,
+                recent_logs=DIAGNOSTICS.recent_log_entries_service,
+                report=DIAGNOSTICS.report_service,
             ),
             history=HttpHistoryServices(
                 undo=HISTORY.undo_service,

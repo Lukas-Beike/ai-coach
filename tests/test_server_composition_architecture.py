@@ -555,23 +555,11 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         assert isinstance(composed, ast.Call)
         self.assertEqual("build_canonical_read", ast.unparse(composed.func))
 
-        diagnostics = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "DIAGNOSTICS_ASSEMBLY"
-                for target in node.targets
-            )
+        diagnostics = (BACKEND_ROOT / "diagnostics" / "wiring.py").read_text(
+            encoding="utf-8"
         )
-        self.assertIn(
-            "canonical_coverage=lambda: CANONICAL_READ",
-            ast.unparse(diagnostics.value),
-        )
-        self.assertIn(
-            "canonical_read=lambda: CANONICAL_READ",
-            ast.unparse(diagnostics.value),
-        )
+        self.assertIn("canonical_coverage=ctx.canonical_read", diagnostics)
+        self.assertIn("canonical_read=ctx.canonical_read", diagnostics)
 
         read_selector = next(
             node

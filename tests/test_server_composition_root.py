@@ -20,6 +20,9 @@ from backend.backup.restore import DatabaseRestoreService
 from backend.backup.restore_validation import DatabaseRestoreValidationService
 from backend.coach.job_store import CoachJobStore
 from backend.coach.turn_failures import CoachTurnFailureService
+from backend.diagnostics.history import CoachDiagnosticHistoryService
+from backend.diagnostics.logs import RecentLogEntriesService
+from backend.diagnostics.report import DiagnosticReportService
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.nutrition.catalog import ProductCatalogService
@@ -73,6 +76,19 @@ class CompositionRootTests(ServerTestCase):
         self.assertIsInstance(
             restore._dependencies.coach_failures, CoachTurnFailureService
         )
+
+    def test_diagnostics_services_resolve_over_the_live_owners(self) -> None:
+        diagnostics = server.DIAGNOSTICS
+
+        logs = diagnostics.recent_log_entries_service()
+        self.assertIsInstance(logs, RecentLogEntriesService)
+        self.assertEqual(logs._log_path, server.LOG_PATH)
+        self.assertIsInstance(
+            diagnostics.coach_history_service(), CoachDiagnosticHistoryService
+        )
+        report = diagnostics.report_service()
+        self.assertIsInstance(report, DiagnosticReportService)
+        self.assertIn("logs", report.report())
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

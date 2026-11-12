@@ -1706,7 +1706,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertIs(check, server.GARMIN_ASSEMBLY.change_check())
         policy = server.SYNC_SCHEDULERS.daily_scheduler()._policies["garmin"]
         self.assertIs(check, policy._change_check)
-        report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
+        report = server.DIAGNOSTICS.report_service().report()
         self.assertEqual(
             check.status()["checks"], report["garmin_change_check"]["checks"]
         )
