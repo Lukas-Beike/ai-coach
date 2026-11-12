@@ -132,7 +132,7 @@ def synthetic_weights(count: int) -> list[dict[str, Any]]:
             summaryDate=day,
             latestWeight=dict(template["latestWeight"], samplePk=i, calendarDate=day),
         )
-        for i, day in enumerate(days)
+        for i, day in enumerate(days, start=1)
     ]
 
 
@@ -1009,7 +1009,8 @@ class ReprojectionTests(BackfillFixture):
     def test_reprojection_spans_batches_and_skips_a_row_deleted_mid_way(self) -> None:
         backfill = self.make_backfill(batch_size=100)
         self.set_garmin(
-            self.manager, garmin_payload(weight=[{"weight": synthetic_weights(300)}])
+            self.manager,
+            garmin_payload(weight=[{"dailyWeightSummaries": synthetic_weights(300)}]),
         )
         self.run_to_completion(backfill)
         key = (GARMIN, HEALTH_KIND)
@@ -1827,7 +1828,7 @@ class ReprojectionTests(BackfillFixture):
             self.manager,
             garmin_payload(
                 resting_hr={"calendarDate": "2026-09-19", "restingHeartRate": 49},
-                weight=[{"weight": synthetic_weights(300)}],
+                weight=[{"dailyWeightSummaries": synthetic_weights(300)}],
             ),
         )
         self.run_to_completion(backfill)

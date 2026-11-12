@@ -1662,15 +1662,16 @@ repository; no provider account was read. Values are synthetic.
 
 - Follow a recorded or observed shape: `max_metrics` (undated rows, `calendarDate` per sport object, no `running`
   object: `MAX_METRICS_DAILY`), `sleep` (`{calendarDate, dailySleepDTO}` with `sleepScores.overall.value`, as
-  `wrap_daily_sleep` stores it), `body_battery` (day key `date`), `daily_stats` (nested range rows before
-  `flatten_daily_summary`), `weight` (`dailyWeightSummaries[].latestWeight`, grams, as `preserve_weight_response`
-  stores it), `hrv` (`calendarDate`, `weeklyAvg`, `lastNightAvg`), `activities` (list keys named "observed" in the
-  `garmin_activity_mapping.py` section) and `personal/heart_rate_zones` (Personal API probe, #1776). The sources are
-  the "observed" notes of this map and the test payloads shaped after the sanitized answers
+  `wrap_daily_sleep` stores it), `daily_stats` (nested range rows of `get_daily_summaries` before
+  `flatten_daily_summary`), `weight` (`dailyWeightSummaries[].latestWeight`, grams; the collector stores the
+  object as a one-element list, `preserve_weight_response`), `hrv` (`calendarDate`, `weeklyAvg`, `lastNightAvg`) and
+  `activities` (list keys named "observed" in the `garmin_activity_mapping.py` section). The sources are the
+  "observed" notes of this map and the test payloads shaped after the sanitized answers
   (`tests/test_garmin_personal_transport.py`, `tests/test_garmin_wellness_history.py`).
-- Code-consistent only, no recorded shape in the repository: `heart_rate_zones` (SDK subset of the Personal
-  zones), `resting_hr`, `readiness`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `race_predictions`,
-  `endurance_score`, the training sections, `gear`, `gear_stats`, `user_profile` and `activity_detail/*`.
+- Code-consistent only, no recorded shape in the repository: `body_battery` (day key `date` as the collector and
+  `garmin_morning.py` read it), `heart_rate_zones`, `personal/heart_rate_zones`, `resting_hr`, `readiness`,
+  `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `race_predictions`, `endurance_score`, the training
+  sections, `gear`, `gear_stats`, `user_profile` and `activity_detail/*`.
 
 #### Sleep (`sleep`)
 
@@ -1730,9 +1731,9 @@ own day.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `vo2max` (no sport) | `generic.vo2MaxPreciseValue` → `generic.vo2MaxValue` (`GARMIN_VO2MAX_ALIASES`) | ml/kg/min, bounds 5 to 120, 0 rejected | Src `provider_reported`. Documented, fixture `max_metrics`. |
+| `vo2max` (no sport) | `generic.vo2MaxPreciseValue` → `generic.vo2MaxValue` (`GARMIN_VO2MAX_ALIASES`) | ml/kg/min, bounds 5 to 120, 0 rejected | Src `provider_reported`. Recorded (`MAX_METRICS_DAILY`), fixture `max_metrics`; `generic` is the running value. |
 | `vo2max` (sport `ride`) | `cycling.vo2MaxPreciseValue` → `cycling.vo2MaxValue` | same | A non-mapping group is `INVALID_TYPE`. |
-| `vo2max` (sport `run`) | `running.vo2MaxPreciseValue` → `running.vo2MaxValue` | same | |
+| `vo2max` (sport `run`) | `running.vo2MaxPreciseValue` → `running.vo2MaxValue` | same | Documented only: the recorded daily rows carry no `running` object. |
 
 #### Thresholds (`running_threshold`)
 
