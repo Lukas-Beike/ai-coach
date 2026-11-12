@@ -145,6 +145,48 @@ class WorkoutProfileTests(unittest.TestCase):
         )
         self.assertEqual(4, low_threshold["segments"][0]["zone"])
 
+    def test_planned_steps_carry_their_target_range_from_the_zones_of_the_day(self):
+        # #2447. Worked examples: Garmin heart-rate zones with floors 110, 129, 142
+        # and 155 bpm at an LTHR of 160 are stored half a bpm above each zone's
+        # last bpm (Z1 up to 109, Z2 110-128, Z5 from 155 bpm); FTP 280 W with
+        # local power limits 55 and 75 % (Z2 155-210 W); threshold pace 4:28 /km
+        # (3.731 m/s), 90 % of its speed is 4:58 /km (298 s).
+        settings = ZoneSettings(
+            lthr=160,
+            max_hr=186,
+            ftp=280,
+            threshold_pace=1000 / 268,
+            hr_limits=tuple(bpm / 160 * 100 for bpm in (109.5, 128.5, 141.5, 154.5)),
+            hr_source="Garmin",
+            power_limits=(55, 75, 90, 105, 120, 150),
+            power_source="Lokal",
+        )
+        for description, expected in (
+            ("- 40m Z1 HR", {"unit": "bpm", "max": 109}),
+            ("- 55m Z2 HR", {"unit": "bpm", "min": 110, "max": 128}),
+            ("- 30m Z3 HR", {"unit": "bpm", "min": 129, "max": 141}),
+            ("- 10m Z5 HR", {"unit": "bpm", "min": 155}),
+            # A zone the athlete's five zones do not have.
+            ("- 10m Z6 HR", None),
+            ("- 20m 86-89% LTHR", {"unit": "bpm", "min": 138, "max": 142}),
+            ("- 20m 70% HR", {"unit": "bpm", "min": 130, "max": 130}),
+            ("- 30m Z2", {"unit": "W", "min": 155, "max": 210}),
+            ("- 30m 200w", {"unit": "W", "min": 200, "max": 200}),
+            ("- 10m 90% Pace", {"unit": "s/km", "min": 298, "max": 298}),
+            # No pace zones of the athlete: the zone step has no range.
+            ("- 10m Z2 Pace", None),
+        ):
+            with self.subTest(description):
+                segment = planned_profile({"description": description}, settings)[
+                    "segments"
+                ][0]
+                self.assertEqual(expected, segment.get("range"))
+        # Without a threshold no range is shown, also for a percent target.
+        for description in ("- 55m Z2 HR", "- 20m 86-89% LTHR", "- 30m 75%"):
+            with self.subTest(description=description, settings="none"):
+                segment = planned_profile({"description": description})["segments"][0]
+                self.assertNotIn("range", segment)
+
     def test_recorded_heart_rate_profile_uses_the_given_threshold(self):
         activity = {
             "streams": {"time": list(range(61)), "heartrate": [140] * 61},
