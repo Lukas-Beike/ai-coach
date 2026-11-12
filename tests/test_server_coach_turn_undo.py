@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from typing import Any
 from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
@@ -24,7 +25,6 @@ class CoachTurnUndoTests(ServerTestCase):
 
     def _coach_turn(self, *, track_library: bool = True) -> str:
         """Record a finished turn that changed the profile and the library."""
-        turn_id = f"turn-{uuid.uuid4()}"
         with change_history.collect_changes() as profile_changes:
             server.ATHLETE_DATA.profile().save({"name": "Bea", "weight_kg": "72"})
         with change_history.collect_changes() as library_changes:
@@ -48,11 +48,13 @@ class CoachTurnUndoTests(ServerTestCase):
                 **({"changes": library_changes} if track_library else {}),
             },
         ]
+        return self._record_turn(steps, "Ändere Profil und Vorlage")
+
+    def _record_turn(self, steps: list, message: str) -> str:
+        turn_id = f"turn-{uuid.uuid4()}"
         receipt = {"command_receipts": steps, "change_summary": change_summary(steps)}
         with server.database_manager().unit_of_work() as db:
-            server.CHAT_REPOSITORY.add(
-                db, "user", "Ändere Profil und Vorlage", client_turn_id=turn_id
-            )
+            server.CHAT_REPOSITORY.add(db, "user", message, client_turn_id=turn_id)
             db.execute(
                 "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
                 "status, receipt, created_at, updated_at) "
@@ -113,6 +115,70 @@ class CoachTurnUndoTests(ServerTestCase):
         with self.assertRaises(AppError) as repeated:
             self._undo(turn_id)
         self.assertEqual(repeated.exception.status, 409)
+
+    def test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields(
+        self,
+    ) -> None:
+        catalog = server.NUTRITION_ASSEMBLY.product_catalog_service()
+        own = catalog.save_product(
+            {
+                "name": "Synthetic skyr",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 63,
+                "source": "manual",
+            }
+        )
+        food: dict[str, Any] = {
+            "id": "off:4006381333931",
+            "name": "Synthetic bar",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 500},
+        }
+        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+        # Filled before the turn: undo of the turn keeps this value and its origin.
+        catalog.fill_product_gaps(
+            [{"id": food["id"], "values": {"fat_g": 30}, "origin": "yazio"}]
+        )
+        with change_history.collect_changes() as changes:
+            result = catalog.fill_product_gaps(
+                [
+                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "bls"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "bls"},
+                ]
+            )
+        steps = [
+            {
+                "tool": "fill_nutrition_product_gaps",
+                "result": result,
+                "changes": changes,
+            }
+        ]
+        turn_id = self._record_turn(steps, "Ja, trag die Lücken ein")
+
+        self.assertEqual(
+            self._messages(turn_id)[1]["coach_changes"]["labels"],
+            [
+                "Produktlücken gefüllt (2)",
+                "Synthetic skyr: Fett 0,2 (BLS)",
+                "Synthetic bar: Salz 0,7 (BLS)",
+            ],
+        )
+        self.assertEqual(
+            [(item["name"], item["written"][0]["field"]) for item in result["changes"]],
+            [("Synthetic skyr", "fat_g"), ("Synthetic bar", "salt_g")],
+        )
+
+        self.assertEqual(self._undo(turn_id)["status"], "undone")
+
+        self.assertIsNone(catalog.get_product(own["id"])["fat_g"])
+        restored = server.NUTRITION_ASSEMBLY.food_mirror().get(food["id"])
+        assert restored is not None
+        # Undo restores the food as it was stored: salt is absent again.
+        self.assertNotIn("salt_g", restored["per_100"])
+        self.assertEqual(restored["per_100"]["fat_g"], 30)
+        self.assertEqual(restored["filled_fields"]["fat_g"]["origin"], "yazio")
 
     def test_a_record_changed_after_the_turn_aborts_the_whole_undo(self) -> None:
         turn_id = self._coach_turn()

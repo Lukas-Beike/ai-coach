@@ -27,6 +27,8 @@ class HistoryAthleteServices:
     checkin_service: Callable[[], Any] | None = None
     meal_library: Callable[[], Any] | None = None
     product_catalog: Callable[[], Any] | None = None
+    # Stored database foods; the Coach's gap fill is recorded and undone there.
+    food_database_entries: Callable[[], Any] | None = None
     # The record services of the equipment entity types, keyed by entity type.
     equipment_history: Callable[[], dict[str, Any]] | None = None
 
@@ -64,6 +66,7 @@ class HistoryAssembly:
         self._checkin_service = dependencies.athlete.checkin_service
         self._meal_library = dependencies.athlete.meal_library
         self._product_catalog = dependencies.athlete.product_catalog
+        self._food_database_entries = dependencies.athlete.food_database_entries
         self._equipment_history = dependencies.athlete.equipment_history
         self._workout_library_service = dependencies.planning.workout_library_service
         self._planned_unit_service = dependencies.planning.planned_unit_service
@@ -92,6 +95,8 @@ class HistoryAssembly:
             services["nutrition_template"] = self._meal_library()
         if self._product_catalog is not None:
             services["nutrition_product"] = self._product_catalog()
+        if self._food_database_entries is not None:
+            services["food_database_entry"] = self._food_database_entries()
         if self._equipment_history is not None:
             services.update(self._equipment_history())
         return services

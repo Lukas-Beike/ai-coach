@@ -16,9 +16,11 @@ from support import temp_database
 
 from backend import change_history
 from backend.coach.change_receipts import change_summary
+from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
+from backend.nutrition.food_mirror import FoodDatabaseMirror
 
 PRODUCT: dict[str, Any] = {
     "name": "Skyr",
@@ -46,6 +48,9 @@ class NutritionProductHistoryTests(unittest.TestCase):
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
         self.catalog = self.library.product_catalog
+        self.mirror = FoodDatabaseMirror(
+            lambda: self.manager, threading.Lock(), lambda: "2026-09-24T12:00:00+00:00"
+        )
 
     def collected(self, write: Any) -> tuple[Any, list[dict[str, str]]]:
         with change_history.collect_changes() as changes:
@@ -54,7 +59,10 @@ class NutritionProductHistoryTests(unittest.TestCase):
 
     def undo(self, changes: list[dict[str, str]]) -> None:
         unused: Any = None
-        services = {"nutrition_product": self.catalog}
+        services = {
+            "nutrition_product": self.catalog,
+            "food_database_entry": self.mirror,
+        }
         undo = HistoryUndoService(
             self.manager,
             ChangeHistoryService(self.manager, unused, record_services=services),
@@ -64,6 +72,11 @@ class NutritionProductHistoryTests(unittest.TestCase):
         )
         with self.manager.unit_of_work() as db:
             undo.apply_many(db, changes)
+
+    def stored_food(self, food_id: str) -> dict[str, Any]:
+        entry = self.mirror.get(food_id)
+        assert entry is not None
+        return entry
 
     def history_actions(self) -> list[str]:
         with self.manager.reader() as db:
@@ -182,14 +195,77 @@ class NutritionProductHistoryTests(unittest.TestCase):
             self.library.product_catalog.get_product(saved["id"])["kcal"], 64
         )
 
+    def test_undo_of_a_gap_fill_empties_exactly_the_filled_fields(self) -> None:
+        own = self.catalog.save_product({**PRODUCT, "fat_g": None, "salt_g": None})
+        food: dict[str, Any] = {
+            "id": "off:4006381333931",
+            "name": "Synthetic bar",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 500, "salt_g": None},
+        }
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(db, food, "2026-09-01")
+        fill = [
+            {"id": own["id"], "values": {"fat_g": 1.5, "salt_g": 0.2}, "origin": "bls"},
+            {"id": food["id"], "values": {"salt_g": 0.7, "kcal": 1}, "origin": "yazio"},
+        ]
+        result, changes = self.collected(lambda: self.catalog.fill_product_gaps(fill))
+
+        self.assertEqual(
+            [item["id"] for item in result["changes"]], [own["id"], food["id"]]
+        )
+        self.assertEqual(
+            [(change["action"], change["entity_type"]) for change in changes],
+            [("update", "nutrition_product"), ("update", "food_database_entry")],
+        )
+        self.assertEqual(self.stored_food(food["id"])["per_100"]["salt_g"], 0.7)
+        self.assertEqual(self.stored_food(food["id"])["per_100"]["kcal"], 500)
+
+        self.undo(changes)
+
+        restored = self.catalog.get_product(own["id"])
+        self.assertEqual((restored["fat_g"], restored["salt_g"]), (None, None))
+        self.assertEqual((restored["kcal"], restored["filled_fields"]), (63, {}))
+        entry = self.stored_food(food["id"])
+        self.assertEqual(
+            (entry["per_100"]["salt_g"], entry["per_100"]["kcal"]), (None, 500)
+        )
+        self.assertEqual(entry["filled_fields"], {})
+
+    def test_undo_of_a_gap_fill_is_refused_after_the_food_changed(self) -> None:
+        food: dict[str, Any] = {
+            "id": "yazio:0a1b2c3d-0000-4000-8000-000000000001",
+            "name": "Synthetic oat drink",
+            "basis_amount": 100,
+            "basis_unit": "ml",
+            "per_100": {"kcal": 45},
+        }
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(db, food, "2026-09-01")
+        _, changes = self.collected(
+            lambda: self.catalog.fill_product_gaps(
+                [{"id": food["id"], "values": {"fat_g": 1}, "origin": "bls"}]
+            )
+        )
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(
+                db, {**food, "per_100": {"kcal": 45, "fat_g": 2}}, "2026-09-02"
+            )
+        with self.assertRaises(AppError) as raised:
+            self.undo(changes)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self.stored_food(food["id"])["per_100"]["fat_g"], 2)
+
     def test_a_coach_turn_that_saves_a_product_is_undoable(self) -> None:
         summary = change_summary(
             [
                 {
-                    "tool": "save_nutrition_product",
+                    "tool": tool,
                     "result": {"ok": True},
                     "changes": [{"id": "x", "action": "create"}],
                 }
+                for tool in ("save_nutrition_product", "fill_nutrition_product_gaps")
             ]
         )
         assert summary is not None

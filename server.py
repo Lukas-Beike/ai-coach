@@ -854,6 +854,7 @@ HISTORY = HistoryAssembly(
             checkin_service=ATHLETE_DATA.checkin,
             meal_library=lambda: NUTRITION_ASSEMBLY.meal_library_service(),
             product_catalog=lambda: NUTRITION_ASSEMBLY.product_catalog_service(),
+            food_database_entries=lambda: NUTRITION_ASSEMBLY.food_mirror(),
             equipment_history=ATHLETE_DATA.equipment_history,
         ),
         planning=HistoryPlanningServices(

@@ -1,6 +1,6 @@
 # Coach tool execution coverage
 
-This matrix covers the 54 tools currently offered to the conversational Coach.
+This matrix covers the 56 tools currently offered to the conversational Coach.
 It measures execution through `chat_with_coach`, not the accuracy of a language
 model's interpretation.
 
@@ -38,11 +38,13 @@ generated from the `covers` declarations; regenerate it with
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
+| `fill_nutrition_product_gaps` | `success` | `test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_training_report` | `success` | `test_training_report_returns_same_local_facts_without_mutation` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
+| `list_incomplete_nutrition_products` | `success` | `test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn` |
 | `list_planned_workouts` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_recent_activities` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_training_plans` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |

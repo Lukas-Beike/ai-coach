@@ -531,6 +531,35 @@ class DestructiveTierTests(unittest.TestCase):
             gate.call_impact("apply_workout_library_plan", library), {"bulk"}
         )
 
+        # A tool may count as bulk from fewer records: two products, not one.
+        fill = "fill_nutrition_product_gaps"
+        for count, impact in ((1, set()), (2, {"bulk"}), (25, {"bulk"})):
+            with self.subTest(products=count):
+                self.assertEqual(
+                    gate.call_impact(fill, {"products": [{}] * count}), impact
+                )
+                self.assertEqual(
+                    _check(
+                        fill,
+                        "Trag die Lücken ein",
+                        arguments={"products": [{}] * count},
+                        classifier=_Classifier(_verdict(["nutrition"])),
+                    ).allowed,
+                    not impact,
+                )
+        self.assertTrue(
+            _check(
+                fill,
+                "Ja, trag sie ein",
+                arguments={"products": [{}] * 3},
+                classifier=_Classifier(_verdict(["nutrition"], bulk=True)),
+            ).allowed
+        )
+        # Only this tool's own earlier records count toward its threshold: a
+        # product saved earlier in the turn does not make one fill bulk.
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 0), set())
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 1), {"bulk"})
+
         # Small calls add up across the turn.
         authority = _authority("Verschieb alles")
         classifier = _Classifier()

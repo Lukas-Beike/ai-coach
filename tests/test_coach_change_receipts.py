@@ -86,13 +86,35 @@ class ChangeSummaryTests(unittest.TestCase):
                     {"ok": True, "templates": [{"id": "a"}, {"id": "b"}]},
                     [_LIBRARY_CHANGE],
                 ),
+                _step(
+                    "fill_nutrition_product_gaps",
+                    {
+                        "ok": True,
+                        "changes": [
+                            {
+                                "id": "p1",
+                                "name": "Riegel",
+                                "written": [
+                                    {"field": "salt_g", "value": 0.4, "origin": "web"},
+                                    {"field": "kcal", "value": 540, "origin": "yazio"},
+                                ],
+                            }
+                        ],
+                    },
+                    [_PROFILE_CHANGE | {"entity_type": "nutrition_product"}],
+                ),
             ]
         )
 
         self.assertEqual(
             summary,
             {
-                "labels": ["Profil aktualisiert", "Trainingsvorlagen bearbeitet (2)"],
+                "labels": [
+                    "Profil aktualisiert",
+                    "Trainingsvorlagen bearbeitet (2)",
+                    "Produktlücken gefüllt (1)",
+                    "Riegel: Salz 0,4 (Web), Energie 540 (Yazio)",
+                ],
                 "undoable": True,
                 "undone_at": None,
             },

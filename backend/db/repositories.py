@@ -66,14 +66,56 @@ def database_origin(food_id: str) -> str:
     return _DATABASE_ORIGINS[food_id.split(":", 1)[0]]
 
 
+def _store_fills(
+    db: Any,
+    product_id: str,
+    raw_details: str,
+    updates: Mapping[str, Any],
+    origin: str,
+    fetched_at: str,
+    source_url: str | None = None,
+    passed_on: Mapping[str, Any] | None = None,
+) -> None:
+    """Write filled fields and name each one's origin, source page and time.
+
+    A value the source itself took from another database keeps that origin
+    (``passed_on``, the source's own ``filled_fields``).
+    """
+    details = json.loads(raw_details)
+    details.setdefault("filled_fields", {}).update(
+        {
+            key: (passed_on or {}).get(key)
+            or {
+                "origin": origin,
+                "fetched_at": fetched_at,
+                **({"source_url": source_url} if source_url else {}),
+            }
+            for key in updates
+        }
+    )
+    db.execute(
+        "UPDATE nutrition_products SET "
+        + ", ".join(f"{key}=?" for key in updates)
+        + ", details=? WHERE id=?",
+        (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
+    )
+
+
 def fill_empty_product_fields(
-    db: Any, product_id: str, food: Mapping[str, Any], fetched_at: str
+    db: Any,
+    product_id: str,
+    food: Mapping[str, Any],
+    fetched_at: str,
+    *,
+    origin: str | None = None,
+    source_url: str | None = None,
 ) -> bool:
     """Fill the empty brand and nutrient fields of an own product from a database food.
 
     Existing values always win. Values per basis are scaled to the product's
     basis when both use the same unit; a product of another unit (a portion)
-    takes no nutrient values. ``details.filled_fields`` names each field's origin.
+    takes no nutrient values. ``details.filled_fields`` names each field's
+    origin, which defaults to the database of the food's id.
     """
     row = db.execute(
         "SELECT brand, basis_amount, basis_unit, details, "
@@ -99,23 +141,46 @@ def fill_empty_product_fields(
         updates["brand"] = str(food["brands"])
     if not updates:
         return False
-    details = json.loads(row["details"])
-    origin = database_origin(str(food["id"]))
-    # A value the food itself took from another database keeps that origin.
-    passed_on = food.get("filled_fields") or {}
-    details.setdefault("filled_fields", {}).update(
-        {
-            key: passed_on.get(key) or {"origin": origin, "fetched_at": fetched_at}
-            for key in updates
-        }
-    )
-    db.execute(
-        "UPDATE nutrition_products SET "
-        + ", ".join(f"{key}=?" for key in updates)
-        + ", details=? WHERE id=?",
-        (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
+    _store_fills(
+        db,
+        product_id,
+        row["details"],
+        updates,
+        origin or database_origin(str(food["id"])),
+        fetched_at,
+        source_url,
+        passed_on=food.get("filled_fields") or {},
     )
     return True
+
+
+def fill_empty_nutrients(
+    db: Any,
+    product_id: str,
+    values: Mapping[str, Any],
+    *,
+    origin: str,
+    fetched_at: str,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    """Write the given nutrient values into the product's empty columns.
+
+    The values count on the product's own basis. Any row of the products table
+    qualifies, an own product or a stored database food. Return the values
+    written; a column that already holds a value keeps it.
+    """
+    row = db.execute(
+        "SELECT details, "
+        + ", ".join(NUTRIENT_COLUMNS)
+        + " FROM nutrition_products WHERE id=?",
+        (product_id,),
+    ).fetchone()
+    updates = {key: value for key, value in values.items() if row[key] is None}
+    if updates:
+        _store_fills(
+            db, product_id, row["details"], updates, origin, fetched_at, source_url
+        )
+    return updates
 
 
 class NutritionProductRepository:
@@ -144,6 +209,37 @@ class NutritionProductRepository:
             "filled_fields", {}
         )
         return product
+
+    @staticmethod
+    def list_incomplete(db: Any, limit: int = 50) -> list[dict[str, Any]]:
+        """Active own products and stored database foods with an empty core field.
+
+        A food whose EAN an own product holds is listed as that product only.
+        Each row names its ``origin`` and the ``missing_fields``.
+        """
+        rows = db.execute(
+            "SELECT id, origin, name, brand, barcode, basis_amount, basis_unit, "
+            + ", ".join(NUTRIENT_COLUMNS)
+            + " FROM nutrition_products WHERE ("
+            + " OR ".join(f"{key} IS NULL" for key in NUTRIENT_COLUMNS)
+            + ") AND (CASE WHEN origin = 'own' THEN status = 'active' ELSE "
+            "(barcode IS NULL OR barcode NOT IN (SELECT barcode FROM "
+            "nutrition_products WHERE origin = 'own' AND barcode IS NOT NULL)) END) "
+            "ORDER BY origin <> 'own', name COLLATE NOCASE, id LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        found = [dict(row) for row in rows]
+        return [
+            {
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if key not in NUTRIENT_COLUMNS
+                },
+                "missing_fields": [key for key in NUTRIENT_COLUMNS if row[key] is None],
+            }
+            for row in found
+        ]
 
     def list(
         self,
@@ -360,7 +456,10 @@ class FoodDatabaseEntryRepository:
     def _entry(row: Any) -> dict[str, Any]:
         details = json.loads(row["details"])
         # Foods stored before sugar, fibre and salt were read lack those keys.
-        absent = set(details.pop("absent_nutrients", ()))
+        # A filled one is present; undo empties it, so it is absent again.
+        absent = {
+            key for key in details.pop("absent_nutrients", ()) if row[key] is None
+        }
         missing = details.pop("absent_fields", ())
         entry = {
             "id": row["id"],
@@ -507,6 +606,26 @@ class FoodDatabaseEntryRepository:
                 tuple(values.values()),
             ).rowcount
             > 0
+        )
+
+    def restore_nutrients(
+        self, db: Any, food_id: str, values: Mapping[str, Any]
+    ) -> None:
+        """Put nutrient values back; a restored value is no longer a filled one."""
+        row = db.execute(
+            "SELECT details FROM nutrition_products WHERE id=? AND origin <> 'own'",
+            (food_id,),
+        ).fetchone()
+        if row is None or not values:
+            return
+        details = json.loads(row["details"])
+        for key in values:
+            details.get("filled_fields", {}).pop(key, None)
+        db.execute(
+            "UPDATE nutrition_products SET "
+            + ", ".join(f"{key}=?" for key in values)
+            + ", details=? WHERE id=?",
+            (*values.values(), json.dumps(details, ensure_ascii=False), food_id),
         )
 
     def delete(self, db: Any, food_id: str) -> bool:
