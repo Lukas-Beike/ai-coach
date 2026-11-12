@@ -28,7 +28,11 @@ from backend.planning.push_state import (
 )
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
-from backend.sync.garmin_strength_push import GarminStrengthPushService
+from backend.db.repositories import KeyValueRepository
+from backend.sync.garmin_strength_push import (
+    APP_WORKOUT_CLEANUP_KEY,
+    GarminStrengthPushService,
+)
 from backend.sync.jobs import JobValidationError, normalize_sync_job_request
 
 U1 = "11111111-1111-4111-8111-111111111111"
@@ -446,6 +450,19 @@ class FakeGarmin:
         self.calls.append(("unschedule", schedule_id))
         if self.schedules.pop(schedule_id, None) is None:
             raise _not_found()
+
+    def get_workouts(self, start, limit):
+        self.calls.append(("list", start))
+        rows = [
+            {
+                "workoutId": int(workout_id),
+                "sportType": {
+                    "sportTypeKey": workout.get("sport", "strength_training")
+                },
+            }
+            for workout_id, workout in self.workouts.items()
+        ]
+        return rows[start : start + limit]
 
 
 class GarminConnectNotFoundError(Exception):
@@ -1061,6 +1078,16 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         )
         self.garmin = FakeGarmin()
         self.service = past_removal_service(self.database_manager, self.garmin)
+        # The one-time removal of unlinked workouts has its own tests below.
+        self.cleanup({"done": True})
+
+    def cleanup(self, state: dict | None = None) -> dict:
+        """Set, or read, the one-time removal's stored progress (#2373)."""
+        values = KeyValueRepository(str)
+        with self.database_manager.unit_of_work() as db:
+            if state is not None:
+                values.set(db, APP_WORKOUT_CLEANUP_KEY, json.dumps(state))
+            return json.loads(values.get(db, APP_WORKOUT_CLEANUP_KEY) or "{}")
 
     def link(self, local_id: str):
         return garmin_link(self.database_manager, local_id)
@@ -1167,6 +1194,58 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.assertEqual(1, unschedule.call_count)
         self.assertIsNotNone(self.link(U1))
         self.assertIsNotNone(self.link(U2))
+
+    def test_once_only_the_apps_workouts_without_an_upcoming_day_go(self) -> None:
+        # Athlete decision 2026-11-12 (#2373): old app workouts that lost their
+        # unit go once; the athlete's own, Intervals.icu copies, upcoming and
+        # scheduled ones stay.
+        self.cleanup({})
+        app = {"description": "Pacecraft\nKniebeuge 4x5"}
+        self.garmin.workouts.update(
+            {
+                "701": dict(app),
+                "702": dict(app),
+                "703": {"description": "Eigenes Workout\nPacecraft"},
+                "704": {"description": ""},
+                "705": {**app, "sport": "running"},
+            }
+        )
+        self.garmin.schedules["801"] = ("702", "2026-11-07")
+        upcoming = self.linked(U1, "2026-11-08")
+        self.garmin.workouts[upcoming] = dict(app)
+        # A unit deleted for good keeps its link; its old workout goes too.
+        gone = self.linked(U2, "2026-11-02")
+        with self.database_manager.unit_of_work() as db:
+            db.execute("DELETE FROM planned_units WHERE local_id=?", (U2,))
+        self.garmin.workouts[gone] = dict(app)
+
+        self.assertEqual(2, self.service.remove_past())
+
+        self.assertEqual(
+            {"702", "703", "704", "705", upcoming}, set(self.garmin.workouts)
+        )
+        self.assertIsNone(self.link(U2))
+        self.assertEqual(upcoming, self.link(U1).remote_id)
+        self.assertEqual({"done": True, "checked": ["703", "704"]}, self.cleanup())
+        self.garmin.calls.clear()
+        self.garmin.workouts["706"] = dict(app)
+        self.assertEqual(0, self.service.remove_past())
+        self.assertEqual([], self.garmin.calls)
+
+    def test_the_one_time_removal_reads_a_bounded_number_per_refresh(self) -> None:
+        self.cleanup({})
+        for index in range(45):
+            self.garmin.workouts[str(600 + index)] = {"description": "Eigenes"}
+        self.garmin.workouts["700"] = {"description": "Pacecraft"}
+
+        self.assertEqual(0, self.service.remove_past())
+        self.assertEqual(40, len(self.cleanup()["checked"]))
+        self.assertFalse(self.cleanup()["done"])
+        self.assertEqual(1, self.service.remove_past())
+
+        self.assertNotIn("700", self.garmin.workouts)
+        self.assertEqual(45, len(self.garmin.workouts))
+        self.assertTrue(self.cleanup()["done"])
 
     def test_a_busy_or_unconfigured_garmin_removes_nothing(self) -> None:
         self.linked(U1, "2026-11-05")
