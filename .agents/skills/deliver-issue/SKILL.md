@@ -54,7 +54,9 @@ decision (issue comments, epic, docs), ask before acting.
 
 When an orchestrator coordinates the run: ask it for the `AGENTS.md` turn before
 touching that file, follow its hold on a red `develop`, and report each closed
-issue with a one-line entry from [ledger-line](../pacecraft-ledger-line/SKILL.md).
+issue or merged part with a one-line entry from
+[ledger-line](../pacecraft-ledger-line/SKILL.md), written after the `close` or
+`tick`, because it reads the issue's live state.
 
 ## 1. Requirements brief
 
