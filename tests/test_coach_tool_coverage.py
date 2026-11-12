@@ -1885,22 +1885,44 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "delete_nutrition_entry:success",
     )
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
-        saved = self.run_tool(
-            "save_nutrition_entry",
-            {
-                "payload": {
-                    "meal_date": "2026-09-07",
-                    "meal_type": "lunch",
-                    "description": "Synthetic pasta",
-                    "kcal": 620,
-                    "carbs_g": 80,
-                }
-            },
-            ["local_nutrition"],
-            message="Ich habe Pasta gegessen; speichere das lokal.",
+        pasta = {
+            "payload": {
+                "meal_date": "2026-09-07",
+                "meal_type": "lunch",
+                "description": "Synthetic pasta",
+                "kcal": 620,
+                "carbs_g": 80,
+            }
+        }
+        seen = []
+
+        def answer(payload):
+            seen.extend(
+                json.loads(item["output"])
+                for item in payload["input"]
+                if item.get("type") == "function_call_output"
+            )
+            return {"output_text": "Synthetischer Ergebnistext."}
+
+        # The model repeats the identical call: one entry, and the second
+        # output says it was a replay (#2340).
+        receipt, _ = self.turn(
+            "Ich habe Pasta gegessen; speichere das lokal.",
+            [
+                lambda _: self.call("save_nutrition_entry", pasta, ["local_nutrition"]),
+                lambda _: self.call("save_nutrition_entry", pasta, ["local_nutrition"]),
+                answer,
+            ],
+        )
+        self.assertEqual(len(receipt["command_receipts"]), 1)
+        saved = receipt["command_receipts"][0]["result"]
+        self.assertEqual(
+            [(output.get("replayed"), output["entry"]["id"]) for output in seen],
+            [(None, saved["entry"]["id"]), (True, saved["entry"]["id"])],
         )
         entry_id = saved["entry"]["id"]
         read = self.run_tool("read_nutrition", {"date": "2026-09-07"})
+        self.assertEqual(read["entry_count"], 1)
         self.assertEqual(read["total_kcal"], 620)
         self.assertEqual(read["entries"][0]["id"], entry_id)
         deleted = self.run_tool(
