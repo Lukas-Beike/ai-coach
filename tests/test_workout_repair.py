@@ -878,8 +878,9 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 {"output_text": "Auswahl unvollstaendig."},
             ],
         )
-        self.assertEqual(receipt["status"], "completed")
-        self.assertEqual(receipt["command_receipts"][0]["result"]["status"], "failed")
+        # A named repair runs without a card (#2342), so the turn itself fails.
+        self.assertEqual(receipt["status"], "failed")
+        self.assertIs(receipt["command_receipts"][0]["result"]["ok"], False)
         self.assertEqual(
             receipt["command_receipts"][0]["result"]["reason"],
             "incomplete_repair_selection",
