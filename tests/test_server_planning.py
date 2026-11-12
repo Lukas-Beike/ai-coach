@@ -37,6 +37,51 @@ from backend.sync import queue as sync_queue
 from backend.sync.authority import competition_push_manifest
 
 
+def ill_with_vo2_draft_tomorrow():
+    """Save a VO2 draft for the athlete's tomorrow and a fever check-in; preview the replan."""
+    tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
+    draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+        [
+            {
+                "date": tomorrow,
+                "sport": "Ride",
+                "name": "VO2 intervals",
+                "description": "- 5m 115%\n- 40m 55%",
+                "duration_minutes": 45,
+                "target": "POWER",
+            }
+        ]
+    )[0]
+    server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
+    preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+    return tomorrow, draft, preview
+
+
+def saved_metadata_plan():
+    """Save one entry for the athlete's tomorrow in "Metadata Plan" and return that plan."""
+    plan_entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+        [
+            {
+                "date": (
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
+                ).isoformat(),
+                "sport": "Ride",
+                "name": "Metadata",
+                "description": "- 30m 60% easy",
+                "duration_minutes": 30,
+                "target": "AUTO",
+                "rationale": "Test",
+            }
+        ],
+        plan_name="Metadata Plan",
+    )[0]
+    return next(
+        item
+        for item in server.PLANNING_DATA.training_plan().list()
+        if item["id"] == plan_entry["plan_id"]
+    )
+
+
 class ServerPlanningTests(ServerTestCase):
     def test_structured_plan_push_declares_and_uses_bounded_entries(self):
         planned = server.PLANNING_DATA.planned_unit().create(
@@ -437,21 +482,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(server.ATHLETE_DATA.activity_feedback().list(), [])
 
     def test_adaptive_replan_only_changes_future_local_drafts_after_preview(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": tomorrow,
-                    "sport": "Ride",
-                    "name": "VO2 intervals",
-                    "description": "- 5m 115%\n- 40m 55%",
-                    "duration_minutes": 45,
-                    "target": "POWER",
-                }
-            ]
-        )[0]
-        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
-        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+        _, draft, preview = ill_with_vo2_draft_tomorrow()
         self.assertEqual(
             preview["illness_pause"]["recommended_pause_days"],
             planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
@@ -501,21 +532,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_adaptive_preview_rejects_changed_target_and_is_idempotent(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": tomorrow,
-                    "sport": "Ride",
-                    "name": "VO2 intervals",
-                    "description": "- 5m 115%\n- 40m 55%",
-                    "duration_minutes": 45,
-                    "target": "POWER",
-                }
-            ]
-        )[0]
-        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
-        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+        _, draft, preview = ill_with_vo2_draft_tomorrow()
         self.assertTrue(preview["changes"][0].get("source_fingerprint"))
         server.PLANNING_DATA.planned_unit().update(
             draft["id"], {"action": "update", "name": "Athletenänderung"}
@@ -532,21 +549,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(repeated["status"], "already_stale")
 
     def test_adaptive_preview_reports_missing_target_and_repeat_apply_is_safe(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": tomorrow,
-                    "sport": "Ride",
-                    "name": "VO2 intervals",
-                    "description": "- 5m 115%\n- 40m 55%",
-                    "duration_minutes": 45,
-                    "target": "POWER",
-                }
-            ]
-        )[0]
-        server.ATHLETE_DATA.checkin().save({"illness": "Fever", "soreness": 8})
-        preview = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
+        tomorrow, draft, preview = ill_with_vo2_draft_tomorrow()
         server.PLANNING_DATA.planned_unit().update(draft["id"], {"action": "delete"})
         result = server.SYNC_COMMANDS.illness_pause().apply(preview["id"])
         self.assertEqual(result["status"], "stale")
@@ -2270,27 +2273,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(result["status"], "replaced")
 
     def test_training_plan_metadata_changes_advance_planning_revision(self):
-        plan_entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": (
-                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
-                    ).isoformat(),
-                    "sport": "Ride",
-                    "name": "Metadata",
-                    "description": "- 30m 60% easy",
-                    "duration_minutes": 30,
-                    "target": "AUTO",
-                    "rationale": "Test",
-                }
-            ],
-            plan_name="Metadata Plan",
-        )[0]
-        plan = next(
-            item
-            for item in server.PLANNING_DATA.training_plan().list()
-            if item["id"] == plan_entry["plan_id"]
-        )
+        plan = saved_metadata_plan()
         before = server.PLANNING_WORKFLOWS.structured_training_state_service().read()[
             "planning_revision"
         ]
@@ -2305,27 +2288,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_training_plan_metadata_undo_advances_planning_revision(self):
-        plan_entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": (
-                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
-                    ).isoformat(),
-                    "sport": "Ride",
-                    "name": "Metadata",
-                    "description": "- 30m 60% easy",
-                    "duration_minutes": 30,
-                    "target": "AUTO",
-                    "rationale": "Test",
-                }
-            ],
-            plan_name="Metadata Plan",
-        )[0]
-        plan = next(
-            item
-            for item in server.PLANNING_DATA.training_plan().list()
-            if item["id"] == plan_entry["plan_id"]
-        )
+        plan = saved_metadata_plan()
         server.PLANNING_DATA.training_plan().update(
             plan["id"], {"action": "update", "name": "Renamed Plan"}
         )
