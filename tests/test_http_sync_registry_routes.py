@@ -1,13 +1,11 @@
-"""Registry-derived sync HTTP routes keep the previous literal contract.
+"""Table-derived sync HTTP routes keep the previous literal contract.
 
-The literal tables below are the pre-registry values. Derived sets must equal
-them exactly, and a test-only provider registered in an injected registry must
-flow through the same HTTP command path as the built-in providers.
+The literal tables below are the pre-table values. Derived sets must equal them
+exactly, and every provider route reaches the same HTTP command path.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import unittest
 from unittest.mock import Mock
 
@@ -23,15 +21,8 @@ from backend.http_api.sync_commands import (
     SyncCommandEndpoint,
 )
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE, ManualSyncRoute
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 
-try:
-    from .provider_runtime_fakes import ACME_ID, acme_descriptor
-except ImportError:
-    from provider_runtime_fakes import ACME_ID, acme_descriptor
-
-ACME_PATH = "/api/acme-mock/sync"
 INTERVALS_MESSAGE = (
     "Intervals.icu ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen "
     "hinterlegen."
@@ -73,18 +64,13 @@ PREVIOUS_NOT_CONFIGURED_MESSAGES = {
 }
 
 
-def _build(
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-) -> tuple[SyncCommandEndpoint, Mock, Mock, Mock, Mock]:
-    """Return the endpoint, queue, state, performance and provider_configured mocks."""
+def _build() -> tuple[SyncCommandEndpoint, Mock, Mock]:
+    """Return the endpoint with its queue and sync-state mocks."""
     queue = Mock()
     queue.enqueue.return_value = {"id": "job-1"}
     state = Mock()
     state.sync_period.return_value = 90
     state.set_sync_period.return_value = 7
-    performance = Mock()
-    performance.refresh.return_value = {"status": "refreshed"}
-    provider_configured = Mock(return_value=True)
     endpoint = SyncCommandEndpoint(
         queue,
         state,
@@ -92,26 +78,9 @@ def _build(
         lambda: "operation-1",
         {"intervals": 90, "garmin": 30},
         -1,
-        provider_configured=provider_configured,
-        registry=registry,
+        provider_configured=Mock(return_value=True),
     )
-    return endpoint, queue, state, performance, provider_configured
-
-
-def _acme_registry(
-    *,
-    uses_sync_period: bool,
-    payload: tuple[tuple[str, object], ...],
-    message: str | None,
-) -> ProviderRegistry:
-    descriptor = dataclasses.replace(
-        acme_descriptor(),
-        manual_sync=ManualSyncRoute(
-            path=ACME_PATH, uses_sync_period=uses_sync_period, payload=payload
-        ),
-        not_configured_message=message,
-    )
-    return ProviderRegistry((*DEFAULT_PROVIDER_REGISTRY.all(), descriptor))
+    return endpoint, queue, state
 
 
 class DerivedSyncTableTests(unittest.TestCase):
@@ -128,19 +97,17 @@ class DerivedSyncTableTests(unittest.TestCase):
             PREVIOUS_NOT_CONFIGURED_MESSAGES, PROVIDER_NOT_CONFIGURED_MESSAGES
         )
 
-    def test_default_endpoint_accepts_exactly_the_previous_routes(self) -> None:
-        endpoint, _, _, _, _ = _build()
+    def test_endpoint_accepts_exactly_the_previous_routes(self) -> None:
         for path in PREVIOUS_POST_PATHS:
             with self.subTest(path=path):
-                self.assertTrue(endpoint.accepts(path))
+                self.assertTrue(SyncCommandEndpoint.handles(path))
                 self.assertEqual(
-                    path in PREVIOUS_BODY_PATHS, endpoint.requires_body(path)
+                    path in PREVIOUS_BODY_PATHS, SyncCommandEndpoint.needs_body(path)
                 )
-        self.assertFalse(endpoint.accepts("/api/other"))
-        self.assertFalse(endpoint.accepts("/api/acme-mock/sync"))
+        self.assertFalse(SyncCommandEndpoint.handles("/api/other"))
 
 
-class DefaultRegistryDispatchTests(unittest.TestCase):
+class SyncRouteDispatchTests(unittest.TestCase):
     def test_period_error_messages_are_byte_identical(self) -> None:
         cases = (
             ("/api/garmin/sync", 91, GARMIN_PERIOD_MESSAGE),
@@ -149,7 +116,7 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
         )
         for path, days, expected in cases:
             with self.subTest(path=path, days=days):
-                endpoint, queue, state, _, _ = _build()
+                endpoint, queue, state = _build()
                 state.set_sync_period.side_effect = ValueError("invalid")
                 with self.assertRaises(AppError) as raised:
                     endpoint.execute(path, {"days": days})
@@ -158,7 +125,7 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
                 queue.enqueue.assert_not_called()
 
     def test_fixed_payload_routes_enqueue_without_sync_period(self) -> None:
-        endpoint, queue, state, _, _ = _build()
+        endpoint, queue, state = _build()
         self.assertEqual(
             (202, {"id": "job-1"}), endpoint.execute("/api/external-calendar/sync")
         )
@@ -174,12 +141,32 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
             {"reason": "manuell", "force": True},
             requested_by="user",
         )
+        self.assertEqual(
+            (202, {"id": "job-1"}), endpoint.execute("/api/wahoo/sync", None)
+        )
+        queue.enqueue.assert_called_with(
+            "wahoo", "refresh", {"reason": "manual"}, requested_by="user"
+        )
         state.set_sync_period.assert_not_called()
+
+    def test_period_route_stores_the_period_and_enqueues_with_the_fixed_payload(
+        self,
+    ) -> None:
+        endpoint, queue, state = _build()
+
+        self.assertEqual(
+            (202, {"id": "job-1"}), endpoint.execute("/api/garmin/sync", {"days": 7})
+        )
+
+        state.set_sync_period.assert_called_once_with("garmin", 7, -1)
+        queue.enqueue.assert_called_once_with(
+            "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
+        )
 
     def test_job_route_validates_payload_shape_and_accepts_non_string_provider(
         self,
     ) -> None:
-        endpoint, queue, _, _, _ = _build()
+        endpoint, queue, _ = _build()
         with self.assertRaises(AppError) as raised:
             endpoint.execute("/api/sync/jobs", ["not", "an", "object"])
         self.assertEqual(
@@ -202,214 +189,48 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
         )
 
     def test_unknown_path_is_rejected_by_execute(self) -> None:
-        endpoint, _, _, _, _ = _build()
+        endpoint, _, _ = _build()
         with self.assertRaises(ValueError):
             endpoint.execute("/api/other")
 
 
-class InjectedRegistryMockProviderTests(unittest.TestCase):
-    def test_fixed_payload_route_is_accepted_and_enqueues_fixed_payload(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=False,
-            payload=(("reason", "manual"), ("force", True)),
-            message=None,
-        )
-        endpoint, queue, _, _, _ = _build(registry)
-        self.assertTrue(endpoint.accepts(ACME_PATH))
-        self.assertFalse(endpoint.requires_body(ACME_PATH))
-        self.assertFalse(SyncCommandEndpoint.handles(ACME_PATH))
-        self.assertEqual((202, {"id": "job-1"}), endpoint.execute(ACME_PATH))
-        queue.enqueue.assert_called_once_with(
-            ACME_ID, "refresh", {"reason": "manual", "force": True}, requested_by="user"
-        )
+class PostRouteTableTests(unittest.TestCase):
+    """The POST route handles every provider path and reads a body only where due."""
 
-    def test_period_route_validates_days_and_enqueues_with_fixed_payload(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=True, payload=(("reason", "manual"),), message=None
-        )
-        endpoint, queue, state, _, _ = _build(registry)
-        self.assertTrue(endpoint.requires_body(ACME_PATH))
-        self.assertEqual(
-            (202, {"id": "job-1"}), endpoint.execute(ACME_PATH, {"days": 7})
-        )
-        state.set_sync_period.assert_called_once_with(ACME_ID, 7, -1)
-        queue.enqueue.assert_called_once_with(
-            ACME_ID, "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
-        )
+    def test_every_path_is_handled_and_reads_a_body_only_when_required(self) -> None:
+        for path in sorted(PREVIOUS_POST_PATHS):
+            with self.subTest(path=path):
+                endpoint = Mock()
+                endpoint.execute.return_value = (202, {"id": "job-9"})
+                handler = Mock()
+                handler.read_json.return_value = {"days": 7}
+                expects_body = path in PREVIOUS_BODY_PATHS
 
-    def test_period_error_uses_descriptor_max_days(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=True, payload=(("reason", "manual"),), message=None
-        )
-        endpoint, queue, state, _, _ = _build(registry)
-        state.set_sync_period.side_effect = ValueError("invalid")
-        with self.assertRaises(AppError) as raised:
-            endpoint.execute(ACME_PATH, {"days": 61})
-        self.assertEqual(
-            "Der Zeitraum für acme-mock muss -1 oder zwischen 1 und 60 Tagen liegen.",
-            raised.exception.message,
-        )
-        queue.enqueue.assert_not_called()
+                handled = dispatch_route(
+                    SyncCommandPostRoute(Mock(return_value=endpoint)),
+                    handler,
+                    path,
+                    method="POST",
+                )
 
-    def test_not_configured_message_rejects_manual_and_job_routes(self) -> None:
-        message = "Acme-Mock ist nicht konfiguriert."
-        registry = _acme_registry(
-            uses_sync_period=True, payload=(("reason", "manual"),), message=message
-        )
-        endpoint, queue, state, _, provider_configured = _build(registry)
-        provider_configured.return_value = False
-        with self.assertRaises(AppError) as raised:
-            endpoint.execute(ACME_PATH, {"days": 7})
-        self.assertEqual(
-            public_error_contract(raised.exception), (409, "not_configured")
-        )
-        self.assertEqual(message, raised.exception.message)
-        provider_configured.assert_called_once_with(ACME_ID)
-        state.set_sync_period.assert_not_called()
-        queue.enqueue.assert_not_called()
-        with self.assertRaises(AppError) as job_error:
-            endpoint.execute(
-                "/api/sync/jobs",
-                {"provider": ACME_ID, "type": "refresh", "payload": {}},
-            )
-        self.assertEqual(message, job_error.exception.message)
-        queue.enqueue.assert_not_called()
+                self.assertTrue(handled)
+                self.assertEqual(expects_body, handler.read_json.called)
+                endpoint.execute.assert_called_once_with(
+                    path, {"days": 7} if expects_body else None
+                )
+                handler.send_json.assert_called_once_with(202, {"id": "job-9"})
 
-    def test_not_configured_lookup_matches_normalized_descriptor_id(self) -> None:
-        message = "Acme-Mock ist nicht konfiguriert."
-        descriptor = dataclasses.replace(
-            acme_descriptor(),
-            provider_id="Acme-Mock",
-            manual_sync=ManualSyncRoute(
-                path=ACME_PATH, uses_sync_period=False, payload=(("reason", "manual"),)
-            ),
-            not_configured_message=message,
-        )
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_REGISTRY.all(), descriptor))
-        endpoint, queue, _, _, provider_configured = _build(registry)
-        provider_configured.return_value = False
-        with self.assertRaises(AppError) as raised:
-            endpoint.execute(ACME_PATH)
-        self.assertEqual(message, raised.exception.message)
-        provider_configured.assert_called_once_with(ACME_ID)
-        queue.enqueue.assert_not_called()
-
-    def test_route_without_not_configured_message_skips_configuration_check(
-        self,
-    ) -> None:
-        registry = _acme_registry(
-            uses_sync_period=False, payload=(("reason", "manual"),), message=None
-        )
-        endpoint, queue, _, _, provider_configured = _build(registry)
-        provider_configured.return_value = False
-        self.assertEqual((202, {"id": "job-1"}), endpoint.execute(ACME_PATH))
-        provider_configured.assert_not_called()
-        queue.enqueue.assert_called_once()
-
-
-class InjectedRegistryPostRouteTests(unittest.TestCase):
-    """The POST route decides acceptance and body reads from its injected registry."""
-
-    def test_injected_fixed_payload_route_is_accepted_without_body(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=False,
-            payload=(("reason", "manual"),),
-            message=None,
-        )
-        endpoint = Mock()
-        endpoint.execute.return_value = (202, {"id": "job-9"})
-        handler = Mock()
-
-        handled = dispatch_route(
-            SyncCommandPostRoute(lambda: endpoint, registry=registry),
-            handler,
-            ACME_PATH,
-            method="POST",
-        )
-
-        self.assertTrue(handled)
-        handler.read_json.assert_not_called()
-        endpoint.execute.assert_called_once_with(ACME_PATH, None)
-        handler.send_json.assert_called_once_with(202, {"id": "job-9"})
-
-    def test_injected_period_route_reads_the_body(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=True,
-            payload=(("reason", "manual"),),
-            message=None,
-        )
-        endpoint = Mock()
-        endpoint.execute.return_value = (202, {"id": "job-10"})
-        handler = Mock()
-        handler.read_json.return_value = {"days": 7}
-
-        handled = dispatch_route(
-            SyncCommandPostRoute(lambda: endpoint, registry=registry),
-            handler,
-            ACME_PATH,
-            method="POST",
-        )
-
-        self.assertTrue(handled)
-        handler.read_json.assert_called_once_with()
-        endpoint.execute.assert_called_once_with(ACME_PATH, {"days": 7})
-
-    def test_default_route_rejects_injected_path_without_building_endpoint(
-        self,
-    ) -> None:
+    def test_a_path_no_provider_declares_is_not_handled(self) -> None:
         factory = Mock()
         handler = Mock()
 
         handled = dispatch_route(
-            SyncCommandPostRoute(factory), handler, ACME_PATH, method="POST"
+            SyncCommandPostRoute(factory), handler, "/api/wahoo/other", method="POST"
         )
 
         self.assertFalse(handled)
         factory.assert_not_called()
         handler.read_json.assert_not_called()
-        handler.send_json.assert_not_called()
-
-    def test_injected_route_rejects_a_path_no_registry_provider_declares(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=False,
-            payload=(("reason", "manual"),),
-            message=None,
-        )
-        factory = Mock()
-        handler = Mock()
-
-        handled = dispatch_route(
-            SyncCommandPostRoute(factory, registry=registry),
-            handler,
-            "/api/acme-mock/other",
-            method="POST",
-        )
-
-        self.assertFalse(handled)
-        factory.assert_not_called()
-        handler.read_json.assert_not_called()
-
-    def test_injected_registry_keeps_builtin_sync_paths(self) -> None:
-        registry = _acme_registry(
-            uses_sync_period=False,
-            payload=(("reason", "manual"),),
-            message=None,
-        )
-        endpoint = Mock()
-        endpoint.execute.return_value = (202, {"id": "job-11"})
-        handler = Mock()
-        handler.read_json.return_value = {"days": 3}
-
-        self.assertTrue(
-            dispatch_route(
-                SyncCommandPostRoute(lambda: endpoint, registry=registry),
-                handler,
-                "/api/garmin/sync",
-                method="POST",
-            )
-        )
-        handler.read_json.assert_called_once_with()
-        endpoint.execute.assert_called_once_with("/api/garmin/sync", {"days": 3})
 
 
 if __name__ == "__main__":

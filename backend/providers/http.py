@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from backend import observability
@@ -1025,3 +1025,32 @@ class JsonHttpClientCache:
 
 
 JSON_HTTP_CLIENT_CACHE = JsonHttpClientCache()
+
+
+def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:
+    """Resolve a model provider API path against a configured base URL."""
+    base = str(base_url or default_base_url).strip() or default_base_url
+    parsed = urlparse(base)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise AppError(
+            500,
+            "Die Basis-URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.",
+        )
+    normalized_path = "/" + str(path or "").lstrip("/")
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path.rstrip("/") + normalized_path,
+            "",
+            "",
+            "",
+        )
+    )

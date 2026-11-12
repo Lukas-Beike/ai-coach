@@ -68,6 +68,23 @@ def find_intervals_orphans(
     return cap(ordered, limit), len(ordered)
 
 
+def leftover_ids(db: Any, local_ids: set[str]) -> set[str]:
+    """The given ids that are leftovers: hidden units still holding their event.
+
+    Any day counts: the plan selection checks entries the Coach proposal added,
+    which ``find_intervals_orphans`` already limited to upcoming days (#2373).
+    """
+    if not local_ids:
+        return set()
+    marks = ", ".join("?" for _ in local_ids)
+    rows = db.execute(
+        f"SELECT local_id, payload FROM planned_units WHERE local_id IN ({marks}) "
+        "AND tombstone=0",
+        tuple(sorted(local_ids)),
+    ).fetchall()
+    return {row["local_id"] for row in rows if _orphan(row, date.min)}
+
+
 def sync_entries(orphans: list[IntervalsOrphan]) -> list[dict[str, Any]]:
     """The entries of an Intervals.icu ``plan_push`` job that remove these events."""
     return [

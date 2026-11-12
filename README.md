@@ -1,6 +1,6 @@
 # Pacecraft · AI Coach
 
-Pace and power, planned and analysed by your AI coach. Pacecraft is a private, mobile-first PWA for a single athlete. It reads completed training and health data from Garmin and Wahoo, keeps plans, workouts and history in an encrypted local database, and coaches through an OpenAI Responses-compatible model (requests use `store: false`; attachments are sent as parsed measurements without metadata and without the first and last 500 m of positions, details in [docs/operations.md](docs/operations.md)). Intervals.icu is an output target only: the app writes workouts, competitions, nutrition and thresholds there when the athlete asks, and never reads training data from it; it only reads back what an explicit export wrote.
+Pace and power, planned and analysed by your AI coach. Pacecraft is a private, mobile-first PWA for a single athlete. It reads completed training and health data from Garmin and Wahoo, keeps plans, workouts and history in an encrypted local database, and coaches through a model the athlete selects: OpenAI Responses (or a compatible endpoint) or Claude through the Anthropic Messages API, with no fallback between them (OpenAI requests use `store: false`; attachments are sent as parsed measurements without metadata and without the first and last 500 m of positions, details in [docs/operations.md](docs/operations.md)). Intervals.icu is an output target only: the app writes workouts, competitions, nutrition and thresholds there when the athlete asks, and never reads training data from it; it only reads back what an explicit export wrote.
 
 It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale). Never expose it directly to the internet; use an authenticated TLS reverse proxy if it must be reachable from outside.
 
@@ -43,6 +43,8 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 | `OPENAI_API_KEY` | none | Coach access; also settable in the app. |
 | `OPENAI_MODEL` | `gpt-6-luna` | Default model deployment. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Responses-compatible endpoint (HTTPS, or loopback HTTP). |
+| `ANTHROPIC_API_KEY` | none | Claude API access; also settable in the app. |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Messages-compatible endpoint (HTTPS, or loopback HTTP). |
 | `INTERVALS_API_KEY`, `INTERVALS_ATHLETE_ID` | none, `0` | Intervals.icu output target. |
 | `GARMIN_PERSONAL_API_KEY` | none | Official read-only Garmin Personal API key. |
 | `GARMIN_PERSONAL_API_KEY_EXPIRES` | none | Key expiry date (`YYYY-MM-DD`) for the renewal warning. |
@@ -69,7 +71,8 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 | Garmin | Input: activities, details, sleep, HRV, daily health, thresholds. Personal API key plus optional login for the rest; planned strength workouts can be sent to the watch. | [Garmin](docs/setup.md#garmin-authentication--mfa-setup) |
 | Wahoo | Input: activities and FIT files, cycling FTP, weight; plan export on request. | [Wahoo](docs/setup.md#wahoo-connection) |
 | Intervals.icu | Output target only, on explicit synchronization. | [Credentials](docs/setup.md#provider-credentials-in-the-app) |
-| OpenAI | Coach (Responses API only). | [Configuration](docs/configuration.md) |
+| OpenAI | Coach (Responses API) and voice transcription. | [Configuration](docs/configuration.md) |
+| Claude (Anthropic) | Coach as the selected alternative (Messages API). | [Configuration](docs/configuration.md) |
 | Open-Meteo, DWD, ICS feeds | Weather, air quality, pollen, calendar constraints. | [Synchronization](docs/synchronization.md) |
 
 Text and records from providers are untrusted data, never instructions.

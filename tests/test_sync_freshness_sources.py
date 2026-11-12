@@ -1,25 +1,16 @@
 from __future__ import annotations
 
-import dataclasses
 import json
 import unittest
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import Mock
 
-from provider_runtime_fakes import (
-    ACME_AREA,
-    ACME_ID,
-    acme_descriptor,
-    acme_freshness_source,
-    fake_binding,
-)
 from support import make_config, temp_database
 
-from backend.canonical.vocabulary import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.config import Config
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
@@ -31,20 +22,17 @@ from backend.sync.freshness_sources import (
     GARMIN_TOKENSTORE_SIGNAL,
     WEATHER_CACHE_KEY,
     WEATHER_FAILURE_KEY,
+    FreshnessInputs,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FreshnessInputs, ProviderRuntimeRegistry
-from backend.sync.provider_table import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    WEATHER_ID,
-)
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.status import SyncPublicStateService
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
-ACME_REGISTRY = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor()))
-ACME_AT_KEY = "acme_last_sync_at"
-ACME_ERROR_KEY = "acme_last_sync_error"
+CALENDAR_URL = "https://calendar.example.test/feed.ics"
+CALENDAR_AT_KEY = "last_external_calendar_sync_at"
+CALENDAR_ERROR_KEY = "last_external_calendar_sync_error"
+TABLE_AREAS = DEFAULT_PROVIDER_REGISTRY.freshness_areas()
 
 
 def _inputs(
@@ -173,18 +161,6 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
         self.assertFalse(source.configured(_inputs()))
 
 
-def _getter(values: dict[str, Any]) -> Callable[[str], Any]:
-    return lambda key: values.get(key)
-
-
-def _acme_runtime(*, running: Any = None) -> ProviderRuntimeRegistry:
-    """Bind the test-only acme-mock provider with its default freshness source."""
-    binding = fake_binding()
-    if running is not None:
-        binding = dataclasses.replace(binding, running_probe=running)
-    return ProviderRuntimeRegistry(ACME_REGISTRY, [binding])
-
-
 class _DatabaseCase(unittest.TestCase):
     def setUp(self) -> None:
         self.manager = temp_database(
@@ -198,29 +174,33 @@ class _DatabaseCase(unittest.TestCase):
                 self.key_values.set(db, key, value)
 
 
-class AcmeMockProjectionTests(_DatabaseCase):
-    def _project(
-        self,
-        runtime: ProviderRuntimeRegistry,
-        profile: dict[str, Any],
-    ) -> list[dict[str, Any]]:
+class FreshnessProjectionTests(_DatabaseCase):
+    def _project(self, **config: str) -> dict[tuple[str, str], dict[str, Any]]:
         with self.manager.unit_of_work() as db:
-            return provider_freshness_state(
+            items = provider_freshness_state(
                 db,
-                config=make_config(),
+                config=make_config(**config),
                 get_value=lambda key: self.key_values.get(db, key),
-                profile=profile,
+                profile={},
                 garmin_has_core_error=False,
                 garmin_tokenstore_exists=False,
                 now=NOW,
-                freshness_sources=runtime.freshness_sources(),
-                registry=ACME_REGISTRY,
             )
+        return {(item["provider"], item["area"]): item for item in items}
 
-    def test_acme_area_carries_label_read_only_flag_and_its_stale_threshold(
+    def _calendar(self, *, configured: bool = True) -> dict[str, Any]:
+        url = CALENDAR_URL if configured else ""
+        return self._project(calendar_ical_url=url)[CALENDAR_ID, "events"]
+
+    def test_projection_lists_every_table_area_in_table_order(self) -> None:
+        self.assertEqual(
+            [(provider, area.area) for provider, area in TABLE_AREAS],
+            list(self._project()),
+        )
+
+    def test_calendar_area_carries_label_read_only_flag_and_its_stale_threshold(
         self,
     ) -> None:
-        runtime = _acme_runtime()
         threshold = timedelta(hours=48)
         cases = (
             (NOW - threshold + timedelta(hours=1), "fresh", False),
@@ -229,11 +209,9 @@ class AcmeMockProjectionTests(_DatabaseCase):
         )
         for last_sync, state, stale in cases:
             with self.subTest(state=state):
-                self.set_values(**{ACME_AT_KEY: last_sync.isoformat()})
-                [item] = self._project(runtime, {"acme_enabled": True})
-                self.assertEqual(item["provider"], ACME_ID)
-                self.assertEqual(item["area"], ACME_AREA)
-                self.assertEqual(item["label"], "Acme mock · Training")
+                self.set_values(**{CALENDAR_AT_KEY: last_sync.isoformat()})
+                item = self._calendar()
+                self.assertEqual(item["label"], "Gemeinsamer Kalender")
                 self.assertTrue(item["read_only"])
                 self.assertTrue(item["configured"])
                 self.assertEqual(item["state"], state)
@@ -243,7 +221,6 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 self.assertTrue(item["has_last_good"])
 
     def test_a_skipped_row_is_neither_a_success_nor_the_latest_attempt(self) -> None:
-        runtime = _acme_runtime()
         rows = (
             ("ok", NOW - timedelta(hours=3), "success", None),
             ("failed", NOW - timedelta(hours=2), "error", "provider_error"),
@@ -258,8 +235,8 @@ class AcmeMockProjectionTests(_DatabaseCase):
                     "error_code) VALUES (?, ?, ?, 'op', 'test', ?, ?, 'complete', ?, ?)",
                     (
                         row_id,
-                        ACME_ID,
-                        ACME_AREA,
+                        CALENDAR_ID,
+                        "events",
                         started.isoformat(),
                         (started + timedelta(minutes=1)).isoformat(),
                         status,
@@ -267,7 +244,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
                     ),
                 )
 
-        [item] = self._project(runtime, {"acme_enabled": True})
+        item = self._calendar()
 
         self.assertEqual(item["state"], "stale")
         self.assertEqual(item["error_code"], "provider_error")
@@ -280,127 +257,50 @@ class AcmeMockProjectionTests(_DatabaseCase):
         )
 
     def test_output_only_area_never_ages_into_stale(self) -> None:
-        area = dataclasses.replace(
-            acme_descriptor().freshness_areas[0], read_only=False
-        )
-        descriptor = dataclasses.replace(acme_descriptor(), freshness_areas=(area,))
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, descriptor))
-        runtime = ProviderRuntimeRegistry(registry, [fake_binding()])
         last_push = NOW - timedelta(days=30)
-        self.set_values(**{ACME_AT_KEY: last_push.isoformat()})
-        with self.manager.unit_of_work() as db:
-            [item] = provider_freshness_state(
-                db,
-                config=make_config(),
-                get_value=lambda key: self.key_values.get(db, key),
-                profile={"acme_enabled": True},
-                garmin_has_core_error=False,
-                garmin_tokenstore_exists=False,
-                now=NOW,
-                freshness_sources=runtime.freshness_sources(),
-                registry=registry,
-            )
+        self.set_values(last_competition_sync_at=last_push.isoformat())
+
+        item = self._project(intervals_api_key="key")[INTERVALS_ID, "competitions"]
+
         self.assertFalse(item["read_only"])
         self.assertEqual(item["state"], "fresh")
         self.assertIs(item["stale"], False)
 
         # A stored push error without a history row must still need attention.
-        self.set_values(**{ACME_ERROR_KEY: "push failed"})
-        with self.manager.unit_of_work() as db:
-            [failed] = provider_freshness_state(
-                db,
-                config=make_config(),
-                get_value=lambda key: self.key_values.get(db, key),
-                profile={"acme_enabled": True},
-                garmin_has_core_error=False,
-                garmin_tokenstore_exists=False,
-                now=NOW,
-                freshness_sources=runtime.freshness_sources(),
-                registry=registry,
-            )
+        self.set_values(last_competition_sync_error="push failed")
+        failed = self._project(intervals_api_key="key")[INTERVALS_ID, "competitions"]
         self.assertEqual(failed["state"], "stale")
         self.assertEqual(failed["error_code"], "provider_error")
 
-    def test_acme_unconfigured_and_error_states_use_its_own_settings(self) -> None:
-        runtime = _acme_runtime()
-        self.set_values(**{ACME_ERROR_KEY: "upstream failed"})
+    def test_unconfigured_and_error_states_use_the_providers_own_settings(
+        self,
+    ) -> None:
+        self.set_values(**{CALENDAR_ERROR_KEY: "upstream failed"})
 
-        [unconfigured] = self._project(runtime, {})
+        unconfigured = self._calendar(configured=False)
         self.assertFalse(unconfigured["configured"])
         self.assertEqual(unconfigured["state"], "not_configured")
         self.assertEqual(unconfigured["error_code"], "provider_error")
 
-        [failed] = self._project(runtime, {"acme_enabled": True})
+        failed = self._calendar()
         self.assertEqual(failed["state"], "error")
         self.assertEqual(failed["error_code"], "provider_error")
         self.assertIsNone(failed["last_success_at"])
         self.assertFalse(failed["has_last_good"])
 
-    def test_provider_without_sources_is_absent_from_projection(self) -> None:
-        with self.manager.unit_of_work() as db:
-            result = provider_freshness_state(
-                db,
-                config=make_config(),
-                get_value=lambda key: None,
-                profile={},
-                garmin_has_core_error=False,
-                garmin_tokenstore_exists=False,
-                now=NOW,
-                freshness_sources={},
-                registry=ACME_REGISTRY,
-            )
-        self.assertEqual(result, [])
 
-    def test_bound_provider_must_supply_exactly_its_declared_areas(self) -> None:
-        with (
-            self.manager.unit_of_work() as db,
-            self.assertRaisesRegex(ValueError, "must cover exactly"),
-        ):
-            provider_freshness_state(
-                db,
-                config=make_config(),
-                get_value=lambda key: None,
-                profile={},
-                garmin_has_core_error=False,
-                garmin_tokenstore_exists=False,
-                now=NOW,
-                freshness_sources={ACME_ID: {}},
-                registry=ACME_REGISTRY,
-            )
-
-    def test_source_for_undeclared_provider_is_rejected(self) -> None:
-        with (
-            self.manager.unit_of_work() as db,
-            self.assertRaisesRegex(ValueError, "undeclared provider"),
-        ):
-            provider_freshness_state(
-                db,
-                config=make_config(),
-                get_value=lambda key: None,
-                profile={},
-                garmin_has_core_error=False,
-                garmin_tokenstore_exists=False,
-                now=NOW,
-                freshness_sources={"undeclared": {ACME_AREA: acme_freshness_source()}},
-                registry=ACME_REGISTRY,
-            )
-
-
-class AcmeMockStatusTests(_DatabaseCase):
-    def test_status_carries_acme_freshness_and_its_running_probe(self) -> None:
+class StatusFreshnessTests(_DatabaseCase):
+    def test_status_carries_provider_freshness_and_the_running_probe(self) -> None:
         active = {"running": False}
-        runtime = _acme_runtime(running=lambda: active["running"])
-        self.set_values(**{ACME_AT_KEY: (NOW - timedelta(hours=3)).isoformat()})
+        self.set_values(**{CALENDAR_AT_KEY: (NOW - timedelta(hours=3)).isoformat()})
         freshness = ProviderFreshnessService(
-            make_config(),
+            make_config(calendar_ical_url=CALENDAR_URL),
             self.manager,
             self.key_values,
             lambda: NOW,
-            freshness_sources=runtime.freshness_sources(),
-            registry=ACME_REGISTRY,
         )
         profile = Mock()
-        profile.get.return_value = {"acme_enabled": True}
+        profile.get.return_value = {}
         garmin = Mock()
         garmin.core_error_entries.return_value = []
         versions = Mock()
@@ -408,7 +308,10 @@ class AcmeMockStatusTests(_DatabaseCase):
         jobs = Mock()
         jobs.list.return_value = []
         status = SyncPublicStateService(
-            make_config(garmin_tokenstore=str(Path(self.manager.path).parent / "t")),
+            make_config(
+                calendar_ical_url=CALENDAR_URL,
+                garmin_tokenstore=str(Path(self.manager.path).parent / "t"),
+            ),
             self.manager,
             self.key_values,
             freshness,
@@ -417,14 +320,17 @@ class AcmeMockStatusTests(_DatabaseCase):
             MaintenanceGate(),
             jobs,
             versions,
-            running_probes=runtime.running_probes(),
+            running_probes={WAHOO_ID: lambda: active["running"]},
         )
 
         idle = status.state()
         self.assertFalse(idle["running"])
-        [item] = idle["provider_freshness"]
-        self.assertEqual(item["provider"], ACME_ID)
-        self.assertEqual(item["label"], "Acme mock · Training")
+        [item] = [
+            entry
+            for entry in idle["provider_freshness"]
+            if entry["provider"] == CALENDAR_ID
+        ]
+        self.assertEqual(item["label"], "Gemeinsamer Kalender")
         self.assertEqual(item["state"], "fresh")
         self.assertFalse(item["stale"])
         self.assertEqual(

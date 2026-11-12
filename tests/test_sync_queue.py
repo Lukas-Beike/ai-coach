@@ -1,20 +1,16 @@
 """Focused tests for persistent sync-job queue orchestration."""
 
-import dataclasses
 import sqlite3
 import threading
 import unittest
 from unittest.mock import Mock
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import JobValidationError, SyncJobStore, validate_job_request
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.queue_assembly import (
     SyncJobQueueAssembly,
@@ -183,44 +179,6 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         self.assertTrue(self.wake_event.is_set())
         self.publisher.publish.assert_not_called()
 
-    def test_test_only_provider_is_queued_through_its_declaring_registry(self):
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor()))
-        store = SyncJobStore(
-            self.manager,
-            lambda: self.now,
-            lambda: next(self.identifiers),
-            registry=registry,
-        )
-        service = SyncJobQueueService(
-            store,
-            self.publisher,
-            self.maintenance_gate,
-            self.wake_event,
-            all_sync_days=-1,
-            daily_sync_markers=self.daily_sync_markers,
-            registry=registry,
-        )
-
-        result = service.enqueue(
-            ACME_ID, "refresh", {"reason": "scheduled"}, requested_by="startup"
-        )
-
-        self.assertEqual(result["provider"], ACME_ID)
-        self.assertEqual(result["status"], "queued")
-        self.daily_sync_markers.mark_attempt.assert_called_once_with(ACME_ID)
-
-    def test_test_only_provider_is_rejected_by_the_default_registry(self):
-        error = self._app_error(
-            lambda: self.service.enqueue(
-                ACME_ID, "refresh", {"reason": "scheduled"}, requested_by="startup"
-            )
-        )
-
-        self.assertEqual(error.status, 400)
-        self.assertEqual(error.reason, "invalid_job_request")
-        self.assertEqual(self.service.list(), [])
-        self.daily_sync_markers.mark_attempt.assert_not_called()
-
     @staticmethod
     def _app_error(action):
         with unittest.TestCase().assertRaises(AppError) as caught:
@@ -228,8 +186,8 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         return caught.exception
 
 
-class SyncQueueAssemblyRegistryTests(SyncQueueFixtureMixin, unittest.TestCase):
-    def _assembly(self, registry=DEFAULT_PROVIDER_REGISTRY):
+class SyncQueueAssemblyTests(SyncQueueFixtureMixin, unittest.TestCase):
+    def _assembly(self):
         return SyncJobQueueAssembly(
             dependencies=SyncJobQueueAssembly.Inputs(
                 persistence=SyncQueuePersistence(
@@ -250,30 +208,21 @@ class SyncQueueAssemblyRegistryTests(SyncQueueFixtureMixin, unittest.TestCase):
                     logger=Mock(),
                     retry_base_seconds=1,
                     retry_max_seconds=2,
-                    registry=registry,
                 ),
             )
         )
 
-    def test_assembly_forwards_policy_registry_to_store_and_service(self):
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor()))
-        job = self._assembly(registry).service().enqueue(ACME_ID, "refresh", {})
+    def test_assembly_builds_a_service_over_the_shared_store(self):
+        job = self._assembly().service().enqueue("garmin", "refresh", {})
 
-        self.assertEqual(job["provider"], ACME_ID)
-        with self.assertRaises(AppError) as caught:
-            self._assembly().service().enqueue(ACME_ID, "refresh", {})
-        self.assertEqual(caught.exception.reason, "invalid_job_request")
+        self.assertEqual(job["provider"], "garmin")
+        self.assertEqual(job["status"], "queued")
 
 
 class RefreshJobGateTests(unittest.TestCase):
     def test_provider_without_refresh_job_type_rejects_refresh_requests(self):
-        descriptor = dataclasses.replace(
-            acme_descriptor(), job_types=frozenset({"plan_push"})
-        )
-        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, descriptor))
-
         with self.assertRaisesRegex(JobValidationError, "Unsupported job type."):
-            validate_job_request(ACME_ID, "refresh", {}, registry=registry)
+            validate_job_request("intervals", "refresh", {})
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from tests import run_tests
 
 
 class RunnerEvidenceTests(unittest.TestCase):
-    def run_fixture(self, case):
+    def run_fixture(self, case, stdout=None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         path = Path(temporary.name) / "result.json"
@@ -31,7 +31,7 @@ class RunnerEvidenceTests(unittest.TestCase):
         with (
             mock.patch.object(sys, "argv", args),
             mock.patch.object(run_tests, "discover_tests", return_value=tests),
-            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stdout(stdout or io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
         ):
             code = run_tests.main()
@@ -54,6 +54,21 @@ class RunnerEvidenceTests(unittest.TestCase):
         self.assertEqual(len(result["selected_ids"]), 1)
         self.assertEqual(result["errors"], 1)
         self.assertIn("setUpClass", result["error_ids"][0])
+
+    def test_failing_tests_are_named_last_and_in_the_evidence(self):
+        class Failing(unittest.TestCase):
+            def test_case(self):
+                self.assertEqual(1, 2)
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code, result = self.run_fixture(Failing, stdout=out)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(1, len(result["failure_ids"]))
+        self.assertIn("test_case", result["failure_ids"][0])
+        last = out.getvalue().strip().splitlines()[-1]
+        self.assertEqual(f"FAILED: {result['failure_ids'][0]}", last)
 
     def test_skip_counts_and_exact_selection(self):
         class Skipped(unittest.TestCase):

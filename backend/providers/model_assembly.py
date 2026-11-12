@@ -1,20 +1,36 @@
-"""Composition for Coach model transports and transient audio transcription."""
+"""Composition for model transports and transient audio transcription.
+
+The selected model names its provider: a Claude family goes to the Anthropic
+Messages API, anything else to OpenAI Responses. There is no fallback from one
+provider to the other; voice transcription always uses OpenAI.
+"""
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
-from backend.config import Config
+from backend.config import DEFAULT_ANTHROPIC_BASE_URL, Config
 from backend.observability import DiagnosticCapture
 from backend.providers import audio as audio_provider
 from backend.providers import http as provider_http
-from backend.providers import openai_requests, openai_stream
+from backend.providers import openai_requests, openai_responses_adapter, openai_stream
+from backend.providers.claude_models import ClaudeModelResolver, setting_family
+from backend.providers.claude_requests import (
+    ClaudeMessagesClient,
+    ClaudeTransportConfig,
+)
 from backend.providers.http import JsonHttpClient
+from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_requests import ResponsesClock
 from backend.providers.state import ProviderStateService
+
+# Where the newest, working and rejected Claude model per family are kept.
+CLAUDE_MODELS_KEY = "claude_models"
 
 
 @dataclass(frozen=True)
@@ -24,6 +40,9 @@ class ModelProviderOwners:
     http_client: Callable[[], JsonHttpClient]
     state_service: Callable[[], ProviderStateService]
     service_tier: Callable[[str], str | None] = lambda model: None
+    # Key/value access for the Claude model state.
+    read_value: Callable[[str], str | None] = lambda key: None
+    write_value: Callable[[str, str], None] = lambda key, value: None
 
 
 @dataclass(frozen=True)
@@ -34,6 +53,7 @@ class ModelEndpointSettings:
     # Longest silence in a streamed response; a plain request has its own limit.
     response_timeout_seconds: int
     request_timeout_seconds: int
+    default_anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
 
 
 @dataclass(frozen=True)
@@ -101,6 +121,85 @@ class ModelTransportAssembly:
         self._monotonic = clock.monotonic
         self._wait = clock.wait
         self._utc_now = clock.utc_now
+        self._default_anthropic_base_url = endpoints.default_anthropic_base_url
+        self._read_value = providers.read_value
+        self._write_value = providers.write_value
+        # One resolver: it serializes the stored model state.
+        self._claude_models = ClaudeModelResolver(
+            read_state=self._read_claude_models,
+            write_state=lambda state: self._write_value(
+                CLAUDE_MODELS_KEY, json.dumps(state, sort_keys=True)
+            ),
+            list_models=lambda: self.claude_client().list_models(),
+            now=lambda: datetime.now(UTC),
+            logger=self._logger,
+        )
+
+    def _read_claude_models(self) -> Any:
+        try:
+            return json.loads(self._read_value(CLAUDE_MODELS_KEY) or "{}")
+        except ValueError:
+            return {}
+
+    def claude_models(self) -> ClaudeModelResolver:
+        return self._claude_models
+
+    def claude_client(self) -> ClaudeMessagesClient:
+        config = self._config()
+        return ClaudeMessagesClient(
+            ClaudeTransportConfig(
+                api_key=config.anthropic_api_key,
+                base_url=config.anthropic_base_url,
+                default_base_url=self._default_anthropic_base_url,
+                timeout_seconds=self._response_timeout_seconds,
+                max_response_bytes=self._max_response_bytes(),
+                app_version=self._app_version,
+            ),
+            provider_state=self._provider_state_service(),
+            logger=self._logger,
+            opener=provider_http.urlopen,
+            clock=self._monotonic,
+            diagnostic_capture=self._diagnostic_capture,
+        )
+
+    def complete(self, request: ModelRequest) -> ModelTurn:
+        """A one-shot answer from the provider the model names."""
+        family = setting_family(request.model)
+        if family is None:
+            return self.openai_responses_client().complete(request)
+        client = self.claude_client()
+        return self._claude_models.call(
+            family, lambda model: client.complete(replace(request, model=model))
+        )
+
+    def stream(
+        self,
+        request: ModelRequest,
+        on_text_delta: Callable[[str], None],
+        cancel_event: Any = None,
+        on_response_id: Callable[[str], None] | None = None,
+    ) -> ModelTurn:
+        """A streamed answer from the provider the model names."""
+        family = setting_family(request.model)
+        if family is None:
+            return openai_responses_adapter.model_turn(
+                self.openai_stream_client().stream(
+                    openai_responses_adapter.request_payload(request),
+                    on_text_delta,
+                    cancel_event=cancel_event,
+                    on_response_id=on_response_id,
+                )
+            )
+        client = self.claude_client()
+        return self._claude_models.call(
+            family,
+            lambda model: client.stream(
+                replace(request, model=model),
+                on_text_delta,
+                cancel_event,
+                on_response_id,
+            ),
+        )
 
     def audio_transcription_client(self) -> audio_provider.AudioTranscriptionClient:
         config = self._config()

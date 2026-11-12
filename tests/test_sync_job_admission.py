@@ -26,15 +26,13 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.execution_assembly import WahooJobDependencies
+from backend.sync.execution_assembly import (
+    WahooJobDependencies,
+    provider_configured_checks,
+)
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.provider_runtime_assembly import (
-    ProviderRuntimeDependencies,
-    build_provider_runtime,
-    builtin_bindings,
-)
 from backend.sync.queue import SyncJobQueueService
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
@@ -47,35 +45,25 @@ def _body(provider: Any) -> dict[str, Any]:
     return {"provider": provider, "type": "plan_push", "payload": {"entries": ENTRIES}}
 
 
-def _runtime_deps(
+def _configured(
     *, intervals_key: str, wahoo_connected: bool, garmin_configured: bool
-) -> ProviderRuntimeDependencies:
+) -> dict[str, Any]:
     """Stand in for live owners; only the configured state is read."""
     config: Any = SimpleNamespace(intervals_api_key=intervals_key, calendar_ical_url="")
     garmin = mock.Mock(name="garmin")
     garmin.sync_service.return_value.configured.return_value = garmin_configured
     wahoo_sync = mock.Mock(name="wahoo_sync")
     wahoo_sync.configured.return_value = wahoo_connected
-    return ProviderRuntimeDependencies(
-        config=lambda: config,
-        profile=mock.Mock(name="profile"),
-        database_manager=mock.Mock(name="database_manager"),
-        key_values=mock.Mock(name="key_values"),
-        database_lock=mock.Mock(name="database_lock"),
-        garmin_resync_gate=ProviderResyncGate("Garmin"),
-        garmin_automatic_sync_days=7,
-        historical=mock.Mock(
-            name="historical", all_sync_days=60, sync_period_defaults={}
-        ),
-        state=mock.Mock(name="state"),
-        intervals=mock.Mock(name="intervals"),
+    deps = mock.Mock(
         garmin=garmin,
-        calendar_weather=mock.Mock(name="calendar_weather"),
         wahoo=WahooJobDependencies(
             sync_service=lambda: wahoo_sync,
             plan_push_service=lambda: mock.Mock(name="plan_push"),
             resync_gate=ProviderResyncGate("Wahoo"),
         ),
+    )
+    return provider_configured_checks(
+        deps, config=lambda: config, profile=mock.Mock(name="profile")
     )
 
 
@@ -86,7 +74,7 @@ def build_endpoint(
     wahoo_connected: bool,
     garmin_configured: bool,
 ) -> tuple[SyncCommandEndpoint, DatabaseManager]:
-    """Wire the real runtime bindings, queue and a temporary database for a case."""
+    """Wire the real configured checks, queue and a temporary database for a case."""
     database = temp_database(
         case, "admission.sqlite", row_factory=sqlite3.Row, schema=True
     )
@@ -102,15 +90,10 @@ def build_endpoint(
             database, KeyValueRepository(NOW.isoformat), lambda: NOW
         ),
     )
-    runtime = build_provider_runtime(
-        DEFAULT_PROVIDER_REGISTRY,
-        builtin_bindings(
-            _runtime_deps(
-                intervals_key=intervals_key,
-                wahoo_connected=wahoo_connected,
-                garmin_configured=garmin_configured,
-            )
-        ),
+    configured = _configured(
+        intervals_key=intervals_key,
+        wahoo_connected=wahoo_connected,
+        garmin_configured=garmin_configured,
     )
     endpoint = SyncCommandEndpoint(
         queue,
@@ -119,7 +102,7 @@ def build_endpoint(
         lambda: "operation-1",
         {"intervals": 90},
         -1,
-        provider_configured=runtime.provider_configured,
+        provider_configured=lambda provider_id: configured[provider_id](),
     )
     return endpoint, database
 

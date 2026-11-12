@@ -254,7 +254,7 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 test("current performance shows the status lines below its heading", () => {
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const reportNode = (tag, text, className) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
-  const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "currentPerformanceRows", "renderCurrentPerformance"], {
+  const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "currentPerformanceRows", "withFirstThresholds", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
     reportNode,
     rememberAnalysisSectionState() {},

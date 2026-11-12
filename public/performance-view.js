@@ -140,8 +140,26 @@ function currentPerformanceRows(metrics, items) {
   return body;
 }
 
+// LT1 as on the zones page (#2262): the stored share of the threshold heart rate and the
+// power or pace at the top of zone 2. The zones are read once; their arrival redraws the table.
+function withFirstThresholds(metrics, status) {
+  if (typeof thresholdRows !== "function") return metrics;
+  // Only Analyse lists LT1, so only there the zones are read.
+  if (!zoneDataLoad && ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) void ensureZoneData().then(() => renderCurrentPerformance(state.data?.performance?.metrics || {}, state.data?.performance?.history, status));
+  const run = thresholdRows("run", metrics);
+  const ride = thresholdRows("ride", metrics);
+  const value = (number, unit) => (number == null ? undefined : { value: unit === "s/km" ? number : Math.round(number), unit });
+  return {
+    ...metrics,
+    run_lt1_pace_seconds_per_km: value(run.lt1.main, "s/km"),
+    run_lt1_hr_bpm: value(run.lt1.hr, "bpm"),
+    cycling_lt1_watts: value(ride.lt1.main, "W"),
+    cycling_lt1_hr_bpm: value(ride.lt1.hr, "bpm"),
+  };
+}
+
 function renderCurrentPerformance(metrics, history, status = []) {
-  metrics = currentPerformanceValues(metrics, history);
+  metrics = withFirstThresholds(currentPerformanceValues(metrics, history), status);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
   root.replaceChildren(reportNode("h3", "Aktuelle Werte"));
@@ -151,12 +169,16 @@ function renderCurrentPerformance(metrics, history, status = []) {
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
+      ["run_lt1_pace_seconds_per_km", "LT1 · Pace"],
+      ["run_lt1_hr_bpm", "LT1 · Puls"],
       ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
     ["Radfahren", "ride", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
+      ["cycling_lt1_watts", "LT1 · Leistung"],
+      ["cycling_lt1_hr_bpm", "LT1 · Puls"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
   ];
@@ -195,6 +217,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   root.replaceChildren();
   const values = performance?.metrics || {};
   renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
+  refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;
   const predictionHeading = reportNode("h4", "Laufprognosen");

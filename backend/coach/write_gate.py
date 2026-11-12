@@ -194,11 +194,13 @@ _POLITE_REQUEST = re.compile(
 
 # "Synchronisieren mache ich selbst": the athlete keeps the action (#2341).
 _KEEP_VERBS = "|".join(
-    normalize(verb) for verb in _words("mach,erledig,übernehm,kümmer")
+    normalize(verb)
+    for verb in _words(
+        "mach,erledig,übernehm,kümmer,sync,synchronisier,lad,schick,send,trag,übertrag"
+    )
 )
 _SELF_KEPT = re.compile(
-    rf"(?<![a-z])(?:(?:{_KEEP_VERBS})[a-z]*\s+ich|"
-    rf"ich\s+(?:{_KEEP_VERBS}|sync|synchronisier|lad|schick|trag)[a-z]*)"
+    rf"(?<![a-z])(?:(?:{_KEEP_VERBS})[a-z]*\s+ich|ich\s+(?:{_KEEP_VERBS})[a-z]*)"
     r"\s+(?:[a-z]+\s+){0,3}?(?:selbst|selber)(?![a-z])|"
     r"(?<![a-z])i(?:'ll| will)?\s+(?:do|sync|upload|handle)\s+(?:it|that|this|them)"
     r"\s+myself(?![a-z])"
@@ -300,26 +302,39 @@ _PROVIDER_OBJECT = _compile(
     )
 )
 _INTERVALS_NAME = re.compile(r"(?<![a-z])intervals(?![a-z])")
+# A refused send or removal ("Nein, doch nicht hochladen"); "spiel"/"pack" are
+# left out so "Spiel nicht zu hart" refuses nothing.
+_REFUSED_SEND = _compile(
+    "^" + stem
+    for stem in _words(
+        "sync,synchronisier,schick,send,übertrag,push,lad,hochlad,upload,trag,"
+        "export,entfern,lösch,remove,delete"
+    )
+)
 
 
 def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
     """The providers one unnegated part names with a workout and one of ``verbs``.
 
     A part that also names Intervals.icu asks for that provider, never these;
-    information questions ask nothing, as for ``remote_requested``.
+    information questions ask nothing and a refusal blocks the message until a
+    contrast part names the provider again, as for ``remote_requested``.
     """
     found: set[str] = set()
-    for _, part in _request_parts(text):
+    blocked = False
+    for index, part in _request_parts(text):
         loose = _loose(part)
-        if (
-            verbs.search(loose)
-            and _PROVIDER_OBJECT.search(loose)
-            and not _INTERVALS_NAME.search(part)
-            and not _negates(part)
-        ):
-            found.update(
-                str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
-            )
+        if not verbs.search(loose) or _INTERVALS_NAME.search(part):
+            continue
+        named = {str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)}
+        if _negates(part):
+            # A refusal blocks the whole message, as for Intervals.icu (#2342).
+            if named or _PROVIDER_OBJECT.search(loose) or _REFUSED_SEND.search(loose):
+                found.clear()
+                blocked = True
+        elif named and _PROVIDER_OBJECT.search(loose) and (index or not blocked):
+            found.update(named)
+            blocked = False
     return frozenset(found)
 
 
@@ -594,7 +609,7 @@ def _remote_effect(arguments: Mapping[str, Any] | None) -> bool:
     )
 
 
-def _garmin_effects(arguments: Mapping[str, Any] | None) -> tuple[bool, bool]:
+def garmin_effects(arguments: Mapping[str, Any] | None) -> tuple[bool, bool]:
     """Whether the call removes and whether it uploads Garmin workouts."""
     entries = arguments.get("entries") if isinstance(arguments, Mapping) else None
     items = [entry for entry in entries or [] if isinstance(entry, Mapping)]
@@ -814,7 +829,7 @@ def _check_garmin_write(
     removal wording; the classifier is not asked, so no local delete is
     confirmed as a side effect.
     """
-    removes, uploads = _garmin_effects(arguments)
+    removes, uploads = garmin_effects(arguments)
     if uploads and not ProviderId.GARMIN in authority.provider_requests:
         return GateDecision(
             False, REMOTE_GARMIN, REMOTE_GARMIN_DENIAL, state.classifier_used
@@ -957,7 +972,8 @@ CLASSIFIER_INSTRUCTIONS = (
     "true only when athlete_message clearly accepts the change proposed in "
     "previous_assistant_message as proposed; false when it rejects, amends or "
     "replaces that proposal, asks for a different change instead, asks a "
-    "question about it or only acknowledges it. accepts_illness_override: "
+    "question about it or only acknowledges it; a request to synchronize the "
+    "proposed illness pause to Intervals.icu accepts it. accepts_illness_override: "
     "true only when athlete_message (or a short confirmation of a "
     "previous_assistant_message question about exactly this) explicitly asks "
     "to train hard or long despite a reported illness or sickness; false for "

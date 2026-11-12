@@ -1,4 +1,4 @@
-"""Prepare Node development tools and the shared local Graphify environment."""
+"""Prepare Node, browser and Python tools, the app image and the shared Graphify environment."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-QUALITY_TOOLS = ("ruff", "mypy")
+QUALITY_TOOLS = ("ruff", "mypy", "tzdata")
 PIP_INPUTS = ("requirements.in", "requirements-dev.in", "requirements-graphify.in")
 PYPI_URL = "https://pypi.org/pypi/{}/json"
 CHECK_TIMEOUT = 5
@@ -22,7 +22,9 @@ NPM_TIMEOUT = 30
 def quality_requirements(lock_text: str) -> str:
     """Return the hash-locked blocks for the quality tools and mypy's dependencies.
 
-    The full development lock needs SQLCipher, which has no Windows wheel.
+    tzdata is here because Windows has no system time zone database, and the
+    tests import zoneinfo. The full development lock needs SQLCipher, which has
+    no Windows wheel.
     """
     blocks = re.split(r"(?m)^(?=[A-Za-z0-9][\w.-]*==)", lock_text)[1:]
     selected = [
@@ -59,6 +61,30 @@ def install_quality_tools(root: Path) -> int:
             str(lock),
         ]
         return subprocess.run(command, cwd=root, check=False).returncode
+
+
+def build_app_image(root: Path) -> int:
+    """Build this checkout's browser-test app image; skip without Docker."""
+    docker = shutil.which("docker")
+    if (
+        not docker
+        or subprocess.run(
+            [docker, "info"], cwd=root, capture_output=True, check=False
+        ).returncode
+    ):
+        print("App image skipped: Docker is not running")
+        return 0
+    tag = subprocess.run(
+        [sys.executable, str(root / "scripts/run_browser_tests.py"), "--print-image"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tag.returncode:
+        return tag.returncode
+    command = [docker, "build", "-q", "-t", tag.stdout.strip(), "."]
+    return subprocess.run(command, cwd=root, check=False).returncode
 
 
 def _release_key(version: str) -> tuple[int, ...] | None:
@@ -168,19 +194,26 @@ def report_newer_versions(root: Path, npm: str | None) -> None:
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     npm = shutil.which("npm") or shutil.which("npm.cmd")
+    node = shutil.which("node")
     worker = str(root / "scripts/graphify_local.py")
+    playwright = str(root / "node_modules/@playwright/test/cli.js")
     steps = [
         ("Node dependencies", [npm, "ci", "--ignore-scripts"] if npm else None),
+        (
+            "Playwright browsers",
+            [node, playwright, "install", "chromium"] if node else None,
+        ),
         ("Graphify setup", [sys.executable, worker, "setup"]),
         ("Graphify update", [sys.executable, worker, "update", "--preparation"]),
-        ("Quality tools", lambda: install_quality_tools(root)),
+        ("Python tools", lambda: install_quality_tools(root)),
+        ("App image", lambda: build_app_image(root)),
     ]
     failed = False
     for label, command in steps:
         print(f"Preparing {label}", flush=True)
         try:
             if command is None:
-                raise FileNotFoundError("npm/npm.cmd unavailable")
+                raise FileNotFoundError("npm/node unavailable")
             code = (
                 command()
                 if callable(command)

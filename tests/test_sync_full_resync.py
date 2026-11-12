@@ -6,15 +6,13 @@ import threading
 import time
 import unittest
 from contextlib import closing, contextmanager
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 from support import temp_database
 
-from backend.canonical.vocabulary import GARMIN_ID
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -23,13 +21,10 @@ from backend.sync.full_resync import (
     FullProviderResyncService,
     FullResyncOperationJournal,
     FullResyncStateStore,
-    resync_field_keys,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import OPERATION_CONTEXT
-from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_resync_assembly import full_resync_handlers
-from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 
 NOW = "2026-09-20T12:00:00+00:00"
@@ -133,6 +128,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         gates = {GARMIN_ID: self.garmin_gate}
         handlers = full_resync_handlers(
             garmin_service=self.garmin_service,
+            wahoo_service=Mock(),
             all_sync_days=-1,
         )
         return FullProviderResyncService(
@@ -437,16 +433,8 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertFalse(self.garmin_gate.is_resetting())
 
 
-ACME_KEYS = (
-    "acme_full_resync_running",
-    "acme_full_resync_status",
-    "acme_full_resync_at",
-    "acme_full_resync_error",
-)
-
-
-class AcmeFullResyncHandler:
-    """Test-only handler for the provider that is registered only in tests."""
+class FakeWahooResyncHandler:
+    """Records the Wahoo full resync the service asks of its handler."""
 
     def __init__(self, *, configured=True, read_status=None):
         self._configured = configured
@@ -458,7 +446,7 @@ class AcmeFullResyncHandler:
         return self._configured
 
     def not_configured_error(self):
-        return AppError(503, "Acme ist nicht konfiguriert.", reason="not_configured")
+        return AppError(503, "Wahoo ist nicht verbunden.", reason="not_configured")
 
     def run(self, operation_id, observer):
         self.calls.append((operation_id, observer))
@@ -467,11 +455,11 @@ class AcmeFullResyncHandler:
         return {"activities": 3}
 
 
-class RegisteredOnlyProviderResyncTests(unittest.TestCase):
+class WahooFullResyncServiceTests(unittest.TestCase):
     def setUp(self):
         database_path = (
             Path(self.enterContext(tempfile.TemporaryDirectory()))
-            / "registered-resync.sqlite3"
+            / "wahoo-resync.sqlite3"
         )
         with closing(sqlite3.connect(database_path)) as db:
             db.execute(
@@ -484,35 +472,22 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
         self.key_values = KeyValueRepository(lambda: NOW)
         self.observer = RecordingObserver()
         self.logger = RecordingLogger()
-        self.gate = RecordingResyncGate(ACME_ID)
-        self.handler = AcmeFullResyncHandler(
-            read_status=lambda: self._stored(ACME_KEYS[1])
+        self.gate = RecordingResyncGate(WAHOO_ID)
+        self.handler = FakeWahooResyncHandler(
+            read_status=lambda: self._stored("wahoo_full_resync_status")
         )
 
     def _stored(self, key):
         with self.database.reader() as db:
             return self.key_values.get(db, key)
 
-    def _runtime(self, *, with_handler=True):
-        if not with_handler:
-            return ProviderRuntimeRegistry(
-                ProviderRegistry([acme_descriptor()]), [fake_binding(ACME_ID)]
-            )
-        descriptor = replace(acme_descriptor(), resync_keys=ACME_KEYS)
-        binding = replace(
-            fake_binding(ACME_ID),
-            gate=self.gate,
-            full_resync=lambda: self.handler,
-        )
-        return ProviderRuntimeRegistry(ProviderRegistry([descriptor]), [binding])
-
-    def _service(self, runtime):
+    def _service(self, *, with_handler=True):
         return FullProviderResyncService(
-            runtime.resync_handlers(),
+            {WAHOO_ID: self.handler} if with_handler else {},
             FullResyncStateStore(
                 self.database,
                 self.key_values,
-                resync_field_keys(runtime.static.resync_key_map()),
+                PROVIDER_RESYNC_KEYS,
             ),
             FullResyncOperationJournal(
                 self.observer,
@@ -522,34 +497,33 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
                 lambda: 10.0,
                 lambda: "generated-operation",
             ),
-            gates={ACME_ID: self.gate},
-            registry=runtime.static,
+            gates={WAHOO_ID: self.gate},
         )
 
-    def test_registered_provider_runs_full_resync_through_its_handler(self):
-        service = self._service(self._runtime())
+    def test_wahoo_runs_full_resync_through_its_handler(self):
+        service = self._service()
 
-        result = service.resync(ACME_ID, "acme-operation")
+        result = service.resync(WAHOO_ID, "wahoo-operation")
 
         self.assertEqual(
             result,
             {
                 "status": "ok",
-                "source": ACME_ID,
+                "source": WAHOO_ID,
                 "resynced_at": NOW,
                 "activities": 3,
             },
         )
-        self.assertEqual(self.handler.calls, [("acme-operation", self.observer)])
+        self.assertEqual(self.handler.calls, [("wahoo-operation", self.observer)])
         self.assertEqual(
             self.handler.status_during_run,
-            "Acme mock: vollständiger Resync läuft…",
+            "Wahoo: vollständiger Resync läuft…",
         )
-        self.assertEqual(self._stored("acme_full_resync_running"), "0")
-        self.assertEqual(self._stored("acme_full_resync_status"), "")
-        self.assertEqual(self._stored("acme_full_resync_at"), NOW)
-        self.assertEqual(self._stored("acme_full_resync_error"), "")
-        state = service.state(ACME_ID)
+        self.assertEqual(self._stored("wahoo_full_resync_running"), "0")
+        self.assertEqual(self._stored("wahoo_full_resync_status"), "")
+        self.assertEqual(self._stored("wahoo_full_resync_at"), NOW)
+        self.assertEqual(self._stored("wahoo_full_resync_error"), "")
+        state = service.state(WAHOO_ID)
         self.assertEqual(
             list(state), ["running", "status", "last_resync_at", "last_error"]
         )
@@ -557,31 +531,29 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
         self.assertFalse(self.gate.is_resetting())
         self.assertEqual(self.logger.events[-1][2]["event"], "operation_completed")
 
-    def test_registered_provider_without_handler_is_rejected_like_unknown_provider(
-        self,
-    ):
-        service = self._service(self._runtime(with_handler=False))
+    def test_wahoo_without_handler_is_rejected_like_unknown_provider(self):
+        service = self._service(with_handler=False)
 
         with self.assertRaises(AppError) as caught:
-            service.resync(ACME_ID)
+            service.resync(WAHOO_ID)
         self.assertEqual(
             (caught.exception.status, caught.exception.message),
             (400, "Unbekannte Anbindung."),
         )
         with self.assertRaises(AppError) as caught:
-            service.state(ACME_ID)
+            service.state(WAHOO_ID)
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(self.handler.calls, [])
         self.assertFalse(self.gate.is_resetting())
-        self.assertIsNone(self._stored("acme_full_resync_running"))
+        self.assertIsNone(self._stored("wahoo_full_resync_running"))
 
     def test_unconfigured_handler_error_is_raised_before_gate_reset(self):
-        self.handler = AcmeFullResyncHandler(configured=False)
-        service = self._service(self._runtime())
+        self.handler = FakeWahooResyncHandler(configured=False)
+        service = self._service()
 
         with self.assertRaises(AppError) as caught:
-            service.resync(ACME_ID)
-        self.assertEqual(caught.exception.message, "Acme ist nicht konfiguriert.")
+            service.resync(WAHOO_ID)
+        self.assertEqual(caught.exception.message, "Wahoo ist nicht verbunden.")
         self.assertEqual(caught.exception.reason, "not_configured")
         self.assertEqual(self.handler.calls, [])
         self.assertFalse(self.gate.is_resetting())

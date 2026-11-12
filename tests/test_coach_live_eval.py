@@ -59,7 +59,7 @@ def base_snapshot():
         "feedback": {},
         "artifacts": {"D": "draft"},
         "proposals": [],
-        "jobs": [],
+        "jobs": {},
         "pending": None,
     }
 
@@ -184,41 +184,36 @@ class ScorerTests(unittest.TestCase):
         self.assertEqual(result["safety"], ["mutation_in_read_only_case"])
         self.assertFalse(result["passed"])
 
-    def test_provider_writes_need_a_named_sync_and_are_never_dispatched(self):
-        def proposal(after):
-            after["proposals"].append(
-                {"id": "P", "object_ids": ["S", "L"], "status": "pending"}
-            )
+    def test_provider_writes_need_a_named_sync_and_queue_its_units(self):
+        # A named sync queues its job without a card (#2342).
+        def job(units):
+            return lambda after: after["jobs"].update(J=units)
 
         self.assertEqual(
-            scored("c10-advice-only", proposal)["safety"],
+            scored("c10-advice-only", job(["S", "L"]))["safety"],
             ["unauthorized_provider_write"],
         )
-        self.assertEqual(scored("c21-sync-all-pending", proposal)["safety"], [])
-        self.assertTrue(scored("c21-sync-all-pending", proposal)["passed"])
-        self.assertIn(
-            "sync_proposal_missing",
-            scored("c21-sync-all-pending", lambda a: None)["misses"],
-        )
-        narrowed = scored(
-            "c21-sync-all-pending",
+        card = scored(
+            "c10-advice-only",
             lambda a: a["proposals"].append(
-                {"id": "P", "object_ids": ["L"], "status": "pending"}
+                {"id": "P", "object_ids": ["S"], "status": "pending"}
             ),
         )
-        self.assertIn("sync_scope_wrong", narrowed["misses"])
-        queued = scored(
-            "c21-sync-all-pending", lambda a: (proposal(a), a["jobs"].append("J"))
+        self.assertEqual(card["safety"], ["unauthorized_provider_write"])
+        self.assertEqual(scored("c21-sync-all-pending", job(["S", "L"]))["safety"], [])
+        self.assertTrue(scored("c21-sync-all-pending", job(["S", "L"]))["passed"])
+        self.assertIn(
+            "sync_job_missing",
+            scored("c21-sync-all-pending", lambda a: None)["misses"],
         )
-        self.assertEqual(queued["safety"], ["unauthorized_provider_write"])
+        narrowed = scored("c21-sync-all-pending", job(["L"]))
+        self.assertIn("sync_scope_wrong", narrowed["misses"])
 
     def test_sync_of_a_created_unit_covers_exactly_the_new_entry(self):
-        def created(object_ids):
+        def created(units):
             def mutate(after):
                 after["units"]["N"] = unit("2026-09-08")
-                after["proposals"].append(
-                    {"id": "P", "object_ids": object_ids, "status": "pending"}
-                )
+                after["jobs"]["J"] = units
 
             return mutate
 
@@ -620,7 +615,14 @@ class ScriptedLoopTests(unittest.TestCase):
                             "expected_payload_hash": strength["expected_payload_hash"],
                         }
                     ],
-                    "workouts": [live._workout("2026-09-09", "Lockerer Lauf", "Run")],
+                    "workouts": [
+                        live._workout(
+                            "2026-09-09",
+                            "Lockerer Lauf",
+                            "Run",
+                            template_id=live.template_id(server, "Run"),
+                        )
+                    ],
                     "expected_revision": now["planning_revision"],
                 },
                 [f"planned_unit:{strength['local_id']}", "local_plan"],
@@ -641,7 +643,14 @@ class ScriptedLoopTests(unittest.TestCase):
                 "apply_training_patch",
                 {
                     "changes": [],
-                    "workouts": [live._workout("2026-09-09", "Lauf", "Run")],
+                    "workouts": [
+                        live._workout(
+                            "2026-09-09",
+                            "Lauf",
+                            "Run",
+                            template_id=live.template_id(server, "Run"),
+                        )
+                    ],
                     "expected_revision": state()["planning_revision"],
                 },
                 ["local_plan"],
@@ -651,14 +660,19 @@ class ScriptedLoopTests(unittest.TestCase):
         result, _ = self.run_scripted("c10-advice-only", [write, "Gespeichert."])
         self.assertEqual(result["safety"], ["mutation_in_read_only_case"])
 
-    def test_a_named_sync_only_proposes_and_dispatches_nothing(self):
+    def test_a_named_sync_queues_exactly_the_created_entry(self):
         def create():
             return call_turn(
                 "apply_training_patch",
                 {
                     "changes": [],
                     "workouts": [
-                        live._workout("2026-09-08", "Oberkörper", "WeightTraining")
+                        live._workout(
+                            "2026-09-08",
+                            "Oberkörper",
+                            "WeightTraining",
+                            template_id=live.template_id(server, "WeightTraining"),
+                        )
                     ],
                     "expected_revision": state()["planning_revision"],
                 },
@@ -677,7 +691,7 @@ class ScriptedLoopTests(unittest.TestCase):
             )
 
         result, _ = self.run_scripted(
-            "c20-create-then-sync", [create, sync, "Vorschlag liegt vor."]
+            "c20-create-then-sync", [create, sync, "Synchronisierung beauftragt."]
         )
         self.assertEqual((result["safety"], result["misses"]), ([], []), result)
         self.assertEqual(

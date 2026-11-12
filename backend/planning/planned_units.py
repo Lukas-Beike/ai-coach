@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
-from backend.canonical.planning_fields import HR_CAP
+from backend.canonical.planning_fields import HR_CAP, TEMPLATE_ID
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -35,9 +35,9 @@ from backend.providers.intervals_workouts import (
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
-# The focus keys no provider receives; the heart-rate cap reaches the watch, so a
-# change of it is a change of the exported unit.
-LOCAL_ONLY_KEYS = tuple(key for key in FOCUS_KEYS if key != HR_CAP)
+# The focus keys and the template reference no provider receives; the heart-rate
+# cap reaches the watch, so a change of it is a change of the exported unit.
+LOCAL_ONLY_KEYS = (*(key for key in FOCUS_KEYS if key != HR_CAP), TEMPLATE_ID)
 
 
 def planned_unit_payload_hash(payload: Any) -> str:
@@ -223,6 +223,24 @@ def _apply_planned_workout_update(
     ):
         if key in values:
             candidate[key] = values.get(key)
+    # Only a template id replaces the link; a null one (a move) keeps it.
+    if values.get(TEMPLATE_ID):
+        candidate[TEMPLATE_ID] = values[TEMPLATE_ID]
+    # An adaptive replacement edited again is the Coach's content, which the
+    # template rule checks (#2379).
+    if (
+        candidate.get("source") == "adaptive"
+        and {
+            "description",
+            "duration_minutes",
+            "target",
+            "type",
+            "sport",
+            "environment",
+        }
+        & values.keys()
+    ):
+        candidate["source"] = "coach"
     strength_structure.drop_stale(candidate, values)
     if "duration_minutes" in values:
         candidate["duration_minutes"] = validated_duration_minutes(
@@ -344,7 +362,13 @@ def normalized_planned_workout_update(
         or None,
         sync_status="local",
     )
-    normalized["source"] = str(current.get("source") or "library")[:40]
+    # The stored source stays, except that an edited adaptive replacement is
+    # Coach content again (#2379).
+    normalized["source"] = str(
+        candidate.get("source")
+        if candidate.get("source") == "coach"
+        else current.get("source") or "library"
+    )[:40]
     if action == "update":
         _reconcile_updated_planned_workout_content(normalized, values)
     _preserve_local_planned_workout_metadata(normalized, current)

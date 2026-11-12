@@ -1,9 +1,9 @@
-"""Acceptance test: a test-only mock provider through the full sync orchestration.
+"""Acceptance test: a provider through the full sync orchestration.
 
-``acme-mock`` exists only in this module, registered next to the real descriptors.
-It must reach scheduling, the job queue, execution with real payload
+Wahoo, ranked last, with a fake job owner stands in for any provider the table
+lists. It must reach scheduling, the job queue, execution with real payload
 normalization, freshness and status projection, the HTTP manual route and Coach
-refresh without any provider literal in the orchestration code.
+refresh through the real orchestration owners.
 
 The test is deterministic: a fake clock, a temporary SQLite database built from
 the current schema, a fake job owner and mocked HTTP and Coach collaborators.
@@ -12,7 +12,6 @@ It uses no network, no real ``.env``, no data directory and no provider account.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import sqlite3
@@ -25,37 +24,28 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
-from provider_runtime_fakes import (
-    ACME_AREA,
-    ACME_ID,
-    FakeJobOwner,
-    FakeSchedulePolicy,
-    acme_descriptor,
-    acme_freshness_source,
-)
 from support import dispatch_route, make_config, temp_database
 
-from backend.coach.authorization import request_target_enum
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
+from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.executor import SyncJobExecutor
 from backend.sync.freshness import ProviderFreshnessService
-from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_table import (
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    ManualSyncRoute,
-    ProviderDescriptor,
+    CALENDAR_ID,
+    WAHOO_NOT_CONFIGURED_MESSAGE,
+    WEATHER_ID,
 )
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.scheduler import (
@@ -64,35 +54,17 @@ from backend.sync.scheduler import (
     StartupSyncScheduler,
     StartupSyncSchedulerConfig,
 )
+from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncPublicStateService
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
-MANUAL_PATH = "/api/acme-mock/sync"
-NOT_CONFIGURED_MESSAGE = "Acme mock ist nicht konfiguriert."
-PERIOD_MESSAGE = (
-    "Der Zeitraum für acme-mock muss -1 oder zwischen 1 und 60 Tagen liegen."
+MANUAL_PATH = "/api/wahoo/sync"
+PERIOD_PATH = "/api/garmin/sync"
+PERIOD_MESSAGE = "Der Zeitraum für garmin muss -1 oder zwischen 1 und 90 Tagen liegen."
+WAHOO_TOKENS = json.dumps(
+    {"access_token": "placeholder", "refresh_token": "placeholder"}
 )
-DEFAULT_SNAPSHOT = DEFAULT_PROVIDER_REGISTRY.all()
-
-
-def acceptance_descriptor(**changes: Any) -> ProviderDescriptor:
-    """Return the acme descriptor with the routes and fields the orchestration uses."""
-    base = dataclasses.replace(
-        acme_descriptor(),
-        refresh_fields=frozenset({"days", "reason"}),
-        not_configured_message=NOT_CONFIGURED_MESSAGE,
-        manual_sync=ManualSyncRoute(
-            path=MANUAL_PATH,
-            uses_sync_period=True,
-            payload=(("reason", "manual"),),
-        ),
-    )
-    return dataclasses.replace(base, **changes)
-
-
-ACCEPTANCE_DESCRIPTOR = acceptance_descriptor()
-REGISTRY = ProviderRegistry((*DEFAULT_PROVIDER_REGISTRY.all(), ACCEPTANCE_DESCRIPTOR))
 
 
 class _Clock:
@@ -111,28 +83,29 @@ class _Clock:
         self.current += timedelta(seconds=seconds)
 
 
-class _Policy(FakeSchedulePolicy):
-    """Schedule policy whose refresh payload uses only fields the descriptor declares."""
+class _Policy:
+    """Schedule policy that records refreshes and, optionally, its configuration asks."""
+
+    def __init__(self, provider_id: str = WAHOO_ID, *, log: list[str] | None = None):
+        self._provider_id = provider_id
+        self._log = log
+        self.refresh_calls: list[tuple[str, str]] = []
+
+    def configured(self) -> bool:
+        if self._log is not None:
+            self._log.append(self._provider_id)
+            return False
+        return True
+
+    def blocked(self) -> bool:
+        return False
 
     def refresh_payload(self, trigger: str, reason: str) -> dict[str, Any]:
         self.refresh_calls.append((trigger, reason))
         return {"days": 14, "reason": reason}
 
 
-class _RecordingPolicy(FakeSchedulePolicy):
-    """Records the order in which the scheduler asks providers for configuration."""
-
-    def __init__(self, provider_id: str, log: list[str]) -> None:
-        super().__init__(configured=False)
-        self._provider_id = provider_id
-        self._log = log
-
-    def configured(self) -> bool:
-        self._log.append(self._provider_id)
-        return False
-
-
-class _AcmeOwner(FakeJobOwner):
+class _Owner:
     """Fake provider owner that persists its own last-sync timestamp on success."""
 
     def __init__(
@@ -141,7 +114,7 @@ class _AcmeOwner(FakeJobOwner):
         key_values: KeyValueRepository,
         clock: _Clock,
     ) -> None:
-        super().__init__()
+        self.calls: list[dict[str, Any]] = []
         self._database = database
         self._key_values = key_values
         self._clock = clock
@@ -154,21 +127,20 @@ class _AcmeOwner(FakeJobOwner):
         *,
         job_type: str,
     ) -> dict[str, Any]:
-        result = super().execute(job, payload, reason, job_type=job_type)
-        if result.get("status") == "completed":
-            with self._database.unit_of_work() as db:
-                self._key_values.set(db, "acme_last_sync_at", self._clock.iso())
-        return result
+        self.calls.append(
+            {
+                "job": dict(job),
+                "payload": dict(payload),
+                "reason": reason,
+                "job_type": job_type,
+            }
+        )
+        with self._database.unit_of_work() as db:
+            self._key_values.set(db, "last_wahoo_sync_at", self._clock.iso())
+        return {"status": "completed"}
 
 
-def _set_period(provider_id: str, days: Any, all_sync_days: int) -> int:
-    value = int(days)
-    if value == all_sync_days or 1 <= value <= ACCEPTANCE_DESCRIPTOR.max_sync_days:
-        return value
-    raise ValueError(f"period out of range for {provider_id}")
-
-
-class AcmeOrchestrationCase(unittest.TestCase):
+class OrchestrationCase(unittest.TestCase):
     """Wire every real orchestration owner around one temporary database."""
 
     def setUp(self) -> None:
@@ -183,21 +155,22 @@ class AcmeOrchestrationCase(unittest.TestCase):
             schema=True,
         )
         self.config = make_config(
-            garmin_tokenstore=str(root / "garmin-tokenstore-not-created")
+            garmin_tokenstore=str(root / "garmin-tokenstore-not-created"),
+            wahoo_client_id="client-id",
+            wahoo_client_secret="client-secret",
+            wahoo_redirect_uri="https://coach.example.invalid/api/wahoo/callback",
         )
         self.key_values = KeyValueRepository(self.clock.iso)
+        self.connect_wahoo()
         identifiers = iter(f"job-{index}" for index in range(1, 500))
         self.publisher = Mock(spec=StateEventBuffer)
         self.gate = MaintenanceGate()
         self.wake = threading.Event()
         self.store = SyncJobStore(
-            self.database,
-            self.clock.iso,
-            lambda: next(identifiers),
-            registry=REGISTRY,
+            self.database, self.clock.iso, lambda: next(identifiers)
         )
         self.markers = DailySyncMarkerService(
-            self.database, self.key_values, self.clock.now, registry=REGISTRY
+            self.database, self.key_values, self.clock.now
         )
         self.queue = SyncJobQueueService(
             self.store,
@@ -206,9 +179,8 @@ class AcmeOrchestrationCase(unittest.TestCase):
             self.wake,
             all_sync_days=-1,
             daily_sync_markers=self.markers,
-            registry=REGISTRY,
         )
-        self.owner = _AcmeOwner(self.database, self.key_values, self.clock)
+        self.owner = _Owner(self.database, self.key_values, self.clock)
         self.executor = SyncJobExecutor(
             historical_sync=Mock(),
             outcome_service=SyncJobOutcomeService(
@@ -216,46 +188,36 @@ class AcmeOrchestrationCase(unittest.TestCase):
                 self.publisher,
                 self.wake,
                 lambda text: text,
-                logging.getLogger("acceptance.acme"),
+                logging.getLogger("acceptance.provider"),
                 self.clock.now,
                 retry_base_seconds=1,
                 retry_max_seconds=60,
             ),
             all_sync_days=-1,
-            job_owners={ACME_ID: self.owner},
-            registry=REGISTRY,
+            job_owners={WAHOO_ID: self.owner},
         )
-        self.period_state = Mock()
-        self.period_state.sync_period.return_value = 14
-        self.period_state.set_sync_period.side_effect = _set_period
+        self.sync_state = SyncStateRepository(
+            self.database, self.key_values, self.clock.iso
+        )
         self.provider_configured = Mock(return_value=True)
         self.endpoint = SyncCommandEndpoint(
             self.queue,
-            self.period_state,
+            self.sync_state,
             Mock(),
             lambda: "operation-1",
-            {ACME_ID: 14},
+            {WAHOO_ID: 84, GARMIN_ID: 84},
             -1,
             provider_configured=self.provider_configured,
-            registry=REGISTRY,
         )
-        self.post_route = SyncCommandPostRoute(lambda: self.endpoint, registry=REGISTRY)
+        self.post_route = SyncCommandPostRoute(lambda: self.endpoint)
         self.profile = Mock()
-        self.profile.get.return_value = {"acme_enabled": True}
+        self.profile.get.return_value = {}
         self.garmin_state = Mock()
         self.garmin_state.core_error_entries.return_value = []
         self.state_versions = Mock()
         self.state_versions.versions.return_value = {"sync": "1"}
         self.freshness = ProviderFreshnessService(
-            self.config,
-            self.database,
-            self.key_values,
-            self.clock.now,
-            freshness_sources={
-                **DEFAULT_FRESHNESS_SOURCES,
-                ACME_ID: {ACME_AREA: acme_freshness_source()},
-            },
-            registry=REGISTRY,
+            self.config, self.database, self.key_values, self.clock.now
         )
         self.status = SyncPublicStateService(
             self.config,
@@ -280,74 +242,75 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.synchronous.refresh.return_value = {"ok": True, "status": "completed"}
         self.refresh = ProviderRefreshCommandService(
             self.queue,
-            synchronous_refreshes={ACME_ID: self.synchronous},
+            synchronous_refreshes={WAHOO_ID: self.synchronous},
         )
+
+    def connect_wahoo(self, *, connected: bool = True) -> None:
+        with self.database.unit_of_work() as db:
+            if connected:
+                self.key_values.set(db, WAHOO_TOKENS_KEY, WAHOO_TOKENS)
+            else:
+                self.key_values.delete(db, WAHOO_TOKENS_KEY)
 
     def daily_scheduler(self, policies: Mapping[str, Any]) -> DailySyncScheduler:
         return DailySyncScheduler(
-            Mock(),
             self.queue,
             self.markers,
-            Mock(),
             self.gate,
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=False,
-                garmin_automatic_sync_days=-1,
                 auto_update_label=AUTO_UPDATE_LABEL,
             ),
             schedule_policies=policies,
-            registry=REGISTRY,
         )
 
     def startup_scheduler(self, policies: Mapping[str, Any]) -> StartupSyncScheduler:
         return StartupSyncScheduler(
-            Mock(),
             self.queue,
-            Mock(),
-            Mock(),
+            self.sync_state,
             config=StartupSyncSchedulerConfig(
-                calendar_enabled=False,
-                garmin_automatic_sync_days=-1,
                 sync_chunk_days=30,
                 sync_earliest_date=date(2026, 1, 1),
             ),
             schedule_policies=policies,
-            registry=REGISTRY,
         )
 
-    def acme_freshness(self, *, enabled: bool = True) -> dict[str, Any]:
+    def _wahoo_freshness(self) -> dict[str, Any]:
         entries = self.freshness.current(
-            profile={"acme_enabled": enabled},
+            profile={},
             garmin_has_core_error=False,
             garmin_tokenstore_exists=False,
         )
         return next(
             entry
             for entry in entries
-            if (entry["provider"], entry["area"]) == (ACME_ID, ACME_AREA)
+            if (entry["provider"], entry["area"]) == (WAHOO_ID, "activities")
         )
 
 
-def drain(case: AcmeOrchestrationCase) -> None:
+def drain(case: OrchestrationCase) -> None:
     """Claim and run queued jobs until none is claimable, as the worker does."""
     while (job := case.store.claim()) is not None:
         case.executor.run(job)
 
 
-def job_rows(case: AcmeOrchestrationCase) -> list[dict[str, Any]]:
+def job_rows(
+    case: OrchestrationCase, provider: str | None = WAHOO_ID, job_type: str = "refresh"
+) -> list[dict[str, Any]]:
+    """Return the stored jobs of one provider (all providers for ``None``)."""
     with case.database.unit_of_work() as db:
         rows = db.execute(
-            "SELECT * FROM sync_jobs WHERE provider=? ORDER BY rowid",
-            (ACME_ID,),
+            "SELECT * FROM sync_jobs WHERE (provider=? OR ? IS NULL) AND type=? "
+            "ORDER BY rowid",
+            (provider, provider, job_type),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
-class AcmeSchedulingTests(AcmeOrchestrationCase):
-    def test_startup_enqueues_acme_as_a_startup_refresh(self) -> None:
+class SchedulingTests(OrchestrationCase):
+    def test_startup_enqueues_the_provider_as_a_startup_refresh(self) -> None:
         policy = _Policy()
 
-        self.startup_scheduler({ACME_ID: policy}).schedule()
+        self.startup_scheduler({WAHOO_ID: policy}).schedule()
 
         rows = job_rows(self)
         self.assertEqual(len(rows), 1)
@@ -359,7 +322,7 @@ class AcmeSchedulingTests(AcmeOrchestrationCase):
 
     def test_daily_scheduler_honours_the_marker_interval_and_active_jobs(self) -> None:
         policy = _Policy()
-        scheduler = self.daily_scheduler({ACME_ID: policy})
+        scheduler = self.daily_scheduler({WAHOO_ID: policy})
 
         scheduler.schedule()
         self.assertEqual(len(job_rows(self)), 1)
@@ -386,29 +349,27 @@ class AcmeSchedulingTests(AcmeOrchestrationCase):
             [("daily", AUTO_UPDATE_LABEL), ("daily", AUTO_UPDATE_LABEL)],
         )
 
-    def test_startup_and_daily_order_follow_the_registry_ranks(self) -> None:
+    def test_startup_and_daily_order_follow_the_table_ranks(self) -> None:
         daily_log: list[str] = []
         startup_log: list[str] = []
-        ids = [descriptor.provider_id for descriptor in REGISTRY.all()]
+        ids = (WAHOO_ID, GARMIN_ID, CALENDAR_ID, WEATHER_ID)
 
         self.daily_scheduler(
-            {pid: _RecordingPolicy(pid, daily_log) for pid in ids}
+            {pid: _Policy(pid, log=daily_log) for pid in ids}
         ).schedule()
         self.startup_scheduler(
-            {pid: _RecordingPolicy(pid, startup_log) for pid in ids}
+            {pid: _Policy(pid, log=startup_log) for pid in ids}
         ).schedule()
 
-        self.assertEqual(daily_log, list(REGISTRY.daily_order()))
-        self.assertEqual(startup_log, list(REGISTRY.startup_order()))
-        self.assertEqual(daily_log[-1], ACME_ID)
-        self.assertEqual(startup_log[-1], ACME_ID)
-        self.assertEqual(job_rows(self), [], "order probes enqueue nothing")
+        self.assertEqual(daily_log, [WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID])
+        self.assertEqual(startup_log, [CALENDAR_ID, GARMIN_ID, WEATHER_ID, WAHOO_ID])
+        self.assertEqual(job_rows(self, None), [], "order probes enqueue nothing")
 
 
-class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
+class QueueAndExecutionTests(OrchestrationCase):
     def test_queue_normalizes_the_payload_before_persisting_it(self) -> None:
         self.queue.enqueue(
-            ACME_ID,
+            WAHOO_ID,
             "refresh",
             {"days": "7", "reason": "  manual  "},
             requested_by="user",
@@ -429,20 +390,20 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
     def test_queue_enforces_the_provider_period_limit(self) -> None:
-        """The descriptor's ``max_sync_days`` (60 for acme) bounds queued jobs."""
-        error = self.rejection({"days": 61, "reason": "too long"})
+        """The provider's ``max_sync_days`` (90 for Wahoo) bounds queued jobs."""
+        error = self.rejection({"days": 91, "reason": "too long"})
 
         self.assertEqual(error.status, 400)
         self.assertEqual(job_rows(self), [])
 
     def rejection(self, payload: dict[str, Any]) -> AppError:
         with self.assertRaises(AppError) as raised:
-            self.queue.enqueue(ACME_ID, "refresh", payload, requested_by="user")
+            self.queue.enqueue(WAHOO_ID, "refresh", payload, requested_by="user")
         return raised.exception
 
-    def test_executor_runs_the_normalized_payload_through_the_acme_owner(self) -> None:
+    def test_executor_runs_the_normalized_payload_through_the_owner(self) -> None:
         self.queue.enqueue(
-            ACME_ID, "refresh", {"days": "7", "reason": "manual"}, requested_by="user"
+            WAHOO_ID, "refresh", {"days": "7", "reason": "manual"}, requested_by="user"
         )
 
         drain(self)
@@ -454,18 +415,18 @@ class AcmeQueueAndExecutionTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self)[0]["status"], "completed")
 
 
-class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
+class FreshnessAndStatusTests(OrchestrationCase):
     def test_freshness_moves_from_never_loaded_to_fresh_then_stale(self) -> None:
-        self.assertEqual(self.acme_freshness()["state"], "never_loaded")
+        self.assertEqual(self._wahoo_freshness()["state"], "never_loaded")
 
         self.queue.enqueue(
-            ACME_ID, "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
+            WAHOO_ID, "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
         self.clock.advance(60)
         drain(self)
         success_at = self.clock.current.isoformat()
 
-        fresh = self.acme_freshness()
+        fresh = self._wahoo_freshness()
         self.assertEqual(fresh["state"], "fresh")
         self.assertTrue(fresh["configured"])
         self.assertTrue(fresh["read_only"])
@@ -473,20 +434,20 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
         self.assertTrue(fresh["has_last_good"])
 
         self.clock.advance(3 * 24 * 60 * 60)
-        stale = self.acme_freshness()
+        stale = self._wahoo_freshness()
         self.assertEqual(stale["state"], "stale")
         self.assertTrue(stale["stale"])
 
-    def test_disabled_provider_is_reported_as_not_configured(self) -> None:
-        entry = self.acme_freshness(enabled=False)
+    def test_disconnected_provider_is_reported_as_not_configured(self) -> None:
+        self.connect_wahoo(connected=False)
+
+        entry = self._wahoo_freshness()
 
         self.assertEqual(entry["state"], "not_configured")
         self.assertFalse(entry["configured"])
 
-    def test_status_json_reports_the_acme_job_and_its_freshness(self) -> None:
+    def test_status_json_reports_the_job_and_its_freshness(self) -> None:
         handler = Mock()
-        handler.read_json.return_value = {"days": 7}
-        handler.path = MANUAL_PATH
         dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
         self.clock.advance(30)
         drain(self)
@@ -499,20 +460,19 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
 
         status_code, payload = status_handler.send_json.call_args.args
         self.assertEqual(status_code, 200)
-        acme_jobs = [job for job in payload["jobs"] if job["provider"] == ACME_ID]
-        self.assertEqual([job["status"] for job in acme_jobs], ["completed"])
-        acme_entries = [
+        wahoo_jobs = [job for job in payload["jobs"] if job["provider"] == WAHOO_ID]
+        self.assertEqual([job["status"] for job in wahoo_jobs], ["completed"])
+        wahoo_entries = [
             entry
             for entry in payload["provider_freshness"]
-            if (entry["provider"], entry["area"]) == (ACME_ID, ACME_AREA)
+            if (entry["provider"], entry["area"]) == (WAHOO_ID, "activities")
         ]
-        self.assertEqual([entry["state"] for entry in acme_entries], ["fresh"])
+        self.assertEqual([entry["state"] for entry in wahoo_entries], ["fresh"])
 
 
-class AcmeHttpRouteTests(AcmeOrchestrationCase):
+class HttpRouteTests(OrchestrationCase):
     def test_manual_route_enqueues_a_user_refresh_and_answers_202(self) -> None:
         handler = Mock()
-        handler.read_json.return_value = {"days": 7}
 
         self.assertTrue(
             dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
@@ -523,62 +483,45 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         rows = job_rows(self)
         self.assertEqual([row["id"] for row in rows], [body["id"]])
         self.assertEqual(rows[0]["requested_by"], "user")
-        self.assertEqual(
-            json.loads(rows[0]["payload"]), {"days": 7, "reason": "manual"}
-        )
-        self.period_state.set_sync_period.assert_called_once_with(ACME_ID, 7, -1)
+        self.assertEqual(json.loads(rows[0]["payload"]), {"reason": "manual"})
+        handler.read_json.assert_not_called()
 
-    def test_manual_route_refuses_an_out_of_range_period_before_queueing(self) -> None:
+    def test_period_route_refuses_an_out_of_range_period_before_queueing(self) -> None:
         handler = Mock()
         handler.read_json.return_value = {"days": 99}
 
         with self.assertRaises(AppError) as raised:
-            dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
+            dispatch_route(self.post_route, handler, PERIOD_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(str(raised.exception), PERIOD_MESSAGE)
-        self.assertEqual(job_rows(self), [])
+        self.assertEqual(job_rows(self, None), [])
 
     def test_unconfigured_provider_is_refused_with_409(self) -> None:
         self.provider_configured.return_value = False
         handler = Mock()
-        handler.read_json.return_value = {"days": 7}
 
         with self.assertRaises(AppError) as raised:
             dispatch_route(self.post_route, handler, MANUAL_PATH, method="POST")
 
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(raised.exception.reason, "not_configured")
-        self.assertEqual(str(raised.exception), NOT_CONFIGURED_MESSAGE)
-        self.assertEqual(
-            REGISTRY.get(ACME_ID).not_configured_message, NOT_CONFIGURED_MESSAGE
-        )
+        self.assertEqual(str(raised.exception), WAHOO_NOT_CONFIGURED_MESSAGE)
         self.assertNotIn("Intervals.icu", str(raised.exception))
         self.assertEqual(job_rows(self), [])
 
-    def test_route_for_an_undeclared_acme_path_is_not_handled(self) -> None:
+    def test_route_for_an_undeclared_path_is_not_handled(self) -> None:
         handler = Mock()
 
         self.assertFalse(
-            dispatch_route(
-                self.post_route, handler, "/api/acme-mock/other", method="POST"
-            )
+            dispatch_route(self.post_route, handler, "/api/wahoo/other", method="POST")
         )
         handler.send_json.assert_not_called()
 
 
-class AcmeCoachRefreshTests(AcmeOrchestrationCase):
-    def test_coach_target_enum_lists_acme_last_and_the_default_registry_does_not(
-        self,
-    ) -> None:
-        targets = request_target_enum(REGISTRY)
-
-        self.assertEqual(targets[0], "local")
-        self.assertEqual(targets[-1], ACME_ID)
-        self.assertNotIn(ACME_ID, request_target_enum(DEFAULT_PROVIDER_REGISTRY))
-
+class CoachRefreshTests(OrchestrationCase):
     def test_coach_refresh_enqueues_asynchronously_by_default(self) -> None:
-        result = self.refresh.start(ACME_ID, {"days": 7, "reason": "coach"})
+        result = self.refresh.start(WAHOO_ID, {"days": 7, "reason": "coach"})
 
         self.assertEqual(result["status"], "queued")
         self.assertTrue(result["ok"])
@@ -589,7 +532,7 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
 
     def test_coach_refresh_waits_for_the_synchronous_refresh_when_asked(self) -> None:
         result = self.refresh.start(
-            ACME_ID, {"days": 7, "reason": "coach", "_wait_for_completion": True}
+            WAHOO_ID, {"days": 7, "reason": "coach", "_wait_for_completion": True}
         )
 
         self.assertEqual(result, {"ok": True, "status": "completed"})
@@ -600,24 +543,17 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
         service = ProviderRefreshCommandService(self.queue, {})
 
         with self.assertRaises(AppError) as raised:
-            service.start(ACME_ID, {"days": 7, "_wait_for_completion": True})
+            service.start(WAHOO_ID, {"days": 7, "_wait_for_completion": True})
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(job_rows(self), [])
 
     def test_coach_refresh_rejects_unknown_fields_without_queueing(self) -> None:
         with self.assertRaises(AppError) as raised:
-            self.refresh.start(ACME_ID, {"bogus": 1})
+            self.refresh.start(WAHOO_ID, {"bogus": 1})
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(job_rows(self), [])
-
-
-class RegistryIsolationTests(AcmeOrchestrationCase):
-    def test_default_registry_is_unchanged_by_the_acceptance_scenarios(self) -> None:
-        self.assertEqual(DEFAULT_PROVIDER_REGISTRY.all(), DEFAULT_SNAPSHOT)
-        self.assertNotIn(ACME_ID, [d.provider_id for d in DEFAULT_PROVIDER_DESCRIPTORS])
-        self.assertNotIn(ACME_ID, DEFAULT_PROVIDER_REGISTRY.daily_order())
 
 
 if __name__ == "__main__":

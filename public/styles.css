@@ -819,6 +819,28 @@ h2 {
 .adaptive-planning-button:disabled { cursor: wait; opacity: .65; }
 .profile-estimate { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .profile-estimate output { flex: 1 1 12rem; font-size: .8rem; line-height: 1.4; }
+/* Zonen & Schwellen: one page per sport with LT1/LT2 and every zone kind (#2262). */
+.zone-sport-tabs { min-width: 0; margin: 12px 0; }
+.zone-overview { display: grid; gap: 10px; }
+.zone-box { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
+.zone-box h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: .95rem; }
+.zone-box h3 small, .zone-muted, .zone-source { color: var(--muted); font-size: .78rem; font-weight: 400; }
+.zone-thresholds { display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px 12px; font-size: .88rem; }
+.zone-thresholds b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.zone-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.zone-list li { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
+.zone-list i { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--zone-color, var(--training-zone-7)); }
+.zone-list span { flex: 1; }
+.zone-list em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.zone-list li[data-zone="Z1"] { --zone-color: var(--training-zone-1); }
+.zone-list li[data-zone="Z2"] { --zone-color: var(--training-zone-2); }
+.zone-list li[data-zone="Z3"] { --zone-color: var(--training-zone-3); }
+.zone-list li[data-zone="Z4"] { --zone-color: var(--training-zone-4); }
+.zone-list li[data-zone="Z5"] { --zone-color: var(--training-zone-5); }
+.zone-source { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0 0; }
+.zone-edit { min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--link); font-weight: 700; }
+.zone-editor { margin-top: 4px; }
+#zoneSummary.is-warning { color: var(--orange); }
 .profile-help {
   margin: 0;
   color: var(--muted);
@@ -894,9 +916,10 @@ h2 {
 .planned-comparison { display: grid; gap: 4px; padding: 10px; border-radius: 10px; color: var(--muted); background: var(--translucent-surface); font-size: .75rem; line-height: 1.5; }
 .planned-comparison p { margin: 0; }
 .planned-badge.is-focus-derived { border-style: dashed; color: var(--muted); }
-.planned-focus-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
-.planned-focus-field select { min-height: 36px; padding: 4px 8px; }
+.planned-focus-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+/* The label sits above its select, so a phone never breaks it inside a word (#2370). */
+.planned-focus-field { display: grid; flex: 0 1 12rem; gap: 4px; font-size: .78rem; font-weight: 700; }
+.planned-focus-field select { min-height: 36px; width: 100%; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
 .planned-week-sync { display: flex; padding: 6px 0 2px; }
 .planned-week-sync .planned-sync-button { position: relative; display: inline-flex; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; }
@@ -1049,6 +1072,8 @@ h2 {
 }
 
 .model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.model-notice { display: block; margin-top: 8px; color: var(--orange); font-size: .74rem; }
+.model-notice[hidden], .model-selector[hidden] { display: none; }
 .calendar-display-form { display: grid; gap: 14px; padding: 18px 0 10px; }
 .calendar-display-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .calendar-display-fields label { display: grid; gap: 6px; color: var(--subtle); font-size: .73rem; font-weight: 500; }

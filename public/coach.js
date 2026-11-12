@@ -670,9 +670,8 @@ function setupQuickActionMenu(button = $("#quickAnalysisButton"), menu = $("#qui
 
 async function sendMessage(event) {
   event.preventDefault();
-  const configured = state.data?.configured;
-  if (configured && !configured.openai) {
-    toast("Kein OpenAI-API-Schlüssel konfiguriert. Bitte hinterlege OPENAI_API_KEY auf dem Server.", true);
+  if (!coachConfigured(state.data?.configured)) {
+    toast("Für das gewählte Coach-Modell fehlt der API-Schlüssel unter Mehr › Anbindungen.", true);
     return;
   }
   const input = $("#messageInput");
@@ -800,8 +799,10 @@ function updateVoiceButton() {
   const recording = voiceIsRecording();
   const transcribing = state.voiceTranscribing;
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
+  // Transcription always uses OpenAI, whichever model answers.
+  const voiceConfigured = Boolean(state.data?.configured?.openai ?? true);
   // Recording stays available while the Coach works; the transcript is queued like a typed follow-up.
-  button.disabled = !chatReady || transcribing;
+  button.disabled = !chatReady || transcribing || (!voiceConfigured && !recording);
   button.classList.toggle("recording", recording);
   button.classList.toggle("transcribing", transcribing);
   button.setAttribute("aria-pressed", recording ? "true" : "false");
@@ -821,9 +822,13 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
+// The selected model's provider has its key (before the first load: assume yes).
+function coachConfigured(configured) {
+  return !configured || Boolean(configured.coach ?? configured.openai);
+}
+
 function chatControlState(input) {
-  const configured = state.data?.configured;
-  const aiConfigured = !configured || Boolean(configured.openai);
+  const aiConfigured = coachConfigured(state.data?.configured);
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages) && aiConfigured);
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
@@ -896,7 +901,7 @@ function updateChatControls() {
 }
 
 function chatInputPlaceholder(controls) {
-  if (!controls.aiConfigured) return "OPENAI_API_KEY in den Server-Einstellungen konfigurieren…";
+  if (!controls.aiConfigured) return "API-Schlüssel unter Mehr › Anbindungen hinterlegen…";
   if (!controls.chatReady) return "Coach-Chat wird geladen…";
   return state.busy ? "Folgefrage – wird danach gesendet" : "Frage deinen Coach…";
 }

@@ -23,11 +23,9 @@ from backend.providers.wahoo_client import WahooClient
 from backend.sync.daily import daily_marker_key
 from backend.sync.executor import SyncJobExecutor, WahooJobAdapter
 from backend.sync.freshness import ProviderFreshnessService
-from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import WahooSchedulePolicy
@@ -53,7 +51,6 @@ from tests.wahoo_sync_fixture import (
 )
 
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
-REGISTRY = DEFAULT_PROVIDER_REGISTRY
 
 
 class FakeWahooTransport:
@@ -101,7 +98,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             ),
             daily_markers=lambda: self.markers,
             observer=lambda: self.observer,
-            registry=REGISTRY,
             clock=WahooSyncClock(lambda: self.now, lambda: ZONE),
             logger=self.logger,
             lock=threading.Lock(),
@@ -114,7 +110,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             self.database,
             lambda: self.now.isoformat(),
             lambda: next(identifiers),
-            registry=REGISTRY,
         )
         self.queue = SyncJobQueueService(
             self.store,
@@ -123,7 +118,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             wake,
             all_sync_days=-1,
             daily_sync_markers=self.markers,
-            registry=REGISTRY,
         )
         self.executor = SyncJobExecutor(
             historical_sync=Mock(),
@@ -143,7 +137,6 @@ class WahooOrchestrationCase(WahooSyncCase):
                     sync=self.service, stream_backfill=_IdleStreamBackfill()
                 )
             },
-            registry=REGISTRY,
         )
         sync_state = Mock()
         sync_state.sync_period.return_value = 84
@@ -159,8 +152,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             self.database,
             self.key_values,
             lambda: self.now,
-            freshness_sources=DEFAULT_FRESHNESS_SOURCES,
-            registry=REGISTRY,
         )
         profile = Mock()
         profile.get.return_value = {}
@@ -198,34 +189,24 @@ class WahooOrchestrationCase(WahooSyncCase):
 
     def _daily_scheduler(self) -> DailySyncScheduler:
         return DailySyncScheduler(
-            Mock(),
             self.queue,
             self.markers,
-            Mock(),
             self.gate,
             config=DailySyncSchedulerConfig(
-                calendar_url_enabled=False,
-                garmin_automatic_sync_days=-1,
                 auto_update_label=AUTO_UPDATE_LABEL,
             ),
             schedule_policies={WAHOO_ID: self.policy},
-            registry=REGISTRY,
         )
 
     def _startup_scheduler(self) -> StartupSyncScheduler:
         return StartupSyncScheduler(
-            Mock(),
             self.queue,
             Mock(),
-            Mock(),
             config=StartupSyncSchedulerConfig(
-                calendar_enabled=False,
-                garmin_automatic_sync_days=-1,
                 sync_chunk_days=30,
                 sync_earliest_date=date(2026, 1, 1),
             ),
             schedule_policies={WAHOO_ID: self.policy},
-            registry=REGISTRY,
         )
 
     def _drain(self) -> None:

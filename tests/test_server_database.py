@@ -377,6 +377,8 @@ class ServerDatabaseTests(ServerTestCase):
         key_values.get_in_transaction.return_value = ""
         settings = Mock()
         settings.selected_model.return_value = ""
+        settings.selected_provider.return_value = "openai"
+        settings.coach_ready.return_value = False
         settings.available_model_options.return_value = []
         settings.selected_thinking_level.return_value = ""
         settings.available_thinking_level_options.return_value = []
@@ -397,6 +399,7 @@ class ServerDatabaseTests(ServerTestCase):
                     garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
                     intervals_api_key="",
                     openai_api_key="",
+                    anthropic_api_key="",
                     calendar_ical_url="",
                     wahoo_configured=False,
                 ),

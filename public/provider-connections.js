@@ -5,6 +5,7 @@
 
 const CREDENTIAL_FORMS = Object.freeze({
   openai: Object.freeze(["openai_api_key", "openai_base_url"]),
+  anthropic: Object.freeze(["anthropic_api_key", "anthropic_base_url"]),
   intervals: Object.freeze(["intervals_api_key", "intervals_athlete_id"]),
   garmin_personal: Object.freeze(["garmin_personal_api_key", "garmin_personal_api_key_expires"]),
   wahoo: Object.freeze(["wahoo_client_id", "wahoo_client_secret"]),
@@ -12,12 +13,14 @@ const CREDENTIAL_FORMS = Object.freeze({
 });
 
 // Setting one of these needs the APP_PASSWORD again; the password is sent once with the
-// request and never stored. Only the OpenAI and Wahoo forms have the password input.
-const CREDENTIAL_REAUTH_FIELDS = new Set(["openai_base_url", "wahoo_client_id", "wahoo_client_secret"]);
+// request and never stored. Only the OpenAI, Claude and Wahoo forms have the password input.
+const CREDENTIAL_REAUTH_FIELDS = new Set(["openai_base_url", "anthropic_base_url", "wahoo_client_id", "wahoo_client_secret"]);
 
 const CREDENTIAL_FIELD_LABELS = Object.freeze({
   openai_api_key: "OpenAI-API-Schlüssel",
   openai_base_url: "OpenAI-Basis-URL",
+  anthropic_api_key: "Anthropic-API-Schlüssel",
+  anthropic_base_url: "Anthropic-Basis-URL",
   intervals_api_key: "Intervals.icu-API-Schlüssel",
   intervals_athlete_id: "Intervals.icu-Athlete-ID",
   garmin_personal_api_key: "Garmin-Personal-API-Schlüssel",
@@ -29,7 +32,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
 });
 
 // Non-secret values the server echoes back; they are shown as the current value.
-const CREDENTIAL_VISIBLE_FIELDS = new Set(["openai_base_url", "intervals_athlete_id", "wahoo_client_id", "garmin_personal_api_key_expires"]);
+const CREDENTIAL_VISIBLE_FIELDS = new Set(["openai_base_url", "anthropic_base_url", "intervals_athlete_id", "wahoo_client_id", "garmin_personal_api_key_expires"]);
 
 const CREDENTIAL_SOURCE_LABELS = Object.freeze({
   db: "In der App gespeichert",

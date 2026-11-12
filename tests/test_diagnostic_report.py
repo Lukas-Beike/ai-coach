@@ -116,6 +116,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 config=SimpleNamespace(
                     openai_api_key="fake-openai-secret",
                     openai_base_url="https://proxy.invalid/fake-base-secret/v1",
+                    anthropic_api_key="fake-claude-secret",
+                    anthropic_base_url="https://claude-proxy.invalid/fake-claude-base",
                     wahoo_configured=False,
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
@@ -124,6 +126,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 ),
                 settings=SimpleNamespace(
                     selected_model=lambda: "gpt-test",
+                    selected_provider=lambda: "openai",
                     selected_thinking_level=lambda: "medium",
                     available_model_options=lambda: [{"id": "gpt-test"}],
                 ),
@@ -183,6 +186,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_session_conflicts",
                 "canonical_provider_composition",
                 "local_load",
+                "garmin_change_check",
                 "stream_backfill",
                 "fit_inventory",
                 "session_metrics",
@@ -409,8 +413,13 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             },
         )
         self.assertIs(report["configuration"]["openai_base_url_custom"], True)
+        self.assertIs(report["configuration"]["anthropic_configured"], True)
+        self.assertIs(report["configuration"]["anthropic_base_url_custom"], True)
         serialized = json.dumps(report)
         for private in (
+            "fake-claude-secret",
+            "fake-claude-base",
+            "claude-proxy.invalid",
             "fake-wahoo-access-secret",
             "fake-wahoo-refresh-secret",
             "fake-base-secret",
@@ -421,10 +430,13 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
     def test_default_openai_endpoint_is_not_custom(self):
         self.service._deps.config.openai_base_url = DEFAULT_OPENAI_BASE_URL
+        self.service._deps.config.anthropic_base_url = "https://api.anthropic.com"
 
         report = self.service.report()
 
         self.assertIs(report["configuration"]["openai_base_url_custom"], False)
+        self.assertIs(report["configuration"]["anthropic_base_url_custom"], False)
+        self.assertEqual(report["configuration"]["model_provider"], "openai")
         self.assertEqual(
             report["wahoo"],
             {

@@ -23,7 +23,6 @@ from backend.history.undo_service import HistoryUndoService
 class ProposalPersistence:
     database_manager: Callable[[], DatabaseManager]
     nutrition_diary_service: Callable[[], Any]
-    nutrition_meal_library_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -62,9 +61,6 @@ class CoachProposalAssembly:
         clock = dependencies.clock
         self._database_manager = persistence.database_manager
         self._nutrition_diary_service = persistence.nutrition_diary_service
-        self._nutrition_meal_library_service = (
-            persistence.nutrition_meal_library_service
-        )
         self._history_undo_service = execution.history_undo_service
         self._intervals_client_factory = execution.intervals_client_factory
         self._maintenance_gate = execution.maintenance_gate
@@ -85,7 +81,6 @@ class CoachProposalAssembly:
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,
             nutrition_diary_service=self._nutrition_diary_service,
-            nutrition_meal_library_service=self._nutrition_meal_library_service,
             today=self._today,
         )
 

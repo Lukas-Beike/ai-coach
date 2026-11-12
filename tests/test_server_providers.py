@@ -174,7 +174,11 @@ class ServerProvidersTests(ServerTestCase):
         with patch.object(server, "CONFIG", config):
             self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
             self.assertEqual(
-                [option["id"] for option in server.SETTINGS.available_model_options()],
+                [
+                    option["id"]
+                    for option in server.SETTINGS.available_model_options()
+                    if option["provider"] == "openai"
+                ],
                 ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"],
             )
             server.SETTINGS.save_model("gpt-6-luna")

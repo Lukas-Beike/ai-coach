@@ -26,9 +26,13 @@ def _count(value: Any) -> int:
         return 0
 
 
+# Claude usage arrives in the same neutral shape (see claude_messages_adapter).
+_RESPONSES_SHAPED = frozenset({"openai", "anthropic"})
+
+
 def _provider(provider: Any) -> str:
-    if provider != "openai":
-        raise ValueError("provider must be exactly 'openai'")
+    if provider not in _RESPONSES_SHAPED:
+        raise ValueError("provider must be 'openai' or 'anthropic'")
     return provider
 
 
@@ -76,24 +80,12 @@ def daily_summary(
 
 def usage_counts(response: Any, *, provider: str) -> dict[str, int]:
     """Extract safe token counters from one provider response."""
-    provider = _provider(provider)
-    if not isinstance(response, dict):
-        raw: dict[str, Any] = {}
-    elif provider == "openai":
-        candidate = response.get("usage")
-        raw = candidate if isinstance(candidate, dict) else {}
-    else:
-        candidate = response.get("usageMetadata")
-        raw = candidate if isinstance(candidate, dict) else {}
-
-    if provider == "openai":
-        input_tokens = _count(raw.get("input_tokens") or raw.get("prompt_tokens"))
-        output_tokens = _count(raw.get("output_tokens") or raw.get("completion_tokens"))
-        total_tokens = _count(raw.get("total_tokens"))
-    else:
-        input_tokens = _count(raw.get("promptTokenCount"))
-        output_tokens = _count(raw.get("candidatesTokenCount"))
-        total_tokens = _count(raw.get("totalTokenCount"))
+    _provider(provider)
+    candidate = response.get("usage") if isinstance(response, dict) else None
+    raw: dict[str, Any] = candidate if isinstance(candidate, dict) else {}
+    input_tokens = _count(raw.get("input_tokens") or raw.get("prompt_tokens"))
+    output_tokens = _count(raw.get("output_tokens") or raw.get("completion_tokens"))
+    total_tokens = _count(raw.get("total_tokens"))
     if not total_tokens:
         total_tokens = input_tokens + output_tokens
     return {

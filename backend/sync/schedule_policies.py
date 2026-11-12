@@ -18,18 +18,30 @@ provider names, so the coupling guard finds nothing in this module.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from backend.athlete.profile import ProfileService
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.sync.garmin_change_check import GarminChangeCheck
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.state import SyncStateRepository
 
 ScheduleTrigger = Literal["daily", "startup"]
+
+
+class ProviderSchedulePolicy(Protocol):
+    """Decides whether a provider is scheduled and what its refresh payload is."""
+
+    def configured(self) -> bool:
+        """Return whether the provider has the settings it needs."""
+
+    def blocked(self) -> bool:
+        """Return whether a scheduled refresh must wait."""
+
+    def refresh_payload(self, trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
+        """Return the job payload for a scheduled refresh."""
 
 
 class WeatherSchedulePolicy:
@@ -156,12 +168,18 @@ def build_schedule_policies(
     calendar_enabled: bool,
     garmin_automatic_sync_days: int,
     garmin_resync_gate: ProviderResyncGate | None = None,
+    garmin_change_check: GarminChangeCheck | None = None,
+    weather_refresh_due: Callable[[], bool] | None = None,
+    wahoo: WahooSchedulePolicy | None = None,
 ) -> dict[str, ProviderSchedulePolicy]:
-    """Return the built-in policies keyed by descriptor provider id."""
-    return {
-        WEATHER_ID: WeatherSchedulePolicy(profile),
+    """Return the provider policies keyed by provider id; Wahoo only when given."""
+    policies: dict[str, ProviderSchedulePolicy] = {
+        WEATHER_ID: WeatherSchedulePolicy(profile, weather_refresh_due),
         CALENDAR_ID: CalendarSchedulePolicy(enabled=calendar_enabled),
         GARMIN_ID: GarminSchedulePolicy(
-            garmin, garmin_automatic_sync_days, garmin_resync_gate
+            garmin, garmin_automatic_sync_days, garmin_resync_gate, garmin_change_check
         ),
     }
+    if wahoo is not None:
+        policies[WAHOO_ID] = wahoo
+    return policies

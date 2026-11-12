@@ -15,6 +15,7 @@ import hashlib
 import json
 import threading
 import unittest
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -29,6 +30,7 @@ from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_models import REMOTE_COACH_WRITE_TOOLS
 from backend.coach.proposal_read import CoachProposalConfirmationService
 from backend.coach.sync_tools import CoachSyncToolService
+from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
@@ -86,6 +88,7 @@ class CardFlow:
     preparation: CoachStructuredToolPreparationService
     inline_refreshes: dict[str, Any]
     queue: SyncJobQueueService
+    tools: CoachStructuredToolExecutionService
 
 
 def wire_card_flow(case: unittest.TestCase) -> CardFlow:
@@ -206,6 +209,16 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
         preparation=preparation,
         inline_refreshes=inline_refreshes,
         queue=queue,
+        tools=CoachStructuredToolExecutionService(
+            database,
+            threading.RLock(),
+            KeyValueRepository(NOW.isoformat),
+            mock.Mock(),
+            mock.Mock(),
+            creation,
+            dispatcher,
+            nullcontext(),
+        ),
     )
 
 
@@ -271,6 +284,29 @@ def create_card(flow: CardFlow, call: dict[str, Any]) -> dict[str, Any]:
         client_turn_id=TURN,
         session_csrf_hash=SESSION,
     )["proposed_action"]
+
+
+def run_in_turn(flow: CardFlow, call: dict[str, Any]) -> dict[str, Any]:
+    """Run the call as the Coach turn does, after the write gate allowed it."""
+    return flow.tools.execute(
+        {"name": call["tool"], "arguments": call["arguments"]},
+        action=call["action"],
+        context={},
+        conversation_id=CONVERSATION,
+        client_turn_id=TURN,
+        session_csrf_hash=SESSION,
+        sync_job_ids=[],
+        cancel_event=None,
+    )
+
+
+def card_count(flow: CardFlow) -> int:
+    with flow.database.reader() as db:
+        return int(
+            db.execute("SELECT COUNT(*) AS n FROM coach_action_proposals").fetchone()[
+                "n"
+            ]
+        )
 
 
 def approve_card(flow: CardFlow, card: dict[str, Any]) -> dict[str, Any]:
@@ -341,6 +377,50 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         self.assertEqual(sorted(ids), sorted(e["library_workout_id"] for e in queued))
         self.assertNotIn(OTHER_UNIT, {e["library_workout_id"] for e in queued})
 
+    def test_replacing_a_ride_by_a_run_and_sending_it_removes_the_rides_event(
+        self,
+    ) -> None:
+        # The athlete's Friday (#2373): the Coach replaced the indoor ride by a
+        # run and sent the run; the ride's Intervals.icu event must go too, or
+        # Intervals.icu keeps the ride in Garmin.
+        ride, _day, _sport = WEEK[4]
+        with self.flow.database.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload=? WHERE local_id=?",
+                (
+                    json.dumps(
+                        {
+                            "name": "Lockeres Indoor-Rad",
+                            "date": "2026-11-13",
+                            "type": "VirtualRide",
+                            "remote_event_id": "evt-ride",
+                            "archived": True,
+                            "local_deleted": True,
+                        },
+                        sort_keys=True,
+                    ),
+                    ride,
+                ),
+            )
+        run = OTHER_UNIT
+        # As the created scope prepares it: the turn's unit carries its token.
+        call = self.coach_tool_call(
+            [run], scope=["intervals_sync", f"planned_unit:{run}"]
+        )
+        call["action"]["request"]["sync_scope"] = "created"
+        call["action"]["_created_sync_entry_ids"] = [run]
+
+        for name, send in (
+            ("card", lambda: approve_card(self.flow, create_card(self.flow, call))),
+            ("named", lambda: run_in_turn(self.flow, call)),
+        ):
+            with self.subTest(name):
+                send()
+                queued = json.loads(self.plan_push_jobs()[-1]["payload"])["entries"]
+                self.assertEqual(
+                    [run, ride], [entry["library_workout_id"] for entry in queued]
+                )
+
     def test_unit_tokens_from_the_model_never_widen_the_card(self) -> None:
         call = self.coach_tool_call(
             [WEEK[0][0]],
@@ -356,6 +436,23 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
             row = db.execute("SELECT payload FROM coach_action_proposals").fetchone()
         scope = json.loads(row["payload"])["intent"]["authorization_scope"]
         self.assertNotIn(f"planned_unit:{OTHER_UNIT}", scope)
+
+    def test_without_a_card_the_request_scope_bounds_the_units(self) -> None:
+        """No card shows the model's selection (#2342), so its own unit tokens
+        bound what a card-free sync may push."""
+        ids = [local_id for local_id, _, _ in WEEK]
+        call = self.coach_tool_call(
+            ids, scope=["intervals_sync", f"planned_unit:{WEEK[0][0]}"]
+        )
+
+        with self.assertRaises(AppError) as caught:
+            run_in_turn(self.flow, call)
+
+        self.assertEqual(
+            (403, "intent_scope_denied"),
+            (caught.exception.status, caught.exception.reason),
+        )
+        self.assertEqual([], self.plan_push_jobs())
 
     def test_card_creation_rejects_a_unit_that_does_not_exist(self) -> None:
         call = self.coach_tool_call([WEEK[0][0]], scope=["intervals_sync"])
@@ -387,13 +484,18 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         self.assertEqual([], self.plan_push_jobs())
 
 
-def _plan_sync_call(flow: CardFlow) -> dict[str, Any]:
+def _plan_sync_call(flow: CardFlow, *tokens: str) -> dict[str, Any]:
     return prepared_call(
         flow,
         "start_intervals_plan_sync",
         {"entries": unit_entries(flow, [WEEK[1][0]]), "reason": "Lauf"},
-        plan_sync_request(["intervals_sync"]),
+        plan_sync_request(["intervals_sync", *tokens]),
     )
+
+
+def _named_plan_sync_call(flow: CardFlow) -> dict[str, Any]:
+    """Without a card the model's own unit token authorizes the unit (#2342)."""
+    return _plan_sync_call(flow, f"planned_unit:{WEEK[1][0]}")
 
 
 def _garmin_call(flow: CardFlow) -> dict[str, Any]:
@@ -484,6 +586,44 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
                     [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
                 )
                 self.assertTrue(json.loads(jobs[0]["payload"])[bound])
+
+    def test_a_named_sync_queues_the_same_job_without_a_card(self) -> None:
+        """The athlete's named sync is the approval (#2342); the job binds the
+        same stored state an approved card would."""
+        for tool, (build, provider, job_type, bound) in CARD_KINDS.items():
+            with self.subTest(tool=tool):
+                self.flow = wire_card_flow(self)
+                if tool == "start_intervals_plan_sync":
+                    build = _named_plan_sync_call
+
+                result = run_in_turn(self.flow, build(self.flow))
+
+                self.assertEqual("queued", result["status"], result)
+                self.assertEqual(0, card_count(self.flow))
+                jobs = queued_jobs(self.flow)
+                self.assertEqual(
+                    [(provider, job_type, "coach")],
+                    [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
+                )
+                self.assertTrue(json.loads(jobs[0]["payload"])[bound])
+
+    def test_an_explicit_garmin_removal_still_asks_on_a_card(self) -> None:
+        call = prepared_call(
+            self.flow,
+            "push_strength_to_garmin",
+            {"entries": [{"local_id": STRENGTH_IDS[0], "remove": True}]},
+            request_for(
+                "garmin",
+                ["garmin_sync", f"planned_unit:{STRENGTH_IDS[0]}"],
+                sync_scope=SELECTED,
+            ),
+        )
+
+        result = run_in_turn(self.flow, call)
+
+        self.assertEqual("approval_required", result["status"])
+        self.assertEqual(1, card_count(self.flow))
+        self.assertEqual([], queued_jobs(self.flow))
 
     def test_the_garmin_card_binds_each_selected_unit_to_its_payload_hash(self) -> None:
         card = create_card(self.flow, _garmin_call(self.flow))
@@ -662,6 +802,50 @@ class RetryByJobProviderTests(unittest.TestCase):
                     )
                     self.assertEqual([job["id"]], jobs)
                 self.assertEqual("queued", job_status(self.flow, job["id"]))
+
+    def test_a_named_push_retry_runs_without_a_card_unless_it_removes_from_garmin(
+        self,
+    ) -> None:
+        # A retry is a named sync (#2342); an explicit Garmin removal keeps its
+        # card, the orphan cleanup a card-free send added does not.
+        orphan = "00000000-0000-4000-8000-0000000000ee"
+        for provider, removed, expected in (
+            ("intervals", None, "queued"),
+            ("garmin", None, "queued"),
+            ("garmin", STRENGTH_IDS[0], "approval_required"),
+            ("garmin", orphan, "queued"),
+        ):
+            with self.subTest(provider=provider, removed=removed):
+                self.flow = wire_card_flow(self)
+                job = failed_job(self.flow, provider, "plan_push")
+                if removed:
+                    payload = json.loads(queued_jobs(self.flow)[0]["payload"])
+                    payload["entries"][0] = {
+                        "library_workout_id": removed,
+                        "remove": True,
+                    }
+                    with self.flow.database.unit_of_work() as db:
+                        db.execute(
+                            "UPDATE sync_jobs SET payload=? WHERE id=?",
+                            (json.dumps(payload), job["id"]),
+                        )
+                        # The pushed workout of a unit that no longer exists.
+                        db.execute(
+                            "INSERT INTO remote_links (entity_kind, local_id, provider,"
+                            " remote_id, sync_state) VALUES ('planned_unit', ?,"
+                            " 'garmin', 'garmin-orphan', 'synced')",
+                            (orphan,),
+                        )
+                call = retry_call(
+                    self.flow, job, target=provider, scope=f"{provider}_sync", push=True
+                )
+
+                result = run_in_turn(self.flow, call)
+
+                self.assertEqual(expected, result["status"], result)
+                self.assertEqual(
+                    int(expected == "approval_required"), card_count(self.flow)
+                )
 
     def test_a_push_retry_without_the_job_providers_sync_scope_is_denied(self) -> None:
         for provider, job_type, label in RETRIED_JOBS:

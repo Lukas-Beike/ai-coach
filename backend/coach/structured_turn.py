@@ -79,8 +79,14 @@ class CoachStructuredTurnService:
         attachments, has_prior_openai_attachments, within_attachment_window = (
             self._deps.attachments.load_for_receipt(receipt)
         )
-        retain_openai_attachment_context = bool(attachments or within_attachment_window)
-        if attachments and not receipt.get("openai_conversation_rotated"):
+        retain_openai_attachment_context = bool(
+            attachments or within_attachment_window
+        ) and self._deps.payload.keeps_remote_conversation(model)
+        if (
+            retain_openai_attachment_context
+            and attachments
+            and not receipt.get("openai_conversation_rotated")
+        ):
             # Earlier image pixels stay in the old conversation; a fresh one keeps
             # the retained context bounded. Resumes skip this via the stored flag.
             conversation_id = self._deps.conversations.rotate(

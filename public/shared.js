@@ -115,16 +115,24 @@ function ensureRouteData(route = state.route) {
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
   refreshOpenProviderChecks();
-  if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
+  if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) {
+    void renderCyclingPowerProfile();
+    // LT1 power and pace read the zones once; their arrival redraws the current values (#2262).
+    if (!zoneDataLoad) void ensureZoneData().then(() => {
+      const performance = state.data?.performance;
+      if (performance) renderCurrentPerformance(performance.metrics || {}, performance.history, performanceDataStatus(performance));
+    });
+  }
 }
 
-// Connection and equipment cards start collapsed on every visit to their segment (#2301, #2302),
+// Connection and equipment cards and the profile sections start collapsed on every visit to their
+// segment (#2301, #2302, #2262),
 // but stay as they are when the shown segment is navigated to again (re-login, active segment link).
 let shownMoreSegment = null;
 
 function renderActiveRoute(mainRoute, panelRoute) {
   const moreSegment = mainRoute === "more" ? AppRouter.moreSegmentFromRoute(panelRoute) : null;
-  if (moreSegment && moreSegment !== shownMoreSegment) document.querySelectorAll(".connection-card[open], #equipmentItems details[open]").forEach((card) => { card.open = false; });
+  if (moreSegment && moreSegment !== shownMoreSegment) document.querySelectorAll(".connection-card[open], #equipmentItems details[open], #profilePanel details.profile-section[open]").forEach((card) => { card.open = false; });
   shownMoreSegment = moreSegment;
   document.dispatchEvent(new CustomEvent("app:route-rendered", { detail: { route: mainRoute } }));
   AppNutrition.handleRoute(panelRoute);
@@ -316,13 +324,17 @@ function renderStatus(data) {
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   const connections = { href: "#more/connections", label: "Anbindungen" };
+  const modelKeyMissing = (provider, action) => provider === "anthropic"
+    ? { level: "critical", title: "Anthropic-API-Schlüssel fehlt", action: { ...action, connection: "anthropic" } }
+    : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...action, connection: "openai" } };
   // The OpenAI key is read from the server environment only. Intervals.icu only
   // receives workouts, so its missing key is the slimmest line; more important
   // notices replace it. The Mehr tab shows its problems on the cards themselves.
+  renderZoneSummary(data.threshold_warnings);
   updateStatusSources({
     loading: null,
     load_failure: null,
-    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...connections, connection: "openai" } },
+    openai: configured.coach ?? configured.openai ? null : modelKeyMissing(data.model?.provider, connections),
     coach_error: error && activePanel !== "settingsPanel" ? { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: error } : null,
     thresholds: thresholdStatusItem(data.threshold_warnings),
     intervals_key: configured.intervals || intervalsHintDismissed() ? null : {

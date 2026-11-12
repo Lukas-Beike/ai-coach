@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 # A failure only the athlete can fix; no automatic retry is scheduled for it.
 ATHLETE_ACTION_ERROR_CODES: Final = frozenset({"auth_required"})
@@ -47,18 +47,16 @@ class ProviderRetryHold:
         now: Callable[[], datetime],
         *,
         credential_keys: Mapping[str, tuple[str, ...]] | None = None,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._database_manager = database_manager
         self._now = now
         self._credential_keys = credential_keys or {}
-        self._registry = registry
 
     def held(self, provider: str) -> bool:
         """Return whether the provider's latest failed refresh holds the schedule."""
         areas = [
             area.area
-            for provider_id, area in self._registry.freshness_areas()
+            for provider_id, area in DEFAULT_PROVIDER_REGISTRY.freshness_areas()
             if provider_id == provider
         ]
         if not areas:

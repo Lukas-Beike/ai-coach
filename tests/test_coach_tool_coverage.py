@@ -483,6 +483,175 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(set(result["context"]), {"recovery"})
         self.assertEqual(self.athlete_state(), before)
 
+    def test_planned_units_come_only_from_the_library_templates(self):
+        # Athlete rule (#2379): no ad-hoc unit; a variant only scales load and
+        # the receipt says so; an older unit without a template still moves.
+        press = {"name": "Bankdrücken", "sets": 3, "reps": 8, "kg": 50}
+        row = {"name": "Rudern", "sets": 3, "reps": 10, "kg": 40}
+        upper = {
+            "date": "2026-09-09",
+            "name": "Oberkörper kurz",
+            "sport": "WeightTraining",
+            "description": "Bankdrücken, Rudern",
+            "duration_minutes": 30,
+            "target": "AUTO",
+            "rationale": "Synthetic training goal",
+            "session_focus": "upper",
+            "strength_intensity": "moderate",
+            "strength_structure": [press, row],
+        }
+        period = {"start": "2026-09-09", "end": "2026-09-10"}
+
+        def plan(workout):
+            return lambda _: self.call(
+                "apply_training_patch",
+                {
+                    "changes": [],
+                    "workouts": [workout],
+                    "expected_revision": self.state()["planning_revision"],
+                },
+                ["local_plan"],
+                period=period,
+            )
+
+        adhoc, _ = self.turn(
+            "Plane mir morgen Oberkörper kurz.",
+            [plan(upper), {"output_text": "Keine Vorlage."}],
+        )
+        self.assertEqual(adhoc["status"], "failed")
+        failure = adhoc["command_receipts"][0]["result"]
+        self.assertEqual(
+            [item["code"] for item in failure["findings"]], ["template_missing"]
+        )
+        self.assertIn("manage_training_templates", failure["findings"][0]["message"])
+        self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
+
+        # No fitting template: the Coach creates it first, then plans from it.
+        self.run_tool(
+            "manage_training_templates",
+            {
+                "templates": [
+                    {
+                        "action": "create",
+                        **{
+                            k: v
+                            for k, v in upper.items()
+                            if k not in {"date", "rationale"}
+                        },
+                    }
+                ]
+            },
+            ["local_template"],
+            message="Ja, lege die Vorlage Oberkörper kurz an.",
+        )
+        template = next(
+            item
+            for item in server.PLANNING_DATA.workout_library().list()
+            if item["name"] == "Oberkörper kurz"
+        )
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [],
+                "workouts": [{**upper, "template_id": template["id"]}],
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period=period,
+        )
+        planned = server.PLANNING_DATA.planned_unit().list()[0]
+        self.assertEqual(planned["template_id"], template["id"])
+        self.assertEqual(
+            [item["name"] for item in planned["strength_structure"]],
+            ["Bankdrücken", "Rudern"],
+        )
+
+        # A lighter variant keeps the exercises and names the scaling.
+        lighter = {
+            **upper,
+            "date": "2026-09-10",
+            "template_id": template["id"],
+            "strength_structure": [{**press, "kg": 40}, row],
+        }
+        variant = self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [],
+                "workouts": [lighter],
+                "expected_revision": self.state()["planning_revision"],
+            },
+            ["local_plan"],
+            period=period,
+        )
+        self.assertEqual(
+            [note["code"] for note in variant["plan_check_notes"]], ["template_scaled"]
+        )
+        swapped, _ = self.turn(
+            "Plane die Variante mit Klimmzügen.",
+            [
+                plan(
+                    {
+                        **lighter,
+                        "strength_structure": [press, {**row, "name": "Klimmzug"}],
+                    }
+                ),
+                {"output_text": "Andere Übungen."},
+            ],
+        )
+        self.assertEqual(
+            [
+                item["code"]
+                for item in swapped["command_receipts"][0]["result"]["findings"]
+            ],
+            ["template_mismatch"],
+        )
+
+        # An older unit without a template still moves.
+        # Stored before the rule, as the planning service does without a template.
+        older = server.PLANNING_DATA.planned_unit().create(
+            {
+                "date": "2026-09-11",
+                "name": "Alter Lauf",
+                "sport": "Run",
+                "description": "- 40m Z2 HR Older free run",
+                "duration_minutes": 40,
+                "target": "HR",
+                "session_focus": "easy",
+                "hr_cap": effective_caps(None)["easy"],
+            }
+        )
+        self.assertNotIn(
+            "template_id",
+            next(
+                u
+                for u in server.PLANNING_DATA.planned_unit().list()
+                if u["id"] == older["id"]
+            ),
+        )
+        state = self.state()
+        self.run_tool(
+            "apply_training_patch",
+            {
+                "changes": [
+                    {
+                        "local_id": older["id"],
+                        "action": "update",
+                        "date": "2026-09-12",
+                        # A move names no template; null keeps the stored link.
+                        "template_id": None,
+                        "expected_payload_hash": next(
+                            u["expected_payload_hash"]
+                            for u in state["planned_units"]
+                            if u["local_id"] == older["id"]
+                        ),
+                    }
+                ],
+                "expected_revision": state["planning_revision"],
+            },
+            ["planned_unit:" + older["id"]],
+            period={"start": "2026-09-11", "end": "2026-09-12"},
+        )
+
     @covers(
         "manage_training_templates:create",
         "manage_training_templates:update",
@@ -553,10 +722,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             templates = server.PLANNING_DATA.workout_library().list(
                 include_archived=True
             )
+            template = [item for item in templates if item["id"] == local_id]
             if action == "delete":
-                self.assertEqual(templates, [])
+                self.assertEqual(template, [])
             else:
-                self.assertEqual(templates[0]["archived"], action == "archive")
+                self.assertEqual(template[0]["archived"], action == "archive")
             self.assertEqual(self.state()["planned_units"], planned_before)
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
@@ -980,8 +1150,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Ja, diese vorgeschlagene Anpassung übernehmen.",
         )
         self.assertEqual(applied["updated"], 1)
-        self.assertLess(
-            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 90
+        # A strength unit keeps its exercises and weights and gets the light
+        # intensity (athlete decision on #2379); the 30 available minutes still
+        # shorten it.
+        stored = server.PLANNING_DATA.planned_unit().list()[0]
+        self.assertEqual(
+            (stored["duration_minutes"], stored["strength_intensity"]), (30, "light")
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
@@ -1633,7 +1807,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_nutrition"],
             message="Ja, speichere diese Mahlzeitvorlage.",
-        )["template"]
+        )
+        # Saved directly with a receipt, no approval card (#2339).
+        self.assertNotIn("proposed_action", template)
+        template = template["template"]
         read = self.run_tool("read_nutrition", {})
         self.assertEqual(read["templates"][0]["id"], template["id"])
         self.assertEqual(read["entry_count"], 0)
@@ -1674,7 +1851,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             },
             ["local_nutrition_product"],
             message="Die angezeigten Angaben stimmen; speichere das Produkt lokal.",
-        )["product"]
+        )
+        # Saved directly with a receipt, no approval card (#2339).
+        self.assertNotIn("proposed_action", saved)
+        self.assertEqual(
+            server.COACH_PROPOSALS.read_service().current("synthetic-session"), []
+        )
+        saved = saved["product"]
 
         self.assertEqual(saved["name"], "Synthetic cocoa whey")
         self.assertEqual(saved["barcode"], "4006381333931")
@@ -1885,22 +2068,44 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "delete_nutrition_entry:success",
     )
     def test_nutrition_entries_can_be_saved_read_and_deleted(self):
-        saved = self.run_tool(
-            "save_nutrition_entry",
-            {
-                "payload": {
-                    "meal_date": "2026-09-07",
-                    "meal_type": "lunch",
-                    "description": "Synthetic pasta",
-                    "kcal": 620,
-                    "carbs_g": 80,
-                }
-            },
-            ["local_nutrition"],
-            message="Ich habe Pasta gegessen; speichere das lokal.",
+        pasta = {
+            "payload": {
+                "meal_date": "2026-09-07",
+                "meal_type": "lunch",
+                "description": "Synthetic pasta",
+                "kcal": 620,
+                "carbs_g": 80,
+            }
+        }
+        seen = []
+
+        def answer(payload):
+            seen.extend(
+                json.loads(item["output"])
+                for item in payload["input"]
+                if item.get("type") == "function_call_output"
+            )
+            return {"output_text": "Synthetischer Ergebnistext."}
+
+        # The model repeats the identical call: one entry, and the second
+        # output says it was a replay (#2340).
+        receipt, _ = self.turn(
+            "Ich habe Pasta gegessen; speichere das lokal.",
+            [
+                lambda _: self.call("save_nutrition_entry", pasta, ["local_nutrition"]),
+                lambda _: self.call("save_nutrition_entry", pasta, ["local_nutrition"]),
+                answer,
+            ],
+        )
+        self.assertEqual(len(receipt["command_receipts"]), 1)
+        saved = receipt["command_receipts"][0]["result"]
+        self.assertEqual(
+            [(output.get("replayed"), output["entry"]["id"]) for output in seen],
+            [(None, saved["entry"]["id"]), (True, saved["entry"]["id"])],
         )
         entry_id = saved["entry"]["id"]
         read = self.run_tool("read_nutrition", {"date": "2026-09-07"})
+        self.assertEqual(read["entry_count"], 1)
         self.assertEqual(read["total_kcal"], 620)
         self.assertEqual(read["entries"][0]["id"], entry_id)
         deleted = self.run_tool(
@@ -2214,7 +2419,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
         self.assertEqual(proposals, [])
 
-    def test_all_pending_approval_does_not_expand_to_units_added_after_preview(self):
+    def test_all_pending_sync_binds_the_units_pending_at_the_request(self):
+        # A named sync queues without a card (#2342); it binds the units pending
+        # when the athlete asked, as the card did when it was created.
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [self.workout()]
         )[0]
@@ -2230,32 +2437,19 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     remote_write=True,
                     sync_scope="all_pending",
                 ),
-                {"output_text": "Prüfe die Freigabe."},
+                {"output_text": "Synchronisierung beauftragt."},
             ],
         )
-        proposal = receipt["command_receipts"][0]["result"]["proposed_action"]
-        self.assertTrue(
-            any(
-                first["id"] in value
-                for value in proposal["object_ids"].get("targets", [])
-            )
-        )
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-11", "Added after approval preview")]
-        )
-        confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
-            proposal["id"], "synthetic-session"
-        )
-
-        with self.assertRaises(AppError) as rejected:
-            server.COACH_PROPOSALS.execution_service().execute(
-                confirmation["action_token"],
-                "synthetic-session",
-                confirmation["proposed_action"]["payload_hash"],
-            )
-
-        self.assertEqual(rejected.exception.reason, "intent_scope_denied")
-        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
+        self.assertEqual(receipt["proposed_actions"], [])
+        self.assertEqual(receipt["command_receipts"][0]["result"]["status"], "queued")
+        later = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout("2026-09-11", "Added after the request")]
+        )[0]
+        jobs = server.SYNC_JOB_QUEUE.service().list()
+        self.assertEqual(len(jobs), 1)
+        queued = json.dumps(jobs[0], default=str)
+        self.assertIn(first["id"], queued)
+        self.assertNotIn(later["id"], queued)
 
     def test_friday_correction_retry_and_sync_keep_sunday_unchanged(self):
         units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -2270,15 +2464,21 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             u for u in initial["planned_units"] if u["local_id"] == sunday
         )
         period = {"start": "2026-09-11", "end": "2026-09-13"}
-        change = {
-            "local_id": friday,
-            "action": "update",
+        easy_run = {
             "sport": "Run",
             "name": "Synthetic easy 8 km run",
             "description": "- 50m Z1 HR Synthetic very easy run",
             "duration_minutes": 50,
             "session_focus": "easy",
             "hr_cap": effective_caps(None)["easy"],
+        }
+        # The Coach switches the unit to a library template (#2379).
+        template = server.PLANNING_DATA.workout_library().create_template(easy_run)
+        change = {
+            "local_id": friday,
+            "action": "update",
+            **easy_run,
+            "template_id": template["id"],
             "expected_payload_hash": next(
                 u["expected_payload_hash"]
                 for u in initial["planned_units"]
@@ -2537,6 +2737,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )[0]
         for field, sport in (("sport", "Run"), ("type", "Swim")):
             state = self.state()
+            template = server.PLANNING_DATA.workout_library().create_template(
+                {
+                    "sport": sport,
+                    "name": f"Synthetic {sport}",
+                    "description": self.workout(sport="Ride")["description"],
+                    "duration_minutes": 30,
+                }
+            )
             self.run_tool(
                 "apply_training_patch",
                 {
@@ -2545,6 +2753,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                             "local_id": unit["id"],
                             "action": "update",
                             field: sport,
+                            "template_id": template["id"],
                             # A changed sport drops the focus; Run needs a new one.
                             **(
                                 {
@@ -2788,20 +2997,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     ],
                 )
                 self.auto_approve_remote_proposals = previous_auto_approval
-                # A selection with a malformed hash is refused when the card is
-                # created, so it never reaches approval.
-                if kwargs.get("remote_write") and name != "start_intervals_plan_sync":
-                    self.assertEqual(
-                        result["command_receipts"][0]["result"]["status"],
-                        "approval_required",
-                    )
-                    after = self.athlete_state()
-                    before.pop("coach_action_proposals")
-                    after.pop("coach_action_proposals")
-                    self.assertEqual(after, before)
-                else:
-                    self.assertEqual(result["status"], "failed")
-                    self.assertEqual(self.athlete_state(), before)
+                # Remote writes run without a card (#2342), so an invalid one
+                # fails like any other call and writes nothing.
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(self.athlete_state(), before)
 
 
 if __name__ == "__main__":

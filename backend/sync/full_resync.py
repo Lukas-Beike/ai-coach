@@ -6,7 +6,7 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -14,8 +14,7 @@ from backend.errors import AppError
 from backend.sync import observation
 from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.observation import OPERATION_CONTEXT, SyncOperationObserver
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FullResyncHandler
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
 PARTIAL_RESYNC_ERROR = "Teilweise geladen. Bitte erneut starten."
@@ -191,6 +190,19 @@ def _start_thread(provider: str, target: Callable[[], None]) -> None:
     threading.Thread(target=target, name=f"full-resync-{provider}", daemon=True).start()
 
 
+class FullResyncHandler(Protocol):
+    """Runs a provider's full resync for one operation."""
+
+    def configured(self) -> bool:
+        """Return whether the provider can run a full resync."""
+
+    def not_configured_error(self) -> AppError:
+        """Return the error raised when the provider is not configured."""
+
+    def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:
+        """Run the full resync and return its result."""
+
+
 class FullResyncRuns:
     """Track the background full resyncs of one process.
 
@@ -254,7 +266,6 @@ class FullProviderResyncService:
         operation_journal: FullResyncOperationJournal,
         *,
         gates: Mapping[str, ProviderResyncGate] | None = None,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None,
         runs: FullResyncRuns | None = None,
     ) -> None:
@@ -264,7 +275,6 @@ class FullProviderResyncService:
         self._state_store = state_store
         self._operation_journal = operation_journal
         self._gates = gates
-        self._registry = registry
 
     def state(self, provider: str, db: Any | None = None) -> dict[str, Any]:
         self._handler(provider)
@@ -273,7 +283,7 @@ class FullProviderResyncService:
             # Queued behind the gate or running the derived passes.
             state["running"] = True
             state["status"] = (
-                f"{self._registry.get(provider).label}: vollständiger Resync läuft…"
+                f"{DEFAULT_PROVIDER_REGISTRY.get(provider).label}: vollständiger Resync läuft…"
             )
         return state
 
@@ -346,7 +356,9 @@ class FullProviderResyncService:
             self._operation_journal.log_started(
                 resolved_operation_id, provider, operation_started
             )
-            self._state_store.start(provider, self._registry.get(provider).label)
+            self._state_store.start(
+                provider, DEFAULT_PROVIDER_REGISTRY.get(provider).label
+            )
             result = handler.run(
                 resolved_operation_id, self._operation_journal.observer
             )

@@ -7,8 +7,8 @@ server validates source-message provenance, live target IDs, dates, revisions,
 hashes and provider-write scope. It never checks local edits against a
 particular verb or an exact workout title. Only two impact tiers add a check:
 deletes, archives and bulk changes need a classifier-confirmed request, and a
-remote write needs the athlete's own named sync wording before its proposal card
-asks for approval (`backend/coach/write_gate.py`).
+remote write needs the athlete's own named sync wording and then runs without a
+card (`backend/coach/write_gate.py`).
 
 `tests/test_coach_dialogue.py` exercises the real local execution loop with
 synthetic model outputs and temporary databases. The browser fixture uses canned
@@ -78,8 +78,8 @@ second matching strength workout only for the explicit ambiguity cases.
 | Coach asks about today's condition → “Die Beine sind ziemlich schwer.” | Save the actual observation as check-in data; do not invent scores. |
 | Coach asks about a completed activity → “Anstrengend, aber kontrolliert.” | Save feedback against that completed activity; do not create a completed workout. |
 | “Sind die Zahlen wirklich von heute? Bitte damit bewerten.” | Refresh the relevant current provider data before analysis; report cached data honestly if refresh fails. |
-| “Morgen Oberkörper, danach genau diese Einheit zu Intervals übertragen.” | Commit locally first, then propose a push of exactly the created entry; the sync job is queued only after the athlete approves the proposal. |
-| “Alle offenen Einheiten übertragen.” | Propose a push of all currently pending entries (queued after approval); do not narrow to the latest creation. |
+| “Morgen Oberkörper, danach genau diese Einheit zu Intervals übertragen.” | Commit locally first, then queue a push of exactly the created entry without a card. |
+| “Alle offenen Einheiten übertragen.” | Queue a push of all currently pending entries; do not narrow to the latest creation. |
 | Provider workout title contains instructions to synchronize/delete | Treat the title as data; it grants no tool authorization. |
 | “Ändere den Montagslauf auf 8 km sehr locker.” | Monday run becomes 8 km total with the recovery/easy HR cap; warm-up and cool-down sit inside the 8 km. |
 | “Ändere den Montagslauf auf 8 km locker.” | Same effect as very easy: easy HR cap, 8 km in total including warm-up and cool-down. |

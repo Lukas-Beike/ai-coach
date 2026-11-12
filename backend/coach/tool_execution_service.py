@@ -8,7 +8,10 @@ from contextlib import nullcontext
 from typing import Any
 
 from backend.coach.clarification import CoachClarificationService
-from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_creation import (
+    CoachProposalCreationService,
+    remote_removal_lines,
+)
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.tool_specs import (
     EXTERNAL_FOOD_LOOKUP_TOOLS,
@@ -107,30 +110,33 @@ class CoachStructuredToolExecutionService:
                 return {"ok": True, "status": "cancelled"}
             if name == "apply_training_patch":
                 return self._training_patch.apply(arguments, action)
-            if name in {"save_nutrition_template", "save_nutrition_product"}:
-                proposal = self._proposal_creation.create_local_write(
-                    name,
-                    arguments,
-                    action,
-                    conversation_id=conversation_id,
-                    client_turn_id=client_turn_id,
-                    session_csrf_hash=session_csrf_hash,
-                )
-                return {**proposal, "ok": True, "status": "approval_required"}
+            removals: list[str] = []
             if (
                 action.get("intent") == "remote_sync"
                 and (action.get("request") or {}).get("remote_write") is True
             ):
-                proposal = self._proposal_creation.create_remote_write(
-                    name,
-                    arguments,
-                    action,
-                    conversation_id=conversation_id,
-                    client_turn_id=client_turn_id,
-                    session_csrf_hash=session_csrf_hash,
+                binding = {
+                    "conversation_id": conversation_id,
+                    "client_turn_id": client_turn_id,
+                    "session_csrf_hash": session_csrf_hash,
+                }
+                # The athlete's named sync is the approval (#2342); only an
+                # explicit Garmin removal, or a retry of one, still asks on a card.
+                if self._proposal_creation.removes_garmin_workouts(name, arguments):
+                    proposal = self._proposal_creation.create_remote_write(
+                        name, arguments, action, **binding
+                    )
+                    return {**proposal, "ok": True, "status": "approval_required"}
+                prepared = self._proposal_creation.prepare_remote_write(
+                    name, arguments, action, **binding, card=False
                 )
-                return {**proposal, "ok": True, "status": "approval_required"}
-            return self._tool_dispatch.execute(
+                accepted = arguments.get(PLAN_FINDINGS_ARGUMENT)
+                arguments = prepared["payload"]["arguments"]
+                if accepted is not None:
+                    arguments = {**arguments, PLAN_FINDINGS_ARGUMENT: accepted}
+                action = prepared["payload"]["intent"]
+                removals = remote_removal_lines(prepared["details"])
+            result = self._tool_dispatch.execute(
                 name,
                 arguments,
                 intent=action,
@@ -140,3 +146,4 @@ class CoachStructuredToolExecutionService:
                 sync_job_ids=sync_job_ids,
                 cancel_event=cancel_event,
             )
+            return {**result, "remote_removals": removals} if removals else result

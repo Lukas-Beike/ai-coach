@@ -7,7 +7,11 @@ from datetime import date
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, Mock, patch
 
-from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
+from backend.http_api.public_plan import (
+    PublicPlanDependencies,
+    PublicPlanStateService,
+    _with_template_names,
+)
 
 
 class PublicPlanStateServiceTests(unittest.TestCase):
@@ -262,6 +266,27 @@ class WorkoutProfileAttachmentTests(unittest.TestCase):
         "record_ids": {"intervals": "i7", "garmin": "g7"},
         "started_at_local": "2026-01-01T07:00:00",
     }
+
+    def test_a_planned_unit_names_its_library_template(self):
+        # The expanded unit shows "Vorlage: <name>" (#2379).
+        names = {"T1": "Oberkörper Standard"}
+        units = [
+            {"id": "u1", "template_id": "T1"},
+            {"id": "u2"},
+            {"id": "u3", "template_id": "gone"},
+        ]
+        self.assertEqual(
+            _with_template_names(names, units),
+            [
+                {
+                    "id": "u1",
+                    "template_id": "T1",
+                    "template_name": "Oberkörper Standard",
+                },
+                {"id": "u2"},
+                {"id": "u3", "template_id": "gone"},
+            ],
+        )
 
     def test_profile_attaches_by_session_id(self):
         result = PublicPlanStateService._with_profile(

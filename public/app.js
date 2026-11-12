@@ -81,15 +81,28 @@ $("#garminFullResyncButton").addEventListener("click", () => fullResync(provider
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#firstThresholdAdopt").addEventListener("click", adoptFirstThreshold);
 $("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
-$("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
-// A closed profile section cannot show its invalid field: open it first.
-$("#profileForm").addEventListener("invalid", (event) => { event.target.closest?.("details")?.setAttribute("open", ""); }, true);
+// The zone editor sits inside the profile section list but saves its own form (#2262).
+$("#profileForm").addEventListener("input", (event) => {
+  if (event.target.form !== event.currentTarget) return;
+  state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true);
+});
+// A closed profile section or a closed editor in it cannot show its invalid field: open them first.
+$("#profileForm").addEventListener("invalid", (event) => {
+  event.target.closest?.("details")?.setAttribute("open", "");
+  const editor = event.target.closest?.(".zone-editor[hidden]");
+  if (editor) editor.hidden = false;
+}, true);
 $("#modelSelect").addEventListener("change", (event) => saveSelectSetting(event, "model", "model", "Aktiv"));
 $("#serviceTierSelect").addEventListener("change", (event) => saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit"));
 $("#thinkingLevelSelect").addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level"));
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
-["#zoneSport", "#zoneMetric", "#zoneEnvironment"].forEach((selector) => $(selector).addEventListener("change", renderZoneEditor));
+$("#zoneEnvironment").addEventListener("change", renderZoneEditor);
+$("#zoneSportTabs").addEventListener("click", (event) => { const sport = event.target.closest("[data-zone-sport]")?.dataset.zoneSport; if (sport) showZoneSport(sport); });
+$("#zoneOverview").addEventListener("click", (event) => {
+  const edit = event.target.closest("[data-zone-edit]");
+  if (edit) openZoneEditor(edit);
+});
 $("#zoneFromBeginning").addEventListener("change", toggleZoneFromBeginning);
 $("#zoneForm").addEventListener("submit", saveZones);
 $("#zoneRemoveButton").addEventListener("click", removeZones);

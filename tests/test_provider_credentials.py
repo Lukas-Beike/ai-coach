@@ -38,6 +38,7 @@ from backend.provider_credentials import (
     ProviderCredentialService,
     credential_status,
     effective_config,
+    requires_password,
     stored_credentials,
 )
 
@@ -45,6 +46,7 @@ ENV = {
     "APP_PASSWORD": "synthetic-password-123",
     "OPENAI_API_KEY": "env-openai-key",
     "OPENAI_BASE_URL": "https://env.example.test/v1",
+    "ANTHROPIC_BASE_URL": "https://claude-env.example.test",
     "INTERVALS_API_KEY": "env-intervals-key",
     "INTERVALS_ATHLETE_ID": "i42",
     "GARMIN_EMAIL": "env@example.test",
@@ -163,10 +165,24 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(reader().intervals_athlete_id, "i99")
 
     def test_invalid_base_url_is_rejected_with_400_and_nothing_is_written(self):
-        for value in ("http://example.test/v1", "ftp://example.test", "https://a/../b"):
-            with self.subTest(value=value), self.assertRaises(AppError) as raised:
-                self.service.update({"openai_base_url": value})
-            self.assertEqual(raised.exception.status, 400)
+        for field, setting in (
+            ("openai_base_url", "OPENAI_BASE_URL"),
+            ("anthropic_base_url", "ANTHROPIC_BASE_URL"),
+        ):
+            for value in (
+                "http://example.test/v1",
+                "ftp://example.test",
+                "https://a/../b",
+                "https://user:pw@example.test",
+                "https://example.test/?key=x",
+            ):
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertRaises(AppError) as raised,
+                ):
+                    self.service.update({field: value})
+                self.assertEqual(raised.exception.status, 400)
+                self.assertIn(setting, raised.exception.message)
         self.assertIsNone(self._stored_row(PROVIDER_CREDENTIALS_KEY))
 
     def test_loopback_http_base_url_is_accepted_and_normalized(self):
@@ -174,6 +190,21 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(
             self.holder["config"].openai_base_url, "http://localhost:8080/v1"
         )
+        self.service.update({"anthropic_base_url": "http://127.0.0.1:8317/"})
+        self.assertEqual(
+            self.holder["config"].anthropic_base_url, "http://127.0.0.1:8317"
+        )
+
+    def test_anthropic_key_overrides_env_and_base_urls_need_the_password(self):
+        self.assertEqual(self.holder["config"].anthropic_api_key, "")
+        self.service.update({"anthropic_api_key": "db-claude-key"})
+        self.assertEqual(self.holder["config"].anthropic_api_key, "db-claude-key")
+        self.assertTrue(self.service.status()["anthropic_configured"])
+        self.service.update({"anthropic_api_key": None})
+        self.assertFalse(self.service.status()["anthropic_configured"])
+        self.assertTrue(requires_password({"anthropic_base_url": "https://x.test"}))
+        self.assertFalse(requires_password({"anthropic_base_url": None}))
+        self.assertFalse(requires_password({"anthropic_api_key": "k"}))
 
     def test_malformed_submissions_are_rejected_with_400(self):
         for values in (
@@ -190,9 +221,16 @@ class ProviderCredentialTests(unittest.TestCase):
 
     def test_stored_invalid_base_url_is_ignored_at_boot(self):
         effective = effective_config(
-            self.env_config, {"openai_base_url": "http://example.test"}
+            self.env_config,
+            {
+                "openai_base_url": "http://example.test",
+                "anthropic_base_url": "http://example.test",
+            },
         )
         self.assertEqual(effective.openai_base_url, "https://env.example.test/v1")
+        self.assertEqual(
+            effective.anthropic_base_url, "https://claude-env.example.test"
+        )
 
     def test_stored_credentials_ignore_unknown_and_non_string_entries(self):
         raw = json.dumps(
@@ -205,17 +243,28 @@ class ProviderCredentialTests(unittest.TestCase):
         self.service.update(
             {
                 "openai_api_key": "secret-openai-value",
+                "anthropic_api_key": "secret-claude-value",
                 "wahoo_client_secret": "secret-wahoo-value",
                 "garmin_email": "stored@example.test",
             }
         )
         payload = json.dumps(self.service.status())
-        for secret in ("secret-openai-value", "secret-wahoo-value", "stored@example"):
+        for secret in (
+            "secret-openai-value",
+            "secret-claude-value",
+            "secret-wahoo-value",
+            "stored@example",
+        ):
             self.assertNotIn(secret, payload)
         status = self.service.status()
         self.assertEqual(status["fields"]["openai_api_key"]["source"], "db")
         self.assertTrue(status["fields"]["openai_api_key"]["configured"])
         self.assertNotIn("value", status["fields"]["openai_api_key"])
+        self.assertNotIn("value", status["fields"]["anthropic_api_key"])
+        self.assertEqual(
+            status["fields"]["anthropic_base_url"]["value"],
+            "https://claude-env.example.test",
+        )
         self.assertEqual(status["fields"]["intervals_api_key"]["source"], "env")
         self.assertEqual(status["fields"]["intervals_athlete_id"]["value"], "i42")
 
@@ -322,14 +371,19 @@ class ProviderCredentialTests(unittest.TestCase):
     def test_environment_secret_stays_redacted_while_a_stored_value_overrides_it(
         self,
     ):
-        self.service.update({"openai_api_key": "db-openai-key"})
+        self.service.update(
+            {"openai_api_key": "db-openai-key", "anthropic_api_key": "db-claude-key"}
+        )
         redactor = Redactor(
             lambda: self.holder["config"],
             extra_secrets=lambda: config_secret_values(self.env_config),
         )
-        redacted = redactor.redact_text("keys env-openai-key and db-openai-key")
+        redacted = redactor.redact_text(
+            "keys env-openai-key, db-openai-key and db-claude-key"
+        )
         self.assertNotIn("env-openai-key", redacted)
         self.assertNotIn("db-openai-key", redacted)
+        self.assertNotIn("db-claude-key", redacted)
 
     def test_credential_kv_keys_cover_every_stored_secret_key(self):
         self.assertEqual(

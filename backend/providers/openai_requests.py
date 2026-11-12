@@ -6,10 +6,11 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote
 
 from backend.errors import COACH_ABORTED_ERROR, OPENAI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
+from backend.providers.http import endpoint
 from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 
@@ -314,32 +315,3 @@ def responses_payload(
     if stream:
         request_payload["stream"] = True
     return request_payload
-
-
-def endpoint(base_url: Any, path: str, *, default_base_url: str) -> str:
-    """Resolve an OpenAI-compatible API path against a configured base URL."""
-    base = str(base_url or default_base_url).strip() or default_base_url
-    parsed = urlparse(base)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise AppError(
-            500,
-            "OPENAI_BASE_URL muss eine gültige HTTP(S)-Basis-URL ohne Zugangsdaten oder Query-Parameter sein.",
-        )
-    normalized_path = "/" + str(path or "").lstrip("/")
-    return urlunparse(
-        (
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path.rstrip("/") + normalized_path,
-            "",
-            "",
-            "",
-        )
-    )

@@ -18,11 +18,12 @@ from urllib.parse import urlsplit, urlunsplit
 from backend.errors import AppError
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 DEFAULT_SYNC_HISTORY_EARLIEST_DATE = date(2000, 1, 1)
 _LOGGER = logging.getLogger("intervals_coach")
 
 
-def validated_openai_base_url(value: str) -> str:
+def validated_base_url(value: str, setting: str) -> str:
     """Accept HTTPS endpoints and HTTP endpoints on loopback only."""
     candidate = str(value or "").strip().rstrip("/")
     try:
@@ -44,7 +45,7 @@ def validated_openai_base_url(value: str) -> str:
             raise ValueError
     except ValueError as exc:
         raise AppError(
-            500, "OPENAI_BASE_URL muss HTTPS oder HTTP auf Loopback verwenden."
+            500, f"{setting} muss HTTPS oder HTTP auf Loopback verwenden."
         ) from exc
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
@@ -173,6 +174,8 @@ class Config:
     wahoo_client_secret: str = ""
     wahoo_redirect_uri: str = ""
     garmin_personal_api_key: str = ""
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
     # ISO date the athlete entered for the key's expiry; Garmin does not report it.
     garmin_personal_api_key_expires: str = ""
     yazio_email: str = ""
@@ -249,8 +252,9 @@ def load_config(
     return Config(
         port=_env_int(target, "PORT", 8090),
         openai_api_key=value("OPENAI_API_KEY", ""),
-        openai_base_url=validated_openai_base_url(
-            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL
+        openai_base_url=validated_base_url(
+            value("OPENAI_BASE_URL", "").strip() or DEFAULT_OPENAI_BASE_URL,
+            "OPENAI_BASE_URL",
         ),
         openai_model=_env_text(target, "OPENAI_MODEL", "gpt-6-luna"),
         intervals_api_key=value("INTERVALS_API_KEY", ""),
@@ -269,6 +273,11 @@ def load_config(
         wahoo_client_secret=value("WAHOO_CLIENT_SECRET", "").strip(),
         wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
         garmin_personal_api_key=value("GARMIN_PERSONAL_API_KEY", "").strip(),
+        anthropic_api_key=value("ANTHROPIC_API_KEY", "").strip(),
+        anthropic_base_url=validated_base_url(
+            value("ANTHROPIC_BASE_URL", "").strip() or DEFAULT_ANTHROPIC_BASE_URL,
+            "ANTHROPIC_BASE_URL",
+        ),
         garmin_personal_api_key_expires=value(
             "GARMIN_PERSONAL_API_KEY_EXPIRES", ""
         ).strip(),

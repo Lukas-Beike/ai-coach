@@ -59,3 +59,29 @@ test("@responsive session focus chip and select on a planned unit", async ({ pag
   await entry.locator("select[name='session_focus']").selectOption("");
   expect((await cleared).ok()).toBeTruthy();
 });
+
+test("@responsive a planned strength unit keeps its field labels whole at phone width", async ({ page }) => {
+  // #2370: at 412 px the selects squeezed their inline labels until "Intensität" broke inside the word.
+  await page.setViewportSize({ width: 412, height: 900 });
+  await page.goto("/#plan/overview");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await page.evaluate(() => {
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    state.data.training_calendar = [{ local_id: "pu_strength_2370", date: today, starts_at_local: `${today}T17:00:00`, name: "Oberkörper kurz", type: "WeightTraining", sport: "strength", description: "Schrägbankdrücken: 3x10 @ 25 kg", planned_duration_s: 2400, session_focus: "upper", focus_origin: "set" }];
+    renderPlanned(state.data.training_calendar);
+    for (let node = document.querySelector(".planned-entry[data-entry-key]"); node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;
+  });
+  const fields = page.locator(".planned-entry").filter({ hasText: "Oberkörper kurz" }).first().locator(".planned-focus-field");
+  await expect(fields).toHaveCount(2);
+  const broken = await fields.evaluateAll((labels) => labels.flatMap((label) => {
+    const text = label.firstChild;
+    return [...text.textContent.matchAll(/\S+/g)].filter((word) => {
+      const range = document.createRange();
+      range.setStart(text, word.index);
+      range.setEnd(text, word.index + word[0].length);
+      return range.getClientRects().length > 1;
+    }).map((word) => word[0]);
+  }));
+  expect(broken).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

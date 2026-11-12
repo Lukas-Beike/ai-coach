@@ -38,6 +38,7 @@ def _resync_service(
     garmin_service.configured.return_value = garmin_configured
     handlers = full_resync_handlers(
         garmin_service=garmin_service,
+        wahoo_service=Mock(),
         all_sync_days=-1,
     )
     return FullProviderResyncService(handlers, Mock(), Mock())

@@ -48,7 +48,7 @@ Configuration SHALL accept HTTPS OpenAI base URLs and HTTP only on loopback, rej
 - **WHEN** the Garmin Personal API key is stored in the app or read from `GARMIN_PERSONAL_API_KEY` with its `GARMIN_PERSONAL_API_KEY_EXPIRES` date
 - **THEN** the key is never returned, the ISO expiry date is the only visible value, and a stored key never takes the environment's expiry, so saving or removing the key clears its expiry
 
-Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_credentials.py::ProviderCredentialService.status`; `backend/provider_credentials.py::credential_status`; `backend/provider_credentials.py::_unpaired_expiry`. Tests: `tests/test_config.py::test_openai_base_url_requires_https_or_loopback_http`; `tests/test_provider_credentials.py::test_status_never_contains_secret_values`; `tests/test_provider_credentials.py::test_stored_value_overrides_env_and_clearing_restores_env`; `tests/test_garmin_personal_key_status.py::test_a_stored_key_never_takes_the_environment_expiry`; `tests/test_garmin_personal_key_status.py::test_saving_or_removing_the_key_clears_its_expiry`.
+Evidence: `backend/config.py::validated_base_url`; `backend/provider_credentials.py::ProviderCredentialService.status`; `backend/provider_credentials.py::credential_status`; `backend/provider_credentials.py::_unpaired_expiry`. Tests: `tests/test_config.py::test_openai_base_url_requires_https_or_loopback_http`; `tests/test_provider_credentials.py::test_status_never_contains_secret_values`; `tests/test_provider_credentials.py::test_stored_value_overrides_env_and_clearing_restores_env`; `tests/test_garmin_personal_key_status.py::test_a_stored_key_never_takes_the_environment_expiry`; `tests/test_garmin_personal_key_status.py::test_saving_or_removing_the_key_clears_its_expiry`.
 
 ### Requirement: Ordered startup and durable-work recovery
 
@@ -67,7 +67,7 @@ Startup SHALL validate secure configuration, initialize the database, recover in
 - **WHEN** the schema/bootstrap service initializes persistent state
 - **THEN** it does not independently repeat job recovery that belongs to runtime startup
 
-Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_provider_runtime_assembly.py`.
+Evidence: `server.py::main`; `backend/db/bootstrap.py::initialize_application_database`; `backend/sync/canonical_backfill.py::timed_batch`. Tests: `tests/test_server_runtime.py::test_worker_start_functions_do_not_repeat_recovery`; `tests/test_server_sync.py::test_startup_explicitly_recovers_jobs_before_starting_workers`; `tests/test_session_analysis_stage.py::test_a_long_recompute_leaves_the_writer_to_a_waiting_login`; `tests/test_server_database.py::test_database_initialization_does_not_recover_jobs`; `tests/test_startup_sync_scheduler.py::test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads`.
 
 ### Requirement: Coordinated maintenance and generation invalidation
 

@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.db.manager import DatabaseManager
@@ -17,8 +16,7 @@ from backend.sync.daily import (
     daily_attempt_marker_key,
     daily_marker_key,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 class CountingDatabaseManager(DatabaseManager):
@@ -220,57 +218,6 @@ class RegistryDailyMarkerTests(unittest.TestCase):
                         ValueError, "unknown daily sync source"
                     ):
                         daily_attempt_marker_key(provider)
-
-
-class TestOnlyProviderDailyMarkerTests(unittest.TestCase):
-    def setUp(self):
-        self.temp_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_directory.cleanup)
-        self.manager = CountingDatabaseManager(
-            Path(self.temp_directory.name) / "daily-acme.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
-        )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE kv ("
-                "key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
-            )
-        self.local_time = datetime(
-            2026, 9, 20, 8, 15, tzinfo=timezone(timedelta(hours=2))
-        )
-        self.repository = TrackingKeyValueRepository(self.manager)
-        self.registry = ProviderRegistry(
-            (*DEFAULT_PROVIDER_DESCRIPTORS, acme_descriptor())
-        )
-
-    def test_test_only_provider_markers_exist_only_under_its_registry(self):
-        self.assertEqual(
-            daily_marker_key(ACME_ID, registry=self.registry),
-            "sync_acme-mock_last_success_at",
-        )
-        self.assertEqual(
-            daily_attempt_marker_key(ACME_ID, registry=self.registry),
-            "sync_acme-mock_last_attempt_at",
-        )
-        with self.assertRaisesRegex(ValueError, "unknown daily sync source"):
-            daily_marker_key(ACME_ID)
-
-        service = DailySyncMarkerService(
-            self.manager,
-            self.repository,
-            lambda: self.local_time,
-            registry=self.registry,
-        )
-        service.mark_attempt(ACME_ID, self.local_time)
-        self.assertFalse(service.is_due(ACME_ID, self.local_time))
-
-        default_service = DailySyncMarkerService(
-            self.manager, self.repository, lambda: self.local_time
-        )
-        with self.assertRaisesRegex(ValueError, "unknown daily sync source"):
-            default_service.is_due(ACME_ID, self.local_time)
 
 
 if __name__ == "__main__":

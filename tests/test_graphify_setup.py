@@ -471,11 +471,17 @@ class WorktreePreparationTests(unittest.TestCase):
                 self.assertEqual(update.call_args.args[2], 100 + seconds)
 
     def test_all_steps_and_failure_propagation(self):
-        for results in ([0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 2, 3]):
+        for results, image in (
+            ([0, 0, 0, 0, 0], 0),
+            ([1, 0, 0, 0, 0], 0),
+            ([0, 1, 2, 3, 4], 0),
+            ([0, 0, 0, 0, 0], 5),
+        ):
             with (
-                self.subTest(results=results),
+                self.subTest(results=results, image=image),
                 patch.object(prepare.shutil, "which", return_value="npm.cmd"),
                 patch.object(prepare, "report_newer_versions") as report,
+                patch.object(prepare, "build_app_image", return_value=image) as build,
                 patch.object(
                     prepare.subprocess,
                     "run",
@@ -484,16 +490,24 @@ class WorktreePreparationTests(unittest.TestCase):
                     ],
                 ) as run,
             ):
-                self.assertEqual(prepare.main(), int(any(results)))
+                self.assertEqual(prepare.main(), int(any(results) or bool(image)))
                 report.assert_called_once()
+                build.assert_called_once()
                 calls = [call.args[0] for call in run.call_args_list]
                 self.assertEqual(calls[0], ["npm.cmd", "ci", "--ignore-scripts"])
+                self.assertEqual(calls[1][0], "npm.cmd")
                 self.assertEqual(
-                    [command[2:] for command in calls[1:3]],
+                    Path(calls[1][1]),
+                    Path(prepare.__file__).resolve().parents[1]
+                    / "node_modules/@playwright/test/cli.js",
+                )
+                self.assertEqual(calls[1][2:], ["install", "chromium"])
+                self.assertEqual(
+                    [command[2:] for command in calls[2:4]],
                     [["setup"], ["update", "--preparation"]],
                 )
-                self.assertEqual(calls[3][1:3], ["-m", "pip"])
-                self.assertIn("--require-hashes", calls[3])
+                self.assertEqual(calls[4][1:3], ["-m", "pip"])
+                self.assertIn("--require-hashes", calls[4])
                 self.assertTrue(
                     all(
                         call.kwargs["cwd"]
@@ -507,7 +521,7 @@ class WorktreePreparationTests(unittest.TestCase):
         lock = (root / "requirements-dev.txt").read_text(encoding="utf-8")
         selected = prepare.quality_requirements(lock)
         names = set(re.findall(r"(?m)^([A-Za-z0-9][\w.-]*)==", selected))
-        self.assertLessEqual({"ruff", "mypy", "librt", "pathspec"}, names)
+        self.assertLessEqual({"ruff", "mypy", "librt", "pathspec", "tzdata"}, names)
         self.assertNotIn("sqlcipher3-binary", names)
         blocks = re.split(r"(?m)^(?=[A-Za-z0-9][\w.-]*==)", selected)[1:]
         self.assertTrue(all("--hash=sha256:" in block for block in blocks))
@@ -518,6 +532,7 @@ class WorktreePreparationTests(unittest.TestCase):
         with (
             patch.object(prepare.shutil, "which", return_value=None),
             patch.object(prepare, "report_newer_versions"),
+            patch.object(prepare, "build_app_image", return_value=0),
             patch.object(
                 prepare.subprocess,
                 "run",
@@ -530,6 +545,42 @@ class WorktreePreparationTests(unittest.TestCase):
         ):
             self.assertEqual(prepare.main(), 1)
             self.assertEqual(run.call_count, 3)
+
+    def test_app_image_is_built_with_the_checkout_tag_or_skipped_without_docker(
+        self,
+    ):
+        root = Path(prepare.__file__).resolve().parents[1]
+        done = subprocess.CompletedProcess
+        for docker, results, code, built in (
+            (None, [], 0, False),
+            ("docker", [done([], 1)], 0, False),
+            ("docker", [done([], 0), done([], 2, "")], 2, False),
+            (
+                "docker",
+                [done([], 0), done([], 0, "pacecraft:e2e-1\n"), done([], 0)],
+                0,
+                True,
+            ),
+            (
+                "docker",
+                [done([], 0), done([], 0, "pacecraft:e2e-1\n"), done([], 3)],
+                3,
+                True,
+            ),
+        ):
+            with (
+                self.subTest(docker=docker, results=len(results), code=code),
+                patch.object(prepare.shutil, "which", return_value=docker),
+                patch.object(prepare.subprocess, "run", side_effect=results) as run,
+            ):
+                self.assertEqual(prepare.build_app_image(root), code)
+                calls = [call.args[0] for call in run.call_args_list]
+                self.assertEqual(len(calls), len(results))
+                if built:
+                    self.assertEqual(
+                        calls[2],
+                        ["docker", "build", "-q", "-t", "pacecraft:e2e-1", "."],
+                    )
 
     def test_version_check_reports_newer_pins_without_installing(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -614,11 +665,12 @@ class WorktreePreparationTests(unittest.TestCase):
         with (
             patch.object(prepare.shutil, "which", return_value="npm.cmd"),
             patch.object(prepare, "report_newer_versions") as report,
+            patch.object(prepare, "build_app_image", return_value=0),
             patch.object(
                 prepare.subprocess,
                 "run",
                 side_effect=[
-                    subprocess.CompletedProcess([], code) for code in (1, 0, 0, 0)
+                    subprocess.CompletedProcess([], code) for code in (1, 0, 0, 0, 0)
                 ],
             ),
         ):

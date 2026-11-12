@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
+from backend.canonical.planning_fields import TEMPLATE_ID
 from backend.errors import (
     CORRUPT_LIBRARY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
@@ -162,6 +163,7 @@ class WorkoutLibraryPlanService:
                         if source.get(key) is not None
                     },
                     "source": "library",
+                    TEMPLATE_ID: str(request["library_workout_id"]),
                     "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
                 },
                 db=db,

@@ -179,6 +179,43 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
             )
         self.assertEqual(all_pending_error.exception.reason, "intent_scope_denied")
 
+    def test_a_turn_sync_accepts_only_the_leftovers_of_hidden_units(self) -> None:
+        # Replacing a unit and sending the new one also removes the old event
+        # (#2373); any other unit beyond the turn's stays refused.
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "ALTER TABLE planned_units ADD COLUMN tombstone INTEGER NOT NULL DEFAULT 0"
+            )
+        new = self.add_entry(UNIT_A, {"name": "Run", "date": "2026-11-13"})
+        replaced = self.add_entry(
+            UNIT_B,
+            {
+                "name": "Ride",
+                "date": "2026-11-13",
+                "remote_event_id": "evt-1",
+                "archived": True,
+                "local_deleted": True,
+            },
+        )
+        intent = {"_created_sync_entry_ids": [UNIT_A]}
+
+        prepared = self.service.prepare([new, replaced], intent)
+
+        self.assertEqual(
+            [UNIT_A, UNIT_B],
+            [entry["library_workout_id"] for entry in prepared.entries],
+        )
+        live = self.add_entry(
+            "00000000-0000-0000-0000-000000000003",
+            {"name": "Live", "date": "2026-11-14"},
+        )
+        for extra in (live, {**replaced, "library_workout_id": UNIT_A}):
+            with self.subTest(extra=extra["library_workout_id"]):
+                entries = [new, live] if extra is live else [replaced]
+                with self.assertRaises(AppError) as error:
+                    self.service.prepare(entries, intent)
+                self.assertEqual("intent_scope_denied", error.exception.reason)
+
     def test_all_pending_manifest_uses_approval_limit_not_edit_limit(self) -> None:
         entries = [
             {

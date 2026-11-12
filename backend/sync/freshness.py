@@ -1,8 +1,8 @@
 """Read-only projection of the freshness of configured data providers.
 
-The projection walks the registry's freshness areas in descriptor order. Each
+The projection walks the provider table's freshness areas in table order. Each
 area reads its fallbacks and configured predicate from a ``FreshnessSource``
-keyed by provider id and area name; the built-in sources live in
+keyed by provider id and area name; the sources live in
 ``backend.sync.freshness_sources``.
 """
 
@@ -19,9 +19,10 @@ from backend.sync.freshness_sources import (
     DEFAULT_FRESHNESS_SOURCES,
     GARMIN_CORE_ERROR_SIGNAL,
     GARMIN_TOKENSTORE_SIGNAL,
+    FreshnessInputs,
+    FreshnessSource,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import FreshnessArea
 from backend.sync.refresh import cleanup_refresh_history
 
@@ -178,31 +179,6 @@ def _provider_freshness_entry(
     }
 
 
-def _check_sources_match_registry(
-    sources: Mapping[str, Mapping[str, FreshnessSource]],
-    registry: ProviderRegistry,
-) -> None:
-    """Reject sources that disagree with the registry's declared areas.
-
-    A provider with sources must supply exactly its declared area names, as the
-    runtime registry requires of a binding; a source for an undeclared provider
-    is an error. Failing here keeps a partial projection from being returned.
-    """
-    declared: dict[str, set[str]] = {}
-    for provider_id, area in registry.freshness_areas():
-        declared.setdefault(provider_id, set()).add(area.area)
-    for provider_id, areas in sources.items():
-        if provider_id not in declared:
-            raise ValueError(
-                f"freshness sources name undeclared provider {provider_id!r}"
-            )
-        if set(areas) != declared[provider_id]:
-            raise ValueError(
-                f"freshness sources for {provider_id!r} must cover exactly "
-                "its declared freshness areas"
-            )
-
-
 def provider_freshness_state(
     db: Any,
     *,
@@ -214,8 +190,6 @@ def provider_freshness_state(
     now: datetime,
     retention_days: int = PROVIDER_REFRESH_RETENTION_DAYS,
     max_rows: int = PROVIDER_REFRESH_MAX_ROWS,
-    freshness_sources: Mapping[str, Mapping[str, FreshnessSource]] | None = None,
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     cleanup: bool = True,
 ) -> list[dict[str, Any]]:
     """Build the provider freshness projection on a caller-owned connection.
@@ -223,19 +197,12 @@ def provider_freshness_state(
     ``cleanup=False`` skips the retention delete so the projection is a pure
     read that also works on a query-only snapshot.
 
-    A provider without freshness sources is omitted, as it is from the runtime
-    registry. A provider with sources must supply exactly its declared areas;
-    mismatches raise ``ValueError`` before any database work. The cleanup
-    intentionally remains uncommitted: the caller owns transaction boundaries
-    and may roll back the diagnostic cleanup together with its work.
+    The cleanup intentionally remains uncommitted: the caller owns transaction
+    boundaries and may roll back the diagnostic cleanup together with its work.
     """
     current_time = (
         now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
     )
-    sources = (
-        DEFAULT_FRESHNESS_SOURCES if freshness_sources is None else freshness_sources
-    )
-    _check_sources_match_registry(sources, registry)
     inputs = FreshnessInputs(
         config=config,
         get_value=get_value,
@@ -249,16 +216,13 @@ def provider_freshness_state(
     if cleanup:
         cleanup_refresh_history(db, cutoff=cutoff, max_rows=max_rows)
     result: list[dict[str, Any]] = []
-    for provider_id, area in registry.freshness_areas():
-        provider_sources = sources.get(provider_id)
-        if provider_sources is None:
-            continue
+    for provider_id, area in DEFAULT_PROVIDER_REGISTRY.freshness_areas():
         result.append(
             _provider_freshness_entry(
                 db,
                 provider_id,
                 area,
-                provider_sources[area.area],
+                DEFAULT_FRESHNESS_SOURCES[provider_id][area.area],
                 inputs,
                 now=current_time,
             )
@@ -275,16 +239,11 @@ class ProviderFreshnessService:
         database_manager: DatabaseManager,
         key_value_repository: KeyValueRepository,
         now: Callable[[], datetime],
-        *,
-        freshness_sources: Mapping[str, Mapping[str, FreshnessSource]] | None = None,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._config = config
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._now = now
-        self._freshness_sources = freshness_sources
-        self._registry = registry
 
     def current(
         self,
@@ -310,7 +269,5 @@ class ProviderFreshnessService:
                 garmin_has_core_error=garmin_has_core_error,
                 garmin_tokenstore_exists=garmin_tokenstore_exists,
                 now=now,
-                freshness_sources=self._freshness_sources,
-                registry=self._registry,
                 cleanup=not read_only,
             )

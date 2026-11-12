@@ -1,4 +1,4 @@
-"""Create local Coach action previews and approval manifests."""
+"""Create Coach action previews and approval manifests."""
 
 from __future__ import annotations
 
@@ -11,20 +11,21 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
-    _preview_nutrient,
     _utc_now,
     coach_action_hash,
     coach_action_view,
     prune_expired_coach_proposals,
 )
 from backend.coach.proposal_validation import (
-    _validate_local_coach_write,
+    _validate_remote_coach_write,
     remote_coach_write_diff,
     remote_write_target,
     validated_coach_action_preview_input,
 )
+from backend.coach.write_gate import garmin_effects
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import CompetitionRepository, PlanAdjustmentRepository
 from backend.errors import AppError
@@ -66,7 +67,6 @@ class CoachProposalCreationService:
         utc_now: Callable[[], str] = _utc_now,
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
-        nutrition_meal_library_service: Callable[[], Any] | None = None,
         today: Callable[[], date] | None = None,
     ) -> None:
         self._today = today or _utc_today
@@ -76,7 +76,6 @@ class CoachProposalCreationService:
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
         self._nutrition_diary_service = nutrition_diary_service
-        self._nutrition_meal_library_service = nutrition_meal_library_service
 
     def create(self, values: Any, session_csrf_hash: str) -> dict[str, Any]:
         action_type, target_system, object_ids, diff, payload = (
@@ -115,7 +114,42 @@ class CoachProposalCreationService:
             }
         return result
 
-    def create_remote_write(
+    def removes_garmin_workouts(self, tool: str, arguments: dict[str, Any]) -> bool:
+        """Whether a named remote write still asks on a card (#2342).
+
+        An explicit Garmin removal does, and so does a retry of a Garmin job
+        that removes a workout other than the orphans a send cleans up itself.
+        """
+        if tool == "push_strength_to_garmin":
+            return garmin_effects(arguments)[0]
+        if tool != "resolve_training_sync_conflict" or not arguments.get("job_id"):
+            return False
+        with self._database_manager.reader() as db:
+            row = db.execute(
+                "SELECT provider, payload FROM sync_jobs WHERE id=?",
+                (str(arguments["job_id"]),),
+            ).fetchone()
+            try:
+                payload = json.loads(row["payload"]) if row else {}
+            except TypeError, ValueError:
+                payload = {}
+            if (
+                row is None
+                or row["provider"] != ProviderId.GARMIN
+                or not isinstance(payload, dict)
+            ):
+                return False
+            orphans = {
+                item.local_id for item in find_orphans(db, self._today(), limit=None)[0]
+            }
+        return any(
+            isinstance(entry, dict)
+            and entry.get("remove") is True
+            and entry.get("library_workout_id") not in orphans
+            for entry in payload.get("entries") or []
+        )
+
+    def prepare_remote_write(
         self,
         tool: str,
         arguments: dict[str, Any],
@@ -124,8 +158,15 @@ class CoachProposalCreationService:
         conversation_id: str,
         client_turn_id: str,
         session_csrf_hash: str,
+        card: bool = True,
     ) -> dict[str, Any]:
-        """Prepare an independently approved Coach remote-write request."""
+        """Bind a Coach remote write to stored state, as its card would show it.
+
+        Returns the payload to dispatch and the rows a card lists. A card-free
+        run (#2342) binds the same state but keeps the request's own unit scope:
+        only units the server adds (orphan leftovers) gain a token, since no card
+        shows the athlete the model's selection.
+        """
         if not conversation_id or not client_turn_id or not session_csrf_hash:
             raise AppError(
                 403, "Die Remote-Aktion ist nicht an eine Coach-Sitzung gebunden."
@@ -138,49 +179,50 @@ class CoachProposalCreationService:
             raise AppError(403, "Die Remote-Aktion hat keinen gültigen Nutzerauftrag.")
         payload: dict[str, Any] = {
             "tool": tool,
-            "arguments": dict(arguments),
-            "intent": intent,
+            "arguments": _approved_remote_arguments(
+                tool,
+                arguments,
+                intent,
+                database_manager=self._database_manager,
+                nutrition_diary_service=self._nutrition_diary_service,
+                today=self._today(),
+            ),
             "conversation_id": str(conversation_id)[:160],
             "client_turn_id": str(client_turn_id)[:160],
         }
-        payload["arguments"] = _approved_remote_arguments(
-            tool,
-            arguments,
-            intent,
-            database_manager=self._database_manager,
-            nutrition_diary_service=self._nutrition_diary_service,
-            today=self._today(),
-        )
-        payload["intent"] = _card_authorized_intent(
+        authorized = _card_authorized_intent(
             tool, payload["arguments"], intent, self._database_manager
         )
-        targets = sorted(
-            value
-            for value in payload["intent"].get("authorization_scope", [])
-            if isinstance(value, str)
-        )
-        approval_manifest = payload["arguments"].get("_approval_manifest")
-        approval_details = _remote_write_approval_details(
+        if not card and authorized is not intent:
+            chosen = {
+                str(entry.get("library_workout_id") or entry.get("local_id") or "")
+                for entry in arguments.get("entries") or []
+                if isinstance(entry, dict)
+            }
+            added = {
+                token
+                for token in authorized["authorization_scope"]
+                if token.startswith(("planned_unit:", "library_workout:"))
+                and token.partition(":")[2] not in chosen
+            }
+            authorized = {
+                **intent,
+                "authorization_scope": sorted(
+                    {*intent.get("authorization_scope", []), *added}
+                ),
+            }
+        payload["intent"] = authorized
+        _validate_remote_coach_write(payload)
+        details = _remote_write_approval_details(
             tool,
             payload["arguments"],
             intent,
             self._database_manager,
             today=self._today(),
         )
-        return self.create(
-            {
-                "action_type": "remote_coach_write",
-                "target_system": remote_write_target(tool, payload["intent"]),
-                "object_ids": {"operation": tool, "targets": targets},
-                "diff": remote_coach_write_diff(
-                    tool, arguments, intent, approval_manifest, approval_details
-                ),
-                "payload": payload,
-            },
-            session_csrf_hash,
-        )
+        return {"payload": payload, "details": details}
 
-    def create_local_write(
+    def create_remote_write(
         self,
         tool: str,
         arguments: dict[str, Any],
@@ -190,128 +232,42 @@ class CoachProposalCreationService:
         client_turn_id: str,
         session_csrf_hash: str,
     ) -> dict[str, Any]:
-        if not conversation_id or not client_turn_id or not session_csrf_hash:
-            raise AppError(
-                403, "Die lokale Aktion ist nicht an eine Coach-Sitzung gebunden."
-            )
-        payload: dict[str, Any] = {
-            "tool": tool,
-            "arguments": dict(arguments),
-            "intent": intent,
-            "conversation_id": str(conversation_id)[:160],
-            "client_turn_id": str(client_turn_id)[:160],
-        }
-        _validate_local_coach_write(payload)
-        values = arguments["payload"]
-        preview_values = self._local_write_preview_values(values, payload)
-        diff = [self._local_write_preview_diff(preview_values)]
+        """Prepare an independently approved Coach remote-write request."""
+        prepared = self.prepare_remote_write(
+            tool,
+            arguments,
+            intent,
+            conversation_id=conversation_id,
+            client_turn_id=client_turn_id,
+            session_csrf_hash=session_csrf_hash,
+        )
+        payload = prepared["payload"]
+        targets = sorted(
+            value
+            for value in payload["intent"].get("authorization_scope", [])
+            if isinstance(value, str)
+        )
         return self.create(
             {
-                "action_type": "local_coach_write",
-                "target_system": "local",
-                "object_ids": {"operation": tool, "template_id": values.get("id")},
-                "diff": diff,
+                "action_type": "remote_coach_write",
+                "target_system": remote_write_target(tool, payload["intent"]),
+                "object_ids": {"operation": tool, "targets": targets},
+                "diff": remote_coach_write_diff(
+                    tool,
+                    arguments,
+                    intent,
+                    payload["arguments"].get("_approval_manifest"),
+                    prepared["details"],
+                ),
                 "payload": payload,
             },
             session_csrf_hash,
         )
 
-    def _local_write_preview_values(
-        self, values: dict[str, Any], payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        preview_values = dict(values)
-        preview_values = self._merge_existing_local_write(
-            preview_values, values, payload
-        )
-        self._calculate_local_write_preview(preview_values, values, payload)
-        return preview_values
 
-    def _merge_existing_local_write(
-        self,
-        preview_values: dict[str, Any],
-        values: dict[str, Any],
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        template_id = str(values.get("id") or "").strip()
-        if template_id and self._nutrition_meal_library_service:
-            nutrition = self._nutrition_meal_library_service()
-            if payload.get("tool") == "save_nutrition_product":
-                try:
-                    existing = nutrition.product_catalog.get_product(template_id)
-                except AppError:
-                    existing = None
-            else:
-                existing = next(
-                    (
-                        template
-                        for template in nutrition.list_templates()
-                        if template.get("id") == template_id
-                    ),
-                    None,
-                )
-            if existing:
-                preview_values = {**existing, **preview_values}
-        return preview_values
-
-    def _calculate_local_write_preview(
-        self,
-        preview_values: dict[str, Any],
-        values: dict[str, Any],
-        payload: dict[str, Any],
-    ) -> None:
-        if "components" in values:
-            if self._nutrition_meal_library_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = self._nutrition_meal_library_service().product_catalog.calculate_components(
-                values["components"]
-            )
-            preview_values.update(calculation)
-            payload["arguments"]["_food_calculation"] = calculation
-        elif "food_ingredients" in values:
-            if self._nutrition_meal_library_service is None:
-                raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = (
-                self._nutrition_meal_library_service().food_database.calculate(
-                    values["food_ingredients"]
-                )
-            )
-            preview_values.update(calculation)
-            payload["arguments"]["_food_calculation"] = calculation
-        elif (
-            set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}
-            and self._nutrition_meal_library_service is not None
-        ):
-            preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(preview_values)
-            )
-
-    @staticmethod
-    def _local_write_preview_diff(preview_values: dict[str, Any]) -> dict[str, str]:
-        diff = {
-            "name": preview_values.get("name", ""),
-            "description": str(preview_values.get("description") or "")[:500],
-            "kcal": _preview_nutrient(preview_values.get("kcal")),
-            "carbs": _preview_nutrient(preview_values.get("carbs_g")),
-            "protein": _preview_nutrient(preview_values.get("protein_g")),
-            "fat": _preview_nutrient(preview_values.get("fat_g")),
-        }
-        if preview_values.get("nutrition_basis", {}).get("kind") == "database":
-            diff["source"] = "; ".join(
-                f"{item['source']}: {item['name']}, {item['amount']:g} {item['unit']} (Basis 100 {item['basis_unit']})"
-                for item in preview_values["nutrition_basis"]["ingredients"]
-            )
-        elif preview_values.get("nutrition_basis", {}).get("kind") == "composite":
-            diff["source"] = "; ".join(
-                f"{item['kind']}: {item['name']}, {item['amount']:g} {item['unit']}"
-                for item in preview_values["nutrition_basis"].get("components", [])
-            )
-        if preview_values.get("basis_amount") and preview_values.get("source"):
-            diff["source"] = str(preview_values["source"])
-        if preview_values.get("basis_amount") and preview_values.get("basis_unit"):
-            diff["basis"] = (
-                f"pro {preview_values['basis_amount']:g} {preview_values['basis_unit']}"
-            )
-        return diff
+# Card rows of what a sync deletes at the provider; the receipt lists them too.
+_INTERVALS_REMOVAL = "Wird bei Intervals.icu entfernt"
+_GARMIN_REMOVAL = "Wird bei Garmin entfernt"
 
 
 def _approved_remote_arguments(
@@ -389,15 +345,16 @@ def _card_authorized_intent(
     """Authorize exactly the units an Intervals.icu plan-sync card lists.
 
     The athlete approves the card, which shows every listed unit. The model's
-    unit tokens are not what the athlete sees, so for a selected sync they are
-    replaced by tokens for the card entries, each checked against local state.
-    The tokens are stored with the hashed card payload and grant nothing else.
+    unit tokens are not what the athlete sees, so for a selected sync, and for a
+    Coach turn's sync that also carries leftovers (#2373), they are replaced by
+    tokens for the card entries, each checked against local state. The tokens
+    are stored with the hashed card payload and grant nothing else.
     """
     entries = arguments.get("entries")
     if (
         tool != "start_intervals_plan_sync"
         or arguments.get("repair") is True
-        or (intent.get("request") or {}).get("sync_scope") != "selected"
+        or (intent.get("request") or {}).get("sync_scope") not in _LEFTOVER_SCOPES
         or not isinstance(entries, list)
         or not entries
     ):
@@ -503,26 +460,26 @@ def _payload_date(row: Any) -> str:
     return str(payload.get("date") or "") if isinstance(payload, dict) else ""
 
 
+# The Coach sync scopes that also remove the leftovers of hidden units.
+_LEFTOVER_SCOPES = frozenset({"selected", "created", "changed"})
+
+
 def _with_intervals_leftovers(
     approved: dict[str, Any],
     intent: dict[str, Any],
     database_manager: DatabaseManager,
     today: date,
 ) -> dict[str, Any]:
-    """Add the Intervals.icu events of deleted or replaced units to a selected sync.
+    """Add the Intervals.icu events of deleted or replaced units to a sync.
 
     The athlete cannot select a hidden unit, yet its event stays in the
     calendar and keeps reaching Garmin. The card lists these units as removals.
-    A sync that must cover exactly the units of one Coach turn gets none.
+    A sync bound to the units of one Coach turn carries them too, so replacing a
+    unit and sending the new one also removes the old event (#2373); the plan
+    selection accepts no other extra unit.
     """
-    if (intent.get("request") or {}).get("sync_scope") != "selected" or any(
-        intent.get(key)
-        for key in (
-            "_replacement_sync_entry_ids",
-            "_created_sync_entry_ids",
-            "_changed_sync_entry_ids",
-            "_sync_all_pending",
-        )
+    if (intent.get("request") or {}).get("sync_scope") not in _LEFTOVER_SCOPES or (
+        intent.get("_sync_all_pending")
     ):
         return approved
     entries = [entry for entry in approved["entries"] if isinstance(entry, dict)]
@@ -653,7 +610,7 @@ def _garmin_approval_details(
         {
             "name": item.name,
             "date": _approval_date(item.date),
-            "sport": "Wird bei Garmin entfernt",
+            "sport": _GARMIN_REMOVAL,
             "id": item.local_id,
         }
         for local_id, item in orphans.items()
@@ -733,10 +690,11 @@ def _label_intervals_removals(
         }
     for detail in details:
         if detail["id"] in removed:
-            detail["sport"] = "Wird bei Intervals.icu entfernt"
+            detail["sport"] = _INTERVALS_REMOVAL
     return details
 
 
+_REMOTE_COMPETITION_DELETE = "Remote-Wettkampfeintrag löschen"
 _COMPETITION_MANIFEST_CHANGED = (
     "Der Wettkampfbestand hat sich vor der Freigabe geändert."
 )
@@ -777,11 +735,11 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         return {
             "name": label["name"][:120],
             "date": _approval_date(label["event_date"]),
-            "sport": "Wird bei Intervals.icu entfernt",
+            "sport": _INTERVALS_REMOVAL,
             "id": str(row["intervals_event_id"] or row["id"]),
         }
     return {
-        "name": "Remote-Wettkampfeintrag l\u00f6schen",
+        "name": _REMOTE_COMPETITION_DELETE,
         "date": "Freigegebene L\u00f6schmarkierung",
         "id": str(row["intervals_event_id"] or row["id"]),
     }
@@ -839,3 +797,19 @@ def _nutrition_approval_arguments(
         else nutrition.sync_status.approval_manifest(pending_limit=limit)
     )
     return {**arguments, "_approval_manifest": manifest}
+
+
+# A card-free run never carries an explicit Garmin removal ("Von Garmin entfernen").
+_REMOVAL_LABELS = frozenset({_INTERVALS_REMOVAL, _GARMIN_REMOVAL})
+
+
+def remote_removal_lines(details: list[dict[str, str]]) -> list[str]:
+    """The receipt lines for what a remote write deletes at the provider."""
+    lines = []
+    for detail in details:
+        sport = detail.get("sport")
+        if sport in _REMOVAL_LABELS:
+            lines.append(f"{sport}: {detail.get('name')} {detail.get('date')}".strip())
+        elif detail.get("name") == _REMOTE_COMPETITION_DELETE:
+            lines.append(f"{_REMOTE_COMPETITION_DELETE} ({detail.get('id')})")
+    return lines

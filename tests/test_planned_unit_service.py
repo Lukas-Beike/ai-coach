@@ -588,10 +588,36 @@ class PlannedUnitServiceTests(unittest.TestCase):
             (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
         )
         self.assertEqual(json.loads(planned[0]["payload"])["session_focus"], "easy")
+        # Linking the unit to its library template is local too (#2379).
+        self.service.update(str(self.id), {"template_id": "template-1"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(
+            (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
+        )
+        self.assertEqual(json.loads(planned[0]["payload"])["template_id"], "template-1")
+        # A null template id on a change keeps the link.
+        self.service.update(
+            str(self.id), {"template_id": None, "session_focus": "easy"}
+        )
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["template_id"], "template-1")
 
         self.service.update(str(self.id), {"name": "Anders"})
         planned, _history, _revision = self.state()
         self.assertEqual(planned[0]["sync_state"], "local")
+
+    def test_an_edited_adaptive_replacement_is_coach_content_again(self):
+        # Only the untouched generic replacement is exempt from the template
+        # rule; once the Coach changes it, the rule applies (#2379).
+        self.service.create(self.workout(source="adaptive"))
+        self.service.update(str(self.id), {"session_focus": "easy"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["source"], "adaptive")
+        self.service.update(
+            str(self.id), {"description": "- 45m 60% locker", "duration_minutes": 45}
+        )
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["source"], "coach")
 
     def test_undoing_a_focus_edit_keeps_the_sync_state(self):
         self.service.create(self.workout())
@@ -601,13 +627,17 @@ class PlannedUnitServiceTests(unittest.TestCase):
                 "WHERE local_id=?",
                 (str(self.id),),
             )
-        self.service.update(str(self.id), {"session_focus": "easy"})
+        self.service.update(
+            str(self.id), {"session_focus": "easy", "template_id": "template-1"}
+        )
         with self.manager.reader() as db:
             current = db.execute(
                 "SELECT * FROM planned_units WHERE local_id=?", (str(self.id),)
             ).fetchone()
         target = {**json.loads(current["payload"])}
         target.pop("session_focus")
+        # The undo also drops a template link the earlier state lacked (#2379).
+        target.pop("template_id")
         with self.manager.unit_of_work() as db:
             self.service.restore_in_transaction(
                 db, str(self.id), dict(current), target, "undo"
@@ -618,6 +648,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
             (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
         )
         self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
+        self.assertNotIn("template_id", json.loads(planned[0]["payload"]))
 
     def mark_synced(self):
         with self.manager.unit_of_work() as db:

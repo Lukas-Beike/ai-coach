@@ -14,7 +14,7 @@ from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
 
 SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
@@ -56,12 +56,11 @@ LOCAL_BROAD_SCOPES = frozenset(
 )
 
 
-def broad_scope_tokens(
-    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-) -> frozenset[str]:
+def broad_scope_tokens() -> frozenset[str]:
     """Return scope tokens naming a whole area, including each refresh target."""
     refresh = frozenset(
-        f"{target}_refresh" for target in registry.coach_refresh_targets()
+        f"{target}_refresh"
+        for target in DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
     )
     return LOCAL_BROAD_SCOPES | refresh
 
@@ -76,16 +75,13 @@ class CoachDialogueActionService:
         sync_jobs: Callable[[], SyncJobQueueService],
         plan_scope: CoachDialoguePlanScopeService,
         today: Callable[[], date],
-        *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._sync_jobs = sync_jobs
         self._plan_scope = plan_scope
         self._today = today
-        self._registry = registry
-        self._broad_scopes = broad_scope_tokens(registry)
+        self._broad_scopes = broad_scope_tokens()
 
     def classify(
         self,
@@ -118,7 +114,6 @@ class CoachDialogueActionService:
                 arguments.pop("_request", None),
                 user_ids,
                 context["current_user_message_id"],
-                registry=self._registry,
             )
         except (TypeError, ValueError) as exc:
             error = AppError(
@@ -232,7 +227,7 @@ class CoachDialogueActionService:
                 reason="request_target",
             )
         if refresh and (
-            target not in self._registry.coach_refresh_targets()
+            target not in DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets()
             or f"{target}_refresh" not in scope
         ):
             raise AppError(

@@ -14,7 +14,7 @@ from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
-from backend.config import DEFAULT_OPENAI_BASE_URL, Config
+from backend.config import DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.canonical_backfill import (
@@ -94,6 +94,8 @@ class DiagnosticReportDependencies:
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
     canonical_read: CanonicalReadStatusReader | None = None
+    # The Garmin change check's counts and times (#2372).
+    garmin_change_check: Callable[[], dict[str, Any]] | None = None
 
 
 # Large kv values whose stored size the report shows: the Garmin state, the
@@ -184,12 +186,16 @@ class DiagnosticReportService:
                     # Only whether the endpoint differs from the default, never the URL.
                     "openai_base_url_custom": deps.config.openai_base_url
                     != DEFAULT_OPENAI_BASE_URL,
+                    "anthropic_configured": bool(deps.config.anthropic_api_key),
+                    "anthropic_base_url_custom": deps.config.anthropic_base_url
+                    != DEFAULT_ANTHROPIC_BASE_URL,
                     "intervals_configured": bool(deps.config.intervals_api_key),
                     "garmin_library_available": deps.garmin_client_factory.available(),
                     "garmin_configured": garmin_status.get("configured"),
                     "garmin_fixture_configured": deps.garmin_fixture_loader.path()
                     is not None,
                     "model": deps.settings.selected_model(),
+                    "model_provider": deps.settings.selected_provider(),
                     "thinking_level": deps.settings.selected_thinking_level(),
                     "available_models": [
                         option["id"]
@@ -291,6 +297,10 @@ class DiagnosticReportService:
                 ),
                 "local_load": section(
                     "local_load", lambda: summarize_local_load(key_values, db)
+                ),
+                "garmin_change_check": section(
+                    "garmin_change_check",
+                    deps.garmin_change_check or (lambda: {"active": False}),
                 ),
                 "stream_backfill": section(
                     "stream_backfill",

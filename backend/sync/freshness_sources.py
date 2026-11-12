@@ -11,15 +11,39 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
 from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.provider_credentials import WAHOO_TOKENS_KEY
-from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
+
+
+@dataclass(frozen=True, slots=True)
+class FreshnessInputs:
+    """Inputs the freshness fallbacks read.
+
+    ``signals`` carries provider-specific observations that are not stored as
+    key-value settings, such as whether a provider's core error is present.
+    """
+
+    config: Any
+    get_value: Callable[[str], Any]
+    profile: Mapping[str, Any]
+    signals: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class FreshnessSource:
+    """Fallback timestamp, fallback error and configured predicate for one area."""
+
+    fallback_at: Callable[[FreshnessInputs], Any]
+    fallback_error: Callable[[FreshnessInputs], Any]
+    configured: Callable[[FreshnessInputs], bool]
+
 
 WEATHER_CACHE_KEY = weather_cache.CACHE_KEY
 WEATHER_FAILURE_KEY = weather_cache.FAILURE_KEY

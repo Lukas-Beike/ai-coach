@@ -11,7 +11,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.wahoo_connection import connection_status
 
 
@@ -53,7 +53,6 @@ class PublicBootstrapDependencies:
     morning_checkin_state_service: Callable[[], Any]
     coach_quick_actions_service: Callable[[], Any]
     provider_state_service: Callable[[], Any]
-    provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     provider_credentials: Callable[[], Any] | None = None
     # Stale-threshold warning for the status strip; null in the bootstrap when none.
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
@@ -67,7 +66,6 @@ class PublicBootstrapService:
 
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
-        registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         # One read-only WAL snapshot serves every read below, including nested
         # service reads, so the projection is consistent without the writer or
         # the shared database lock. A hidden write fails on the query-only
@@ -92,6 +90,11 @@ class PublicBootstrapService:
             )
             jobs = deps.sync_job_queue_service().list()
             state_version_values = deps.state_version_service().versions()
+            provider = deps.settings.selected_provider()
+            provider_state = deps.provider_state_service()
+            summaries = {
+                name: provider_state.summary(name) for name in ("openai", "anthropic")
+            }
             state = {
                 "state_versions": state_version_values,
                 "app": {"name": deps.app_name, "version": deps.app_version},
@@ -149,7 +152,7 @@ class PublicBootstrapService:
                 },
                 "provider_labels": {
                     descriptor.provider_id: descriptor.label
-                    for descriptor in registry.all()
+                    for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
                 },
                 "garmin_sync": {
                     "running": deps.garmin_sync_service().running(),
@@ -162,7 +165,7 @@ class PublicBootstrapService:
                     provider_id: deps.full_provider_resync_service().state(
                         provider_id, db
                     )
-                    for _, provider_id in registry.full_resync_routes()
+                    for _, provider_id in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()
                 },
                 "sync": deps.sync_public_state_service().browser_state(
                     freshness=freshness,
@@ -182,7 +185,7 @@ class PublicBootstrapService:
                         f"{provider_id}_days": deps.sync_state_repository().sync_period(
                             provider_id, deps.sync_period_defaults, deps.all_sync_days
                         )
-                        for provider_id in registry.sync_period_defaults()
+                        for provider_id in DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
                     },
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
@@ -190,6 +193,7 @@ class PublicBootstrapService:
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),
                 "model": {
                     "selected": deps.settings.selected_model(),
+                    "provider": provider,
                     "options": deps.settings.available_model_options(),
                 },
                 "service_tier": deps.settings.service_tier_state(),
@@ -199,6 +203,9 @@ class PublicBootstrapService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
+                    "anthropic": bool(deps.config.anthropic_api_key),
+                    # The selected model's provider has its key.
+                    "coach": deps.settings.coach_ready(),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
@@ -214,7 +221,11 @@ class PublicBootstrapService:
                     if deps.provider_credentials is not None
                     else None
                 ),
-                "usage": deps.provider_state_service().summary("openai"),
+                "usage": summaries[provider],
+                "provider_status": {
+                    name: summary.get("status") or {}
+                    for name, summary in summaries.items()
+                },
             }
             # Always present, so a cleared warning also clears on a client that merges bootstraps.
             state["threshold_warnings"] = deps.threshold_warnings() or None

@@ -4,10 +4,10 @@ import logging
 import unittest
 from unittest.mock import Mock, patch
 
-from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.sync import provider_resync_assembly as assembly_module
-from backend.sync.full_resync import resync_field_keys
+from backend.sync.full_resync import PROVIDER_RESYNC_KEYS, resync_field_keys
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
@@ -34,6 +34,8 @@ def _build_assembly(
             resync=ResyncProviderOwners(
                 garmin_sync_service=Mock(),
                 garmin_resync_gate=garmin_gate,
+                wahoo_sync_service=Mock(),
+                wahoo_resync_gate=Mock(),
                 all_sync_days=-1,
             ),
             persistence=ProviderResyncPersistence(
@@ -60,44 +62,34 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         garmin.sync.return_value = {"records": 4}
         handlers = full_resync_handlers(
             garmin_service=garmin,
+            wahoo_service=Mock(),
             all_sync_days=-1,
         )
 
+        self.assertEqual({GARMIN_ID, WAHOO_ID}, set(handlers))
         self.assertEqual(handlers[GARMIN_ID].run("op-1", Mock()), {"records": 4})
         garmin.sync.assert_called_once_with(
             days=-1, operation_id="op-1", reason="Vollständiger Resync"
         )
 
-    def test_factory_rejects_handler_without_registered_state_keys(self):
-        intervals_gate = ProviderResyncGate("Intervals.icu")
-        garmin_gate = ProviderResyncGate("Garmin")
-        assembly = _build_assembly(intervals_gate, garmin_gate)
-
-        with (
-            patch.object(assembly_module, "CompetitionSyncService"),
-            patch.object(
-                assembly_module,
-                "full_resync_handlers",
-                return_value={INTERVALS_ID: Mock(), "acme-mock": Mock()},
-            ),
-            patch.object(assembly_module, "FullProviderResyncService") as service_type,
-            self.assertRaisesRegex(ValueError, "acme-mock"),
-        ):
-            assembly.full_resync_service()
-
-        service_type.assert_not_called()
+    def test_every_handler_has_its_registered_state_keys(self):
+        # Replaces the former build-time check of the runtime bindings (#2070).
+        handlers = full_resync_handlers(
+            garmin_service=Mock(), wahoo_service=Mock(), all_sync_days=-1
+        )
+        self.assertEqual(set(PROVIDER_RESYNC_KEYS), set(handlers))
 
 
 class ResyncFieldKeysTests(unittest.TestCase):
     def test_rejects_descriptor_without_four_state_keys(self):
         with self.assertRaisesRegex(ValueError, "needs keys for"):
-            resync_field_keys({"acme-mock": ("a", "b", "c")})
+            resync_field_keys({"wahoo": ("a", "b", "c")})
 
     def test_names_keys_by_role_in_declared_order(self):
         self.assertEqual(
-            resync_field_keys({"acme-mock": ("r", "s", "t", "e")}),
+            resync_field_keys({"wahoo": ("r", "s", "t", "e")}),
             {
-                "acme-mock": {
+                "wahoo": {
                     "running": "r",
                     "status": "s",
                     "last_at": "t",
@@ -124,6 +116,8 @@ class ProviderResyncAssemblyTests(unittest.TestCase):
                 resync=ResyncProviderOwners(
                     garmin_sync_service=Mock(),
                     garmin_resync_gate=Mock(),
+                    wahoo_sync_service=Mock(),
+                    wahoo_resync_gate=Mock(),
                     all_sync_days=90,
                 ),
                 persistence=ProviderResyncPersistence(

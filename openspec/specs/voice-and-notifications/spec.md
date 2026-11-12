@@ -141,3 +141,16 @@ The client SHALL suppress duplicate successfully delivered notification keys, al
 - **THEN** it closes and the worker focuses an existing window when available, otherwise opens `/`.
 
 Evidence: `public/notifications.js::reserveNotificationAttempt`, `public/notifications.js::showPwaNotification`, `public/service-worker.js` (notificationclick listener); `tests/notifications-retry.test.cjs::a persistently rejecting notification is retried at most three times`, `tests/notifications-retry.test.cjs::renders inside the retry delay do not resend a rejected notification`, `tests/notifications-retry.test.cjs::a transient failure followed by success is delivered once`. Click handling is inspected source only; duplicate suppression is in-memory and does not promise cross-tab/restart delivery deduplication.
+
+### Requirement: Transcription stays with OpenAI
+The system SHALL transcribe voice input with OpenAI whichever model provider answers the Coach, and SHALL offer the microphone only while an OpenAI key is configured.
+
+#### Scenario: Claude selected
+- **WHEN** a Claude family is the Coach model and an OpenAI key is configured
+- **THEN** recording and transcription work as before through OpenAI.
+
+#### Scenario: No OpenAI key
+- **WHEN** no OpenAI key is configured
+- **THEN** the microphone control is disabled while the chat itself stays usable with a configured Claude key.
+
+Evidence: `backend/providers/model_assembly.py:ModelTransportAssembly.audio_transcription_client`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).

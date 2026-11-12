@@ -403,6 +403,7 @@ class GarminProbeTests(unittest.TestCase):
             config=lambda: config,
             request=Mock(),
             default_openai_base_url="https://api.openai.com/v1",
+            default_anthropic_base_url="https://api.anthropic.com",
             intervals_get=Mock(),
             wahoo_status=dict,
             wahoo_user=Mock(),

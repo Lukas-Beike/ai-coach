@@ -42,8 +42,8 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 - **THEN** the step carries `weightValue` 40.0 with the kilogram unit, and units sent in an earlier form show as changed so the athlete can send them again.
 
 #### Scenario: Coach request
-- **WHEN** the Coach proposes the push after the athlete named Garmin or the watch
-- **THEN** the same job is queued only after the athlete approves the card, with the payload hashes stored when the card was created (see coach-tool-authority CA5).
+- **WHEN** the Coach sends units after the athlete named Garmin or the watch
+- **THEN** the same job is queued without a card, with the payload hashes stored when the request ran; a call that explicitly removes a workout is queued only after the athlete approves its card (see coach-tool-authority CA5).
 
 #### Scenario: Rejected locally
 - **WHEN** a unit is stale, deleted, archived, in the past, not strength or has no structure
@@ -135,4 +135,8 @@ After each Garmin `refresh` job, the system SHALL unschedule and delete the link
 - **WHEN** Garmin refuses one workout's deletion with a client error
 - **THEN** its link stays for the next refresh and the other past workouts are still removed; one refresh makes at most 40 removal attempts.
 
-Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`.
+#### Scenario: One-time removal of the app's unlinked old workouts
+- **WHEN** a Garmin refresh finishes and the one-time removal (athlete decision 2026-11-12, #2373) has not finished yet
+- **THEN** the strength workouts of the Garmin library whose description starts with the app's marker line "Pacecraft", that no stored unit dated today or later links and that no day from today through 90 days ahead schedules are deleted, together with any link to them; workouts without the marker (the athlete's own and Intervals.icu copies), other sports, upcoming and scheduled ones stay. It reads at most 40 workouts and removes at most 20 per refresh, remembers the ids read as not the app's and those Garmin refused to delete, keeps that progress through a Garmin outage, and once a pass reaches the end of the list it never runs again.
+
+Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/garmin_strength_push.py:GarminStrengthPushService._remove_unlinked`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`.

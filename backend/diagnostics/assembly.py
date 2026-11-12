@@ -38,6 +38,8 @@ class DiagnosticGarminServices:
     client_factory: Callable[[], Any]
     fixture_loader: Callable[[], Any]
     sync_state: Callable[[], Any]
+    # The Garmin change check's status: counts and times only (#2372).
+    change_check: Callable[[], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ class DiagnosticsAssembly:
         self._garmin_client_factory = garmin.client_factory
         self._garmin_fixture_loader = garmin.fixture_loader
         self._garmin_sync_state = garmin.sync_state
+        self._garmin_change_check = garmin.change_check
         self._profile = local.profile
         self._external_calendar_sync = local.external_calendar_sync
         self._external_calendar_reader = local.external_calendar_reader
@@ -150,5 +153,6 @@ class DiagnosticsAssembly:
                 canonical_read=(
                     self._canonical_read() if self._canonical_read is not None else None
                 ),
+                garmin_change_check=self._garmin_change_check,
             )
         )

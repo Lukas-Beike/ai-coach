@@ -46,6 +46,10 @@ from backend.planning.plan_guard_service import (
 from backend.providers.model_seam import ModelRequest, ModelStep, ModelTurn
 
 COACH_TOOL_MAX_ROUNDS = 12
+_REPLAYED_NOTICE = (
+    "This identical call already ran earlier in this turn; this is its result "
+    "again and nothing new was saved or sent. Report the change once."
+)
 _TURN_RELEASED = {
     "ok": False,
     "status": "not_performed",
@@ -227,6 +231,10 @@ class CoachStructuredToolRoundService:
             cached = self._replay.lookup(metadata, state.command_receipts)
             if cached:
                 result = cached["result"]
+                if cached.get("call_id") not in (None, call_id):
+                    # An identical second call ran nothing new; say so, so the
+                    # Coach reports the change once (#2340).
+                    result = result | {"replayed": True, "notice": _REPLAYED_NOTICE}
             else:
                 action = self._preparation.prepare(
                     metadata,
@@ -247,6 +255,7 @@ class CoachStructuredToolRoundService:
                     return name, call_id, denial, {"operation": name}
 
                 result = self._execute_and_record(metadata, action, state)
+                self._turn_write_gate(state).settle(result)
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
                 _log_context_reload(state, result, round_number, name)
@@ -270,6 +279,8 @@ class CoachStructuredToolRoundService:
                 action=action,
                 command_receipts=state.command_receipts,
             )
+            if state.write_gate is not None:
+                state.write_gate.settle(result)
         state.model_instructions = model_instructions
         return name, call_id, result, action
 

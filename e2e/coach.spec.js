@@ -346,6 +346,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
     await page.goto("/#more/profile");
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
+    // Every profile section starts closed (#2262).
+    await page.locator("#profileForm > details.profile-section").first().locator(":scope > summary").click();
     const profileName = page.getByLabel("Name");
     await profileName.fill("Fixture Athlete");
     await expect(page.locator("#profileDirtyIndicator")).toBeVisible();

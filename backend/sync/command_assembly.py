@@ -6,14 +6,20 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.sync.adaptive import IllnessPauseSyncService
 from backend.sync.authority import PlanningAuthorityService
-from backend.sync.commands import ProviderRefreshCommandService
+from backend.sync.commands import (
+    GarminSynchronousRefresh,
+    ProviderRefreshCommandService,
+    SynchronousRefresh,
+    WahooSynchronousRefresh,
+)
 from backend.sync.conflict_commands import SyncConflictCommandService
+from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
-from backend.sync.provider_runtime import ProviderRuntimeRegistry, SynchronousRefresh
 
 
 @dataclass(frozen=True)
@@ -25,7 +31,7 @@ class SyncCommandCore:
     planning_revision: Any
     utc_now: Callable[[], Any]
     training_change_limit: int
-    synchronous_refreshes: Mapping[str, SynchronousRefresh] | None = None
+    synchronous_refreshes: Callable[[], Mapping[str, SynchronousRefresh]] = dict
     after_refresh: Callable[[Mapping[str, Any]], None] = lambda _job: None
 
 
@@ -47,11 +53,9 @@ class SyncCommandAssembly:
         *,
         core: SyncCommandCore,
         illness_pause: IllnessPauseDependencies,
-        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
     ) -> None:
         self._core = core
         self._illness_pause = illness_pause
-        self._provider_runtime = provider_runtime
 
     def illness_pause(self) -> IllnessPauseSyncService:
         return IllnessPauseSyncService(
@@ -65,12 +69,9 @@ class SyncCommandAssembly:
         )
 
     def provider_refresh(self) -> ProviderRefreshCommandService:
-        synchronous_refreshes = self._core.synchronous_refreshes or {}
-        if self._provider_runtime is not None:
-            synchronous_refreshes = self._provider_runtime().synchronous_refreshes()
         return ProviderRefreshCommandService(
             self._core.queue_service(),
-            synchronous_refreshes,
+            self._core.synchronous_refreshes(),
             self._core.after_refresh,
         )
 
@@ -104,3 +105,26 @@ class SyncCommandAssembly:
         return PlanRepairManifestService(
             self._core.database_manager(), self.authority()
         )
+
+
+def coach_synchronous_refreshes(
+    jobs: SyncJobExecutionAssembly.Inputs,
+) -> dict[str, SynchronousRefresh]:
+    """Return the inline refreshes a waiting Coach request runs (Garmin, Wahoo)."""
+    historical = jobs.historical
+    all_sync_days = historical.all_sync_days
+    state = jobs.state.sync_state_repository()
+    return {
+        GARMIN_ID: GarminSynchronousRefresh(
+            jobs.garmin.sync_service(),
+            jobs.garmin.morning_body_battery_service(),
+            all_sync_days,
+        ),
+        WAHOO_ID: WahooSynchronousRefresh(
+            jobs.wahoo.sync_service(),
+            all_sync_days,
+            stored_days=lambda: state.sync_period(
+                WAHOO_ID, historical.sync_period_defaults, all_sync_days
+            ),
+        ),
+    }

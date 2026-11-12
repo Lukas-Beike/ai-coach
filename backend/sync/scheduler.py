@@ -10,18 +10,17 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from backend.athlete.profile import ProfileService
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.backfill_resume import historical_backfill_payload
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.garmin_service import GarminSyncService
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import ProviderSchedulePolicy
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.schedule_policies import build_schedule_policies
+from backend.sync.schedule_policies import (
+    ProviderSchedulePolicy,
+)
 from backend.sync.state import SyncStateRepository
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -31,8 +30,6 @@ _HISTORICAL_BACKFILL = "historical_backfill"
 
 @dataclass(frozen=True)
 class DailySyncSchedulerConfig:
-    calendar_url_enabled: bool
-    garmin_automatic_sync_days: int
     auto_update_label: str
 
 
@@ -41,15 +38,12 @@ class DailySyncScheduler:
 
     def __init__(
         self,
-        profile: ProfileService,
         queue: SyncJobQueueService,
         markers: DailySyncMarkerService,
-        garmin: GarminSyncService,
         maintenance_gate: MaintenanceGate,
         *,
         config: DailySyncSchedulerConfig,
-        schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
-        registry: ProviderRegistry | None = None,
+        schedule_policies: Mapping[str, ProviderSchedulePolicy],
         retry_held: Callable[[str], bool] | None = None,
         backfill_resumer: Callable[[], None] | None = None,
     ) -> None:
@@ -61,23 +55,13 @@ class DailySyncScheduler:
         self._retry_held = retry_held
         self._maintenance_gate = maintenance_gate
         self._config = config
-        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
-        self._daily_marker_ids = self._registry.daily_marker_ids()
-        self._policies: Mapping[str, ProviderSchedulePolicy] = (
-            build_schedule_policies(
-                profile=profile,
-                garmin=garmin,
-                calendar_enabled=config.calendar_url_enabled,
-                garmin_automatic_sync_days=config.garmin_automatic_sync_days,
-            )
-            if schedule_policies is None
-            else schedule_policies
-        )
+        self._daily_marker_ids = DEFAULT_PROVIDER_REGISTRY.daily_marker_ids()
+        self._policies = schedule_policies
 
     def schedule(self) -> None:
-        """Enqueue eligible refresh jobs in the registry's daily rank order."""
+        """Enqueue eligible refresh jobs in the provider table's daily rank order."""
         with self._maintenance_gate.operation():
-            for provider_id in self._registry.daily_order():
+            for provider_id in DEFAULT_PROVIDER_REGISTRY.daily_order():
                 policy = self._policies.get(provider_id)
                 if policy is not None:
                     self._schedule_provider_safely(provider_id, policy)
@@ -245,8 +229,6 @@ class DailySyncLoop:
 
 @dataclass(frozen=True)
 class StartupSyncSchedulerConfig:
-    calendar_enabled: bool
-    garmin_automatic_sync_days: int
     sync_chunk_days: int
     sync_earliest_date: date
 
@@ -256,33 +238,20 @@ class StartupSyncScheduler:
 
     def __init__(
         self,
-        profile: ProfileService,
         queue: SyncJobQueueService,
-        garmin: GarminSyncService,
         sync_state: SyncStateRepository,
         *,
         config: StartupSyncSchedulerConfig,
-        schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
-        registry: ProviderRegistry | None = None,
+        schedule_policies: Mapping[str, ProviderSchedulePolicy],
     ) -> None:
         self._queue = queue
         self._sync_state = sync_state
         self._config = config
-        self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
-        self._policies: Mapping[str, ProviderSchedulePolicy] = (
-            build_schedule_policies(
-                profile=profile,
-                garmin=garmin,
-                calendar_enabled=config.calendar_enabled,
-                garmin_automatic_sync_days=config.garmin_automatic_sync_days,
-            )
-            if schedule_policies is None
-            else schedule_policies
-        )
+        self._policies = schedule_policies
 
     def schedule(self) -> None:
-        """Queue startup work in the registry's startup rank order."""
-        for provider_id in self._registry.startup_order():
+        """Queue startup work in the provider table's startup rank order."""
+        for provider_id in DEFAULT_PROVIDER_REGISTRY.startup_order():
             policy = self._policies.get(provider_id)
             if policy is not None:
                 self._schedule_provider(provider_id, policy)
@@ -302,7 +271,7 @@ class StartupSyncScheduler:
         # Each backfill chain walks its own cursor to the floor once; a restart
         # resumes below the cursor (the wellness walk is the one-off #1730).
         for job_type in BACKFILL_CURSOR_STREAMS:
-            if self._registry.supports_job(provider_id, job_type):
+            if DEFAULT_PROVIDER_REGISTRY.supports_job(provider_id, job_type):
                 self._enqueue_historical_backfill(provider_id, job_type)
 
     def _enqueue_historical_backfill(

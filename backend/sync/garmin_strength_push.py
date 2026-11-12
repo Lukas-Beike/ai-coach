@@ -18,7 +18,10 @@ units of the run, so a Garmin outage never turns into a burst of requests.
 The one write without a request (athlete decision 2026-11-11, #2185): after each
 Garmin refresh, ``remove_past`` unschedules and deletes the linked workouts whose
 planned day has passed, so they do not fill the watch's workout list. It touches
-only linked ids, never a recorded activity.
+only linked ids, never a recorded activity. Once (athlete decision 2026-11-12,
+#2373) it also removes the app's own older strength workouts that lost their
+unit: only those whose description starts with ``WORKOUT_MARKER``, that no unit
+of today or later links and that no day from today on schedules.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units, strength_structure
@@ -59,6 +63,7 @@ from backend.sync.gates import ProviderResyncGate
 
 GARMIN = ProviderId.GARMIN.value
 _REMOTE_LINKS = RemoteLinkRepository()
+_KEY_VALUES = KeyValueRepository(lambda: datetime.now(UTC).isoformat())
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
 _LOCK_WAIT_S = 30.0
 _LOGGER = logging.getLogger("intervals_coach")
@@ -72,6 +77,14 @@ WORKOUT_MARKER = "Pacecraft"
 _PAST_REMOVAL_BATCH = 20
 _PAST_REMOVAL_ATTEMPTS = 2 * _PAST_REMOVAL_BATCH
 _STOPPED = "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
+# The one-time removal of the app's unlinked old workouts (#2373): its progress
+# (done, and the ids read as not the app's), workout list pages, detail reads per
+# refresh and the scheduled days it keeps.
+APP_WORKOUT_CLEANUP_KEY = "garmin_app_workout_cleanup"
+_CLEANUP_PAGE = 100
+_CLEANUP_MAX_PAGES = 10
+_CLEANUP_READS = 40
+_CLEANUP_SCHEDULE_DAYS = 90
 
 
 class _StopRun(Exception):
@@ -181,7 +194,8 @@ class GarminStrengthPushService:
         try:
             if not self._configured() or not self._write_ready():
                 return 0
-            if not self._past_links():
+            cleanup = self._cleanup_state()
+            if not self._past_links() and cleanup["done"]:
                 return 0
             operation = (
                 self._gate.operation() if self._gate is not None else nullcontext()
@@ -189,6 +203,8 @@ class GarminStrengthPushService:
             with operation, self._lock, self._sdk_session() as client:
                 # Read again under the lock: a push may have moved a unit meanwhile.
                 self._remove_links(client, self._past_links(), removed)
+                if not cleanup["done"]:
+                    self._remove_unlinked(client, cleanup, removed)
         except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
             _LOGGER.warning(
                 "Garmin past workout removal failed",
@@ -252,6 +268,92 @@ class GarminStrengthPushService:
                     db, RemoteEntityKind.PLANNED_UNIT, local_id, GARMIN
                 )
             removed[0] += 1
+
+    def _remove_unlinked(
+        self, client: Any, state: dict[str, Any], removed: list[int]
+    ) -> None:
+        """Remove the app's old workouts no unit of today or later uses, once.
+
+        A workout counts as the app's only by its description's first line. The
+        ids read as someone else's are remembered, so the bounded reads move on;
+        a pass that reaches the end of the list finishes the removal for good.
+        """
+        today = self._today()
+        keep = self._upcoming_workout_ids(today) | _scheduled_from(client, today)
+        checked = set(state["checked"])
+        reads = 0
+        finished = False
+        try:
+            for workout_id in _strength_workout_ids(client):
+                if workout_id in keep or workout_id in checked:
+                    continue
+                if removed[0] >= _PAST_REMOVAL_BATCH or reads >= _CLEANUP_READS:
+                    break
+                reads += 1
+                if self._remove_if_own(client, workout_id):
+                    removed[0] += 1
+                else:
+                    checked.add(workout_id)
+            else:
+                finished = True
+        finally:
+            # A Garmin outage keeps what this pass already read.
+            self._save_cleanup({"done": finished, "checked": sorted(checked)})
+
+    def _remove_if_own(self, client: Any, workout_id: str) -> bool:
+        """Delete one workout if the app sent it; False for another's or a refused one.
+
+        A refused workout is not retried forever: the finished pass leaves it.
+        """
+        try:
+            if not _app_created(_call(client.get_workout_by_id, workout_id)):
+                return False
+            _call(client.delete_workout, workout_id)
+        except _Missing:
+            pass
+        except AppError:
+            return False
+        with self._database_manager().unit_of_work() as db:
+            db.execute(
+                "DELETE FROM remote_links WHERE provider=? AND entity_kind=? "
+                "AND remote_id=?",
+                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, workout_id),
+            )
+        return True
+
+    def _upcoming_workout_ids(self, today: date) -> set[str]:
+        """Workouts linked to a stored unit dated today or later."""
+        with self._database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT l.remote_id FROM remote_links l "
+                "JOIN planned_units p ON p.local_id = l.local_id "
+                "WHERE l.provider=? AND l.entity_kind=? AND l.remote_id IS NOT NULL "
+                "AND json_valid(p.payload) "
+                "AND substr(json_extract(p.payload, '$.date'), 1, 10) >= ?",
+                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, today.isoformat()),
+            ).fetchall()
+        return {str(row["remote_id"]) for row in rows}
+
+    def _cleanup_state(self) -> dict[str, Any]:
+        with self._database_manager().unit_of_work() as db:
+            raw = _KEY_VALUES.get(db, APP_WORKOUT_CLEANUP_KEY)
+        try:
+            value = json.loads(raw or "{}")
+        except TypeError, ValueError:
+            value = {}
+        if not isinstance(value, dict):
+            value = {}
+        checked = value.get("checked")
+        return {
+            "done": value.get("done") is True,
+            "checked": [str(item) for item in checked]
+            if isinstance(checked, list)
+            else [],
+        }
+
+    def _save_cleanup(self, state: dict[str, Any]) -> None:
+        with self._database_manager().unit_of_work() as db:
+            _KEY_VALUES.set(db, APP_WORKOUT_CLEANUP_KEY, json.dumps(state))
 
     def _run(self, requested: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
@@ -549,6 +651,50 @@ def _schedule_id(saved: Any) -> str | None:
         ):
             return str(value)
     return None
+
+
+def _app_created(workout: Any) -> bool:
+    """Whether this app sent the workout: its description's first line is the marker."""
+    if not isinstance(workout, dict):
+        return False
+    lines = str(workout.get("description") or "").splitlines()
+    return bool(lines) and lines[0].strip() == WORKOUT_MARKER
+
+
+def _strength_workout_ids(client: Any) -> list[str]:
+    """The ids of the strength workouts in the athlete's Garmin library."""
+    ids: list[str] = []
+    for page in range(_CLEANUP_MAX_PAGES):
+        rows = _call(client.get_workouts, page * _CLEANUP_PAGE, _CLEANUP_PAGE)
+        rows = rows if isinstance(rows, list) else []
+        ids.extend(
+            str(row["workoutId"])
+            for row in rows
+            if isinstance(row, dict)
+            and row.get("workoutId") is not None
+            and (row.get("sportType") or {}).get("sportTypeKey") == "strength_training"
+        )
+        if len(rows) < _CLEANUP_PAGE:
+            break
+    return ids
+
+
+def _scheduled_from(client: Any, today: date) -> set[str]:
+    """Workouts scheduled on a day from today on: they stay."""
+    last = today + timedelta(days=_CLEANUP_SCHEDULE_DAYS)
+    items = _call(
+        client.get_scheduled_workouts_by_period, today.isoformat(), last.isoformat()
+    )
+    owners: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        workout = item.get("workout")
+        workout = workout if isinstance(workout, dict) else {}
+        owner = item.get("workoutId") or workout.get("workoutId")
+        if owner is not None:
+            owners.add(str(owner))
+    return owners
 
 
 def _scheduled_on(client: Any, workout_id: str, day: str) -> str | None:

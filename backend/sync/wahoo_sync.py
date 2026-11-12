@@ -49,7 +49,7 @@ from backend.sync.canonical_ingest import fetch_deletion_window, ingest_plan
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 
@@ -105,15 +105,15 @@ class WahooConnectionStatus(Protocol):
     def status(self) -> Mapping[str, Any]: ...
 
 
-def sync_window_days(registry: ProviderRegistry, requested: object) -> int:
+def sync_window_days(requested: object) -> int:
     """Clamp a requested window to the descriptor's limits.
 
     A missing or invalid request uses the descriptor's default window. Any
     integer of zero or below is the "all" sentinel (``-1``) and means the
     descriptor maximum, as it does for the other providers.
     """
-    maximum = registry.max_sync_days(WAHOO_ID)
-    default = registry.sync_period_defaults().get(WAHOO_ID, maximum)
+    maximum = DEFAULT_PROVIDER_REGISTRY.max_sync_days(WAHOO_ID)
+    default = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults().get(WAHOO_ID, maximum)
     if isinstance(requested, bool) or not isinstance(requested, int):
         return max(1, min(default, maximum))
     if requested <= 0:
@@ -133,7 +133,6 @@ class WahooSyncService:
         storage: WahooSyncStorage,
         daily_markers: Callable[[], DailySyncMarkerService],
         observer: Callable[[], SyncOperationObserver],
-        registry: ProviderRegistry,
         clock: WahooSyncClock,
         logger: logging.Logger,
         lock: Any | None = None,
@@ -149,7 +148,6 @@ class WahooSyncService:
         self._coverage = CanonicalCoverageStore(storage.key_values)
         self._daily_markers = daily_markers
         self._observer = observer
-        self._registry = registry
         self._clock = clock
         self._logger = logger
         self._lock = lock if lock is not None else WAHOO_SYNC_LOCK
@@ -221,7 +219,7 @@ class WahooSyncService:
             return {"status": "already_running"}
         try:
             try:
-                return self._sync_locked(sync_window_days(self._registry, days))
+                return self._sync_locked(sync_window_days(days))
             except AppError as error:
                 self._record_error(error.message)
                 self._log_failure(reason, error)

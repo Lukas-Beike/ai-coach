@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import json
 import logging
 import sqlite3
 import threading
@@ -46,16 +47,13 @@ from backend.sync.execution_assembly import (
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
     WahooJobDependencies,
+    configured_for_job,
+    provider_configured_checks,
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.provider_runtime_assembly import (
-    ProviderRuntimeDependencies,
-    build_provider_runtime,
-    builtin_bindings,
-)
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
@@ -95,6 +93,14 @@ EXPECTED_PAIRS: Final = frozenset(
 COACH_ONLY: Final = frozenset({(INTERVALS_ID, "nutrition_sync")})
 # Providers whose descriptor carries a not_configured_message.
 CONFIGURABLE: Final = frozenset({INTERVALS_ID, GARMIN_ID, WAHOO_ID})
+
+# Manual route -> provider, request body and the refresh payload it queues.
+MANUAL_ROUTES: Final[dict[str, tuple[str, dict[str, Any] | None, dict[str, Any]]]] = {
+    "/api/garmin/sync": (GARMIN_ID, {"days": 7}, {"days": 7, "reason": "manual"}),
+    "/api/wahoo/sync": (WAHOO_ID, None, {"reason": "manual"}),
+    "/api/weather/sync": (WEATHER_ID, None, {"reason": "manuell", "force": True}),
+    "/api/external-calendar/sync": (CALENDAR_ID, None, {"reason": "manuell"}),
+}
 
 # (provider, type) -> request payload and the provider service call it must reach.
 CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
@@ -288,14 +294,7 @@ class Harness:
             resync_gate=ProviderResyncGate("Wahoo"),
             stream_backfill_service=lambda: service("wahoo.streams"),
         )
-        dependencies = ProviderRuntimeDependencies(
-            config=lambda: config,
-            profile=lambda: mock.Mock(),
-            database_manager=lambda: self.database,
-            key_values=key_values,
-            database_lock=threading.RLock(),
-            garmin_resync_gate=ProviderResyncGate("Garmin"),
-            garmin_automatic_sync_days=7,
+        jobs = SyncJobExecutionAssembly.Inputs(
             historical=historical,
             state=state,
             intervals=intervals,
@@ -303,27 +302,18 @@ class Harness:
             calendar_weather=calendar_weather,
             wahoo=wahoo_deps,
         )
-        self.runtime = build_provider_runtime(
-            DEFAULT_PROVIDER_REGISTRY, builtin_bindings(dependencies)
+        self.configured = provider_configured_checks(
+            jobs, config=lambda: config, profile=lambda: mock.Mock()
         )
-        self.executor = SyncJobExecutionAssembly(
-            dependencies=SyncJobExecutionAssembly.Inputs(
-                historical=historical,
-                state=state,
-                intervals=intervals,
-                garmin=garmin_deps,
-                calendar_weather=calendar_weather,
-                wahoo=wahoo_deps,
-            ),
-        ).executor()
+        self.executor = SyncJobExecutionAssembly(dependencies=jobs).executor()
         self.endpoint = SyncCommandEndpoint(
             self.queue,
-            mock.Mock(),
+            state_repository,
             mock.Mock(),
             lambda: "operation-1",
             {GARMIN_ID: 7, WAHOO_ID: 7},
             -1,
-            provider_configured=self.runtime.provider_configured,
+            provider_configured=lambda provider_id: self.configured[provider_id](),
         )
 
     def start(self, provider: str, job_type: str, payload: dict[str, Any]) -> dict:
@@ -407,6 +397,22 @@ class ProviderJobWiringTests(unittest.TestCase):
                 )
                 self.assertEqual(0, harness.stored_jobs())
 
+    def test_the_configured_guard_normalizes_the_provider_id(self) -> None:
+        # The check reads the normalized id (a raw " Garmin " would miss the
+        # check table), so case and spaces cannot slip past the 409.
+        for spelled, provider in ((" Garmin ", GARMIN_ID), ("WAHOO", WAHOO_ID)):
+            with self.subTest(provider=spelled):
+                harness = Harness(self, intervals_key="", garmin=False, wahoo=False)
+
+                with self.assertRaises(AppError) as caught:
+                    harness.post(spelled, "refresh", CASES[provider, "refresh"][0])
+
+                self.assertEqual(
+                    (409, "not_configured"),
+                    (caught.exception.status, caught.exception.reason),
+                )
+                self.assertEqual(0, harness.stored_jobs())
+
     def test_providers_without_a_message_are_admitted_when_others_are_not(self) -> None:
         for provider, job_type in sorted(EXPECTED_PAIRS):
             if provider in CONFIGURABLE:
@@ -419,8 +425,63 @@ class ProviderJobWiringTests(unittest.TestCase):
                 self.assertEqual("completed", harness.run_next()["status"])
 
 
+class ManualRouteWiringTests(unittest.TestCase):
+    def test_the_matrix_lists_exactly_the_manual_routes_of_the_table(self) -> None:
+        self.assertEqual(
+            {(path, provider) for path, (provider, _, _) in MANUAL_ROUTES.items()},
+            set(DEFAULT_PROVIDER_REGISTRY.manual_routes()),
+        )
+
+    def test_every_manual_route_queues_its_refresh_and_reaches_its_provider(
+        self,
+    ) -> None:
+        for path, (provider, body, queued) in sorted(MANUAL_ROUTES.items()):
+            with self.subTest(path=path):
+                harness = Harness(self)
+
+                status, job = harness.endpoint.execute(path, body)
+
+                self.assertEqual(202, status)
+                self.assertEqual(
+                    (provider, "refresh", "queued"),
+                    (job["provider"], job["type"], job["status"]),
+                )
+                with harness.database.reader() as db:
+                    stored = db.execute(
+                        "SELECT payload FROM sync_jobs WHERE id=?", (job["id"],)
+                    ).fetchone()[0]
+                self.assertEqual(queued, json.loads(stored))
+                self.assertEqual("completed", harness.run_next()["status"])
+                self.assertIn(CASES[provider, "refresh"][1], harness.calls)
+
+    def test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job(
+        self,
+    ) -> None:
+        for path, (provider, body, _) in sorted(MANUAL_ROUTES.items()):
+            with self.subTest(path=path):
+                harness = Harness(self, intervals_key="", garmin=False, wahoo=False)
+                message = DEFAULT_PROVIDER_REGISTRY.get(provider).not_configured_message
+
+                if message is None:
+                    harness.endpoint.execute(path, body)
+                    self.assertEqual(1, harness.stored_jobs())
+                    continue
+                with self.assertRaises(AppError) as caught:
+                    harness.endpoint.execute(path, body)
+
+                self.assertEqual(
+                    (409, "not_configured", message),
+                    (
+                        caught.exception.status,
+                        caught.exception.reason,
+                        caught.exception.message,
+                    ),
+                )
+                self.assertEqual(0, harness.stored_jobs())
+
+
 class ConfiguredCheckTests(unittest.TestCase):
-    """The HTTP layer's configured check is the runtime registry's, per provider."""
+    """The HTTP layer's configured check is the provider's live check."""
 
     def test_each_message_provider_follows_its_own_configuration(self) -> None:
         for only in sorted(CONFIGURABLE):
@@ -435,24 +496,26 @@ class ConfiguredCheckTests(unittest.TestCase):
                 self.assertEqual(
                     {provider: provider == only for provider in CONFIGURABLE},
                     {
-                        provider: harness.runtime.provider_configured(provider)
+                        provider: harness.configured[provider]()
                         for provider in CONFIGURABLE
                     },
                 )
 
-    def test_every_message_descriptor_is_bound_in_the_runtime(self) -> None:
+    def test_every_message_provider_has_a_configured_check(self) -> None:
         harness = Harness(self)
         for descriptor in DEFAULT_PROVIDER_REGISTRY.all():
             if descriptor.not_configured_message:
                 with self.subTest(provider=descriptor.provider_id):
-                    # An unbound provider would raise KeyError here, which the
-                    # removed full-resync lookup did for Intervals.icu (#1819).
+                    # A provider without a check would raise KeyError here, which
+                    # the removed full-resync lookup did for Intervals.icu (#1819).
                     self.assertIsInstance(
-                        harness.runtime.provider_configured(descriptor.provider_id),
+                        harness.configured[descriptor.provider_id](),
                         bool,
                     )
 
-    def test_the_composition_root_wires_the_endpoint_to_the_runtime(self) -> None:
+    def test_the_composition_root_wires_the_endpoint_to_the_configured_checks(
+        self,
+    ) -> None:
         root = Path(__file__).resolve().parents[1] / "server.py"
         tree = ast.parse(root.read_text(encoding="utf-8"))
         wired = [
@@ -464,19 +527,44 @@ class ConfiguredCheckTests(unittest.TestCase):
             if keyword.arg == "provider_configured"
         ]
         self.assertEqual(1, len(wired))
-        calls = [
-            node
-            for node in ast.walk(wired[0])
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "attr", "") == "provider_configured"
-        ]
-        self.assertEqual(1, len(calls))
-        owner = calls[0].func.value  # type: ignore[attr-defined]
         self.assertEqual(
-            "provider_runtime",
-            getattr(owner.func, "id", ""),
-            "HttpSyncServices must take provider_configured from provider_runtime()",
+            "PROVIDER_CONFIGURED[provider_id]()",
+            ast.unparse(cast(ast.Lambda, wired[0]).body),
+            "HttpSyncServices must take provider_configured from PROVIDER_CONFIGURED",
         )
+
+
+class ConfiguredForJobTests(unittest.TestCase):
+    def test_follows_table_order_job_type_and_live_configuration(self) -> None:
+        state = dict.fromkeys(DEFAULT_PROVIDER_REGISTRY.ids(), True)
+        checks = {
+            provider: (lambda provider=provider: state[provider]) for provider in state
+        }
+
+        self.assertEqual(
+            (INTERVALS_ID, GARMIN_ID, WAHOO_ID), configured_for_job(checks, "plan_push")
+        )
+        self.assertEqual((GARMIN_ID,), configured_for_job(checks, "activity_details"))
+        state[GARMIN_ID] = False
+        self.assertEqual((), configured_for_job(checks, "activity_details"))
+
+
+class RunningProbeWiringTests(unittest.TestCase):
+    def test_the_composition_root_gives_the_public_state_the_wahoo_probe(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "server.py"
+        tree = ast.parse(root.read_text(encoding="utf-8"))
+        probes = [
+            keyword.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", "") == "PublicStateAssembly"
+            for keyword in node.keywords
+            if keyword.arg == "running_probes"
+        ]
+        self.assertEqual(1, len(probes))
+        probe = cast(ast.Dict, probes[0])
+        self.assertEqual(["WAHOO_ID"], [ast.unparse(key) for key in probe.keys if key])
+        self.assertIn("WAHOO_SYNC.sync_service().running()", ast.unparse(probe))
 
 
 if __name__ == "__main__":

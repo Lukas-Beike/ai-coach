@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Mapping
 from datetime import date
-from typing import Any
+from typing import Any, Protocol
 
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
@@ -19,18 +19,15 @@ from backend.sync.garmin_service import (
     GarminSyncService,
     refresh_morning_battery_after_sync,
 )
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import SynchronousRefresh
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.wahoo_sync import WahooSyncService
 
 
-def _requested_days(
-    requested_days: Any, provider: str, all_sync_days: int, registry: ProviderRegistry
-) -> int:
+def _requested_days(requested_days: Any, provider: str, all_sync_days: int) -> int:
     """Validate a Coach refresh window; ``all_sync_days`` marks the whole history.
 
-    The registry's rule is the one a stored sync period must satisfy as well.
+    The provider table's rule is the one a stored sync period must satisfy as well.
     """
     try:
         days = int(requested_days)
@@ -40,7 +37,7 @@ def _requested_days(
             "Der synchrone Datenabruf benötigt einen gültigen Zeitraum.",
             reason="invalid_refresh_request",
         ) from exc
-    if not registry.accepts_sync_days(provider, days, all_sync_days):
+    if not DEFAULT_PROVIDER_REGISTRY.accepts_sync_days(provider, days, all_sync_days):
         raise AppError(
             400,
             "Der Synchronisationszeitraum ist zu groß.",
@@ -62,6 +59,18 @@ def _raise_if_busy(result: Mapping[str, Any], provider_label: str) -> None:
         )
 
 
+class SynchronousRefresh(Protocol):
+    """Performs a refresh inline for a Coach request that waits for completion."""
+
+    def refresh(
+        self,
+        provider: str,
+        arguments: Mapping[str, Any],
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        """Run the refresh and return its result."""
+
+
 class GarminSynchronousRefresh:
     """Runs the Garmin refresh inline for a Coach request that waits.
 
@@ -81,13 +90,10 @@ class GarminSynchronousRefresh:
         garmin_sync_service: GarminSyncService,
         morning_body_battery_service: MorningBodyBatteryService,
         all_sync_days: int,
-        *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._all_sync_days = all_sync_days
-        self._registry = registry
 
     def refresh(
         self,
@@ -96,7 +102,7 @@ class GarminSynchronousRefresh:
         cancel_event: threading.Event | None,
     ) -> dict[str, Any]:
         days, end_date, history_limited = self._window(provider, arguments)
-        label = self._registry.get(provider).label
+        label = DEFAULT_PROVIDER_REGISTRY.get(provider).label
         result = self._sync(days, end_date, True, cancel_event)
         _raise_if_busy(result, label)
         if result.get("waited_for_existing"):
@@ -152,9 +158,7 @@ class GarminSynchronousRefresh:
         days = (
             None
             if requested_days is None
-            else _requested_days(
-                requested_days, provider, self._all_sync_days, self._registry
-            )
+            else _requested_days(requested_days, provider, self._all_sync_days)
         )
         if days is None or days == self._all_sync_days:
             window_days, end_date = self._garmin_sync_service.automatic_sync_window(
@@ -201,14 +205,12 @@ class WahooSynchronousRefresh:
         wahoo_sync_service: WahooSyncService,
         all_sync_days: int,
         *,
-        registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         wait_seconds: float = 120.0,
         stored_days: Callable[[], int] | None = None,
     ) -> None:
         self._stored_days = stored_days
         self._wahoo_sync_service = wahoo_sync_service
         self._all_sync_days = all_sync_days
-        self._registry = registry
         self._wait_seconds = wait_seconds
 
     def refresh(
@@ -221,11 +223,9 @@ class WahooSynchronousRefresh:
         days = (
             None
             if requested_days is None
-            else _requested_days(
-                requested_days, provider, self._all_sync_days, self._registry
-            )
+            else _requested_days(requested_days, provider, self._all_sync_days)
         )
-        label = self._registry.get(provider).label
+        label = DEFAULT_PROVIDER_REGISTRY.get(provider).label
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
         # The sync acquires the lock itself, waiting for a running read to end.

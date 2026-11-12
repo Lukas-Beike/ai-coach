@@ -11,6 +11,7 @@ from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import (
     PLANNED_INTENSITY,
     PLANNED_LOAD,
+    TEMPLATE_ID,
 )
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.stored_sports import workout_sport_from_record
@@ -58,6 +59,7 @@ LIBRARY_WORKOUT_FIELDS = {
     "remote_event_category",
     "category",
     "paired_event_id",
+    TEMPLATE_ID,
     *FOCUS_KEYS,
 }
 

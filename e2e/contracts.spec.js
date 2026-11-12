@@ -358,6 +358,8 @@ test("new session loads are independent of a delayed previous session load", asy
 test("profile invalid JSON and incomplete success preserve the dirty draft", async ({ page }) => {
   await ready(page);
   await page.goto("/#more/profile");
+  // Every profile section starts closed (#2262).
+  await page.locator("#profileForm > details.profile-section").first().locator(":scope > summary").click();
   for (const body of ["{", "<html>proxy error</html>", "{}"] ) {
     await page.route("**/api/profile", (route) => route.request().method() === "PUT"
       ? route.fulfill({ status: 200, contentType: "application/json", body }) : route.continue());

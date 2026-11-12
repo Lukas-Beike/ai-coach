@@ -7,7 +7,7 @@ Describe explicit local-diary export to Intervals.icu and scoped Garmin nutritio
 ## Requirements
 
 ### Requirement: Nutrition export is an explicit queued operation
-The system SHALL start a nutrition export only from a sync the athlete names, approved through a Coach action card, and SHALL NOT expose a direct HTTP route that queues it. Ordinary diary reads, edits, product lookup, and view refresh SHALL not implicitly export nutrition.
+The system SHALL start a nutrition export only from a sync the athlete names in the Coach, queued without a card and bound to the manifest frozen when the request ran, and SHALL NOT expose a direct HTTP route that queues it. Ordinary diary reads, edits, product lookup, and view refresh SHALL not implicitly export nutrition.
 
 #### Scenario: No direct export route
 - **WHEN** a client posts to `/api/nutrition/sync`
@@ -15,10 +15,10 @@ The system SHALL start a nutrition export only from a sync the athlete names, ap
 
 #### Scenario: Export on the job route
 - **WHEN** a client posts a `nutrition_sync` job for Intervals.icu to `/api/sync/jobs`, with a `date`, a `pending_limit`, a client-built `approval_manifest` or nothing
-- **THEN** the route answers 400 and no nutrition-export job is enqueued; only the approved Coach card enqueues the export, directly through the queue.
+- **THEN** the route answers 400 and no nutrition-export job is enqueued; only the Coach's named sync enqueues the export, directly through the queue.
 
 #### Scenario: Export pending dates
-- **WHEN** the approved Coach action covers pending dates
+- **WHEN** the named Coach sync covers pending dates
 - **THEN** service execution accepts only a limit from one through thirty-one.
 
 #### Scenario: Refresh the diary
