@@ -167,6 +167,16 @@ class ChangeHistoryTests(unittest.TestCase):
             list(json.loads(record["diff"])["fields"]), ["starts_at_local"]
         )
 
+    def test_a_stored_food_change_recorded_before_its_origin_marks_stays_undoable(
+        self,
+    ):
+        value = {"id": "off:1", "basis_amount": 100, "salt_g": 0.4, "filled_fields": {}}
+        recorded = {key: item for key, item in value.items() if key != "filled_fields"}
+        self.assertIn(
+            change_history.audit_hash(recorded),
+            change_history.accepted_audit_hashes("food_database_entry", value),
+        )
+
     def test_planning_field_names_before_schema_v16_are_not_translated(self):
         # Schema v21 is the baseline (#1798): history rows written under the
         # former Intervals.icu names are neither matched nor renamed.

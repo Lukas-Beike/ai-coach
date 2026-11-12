@@ -230,11 +230,14 @@ NUTRITION_PRODUCT_FIELDS = (
     "status",
 )
 # A stored database food: its nutrient values and the basis they count on. Only
-# the Coach's gap fill records it; a refetch replaces the values and so ends undo.
+# a gap fill and the athlete's edit record it; a refetch replaces the values and
+# so ends undo.
 FOOD_DATABASE_ENTRY_FIELDS = (
     "id",
     "basis_amount",
     "basis_unit",
+    # Where each filled or edited value came from; undo puts it back.
+    "filled_fields",
     "kcal",
     "carbs_g",
     "protein_g",
@@ -427,6 +430,8 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
     ),
     "planned_unit": (("starts_at_local",), FOCUS_KEYS),
     "workout_library": (FOCUS_KEYS,),
+    # Gap fills of stored foods were recorded before the origin marks were.
+    "food_database_entry": (("filled_fields",),),
 }
 
 

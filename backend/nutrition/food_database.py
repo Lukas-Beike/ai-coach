@@ -602,6 +602,20 @@ class FoodDatabaseService:
             ),
         }
 
+    def refresh_barcode(self, barcode: str) -> str:
+        """Store the food of an EAN, re-checking a stored one now; return the notice.
+
+        A failed lookup raises and leaves the stored foods unchanged.
+        """
+        stored = self._mirror.by_barcode(barcode) if self._mirror else []
+        # Newest first; a source that is unavailable gives way to the next one.
+        for entry in stored:
+            try:
+                return str(self.refresh_stored(entry["id"]).get("notice", ""))
+            except AppError:
+                continue
+        return self._barcode_lookup(barcode)[1]
+
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):
             raise AppError(
