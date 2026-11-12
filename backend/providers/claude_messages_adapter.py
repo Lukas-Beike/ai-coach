@@ -39,7 +39,6 @@ _JSON_ONLY = (
     "no text before or after it."
 )
 _FAMILY = re.compile(r"^claude-(opus|sonnet|haiku)-")
-_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _ACTION_BLOCKS = frozenset(
     {
         "tool_use",
@@ -256,9 +255,14 @@ def _final_text(content: list[dict[str, Any]], *, json_answer: bool) -> str:
         for block in content[last_action + 1 :]
         if block.get("type") == "text"
     ).strip()
-    if json_answer:
-        fenced = _FENCE.match(text)
-        text = fenced.group(1) if fenced else text
+    if (
+        json_answer
+        and len(text) >= 6
+        and text.startswith("```")
+        and text.endswith("```")
+    ):
+        # A fenced answer despite the instruction: keep what is inside the fence.
+        text = text[3:-3].removeprefix("json").strip()
     return text
 
 

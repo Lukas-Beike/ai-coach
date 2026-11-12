@@ -55,6 +55,25 @@ def claude_headers(api_key: str) -> dict[str, str]:
     return {"x-api-key": api_key.strip(), "anthropic-version": ANTHROPIC_VERSION}
 
 
+def _dispatch_event(
+    data: list[str], on_event: Callable[[dict[str, Any]], None]
+) -> None:
+    """Decode one event's data lines and apply it; malformed is invalid."""
+    try:
+        event = json.loads("\n".join(data))
+        if not isinstance(event, dict):
+            raise TypeError("event")
+        on_event(event)
+    except (KeyError, TypeError, ValueError) as exc:
+        # Not JSON, not an object, or an event for a block that never started.
+        raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
+
+
+def _raise_if_cancelled(cancel_event: Any) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise provider_http.ProviderRequestCancelled
+
+
 def read_sse_events(
     response: Any,
     *,
@@ -65,30 +84,12 @@ def read_sse_events(
     """Read Server-Sent Events within the byte bound; return the bytes read."""
     size = 0
     data: list[str] = []
-
-    def dispatch() -> None:
-        try:
-            event = json.loads("\n".join(data))
-        except json.JSONDecodeError as exc:
-            raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
-        if not isinstance(event, dict):
-            raise AppError(502, _INVALID_EVENT, reason="invalid_response")
-        try:
-            on_event(event)
-        except (KeyError, TypeError, ValueError) as exc:
-            # An event for a block that never started, or without a field.
-            raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
-
-    def check_cancelled() -> None:
-        if cancel_event is not None and cancel_event.is_set():
-            raise provider_http.ProviderRequestCancelled
-
     while True:
-        check_cancelled()
+        _raise_if_cancelled(cancel_event)
         # One byte over the remaining budget detects an overlong line.
         line = response.readline(max(1, max_bytes - size + 1))
         # A cancel closes the response, which ends the read: that is no truncation.
-        check_cancelled()
+        _raise_if_cancelled(cancel_event)
         size += len(line)
         if size > max_bytes:
             raise provider_http.ProviderResponseTooLarge(
@@ -103,10 +104,10 @@ def read_sse_events(
         if text.startswith("data:"):
             data.append(text[5:].lstrip())
         elif not text and data:
-            dispatch()
+            _dispatch_event(data, on_event)
             data = []
     if data:
-        dispatch()
+        _dispatch_event(data, on_event)
     return size
 
 
