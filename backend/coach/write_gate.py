@@ -44,6 +44,7 @@ from backend.coach.tool_specs import (
     CHECKIN,
     COMPETITION,
     DELETE_TOOLS,
+    DISTINCT_RECORD_TOOLS,
     NO_RECORD_TOOLS,
     NUTRITION,
     PLANNING,
@@ -527,6 +528,8 @@ class TurnGateState:
     records_count: int = 0
     # Records per tool, for a tool's own bulk threshold.
     tool_records: dict[str, int] = field(default_factory=dict)
+    # The record ids a distinct-record tool already touched in the turn.
+    tool_record_ids: dict[str, frozenset[str]] = field(default_factory=dict)
     verdict: ImpactVerdict | None = None
 
     @property
@@ -571,7 +574,35 @@ def record_count(tool_name: str, arguments: Mapping[str, Any] | None) -> int:
     keys = RECORD_LISTS.get(tool_name)
     if keys is None or not isinstance(arguments, Mapping):
         return 1
+    if tool_name in DISTINCT_RECORD_TOOLS:
+        return _new_records(tool_name, arguments, frozenset())
     return max(1, sum(len(_items(arguments, key)) for key in keys))
+
+
+def _record_keys(
+    tool_name: str, arguments: Mapping[str, Any] | None
+) -> tuple[frozenset[str], int]:
+    """The record ids a call names, and how many items name no id."""
+    items = (
+        [
+            item
+            for key in RECORD_LISTS.get(tool_name, ())
+            for item in _items(arguments, key)
+        ]
+        if isinstance(arguments, Mapping)
+        else []
+    )
+    ids = [
+        str(item["id"])
+        for item in items
+        if isinstance(item, Mapping) and item.get("id") not in (None, "")
+    ]
+    return frozenset(ids), len(items) - len(ids)
+
+
+def record_ids(tool_name: str, arguments: Mapping[str, Any] | None) -> frozenset[str]:
+    """The record ids a call names, as the receipt keeps them."""
+    return _record_keys(tool_name, arguments)[0]
 
 
 def _canonical(value: Any) -> str:
@@ -598,21 +629,60 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
     )
 
 
+def _new_records(
+    tool_name: str, arguments: Mapping[str, Any] | None, seen_ids: frozenset[str]
+) -> int:
+    """Records a call adds; a distinct-record tool skips ids already touched.
+
+    An item without an id is always a record of its own; a call naming only
+    touched ids adds none, any other call at least one.
+    """
+    if tool_name not in DISTINCT_RECORD_TOOLS:
+        return record_count(tool_name, arguments)
+    ids, anonymous = _record_keys(tool_name, arguments)
+    added = len(ids - seen_ids) + anonymous
+    return added if added or ids else 1
+
+
+def count_records(
+    state: TurnGateState, tool_name: str, records: int, ids: frozenset[str]
+) -> None:
+    """Add a call's records to the turn: live, and again when a turn resumes."""
+    state.records_count += records
+    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
+    if tool_name in DISTINCT_RECORD_TOOLS:
+        state.tool_record_ids[tool_name] = (
+            state.tool_record_ids.get(tool_name, frozenset()) | ids
+        )
+
+
+def resumed_records(
+    state: TurnGateState, tool_name: str, stored: int, ids: frozenset[str]
+) -> int:
+    """Records an earlier call of a resumed turn adds, counted as it was live."""
+    if tool_name not in DISTINCT_RECORD_TOOLS or not ids:
+        return stored
+    anonymous = max(0, stored - len(ids))
+    return len(ids - state.tool_record_ids.get(tool_name, frozenset())) + anonymous
+
+
 def call_impact(
     tool_name: str,
     arguments: Mapping[str, Any] | None,
     records_so_far: int = 0,
     tool_records_so_far: int = 0,
+    seen_ids: frozenset[str] = frozenset(),
 ) -> frozenset[str]:
     """The high-impact kinds of one local call: ``delete`` and/or ``bulk``.
 
     ``tool_records_so_far`` counts the records this tool already touched in the
-    turn, for a tool that counts as bulk from fewer records than the rest.
+    turn, for a tool that counts as bulk from fewer records than the rest;
+    ``seen_ids`` are those records, which a distinct-record tool counts once.
     """
     impact = set()
     if _removes_records(tool_name, arguments):
         impact.add(DELETE)
-    records = record_count(tool_name, arguments)
+    records = _new_records(tool_name, arguments, seen_ids)
     # A tool may count as bulk from fewer records than the general threshold.
     bulk_from = BULK_FROM.get(tool_name)
     if (
@@ -798,7 +868,8 @@ def check_write(
         return GateDecision(
             False, domain, REMOTE_INTERVALS_DENIAL, state.classifier_used
         )
-    records = record_count(tool_name, arguments)
+    seen = state.tool_record_ids.get(tool_name, frozenset())
+    records = _new_records(tool_name, arguments, seen)
     impact = (
         frozenset()
         if domain == REMOTE_INTERVALS
@@ -807,6 +878,7 @@ def check_write(
             arguments,
             state.records_count,
             state.tool_records.get(tool_name, 0),
+            seen,
         )
     )
     denied = _classifier_denial(
@@ -818,8 +890,7 @@ def check_write(
     if denied:
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
-    state.records_count += records
-    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
+    count_records(state, tool_name, records, record_ids(tool_name, arguments))
     return GateDecision(True, domain, "ok", state.classifier_used)
 
 
