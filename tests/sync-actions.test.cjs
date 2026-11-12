@@ -97,12 +97,15 @@ test("a failed sync without a cause keeps the generic message", async () => {
   assert.equal(toasts[0].message, "Garmin-Synchronisierung fehlgeschlagen.");
 });
 
-test("a second tap during a running sync starts no second job", async () => {
-  for (const [action, flag] of [["syncGarmin", "garmin"], ["syncWahoo", "wahoo"], ["syncWeather", "weather"], ["syncExternalCalendar", "externalCalendar"]]) {
-    const { context, posts } = syncHarness([{ id: "job-1", status: "completed", items: [] }]);
-    context.state.localSync[flag] = true;
-    await vm.runInContext(`${action}()`, context);
-    assert.equal(posts.length, 0, action);
+test("a second tap during a running sync starts no second job, also before the bootstrap loaded", async () => {
+  for (const bootstrapped of [true, false]) {
+    for (const [action, flag] of [["syncGarmin", "garmin"], ["syncWahoo", "wahoo"], ["syncWeather", "weather"], ["syncExternalCalendar", "externalCalendar"]]) {
+      const { context, posts } = syncHarness([{ id: "job-1", status: "completed", items: [] }]);
+      if (!bootstrapped) context.providerIds = () => ({});
+      context.state.localSync[flag] = true;
+      await vm.runInContext(`${action}()`, context);
+      assert.equal(posts.length, 0, `${action} bootstrapped=${bootstrapped}`);
+    }
   }
 });
 

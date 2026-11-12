@@ -1,6 +1,7 @@
 // One athlete action on a control: busy state, `run` (returns the success toast), reload, error toast and cleanup.
-// `flag` locks a state.localSync entry against a second tap; `rerender` lets the settings redraw the control.
-async function runAction(control, run, { flag, busyText, idleText, pulse, invalidate, rerender } = {}) {
+// `lock` names the state.localSync entry (its one key) that blocks a second tap; `rerender` lets the settings redraw the control.
+async function runAction(control, run, { lock, busyText, idleText, pulse, invalidate, rerender } = {}) {
+  const flag = lock && Object.keys(lock)[0];
   if (!control || (flag && state.localSync[flag])) return;
   if (flag) state.localSync[flag] = true;
   control.disabled = true;
@@ -39,28 +40,28 @@ function syncGarmin() {
     const days = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
     const job = await runSyncJob("/api/garmin/sync", JSON.stringify({ days }), "Garmin-Synchronisierung fehlgeschlagen.");
     return `Garmin ${partially(job)}synchronisiert`;
-  }, { flag: providerIds().garmin, busyText: "Garmin wird synchronisiert…", idleText: "Garmin synchronisieren", invalidate: true });
+  }, { lock: { garmin: true }, busyText: "Garmin wird synchronisiert…", idleText: "Garmin synchronisieren", invalidate: true });
 }
 
 function syncExternalCalendar() {
   return runAction($("#externalCalendarSyncButton"), async () => {
     const job = await runSyncJob("/api/external-calendar/sync", "{}", "Kalender-Synchronisierung fehlgeschlagen.");
     return `Kalender ${partially(job)}synchronisiert`;
-  }, { flag: "externalCalendar", busyText: "Synchronisierung läuft…", idleText: "Synchronisieren", invalidate: true });
+  }, { lock: { externalCalendar: true }, busyText: "Synchronisierung läuft…", idleText: "Synchronisieren", invalidate: true });
 }
 
 function syncWeather() {
   return runAction($("#weatherSyncButton"), async () => {
     const job = await runSyncJob("/api/weather/sync", "{}", "Wetter-Synchronisierung fehlgeschlagen.");
     return job.status === "partial" ? "Open-Meteo teilweise aktualisiert" : "Open-Meteo-Wetter aktualisiert";
-  }, { flag: "weather", busyText: "Wetter wird aktualisiert…", pulse: true, invalidate: true, rerender: true });
+  }, { lock: { weather: true }, busyText: "Wetter wird aktualisiert…", pulse: true, invalidate: true, rerender: true });
 }
 
 function syncWahoo() {
   return runAction($("#wahooSyncButton"), async () => {
     const job = await runSyncJob("/api/wahoo/sync", "{}", "Wahoo-Synchronisierung fehlgeschlagen.", true);
     return `Wahoo ${partially(job)}synchronisiert`;
-  }, { flag: providerIds().wahoo, busyText: "Synchronisierung läuft…", invalidate: true, rerender: true });
+  }, { lock: { wahoo: true }, busyText: "Synchronisierung läuft…", invalidate: true, rerender: true });
 }
 
 function fullResyncButtonSelector(source) {
