@@ -1,11 +1,12 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 const { showCalendarEntry } = require("./helpers/ui");
 
 test("@responsive Garmin metric export sits in Anbindungen and shows its receipt", async ({ page }) => {
   await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
-  const panel = page.locator("details[data-more-segment-panel='connections']");
-  if (!await panel.evaluate((node) => node.open)) await panel.locator("summary").click();
+  await expandConnections(page, ["garmin"]);
+  const panel = page.locator("#connection-garmin");
   // The fixture runtime has no Garmin credentials, so the export block stays hidden until Garmin is connected.
   await expect(page.locator("#garmin-metric-export")).toBeHidden();
   await page.evaluate(() => {

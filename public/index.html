@@ -321,147 +321,216 @@
             </select>
           </label>
         </section>
-        <details class="settings-section collapsible-section" data-more-segment-panel="connections">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
+        <section class="settings-section" data-more-segment-panel="connections" aria-label="Anbindungen">
           <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
           <div class="connection-cards">
-            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="weatherConnectionDetail"></small><small data-check-result="weather"></small></div><div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="openaiConnectionDetail"></small><small data-check-result="openai"></small></div><div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small><small data-check-result="intervals"></small></div><div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button></div><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID im Bereich „Zugangsdaten“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus" class="connection-chip">Status wird geprüft…</span><ul id="garminSourceLines" class="connection-lines"></ul><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Garmin synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status"></small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist nicht verbunden. Melde dich unter „Zugangsdaten“ an oder hinterlege dort einen Schlüssel der Garmin Personal API.</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="wahooConnectionDetail"></small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Yazio</strong><span id="yazioConnectionStatus" class="connection-chip">Status wird geladen…</span><small id="yazioConnectionDetail"></small></div><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="externalCalendarConnectionDetail"></small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
-          </div>
-          <section id="providerCredentials" class="provider-credentials" aria-labelledby="providerCredentialsTitle">
-            <div class="settings-section-heading"><div><h3 id="providerCredentialsTitle">Zugangsdaten</h3></div></div>
-            <form id="cred-form-openai" class="credential-form" autocomplete="off" aria-labelledby="credOpenaiTitle">
-              <h4 id="credOpenaiTitle">OpenAI</h4>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-openai_api_key">API-Schlüssel</label><span id="cred-source-openai_api_key" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-openai_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
-                <button id="cred-clear-openai_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-openai_base_url">Basis-URL</label><span id="cred-source-openai_base_url" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-openai_base_url" type="url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="https://api.openai.com/v1">
-                <small id="cred-current-openai_base_url" class="credential-current"></small>
-                <button id="cred-clear-openai_base_url" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div id="cred-password-row-openai" class="credential-row" hidden>
-                <div class="credential-row-head"><label for="cred-app_password-openai">App-Passwort</label></div>
-                <input id="cred-app_password-openai" type="password" autocomplete="current-password" spellcheck="false">
-              </div>
-              <p id="cred-error-openai" class="credential-error" role="alert" hidden></p>
-              <button id="cred-submit-openai" class="secondary-button" type="submit">Speichern</button>
-            </form>
-            <form id="cred-form-intervals" class="credential-form" autocomplete="off" aria-labelledby="credIntervalsTitle">
-              <h4 id="credIntervalsTitle">Intervals.icu</h4>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-intervals_api_key">API-Schlüssel</label><span id="cred-source-intervals_api_key" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-intervals_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
-                <button id="cred-clear-intervals_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-intervals_athlete_id">Athlete ID</label><span id="cred-source-intervals_athlete_id" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-intervals_athlete_id" type="text" autocomplete="off" spellcheck="false" placeholder="z. B. i123456">
-                <small id="cred-current-intervals_athlete_id" class="credential-current"></small>
-                <button id="cred-clear-intervals_athlete_id" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <p id="cred-error-intervals" class="credential-error" role="alert" hidden></p>
-              <button id="cred-submit-intervals" class="secondary-button" type="submit">Speichern</button>
-            </form>
-            <form id="cred-form-wahoo" class="credential-form" autocomplete="off" aria-labelledby="credWahooTitle">
-              <h4 id="credWahooTitle">Wahoo</h4>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-wahoo_client_id">Client-ID</label><span id="cred-source-wahoo_client_id" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-wahoo_client_id" type="text" autocomplete="off" spellcheck="false" placeholder="Neue Client-ID eingeben">
-                <small id="cred-current-wahoo_client_id" class="credential-current"></small>
-                <button id="cred-clear-wahoo_client_id" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-wahoo_client_secret">Client-Secret</label><span id="cred-source-wahoo_client_secret" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-wahoo_client_secret" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Secret eingeben">
-                <button id="cred-clear-wahoo_client_secret" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div id="cred-password-row-wahoo" class="credential-row" hidden>
-                <div class="credential-row-head"><label for="cred-app_password-wahoo">App-Passwort</label></div>
-                <input id="cred-app_password-wahoo" type="password" autocomplete="current-password" spellcheck="false">
-              </div>
-              <p id="cred-error-wahoo" class="credential-error" role="alert" hidden></p>
-              <button id="cred-submit-wahoo" class="secondary-button" type="submit">Speichern</button>
-            </form>
-            <form id="cred-form-yazio" class="credential-form" autocomplete="off" aria-labelledby="credYazioTitle">
-              <h4 id="credYazioTitle">Yazio</h4>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-yazio_email">Yazio-E-Mail</label><span id="cred-source-yazio_email" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-yazio_email" type="email" autocomplete="off" spellcheck="false" placeholder="Neue E-Mail eingeben">
-                <button id="cred-clear-yazio_email" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-yazio_password">Yazio-Passwort</label><span id="cred-source-yazio_password" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-yazio_password" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Passwort eingeben">
-                <button id="cred-clear-yazio_password" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <p id="cred-error-yazio" class="credential-error" role="alert" hidden></p>
-              <button id="cred-submit-yazio" class="secondary-button" type="submit">Speichern</button>
-            </form>
-            <form id="cred-form-garmin_personal" class="credential-form" autocomplete="off" aria-labelledby="credGarminPersonalTitle">
-              <h4 id="credGarminPersonalTitle">Garmin Personal API</h4>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-garmin_personal_api_key">API-Schlüssel</label><span id="cred-source-garmin_personal_api_key" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-garmin_personal_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
-                <button id="cred-clear-garmin_personal_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-garmin_personal_api_key_expires">Gültig bis</label><span id="cred-source-garmin_personal_api_key_expires" class="credential-source">Status wird geprüft…</span></div>
-                <input id="cred-garmin_personal_api_key_expires" type="date" autocomplete="off">
-                <small id="cred-current-garmin_personal_api_key_expires" class="credential-current"></small>
-                <button id="cred-clear-garmin_personal_api_key_expires" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
-              </div>
-              <p id="cred-error-garmin_personal" class="credential-error" role="alert" hidden></p>
-              <button id="cred-submit-garmin_personal" class="secondary-button" type="submit">Speichern</button>
-            </form>
-            <section class="credential-form garmin-credential-form" aria-labelledby="credGarminTitle">
-              <div class="credential-row-head"><h4 id="credGarminTitle">Garmin</h4><span id="garmin-source" class="credential-source">Status wird geprüft…</span></div>
-              <p id="garmin-connection-status" class="credential-current">Status wird geprüft…</p>
-              <form id="garmin-login-form" class="credential-step" autocomplete="off" hidden>
-                <p class="fine-print settings-message">Die Anmeldung läuft direkt bei Garmin. Gespeichert werden nur die Garmin-Tokens in der verschlüsselten Datenbank, nicht das Passwort.</p>
-                <label for="garmin-email">Garmin-E-Mail</label>
-                <input id="garmin-email" type="email" autocomplete="off" spellcheck="false" inputmode="email">
-                <label for="garmin-password">Garmin-Passwort</label>
-                <input id="garmin-password" type="password" autocomplete="off" spellcheck="false">
-                <p id="garmin-login-error" class="credential-error" role="alert" hidden></p>
-                <button id="garmin-login-submit" class="secondary-button" type="submit">Mit Garmin anmelden</button>
-              </form>
-              <form id="garmin-mfa-form" class="credential-step" autocomplete="off" hidden>
-                <p class="fine-print settings-message">Garmin hat einen Bestätigungscode geschickt. Gib ihn ein, um die Anmeldung abzuschließen.</p>
-                <label for="garmin-mfa-code">Bestätigungscode</label>
-                <input id="garmin-mfa-code" type="text" autocomplete="one-time-code" inputmode="numeric" spellcheck="false">
-                <p id="garmin-mfa-error" class="credential-error" role="alert" hidden></p>
-                <div class="credential-actions">
-                  <button id="garmin-mfa-submit" class="secondary-button" type="submit">Code bestätigen</button>
-                  <button id="garmin-mfa-cancel" class="secondary-button" type="button">Abbrechen</button>
+            <details id="connection-garmin" class="connection-card">
+              <summary><strong>Garmin</strong><span id="garminConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <ul id="garminSourceLines" class="connection-lines"></ul>
+                  <small id="garminStatus"></small>
+                  <small id="garminKeyHint" class="provider-key-hint" hidden></small>
+                  <small data-check-result="garmin"></small>
+                  <p id="garminDetail" class="fine-print settings-message"></p>
+                  <div id="freshness-garmin" class="provider-freshness-list" aria-live="polite"></div>
                 </div>
-              </form>
-              <div id="garmin-connected" class="credential-step" hidden>
-                <button id="garmin-disconnect" class="secondary-button danger-button" type="button">Garmin trennen</button>
+                <section class="credential-form garmin-credential-form" aria-labelledby="credGarminTitle">
+                  <div class="credential-row-head"><h4 id="credGarminTitle">Garmin-Konto</h4><span id="garmin-source" class="credential-source">Status wird geprüft…</span></div>
+                  <p id="garmin-connection-status" class="credential-current">Status wird geprüft…</p>
+                  <form id="garmin-login-form" class="credential-step" autocomplete="off" hidden>
+                    <p class="fine-print settings-message">Die Anmeldung läuft direkt bei Garmin. Gespeichert werden nur die Garmin-Tokens in der verschlüsselten Datenbank, nicht das Passwort.</p>
+                    <label for="garmin-email">Garmin-E-Mail</label>
+                    <input id="garmin-email" type="email" autocomplete="off" spellcheck="false" inputmode="email">
+                    <label for="garmin-password">Garmin-Passwort</label>
+                    <input id="garmin-password" type="password" autocomplete="off" spellcheck="false">
+                    <p id="garmin-login-error" class="credential-error" role="alert" hidden></p>
+                    <button id="garmin-login-submit" class="secondary-button" type="submit">Mit Garmin anmelden</button>
+                  </form>
+                  <form id="garmin-mfa-form" class="credential-step" autocomplete="off" hidden>
+                    <p class="fine-print settings-message">Garmin hat einen Bestätigungscode geschickt. Gib ihn ein, um die Anmeldung abzuschließen.</p>
+                    <label for="garmin-mfa-code">Bestätigungscode</label>
+                    <input id="garmin-mfa-code" type="text" autocomplete="one-time-code" inputmode="numeric" spellcheck="false">
+                    <p id="garmin-mfa-error" class="credential-error" role="alert" hidden></p>
+                    <div class="credential-actions">
+                      <button id="garmin-mfa-submit" class="secondary-button" type="submit">Code bestätigen</button>
+                      <button id="garmin-mfa-cancel" class="secondary-button" type="button">Abbrechen</button>
+                    </div>
+                  </form>
+                  <div id="garmin-connected" class="credential-step" hidden>
+                    <button id="garmin-disconnect" class="secondary-button danger-button" type="button">Garmin trennen</button>
+                  </div>
+                </section>
+                <form id="cred-form-garmin_personal" class="credential-form" autocomplete="off" aria-labelledby="credGarminPersonalTitle">
+                  <h4 id="credGarminPersonalTitle">Personal API</h4>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-garmin_personal_api_key">API-Schlüssel</label><span id="cred-source-garmin_personal_api_key" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-garmin_personal_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
+                    <button id="cred-clear-garmin_personal_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-garmin_personal_api_key_expires">Gültig bis</label><span id="cred-source-garmin_personal_api_key_expires" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-garmin_personal_api_key_expires" type="date" autocomplete="off">
+                    <small id="cred-current-garmin_personal_api_key_expires" class="credential-current"></small>
+                    <button id="cred-clear-garmin_personal_api_key_expires" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <p id="cred-error-garmin_personal" class="credential-error" role="alert" hidden></p>
+                  <button id="cred-submit-garmin_personal" class="secondary-button" type="submit">Speichern</button>
+                </form>
+                <div id="garmin-metric-export" class="garmin-metric-export" hidden>
+                  <p id="garmin-metric-export-text" class="fine-print settings-message"></p>
+                  <fieldset id="garmin-metric-export-fields" class="garmin-metric-export-fields" aria-label="Automatisch an Intervals.icu gesendete Werte" hidden></fieldset>
+                  <button id="garmin-metric-export-toggle" class="secondary-button" type="button">Werte automatisch an Intervals.icu senden</button>
+                  <p id="garmin-metric-export-status" class="fine-print settings-message" hidden></p>
+                </div>
+                <label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"></label>
+                <div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Garmin synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div>
+                <small id="garminFullResyncStatus" class="connection-resync-status"></small>
+                <p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist nicht verbunden. Melde dich unter „Garmin-Konto“ an oder hinterlege unter „Personal API“ einen Schlüssel.</p>
               </div>
-              <div id="garmin-metric-export" class="garmin-metric-export" hidden>
-                <p id="garmin-metric-export-text" class="fine-print settings-message"></p>
-                <fieldset id="garmin-metric-export-fields" class="garmin-metric-export-fields" aria-label="Automatisch an Intervals.icu gesendete Werte" hidden></fieldset>
-                <button id="garmin-metric-export-toggle" class="secondary-button" type="button">Werte automatisch an Intervals.icu senden</button>
-                <p id="garmin-metric-export-status" class="fine-print settings-message" hidden></p>
+            </details>
+            <details id="connection-wahoo" class="connection-card">
+              <summary><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="wahooConnectionDetail"></small>
+                  <small data-check-result="wahoo"></small>
+                  <div id="freshness-wahoo" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <form id="cred-form-wahoo" class="credential-form" autocomplete="off" aria-labelledby="credWahooTitle">
+                  <h4 id="credWahooTitle">Zugang</h4>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-wahoo_client_id">Client-ID</label><span id="cred-source-wahoo_client_id" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-wahoo_client_id" type="text" autocomplete="off" spellcheck="false" placeholder="Neue Client-ID eingeben">
+                    <small id="cred-current-wahoo_client_id" class="credential-current"></small>
+                    <button id="cred-clear-wahoo_client_id" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-wahoo_client_secret">Client-Secret</label><span id="cred-source-wahoo_client_secret" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-wahoo_client_secret" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Secret eingeben">
+                    <button id="cred-clear-wahoo_client_secret" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div id="cred-password-row-wahoo" class="credential-row" hidden>
+                    <div class="credential-row-head"><label for="cred-app_password-wahoo">App-Passwort</label></div>
+                    <input id="cred-app_password-wahoo" type="password" autocomplete="current-password" spellcheck="false">
+                  </div>
+                  <p id="cred-error-wahoo" class="credential-error" role="alert" hidden></p>
+                  <button id="cred-submit-wahoo" class="secondary-button" type="submit">Speichern</button>
+                </form>
+                <div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div>
+                <div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div>
+                <small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small>
+                <p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret unter „Zugang“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p>
               </div>
-            </section>
-          </section>
-          <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
-            <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Wiederholungsverlauf</h3></div></div>
-            <div id="providerFreshnessTimeline" class="provider-freshness-list" aria-live="polite">Status wird geladen…</div>
-          </section>
-          <p id="garminDetail" class="fine-print settings-message"></p>
-          <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
-        </details>
+            </details>
+            <details id="connection-intervals" class="connection-card">
+              <summary><strong>Intervals.icu</strong><span id="intervalsConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="intervalsConnectionDetail"></small>
+                  <small data-check-result="intervals"></small>
+                  <div id="freshness-intervals" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <form id="cred-form-intervals" class="credential-form" autocomplete="off" aria-labelledby="credIntervalsTitle">
+                  <h4 id="credIntervalsTitle">Zugang</h4>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-intervals_api_key">API-Schlüssel</label><span id="cred-source-intervals_api_key" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-intervals_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
+                    <button id="cred-clear-intervals_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-intervals_athlete_id">Athlete ID</label><span id="cred-source-intervals_athlete_id" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-intervals_athlete_id" type="text" autocomplete="off" spellcheck="false" placeholder="z. B. i123456">
+                    <small id="cred-current-intervals_athlete_id" class="credential-current"></small>
+                    <button id="cred-clear-intervals_athlete_id" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <p id="cred-error-intervals" class="credential-error" role="alert" hidden></p>
+                  <button id="cred-submit-intervals" class="secondary-button" type="submit">Speichern</button>
+                </form>
+                <div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button></div>
+                <p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID unter „Zugang“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p>
+              </div>
+            </details>
+            <details id="connection-openai" class="connection-card">
+              <summary><strong>OpenAI</strong><span id="openaiConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="openaiConnectionDetail"></small>
+                  <small data-check-result="openai"></small>
+                  <div id="freshness-openai" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <form id="cred-form-openai" class="credential-form" autocomplete="off" aria-labelledby="credOpenaiTitle">
+                  <h4 id="credOpenaiTitle">Zugang</h4>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-openai_api_key">API-Schlüssel</label><span id="cred-source-openai_api_key" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-openai_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
+                    <button id="cred-clear-openai_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-openai_base_url">Basis-URL</label><span id="cred-source-openai_base_url" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-openai_base_url" type="url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="https://api.openai.com/v1">
+                    <small id="cred-current-openai_base_url" class="credential-current"></small>
+                    <button id="cred-clear-openai_base_url" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div id="cred-password-row-openai" class="credential-row" hidden>
+                    <div class="credential-row-head"><label for="cred-app_password-openai">App-Passwort</label></div>
+                    <input id="cred-app_password-openai" type="password" autocomplete="current-password" spellcheck="false">
+                  </div>
+                  <p id="cred-error-openai" class="credential-error" role="alert" hidden></p>
+                  <button id="cred-submit-openai" class="secondary-button" type="submit">Speichern</button>
+                </form>
+                <div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div>
+              </div>
+            </details>
+            <details id="connection-yazio" class="connection-card">
+              <summary><strong>Yazio</strong><span id="yazioConnectionStatus" class="connection-chip">Status wird geladen…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="yazioConnectionDetail"></small>
+                  <div id="freshness-yazio" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <form id="cred-form-yazio" class="credential-form" autocomplete="off" aria-labelledby="credYazioTitle">
+                  <h4 id="credYazioTitle">Zugang</h4>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-yazio_email">Yazio-E-Mail</label><span id="cred-source-yazio_email" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-yazio_email" type="email" autocomplete="off" spellcheck="false" placeholder="Neue E-Mail eingeben">
+                    <button id="cred-clear-yazio_email" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <div class="credential-row">
+                    <div class="credential-row-head"><label for="cred-yazio_password">Yazio-Passwort</label><span id="cred-source-yazio_password" class="credential-source">Status wird geprüft…</span></div>
+                    <input id="cred-yazio_password" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Passwort eingeben">
+                    <button id="cred-clear-yazio_password" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+                  </div>
+                  <p id="cred-error-yazio" class="credential-error" role="alert" hidden></p>
+                  <button id="cred-submit-yazio" class="secondary-button" type="submit">Speichern</button>
+                </form>
+                <div class="connection-actions"><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></div>
+              </div>
+            </details>
+            <details id="connection-calendar" class="connection-card">
+              <summary><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="externalCalendarConnectionDetail"></small>
+                  <div id="freshness-calendar" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <div class="connection-actions"><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></div>
+              </div>
+            </details>
+            <details id="connection-weather" class="connection-card">
+              <summary><strong>Open-Meteo</strong><span id="weatherConnectionStatus" class="connection-chip">Status wird geprüft…</span></summary>
+              <div class="connection-card-body">
+                <div class="connection-card-status">
+                  <small id="weatherConnectionDetail"></small>
+                  <small data-check-result="weather"></small>
+                  <div id="freshness-weather" class="provider-freshness-list" aria-live="polite"></div>
+                </div>
+                <div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div>
+                <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
+              </div>
+            </details>
+          </div>
+        </section>
         <details class="settings-section collapsible-section" data-more-segment-panel="appearance">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
           <form id="calendarDisplayForm" class="calendar-display-form">

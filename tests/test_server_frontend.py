@@ -935,7 +935,9 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_provider_refresh_markup_and_versioned_icon(self):
         index = served_page("index.html")
-        self.assertIn('id="providerFreshnessTimeline"', index)
+        for provider in ("garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"):
+            self.assertIn(f'<details id="connection-{provider}" class="connection-card">', index)
+            self.assertIn(f'id="freshness-{provider}"', index)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
         self.assertNotIn('id="providerAttentionBanner"', index)

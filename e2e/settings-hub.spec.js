@@ -97,23 +97,41 @@ test("@responsive Mehr keeps its title and shows the active area and fits all si
   }
 });
 
-test("@responsive every connection states its status in words and the header counts them", async ({ page }) => {
+test("@responsive the seven connections start collapsed and name their status in words", async ({ page }) => {
   await openMore(page, "connections");
-  await expandConnections(page);
-  const chips = page.locator(".connection-cards .connection-chip");
+  const cards = page.locator(".connection-cards > details.connection-card");
+  await expect(cards.locator("summary strong")).toHaveText(["Garmin", "Wahoo", "Intervals.icu", "OpenAI", "Yazio", "Gemeinsamer Kalender", "Open-Meteo"]);
+  await expect(page.locator(".connection-card[open]")).toHaveCount(0);
+  for (const card of await cards.all()) await expect(card.locator(".connection-card-body")).toBeHidden();
+  const chips = cards.locator("summary .connection-chip");
   await expect(chips).toHaveCount(7);
   await expect(page.locator(".connection-cards .connection-chip:not([data-state])")).toHaveCount(0);
   for (const chip of await chips.all()) expect(["Verbunden", "Nicht eingerichtet", "Fehler", "Nicht geprüft"]).toContain((await chip.textContent()).trim());
-  await expect(page.locator("#connectionsSummary")).toHaveText(/^(\d+ (verbunden|Fehler|nicht geprüft|nicht eingerichtet))( · \d+ (verbunden|Fehler|nicht geprüft|nicht eingerichtet))*$/);
+  await expect(page.locator("#providerCredentials, #providerFreshnessTimeline, #connectionsSummary")).toHaveCount(0);
+  await expandConnections(page, ["garmin"]);
   const lines = page.locator("#garminSourceLines li");
   await expect(lines).toHaveCount(2);
   await expect(lines.nth(0)).toContainText("Personal API:");
   await expect(lines.nth(1)).toContainText("SDK-Login:");
 });
 
+test("@responsive an open card holds only its own provider's status, access, settings and actions", async ({ page }) => {
+  await openMore(page, "connections");
+  await expandConnections(page, ["garmin"]);
+  const garmin = page.locator("#connection-garmin");
+  for (const selector of ["#garminSourceLines", "#freshness-garmin", "#garmin-connection-status", "#cred-garmin_personal_api_key", "#cred-garmin_personal_api_key_expires", "#garmin-metric-export", "#garminSyncButton", "[data-check-button='garmin']"]) {
+    await expect(garmin.locator(selector)).toHaveCount(1);
+  }
+  await expect(garmin.locator("[id*='openai'], [id*='wahoo'], [id*='intervals_'], [id*='yazio']")).toHaveCount(0);
+  await expect(page.locator("#connection-wahoo .connection-card-body")).toBeHidden();
+  await expect(page.locator("#connection-weather a[href='https://open-meteo.com/']")).toHaveText("Open-Meteo.com");
+  await expandConnections(page, ["wahoo"]);
+  await expect(page.locator(".connection-card[open]")).toHaveCount(2);
+});
+
 test("@responsive collapsible sections share one chevron and the page passes the contrast check", async ({ page }) => {
   await openMore(page, "connections");
-  const summary = page.locator('details[data-more-segment-panel="connections"] > summary');
+  const summary = page.locator("#connection-garmin > summary");
   expect(await summary.evaluate((node) => getComputedStyle(node, "::after").content)).not.toBe("none");
   expect(await summary.evaluate((node) => getComputedStyle(node).listStyleType)).toBe("none");
   await expandConnections(page);

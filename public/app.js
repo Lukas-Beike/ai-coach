@@ -48,11 +48,12 @@ $("#appearanceSelect").addEventListener("change", (event) => {
   const appearance = applyAppearance(event.currentTarget.value);
   try { localStorage.setItem(APPEARANCE_KEY, appearance); } catch { }
 });
-// Setup links lead to the collapsed Anbindungen section; open it so the hints are visible.
+// A setup link that names a provider opens that provider's card.
 document.addEventListener("click", (event) => {
-  if (!event.target.closest?.('a[href="#more/connections"]')) return;
-  const section = document.querySelector('details[data-more-segment-panel="connections"]');
-  if (section) section.open = true;
+  const link = event.target.closest?.('a[href="#more/connections"][data-connection]');
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  void AppRouter.navigate("more/connections", { historyMode: "push" }).then((shown) => { if (shown) openConnectionCard(link.dataset.connection); });
 });
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
@@ -87,7 +88,6 @@ $("#modelSelect").addEventListener("change", (event) => saveSelectSetting(event,
 $("#serviceTierSelect").addEventListener("change", (event) => saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit"));
 $("#thinkingLevelSelect").addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level"));
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
-$('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) { void loadYazioStatus(); void loadProviderChecks(); } });
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
 ["#zoneSport", "#zoneMetric", "#zoneEnvironment"].forEach((selector) => $(selector).addEventListener("change", renderZoneEditor));
 $("#zoneFromBeginning").addEventListener("change", toggleZoneFromBeginning);

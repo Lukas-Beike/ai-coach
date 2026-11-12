@@ -1,5 +1,5 @@
-// Connection status of the providers in Mehr > Anbindungen: one text chip per
-// provider (never colour alone), a count line for the collapsed section, and the
+// Connection status of the providers in Mehr > Anbindungen: one card per provider
+// whose summary names its status in a text chip (never colour alone), and the
 // Garmin Personal API key / SDK login lines.
 
 const CONNECTION_CHIPS = Object.freeze({
@@ -9,19 +9,17 @@ const CONNECTION_CHIPS = Object.freeze({
   unchecked: "Nicht geprüft",
 });
 
-const CONNECTION_COUNT_LABELS = Object.freeze({
-  ok: "verbunden",
-  error: "Fehler",
-  unchecked: "nicht geprüft",
-  off: "nicht eingerichtet",
-});
+// Mehr › Anbindungen is the shown route ("more" alone lands there too).
+function connectionsShown() {
+  return globalThis.AppRouter?.baseRoute() === "more" && AppRouter.moreSegmentFromRoute() === "connections";
+}
 
-// Pure: "5 verbunden · 1 Fehler" from the chip counts, empty when no chip has reported.
-function connectionsSummaryText(counts) {
-  return Object.keys(CONNECTION_COUNT_LABELS)
-    .filter((kind) => counts?.[kind] > 0)
-    .map((kind) => `${counts[kind]} ${CONNECTION_COUNT_LABELS[kind]}`)
-    .join(" · ");
+// Opens one provider card and brings it into view after the route has scrolled to the top.
+function openConnectionCard(provider) {
+  const card = document.getElementById(`connection-${provider}`);
+  if (!card) return;
+  card.open = true;
+  requestAnimationFrame(() => card.scrollIntoView({ block: "start" }));
 }
 
 // The full-resync button of every provider: label, disabled state and pulse all follow the running state.
@@ -100,19 +98,8 @@ function setConnectionChip(selector, kind) {
   node.textContent = CONNECTION_CHIPS[chip];
   node.className = `connection-chip is-${chip}`;
   node.dataset.state = chip;
-  refreshConnectionsSummary();
-}
-
-function refreshConnectionsSummary() {
-  const summary = document.querySelector("#connectionsSummary");
-  if (!summary) return;
-  const counts = {};
-  document.querySelectorAll(".connection-cards .connection-chip[data-state]").forEach((chip) => {
-    counts[chip.dataset.state] = (counts[chip.dataset.state] || 0) + 1;
-  });
-  summary.textContent = connectionsSummaryText(counts) || "Status wird geprüft…";
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { CONNECTION_CHIPS, connectionsSummaryText, connectionKind, intervalsConnectionKind, yazioConnectionKind, garminConnectionKind, garminSourceLines };
+  module.exports = { CONNECTION_CHIPS, connectionKind, intervalsConnectionKind, yazioConnectionKind, garminConnectionKind, garminSourceLines };
 }

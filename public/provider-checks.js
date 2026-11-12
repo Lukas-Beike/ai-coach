@@ -44,7 +44,7 @@ const PROVIDER_CHECK_MAX_POLLS = 200;
 
 function connectionsVisible() {
   return document.visibilityState !== "hidden"
-    && Boolean(document.querySelector('details[data-more-segment-panel="connections"]')?.open);
+    && connectionsShown();
 }
 const providerCheckResults = new Map();
 const providerCheckBusy = new Set();
@@ -152,9 +152,11 @@ async function checkProviderConnection(provider) {
   if (!result || epoch !== providerCheckEpoch) void loadProviderChecks();
 }
 
-// Reads the status when the connections panel is already open (start, re-login).
+// Reads the statuses when Anbindungen is shown (route change, start, re-login).
 function refreshOpenProviderChecks() {
-  if (document.querySelector('details[data-more-segment-panel="connections"]')?.open) void loadProviderChecks();
+  if (!connectionsShown()) return;
+  void loadYazioStatus();
+  void loadProviderChecks();
 }
 
 function bindProviderChecks() {

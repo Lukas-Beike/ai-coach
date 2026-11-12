@@ -71,8 +71,8 @@ schema v27 moves every former mirror row into the product table without loss.
 
 Under **Mehr > Anbindungen** (More > Connections), "Verbindung prüfen" (check connection) explicitly checks the login. The status shows the last check result and its time; after a restart or a change of credentials, a new check is needed. Rejected logins can concern account or app credentials; the exact cause is not always known. On rate limiting or outage, try again later. Loading the status makes no request to Yazio.
 
-With Yazio credentials set up (`YAZIO_*` or **Mehr > Anbindungen >
-Zugangsdaten**, i.e. More > Connections > Credentials), product searches without an explicit source use this
+With Yazio credentials set up (`YAZIO_*` or the Yazio card under **Mehr >
+Anbindungen**, i.e. More > Connections), product searches without an explicit source use this
 order: own stored products, local database (mirror), Yazio,
 Open Food Facts, BLS. The next source is queried if the previous one
 has no matching result (every search word in the name, known calorie value),

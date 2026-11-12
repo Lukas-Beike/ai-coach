@@ -153,7 +153,7 @@ function renderMaintenanceStatus(maintenance) {
 
 function handleSyncStatus(status) {
   if (!status || typeof status !== "object") return;
-  if ($('details[data-more-segment-panel="connections"]')?.open) void loadYazioStatus();
+  if (connectionsShown()) void loadYazioStatus();
   if (status.operation_id && status.running) {
     state.syncPoll.operationId = status.operation_id;
   }
@@ -327,11 +327,12 @@ function renderProviderAttention(data) {
     // Only hard failures are critical; stale or partial data is a warning.
     const hardError = others.some((entry) => entry.state === "error"
       || ["auth_required", "invalid_configuration"].includes(entry.error_code));
+    const ids = [...new Set(others.map((entry) => entry.provider))];
     provider = {
       level: hardError ? "critical" : "warning",
       title: "Anbindung benötigt Aufmerksamkeit",
       detail: labels.length === 1 ? `${labels[0]} benötigt manuelles Eingreifen.` : `${labels.length} Anbindungen benötigen manuelles Eingreifen.`,
-      action: connections,
+      action: ids.length === 1 ? { ...connections, connection: ids[0] } : connections,
     };
   }
   updateStatusSources({
@@ -340,7 +341,7 @@ function renderProviderAttention(data) {
       level: keyHint.urgent ? "critical" : "warning",
       title: "Garmin-Anbindung",
       detail: keyHint.text,
-      action: connections,
+      action: { ...connections, connection: garminId },
     } : null,
   });
 }
@@ -443,16 +444,13 @@ function renderConnectionsSyncProgress(data) {
 }
 
 
+// Each provider's freshness and retry entries go into its own card.
 function renderProviderFreshness(data) {
-  const root = $("#providerFreshnessTimeline");
-  if (!root) return;
-  root.replaceChildren();
+  document.querySelectorAll('.connection-card [id^="freshness-"]').forEach((root) => root.replaceChildren());
   const entries = Array.isArray(data.provider_freshness) ? data.provider_freshness : [];
-  if (!entries.length) {
-    root.textContent = "Noch kein Provider-Status verfügbar.";
-    return;
-  }
   entries.forEach((entry) => {
+    const root = document.getElementById(`freshness-${entry.provider}`);
+    if (!root) return;
     const item = document.createElement("article");
     item.className = "provider-freshness-item";
     const header = document.createElement("div");

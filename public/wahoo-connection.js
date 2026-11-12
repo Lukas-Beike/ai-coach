@@ -146,8 +146,7 @@ function showWahooReturnOutcome() {
   const [message, isError] = WAHOO_RETURN_OUTCOMES[pendingWahooReturn];
   pendingWahooReturn = null;
   toast(message, isError);
-  const section = document.querySelector('details[data-more-segment-panel="connections"]');
-  if (section) section.open = true;
+  openConnectionCard(providerIds().wahoo);
 }
 
 function safeWahooAuthorizeUrl(value) {
