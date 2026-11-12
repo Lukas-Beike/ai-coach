@@ -174,7 +174,7 @@ test("light mode keeps performance source badges readable", { tag: "@responsive"
 
 test("chat reset detaches a delayed status poll without releasing its successor", async ({ page }) => {
   await ready(page);
-  await expect(page.locator("#openaiChatResetButton")).toHaveCount(1);
+  await expect(page.locator("#coachChatResetButton")).toHaveCount(1);
   await expect(page.locator("#chatResetButton, #aiProviderSelect")).toHaveCount(0);
   await page.evaluate(() => {
     const original = fetch.bind(window);
@@ -204,6 +204,43 @@ test("chat reset detaches a delayed status poll without releasing its successor"
   await page.evaluate(() => __statusCalls[2]({ status: "running", operation_id: "current-operation" }));
   await expect.poll(() => page.evaluate(() => state.chatServerOperationId)).toBe("current-operation");
 });
+
+for (const provider of ["openai", "anthropic"]) {
+  test(`chat reset sits with the Coach model and resets with ${provider} selected @responsive`, async ({ page }) => {
+    await ready(page);
+    const resets = [];
+    await page.route("**/api/chat/reset", async (route) => {
+      const request = route.request();
+      resets.push({ body: request.postDataJSON(), csrf: request.headers()["x-csrf-token"] });
+      await route.fulfill({ json: { status: "ok", generation: "fixture-generation" } });
+    });
+    await page.evaluate((selected) => renderModel({
+      provider: selected,
+      selected: `${selected}-fixture`,
+      options: [
+        { id: "openai-fixture", provider: "openai", label: "OpenAI Fixture", model: "openai-fixture" },
+        { id: "anthropic-fixture", provider: "anthropic", label: "Claude Fixture", model: "anthropic-fixture" },
+      ],
+    }), provider);
+    await page.goto("/#more/coach");
+    const section = page.locator("details", { has: page.locator("#modelSelect") });
+    await section.locator("summary").click();
+    await expect(page.locator("#modelSelect")).toHaveValue(`${provider}-fixture`);
+    // Claude hides the OpenAI-only speed row; the reset stays.
+    await expect(page.locator("#serviceTierRow")).toHaveJSProperty("hidden", provider === "anthropic");
+    const button = section.getByRole("button", { name: "Chat zurücksetzen", exact: true });
+    await expect(button).toBeVisible();
+    await expect(page.locator("#connection-openai").getByRole("button", { name: "Chat zurücksetzen" })).toHaveCount(0);
+    await button.click();
+    await expect(page.locator("#confirmationDialog")).toBeVisible();
+    await page.locator("#confirmationDialogAccept").click();
+    await expect.poll(() => resets.length).toBe(1);
+    expect(resets[0].body).toEqual({ confirmed: true });
+    expect(resets[0].csrf).toBeTruthy();
+    await expect(button).toHaveText("Chat zurücksetzen");
+    await expect(button).toBeEnabled();
+  });
+}
 
 test("history barriers preserve optimistic and completed messages through navigation", async ({ page }) => {
   await ready(page);

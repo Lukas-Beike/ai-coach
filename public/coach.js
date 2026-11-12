@@ -719,7 +719,7 @@ function steerCurrentChat(event) {
 }
 
 async function resetCoachChat() {
-  const button = $("#openaiChatResetButton");
+  const button = $("#coachChatResetButton");
   // Reset clears the local queue; wait for queued messages instead of silently dropping them.
   if (state.chatQueue?.length) {
     toast("Bitte warte, bis die wartenden Nachrichten gesendet sind. Danach kannst du den Chat zurücksetzen.", true);
@@ -2552,7 +2552,7 @@ function setupCoachEvents() {
 
   $("#coachAdaptivePlanningButton").addEventListener("click", () => askCoach("Prüfe meine nächsten geplanten Einheiten und schlage sinnvolle Anpassungen vor."));
 
-  $("#openaiChatResetButton").addEventListener("click", resetCoachChat);
+  $("#coachChatResetButton").addEventListener("click", resetCoachChat);
 
   $("#systemContextPreviewButton").addEventListener("click", () => {
     $("#systemContextPreviewButton").dataset.loaded = "false";

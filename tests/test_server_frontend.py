@@ -163,7 +163,7 @@ class ServerFrontendTests(ServerTestCase):
             "voiceButton",
             "attachmentInput",
             "messageInput",
-            "openaiChatResetButton",
+            "coachChatResetButton",
         ):
             binding = f'$("#{selector}").addEventListener('
             self.assertIn(binding, coach)
