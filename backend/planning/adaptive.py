@@ -21,6 +21,7 @@ from backend.canonical.planning_fields import (
     SESSION_FOCUS,
     STRENGTH_INTENSITY,
     STRENGTH_STRUCTURE,
+    TEMPLATE_ID,
 )
 from backend.canonical.vocabulary import Sport
 from backend.db.repositories import CheckinRepository
@@ -42,8 +43,9 @@ ADAPTIVE_REPLACEMENT_KEYS = (
     "rationale",
     "archived",
     "private_calendar_adjustment",
-    # "adaptive" marks a run or ride replacement that has no template (#2379).
+    # "adaptive" marks a generic replacement that has no template (#2379).
     "source",
+    TEMPLATE_ID,
     # Re-derived for the easier content; None removes a field that no longer fits.
     SESSION_FOCUS,
     STRENGTH_INTENSITY,
@@ -125,8 +127,9 @@ def adaptive_recovery_replacement(
         "description": adaptive_recovery_description(sport, duration),
         "target": "AUTO",
         "rationale": rationale,
-        # A run or ride replacement is not one of the athlete's templates.
+        # The generic replacement is not one of the athlete's templates.
         "source": "adaptive",
+        TEMPLATE_ID: None,
     }
 
 

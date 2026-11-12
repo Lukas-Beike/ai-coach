@@ -340,6 +340,18 @@ class PlanCheckRuleTests(unittest.TestCase):
                 "template_mismatch",
             ),
             (
+                "adaptive easy swim",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "swim",
+                    30,
+                    source="adaptive",
+                    template_id="T-run",
+                ),
+                None,
+            ),
+            (
                 "adaptive easy run",
                 unit(
                     "2",

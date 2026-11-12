@@ -682,7 +682,7 @@ def template_conformance(
     findings = []
     for unit in units:
         sport = planned_sport_environment(unit)[0]
-        if unit.get("source") == "adaptive" and sport in {Sport.RUN, Sport.RIDE}:
+        if unit.get("source") == "adaptive" and sport is not Sport.STRENGTH:
             continue
         template = templates.get(str(unit.get(TEMPLATE_ID) or ""))
         evidence: dict[str, Any] = {

@@ -565,6 +565,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             description="- 50m Z4 HR",
             session_focus="threshold",
             duration_minutes=50,
+            template_id="threshold-template",
         )
         heavy = [
             {
@@ -599,6 +600,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertFalse(is_hard(saved_run))
         # The generic easy run is no template of the athlete (#2379).
         self.assertEqual(saved_run["source"], "adaptive")
+        self.assertNotIn("template_id", saved_run)
         saved_strength = self.saved(strength_id)
         self.assertEqual(saved_strength["strength_intensity"], "light")
         # Exercises, sets and weights stay (athlete decision on #2379), so the

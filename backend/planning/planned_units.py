@@ -224,6 +224,21 @@ def _apply_planned_workout_update(
     ):
         if key in values:
             candidate[key] = values.get(key)
+    # An adaptive replacement edited again is the Coach's content, which the
+    # template rule checks (#2379).
+    if (
+        candidate.get("source") == "adaptive"
+        and {
+            "description",
+            "duration_minutes",
+            "target",
+            "type",
+            "sport",
+            "environment",
+        }
+        & values.keys()
+    ):
+        candidate["source"] = "coach"
     strength_structure.drop_stale(candidate, values)
     if "duration_minutes" in values:
         candidate["duration_minutes"] = validated_duration_minutes(
@@ -345,7 +360,13 @@ def normalized_planned_workout_update(
         or None,
         sync_status="local",
     )
-    normalized["source"] = str(current.get("source") or "library")[:40]
+    # The stored source stays, except that an edited adaptive replacement is
+    # Coach content again (#2379).
+    normalized["source"] = str(
+        candidate.get("source")
+        if candidate.get("source") == "coach"
+        else current.get("source") or "library"
+    )[:40]
     if action == "update":
         _reconcile_updated_planned_workout_content(normalized, values)
     _preserve_local_planned_workout_metadata(normalized, current)
