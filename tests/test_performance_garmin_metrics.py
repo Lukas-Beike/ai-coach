@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import date
 
-from test_garmin_health_mapping import MAX_METRICS_DAILY
+from canonical_consumer_cases import MAX_METRICS_DAILY
 
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
@@ -130,6 +130,26 @@ class GarminPerformanceMetricTests(unittest.TestCase):
             self.assertEqual(
                 (cycling["value"], cycling["observed_at"]), (58.6, "2026-11-11")
             )
+
+    def test_canonical_vo2max_is_dated_by_each_sport_reading(self):
+        # #2345: the canonical read dates each VO2max by its own reading.
+        metrics = garmin_performance_metrics(
+            GarminSyncStatus.from_state({}),
+            date(2026, 11, 12),
+            GarminCanonicalMetrics(
+                cycling_vo2max=58.6,
+                running_vo2max=54.3,
+                cycling_vo2max_on=date(2026, 11, 11),
+                running_vo2max_on=date(2026, 11, 12),
+            ),
+        )
+        self.assertEqual(
+            [
+                (metrics[key]["value"], metrics[key]["observed_at"])
+                for key in ("running_vo2max_ml_kg_min", "cycling_vo2max_ml_kg_min")
+            ],
+            [(54.3, "2026-11-12"), (58.6, "2026-11-11")],
+        )
 
     def test_precise_vo2max_wins_over_its_rounded_twin(self):
         # Garmin sends both fields in one section; the precise one keeps its decimal (#2263).

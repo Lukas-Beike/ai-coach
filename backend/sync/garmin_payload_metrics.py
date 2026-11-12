@@ -361,7 +361,12 @@ def _garmin_vo2_metrics(
     values: dict[str, list[VO2Reading]] = {"cycling": [], "running": [], "generic": []}
     _garmin_collect_vo2_values(max_metrics, values)
     cycling = _newest(values["cycling"])
-    running = _newest(values["running"]) or _newest(values["generic"])
+    # The newest of running and generic, running winning the same day, as the
+    # canonical read does.
+    dated = [(day, True, value) for day, value in values["running"]]
+    dated += [(day, False, value) for day, value in values["generic"]]
+    newest = max(reversed(dated), key=lambda item: item[:2], default=None)
+    running = None if newest is None else (newest[0], newest[2])
     return (
         (cycling and cycling[1], running and running[1]),
         (

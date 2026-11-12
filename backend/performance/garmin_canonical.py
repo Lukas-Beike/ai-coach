@@ -383,14 +383,16 @@ def _metrics(
     by_kind: Mapping[MetricKind, tuple[Observation, ...]],
 ) -> GarminCanonicalMetrics:
     vo2 = by_kind[MetricKind.VO2MAX]
+    cycling_vo2 = _vo2max_reading(_latest(vo2, Sport.RIDE))
+    running_vo2 = _vo2max_reading(_running_vo2max_reading(vo2))
     threshold_hr = by_kind[MetricKind.THRESHOLD_HR]
     return GarminCanonicalMetrics(
         weight_kg=_bounded(_latest_value(by_kind[MetricKind.WEIGHT]), _WEIGHT_KG_RANGE),
         cycling_ftp_watts=_latest_value(by_kind[MetricKind.FTP], Sport.RIDE),
-        cycling_vo2max=_bounded(_latest_value(vo2, Sport.RIDE), _VO2MAX_RANGE),
-        running_vo2max=_bounded(_running_vo2max(vo2), _VO2MAX_RANGE),
-        cycling_vo2max_on=_reading_day(_latest(vo2, Sport.RIDE), _VO2MAX_RANGE),
-        running_vo2max_on=_reading_day(_running_vo2max_reading(vo2), _VO2MAX_RANGE),
+        cycling_vo2max=cycling_vo2[0],
+        running_vo2max=running_vo2[0],
+        cycling_vo2max_on=cycling_vo2[1],
+        running_vo2max_on=running_vo2[1],
         run_threshold_watts=_bounded(
             _latest_value(_run_threshold_power(by_kind), Sport.RUN),
             _RUN_THRESHOLD_POWER_RANGE,
@@ -710,13 +712,20 @@ def _running_vo2max(observations: Iterable[Observation]) -> float | None:
     return None if latest is None else latest.value.value
 
 
-def _reading_day(
-    observation: Observation | None, bounds: tuple[float, float]
-) -> date | None:
-    """The day of a reading whose value is shown (inside ``bounds``)."""
-    if observation is None or _bounded(observation.value.value, bounds) is None:
-        return None
-    return observation.observed_on
+def _vo2max_reading(
+    observation: Observation | None,
+) -> tuple[float | None, date | None]:
+    """The shown VO2max (inside its bounds) and the day of that reading."""
+    value = (
+        None
+        if observation is None
+        else _bounded(observation.value.value, _VO2MAX_RANGE)
+    )
+    return (
+        (None, None)
+        if value is None or observation is None
+        else (value, observation.observed_on)
+    )
 
 
 def _bounded(value: float | None, bounds: tuple[float, float]) -> float | None:

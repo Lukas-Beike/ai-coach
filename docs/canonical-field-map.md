@@ -1701,11 +1701,13 @@ The categorical `level` of the same reading becomes a `readiness_level` code (se
 
 #### Maximum oxygen uptake (`max_metrics`)
 
-Row `{generic, cycling, running}`; each object is read separately (`_Group.key`). Record id suffix =
-group key. The daily endpoint (`get_max_metrics_range`, recorded shape `max_metrics_daily`) leaves the row undated and
-dates each object (`generic.calendarDate`; `cycling` is null on days without a cycling value), so a row without its own
-`calendarDate` takes its first dated object's day (`_max_metric_records`, mapper 23, #2345). `generic` is Garmin's
-running VO2max. The legacy performance history dates each sport's newest reading by its own day.
+Row `{calendarDate, generic, cycling, running}` or, from the daily range (`get_max_metrics_range`), the undated row
+`{generic, cycling, heatAltitudeAcclimation}` whose objects carry their own `calendarDate` (`cycling` is null on days
+without a cycling value; `generic` is Garmin's running VO2max). Each object is read separately (`_Group.key`) and dated
+by its own `calendarDate`, else by the row's (`_map_max_metrics`, mapper 23, #2345); an object without either is a
+`MISSING` issue. The collector also dates the stored row by its objects (`_dated_max_metrics`), so a stored element is
+keyed by its day. Record id suffix = group key. The legacy performance history dates each sport's newest reading by its
+own day.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|

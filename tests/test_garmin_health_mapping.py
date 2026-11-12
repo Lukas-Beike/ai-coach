@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo
 
+from canonical_consumer_cases import MAX_METRICS_DAILY
+
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
@@ -23,7 +25,6 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.performance import garmin_canonical
 from backend.providers import canonical_plans
 from backend.providers.garmin_health_mapping import (
     GARMIN_LABEL,
@@ -41,58 +42,6 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers" / "garmin"
 ZONE = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 6, 0, tzinfo=ZONE)
 DAY = "2026-10-10"
-
-# #2345: the recorded shape of Garmin's maxmet daily range (one row per day): the row
-# is undated, each sport object carries its own calendarDate, cycling is null on days
-# without a cycling value, and generic is the running VO2max. Synthetic values.
-MAX_METRICS_DAILY: Final = [
-    {
-        "userId": 12345678,
-        "generic": {
-            "calendarDate": "2026-11-10",
-            "vo2MaxPreciseValue": 53.9,
-            "vo2MaxValue": 54.0,
-            "fitnessAge": None,
-            "maxMetCategory": 0,
-        },
-        "cycling": None,
-        "heatAltitudeAcclimation": {
-            "acclimationPercentage": 0,
-            "altitudeAcclimation": 0,
-            "heatAcclimationPercentage": 0,
-        },
-    },
-    {
-        "userId": 12345678,
-        "generic": {
-            "calendarDate": "2026-11-11",
-            "vo2MaxPreciseValue": 54.1,
-            "vo2MaxValue": 54.0,
-            "fitnessAge": None,
-            "maxMetCategory": 0,
-        },
-        "cycling": {
-            "calendarDate": "2026-11-11",
-            "vo2MaxPreciseValue": 58.6,
-            "vo2MaxValue": 59.0,
-            "fitnessAge": None,
-            "maxMetCategory": 1,
-        },
-        "heatAltitudeAcclimation": None,
-    },
-    {
-        "userId": 12345678,
-        "generic": {
-            "calendarDate": "2026-11-12",
-            "vo2MaxPreciseValue": 54.3,
-            "vo2MaxValue": 54.0,
-            "fitnessAge": None,
-            "maxMetCategory": 0,
-        },
-        "cycling": None,
-        "heatAltitudeAcclimation": None,
-    },
-]
 
 SNAPSHOT_SECTIONS = (
     "sleep",
@@ -743,6 +692,41 @@ class AliasAndUnitTests(unittest.TestCase):
 
         self.assertEqual(_rows(result), [("vo2max", 57.4, DAY, "-")])
         self.assertEqual(_issues(result), [])
+
+    def test_maxmet_daily_rows_date_each_sport_object(self) -> None:
+        # #2345: the daily range leaves the row undated; each object keeps its own day,
+        # the current day's included, and running (generic) and cycling stay apart.
+        rows = [
+            *MAX_METRICS_DAILY,
+            {
+                "generic": {"calendarDate": None},
+                "cycling": {"calendarDate": "2026-11-09", "vo2MaxPreciseValue": 57.0},
+            },
+        ]
+        result = _map(
+            {"max_metrics": rows},
+            retrieved_at=datetime(2026, 11, 12, 9, 0, tzinfo=ZONE),
+        )
+        by_day = {
+            (item.observed_on.isoformat(), item.sport): item.value.value
+            for item in result.records
+            if item.kind is MetricKind.VO2MAX
+        }
+        self.assertEqual(
+            by_day,
+            {
+                ("2026-11-09", Sport.RIDE): 57.0,
+                ("2026-11-10", None): 53.9,
+                ("2026-11-11", None): 54.1,
+                ("2026-11-11", Sport.RIDE): 58.6,
+                ("2026-11-12", None): 54.3,
+            },
+        )
+        # An object without any day is reported, never dated by the sync day.
+        self.assertEqual(
+            [(issue.record_ref, issue.field) for issue in result.issues],
+            [("max_metrics[3]", "calendarDate")],
+        )
 
     def test_multiple_records_in_a_list_each_map(self) -> None:
         result = _map(
@@ -2067,44 +2051,6 @@ class ContractTests(unittest.TestCase):
                 result = _map(sections)
                 self.assertEqual(_issues(result), expected_issues)
                 self.assertEqual(len(result.records), count)
-
-
-class GarminMaxMetricsDailyTests(unittest.TestCase):
-    """#2345: Garmin's maxmet daily rows date each sport object, not the row."""
-
-    def _observations(self, payload: object) -> list[Observation]:
-        result = map_garmin_health(
-            {"max_metrics": payload},
-            zone=ZONE,
-            retrieved_at=datetime(2026, 11, 12, 9, 0, tzinfo=ZONE),
-        )
-        self.assertEqual(result.issues, ())
-        return [item for item in result.records if item.kind is MetricKind.VO2MAX]
-
-    def test_the_current_day_reading_is_stored_on_its_own_day(self) -> None:
-        rows = self._observations(MAX_METRICS_DAILY)
-        by_day = {
-            (item.observed_on.isoformat(), item.sport): item.value.value
-            for item in rows
-        }
-        self.assertEqual(
-            by_day,
-            {
-                ("2026-11-10", None): 53.9,
-                ("2026-11-11", None): 54.1,
-                ("2026-11-11", Sport.RIDE): 58.6,
-                ("2026-11-12", None): 54.3,
-            },
-        )
-
-    def test_running_and_cycling_stay_distinct_in_the_current_metrics(self) -> None:
-        rows = self._observations(MAX_METRICS_DAILY)
-        by_kind: dict[MetricKind, tuple[Observation, ...]] = {
-            kind: () for kind in garmin_canonical._READ_KINDS
-        }
-        by_kind[MetricKind.VO2MAX] = tuple(rows)
-        metrics = garmin_canonical._metrics(by_kind)
-        self.assertEqual((metrics.running_vo2max, metrics.cycling_vo2max), (54.3, 58.6))
 
 
 if __name__ == "__main__":

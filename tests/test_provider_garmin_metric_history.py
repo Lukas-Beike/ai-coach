@@ -6,6 +6,7 @@ from datetime import date
 from backend.providers.garmin import (
     GarminCollectionOptions,
     _collect_daily_stats,
+    _dated_max_metrics,
     collect_garmin_data,
 )
 from backend.sync.garmin_metric_history import (
@@ -230,6 +231,23 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             ),
         )
         return calls, result["provider_sync"]
+
+    def test_maxmet_daily_rows_take_their_sport_objects_day(self):
+        # #2345: the range leaves the row undated, so the stored element would be
+        # keyed by its content; the collected row carries the day of its objects.
+        rows = [
+            {
+                "generic": {"calendarDate": "2026-11-12", "vo2MaxPreciseValue": 54.3},
+                "cycling": None,
+            },
+            {"calendarDate": "2026-11-11", "generic": {"calendarDate": "2026-11-11"}},
+            {"generic": None, "cycling": None},
+        ]
+        self.assertEqual(
+            [row.get("calendarDate") for row in _dated_max_metrics(rows)],
+            ["2026-11-12", "2026-11-11", None],
+        )
+        self.assertEqual(_dated_max_metrics({"x": 1}), {"x": 1})
 
     def test_daily_metrics_are_skipped_until_due_or_a_new_activity(self):
         calls, provider_sync = self.daily_metric_collection(

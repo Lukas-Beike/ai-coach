@@ -1160,7 +1160,9 @@ def _collect_current_metrics(
         (
             "max_metrics",
             "get_max_metrics_range",
-            lambda fetch: fetch(max_metrics_start.isoformat(), today.isoformat()),
+            lambda fetch: _dated_max_metrics(
+                fetch(max_metrics_start.isoformat(), today.isoformat())
+            ),
             {
                 "window_start": max_metrics_start.isoformat(),
                 "window_end": today.isoformat(),
@@ -1444,6 +1446,34 @@ def _gear_activity_ids(
     if len(result) >= GEAR_ACTIVITIES_LIMIT:
         linked["activity_ids_truncated"] = True
     return linked
+
+
+def _dated_max_metrics(rows: Any) -> Any:
+    """Date each maxmet daily row by its sport objects' day (#2345).
+
+    The range leaves the row undated and dates ``generic`` and ``cycling``; the
+    row's day keeps a stored element keyed by its day, so a changed value of the
+    day replaces it instead of adding one.
+    """
+    if not isinstance(rows, list):
+        return rows
+    dated = []
+    for row in rows:
+        if isinstance(row, dict) and not row.get("calendarDate"):
+            day = next(
+                (
+                    item["calendarDate"]
+                    for item in row.values()
+                    if isinstance(item, dict)
+                    and isinstance(item.get("calendarDate"), str)
+                    and item["calendarDate"]
+                ),
+                None,
+            )
+            if day:
+                row = {**row, "calendarDate": day}
+        dated.append(row)
+    return dated
 
 
 def _collect_optional_metric(
