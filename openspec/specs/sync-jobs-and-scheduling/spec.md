@@ -79,7 +79,7 @@ Detailed contract: Garmin's slowly changing metric sources SHALL be reread when 
 Evidence: `backend/sync/garmin.py:GarminPayloadService.automatic_sync_window`, `backend/providers/garmin.py:GarminCollectionOptions`, `backend/sync/wahoo_sync.py:sync_window_days`; `tests/test_sync_garmin_service.py:test_current_refresh_reads_daily_metrics_only_when_due`, `tests/test_wahoo_sync.py:test_all_sentinel_and_zero_mean_the_descriptor_maximum`.
 
 ### Requirement: Output-only Intervals.icu
-The system SHALL NOT read Intervals.icu activities, wellness history, athlete record or activity details in any sync, and reads its calendar events only as the read-back of an explicit export. Intervals.icu SHALL accept only plan push, competition push and nutrition sync jobs plus the explicit library, metric and calendar writes with their read-backs. A refresh, historical backfill, activity-details or performance-refresh job, manual sync route or full resync for Intervals.icu SHALL be rejected.
+The system SHALL NOT read Intervals.icu activities, wellness history, athlete record or activity details in any sync, and reads its calendar events only inside an explicit export. Intervals.icu SHALL accept only plan push, competition push and nutrition sync jobs plus the explicit library, metric and calendar writes with their read-backs. A refresh, historical backfill, activity-details or performance-refresh job, manual sync route or full resync for Intervals.icu SHALL be rejected.
 
 #### Scenario: Refresh for Intervals.icu
 - **WHEN** a request queues a `refresh` job for Intervals.icu
@@ -89,7 +89,7 @@ The system SHALL NOT read Intervals.icu activities, wellness history, athlete re
 - **WHEN** the athlete explicitly asks the Coach for current data
 - **THEN** the Coach waits for the Garmin and Wahoo refreshes where configured and calls no Intervals.icu ingest endpoint.
 
-Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records of a database restored from a release before 2.0.0 are not read. The competition push reconciles linked events and never imports new competitions from Intervals.icu.
+Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records of a database restored from a release before 2.0.0 are not read. The competition push reconciles linked events and never imports new competitions from Intervals.icu. A metric export reads the wellness record of one day and the sport settings of Ride or Run for the values it offers; every call is in docs/provider-endpoints.md.
 
 Evidence: `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
 

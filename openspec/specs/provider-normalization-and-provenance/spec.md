@@ -21,6 +21,13 @@ Detailed contract: Unknown provider fields SHALL not automatically enter public 
 
 Evidence: `backend/canonical/records.py:Provenance`, `backend/canonical/records.py:Observation`, `backend/canonical/mapping.py:MappingIssue`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_garmin_health_mapping.py:test_issues_never_echo_raw_values`.
 
+### Requirement: Normative field map and mapper versions
+The system SHALL keep `docs/canonical-field-map.md` as the normative field map of every provider mapper: provider keys, alias order, unit conversions, bounds, zero rules and the orders that decide a result. A change to what a mapper emits SHALL change the map in the same change and raise the `MAPPER_VERSION` that replays the mapper, so stored raw records are re-projected.
+
+#### Scenario: Mapper output changes
+- **WHEN** a mapper change alters the canonical records it emits for a stored payload
+- **THEN** the field map states the new rule and the replaying `MAPPER_VERSION` is raised; `tests/test_mapper_version_guard.py` fingerprints the mapping code, not its output, and fails when that code changes without a bump.
+
 ### Requirement: Provider-aware time and sport normalization
 The system SHALL preserve explicit instants, date each activity on the day it was lived using the UTC offset the provider reports for it and otherwise the active athlete timezone, normalize supported sports and indoor/outdoor/virtual environments, and apply the implemented wall-time DST rules to local timestamps.
 

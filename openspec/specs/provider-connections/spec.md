@@ -22,7 +22,7 @@ Detailed contract: The current training registry contains no direct Polar, COROS
 Evidence: `backend/sync/provider_table.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`, `tests/test_garmin_activity_mapping.py:test_manufacturer_names_the_recording_origin`.
 
 ### Requirement: Intervals server configuration and requests
-The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness history or athlete record, and remote writes SHALL enter their explicit domain use cases.
+The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities or wellness history; its only reads are those listed in docs/provider-endpoints.md, and remote writes SHALL enter their explicit domain use cases.
 
 #### Scenario: Missing Intervals key
 - **WHEN** an athlete requests an Intervals.icu synchronization without configured access
@@ -30,7 +30,11 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 
 #### Scenario: Output only
 - **WHEN** Intervals credentials are configured
-- **THEN** no activity, wellness-history or athlete-record read is part of any sync; only an explicit push, its read-back (library, calendar events, the wellness day and sport settings of an export) or the explicit connection check reaches Intervals.icu.
+- **THEN** no activity or wellness-history read is part of any sync; only an explicit push, its read-back (library, folders, calendar events), the one-day wellness and sport-settings reads of a metric export or the explicit connection check (one athlete-endpoint request) reaches Intervals.icu.
+
+#### Scenario: Endpoint table
+- **WHEN** a provider call is added, removed or changed
+- **THEN** docs/provider-endpoints.md, the normative table of every outbound provider call with method and path, kind, caller, timeout, retry and error mapping, changes in the same pull request.
 
 Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_any_job_is_stored`, `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
@@ -127,7 +131,7 @@ Detailed contract: Optional profile and power-zone import SHALL run only with gr
 Evidence: `backend/sync/wahoo_connection.py:connection_status`, `backend/sync/wahoo_connection.py:WahooConnectionService.disconnect`, `backend/sync/wahoo_sync.py:WahooSyncService._threshold_fetch`; `tests/test_wahoo_connection.py:test_disconnect_during_code_exchange_prevents_reconnect`, `tests/test_wahoo_connection.py:test_disconnect_succeeds_locally_when_remote_revoke_fails`, `tests/test_wahoo_sync.py:test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts`.
 
 ### Requirement: Credential-safe bounded transport
-The system SHALL keep external credentials and callback values out of public status, ordinary diagnostics, exports, request-target logs, and persisted activity download links. Shared HTTP transports SHALL reject redirects rather than forwarding authenticated requests to a redirect target. Wahoo FIT downloads SHALL use an allowlisted HTTPS CDN, no authorization header, and bounded time/body size; calendar and weather SHALL use their own bounded provider transports.
+The system SHALL keep external credentials and callback values out of public status, ordinary diagnostics, exports, request-target logs, and persisted activity download links. Provider transports SHALL reject redirects rather than forwarding authenticated requests to a redirect target. Wahoo FIT downloads SHALL use an allowlisted HTTPS CDN, no authorization header, and bounded time/body size; the calendar feed SHALL use its own bounded transport and weather the shared one.
 
 #### Scenario: Authenticated provider redirect
 - **WHEN** an upstream responds with a redirect to the same or a different origin

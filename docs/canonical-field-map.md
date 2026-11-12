@@ -1,6 +1,6 @@
 # Canonical field map
 
-How every provider field reaches the canonical model, read from the code of this repository. It is the reference for anyone changing a mapper, a reader or a consumer. The canonical model is the one vocabulary (`backend/canonical/`) that all providers are mapped into; everything downstream (sessions, current values, Coach context, planning) reads it instead of provider payloads.
+How every provider field reaches the canonical model, read from the code of this repository. It is the normative field map: a mapper output change changes this file in the same PR (and bumps the mapper version, see the provider normalization spec), and a rule that only the code states is a defect of this file. It is the reference for anyone changing a mapper, a reader or a consumer. The canonical model is the one vocabulary (`backend/canonical/`) that all providers are mapped into; everything downstream (sessions, current values, Coach context, planning) reads it instead of provider payloads.
 
 `tests/test_canonical_field_map_doc.py` keeps this file complete: it fails when a mapper names a canonical enum member or builds a canonical record field that its section does not list, when a vocabulary member or a record field is missing, when a documented mapper version differs from `MAPPER_VERSION`, or when the map cites a file that does not exist.
 
@@ -970,8 +970,8 @@ One external sensor a recording named. The serial number is only an input of the
 
 | Field | Type & unit | Emitted by | Notes |
 |---|---|---|---|
-| `role` | `SensorRole` | `fit_sensor_mapping.py` | From the ANT+ device type: 120 heart rate, 11 power meter, 17 trainer. |
-| `key` | text, SHA-256 hex | `fit_sensor_mapping.py` | Hash of manufacturer, product and serial number; the registry shows its first 16 characters. |
+| `role` | `SensorRole` | `fit_sensor_mapping.py` | From the device type: ANT+ (or no `source_type`) 120 heart rate, 11 power meter, 17 trainer; Bluetooth LE (`source_type` 3) 1 heart rate, 2 power meter, 7 trainer. |
+| `key` | text, SHA-256 hex | `fit_sensor_mapping.py` | `sensor_key`: SHA-256 of `pacecraft-sensor:<manufacturer>:<product>:<serial>` (preimage in the `sensors` row of the mapper section); the registry shows its first 16 characters. |
 | `connection` | text or `None` | `fit_sensor_mapping.py` | `ant`, `antplus`, `bluetooth`, `bluetooth_low_energy` or `wifi` from the file's `source_type` (FIT SDK profile: 0 ant, 1 antplus, 2 bluetooth, 3 bluetooth_low_energy, 4 wifi, 5 local). |
 | `manufacturer` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT manufacturer number. |
 | `product` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT product number. |
@@ -1267,7 +1267,7 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
-| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 10. |
+| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's `MAPPER_VERSION`. |
 | `resolution` | | `downsampled` | Fixed. |
 | `origin` | | `fetch` | Fixed. |
 
@@ -1327,7 +1327,7 @@ Not mapped: `directDoubleCadence`, every other metric descriptor key (for exampl
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 10.
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with the `MAPPER_VERSION` of `garmin_activity_detail_mapping.py`.
 Mapper version: **9**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
@@ -1407,7 +1407,7 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 
 ### `fit_sensor_mapping.py`
 
-Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (9) and by `garmin_activity_detail_mapping.py` version 10.
+Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by the `MAPPER_VERSION` of `fit_activity_detail_mapping.py` and of `garmin_activity_detail_mapping.py`.
 Mapper version: none of its own. Replayed by the current `MAPPER_VERSION` of `fit_activity_detail_mapping.py` and `garmin_activity_detail_mapping.py`.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (the Garmin FIT SDK profile: 1 heart_rate, 2 bike_power, 7 bike_trainer), are unverified on real files; only the antplus (or unnamed) and Bluetooth LE sources name roles.
@@ -1418,13 +1418,13 @@ Record keywords set: stream set `hr_source`, `power_source`, `sensors`; sensor `
 |---|---|---|---|
 | `hr_source` | external device with `device_type` 120 (ANT+) or 1 (Bluetooth LE `ble_device_type` heart_rate) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
 | `power_source` | external device with `device_type` 11 or 17 (ANT+), 2 or 7 (Bluetooth LE `ble_device_type` bike_power, bike_trainer) | 11 or BLE 2 `power_meter`, 17 or BLE 7 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
-| `sensors` | external devices whose `device_type` names a role: ANT+ (or no `source_type`) 120, 11, 17; Bluetooth LE (`source_type` 3) 1, 2, 7 | `heart_rate`, `power_meter`, `trainer`; `key` is the SHA-256 of manufacturer, product and serial | A device whose `source_type` is local (5) is the recording device, not a sensor; without a `source_type`, `device_index` 0 is. Other `source_type` values name no role. A sensor whose serial number is missing or not above 0 cannot be identified and is left out. At most 16 sensors are kept. |
+| `sensors` | external devices whose `device_type` names a role: ANT+ (or no `source_type`) 120, 11, 17; Bluetooth LE (`source_type` 3) 1, 2, 7 | `heart_rate`, `power_meter`, `trainer`; `key` is `sensor_key`: the hex SHA-256 of the UTF-8 text `pacecraft-sensor:<manufacturer>:<product>:<serial>` | A device whose `source_type` is local (5) is the recording device, not a sensor. A device whose `source_type` is missing or not in the FIT profile table (0 to 5) is external only with a `device_index` other than 0 (a missing index excludes it); a known `source_type` other than local makes it external. `source_type` 0, 2 and 4 name no role, so they give no sensor. A sensor whose serial number is missing or not above 0 cannot be identified and is left out. At most 16 sensors are kept (`MAX_SENSORS`), one per `<role>:<key>` (the first wins). Key preimage (`sensor_key`): manufacturer, product and serial as decimal integers; manufacturer and product count only within 0 to 65,535, otherwise (or when missing) the literal text `None` stands in. A rebuild with another preimage gives other keys and the athlete's stored sensor names (`sensor_registry`) no longer match. |
 
 Not mapped: every other device type (cadence, speed, light and radar sensors), the device's software and battery fields, and the serial number itself.
 
 ### `fit_rr_mapping.py`
 
-Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (9) and by `garmin_activity_detail_mapping.py` version 10.
+Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by the `MAPPER_VERSION` of `fit_activity_detail_mapping.py` and of `garmin_activity_detail_mapping.py`.
 Mapper version: none of its own. Replayed by the current `MAPPER_VERSION` of `fit_activity_detail_mapping.py` and `garmin_activity_detail_mapping.py`.
 Inputs: the decoded FIT messages; the hrv message is global number 78, field 0 `time`, an array of up to five uint16 values in seconds (scale 1000, 0xFFFF invalid). Garmin writes it only while HRV logging is enabled for the heart rate sensor.
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_rr_mapping.py` and `tests/test_fit_file.py`). Whether real Garmin and Wahoo files carry hrv messages this way is unverified.
@@ -1441,7 +1441,7 @@ Not mapped: the hrv timestamps (the message has none), RR values outside 300 to 
 ### `wahoo_fit_download.py`
 
 Status: Live. Transport only: `download_wahoo_fit` is injected into `WahooActivityDetailImport` by `wahoo_sync_assembly.py` and runs after a committed Wahoo sync. It maps nothing.
-Inputs: the Wahoo workout row's `workout_summary.file.url` (`wahoo_fit_url`), the signed download link of the workout's original FIT file. Decoding and mapping are done by `fit_activity_detail_mapping.py` (version 4) with Wahoo provenance (`device_measured`, `recorded_by` `wahoo`, label `Wahoo`); the sets are stored per Wahoo workout id with the summary hash of the active record. Result for Wahoo detail: `streams` (`full`), `laps` (`device_laps`) and `strength_sets` (`fit_set_messages`); no zone distribution (derived zones are added at read time).
+Inputs: the Wahoo workout row's `workout_summary.file.url` (`wahoo_fit_url`), the signed download link of the workout's original FIT file. Decoding and mapping are done by `fit_activity_detail_mapping.py` (at its current `MAPPER_VERSION`) with Wahoo provenance (`device_measured`, `recorded_by` `wahoo`, label `Wahoo`); the sets are stored per Wahoo workout id with the summary hash of the active record. Result for Wahoo detail: `streams` (`full`), `laps` (`device_laps`) and `strength_sets` (`fit_set_messages`); no zone distribution (derived zones are added at read time).
 Evidence: documented only (`tests/test_wahoo_fit_download.py`, `tests/test_wahoo_activity_details.py`); there is no Wahoo payload in the payload files.
 
 | Item | Rule |
@@ -1631,6 +1631,8 @@ Garmin's own calendar day, never converted by the athlete zone. Undated records 
 `cycling_ftp`; every other undated record is reported `MISSING` (field = first date key) and not mapped.
 Exceptions: Body Battery samples are dated by their own instant in the athlete zone (`local_date(observed_at, zone)`);
 weight epoch milliseconds are read as a UTC date (`_epoch_day`).
+
+Section emission order (`_SECTION_ORDER`, exported as `GARMIN_HEALTH_SECTION_NAMES`; `map_sections` and the canonical plan visit sections in it): `sleep`, `hrv`, `resting_hr`, `readiness`, `max_metrics`, `running_threshold`, `cycling_ftp`, `cycling_ftp_history`, `heart_rate_zones`, `weight` (weight and body fat), `daily_stats`, `race_predictions`, `endurance_score`, `body_battery`, the `TRAINING_SECTIONS` (`daily_training_status`, `training_load_balance`, `training_status`, `weekly_training_status`, `running_tolerance`, `training_readiness_history`), and last `performance_history`. Ingest keeps the first value of a natural key, so when two sections emit the same key (for example `readiness` and `training_readiness_history` on one day) the earlier section wins; the order is part of the mapping.
 
 #### Section index (collector call → section → mapper entry)
 
@@ -1839,7 +1841,7 @@ without its source type, so it is not claimed as a scale value). Id `performance
 
 Other `metrics` keys (including the activity-derived max heart rate keys) are not mapped.
 
-#### Training sections (delegated to `garmin_training_mapping.py`, ride on `MAPPER_VERSION` 22)
+#### Training sections (delegated to `garmin_training_mapping.py`, ride on the `MAPPER_VERSION` of `garmin_health_mapping.py`)
 
 `TRAINING_SECTIONS` are mapped through `training_values` / `endurance_group_values` (another writer documents the
 reader). The health mapper emits each value Src `provider_reported`, no agg or window, number via `coerce_number`, id
@@ -1909,8 +1911,9 @@ items) holding a start field and an end field gives one interval when end is aft
 Start fields, first present wins: `sleepStartTimestampGMT`, `sleepStartTimestamp`, `sleep_start_at`, `sleepStart`,
 `sleep_start`, `onset_at`. End fields: `sleepEndTimestampGMT`, `sleepEndTimestamp`, `sleep_end_at`, `sleepEnd`,
 `sleep_end`, `wake_at`. Timestamps: number above 1e10 is epoch ms, other numbers epoch s, text is ISO (no offset = UTC)
-(`utc_timestamp`). The `...Local` fields (`sleepStartTimestampLocal`) are not read. Duplicates: one interval per
-(start, end) pair (last wins), then one per start (first wins) (`_distinct`).
+(`utc_timestamp`). The `...Local` fields (`sleepStartTimestampLocal`) are not read. Walk order (`sleep_intervals`, a stack): the row first, then the nested mappings and lists of each node in reverse
+insertion order, depth first; a list contributes its first 500 items. "Last" and "first" below refer to this order.
+Duplicates: one interval per (start, end) pair (last wins), then one per start (first wins) (`_distinct`).
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
@@ -2152,12 +2155,14 @@ Evidence: documented, fixtures `tests/fixtures/providers/garmin/heart_rate_zones
 | `sport` | `sport` -> `sportType` -> `activityType` | text containing `cycl`, `bike` or `ride` is `ride`, containing `run` is `run`, `DEFAULT`, `generic` or `all` (also a missing key) is `None` | Any other sport is left out. |
 | `environment`, `valid_until`, `percent_limits`, `percent_basis` | - | `None` | Never produced. |
 | `valid_from` | `fetchedOn` | ISO day; else the local day of `retrieved_at` | The day the set was first fetched. |
-| `threshold` | `lactateThresholdHeartRateUsed` | bpm, positive finite number | `None` on a maximum-HR or reserve basis without it. |
-| `maximum` | `maxHeartRateUsed` | bpm | Required: it is the open top limit. |
-| `resting` | `restingHeartRateUsed` | bpm | |
+| `threshold` | `lactateThresholdHeartRateUsed` | bpm, positive finite JSON number (`_number`) | `None` on a maximum-HR or reserve basis without it. |
+| `maximum` | `maxHeartRateUsed` | bpm, positive finite JSON number | Required: it is the open top limit. |
+| `resting` | `restingHeartRateUsed` | bpm, positive finite JSON number | |
 | `limits` | `zone2Floor` .. `zone5Floor`, `maxHeartRateUsed` | each floor minus 1 bpm, then the maximum | Strictly ascending; `zone1Floor` must be a number but is not a limit. A missing, non-numeric or non-ascending value drops the set. |
 | `model` | `trainingMethod` | lower-cased identifier up to 64 characters | The calculation basis, information only. |
 | `provenance` | - | `Provenance(provider=garmin, source_kind=provider_reported, source_record_id=<argument>, recorded_by=garmin, retrieved_at=<argument>, label="Garmin Connect")` | `Provenance` arguments set: `provider`, `source_kind`, `source_record_id`, `recorded_by`, `retrieved_at`, `label`. Source kind `provider_reported`, recorded by `garmin`. |
+
+Number rule (`garmin_zone_mapping._number`): only a JSON `int` or `float` counts (no `bool`). Numeric text such as `"150"` is rejected, unlike every other Garmin mapper, which reads dot-decimal text through `coerce_number`: for a floor or `maxHeartRateUsed` it drops the set, for the threshold or resting heart rate it leaves the field `None`. The `max_hr` observation of the same element does accept the text.
 
 Construction is wrapped in `try/except (TypeError, ValueError)`: a validation failure drops the set. One configuration per sport comes out of an element; the first wins.
 
