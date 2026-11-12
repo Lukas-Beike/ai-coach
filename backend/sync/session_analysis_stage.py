@@ -73,7 +73,6 @@ from backend.performance.session_zones import (
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.target_snapshot import freeze_targets
 from backend.sync.canonical_backfill import (
-    PREFETCH_SECONDS,
     BatchReport,
     precomputed_batch,
     timed_batch,
@@ -133,6 +132,9 @@ class _Analysed:
     payload: dict[str, Any]
     outcome: str
     frozen: bool
+    # Targets looked up or frozen for a session whose row had none; the writer
+    # derives them again and drops the result when they differ.
+    derived: Mapping[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -246,9 +248,7 @@ class SessionAnalysisStage:
         with database().reader() as db:
             summaries, _, changed = self._changed(db)
             context = _FreezeContext(summaries, self._planned_units, now)
-            for session, fingerprint in timed_batch(
-                changed, self._batch_size, PREFETCH_SECONDS
-            ):
+            for session, fingerprint in timed_batch(changed, self._batch_size):
                 prepared[session.session_id] = (
                     fingerprint,
                     self._analyse(db, session, fingerprint, context),
@@ -266,6 +266,8 @@ class SessionAnalysisStage:
         summaries, total, changed = self._changed(db)
         tally = _Tally()
         context = _FreezeContext(summaries, self._planned_units, now)
+        if prepared:
+            prepared = self._current_targets(db, changed, prepared, context)
         computed = 0
         for session, analysed in precomputed_batch(
             [
@@ -382,6 +384,39 @@ class SessionAnalysisStage:
             sessions.append((session, row))
         return summaries, sessions
 
+    @staticmethod
+    def _targets(
+        db: Any, session: _Session, context: _FreezeContext
+    ) -> tuple[Mapping[str, Any] | None, bool]:
+        """The session's targets and whether they were frozen just now."""
+        if session.targets is not None or not session.keys:
+            return session.targets, False
+        targets = stored_targets(db, session.session_id, session.all_records)
+        if targets is not None:
+            return targets, False
+        targets = context.freeze(session)
+        return targets, targets is not None
+
+    def _current_targets(
+        self,
+        db: Any,
+        changed: Sequence[tuple[_Session, str]],
+        prepared: dict[str, tuple[str, _Analysed]],
+        context: _FreezeContext,
+    ) -> dict[str, tuple[str, _Analysed]]:
+        """Drop prefetched rows whose derived targets changed since (#2311)."""
+        sessions = {session.session_id: session for session, _ in changed}
+        return {
+            session_id: (fingerprint, analysed)
+            for session_id, (fingerprint, analysed) in prepared.items()
+            if analysed.derived is None
+            or (
+                session_id in sessions
+                and self._targets(db, sessions[session_id], context)[0]
+                == analysed.derived
+            )
+        }
+
     def _analyse(
         self,
         db: Any,
@@ -390,17 +425,14 @@ class SessionAnalysisStage:
         context: _FreezeContext,
     ) -> _Analysed:
         """Freeze the session's targets if needed and compute its row; no write."""
-        targets = session.targets
-        frozen = False
-        if targets is None and session.keys:
-            targets = stored_targets(db, session.session_id, session.all_records)
-            if targets is None:
-                targets = context.freeze(session)
-                frozen = targets is not None
-            if targets is not None:
-                fingerprint = session.fingerprint(targets)
+        targets, frozen = self._targets(db, session, context)
+        derived = None if targets is session.targets else targets
+        if derived is not None:
+            fingerprint = session.fingerprint(derived)
         payload = self._payload(db, session, targets)
-        return _Analysed(fingerprint, payload, _outcome(session, payload), frozen)
+        return _Analysed(
+            fingerprint, payload, _outcome(session, payload), frozen, derived
+        )
 
     @staticmethod
     def _store(

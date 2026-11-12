@@ -62,7 +62,6 @@ from backend.performance.session_metrics_reads import (
     stored_session_metrics,
 )
 from backend.sync.canonical_backfill import (
-    PREFETCH_SECONDS,
     BatchReport,
     precomputed_batch,
     timed_batch,
@@ -272,9 +271,7 @@ class SessionMetricsStage:
         prepared: dict[str, tuple[str, SessionMetrics]] = {}
         with database().reader() as db:
             scan = self._scan(db)
-            for item, fingerprint in timed_batch(
-                scan.plan.changed, self._batch_size, PREFETCH_SECONDS
-            ):
+            for item, fingerprint in timed_batch(scan.plan.changed, self._batch_size):
                 prepared[str(item["id"])] = (
                     fingerprint,
                     scan.compute(db, item, fingerprint),
@@ -293,7 +290,7 @@ class SessionMetricsStage:
         stored, state, plan = scan.stored, scan.state, scan.plan
         keep, next_empty = plan.keep, plan.empty
         tally = _Tally()
-        done_ids: set[str] = set()
+        computed = 0
         for item, metrics in precomputed_batch(
             [
                 (str(item["id"]), fingerprint, (item, fingerprint))
@@ -303,20 +300,15 @@ class SessionMetricsStage:
             prepared,
             lambda entry: scan.compute(db, *entry),
         ):
+            computed += 1
             summary, fingerprint = item
             session_id = str(summary["id"])
-            done_ids.add(session_id)
             written = _write_session(db, summary, metrics, now, tally)
             if written:
                 keep.update(written)
             else:
                 next_empty[session_id] = fingerprint
-        computed = len(done_ids)
-        pending = [
-            (item, fingerprint)
-            for item, fingerprint in plan.changed
-            if str(item["id"]) not in done_ids
-        ]
+        pending = plan.changed[computed:]
         for waiting, _ in pending:
             # Not recomputed yet: its stored rows stay until a later batch.
             keep.update(

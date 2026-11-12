@@ -83,7 +83,11 @@ def writer_free_while_computing(
     )
     with patch.object(module, name, probe):
         worker.start()
-        worker.join(30)
+        try:
+            worker.join(30)
+        finally:
+            worker.stop()
+            worker.join(5)
     return free
 
 

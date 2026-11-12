@@ -320,6 +320,15 @@ class SessionMetricsStageTests(unittest.TestCase):
         self.assertEqual([True], free)
         self.assertAlmostEqual(self._served()["work_kj"], 600.0)
 
+    def test_a_prefetched_result_whose_inputs_changed_is_not_written(self) -> None:
+        # #2311: the streams arrive between the prefetch and the writer, so the
+        # summary-only result is stale and the writer computes the session again.
+        self.stage.prefetch(lambda: self.manager)
+        with self.manager.unit_of_work() as db:
+            _store_streams(db, "g1")
+        self.assertEqual(1, self._run()["counts"]["computed"])
+        self.assertAlmostEqual(self._served()["work_kj"], 600.0)
+
     def test_detail_document_shows_the_local_values(self) -> None:
         with self.manager.unit_of_work() as db:
             _store_streams(db, "g1")

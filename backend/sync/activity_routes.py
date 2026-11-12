@@ -40,7 +40,6 @@ from backend.canonical.vocabulary import (
 from backend.db import activity_detail_store
 from backend.db.repositories import KeyValueRepository
 from backend.sync.canonical_backfill import (
-    PREFETCH_SECONDS,
     BatchReport,
     precomputed_batch,
     timed_batch,
@@ -141,14 +140,19 @@ class ActivityRoutesStage:
         try:
             with database().reader() as db:
                 wanted, hashes, changed = self._changed(db, route_store.load_index(db))
-                for session_id in timed_batch(
-                    changed, self._batch_size, PREFETCH_SECONDS
-                ):
+                for session_id in timed_batch(changed, self._batch_size):
                     prepared[session_id] = (
                         hashes[session_id],
                         _track(db, session_id, wanted[session_id].get("distance_m")),
                     )
-        except Exception:  # noqa: BLE001 - the writer batch computes inline instead
+        except Exception as error:  # noqa: BLE001 - the writer batch computes inline
+            _LOGGER.warning(
+                "Route prefetch failed",
+                extra={
+                    "event": "activity_routes_failed",
+                    "context": {"error_type": type(error).__name__},
+                },
+            )
             prepared = {}
         self._prepared = prepared
 
