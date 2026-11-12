@@ -237,6 +237,8 @@ class ProbeTests(unittest.TestCase):
         config = SimpleNamespace(
             openai_api_key="sk-synthetic",
             openai_base_url="https://api.example.test/v1",
+            anthropic_api_key="sk-ant-synthetic",
+            anthropic_base_url="https://claude.example.test",
             intervals_api_key="key",
             intervals_athlete_id="i1",
             wahoo_configured=True,
@@ -263,29 +265,44 @@ class ProbeTests(unittest.TestCase):
 
     def test_every_probe_is_a_single_read(self):
         probes, values, _ = self._probes()
-        for name in ("openai", "weather", "intervals", "wahoo", "garmin"):
+        for name in ("openai", "anthropic", "weather", "intervals", "wahoo", "garmin"):
             probes[name].check()
         calls = values["request"].call_args_list
-        self.assertEqual([call.args[0] for call in calls], ["GET", "GET"])
+        self.assertEqual([call.args[0] for call in calls], ["GET", "GET", "GET"])
         self.assertEqual(calls[0].args[1], "https://api.example.test/v1/models")
-        self.assertIn("api.open-meteo.com", calls[1].args[1])
+        self.assertEqual(calls[1].args[1], "https://claude.example.test/v1/models")
+        self.assertIn("api.open-meteo.com", calls[2].args[1])
         values["intervals_get"].assert_called_once_with("/athlete/i1")
         values["wahoo_user"].assert_called_once_with()
         values["garmin_login"].assert_called_once_with()
 
-    def test_openai_models_not_found_is_unsupported(self):
-        request = Mock(side_effect=AppError(502, "x", upstream_status=404))
-        probes, _, _ = self._probes(request=request)
-        self.assertEqual(
-            ProviderConnectionChecks(probes).check("openai")["status"], "unsupported"
-        )
+    def test_model_provider_listing_failures_are_classified(self):
+        for provider in ("openai", "anthropic"):
+            for upstream, status in (
+                (404, "unsupported"),
+                (401, "auth_failed"),
+                (403, "auth_failed"),
+            ):
+                with self.subTest(provider=provider, upstream=upstream):
+                    request = Mock(
+                        side_effect=AppError(502, "x", upstream_status=upstream)
+                    )
+                    probes, _, _ = self._probes(request=request)
+                    self.assertEqual(
+                        ProviderConnectionChecks(probes).check(provider)["status"],
+                        status,
+                    )
 
-    def test_invalid_openai_base_url_is_misconfiguration_without_a_request(self):
-        probes, values, config = self._probes()
-        config.openai_base_url = "https://user:pw@api.example.test/v1"
-        result = ProviderConnectionChecks(probes).check("openai")
-        self.assertEqual(result["status"], "misconfigured")
-        values["request"].assert_not_called()
+    def test_invalid_base_url_is_misconfiguration_without_a_request(self):
+        for provider in ("openai", "anthropic"):
+            with self.subTest(provider=provider):
+                probes, values, config = self._probes()
+                setattr(
+                    config, f"{provider}_base_url", "https://user:pw@api.example.test"
+                )
+                result = ProviderConnectionChecks(probes).check(provider)
+                self.assertEqual(result["status"], "misconfigured")
+                values["request"].assert_not_called()
 
     def test_garmin_identity_changes_with_each_connection(self):
         generation = {"value": "1"}
@@ -301,6 +318,17 @@ class ProbeTests(unittest.TestCase):
         call = values["request"].call_args
         self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer sk-synthetic")
         self.assertEqual(call.kwargs["service"], "openai-check")
+
+    def test_anthropic_check_sends_the_key_as_x_api_key_with_the_version(self):
+        probes, values, config = self._probes()
+        config.anthropic_api_key = "sk-ant-synthetic \n"
+        probes["anthropic"].check()
+        call = values["request"].call_args
+        self.assertEqual(
+            call.kwargs["headers"],
+            {"x-api-key": "sk-ant-synthetic", "anthropic-version": "2026-10-21"},
+        )
+        self.assertEqual(call.kwargs["service"], "anthropic-check")
 
     def test_wahoo_identity_changes_on_reconnect(self):
         state = {"connected": True, "connected_at": "t1"}
@@ -329,13 +357,6 @@ class ProbeTests(unittest.TestCase):
         )
         values["wahoo_user"].assert_not_called()
 
-    def test_openai_forbidden_models_listing_is_a_rejection(self):
-        request = Mock(side_effect=AppError(502, "x", upstream_status=403))
-        probes, _, _ = self._probes(request=request)
-        self.assertEqual(
-            ProviderConnectionChecks(probes).check("openai")["status"], "auth_failed"
-        )
-
     def test_unknown_intervals_athlete_is_a_misconfiguration(self):
         probes, _, _ = self._probes(
             intervals_get=Mock(side_effect=AppError(502, "x", upstream_status=404))
@@ -343,13 +364,6 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(
             ProviderConnectionChecks(probes).check("intervals")["status"],
             "misconfigured",
-        )
-
-    def test_openai_auth_failure(self):
-        request = Mock(side_effect=AppError(502, "x", upstream_status=401))
-        probes, _, _ = self._probes(request=request)
-        self.assertEqual(
-            ProviderConnectionChecks(probes).check("openai")["status"], "auth_failed"
         )
 
     def test_configuration_signals(self):
@@ -360,6 +374,9 @@ class ProbeTests(unittest.TestCase):
         self.assertTrue(probes["weather"].snapshot()[0])
         config.openai_api_key = " "
         self.assertFalse(probes["openai"].snapshot()[0])
+        self.assertTrue(probes["anthropic"].snapshot()[0])
+        config.anthropic_api_key = " "
+        self.assertFalse(probes["anthropic"].snapshot()[0])
         config.intervals_athlete_id = ""
         self.assertFalse(probes["intervals"].snapshot()[0])
 
@@ -368,6 +385,10 @@ class ProbeTests(unittest.TestCase):
         before = probes["openai"].snapshot()[1]
         config.openai_api_key = "sk-other"
         self.assertNotEqual(before, probes["openai"].snapshot()[1])
+        for field in ("anthropic_api_key", "anthropic_base_url"):
+            before = probes["anthropic"].snapshot()[1]
+            setattr(config, field, "changed")
+            self.assertNotEqual(before, probes["anthropic"].snapshot()[1])
 
 
 class RouteTests(unittest.TestCase):

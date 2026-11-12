@@ -150,8 +150,10 @@ test("saving sends only non-blank values and leaves no secret in the DOM", async
   assert.equal(harness.invalidatedCount(), 1);
 });
 
-test("only the OpenAI base URL and the Wahoo client settings need the app password", () => {
+test("only the model provider base URLs and the Wahoo client settings need the app password", () => {
   assert.equal(credentialNeedsPassword({ openai_base_url: "https://proxy.example.test/v1" }), true);
+  assert.equal(credentialNeedsPassword({ anthropic_base_url: "https://claude-proxy.example.test" }), true);
+  assert.equal(credentialNeedsPassword({ anthropic_api_key: "key" }), false);
   assert.equal(credentialNeedsPassword({ wahoo_client_id: "id" }), true);
   assert.equal(credentialNeedsPassword({ wahoo_client_secret: "secret" }), true);
   assert.equal(credentialNeedsPassword({ openai_api_key: "key", intervals_athlete_id: "i1" }), false);
@@ -175,15 +177,17 @@ test("the password input appears only while a protected field is filled in", () 
 });
 
 test("a protected save without the password sends nothing and keeps the entries", async () => {
-  const harness = loadProviderConnections();
-  harness.setData({ credentials: { fields: statusFields } });
-  harness.element("cred-openai_base_url").value = "https://proxy.example.test/v1";
+  for (const provider of ["openai", "anthropic"]) {
+    const harness = loadProviderConnections();
+    harness.setData({ credentials: { fields: statusFields } });
+    harness.element(`cred-${provider}_base_url`).value = "https://proxy.example.test/v1";
 
-  await harness.fn("saveProviderCredentials")(event(), "openai");
+    await harness.fn("saveProviderCredentials")(event(), provider);
 
-  assert.equal(harness.calls.length, 0);
-  assert.equal(harness.element(credentialFormIds("openai").error).textContent, "Bitte das App-Passwort eingeben.");
-  assert.equal(harness.element("cred-openai_base_url").value, "https://proxy.example.test/v1");
+    assert.equal(harness.calls.length, 0);
+    assert.equal(harness.element(credentialFormIds(provider).error).textContent, "Bitte das App-Passwort eingeben.");
+    assert.equal(harness.element(`cred-${provider}_base_url`).value, "https://proxy.example.test/v1");
+  }
 });
 
 test("a protected save sends the password once and clears it from the DOM", async () => {

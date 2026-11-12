@@ -12,9 +12,10 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from backend.config import Config
+from backend.config import DEFAULT_ANTHROPIC_BASE_URL, Config
 from backend.errors import AppError
 from backend.providers import openai_requests
+from backend.providers.claude_requests import CLAUDE_MODELS_PATH, claude_headers
 from backend.providers.connection_checks import (
     MISCONFIGURED_REASON,
     SCOPE_MISSING_REASON,
@@ -36,27 +37,26 @@ def _identity(*values: object) -> str:
     return "\x1f".join(str(value or "") for value in values)
 
 
-def _openai_check(
-    current: Config, request: Callable[..., Any], default_base_url: str
+def _models_check(
+    request: Callable[..., Any],
+    *,
+    base_url: str,
+    default_base_url: str,
+    path: str,
+    headers: dict[str, str],
+    service: str,
 ) -> None:
+    """List the models of a model provider: the cheapest authenticated read."""
     try:
         url = openai_requests.endpoint(
-            current.openai_base_url,
-            OPENAI_MODELS_PATH,
-            default_base_url=default_base_url,
+            base_url, path, default_base_url=default_base_url
         )
     except AppError as error:
         raise AppError(
             400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON
         ) from error
     try:
-        request(
-            "GET",
-            url,
-            headers={"Authorization": f"Bearer {current.openai_api_key.strip()}"},
-            timeout=_TIMEOUT_SECONDS,
-            service="openai-check",
-        )
+        request("GET", url, headers=headers, timeout=_TIMEOUT_SECONDS, service=service)
     except AppError as error:
         # Compatible endpoints may not implement the model listing.
         if error.upstream_status in {404, 405, 501}:
@@ -93,7 +93,26 @@ def build_probes(
     """Return the probes for the providers that support a safe explicit check."""
 
     def openai() -> None:
-        _openai_check(config(), request, default_openai_base_url)
+        current = config()
+        _models_check(
+            request,
+            base_url=current.openai_base_url,
+            default_base_url=default_openai_base_url,
+            path=OPENAI_MODELS_PATH,
+            headers={"Authorization": f"Bearer {current.openai_api_key.strip()}"},
+            service="openai-check",
+        )
+
+    def anthropic() -> None:
+        current = config()
+        _models_check(
+            request,
+            base_url=current.anthropic_base_url,
+            default_base_url=DEFAULT_ANTHROPIC_BASE_URL,
+            path=CLAUDE_MODELS_PATH,
+            headers=claude_headers(current.anthropic_api_key),
+            service="anthropic-check",
+        )
 
     def intervals() -> None:
         _intervals_check(config(), intervals_get)
@@ -147,6 +166,14 @@ def build_probes(
                 config().openai_api_key, config().openai_base_url
             ),
             check=openai,
+            auth_hint="Anmeldung abgelehnt – API-Schlüssel und Basis-URL prüfen",
+        ),
+        "anthropic": simple_probe(
+            configured=lambda: bool(str(config().anthropic_api_key).strip()),
+            identity=lambda: _identity(
+                config().anthropic_api_key, config().anthropic_base_url
+            ),
+            check=anthropic,
             auth_hint="Anmeldung abgelehnt – API-Schlüssel und Basis-URL prüfen",
         ),
         "intervals": simple_probe(

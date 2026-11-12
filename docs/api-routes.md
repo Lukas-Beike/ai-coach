@@ -94,7 +94,7 @@ Regenerate it with `python tests/test_api_routes_doc.py --write`.
 | PUT | `/api/profile` | Session + CSRF | Patch only the submitted profile fields; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export`. |
 | POST | `/api/profile/first-threshold/adopt` | Session + CSRF | Store the shown first threshold estimate (`percent_lthr`) with origin `estimated`; `replace_measured: true` replaces a measured value. |
 | GET | `/api/providers/connections` | Session | Last local connection check per provider, without contacting any provider. |
-| POST | `/api/providers/{provider}/check` | Session + CSRF | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result. |
+| POST | `/api/providers/{provider}/check` | Session + CSRF | Explicitly run one bounded read-only connection check for an OpenAI, Claude, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result. |
 | GET | `/api/readiness` | Public | Readiness status; 503 while not ready. |
 | POST | `/api/routes/rename` | Session + CSRF | Rename a recognised route (`route_id`, `name`: 1 to 60 characters without control characters); answers `route_id` and `label` only. |
 | PUT | `/api/settings/calendar-display` | Session + CSRF | Update the calendar display settings. |

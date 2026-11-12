@@ -43,6 +43,8 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 | `OPENAI_API_KEY` | none | Coach access; also settable in the app. |
 | `OPENAI_MODEL` | `gpt-6-luna` | Default model deployment. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Responses-compatible endpoint (HTTPS, or loopback HTTP). |
+| `ANTHROPIC_API_KEY` | none | Claude API access; also settable in the app. |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Messages-compatible endpoint (HTTPS, or loopback HTTP). |
 | `INTERVALS_API_KEY`, `INTERVALS_ATHLETE_ID` | none, `0` | Intervals.icu output target. |
 | `GARMIN_PERSONAL_API_KEY` | none | Official read-only Garmin Personal API key. |
 | `GARMIN_PERSONAL_API_KEY_EXPIRES` | none | Key expiry date (`YYYY-MM-DD`) for the renewal warning. |
