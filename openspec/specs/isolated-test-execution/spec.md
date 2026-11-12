@@ -18,11 +18,15 @@ The test entry points SHALL expose explicit focused and complete selections. Com
 - **WHEN** a developer selects a project, spec, or Python module
 - **THEN** the runner reports that selection and its result without omitting any case inside the selected scope or claiming complete-suite success.
 
+#### Scenario: Spec a selected project does not list
+- **WHEN** a requested spec is listed by some project but not by a selected one
+- **THEN** that (spec, project) pair is skipped with a note and the other selected pairs run; a spec no project lists fails clearly
+
 #### Scenario: Invalid or empty selection
 - **WHEN** an unknown project, invalid shard, or selection matching no tests is requested
 - **THEN** execution fails clearly rather than returning a successful empty run.
 
-Evidence: `scripts/run_browser_tests.py`, `tests/run_tests.py`, `playwright.config.cjs`; `tests/browser-selection.test.cjs`, `tests/test_browser_runner.py::BrowserRunnerTests.test_invalid_and_zero_selection_fail`, `tests/test_browser_runner.py::BrowserRunnerTests.test_expected_identities_survive_spec_and_shard_filters`, `tests/test_browser_runner.py::BrowserRunnerTests.test_synthetic_identity_parity_across_all_projects_and_shards`, `tests/test_browser_runner.py::BrowserRunnerTests.test_list_does_not_start_containers_and_never_reports_passed`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_focused_or_wrong_matrix_cannot_claim_complete_validation`.
+Evidence: `scripts/run_browser_tests.py`, `tests/run_tests.py`, `playwright.config.cjs`; `tests/browser-selection.test.cjs`, `tests/test_browser_runner.py::BrowserRunnerTests.test_invalid_and_zero_selection_fail`, `tests/test_browser_runner.py::BrowserRunnerTests.test_spec_a_project_does_not_list_is_skipped_with_a_note`, `tests/test_browser_runner.py::BrowserRunnerTests.test_expected_identities_survive_spec_and_shard_filters`, `tests/test_browser_runner.py::BrowserRunnerTests.test_synthetic_identity_parity_across_all_projects_and_shards`, `tests/test_browser_runner.py::BrowserRunnerTests.test_list_does_not_start_containers_and_never_reports_passed`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_focused_or_wrong_matrix_cannot_claim_complete_validation`.
 
 ### Requirement: Prepared browser execution matches the locked toolchain
 Regular CI browser jobs SHALL use a prepared, immutable browser environment containing the browser and required system packages for the locked test-tool version. Preparation SHALL be distinct from ordinary test execution, and missing or incompatible tooling SHALL fail explicitly.

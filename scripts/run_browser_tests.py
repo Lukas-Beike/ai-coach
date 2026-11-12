@@ -436,7 +436,9 @@ def select(listing, project, specs, shard, total, timing):
         if project not in projects:
             raise RunnerError("Unknown or empty Playwright project")
         projects = [project]
-    available = {file for name, file in listing if name in projects}
+    # A spec must exist in some project; a project that does not list it
+    # (a desktop-only spec on mobile) skips it with a note.
+    available = {file for _, file in listing}
     wanted = set()
     for item in specs:
         spec = item.replace("\\", "/").removeprefix("./")
@@ -446,10 +448,14 @@ def select(listing, project, specs, shard, total, timing):
             spec = matches.pop()
         if spec not in available:
             raise RunnerError(
-                f"Requested spec {spec} absent from selected project listing; "
+                f"Requested spec {spec} absent from the Playwright listing; "
                 "use the listed path, such as e2e/<name>.spec.js"
             )
         wanted.add(spec)
+    for name in projects:
+        for spec in sorted(wanted):
+            if (name, spec) not in listing:
+                print(f"Skipped {spec} on {name}: not listed", file=sys.stderr)
     result = []
     for name in projects:
         files = {
