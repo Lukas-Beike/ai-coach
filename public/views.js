@@ -416,6 +416,7 @@ function renderProfileSummary(profile) {
 
 function renderProfile(profile) {
   renderFirstThresholdEstimate(state.data?.first_threshold_estimate, profile);
+  refreshThresholdBox();
   setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
   if (state.profileDirty) return;
   const form = $("#profileForm");

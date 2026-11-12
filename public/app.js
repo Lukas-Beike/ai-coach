@@ -86,8 +86,12 @@ $("#profileForm").addEventListener("input", (event) => {
   if (event.target.form !== event.currentTarget) return;
   state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true);
 });
-// A closed profile section cannot show its invalid field: open it first.
-$("#profileForm").addEventListener("invalid", (event) => { event.target.closest?.("details")?.setAttribute("open", ""); }, true);
+// A closed profile section or a closed editor in it cannot show its invalid field: open them first.
+$("#profileForm").addEventListener("invalid", (event) => {
+  event.target.closest?.("details")?.setAttribute("open", "");
+  const editor = event.target.closest?.(".zone-editor[hidden]");
+  if (editor) editor.hidden = false;
+}, true);
 $("#modelSelect").addEventListener("change", (event) => saveSelectSetting(event, "model", "model", "Aktiv"));
 $("#serviceTierSelect").addEventListener("change", (event) => saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit"));
 $("#thinkingLevelSelect").addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level"));

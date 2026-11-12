@@ -144,7 +144,8 @@ function currentPerformanceRows(metrics, items) {
 // power or pace at the top of zone 2. The zones are read once; their arrival redraws the table.
 function withFirstThresholds(metrics, status) {
   if (typeof thresholdRows !== "function") return metrics;
-  if (!zoneDataLoad) void ensureZoneData().then(() => renderCurrentPerformance(state.data?.performance?.metrics || {}, state.data?.performance?.history, status));
+  // Only Analyse lists LT1, so only there the zones are read.
+  if (!zoneDataLoad && ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) void ensureZoneData().then(() => renderCurrentPerformance(state.data?.performance?.metrics || {}, state.data?.performance?.history, status));
   const run = thresholdRows("run", metrics);
   const ride = thresholdRows("ride", metrics);
   const value = (number, unit) => (number == null ? undefined : { value: unit === "s/km" ? number : Math.round(number), unit });
@@ -216,6 +217,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   root.replaceChildren();
   const values = performance?.metrics || {};
   renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
+  refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;
   const predictionHeading = reportNode("h4", "Laufprognosen");

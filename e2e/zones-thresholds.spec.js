@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 
 // #2262: Zonen & Schwellen as one page per sport, LT1 and LT2 on top, every zone kind below.
-const GARMIN_HR = { key: "garmin|heart_rate|||2026-11-09", source: "garmin", label: "Garmin", sport: null, metric: "heart_rate", environment: null, valid_from: "2026-11-09", valid_until: null, threshold: 163, maximum: 186, limits: [130, 145, 155, 166], percent_limits: null, percent_basis: null };
+const GARMIN_HR = { key: "garmin|heart_rate|||2026-11-09", source: "garmin", label: "Garmin", sport: null, metric: "heart_rate", environment: null, valid_from: "2026-11-09", valid_until: null, threshold: 163, maximum: 186, limits: [130, 145, 155, 166, 186], percent_limits: null, percent_basis: null };
 const ZONES = {
   sports: ["ride", "run", "swim"],
   today: "2026-11-12",
@@ -72,10 +72,10 @@ test("@responsive each sport shows LT1 and LT2 and its zone kinds, and Bearbeite
   await heart.getByRole("button", { name: "Bearbeiten" }).click();
   await expect(page.locator("#zoneThreshold")).toHaveValue("163");
   await expect(page.locator("#zoneMaximum")).toHaveValue("186");
-  await expect(page.locator("#zoneLimits")).toHaveValue("130, 145, 155, 166");
+  await expect(page.locator("#zoneLimits")).toHaveValue("130, 145, 155, 166, 186");
   await expect(page.locator("#zoneEnvironment")).toBeVisible();
   // Editing the zone form does not mark the profile unsaved.
-  await page.locator("#zoneLimits").fill("130, 145, 155, 167");
+  await page.locator("#zoneLimits").fill("130, 145, 155, 167, 186");
   await expect(page.locator("#profileDirtyIndicator")).toBeHidden();
   // LT1 opens the first-threshold entry under the thresholds.
   await thresholds.getByRole("button", { name: "Bearbeiten" }).click();
