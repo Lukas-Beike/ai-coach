@@ -108,7 +108,7 @@ test("the attachment draft is replaced only after every file is prepared", async
   const { state, input } = attachmentSetup(async (picture) => { if (picture.name === "slow.png") await gate; return { mime: "image/png", dataUrl: `data:image/png;base64,${picture.name}` }; });
   const before = state.chatAttachments;
   const pending = input.fire("change", { target: { files: [file("fast.png", "image/png"), file("slow.png", "image/png")], value: "x" } });
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.chatAttachments, before);
   assert.equal(state.chatAttachmentsLoading, true);
   release();
