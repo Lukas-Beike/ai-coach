@@ -9,7 +9,6 @@ import unittest
 import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
-from datetime import datetime as _local_datetime
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from pathlib import Path
@@ -70,7 +69,7 @@ class ServerSyncTests(ServerTestCase):
                 {
                     "name": "Contract race",
                     "event_date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=30)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=30)
                     ).isoformat(),
                     "sport": "Cycling",
                 }
@@ -84,7 +83,7 @@ class ServerSyncTests(ServerTestCase):
             {
                 "name": "Competition contract",
                 "event_date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=30)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=30)
                 ).isoformat(),
                 "sport": "Cycling",
             }
@@ -349,13 +348,11 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
     def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
+        today = server.ATHLETE_CLOCK.now().date()
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
-                    "date": (
-                        _local_datetime.now().astimezone().date()
-                        + timedelta(days=index + 1)
-                    ).isoformat(),
+                    "date": (today + timedelta(days=index + 1)).isoformat(),
                     "sport": "Run",
                     "name": "Synthetic replacement run",
                     "description": "- 30m 60% Synthetic easy session",
@@ -448,7 +445,7 @@ class ServerSyncTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=9)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=9)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Repeated",
@@ -483,7 +480,7 @@ class ServerSyncTests(ServerTestCase):
         changed = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=6)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=6)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Changed",
@@ -493,7 +490,7 @@ class ServerSyncTests(ServerTestCase):
         untouched = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=7)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=7)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Untouched",
@@ -532,13 +529,11 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["status"], "queued")
 
     def test_changed_batch_sync_accepts_the_coach_change_limit(self):
+        today = server.ATHLETE_CLOCK.now().date()
         for index in range(101):
             server.PLANNING_DATA.planned_unit().create(
                 {
-                    "date": (
-                        _local_datetime.now().astimezone().date()
-                        + timedelta(days=index + 10)
-                    ).isoformat(),
+                    "date": (today + timedelta(days=index + 10)).isoformat(),
                     "sport": "Ride",
                     "name": f"Changed {index}",
                     "description": "- 20m 60% easy",
@@ -1325,7 +1320,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=30)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=30)
         ).isoformat()
         saved = server.PLANNING_DATA.competition().save(
             {
@@ -1438,7 +1433,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_competition_sync_pushes_local_events_idempotently(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=60)
         ).isoformat()
         saved = server.PLANNING_DATA.competition().save(
             {
@@ -1495,7 +1490,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=30)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=30)
         ).isoformat()
         server.PLANNING_DATA.competition().save(
             {"name": "Swim Race", "event_date": event_date, "sport": "Swim"}
@@ -1531,7 +1526,7 @@ class ServerSyncTests(ServerTestCase):
         )
 
     def test_intervals_snapshot_gives_no_threshold_recovery_or_load(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = {
             "synced_at": f"{today}T00:00:00+00:00",
             "athlete": {"icu_ftp": 300, "lthr": 171},
@@ -1570,7 +1565,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("ai_estimates", performance)
 
     def test_stored_intervals_ctl_and_atl_give_no_load_or_form(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = {
             "synced_at": "now",
             "athlete": {},
@@ -1585,7 +1580,7 @@ class ServerSyncTests(ServerTestCase):
     def test_intervals_eftp_is_not_read_from_settings_wellness_or_activities(
         self,
     ):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {
                 "sportSettings": [{"types": ["Ride"], "ftp": 300, "eFTP": 309}],

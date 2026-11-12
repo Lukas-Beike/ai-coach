@@ -4,7 +4,6 @@ import json
 import unittest
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
-from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -373,9 +372,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertNotIn("renderExternalCalendarMarker", app)
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -400,9 +397,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
 
     def test_ical_no_intensity_marker_requires_easy_replacement(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -444,9 +439,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(
         self,
     ):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -497,7 +490,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         planned = planning_planned_units.normalize_planned_unit(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Locker",
@@ -509,9 +502,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(planned["private_calendar_adjustment"], context)
 
     def test_adaptive_replan_persists_private_calendar_context_after_apply(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         draft = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
@@ -664,9 +655,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertIsInstance(result["planning_compliance"], list)
 
     def test_canonical_planning_view_exposes_local_identity(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         local = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": tomorrow,
@@ -710,9 +699,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_non_relevant_external_events_are_stored_but_not_in_canonical_calendar_or_coach(
         self,
     ):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -759,9 +746,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
 
     def test_workout_payload_is_an_idempotent_calendar_event(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         payload = planning_workouts.workout_event_payload(
             "abc",
             {
@@ -780,9 +765,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertTrue(payload["start_date_local"].endswith("T00:00:00"))
 
     def test_calendar_conflict_is_detected_before_push(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
@@ -813,9 +796,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
 
     def test_calendar_conflicts_use_time_windows_when_both_events_are_timed(self):
-        day = (
-            _local_datetime.now().astimezone().date() + timedelta(days=2)
-        ).isoformat()
+        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=2)).isoformat()
         remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
@@ -845,9 +826,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(conflict["match"], "time_window")
 
     def test_calendar_conflicts_ignore_archived_planned_units(self):
-        day = (
-            _local_datetime.now().astimezone().date() + timedelta(days=4)
-        ).isoformat()
+        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=4)).isoformat()
         existing = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": day,
@@ -867,9 +846,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
 
     def test_calendar_conflicts_include_local_competitions_with_date_fallback(self):
-        day = (
-            _local_datetime.now().astimezone().date() + timedelta(days=3)
-        ).isoformat()
+        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=3)).isoformat()
         server.PLANNING_DATA.competition().save(
             {
                 "name": "Local Race",
@@ -940,9 +917,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         }
         client = server.PROVIDER_TRANSPORT.intervals_client()
         library_payload = planning_workouts.library_workout_payload(workout)
-        plan_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        plan_date = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         with (
             patch.object(client, "get_or_create_workout_folder", return_value=1),
             patch.object(client, "post", return_value={"id": "synthetic"}) as post,
@@ -984,7 +959,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Ride",
                     "name": "Synthetic",
@@ -1059,9 +1034,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             ]
         )
         library = server.PLANNING_DATA.workout_library().list()[0]
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         snapshot_seed.save_snapshot(
             server.SYNC_PERSISTENCE.state_repository(),
             {
@@ -1182,9 +1155,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             result = server.WORKOUT_LIBRARY_SYNC.sync_service().plan_remote(
                 "remote-workout-1",
                 {"name": "Planned", "type": "Ride", "description": "- 60m 65%"},
-                (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
-                ).isoformat(),
+                (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
             )
         self.assertEqual(result["id"], "remote-planned-event")
         self.assertEqual([call["method"] for call in recorder.mutations], ["POST"])
@@ -1537,9 +1508,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
 
     def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

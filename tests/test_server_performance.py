@@ -3,7 +3,6 @@
 import unittest
 from dataclasses import replace
 from datetime import date, timedelta
-from datetime import datetime as _local_datetime
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -314,9 +313,7 @@ class ServerPerformanceTests(ServerTestCase):
             "recent_activities": [],
             # A wellness day (without values) lets the canonical inputs read the
             # athlete record.
-            "recent_wellness": [
-                {"id": _local_datetime.now().astimezone().date().isoformat()}
-            ],
+            "recent_wellness": [{"id": server.ATHLETE_CLOCK.now().date().isoformat()}],
         }
         metrics = snapshot_metrics(
             snapshot,
@@ -437,7 +434,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
 
     def test_performance_does_not_use_eftp_as_ftp_history(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
             [],
@@ -602,7 +599,7 @@ class ServerPerformanceTests(ServerTestCase):
         )
 
     def test_activity_validation_exposes_running_evidence_against_provider_values(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {
                 "sportSettings": [
@@ -648,7 +645,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertIn("direct_support", validation["validation_outcome_enum"])
 
     def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {"sportSettings": [{"types": ["Ride"], "ftp": 300, "vo2max": 60}]},
             [
@@ -791,7 +788,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("intensity", evidence)
 
     def test_no_actual_atl_is_reconstructed_from_intervals_atl(self):
-        today = _local_datetime.now().astimezone().date()
+        today = server.ATHLETE_CLOCK.now().date()
         wellness = [
             {
                 "id": (today - timedelta(days=offset)).isoformat(),
@@ -818,7 +815,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("fatigue_atl_actual", performance.get("comparisons", {}))
 
     def test_performance_reads_sport_settings_and_wellness_aliases(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {
                 "weight": 72.3,
@@ -867,7 +864,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("intervals_load_history", performance)
 
     def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {
                 "sportSettings": [

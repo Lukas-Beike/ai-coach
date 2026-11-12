@@ -6,7 +6,6 @@ import shutil
 import struct
 import tempfile
 import unittest
-from datetime import datetime as _local_datetime
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock
@@ -194,7 +193,7 @@ class ServerFrontendTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Remove me",
