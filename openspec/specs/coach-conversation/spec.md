@@ -55,7 +55,19 @@ The system SHALL retain background turn checkpoints, request unfinished work aga
 - **WHEN** a job repeatedly fails outside handled turn processing, or belongs to a reset generation
 - **THEN** repeated failures eventually become terminal, while an invalidated job cannot restore its session or recreate deleted dialogue.
 
-Evidence: `backend/coach/background_job.py:CoachBackgroundJobRunner`; `backend/coach/job_worker.py:CoachJobWorker`; `backend/coach/job_store.py:CoachJobStore`; `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`, `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`, `tests/test_coach_dialogue.py:test_job_of_an_older_release_is_requested_again_without_its_resume_state`, `tests/test_coach_job_store.py:test_restart_requeues_all_background_jobs`.
+#### Scenario: Worker and conversation slots
+- **WHEN** Coach turns are queued
+- **THEN** one daemon worker wakes on a signal or every 5 seconds and claims the oldest due turn among the 20 oldest queued rows (a turn with a stored cancel is due at once); at most 3 turns hold or wait for the conversation lock, a further one fails with 429 `chat_queue_full`, and a lock not free within 30 seconds fails with 409 `chat_request_timeout`
+
+#### Scenario: Backoff and terminal failure
+- **WHEN** a turn is requeued for `chat_queue_full` or `chat_request_timeout`, or fails outside its own error handling
+- **THEN** a requeue sets the phase `waiting_for_coach_slot` and a delay of min(60, 2^min(n, 5)) seconds for the n-th contention and never ends the turn; the third failure outside turn handling ends it with reason `background_job_exhausted` and "Der Coach-Auftrag ist mehrfach fehlgeschlagen und wurde beendet."
+
+#### Scenario: Restart and stale release
+- **WHEN** the process starts with open commands, or a turn that is not a background job has been running for more than 15 minutes when its id is requested again
+- **THEN** a running command that is not a background job ends with reason `process_interrupted`, background turns return to `queued` with phase `queued`, and the stale turn is released as `failed` ("Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."); a tool call of a released turn is not executed (CA8)
+
+Evidence: `backend/coach/background_job.py:CoachBackgroundJobRunner`; `backend/coach/job_worker.py:CoachJobWorker`; `backend/coach/job_store.py:CoachJobStore`; `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`, `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`, `tests/test_coach_dialogue.py:test_job_of_an_older_release_is_requested_again_without_its_resume_state`, `tests/test_coach_job_store.py:test_restart_requeues_all_background_jobs`; `backend/coach/job_worker.py:CoachJobWorker.run_forever`, `backend/coach/job_store.py:CoachJobStore.claim`, `backend/coach/job_store.py:CoachJobStore.requeue`, `backend/coach/job_store.py:CoachJobStore.resume_interrupted`, `backend/coach/conversation_gate.py:CoachConversationGate.operation`, `backend/coach/chat_turn.py:CoachChatTurnService._recover_stale_command`; `tests/test_coach_job_store.py:test_requeue_persists_contention_backoff_and_wakes_worker`, `tests/test_coach_job_store.py:test_claim_preserves_the_twenty_row_candidate_limit`, `tests/test_coach_conversation_gate.py:test_full_queue_returns_429_and_queue_full_reason`.
 
 ### Requirement: CC4 Local history and current execution status
 The system SHALL provide authenticated bounded local history pages, chronological display within each page, pagination/search metadata and session-scoped execution status.
@@ -106,7 +118,23 @@ The system SHALL bind clarification to stored athlete messages, persist unresolv
 - **WHEN** a clarification references an assistant message or missing current user ID, or the athlete cancels the pending request
 - **THEN** invalid provenance is rejected without saving a question, and cancellation closes pending state without changing athlete records.
 
-Evidence: `backend/coach/clarification.py:CoachClarificationService.save_question`; `backend/coach/context_selection.py:_pending_request_is_active`, `backend/coach/context_selection.py:pending_origin_messages`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_clarification_service_persists_valid_user_provenance_and_limits`, `tests/test_coach_dialogue.py:test_clarification_service_rejects_unbound_message_ids_without_writing`, `tests/test_coach_dialogue.py:test_cancel_and_chat_reset_close_pending_request`; `tests/test_coach_context_selection.py:test_concise_freeform_answer_retains_an_active_clarification`.
+#### Scenario: Clarification limits and stored shape
+- **WHEN** the Coach calls `clarify_coach_request` (`source_message_ids`, `summary`, `question`; no `_request`, no write gate)
+- **THEN** it needs 1 to 24 integer ids of stored athlete messages of the current dialogue that include the current message (else 400 `request_provenance` "Die Rückfrage benötigt den zugehörigen Nutzerauftrag."), a summary of 1 to 4,000 and a question of 1 to 1,000 characters (else 400 `request_question` "Bitte formuliere eine konkrete Rückfrage zum Auftrag."); the pending request `{summary, question, source_message_ids, origin_message_ids, status, domain}` is stored with status `needs_clarification`, the result is `{ok, status: needs_clarification, question}`, and the turn ends `completed` with `awaiting_clarification: true` and the question as its answer; `cancel_coach_request` takes no parameters and returns `{ok, status: cancelled}`
+
+#### Scenario: Kept or dropped
+- **WHEN** the next athlete message arrives
+- **THEN** a clarification is kept for a retry or continuation word, a message of the same domain, a typical answer pattern, or a reply of at most three words without a question mark and without a topic of its own; a failed request is kept only for a retry or continuation and only with stored source ids; a message of another domain drops both, and a kept failed request is shown to the model as the athlete's stored words, never as a model summary
+
+#### Scenario: Server-recorded chain
+- **WHEN** the write gate reads the original request of a retried or answered pending request
+- **THEN** it uses `origin_message_ids`, the chain of athlete message ids the server recorded (the original request plus the athlete's answers), never the ids the model cited
+
+#### Scenario: Other calls beside a control tool
+- **WHEN** a tool round holds `clarify_coach_request` or `cancel_coach_request`
+- **THEN** every other non-read call of that round fails with 409 `request_paused` "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", whatever the order, read tools still run, and the next model request is sent with `tool_choice: none`
+
+Evidence: `backend/coach/clarification.py:CoachClarificationService.save_question`; `backend/coach/context_selection.py:_pending_request_is_active`, `backend/coach/context_selection.py:pending_origin_messages`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_clarification_service_persists_valid_user_provenance_and_limits`, `tests/test_coach_dialogue.py:test_clarification_service_rejects_unbound_message_ids_without_writing`, `tests/test_coach_dialogue.py:test_cancel_and_chat_reset_close_pending_request`; `tests/test_coach_context_selection.py:test_concise_freeform_answer_retains_an_active_clarification`; `backend/coach/context_selection.py:request_chain_ids`, `backend/coach/context_selection.py:compact_coach_dialogue`, `backend/coach/turn_write_gate.py:_pending_origin`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._request_is_paused`; `tests/test_coach_turn_outcome.py:test_clarified_request_that_fails_keeps_its_chain_through_a_retry`, `tests/test_coach_tool_preparation.py:test_round_pause_blocks_writes_but_allows_reads_and_dialogue_controls`.
 
 ### Requirement: CC7 Conversation reset and unavailable remote continuity
 The system SHALL reset local dialogue atomically under a bounded conversation lock, invalidate queued work and pending requests, and keep durable athlete records independent of remote conversation continuity.
@@ -122,6 +150,10 @@ The system SHALL reset local dialogue atomically under a bounded conversation lo
 #### Scenario: Invalid provider conversation
 - **WHEN** an unfinished response reports invalid conversation state before any new text delta, and the recovery budget remains
 - **THEN** the system retries once using bounded local dialogue, current message and confirmed steps without inventing unavailable image details or repeating committed work.
+
+#### Scenario: Recovery contents
+- **WHEN** recovery runs (`conversation_state_invalid` before any text delta, once per turn, on the first or second attempt of a request)
+- **THEN** the stored provider conversation id is cleared, the request loses its conversation and earlier tool-round items, its input is rebuilt as `{dialogue, current_message, confirmed_steps}` from local data, and its instructions gain the notice "The remote conversation was unavailable. Continue only unfinished work using local dialogue and confirmed_steps. Earlier image pixels may be unavailable; ask for missing evidence only if essential. Never invent attachment details."; a second invalid state in the same turn fails the turn with the fixed explanation of CC11
 
 Evidence: `backend/coach/conversation.py:CoachConversationResetService.reset`; `backend/coach/conversation_recovery.py:CoachConversationRecoveryService.recover_if_invalid`; `tests/test_coach_conversation_reset.py:test_slow_remote_delete_does_not_delay_the_reset_response`, `tests/test_coach_conversation_reset.py:test_failing_remote_delete_is_logged_and_does_not_fail_the_reset`, `tests/test_coach_conversation_reset.py:test_reset_succeeds_after_a_lock_timeout_once_the_turn_released`; `tests/test_coach_dialogue.py:test_invalid_state_recovery_does_not_repeat_committed_effect`, `tests/test_coach_dialogue.py:test_repeated_invalid_state_is_bounded_and_explained_without_raw_error`.
 
@@ -140,7 +172,19 @@ The system SHALL accept only supported bounded image, GPX and FIT attachments, p
 - **WHEN** the athlete follows up on recent attachments or remote continuity is lost
 - **THEN** the system uses its bounded attachment-continuity policy and local non-image summaries, marks missing evidence honestly, and does not fabricate image contents.
 
-Evidence: `backend/coach/attachments.py:validate_attachments`, `backend/coach/attachments.py:model_attachments`, `backend/providers/openai_responses_adapter.py:model_input`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`, `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `backend/coach/conversation.py:CoachConversationProvisionService`; `tests/test_coach_attachments.py:test_attachment_persists_for_worker_without_leaking_into_history`, `tests/test_coach_attachments.py:test_invalid_upload_does_not_create_a_command`, `tests/test_coach_attachments.py:test_attachment_storage_quota_prevents_backup_growth`, `tests/test_coach_attachments.py:test_invalid_attachment_conversation_recovers_gpx_and_future_turns`.
+#### Scenario: Track files leave only measurements
+- **WHEN** a GPX or FIT file is attached
+- **THEN** the model receives its parsed points and a computed summary, never the original file; positions within 500 m of the start and the end of the track are removed while the other values stay, a track shorter than 1,000 m loses every position, GPX name, description, comment, source, symbol, type, link and fix fields are skipped, and only the session, lap, record and set messages of a FIT file are read, so device, serial-number and user-profile records never leave the server
+
+#### Scenario: Images leave without metadata
+- **WHEN** a PNG, JPEG or WebP image is attached
+- **THEN** EXIF, XMP, comments and text chunks are removed before it is sent while the pixel data stays; an image that cannot be parsed is rejected at submission; the stored copy is not changed
+
+#### Scenario: Attachment limits
+- **WHEN** attachments are validated
+- **THEN** at most 4 files are accepted, each at most 5,000,000 decoded bytes with a name of 1 to 160 characters without `/`, backslash or control characters; the payload sent to the provider may hold at most 28,000,000 bytes (413 `attachment_request_too_large`) and all stored attachments at most 40,000,000 bytes (413 `attachment_storage_quota`); the browser accepts images up to 15,000,000 bytes and reduces them before upload; an OpenAI conversation is kept for the next 3 athlete messages after an upload, later turns get local summaries
+
+Evidence: `backend/coach/attachments.py:validate_attachments`, `backend/coach/attachments.py:model_attachments`, `backend/providers/openai_responses_adapter.py:model_input`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`, `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `backend/coach/conversation.py:CoachConversationProvisionService`; `tests/test_coach_attachments.py:test_attachment_persists_for_worker_without_leaking_into_history`, `tests/test_coach_attachments.py:test_invalid_upload_does_not_create_a_command`, `tests/test_coach_attachments.py:test_attachment_storage_quota_prevents_backup_growth`, `tests/test_coach_attachments.py:test_invalid_attachment_conversation_recovers_gpx_and_future_turns`; `backend/coach/attachment_privacy.py:hidden_position_indexes`, `backend/coach/image_metadata.py:strip_image_metadata`, `backend/coach/attachments.py:MAX_REQUEST_BYTES`, `backend/coach/conversation.py:ATTACHMENT_RETENTION_USER_MESSAGES`, `backend/coach/conversation_recovery.py:CoachConversationRecoveryService.recover_if_invalid`, `public/coach.js:validateChatAttachmentFiles`; `tests/test_coach_attachment_privacy.py:test_first_and_last_500_m_are_hidden`, `tests/test_coach_attachment_privacy.py:test_unparseable_image_is_rejected_not_passed_through`, `tests/test_coach_attachment_context.py:test_retention_window_boundary_at_one_and_three_and_outside_at_four`, `tests/test_coach_conversation_recovery.py`.
 
 ### Requirement: CC9 Athlete-started morning check-in completion
 The system SHALL treat the morning quick action as a stored athlete-started turn, prepare configured Garmin sleep and morning battery data before coaching, and mark it ready for the local day only after a completed answer without clarification.
@@ -292,3 +336,71 @@ The system SHALL create, bind or rotate no remote conversation for a turn whose 
 - **THEN** no OpenAI conversation is created, bound or rotated, the attachments of this turn are sent with it, and later turns rely on the local summaries.
 
 Evidence: `backend/coach/structured_turn.py:CoachStructuredTurnService._open_and_request`, `backend/coach/request_payload.py:CoachRequestPayloadService.keeps_remote_conversation`; `tests/test_coach_structured_turn.py:test_a_claude_turn_keeps_attachments_local_and_never_goes_remote`, `tests/test_coach_request_payload.py:test_only_openai_models_keep_a_remote_conversation`.
+
+### Requirement: CC11 Turn receipt status and failure explanation
+The system SHALL finish each turn's one durable receipt together with its assistant message in one transaction, choose its status by a fixed rule, and explain a failed turn with a fixed German text per reason while keeping every applied effect.
+
+#### Scenario: Status of a finished turn
+- **WHEN** a turn finishes
+- **THEN** its status is `completed` when it ends with a clarification question; `partial` when the answer is incomplete, or when a step failed or no answer came although something took effect; `failed` when a step failed or no answer came and nothing took effect; `cancelled` after a cancellation without failure; otherwise `completed`
+
+#### Scenario: Final receipt
+- **WHEN** the final receipt is stored
+- **THEN** it adds `awaiting_clarification`, `response_status` (`incomplete` when the answer stopped for length, else the provider's stop reason, or null), `tool_rounds`, `tool_budget_exhausted`, `pending_operations`, `proposed_actions`, `change_summary` and `message`, drops the open tool-call list, and is written with the assistant message before the event `coach {message_id, role, client_turn_id}` is published; a turn that is already finished returns its stored receipt, and the receipt keeps the provider of the answer in `ai_provider`
+
+#### Scenario: Failed turn
+- **WHEN** a turn ends with an error other than `command_scope_denied`, `client_turn_in_progress` or `client_turn_text_mismatch`
+- **THEN** an assistant message with a fixed German explanation is stored, flagged `coach_failed` (with `coach_request_kind` for a quick action) when the status is `failed`; the receipt keeps the steps, `error` (redacted, at most 1,000 characters), `diagnostic_error`, `pending_operations`, `proposed_actions` and the change summary of the applied writes, so applied effects stay visible and undoable; a cancelled turn clears the pending request, any other failure stores the athlete's message as a `failed` pending request with its completed steps, unless a clarification question had been stored in this turn, which then is the answer with status `completed`; with applied effects a failed or cancelled turn is `partial`
+
+#### Scenario: Explanation per reason
+- **WHEN** the error has one of the reasons mapped in `CoachTurnFailureService._base_response` (OpenAI or Anthropic not configured, `refused`, `conversation_state_invalid`, `conversation_locked`, `authentication_or_permission`, `insufficient_quota`, `credit_balance_exhausted`, the three spend and usage limit reasons, `database_busy`, `provider_timeout`, `not_found`, `provider_unavailable`, `response_error`, `response_failed`, a rate limit)
+- **THEN** the answer is that mapping's fixed text, normative like the modules of CC9c, "Die Coach-Verarbeitung wurde abgebrochen." for a cancellation and for any other reason "Bei der Coach-Verarbeitung ist ein technischer Fehler aufgetreten. Bitte versuche es erneut. Wenn der Fehler wieder auftritt, exportiere die Diagnose in den Einstellungen."; applied effects add "Bereits erfolgreich ausgeführt: <Labels>. Diese Schritte bleiben gespeichert.", a card waiting for approval "Eine Remote-Änderung wurde noch nicht ausgeführt und wartet auf deine Freigabe.", a queued sync "Der Sync-Auftrag bleibt bestehen und wird unabhängig vom Coach verarbeitet. Sein Abschluss ist in dieser Antwort noch nicht bestätigt.", unresolved failures their lines and open steps "Noch offen: <Aktionen>."
+
+Evidence: `backend/coach/service.py:outcome_status`, `backend/coach/final_receipt.py:CoachFinalReceiptService.build`, `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`, `backend/coach/turn_failures.py:CoachTurnFailureService.persist`, `backend/coach/turn_failures.py:CoachTurnFailureService._base_response`, `backend/coach/turn_failures.py:CoachTurnFailureService._effect_text`, `backend/coach/structured_turn.py:CoachStructuredTurnService.run`; `tests/test_coach_final_receipt.py:test_build_projects_outcome_and_removes_open_tool_calls`, `tests/test_coach_turn_failures.py:test_busy_local_database_is_explained_as_a_short_retry`, `tests/test_coach_turn_failures.py:test_provider_timeout_is_a_persisted_actionable_chat_message`, `tests/test_coach_turn_failures.py:test_openai_billing_failure_is_a_persisted_actionable_chat_message`.
+
+### Requirement: CC12 Quick-action state
+The system SHALL publish a `coach_quick_actions` object in the bootstrap, state and plan payloads and in the receipt of a completed morning check-in, telling the client which Coach quick actions are useful today.
+
+#### Scenario: State fields
+- **WHEN** the state is read
+- **THEN** it is `{morning_checkin, analyze_latest_activity, adjust_plan, plan_blockers, horizon_days}`: `morning_checkin` is false only when the stored morning status is `ready` for today's local date; `analyze_latest_activity` is always true; `horizon_days` is 3; `adjust_plan` is true exactly when `plan_blockers` is not empty
+
+#### Scenario: Plan blockers
+- **WHEN** the latest adaptive adjustment has status `preview`
+- **THEN** `plan_blockers` lists `{date, name, triggers}` for each of its changes dated today up to two days ahead whose blocking triggers include calendar, illness, injury or weather (only these four, sorted), the name cut to 200 characters; without such a preview the list is empty
+
+Evidence: `backend/coach/context.py:coach_quick_actions_state`, `backend/coach/context.py:CoachQuickActionsService.state`, `backend/planning/adaptive.py:adaptive_quick_action_blockers`, `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`, `backend/http_api/bootstrap_state.py`, `backend/http_api/public_plan.py`; `tests/test_coach_quick_actions.py:test_blockers_include_today_through_two_days_but_not_day_three`, `tests/test_server_coach.py:ServerCoachTests.test_coach_quick_actions_hide_completed_morning_and_limit_plan_blockers_to_three_days`.
+
+### Requirement: CC13 Durable Coach state
+The system SHALL keep Coach dialogue state in the tables `messages`, `coach_commands`, `coach_action_proposals` and `coach_plan_artifacts` and in the key-value entries below, with the meanings of the scenarios. Column definitions are in `docs/schema-reference.md` (generated).
+
+#### Scenario: One command per turn
+- **WHEN** a turn is accepted
+- **THEN** exactly one `coach_commands` row exists for its `client_turn_id` with status `queued`, `running` or `completed`; its `intent` holds `{"allow_mutations": bool}` and its `receipt` the JSON receipt of CC9b and CC11; a failed or cancelled turn is stored as `completed` with `receipt.status` `failed` or `cancelled`
+
+#### Scenario: Messages, drafts and entries
+- **WHEN** Coach state is stored
+- **THEN** `messages` holds the chat (`role` user or assistant, `content`, `client_turn_id`, attachments), `coach_plan_artifacts.status` is `draft`, `committed` or `superseded`, and the key-value entries are `coach_pending_request` (CC6), `chat_generation`, `openai_conversation_id`, `last_chat_reset_at`, `last_coach_ai_provider`, `morning_checkin_date`, `morning_checkin_status` and the selections `selected_model_openai`, `selected_thinking_level`, `selected_service_tier` (MU1 to MU3)
+
+#### Scenario: Chat reset
+- **WHEN** the chat is reset
+- **THEN** in one transaction every message is deleted, open commands become `completed` with receipt status `cancelled` and phase `chat_reset`, open remote and local write proposals are cancelled, draft plan artifacts become `superseded`, the pending request and the provider conversation reference are cleared, and a new `chat_generation` and `last_chat_reset_at` are stored
+
+Evidence: `backend/db/schema.py` (tables `messages`, `coach_commands`, `coach_action_proposals`, `coach_plan_artifacts`), `backend/coach/job_submission.py:CoachJobSubmissionService._persist`, `backend/coach/conversation.py:CoachConversationResetService._reset_local`, `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`, `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`, `backend/settings.py:SettingsService`; `tests/test_coach_conversation_reset.py`, `tests/test_coach_job_store.py`.
+
+### Requirement: CC14 Composer states while the Coach works
+The client SHALL show the working state of a turn, offer a retry on a failed answer and bound its queue of follow-ups.
+
+#### Scenario: Working labels and polling
+- **WHEN** a turn runs
+- **THEN** the indicator reads "Coach arbeitet an deiner Antwort…", "Der Coach arbeitet · du kannst die Seite neu laden…" for a background job, "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…" after a lost stream and "Antwort wird sicher übernommen…" while the receipt is read; a stream silent for 45 seconds is aborted and the client polls the status, and while a job is active it polls at least every 15 seconds
+
+#### Scenario: Failed answer
+- **WHEN** the newest answer belongs to a failed turn whose request had text and no attachments
+- **THEN** it offers "Erneut senden", which sends the text with its quick-action kind as a new turn
+
+#### Scenario: Queue limits
+- **WHEN** queued follow-ups would hold more than 16,000,000 characters of encoded attachment data, or the athlete resets the chat while messages are queued
+- **THEN** the message is refused with "Die Warteschlange enthält bereits zu viele Bilddaten. Warte auf die laufende Coach-Antwort." or the reset with "Bitte warte, bis die wartenden Nachrichten gesendet sind. Danach kannst du den Chat zurücksetzen."
+
+Evidence: `public/coach.js:CHAT_STREAM_SILENCE_MS`, `public/coach.js:CHAT_STATUS_SAFETY_POLL_MS`, `public/coach.js:MAX_QUEUED_ATTACHMENT_BYTES`, `public/coach.js:queueChatMessage`, `public/coach.js:appendFailedTurnRetry`, `public/coach.js:resetCoachChat`; `tests/coach-recovery-queue.test.cjs:a message sent while a chat recovers is queued with its attachments`, `tests/coach-stream-silence.test.cjs:the silence window is three missed heartbeats`, `tests/test_coach_turn_failures.py:test_failed_quick_action_keeps_its_kind_for_the_retry`, `e2e/coach-queue.spec.js`.
