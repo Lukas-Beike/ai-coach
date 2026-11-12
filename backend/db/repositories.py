@@ -65,6 +65,9 @@ _DATABASE_ORIGINS = {"off": "open_food_facts", "yazio": "yazio"}
 MANUAL_ORIGIN = "manual"
 
 
+_UPDATE_PRODUCT = "UPDATE nutrition_products SET "
+
+
 def database_origin(food_id: str) -> str:
     return _DATABASE_ORIGINS[food_id.split(":", 1)[0]]
 
@@ -97,7 +100,7 @@ def _store_fills(
         }
     )
     db.execute(
-        "UPDATE nutrition_products SET "
+        _UPDATE_PRODUCT
         + ", ".join(f"{key}=?" for key in updates)
         + ", details=? WHERE id=?",
         (*updates.values(), json.dumps(details, ensure_ascii=False), product_id),
@@ -718,7 +721,7 @@ class FoodDatabaseEntryRepository:
             if value is None:
                 details.get("filled_fields", {}).pop(key, None)
         db.execute(
-            "UPDATE nutrition_products SET "
+            _UPDATE_PRODUCT
             + ", ".join(f"{key}=?" for key in values)
             + ", details=? WHERE id=?",
             (*values.values(), json.dumps(details, ensure_ascii=False), food_id),
@@ -745,7 +748,7 @@ class FoodDatabaseEntryRepository:
             else:
                 marks[key] = {"origin": MANUAL_ORIGIN, "fetched_at": edited_at}
         db.execute(
-            "UPDATE nutrition_products SET "
+            _UPDATE_PRODUCT
             + ", ".join(f"{key}=?" for key in values)
             + ", details=?, updated_at=? WHERE id=?",
             (

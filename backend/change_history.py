@@ -430,6 +430,8 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
     ),
     "planned_unit": (("starts_at_local",), FOCUS_KEYS),
     "workout_library": (FOCUS_KEYS,),
+    # Gap fills of stored foods were recorded before the origin marks were.
+    "food_database_entry": (("filled_fields",),),
 }
 
 
