@@ -6,7 +6,7 @@ const { extractFunctions, loadPublicScript, FakeElement, fakeDocument, textOf } 
 
 function text(node) {
   if (typeof node === "string") return node;
-  return [node.textContent, ...(node.children || []).map(text)].join(" ");
+  return node.children?.length ? node.children.map(text).join(" ") : String(node.textContent);
 }
 
 function loadDetailRenderer(makeScrollRegionFocusable = (region) => region) {
