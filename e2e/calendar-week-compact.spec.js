@@ -271,3 +271,32 @@ test("@responsive Verschieben moves a planned unit to a tapped day and Rückgän
   await expect(card.locator(".planned-move-status")).toHaveText("Zurückgenommen.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
+
+test("@responsive a planned unit lists its steps with zone and target range instead of the workout notation", async ({ page, request }) => {
+  await openCalendar(page, request);
+  const days = await renderSyntheticCalendar(page);
+  await page.evaluate(() => {
+    const unit = state.data.training_calendar.find((item) => item.id === "next-plan");
+    // #2447: the server's profile carries each step's range from the zones of the unit's day.
+    unit.workout_profile = { ...unit.workout_profile, source: "planned", unit: "zone", segments: [
+      { duration: 600, value: 1, end_value: 1, zone: 1, label: "Z1 HR", range: { unit: "bpm", max: 109 } },
+      { duration: 3300, value: 2, end_value: 2, zone: 2, label: "Z2 HR", range: { unit: "bpm", min: 110, max: 128 } },
+      { duration: 30, value: 5, end_value: 5, zone: 5, label: "Z5 HR" },
+      { duration: 90, value: 2, end_value: 2, zone: 2, label: "Z1-Z2 HR", range: { unit: "bpm", max: 128 } },
+      { duration: 600, value: 75, end_value: 75, zone: 2, label: "75%" },
+    ] };
+    unit.description = "Locker bleiben\n- 10m Z1 HR\n- 55m Z2 HR\n- 30s Z5 HR";
+    renderPlanned(state.data.training_calendar);
+  });
+  await showCalendarDay(page, days.next);
+  const card = page.locator(`.planned-day[data-date="${days.next}"] .planned-entry`).first();
+  if (!await card.evaluate((element) => element.open)) await card.locator(":scope > summary").click();
+  const steps = card.getByRole("list", { name: "Ablauf" }).locator("li");
+  // A zone span names both zones; a percent target without a range shows its own text.
+  await expect(steps.locator(".planned-step-text")).toHaveText(["10 min · Z1", "55 min · Z2", "30 s · Z5", "1:30 min · Z1–Z2", "10 min"]);
+  await expect(steps.locator(".planned-step-range")).toHaveText(["≤ 109 bpm", "110–128 bpm", "", "≤ 128 bpm", "75%"]);
+  await expect(steps.nth(1)).toHaveAttribute("data-zone", "2");
+  // The workout notation is gone from the pane; the free text stays.
+  await expect(card.locator(".planned-description")).toHaveText("Locker bleiben");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});

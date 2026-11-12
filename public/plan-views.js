@@ -71,6 +71,57 @@ function appendPlannedDescription(details, text) {
   details.append(h("p", "planned-description", text || "Keine weiteren Details hinterlegt."));
 }
 
+// The planned steps as a list (#2447, mockup B): zone mark, duration or distance, zone, and the target
+// range of the zones in effect on the unit's day right-aligned; a step without a range shows none.
+function plannedStepList(profile) {
+  const segments = profile?.source === "planned" && Array.isArray(profile.segments) ? profile.segments : [];
+  if (!segments.length || segments.length > 200) return null;
+  const axis = profile.axis === "distance" ? "distance" : "duration";
+  const rows = segments.map((segment) => {
+    const zone = Number.isInteger(segment.zone) && segment.zone >= 1 && segment.zone <= 7 ? segment.zone : null;
+    // The zone text is the written zone target ("Z1–Z2"); a percent or watt target shows its own text instead.
+    const label = String(segment.label || "");
+    const written = /^Z([1-7])(?:\s*-\s*Z([1-7]))?/.exec(label);
+    const zoneText = written ? [written[1], written[2]].filter(Boolean).map((value) => `Z${value}`).join("–") : null;
+    const range = plannedStepRange(segment.range) || (written ? "" : label.slice(0, 40));
+    return h("li", { dataset: { zone: zone || "unknown" } },
+      h("span", { className: "planned-step-mark", "aria-hidden": "true" }),
+      h("span", "planned-step-text", [plannedStepExtent(Number(segment[axis]), axis), zoneText].filter(Boolean).join(" · ")),
+      h("span", "planned-step-range", range));
+  });
+  return h("ol", { className: "planned-steps", "aria-label": "Ablauf" }, rows);
+}
+
+// A step's exact length: "30 s", "1:30 min", "55 min", "1:10 h"; "400 m", "1,25 km".
+const STEP_KM_FORMAT = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 });
+function plannedStepExtent(size, axis) {
+  if (axis === "distance") return size < 1000 ? `${Math.round(size)} m` : `${STEP_KM_FORMAT.format(size / 1000)} km`;
+  if (size < 60) return `${Math.round(size)} s`;
+  return size < 3600 && Math.round(size) % 60 ? `${AppFormat.clock(size)} min` : AppFormat.duration(size);
+}
+
+// "110–128 bpm", "≤ 109 bpm" for the lowest zone, "≥ 155 bpm" for the open top; pace in min/km, slower end first.
+function plannedStepRange(range) {
+  if (!range || !["bpm", "W", "s/km"].includes(range.unit)) return "";
+  const pace = range.unit === "s/km";
+  const text = (value) => (pace ? AppFormat.clock(value) : String(value));
+  const unit = pace ? "/km" : range.unit;
+  const { min, max } = range;
+  if (Number.isFinite(min) && Number.isFinite(max)) return min === max ? `${text(min)} ${unit}` : `${text(min)}–${text(max)} ${unit}`;
+  // Pace counts down with intensity: the lowest zone is slower than its limit, the top one faster.
+  if (Number.isFinite(max)) return `${pace ? "≥" : "≤"} ${text(max)} ${unit}`;
+  if (Number.isFinite(min)) return `${pace ? "≤" : "≥"} ${text(min)} ${unit}`;
+  return "";
+}
+
+// The description without its step lines ("- 10m Z2 HR") and repeat headers ("4x").
+function plannedDescriptionText(text) {
+  // As the workout parser reads them: a step starts with "-", a repeat header ends with "4x".
+  const step = /^\s*-/;
+  const repeat = /\b\d+x\s*$/i;
+  return String(text || "").split("\n").filter((line) => !step.test(line) && !repeat.test(line)).join("\n").trim();
+}
+
 function stopSummaryToggle(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -1330,13 +1381,16 @@ function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPl
   });
   const metrics = actual ? null : plannedSessionMetrics(entry);
   if (metrics) details.append(metrics);
+  const steps = actual ? null : plannedStepList(entry.workout_profile);
+  if (steps) details.append(steps);
   if (!actual) details.append(...plannedUnitActions(entry, dateKey, todayKey));
   appendActualCalendarDetails(details, actual);
   if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
   appendPlannedCalendarComparison(details, entry, actual);
   const focusForm = plannedFocusForm(entry, dateKey);
   if (focusForm) details.append(focusForm);
-  appendPlannedDescription(details, entry.description);
+  // With the step list, the description keeps only its free text; the stored text is unchanged (#2447).
+  appendPlannedDescription(details, steps ? plannedDescriptionText(entry.description) : entry.description);
   card.append(cardSummary, details);
   return card;
 }

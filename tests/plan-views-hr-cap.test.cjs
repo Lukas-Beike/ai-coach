@@ -27,3 +27,27 @@ test("without a resolved bpm only the percent is shown, and a unit without a usa
   assert.equal(hrCapChipSpec({ hr_cap: { percent_lthr: "x", source: "default" } }), null);
   assert.equal(hrCapChipSpec({ hr_cap: { percent_lthr: 50 } }), null);
 });
+
+// #2447: each planned step names its target range from the zones of the unit's day.
+test("a step range reads as a span, an open lowest or top zone, or a pace in min/km", () => {
+  const { plannedStepRange, plannedDescriptionText, plannedStepExtent } = loadPublicScript(["format.js", "performance-view.js", "plan-views.js"]);
+  // Exact step lengths: 30 s, 90 s, 55 min, 70 min, 400 m.
+  assert.deepEqual([30, 90, 3300, 4200].map((size) => plannedStepExtent(size, "duration")), ["30 s", "1:30 min", "55 min", "1:10 h"]);
+  assert.deepEqual([400, 1250, 5000].map((size) => plannedStepExtent(size, "distance")), ["400 m", "1,25 km", "5 km"]);
+  for (const [range, text] of [
+    [{ unit: "bpm", min: 110, max: 128 }, "110–128 bpm"],
+    [{ unit: "bpm", max: 109 }, "≤ 109 bpm"],
+    [{ unit: "bpm", min: 155 }, "≥ 155 bpm"],
+    [{ unit: "W", min: 210, max: 210 }, "210 W"],
+    // 320 and 295 s/km: the slower end first; the lowest pace zone is slower than its limit.
+    [{ unit: "s/km", min: 320, max: 295 }, "5:20–4:55 /km"],
+    [{ unit: "s/km", max: 320 }, "≥ 5:20 /km"],
+    [null, ""],
+    [{ unit: "zone", min: 1 }, ""],
+  ]) assert.equal(plannedStepRange(range), text);
+  // The pane keeps only the free text of the description; the stored text is unchanged.
+  assert.equal(plannedDescriptionText("Locker einrollen\n- 10m Z1 HR\nMain set 4x\n- 4m Z4 HR\n- 2m Z1 HR\nNicht überziehen."), "Locker einrollen\nNicht überziehen.");
+  assert.equal(plannedDescriptionText("- 40m Z2 HR"), "");
+  // As the parser reads them: "-10m" without a space is a step, "Hauptteil:4x" a repeat header.
+  assert.equal(plannedDescriptionText("Einlaufen\n-10m Z1 HR\nHauptteil:4x\n- 4m Z4 HR"), "Einlaufen");
+});
