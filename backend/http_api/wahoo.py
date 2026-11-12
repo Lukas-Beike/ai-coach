@@ -41,7 +41,23 @@ class WahooGetRoutes:
         return [Route("GET", CALLBACK_PATH, Access.PUBLIC, self._callback)]
 
     def _callback(self, handler: Any, request: RouteRequest) -> None:
-        """Wahoo OAuth redirect target; answers 302 to the app (see below)."""
+        """Wahoo OAuth redirect target; answers 302 to the app.
+
+        Request: no session; query `code` (authorization code), `state` and
+        `error`, each at most 2048 characters. The only accepted credential is
+        the single-use `state` stored on the server by `POST /api/wahoo/connect`
+        (valid 10 minutes, consumed by the first callback that matches or finds
+        it expired): the SameSite=Strict session cookies are not sent on Wahoo's
+        cross-site redirect. The call enters the maintenance operation gate.
+
+        Response: 302 with an empty `text/plain` body and `Location`
+        `/?wahoo=connected` after the code was exchanged and the tokens stored,
+        else `/?wahoo=error`.
+
+        Errors: none; an unknown, expired or reused `state`, a missing `code`, an
+        `error` parameter, a failed code exchange, an unconfigured Wahoo or a
+        disconnect during the exchange all redirect to `/?wahoo=error`.
+        """
 
         def first(name: str) -> str | None:
             values = request.query.get(name)
@@ -72,7 +88,26 @@ class WahooPostRoutes:
         ]
 
     def _command(self, handler: Any, request: RouteRequest) -> None:
-        """Start the Wahoo OAuth connection or disconnect Wahoo."""
+        """Start the Wahoo OAuth connection or disconnect Wahoo.
+
+        Request: JSON object body, which is ignored (send `{}`). Registered for
+        `/api/wahoo/connect` and `/api/wahoo/disconnect`.
+
+        Response: for `/api/wahoo/connect` 200 with `authorize_url`, the Wahoo
+        authorization URL carrying a new one-time `state` that replaces any
+        pending one. For `/api/wahoo/disconnect` 200 with `status` (`"ok"`),
+        `connected` (`false`), `remote_revoke_attempted` and `remote_revoked`
+        (the revocation at Wahoo is best effort; the local tokens are always
+        deleted).
+
+        Errors: for `/api/wahoo/connect`: 503 `not_configured` "Wahoo ist nicht
+        konfiguriert. Bitte WAHOO_CLIENT_ID, WAHOO_CLIENT_SECRET und
+        WAHOO_REDIRECT_URI in der Serverkonfiguration hinterlegen."; 400
+        `invalid_redirect_uri` "WAHOO_REDIRECT_URI muss eine vollständige
+        HTTPS-URL ohne Zugangsdaten sein." when the configured redirect is not an
+        HTTPS URL with host, without credentials or fragment. Disconnect has no
+        route-specific errors.
+        """
         # Drain and validate the (empty) JSON command body like other commands.
         handler.read_json()
         service = self._wahoo_service()

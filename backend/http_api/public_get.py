@@ -36,18 +36,44 @@ class PublicGetRoutes:
         ]
 
     def _health(self, handler: Any, _request: RouteRequest) -> None:
-        """Liveness and maintenance state."""
+        """Liveness and maintenance state.
+
+        Request: no body.
+
+        Response: 200 with `status` (`"ok"`) and `maintenance` (`active` boolean,
+        true during a restore; `running_operations` count).
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(
             200, {"status": "ok", "maintenance": self._maintenance_gate.state()}
         )
 
     def _readiness(self, handler: Any, _request: RouteRequest) -> None:
-        """Readiness status; 503 while not ready."""
+        """Readiness status; 503 while not ready.
+
+        Request: no body.
+
+        Response: 200 when ready, else 503, with the same body: `status`
+        (`"ready"` or `"not_ready"`), `ready`, `checks` (booleans `database`,
+        `schema`, `data_directory`, `maintenance`) and `maintenance` (`active`).
+
+        Errors: 503 with the body above while any check fails, including during
+        a restore.
+        """
         readiness = self._readiness_service().state()
         handler.send_json(200 if readiness["ready"] else 503, readiness)
 
     def _auth_status(self, handler: Any, _request: RouteRequest) -> None:
-        """Current login status."""
+        """Current login status.
+
+        Request: no body; the session cookie is read if present.
+
+        Response: 200 with `authenticated` (boolean) and `maintenance` (`active`,
+        `running_operations`).
+
+        Errors: none beyond the common ones.
+        """
         session = self._auth_service().authenticated_session(handler)
         handler.send_json(
             200,
@@ -58,5 +84,19 @@ class PublicGetRoutes:
         )
 
     def _bootstrap(self, handler: Any, _request: RouteRequest) -> None:
-        """Initial authenticated client state."""
+        """Initial authenticated client state.
+
+        Request: no body.
+
+        Response: 200 with the bounded, local-only projection of
+        `PublicBootstrapService.read`, read from one database snapshot. Top-level
+        keys include `state_versions`, `app`, `messages`, `planned`, `calendar`,
+        `profile`, `competitions`, `planning`, `external_calendar`, `garmin`,
+        `intervals`, `wahoo`, `sync`, `sync_settings`, `model`, `service_tier`,
+        `thinking_level`, `configured`, `credentials`, `usage` and
+        `provider_status`. Lists that have their own route (`library`,
+        `activities`, `checkins`) are empty.
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(200, self._public_bootstrap_service().read())
