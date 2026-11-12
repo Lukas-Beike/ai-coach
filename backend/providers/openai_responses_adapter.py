@@ -125,9 +125,14 @@ def _one_shot_payload(request: ModelRequest) -> dict[str, Any]:
         payload["max_output_tokens"] = request.max_output_tokens
     if request.reasoning_effort:
         payload["reasoning"] = {"effort": request.reasoning_effort}
+    return payload
+
+
+def _with_options(payload: dict[str, Any], request: ModelRequest) -> dict[str, Any]:
+    """Add the web search and a fixed service tier to any request shape."""
     if request.web_search:
-        payload["tools"] = [{"type": "web_search"}]
-        payload["include"] = [WEB_SEARCH_SOURCES_INCLUDE]
+        payload["tools"] = [*payload.get("tools", []), {"type": "web_search"}]
+        payload["include"] = [*payload.get("include", []), WEB_SEARCH_SOURCES_INCLUDE]
     if request.service_tier:
         payload["service_tier"] = request.service_tier
     return payload
@@ -136,7 +141,7 @@ def _one_shot_payload(request: ModelRequest) -> dict[str, Any]:
 def request_payload(request: ModelRequest) -> dict[str, Any]:
     """The Responses API payload for one request."""
     if request.output_schema is not None or request.json_output:
-        return _one_shot_payload(request)
+        return _with_options(_one_shot_payload(request), request)
     payload: dict[str, Any] = {"model": request.model}
     if request.reasoning_effort:
         payload["reasoning"] = {"effort": request.reasoning_effort}
@@ -156,7 +161,7 @@ def request_payload(request: ModelRequest) -> dict[str, Any]:
     if request.stateless:
         payload["include"] = [ENCRYPTED_REASONING_INCLUDE]
     payload["parallel_tool_calls"] = False
-    return payload
+    return _with_options(payload, request)
 
 
 def model_turn(response: Any) -> ModelTurn:
@@ -193,11 +198,16 @@ def model_turn(response: Any) -> ModelTurn:
     )
 
 
+def _list(value: Any) -> list[Any]:
+    """A reply field that should be a list; anything else reads as empty."""
+    return value if isinstance(value, list) else []
+
+
 def _final_text(output: list[dict[str, Any]]) -> str:
     messages = [item for item in output if item.get("type") == "message"]
     return "".join(
         str(content.get("text") or "")
-        for content in (messages[-1].get("content") or [] if messages else [])
+        for content in (_list(messages[-1].get("content")) if messages else [])
         if isinstance(content, dict) and content.get("type") == "output_text"
     )
 
@@ -210,14 +220,14 @@ def _sources(output: list[dict[str, Any]]) -> list[str]:
             action = item.get("action")
             found = action.get("sources") if isinstance(action, dict) else None
             urls += [
-                source.get("url") for source in found or [] if isinstance(source, dict)
+                source.get("url") for source in _list(found) if isinstance(source, dict)
             ]
         elif item.get("type") == "message":
             urls += [
                 annotation.get("url")
-                for content in item.get("content") or []
+                for content in _list(item.get("content"))
                 if isinstance(content, dict)
-                for annotation in content.get("annotations") or []
+                for annotation in _list(content.get("annotations"))
                 if isinstance(annotation, dict)
                 and annotation.get("type") == "url_citation"
             ]

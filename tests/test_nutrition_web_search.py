@@ -68,7 +68,7 @@ def service(result: Any) -> tuple[NutritionWebSearchService, list[dict[str, Any]
 
     def complete(request: ModelRequest) -> ModelTurn:
         # Through the real adapter: the wire payload out, the reply read back.
-        sent.append({"path": "/v1/responses", **request_payload(request)})
+        sent.append(request_payload(request))
         if isinstance(result, Exception):
             raise result
         return model_turn(result)
@@ -183,18 +183,49 @@ class NutritionWebSearchWireTests(unittest.TestCase):
         )
 
 
+class ResponsesAdapterWebSearchTests(unittest.TestCase):
+    def test_web_search_and_tier_reach_every_request_shape(self) -> None:
+        for request in (
+            ModelRequest(model="m", input="x", web_search=True, service_tier="default"),
+            ModelRequest(
+                model="m",
+                input="x",
+                json_output=True,
+                web_search=True,
+                service_tier="default",
+            ),
+        ):
+            payload = request_payload(request)
+            self.assertIn({"type": "web_search"}, payload["tools"])
+            self.assertIn("web_search_call.action.sources", payload["include"])
+            self.assertEqual(payload["service_tier"], "default")
+
+    def test_malformed_sources_and_citations_read_as_none(self) -> None:
+        turn = model_turn(
+            {
+                "output": [
+                    {"type": "web_search_call", "action": {"sources": "x"}},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "annotations": 5}],
+                    },
+                    {"type": "message", "content": "text"},
+                ]
+            }
+        )
+        self.assertEqual((turn.sources, turn.final_text), ([], ""))
+
+
 class NutritionWebSearchTests(unittest.TestCase):
     def test_request_carries_only_product_data(self) -> None:
         searcher, sent = service(response([]))
         searcher.search([ROW])
         request = sent[0]
-        self.assertEqual(request["path"], "/v1/responses")
         self.assertEqual(request["model"], "synthetic-model")
         self.assertEqual(request["tools"], [{"type": "web_search"}])
         self.assertEqual(
             set(request),
             {
-                "path",
                 "model",
                 "tools",
                 "instructions",
