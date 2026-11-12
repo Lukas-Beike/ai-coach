@@ -936,6 +936,12 @@ h2 {
 .planned-focus-field { display: grid; flex: 0 1 12rem; gap: 4px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; width: 100%; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
+.planned-move-status { margin: 0; color: var(--muted); font-size: .72rem; }
+.planned-move-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.planned-move-day { display: grid; min-width: 44px; min-height: 44px; place-items: center; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink); background: var(--surface-input); font-size: .72rem; line-height: 1.2; }
+.planned-move-day b { font-size: .9rem; }
+.planned-move-day:disabled { opacity: .45; }
+.planned-move-picker:not(.is-shown) { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .planned-week-sync { display: flex; padding: 6px 0 2px; }
 .planned-week-sync .planned-sync-button { position: relative; display: inline-flex; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; }
 .planned-week-sync .planned-sync-button::before { content: ""; position: absolute; inset: -7px 0; }

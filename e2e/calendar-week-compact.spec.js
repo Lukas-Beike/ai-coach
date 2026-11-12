@@ -219,3 +219,55 @@ test("@responsive the Monat switch shows the month grid and the calendar returns
   await expect(page.locator(".planned-month")).toHaveCount(0);
   await expect(page.locator(".planned-day.is-today")).toHaveCount(1);
 });
+
+test("@responsive Verschieben moves a planned unit to a tapped day and Rückgängig puts it back", async ({ page, request }) => {
+  await openCalendar(page, request);
+  const days = await renderSyntheticCalendar(page);
+  const target = await page.evaluate((day) => addDateKey(day, 2), days.today);
+  const posts = [];
+  const undos = [];
+  // The fixture's planned units are not the synthetic ones: the reload moves the synthetic unit as the server would.
+  await page.route("**/api/planned-units/*/date", async (route) => {
+    posts.push(JSON.parse(route.request().postData()));
+    await page.evaluate((day) => { globalThis.movedTo = day; }, posts.at(-1).date);
+    await route.fulfill({ json: { status: "local", local_id: "11111111-1111-4111-8111-111111111111", change: { id: "c-move", after_hash: "h-move" } } });
+  });
+  await page.route("**/api/change-history/undo", async (route) => {
+    undos.push(JSON.parse(route.request().postData()));
+    await page.evaluate((day) => { globalThis.movedTo = day; }, days.next);
+    await route.fulfill({ json: { status: "undone" } });
+  });
+  await page.evaluate(() => {
+    const unit = state.data.training_calendar.find((item) => item.id === "next-plan");
+    Object.assign(unit, { local_id: "11111111-1111-4111-8111-111111111111", payload_hash: "hash-1", conflicts: [] });
+    globalThis.load = async () => {
+      unit.date = globalThis.movedTo || unit.date;
+      renderPlanned(state.data.training_calendar);
+    };
+    renderPlanned(state.data.training_calendar);
+  });
+  await showCalendarDay(page, days.next);
+  const card = page.locator('.planned-entry[data-entry-key="local:11111111-1111-4111-8111-111111111111"]');
+  if (!await card.evaluate((element) => element.open)) await card.locator(":scope > summary").click();
+  const pane = card.locator(":scope > .planned-entry-details");
+  await pane.getByRole("button", { name: "Verschieben" }).click();
+  const strip = pane.getByRole("group", { name: "Neuer Tag" });
+  await expect(strip.locator(".planned-move-day[data-day]")).toHaveCount(7);
+  await expect(strip.locator(`.planned-move-day[data-day="${days.next}"]`)).toBeDisabled();
+  // The date picker ends with the last day the calendar shows, so a moved unit stays visible.
+  await expect(strip.locator(".planned-move-picker")).toHaveAttribute("max", await page.evaluate(() => plannedLastDateKey));
+  for (const tile of await strip.locator(".planned-move-day").all()) expect((await tile.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await strip.locator(`.planned-move-day[data-day="${target}"]`).click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toEqual({ date: target, expected_payload_hash: "hash-1" });
+  // The open card follows the unit to its new day with the receipt.
+  await expect(page.locator(`.planned-day[data-date="${target}"]`).locator(card)).toHaveCount(1);
+  await expect(card).toHaveAttribute("open", "");
+  await expect(card.locator(".planned-move-status")).toContainText("Verschoben auf");
+  await card.locator(".planned-move-status").getByRole("button", { name: "Rückgängig" }).click();
+  await expect.poll(() => undos.length).toBe(1);
+  expect(undos[0]).toEqual({ change_id: "c-move", expected_current_hash: "h-move" });
+  await expect(page.locator(`.planned-day[data-date="${days.next}"]`).locator(card)).toHaveCount(1);
+  await expect(card.locator(".planned-move-status")).toHaveText("Zurückgenommen.");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});
