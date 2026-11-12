@@ -93,6 +93,7 @@ test("the GPS-tracks switch takes clicks once loaded and a failed save restores 
   await openMore(page, "operations");
   const summary = page.locator("#privacySection summary");
   const toggle = page.locator("#gpsTracksToggle");
+  await expect(page.locator("#privacySection")).not.toHaveAttribute("open", "");
   const loaded = page.waitForResponse(isGet);
   await summary.click();
   await expect(toggle).toBeDisabled();
@@ -101,7 +102,7 @@ test("the GPS-tracks switch takes clicks once loaded and a failed save restores 
   await expect(toggle).toBeEnabled();
   await expect(toggle).toBeChecked({ checked: before });
 
-  // A failed save restores the server-confirmed state, also when a reload rendered it meanwhile.
+  // A pending save takes no click, and a failed one restores the server-confirmed state.
   let failSave;
   const saveHeld = new Promise((resolve) => { failSave = resolve; });
   await page.route("**/api/privacy/gps", async (route) => {
@@ -111,12 +112,12 @@ test("the GPS-tracks switch takes clicks once loaded and a failed save restores 
   });
   await toggle.click();
   await expect(toggle).toBeChecked({ checked: !before });
-  const reloaded = page.waitForResponse(isGet);
+  await expect(toggle).toBeDisabled();
+  // Reopening during the save loads nothing that could overwrite the switch.
   await summary.click();
   await summary.click();
-  await reloaded;
-  await expect(toggle).toBeChecked({ checked: before });
   failSave();
   await expect(page.locator("#toast")).toBeVisible();
   await expect(toggle).toBeChecked({ checked: before });
+  await expect(toggle).toBeEnabled();
 });
