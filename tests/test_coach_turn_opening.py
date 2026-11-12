@@ -82,6 +82,10 @@ class CoachTurnOpeningTests(unittest.TestCase):
         message = args.pop("message")
         return self.service.open(message, **args)
 
+    def test_a_claude_turn_names_its_provider(self) -> None:
+        # Its attachments never reached OpenAI, so no OpenAI window may follow.
+        self.assertEqual(self._open(model="claude-opus")["ai_provider"], "anthropic")
+
     def test_new_turn_atomically_inserts_message_and_session_bound_receipt(
         self,
     ) -> None:

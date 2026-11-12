@@ -23,8 +23,9 @@ MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
 # User messages after the latest earlier attachment turn that keep the OpenAI
 # conversation (counting the current message) before local dialogue takes over.
 ATTACHMENT_RETENTION_USER_MESSAGES = 3
-# The latest prior Coach turn that sent attachments to OpenAI, and how many user
-# messages (including the current one) follow it. Receipts are filtered in SQL so
+# The latest prior Coach turn that sent attachments to OpenAI, how many user
+# messages (including the current one) follow it, and how many turns of another
+# provider ran since: the OpenAI conversation holds none of those. Receipts are filtered in SQL so
 # a turn does not decode every stored receipt; the CASE guards skip malformed JSON.
 PRIOR_OPENAI_ATTACHMENT_QUERY = (
     "WITH prior AS (SELECT MAX(messages.id) AS id FROM coach_commands JOIN messages "
@@ -40,7 +41,12 @@ PRIOR_OPENAI_ATTACHMENT_QUERY = (
     "'$.status')='completed') "
     "AND messages.id<? AND messages.attachments!='[]') "
     "SELECT prior.id AS id, (SELECT COUNT(*) FROM messages WHERE role='user' "
-    "AND messages.id<=? AND messages.id>prior.id) AS turns FROM prior"
+    "AND messages.id<=? AND messages.id>prior.id) AS turns, "
+    "(SELECT COUNT(*) FROM coach_commands WHERE json_valid(receipt) "
+    "AND json_extract(receipt, '$.user_message_id')>prior.id "
+    "AND json_extract(receipt, '$.user_message_id')<? "
+    "AND COALESCE(json_extract(receipt, '$.ai_provider'), ?)!=?) AS other_turns "
+    "FROM prior"
 )
 CONVERSATION_IN_USE_QUERY = (
     "SELECT 1 FROM coach_commands WHERE conversation_id=? AND client_turn_id!=? LIMIT 1"
@@ -349,11 +355,21 @@ class CoachAttachmentContextService:
                 MESSAGE_ATTACHMENTS_QUERY, (receipt.get("user_message_id"),)
             ).fetchone()
             prior = db.execute(
-                PRIOR_OPENAI_ATTACHMENT_QUERY, (AI_PROVIDER, message_id, message_id)
+                PRIOR_OPENAI_ATTACHMENT_QUERY,
+                (
+                    AI_PROVIDER,
+                    message_id,
+                    message_id,
+                    message_id,
+                    AI_PROVIDER,
+                    AI_PROVIDER,
+                ),
             ).fetchone()
         has_prior = bool(prior and prior["id"] is not None)
         within_window = bool(
-            has_prior and prior["turns"] <= ATTACHMENT_RETENTION_USER_MESSAGES
+            has_prior
+            and prior["turns"] <= ATTACHMENT_RETENTION_USER_MESSAGES
+            and not prior["other_turns"]
         )
         try:
             attachments = (

@@ -446,11 +446,11 @@ function renderFirstThresholdEstimate(estimate, profile = {}) {
   if (stored) stored.textContent = profile?.first_threshold_pct && profile.first_threshold_origin === "estimated" ? "Gespeichert (% LSHF, geschätzt)" : "Gespeichert (% LSHF)";
 }
 
-const MODEL_PROVIDER_GROUPS = Object.freeze({ openai: "OpenAI", claude: "Claude" });
+const MODEL_PROVIDER_GROUPS = Object.freeze({ openai: "OpenAI", anthropic: "Claude" });
 
 // Pure: a Claude family names the model it resolves to; the rest keep their label.
 function modelOptionLabel(option) {
-  return option.provider === "claude" && option.model ? `${option.label} (${option.model})` : option.label;
+  return option.provider === "anthropic" && option.model ? `${option.label} (${option.model})` : option.label;
 }
 
 function modelOptionElement(option) {

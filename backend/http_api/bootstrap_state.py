@@ -92,6 +92,9 @@ class PublicBootstrapService:
             state_version_values = deps.state_version_service().versions()
             provider = deps.settings.selected_provider()
             provider_state = deps.provider_state_service()
+            summaries = {
+                name: provider_state.summary(name) for name in ("openai", "anthropic")
+            }
             state = {
                 "state_versions": state_version_values,
                 "app": {"name": deps.app_name, "version": deps.app_version},
@@ -202,11 +205,7 @@ class PublicBootstrapService:
                     "openai": bool(deps.config.openai_api_key),
                     "anthropic": bool(deps.config.anthropic_api_key),
                     # The selected model's provider has its key.
-                    "coach": bool(
-                        deps.config.anthropic_api_key
-                        if provider == "anthropic"
-                        else deps.config.openai_api_key
-                    ),
+                    "coach": deps.settings.coach_ready(),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
@@ -222,10 +221,10 @@ class PublicBootstrapService:
                     if deps.provider_credentials is not None
                     else None
                 ),
-                "usage": provider_state.summary(provider),
+                "usage": summaries[provider],
                 "provider_status": {
-                    name: provider_state.summary(name).get("status") or {}
-                    for name in ("openai", "anthropic")
+                    name: summary.get("status") or {}
+                    for name, summary in summaries.items()
                 },
             }
             # Always present, so a cleared warning also clears on a client that merges bootstraps.

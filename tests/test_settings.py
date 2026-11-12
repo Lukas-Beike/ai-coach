@@ -150,7 +150,7 @@ class SettingsServiceTests(unittest.TestCase):
             claude_models=lambda: status,
         )
         claude = [
-            o for o in service.available_model_options() if o["provider"] == "claude"
+            o for o in service.available_model_options() if o["provider"] == "anthropic"
         ]
         self.assertEqual(
             [(o["id"], o["label"], o["model"], o["rejected"]) for o in claude],
@@ -174,7 +174,8 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(service.selected_provider(), "anthropic")
         # Claude has no speed modes; OpenAI's stay as they were.
         self.assertIsNone(service.service_tier())
-        self.current_config[0] = replace(self.current_config[0], openai_api_key="")
+        self.assertTrue(service.coach_ready())
+        self.current_config[0] = replace(self.current_config[0], openai_api_key=" ")
         self.assertTrue(
             all(
                 o["disabled"]
@@ -182,8 +183,17 @@ class SettingsServiceTests(unittest.TestCase):
                 if o["provider"] == "openai"
             )
         )
+        # Either provider needs its key; a blank one counts as missing.
+        with self.assertRaises(AppError):
+            service.save_model("gpt-6-sol")
+        self.assertEqual(service.selected_provider(), "anthropic")
+        self.current_config[0] = replace(
+            self.current_config[0], openai_api_key="openai-test-key"
+        )
         service.save_model("gpt-6-sol")
         self.assertEqual(service.selected_provider(), "openai")
+        self.current_config[0] = replace(self.current_config[0], openai_api_key="")
+        self.assertFalse(service.coach_ready())
 
     def test_calendar_defaults_clamping_and_write_keys(self):
         self.assertEqual(

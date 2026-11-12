@@ -94,11 +94,11 @@ test("long goals are cut for the one-line summary", () => {
 test("the Coach model list groups OpenAI and Claude and names the resolved Claude model", () => {
   const { modelOptionLabel, modelNoticeText } = extractFunctions("views.js", ["modelOptionLabel", "modelNoticeText"]);
   assert.equal(modelOptionLabel({ id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai" }), "GPT-6 Luna");
-  assert.equal(modelOptionLabel({ id: "claude-opus", label: "Opus", provider: "claude", model: "claude-opus-5-5" }), "Opus (claude-opus-5-5)");
-  assert.equal(modelOptionLabel({ id: "claude-haiku", label: "Haiku", provider: "claude", model: null }), "Haiku");
+  assert.equal(modelOptionLabel({ id: "claude-opus", label: "Opus", provider: "anthropic", model: "claude-opus-5-5" }), "Opus (claude-opus-5-5)");
+  assert.equal(modelOptionLabel({ id: "claude-haiku", label: "Haiku", provider: "anthropic", model: null }), "Haiku");
   const options = [
-    { id: "claude-opus", label: "Opus", provider: "claude", model: "claude-opus-5-5", rejected: "claude-opus-5-6" },
-    { id: "claude-sonnet", label: "Sonnet", provider: "claude", model: "claude-sonnet-5-5", rejected: null },
+    { id: "claude-opus", label: "Opus", provider: "anthropic", model: "claude-opus-5-5", rejected: "claude-opus-5-6" },
+    { id: "claude-sonnet", label: "Sonnet", provider: "anthropic", model: "claude-sonnet-5-5", rejected: null },
   ];
   assert.equal(modelNoticeText({ selected: "claude-opus", options }), "claude-opus-5-6 abgelehnt – Coach nutzt claude-opus-5-5.");
   assert.equal(modelNoticeText({ selected: "claude-sonnet", options }), "");

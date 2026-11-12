@@ -45,6 +45,8 @@ ANTHROPIC_API_KEY_ERROR = (
     "Kein Anthropic-API-Schlüssel konfiguriert. Hinterlege ihn in der Karte "
     "Claude (Anthropic) unter Mehr › Anbindungen."
 )
+# The model listing is a small read before a request: it must not hold one up.
+MODELS_TIMEOUT_SECONDS = 15
 # A server-side search loop may pause; resend it a bounded number of times.
 MAX_PAUSE_CONTINUATIONS = 3
 _INVALID_EVENT = "Claude hat ein ungültiges Streaming-Ereignis zurückgegeben."
@@ -133,12 +135,14 @@ class ClaudeMessagesClient:
         logger: Any,
         opener: Any = urlopen,
         clock: Callable[[], float] = time.perf_counter,
+        diagnostic_capture: Any = None,
     ) -> None:
         self.config = config
         self.provider_state = provider_state
         self.logger = logger
         self.opener = opener
         self.clock = clock
+        self.diagnostic_capture = diagnostic_capture
 
     def list_models(self) -> Any:
         """One page of the Models API: the newest models are on it."""
@@ -161,7 +165,7 @@ class ClaudeMessagesClient:
         try:
             return provider_http.request_json(
                 request,
-                timeout=self.config.timeout_seconds,
+                timeout=MODELS_TIMEOUT_SECONDS,
                 max_bytes=self.config.max_response_bytes,
                 opener=self.opener,
             ).payload
@@ -343,23 +347,25 @@ class ClaudeMessagesClient:
     ) -> None:
         """Bill the usage the stream reported (none when it never started)."""
         message = assembler.message or {}
-        self.provider_state.record_usage(
-            "anthropic", {"usage": neutral_usage(message.get("usage"))}, operation
-        )
+        usage = neutral_usage(message.get("usage"))
+        self.provider_state.record_usage("anthropic", {"usage": usage}, operation)
+        details = {
+            **context,
+            "operation": operation,
+            "served_model": str(message.get("model") or ""),
+            "stop_reason": str(message.get("stop_reason") or ""),
+            "reason": error.reason if error is not None else "ok",
+            "duration_ms": round((self.clock() - started) * 1000, 1),
+        }
         self.logger.info(
             "Claude request finished",
-            extra={
-                "event": "anthropic_request",
-                "context": {
-                    **context,
-                    "operation": operation,
-                    "served_model": str(message.get("model") or ""),
-                    "stop_reason": str(message.get("stop_reason") or ""),
-                    "reason": error.reason if error is not None else "ok",
-                    "duration_ms": round((self.clock() - started) * 1000, 1),
-                },
-            },
+            extra={"event": "anthropic_request", "context": details},
         )
+        if self.diagnostic_capture is not None:
+            # Metadata and counters only: no request or response text.
+            self.diagnostic_capture.capture(
+                "anthropic_stream", {**details, "usage": usage}
+            )
 
     def _http_error(
         self, exc: HTTPError, context: dict[str, Any], started: float

@@ -14,7 +14,7 @@ from backend.coach.attachments import (
     validate_attachments,
 )
 from backend.coach.authorization import coach_execution_scope, coach_session_key
-from backend.coach.constants import AI_PROVIDER
+from backend.coach.constants import turn_ai_provider
 from backend.coach.playbooks import REQUEST_KINDS
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
@@ -323,7 +323,7 @@ class CoachJobSubmissionService:
                     "user_message_id": user_message["id"],
                     "client_turn_id": client_turn_id,
                     "plan_scope": scope,
-                    "ai_provider": AI_PROVIDER,
+                    "ai_provider": turn_ai_provider(model),
                     "model": model,
                     "thinking_level": thinking_level,
                     "request_kind": request_kind,

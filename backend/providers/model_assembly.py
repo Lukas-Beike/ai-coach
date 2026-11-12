@@ -159,6 +159,7 @@ class ModelTransportAssembly:
             logger=self._logger,
             opener=provider_http.urlopen,
             clock=self._monotonic,
+            diagnostic_capture=self._diagnostic_capture,
         )
 
     def complete(self, request: ModelRequest) -> ModelTurn:
