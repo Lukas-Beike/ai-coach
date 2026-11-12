@@ -13,7 +13,10 @@ from uuid import UUID
 from support import temp_database
 
 from backend.coach import proposal_creation
-from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_creation import (
+    CoachProposalCreationService,
+    remote_removal_lines,
+)
 from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
 from backend.db import row_factory
 from backend.db.repositories import CompetitionRepository
@@ -431,6 +434,11 @@ class CoachProposalCreationTests(unittest.TestCase):
                     "id": "remote-1",
                 }
             ],
+        )
+        # Without a card the receipt names the same deletion (#2342).
+        self.assertEqual(
+            remote_removal_lines(result["proposed_action"]["diff"]),
+            ["Wird bei Intervals.icu entfernt: Frühjahrsklassiker 2026-04-12"],
         )
         # A deletion marker gone or changed before approval reads German (#2134).
         with self.database_manager.reader() as db:

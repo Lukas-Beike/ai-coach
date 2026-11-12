@@ -42,8 +42,8 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 - **THEN** the step carries `weightValue` 40.0 with the kilogram unit, and units sent in an earlier form show as changed so the athlete can send them again.
 
 #### Scenario: Coach request
-- **WHEN** the Coach proposes the push after the athlete named Garmin or the watch
-- **THEN** the same job is queued only after the athlete approves the card, with the payload hashes stored when the card was created (see coach-tool-authority CA5).
+- **WHEN** the Coach sends units after the athlete named Garmin or the watch
+- **THEN** the same job is queued without a card, with the payload hashes stored when the request ran; a call that explicitly removes a workout is queued only after the athlete approves its card (see coach-tool-authority CA5).
 
 #### Scenario: Rejected locally
 - **WHEN** a unit is stale, deleted, archived, in the past, not strength or has no structure

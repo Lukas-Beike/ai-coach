@@ -161,8 +161,6 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.database_manager.uow_count, 2)
         self.training_patch.apply.assert_called_once_with(arguments, action)
 
-
-
     def test_dispatch_receives_complete_turn_and_cancellation_context(self) -> None:
         expected = {"ok": True, "status": "completed"}
         arguments = {
@@ -206,6 +204,37 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
+    def test_a_named_illness_sync_runs_the_bound_payload_with_accepted_findings(
+        self,
+    ) -> None:
+        # No card (#2342): the bound payload runs, and findings the athlete
+        # accepted in the same message stay with it.
+        bound = {"adjustment_id": "adj-1", "sync_illness_to_intervals": True}
+        self.proposal_creation.removes_garmin_workouts.return_value = False
+        self.proposal_creation.prepare_remote_write.return_value = {
+            "payload": {"arguments": bound, "intent": {"bound": True}},
+            "details": [],
+        }
+        self.tool_dispatch.execute.return_value = {"ok": True, "status": "queued"}
+        action = {"intent": "remote_sync", "request": {"remote_write": True}}
+
+        result = self.execute(
+            "apply_adaptive_replan",
+            {**bound, "extra": 1, "accept_plan_findings": ["illness_hard"]},
+            action=action,
+        )
+
+        self.assertEqual(result, {"ok": True, "status": "queued"})
+        self.proposal_creation.create_remote_write.assert_not_called()
+        name, arguments = self.tool_dispatch.execute.call_args.args
+        self.assertEqual(
+            (name, arguments, self.tool_dispatch.execute.call_args.kwargs["intent"]),
+            (
+                "apply_adaptive_replan",
+                {**bound, "accept_plan_findings": ["illness_hard"]},
+                {"bound": True},
+            ),
+        )
 
     def test_food_lookups_do_not_hold_a_local_database_transaction(self) -> None:
         self.tool_dispatch.execute.side_effect = lambda *_args, **_kwargs: (

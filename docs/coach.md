@@ -20,7 +20,7 @@ The Coach interacts with the athlete's data via structured tools covering plan i
 - **Receipt Retention**: While a turn is open, its receipt keeps the full tool results. The final or failure receipt keeps only status, identifiers, proposed actions and the undo references, so stored receipts hold no bulky tool output. Progress updates write only the changed receipt keys. Receipts follow `DATA_RETENTION_DAYS`, except those whose changes can still be undone.
 - **Transaction Locks**: All database updates share SQLite transaction locks to guarantee that conversational actions and background syncs never collide.
 - **Revision Control**: Plan modifications require passing the current planning revision and object hash, preventing overwrite collisions if edits occur concurrently.
-- **Remote Approval**: Intervals.icu changes remain proposals until the athlete approves their visible scope. A changed or stale workout manifest fails closed, and approval is bound to the current session and originating Coach turn.
+- **Named Remote Sync**: An Intervals.icu or Garmin write the athlete names in their own message runs in the same turn without an approval card, bound to the stored units, payload hashes and manifests as a card would bind it; the receipt lists the queued sync and each remote deletion it carries. An unclear request gets an offer instead. Only an explicit Garmin removal still shows a card, bound to the current session and originating Coach turn; a changed or stale manifest fails closed.
 - **Receipt Verification**: Tool invocations produce structured receipts in the chat UI, distinguishing saved local modifications, pending approval, queued sync jobs, and rejected parameters.
 
 ## Multimodal Capabilities

@@ -19,20 +19,6 @@ class CoachResponseFailureTests(unittest.TestCase):
     request = dialogue.CoachDialogueTests.request
     call = dialogue.CoachDialogueTests.call
 
-    @staticmethod
-    def approve_remote_write():
-        proposals = server.COACH_PROPOSALS.read_service().current("synthetic-session")
-        if not proposals:
-            raise AssertionError("expected a pending remote approval proposal")
-        confirmation = server.COACH_PROPOSALS.confirmation_service().confirm(
-            proposals[0]["id"], "synthetic-session"
-        )
-        return server.COACH_PROPOSALS.execution_service().execute(
-            confirmation["action_token"],
-            "synthetic-session",
-            confirmation["proposed_action"]["payload_hash"],
-        )
-
     def test_background_rate_limit_retries_summary_with_parent_and_one_sync(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [self.workout("2026-09-08")]
@@ -96,8 +82,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 background_job=True,
             )
             self.assertEqual(receipt["status"], "completed")
-            enqueue.assert_not_called()
-            approved = self.approve_remote_write()
+            # A named sync queues in the turn without a card (#2342).
             enqueue.assert_called_once()
         self.assertEqual(len(payloads), 3)
         self.assertEqual(payloads[1], payloads[2])
@@ -110,7 +95,10 @@ class CoachResponseFailureTests(unittest.TestCase):
             self.assertIs(payload["store"], False)
             self.assertNotIn("conversation", payload)
             self.assertNotIn("previous_response_id", payload)
-        self.assertEqual(approved["status"], "queued")
+        self.assertEqual(
+            server.SYNC_JOB_QUEUE.service().state(receipt["sync_job_ids"][0])["status"],
+            "queued",
+        )
 
     def test_failed_background_answer_keeps_sync_and_reports_provider_code(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -185,7 +173,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 session_csrf_hash="synthetic-session",
                 background_job=True,
             )
-            enqueue.assert_not_called()
+            enqueue.assert_called_once()
             # The sync call, then the answer's three attempts: nothing is stored
             # at the provider, so a failed answer is requested again.
             self.assertEqual(responses, 4)
@@ -201,14 +189,11 @@ class CoachResponseFailureTests(unittest.TestCase):
                 receipt["message"]["content"],
             )
             self.assertIn("erneut", receipt["message"]["content"])
-            self.assertIn("wartet auf deine Freigabe", receipt["message"]["content"])
-            self.assertNotIn(
+            self.assertIn(
                 "Plansynchronisierung beauftragt", receipt["message"]["content"]
             )
-            approved = self.approve_remote_write()
-            enqueue.assert_called_once()
         self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(approved["sync_job_id"])["status"],
+            server.SYNC_JOB_QUEUE.service().state(receipt["sync_job_ids"][0])["status"],
             "queued",
         )
         history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()

@@ -2122,17 +2122,16 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         enqueue.assert_called_once()
         self.assertEqual(retry_wait.call_count, 2)
         model.assert_not_called()
-        self.assertEqual(
-            replay["command_receipts"][0]["result"]["status"], "approval_required"
-        )
+        # A named sync queues without a card (#2342).
+        self.assertEqual(replay["command_receipts"][0]["result"]["status"], "queued")
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["pending_operations"], [])
         self.assertEqual(result["diagnostic_error"]["reason"], "provider_unavailable")
         text = result["message"]["content"]
         self.assertIn("KI-Dienst ist vorübergehend nicht verfügbar", text)
         self.assertIn("erneut", text)
-        self.assertIn("wartet auf deine Freigabe", text)
-        self.assertNotIn("Plansynchronisierung beauftragt", text)
+        self.assertIn("Bereits erfolgreich ausgeführt: Plansynchronisierung beauftragt", text)
+        self.assertIn("Abschluss ist in dieser Antwort noch nicht bestätigt", text)
         self.assertNotIn("Der Coach-Auftrag konnte nicht abgeschlossen werden", text)
         self.assertEqual(
             server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
