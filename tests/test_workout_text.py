@@ -9,6 +9,7 @@ from unittest.mock import patch
 from server_test_support import ServerTestCase, server
 from support import parsed_workout_fixture
 
+from backend.activities.workout_text import structured_blocks, structured_steps
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 
@@ -396,6 +397,17 @@ class WorkoutTextTests(ServerTestCase):
         reply["workout_doc"]["steps"][0]["steps"] = list(reversed(steps))
         with self.assertRaises(AppError):
             planning_workouts.validate_intervals_workout_result(workout, reply)
+
+    def test_structured_steps_flatten_the_repeated_blocks(self):
+        text = "Warmup\n- 10m 60%\n\nMain set 2x\n- 4m 90%\n- 1m 50%"
+        blocks = structured_blocks(text)
+
+        self.assertEqual([1, 2], [block["repeat"] for block in blocks])
+        self.assertEqual(
+            [step for block in blocks for step in block["steps"] * block["repeat"]],
+            structured_steps(text),
+        )
+        self.assertEqual(5, len(structured_steps(text)))
 
 
 if __name__ == "__main__":
