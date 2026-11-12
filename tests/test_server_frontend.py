@@ -69,8 +69,7 @@ def frontend_source():
 from backend.errors import AppError
 from backend.http_api.static_assets import (
     CACHE_NAME_TOKEN,
-    STATIC_TARGETS,
-    VERSIONED_STATIC_ASSETS,
+    UNVERSIONED_STATIC_ASSETS,
     StaticAssetService,
 )
 from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
@@ -743,7 +742,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertEqual(by_src["/icon-maskable-512.png"]["purpose"], "maskable")
         for src in by_src:
             self.assertTrue((server.PUBLIC_DIR / src.lstrip("/")).is_file(), src)
-            self.assertIn(f'"{src}"', service_worker)
+            self.assertRegex(
+                service_worker, rf'"{re.escape(src)}(\?v=[0-9a-f]{{10}})?"'
+            )
         for name, size in (
             ("icon-192.png", 192),
             ("icon-512.png", 512),
@@ -776,7 +777,7 @@ class ServerFrontendTests(ServerTestCase):
                 self.assertNotIn(CACHE_NAME_TOKEN, body)
         index = service.stamped("index.html").decode("utf-8")
         for ref in re.findall(r'(?:src|href)="(/[^"?]+)(\?[^"]*)?"', index):
-            if ref[0].lstrip("/") in VERSIONED_STATIC_ASSETS:
+            if ref[0].lstrip("/") not in UNVERSIONED_STATIC_ASSETS:
                 self.assertRegex(ref[1], r"^\?v=[0-9a-f]{10}$", ref[0])
 
     def test_cache_name_follows_cached_assets_and_ignores_the_rest(self):
@@ -891,19 +892,29 @@ class ServerFrontendTests(ServerTestCase):
             with self.assertRaises(ValueError):
                 StaticAssetService(public).stamped("service-worker.js")
 
-    def test_every_public_asset_is_served(self):
-        # An unlisted public file is answered with index.html, so the browser
-        # rejects it and every browser spec fails.
-        files = {
+    def test_every_public_asset_is_served_and_nothing_else(self):
+        # An unserved public file is answered with index.html, so the browser
+        # rejects it and every browser spec fails; dot-files and non-asset files
+        # (AGENTS.md, notes) must never be served.
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            shutil.copytree(server.PUBLIC_DIR, public, dirs_exist_ok=True)
+            (public / ".hidden.js").write_text("secret()", encoding="utf-8")
+            (public / "notes.md").write_text("notes", encoding="utf-8")
+            service = StaticAssetService(public)
+            shell = service.render("/", "/", None).body
+            served = {
+                path.name
+                for path in public.iterdir()
+                if path.is_file()
+                and service.render(f"/{path.name}", f"/{path.name}", None).body != shell
+            }
+        expected = {
             path.name
             for path in server.PUBLIC_DIR.iterdir()
-            if path.is_file() and path.name != "AGENTS.md"
+            if path.is_file() and path.suffix != ".md"
         }
-        self.assertEqual(
-            set(),
-            files - set(STATIC_TARGETS),
-            "add new public files to STATIC_TARGETS in backend/http_api/static_assets.py",
-        )
+        self.assertEqual(expected - {"index.html"}, served)
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = served_page("service-worker.js")
@@ -913,7 +924,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/state.js")}"', source)
         self.assertIn(f'"{asset_ref("/views.js")}"', source)
         self.assertIn(f'"{asset_ref("/plan-views.js")}"', source)
-        self.assertIn('"/plan-views.js"', source)
         self.assertIn(f'"{asset_ref("/components.js")}"', source)
         self.assertNotIn("forms.js", source)
         self.assertIn(f'"{asset_ref("/coach.js")}"', source)
@@ -940,7 +950,6 @@ class ServerFrontendTests(ServerTestCase):
         asset = f"/format.js?v={version.group(1)}"
         self.assertLess(index.index(asset), index.index("/api.js?v="))
         self.assertIn(f'"{asset}"', worker)
-        self.assertIn('"/format.js"', worker)
         response = StaticAssetService(server.PUBLIC_DIR).render(
             "/format.js", asset, None
         )

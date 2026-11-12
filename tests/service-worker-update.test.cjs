@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
 const { extractFunctions, loadPublicScript } = require("./frontend-harness.cjs");
@@ -284,7 +286,9 @@ function fetching(networkStatus, { shell = true, cached = [] } = {}) {
   const stored = new Map([...(shell ? [["/", { shell: true, status: 200 }]] : []), ...cached]);
   const puts = [];
   const network = [];
-  const context = loadPublicScript("service-worker.js", {
+  // The server stamps "?v=<hash>" onto versioned precache entries; stamp app.js alike.
+  const source = fs.readFileSync(path.join(__dirname, "../public/service-worker.js"), "utf8").replace('"/app.js"', '"/app.js?v=abc"');
+  const context = vm.createContext({
     URL,
     setTimeout,
     clearTimeout,
@@ -303,6 +307,7 @@ function fetching(networkStatus, { shell = true, cached = [] } = {}) {
       }),
     },
   });
+  new vm.Script(source, { filename: "service-worker.js" }).runInContext(context); // NOSONAR: test-only, runs the repository's own public/ worker.
   return async (url, mode = "navigate", method = "GET") => {
     let answer;
     const waits = [];
