@@ -15,7 +15,7 @@ from typing import Any
 
 # Token shapes that must never reach an issue, PR or comment body.
 SECRET_SHAPES = re.compile(
-    r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}"
+    r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?<![A-Za-z0-9-])sk-[A-Za-z0-9_-]{20,}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[abp]-[A-Za-z0-9-]{10,}"
 )
 MAX_BODY = 60_000
@@ -44,9 +44,14 @@ def run(
     except FileNotFoundError as exc:
         raise CliError(f"{program} is not installed.") from exc
     if done.returncode != 0:
-        detail = (done.stderr or done.stdout or "").strip().splitlines()
+        lines = (done.stderr or done.stdout or "").strip().splitlines()
+        # git prints progress ("To <remote>") before the line that says why.
+        reason = next(
+            (x for x in lines if x.startswith(("error", "fatal", " ! "))), None
+        )
         raise CliError(
-            f"{program} {' '.join(args[:2])} failed: {detail[0] if detail else 'no output'}"
+            f"{program} {' '.join(args[:2])} failed: "
+            f"{reason or (lines[0] if lines else 'no output')}"
         )
     return done.stdout
 

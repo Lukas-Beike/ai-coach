@@ -132,6 +132,23 @@ class BranchSyncTests(unittest.TestCase):
         )
         self.assertTrue((self.work / "hook-ran").exists())
 
+    def test_push_keeps_remote_work_the_branch_has_not_seen(self):
+        commit(self.work, "c.txt", "1\n", "feat(ui): add c")
+        git(self.work, "push", "-q", "-u", "origin", "feat/x")
+        other = self.root / "other"
+        git(self.root, "clone", "-q", "-b", "feat/x", str(self.origin), str(other))
+        git(other, "config", "user.name", "Other")
+        git(other, "config", "user.email", "other@example.test")
+        commit(other, "d.txt", "2\n", "feat(ui): remote only")
+        git(other, "push", "-q", "origin", "feat/x")
+        remote_tip = git(self.origin, "rev-parse", "feat/x")
+        git(self.work, "commit", "-q", "--amend", "-m", "feat(ui): add c, reworded")
+        with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):
+            code, _, err = self.sync("--push")
+        self.assertEqual(code, 2)
+        self.assertIn("rejected", err)
+        self.assertEqual(git(self.origin, "rev-parse", "feat/x"), remote_tip)
+
     def test_invalid_subject_blocks_the_push(self):
         commit(self.work, "c.txt", "1\n", "wip")
         with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):

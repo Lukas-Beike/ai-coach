@@ -66,6 +66,12 @@ def sync(onto: str, push: bool) -> int:
         print("refused: uncommitted changes; commit or stash them first")
         return 1
     env = push_env(os.environ, Path.home()) if push else None
+    # The lease must name the remote tip seen before this run's fetch, or the
+    # fetch moves origin/<branch> and the lease can no longer protect remote work.
+    try:
+        leased = git("rev-parse", "--verify", "--quiet", f"origin/{branch}").strip()
+    except CliError:
+        leased = ""  # never pushed: the push only succeeds while it stays absent
     git("fetch", "origin")
     try:
         git("rebase", onto)
@@ -87,8 +93,8 @@ def sync(onto: str, push: bool) -> int:
         return 1
     if push:
         git(
-            "-c", "core.hooksPath=.githooks", "push", "--force-with-lease", "-u",
-            "origin", branch, env=env,
+            "-c", "core.hooksPath=.githooks", "push",
+            f"--force-with-lease={branch}:{leased}", "-u", "origin", branch, env=env,
         )  # fmt: skip
         print(f"pushed: {branch}")
     behind, ahead = git("rev-list", "--left-right", "--count", f"{onto}...HEAD").split()

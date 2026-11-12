@@ -117,6 +117,13 @@ class IssueCreateTests(unittest.TestCase):
                 self.assertIn("title must be", err)
                 self.assertEqual(fake.calls, [])
 
+    def test_hyphenated_words_are_not_credentials(self):
+        self.body.write_text(
+            "Use a risk-adjusted-training-load-model.\n", encoding="utf-8"
+        )
+        code, _, err, _ = self.run_script("--title", "feat(ui): show load", "--dry-run")
+        self.assertEqual((code, err), (0, ""))
+
     def test_refuses_empty_and_secret_shaped_bodies(self):
         for text in ("  \n", "token ghp_" + "a" * 36 + "\n"):
             with self.subTest(text=text[:8]):
