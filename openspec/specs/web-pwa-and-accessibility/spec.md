@@ -255,6 +255,24 @@ The client SHALL expose server-advertised model, thinking, and speed capabilitie
 
 Evidence: `public/settings.js::saveProfile`, `public/settings.js::saveModel`, `public/settings.js::saveThinkingLevel`, `public/settings.js::saveServiceTier`, `public/settings.js::saveCalendarDisplaySettings`, `public/shared.js::applyAppearance`, `public/appearance.js` (early theme projection), `public/views.js::renderModel`; `e2e/model-settings.spec.js::model and speed selection persist with capability checks @responsive`, `e2e/audit-remediation.spec.js::profile edits made while saving remain dirty and visible`, `e2e/contracts.spec.js::appearance choice updates the theme and survives reload on this device`, `tests/test_settings.py::SettingsServiceTests.test_calendar_defaults_clamping_and_write_keys`.
 
+### Requirement: Calendar display window setting
+
+The calendar display setting SHALL hold `past_weeks` (default 1) and `future_weeks` (default 4), each an integer from 0 to 52, stored under `calendar_display_past_weeks` and `calendar_display_future_weeks`. The route contract and its error messages are in `docs/api-routes.md` (`PUT /api/settings/calendar-display`).
+
+#### Scenario: Stored value out of range or unreadable
+- **WHEN** a stored value is not an integer or lies outside 0 to 52
+- **THEN** reads return the default, or the value clamped to 0 to 52
+
+#### Scenario: Invalid save
+- **WHEN** the payload is not an object, a value is not an integer, a value is outside 0 to 52, or neither key is present
+- **THEN** the save fails with HTTP 400 and nothing is written, also when one of two sent values is valid
+
+#### Scenario: Partial save
+- **WHEN** only one key is sent
+- **THEN** only that key is stored and the answer is `{"status": "ok", "past_weeks", "future_weeks"}` with both stored values
+
+Evidence: `backend/settings.py::SettingsService.save_calendar_display_settings`; `backend/settings.py::SettingsService.calendar_display_settings`. Tests: `tests/test_settings.py::test_calendar_defaults_clamping_and_write_keys`; `tests/test_settings.py::test_calendar_invalid_values_have_exact_errors_and_no_partial_write`.
+
 ### Requirement: Diagnostics and destructive operational controls retain reviewable outcomes
 The client SHALL expose operations through their explicit controls, keep downloads and destructive requests visibly pending, request applicable confirmation, and display failures without implying a completed restore/deletion. Diagnostic values SHALL be displayed as inert text.
 
