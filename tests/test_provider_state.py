@@ -99,6 +99,7 @@ class ProviderStateServiceTests(unittest.TestCase):
             (self.service.summary, ("OpenAI",)),
             (self.service.record_success, ("other",)),
             (self.service.record_usage, ("unsupported ", {}, "chat")),
+            (self.service.summary, ("claude",)),
         ):
             with self.assertRaises(ValueError):
                 method(*args)
@@ -284,6 +285,20 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertEqual(self.service.summary("openai")["total_tokens"], 10)
         self.assertEqual(len(self.logger.calls), 2)
         self.assertNotIn("private", json.dumps(self.logger.calls))
+        claude = self.service.record_usage(
+            "anthropic",
+            {"usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10}},
+            "messages_stream",
+        )
+        self.assertEqual(
+            claude, {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10}
+        )
+        # Claude has its own counters; OpenAI's stay unchanged.
+        self.assertEqual(self.service.summary("anthropic")["requests"], 1)
+        self.assertEqual(self.service.summary("openai")["requests"], 2)
+        self.assertEqual(self.logger.calls[-1][0], "Claude usage recorded")
+        self.assertEqual(self.logger.calls[-1][1]["extra"]["event"], "anthropic_usage")
+        del self.logger.calls[-1]
         self.assertEqual(self.logger.calls[0][0], "OpenAI usage recorded")
         self.assertEqual(self.logger.calls[0][1]["extra"]["event"], "openai_usage")
         self.assertEqual(

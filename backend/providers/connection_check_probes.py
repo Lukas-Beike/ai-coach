@@ -14,7 +14,7 @@ from urllib.parse import quote, urlencode
 
 from backend.config import Config
 from backend.errors import AppError
-from backend.providers import openai_requests
+from backend.providers import http as provider_http
 from backend.providers.claude_requests import CLAUDE_MODELS_PATH, claude_headers
 from backend.providers.connection_checks import (
     MISCONFIGURED_REASON,
@@ -48,7 +48,7 @@ def _models_check(
 ) -> None:
     """List the models of a model provider: the cheapest authenticated read."""
     try:
-        url = openai_requests.endpoint(
+        url = provider_http.endpoint(
             base_url, path, default_base_url=default_base_url
         )
     except AppError as error:

@@ -1,0 +1,71 @@
+{
+  "_source": "Synthetic events in the documented Anthropic Messages API shapes (API version 2026-10-21, docs read 2026-11-12); no recorded athlete data.",
+  "tool_round": [
+    {"type": "message_start", "message": {"id": "msg_tool", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [], "stop_reason": null, "usage": {"input_tokens": 1200, "cache_creation_input_tokens": 3000, "cache_read_input_tokens": 0, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig-synthetic-1"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Ich schaue "}},
+    {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "nach."}},
+    {"type": "content_block_stop", "index": 1},
+    {"type": "ping"},
+    {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_synthetic1", "name": "read_plan", "input": {}}},
+    {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"week\": "}},
+    {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\"2026-W46\"}"}},
+    {"type": "content_block_stop", "index": 2},
+    {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null, "stop_details": null}, "usage": {"input_tokens": 1200, "cache_creation_input_tokens": 3000, "cache_read_input_tokens": 0, "output_tokens": 85}},
+    {"type": "message_stop"}
+  ],
+  "web_search": [
+    {"type": "message_start", "message": {"id": "msg_search", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5", "content": [], "stop_reason": null, "usage": {"input_tokens": 400, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Ich suche die Nährwerte."}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "content_block_start", "index": 1, "content_block": {"type": "server_tool_use", "id": "srvtoolu_synthetic1", "name": "web_search", "input": {}}},
+    {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"query\": \"Beispielriegel Nährwerte\"}"}},
+    {"type": "content_block_stop", "index": 1},
+    {"type": "content_block_start", "index": 2, "content_block": {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_synthetic1", "content": [{"type": "web_search_result", "url": "https://shop.example.test/riegel", "title": "Riegel", "encrypted_content": "enc-1", "page_age": null}, {"type": "web_search_result", "url": "https://hersteller.example.test/riegel", "title": "Hersteller", "encrypted_content": "enc-2", "page_age": null}]}},
+    {"type": "content_block_stop", "index": 2},
+    {"type": "content_block_start", "index": 3, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 3, "delta": {"type": "text_delta", "text": "```json\n{\"products\": [{\"ref\": 1, \"values\": []}]}\n```"}},
+    {"type": "content_block_delta", "index": 3, "delta": {"type": "citations_delta", "citation": {"type": "web_search_result_location", "cited_text": "Energie 400 kcal", "url": "https://hersteller.example.test/riegel", "title": "Hersteller", "encrypted_index": "idx-1"}}},
+    {"type": "content_block_stop", "index": 3},
+    {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_details": null}, "usage": {"input_tokens": 9000, "cache_read_input_tokens": 0, "output_tokens": 120, "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0}}},
+    {"type": "message_stop"}
+  ],
+  "paused_search": [
+    {"type": "message_start", "message": {"id": "msg_pause", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5", "content": [], "stop_reason": null, "usage": {"input_tokens": 300, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "server_tool_use", "id": "srvtoolu_synthetic2", "name": "web_search", "input": {}}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"query\": \"Beispiel\"}"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "pause_turn"}, "usage": {"output_tokens": 20}},
+    {"type": "message_stop"}
+  ],
+  "refusal": [
+    {"type": "message_start", "message": {"id": "msg_refusal", "type": "message", "role": "assistant", "model": "claude-opus-5", "content": [], "stop_reason": null, "usage": {"input_tokens": 500, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Dazu"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "refusal", "stop_details": {"type": "refusal", "category": "bio", "explanation": "Synthetic explanation."}}, "usage": {"output_tokens": 3}},
+    {"type": "message_stop"}
+  ],
+  "overloaded": [
+    {"type": "message_start", "message": {"id": "msg_error", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "content": [], "stop_reason": null, "usage": {"input_tokens": 50, "output_tokens": 1}}},
+    {"type": "error", "error": {"type": "overloaded_error", "message": "Synthetic provider text that must not surface."}}
+  ],
+  "models_page": {
+    "data": [
+      {"type": "model", "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "created_at": "2026-10-01T00:00:00Z"},
+      {"type": "model", "id": "claude-opus-5-6", "display_name": "Claude Opus 5.6", "created_at": "2026-12-01T00:00:00Z"},
+      {"type": "model", "id": "claude-opus-5", "display_name": "Claude Opus 5", "created_at": "2026-05-01T00:00:00Z"},
+      {"type": "model", "id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-10-01T00:00:00Z"},
+      {"type": "model", "id": "claude-haiku-4-5-20251001", "display_name": "Claude Haiku 4.5", "created_at": "2027-01-01T00:00:00Z"},
+      {"type": "model", "id": "claude-haiku-5-5", "display_name": "Claude Haiku 5.5", "created_at": "2026-10-01T00:00:00Z"},
+      {"type": "model", "id": "claude-fable-5-2", "display_name": "Claude Fable 5.2", "created_at": "2026-11-01T00:00:00Z"}
+    ],
+    "has_more": false,
+    "first_id": "claude-opus-5-5",
+    "last_id": "claude-fable-5-2"
+  }
+}

@@ -63,6 +63,16 @@ class ProviderUsageTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             usage_counts({}, provider="OpenAI")
+        # Claude usage arrives already normalized by its adapter.
+        self.assertEqual(
+            usage_counts(
+                {"usage": {"input_tokens": 4200, "output_tokens": 85}},
+                provider="anthropic",
+            ),
+            {"input_tokens": 4200, "output_tokens": 85, "total_tokens": 4285},
+        )
+        with self.assertRaises(ValueError):
+            usage_counts({}, provider="claude")
 
     def test_recorded_usage_is_non_mutating_and_returns_only_safe_delta(self):
         summary = {
