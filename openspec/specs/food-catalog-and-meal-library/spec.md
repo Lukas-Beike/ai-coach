@@ -427,6 +427,14 @@ Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_ya
 ### Requirement: Coach fills empty product fields
 The Coach SHALL list own products and stored database foods with empty core fields, and SHALL write values into named products only where the field is empty at write time, per the product's own basis, each with its origin, source page and time. Known values SHALL never be replaced. Every write SHALL be in the change history so the turn receipt names product, field, value and origin and whole-turn undo restores the empty fields.
 
+#### Scenario: Origin backed by a lookup
+- **WHEN** the Coach writes a value with origin Open Food Facts, Yazio, BLS or web
+- **THEN** it is accepted only if a database lookup or the web search returned that value (scaled to the product's basis) in the last hour; otherwise the item is rejected, and a value the athlete states is written with origin `manual`.
+
+#### Scenario: Implausible value for the basis
+- **WHEN** a value exceeds the product's basis in grams, or its energy exceeds that of pure fat
+- **THEN** the item is rejected without a write.
+
 #### Scenario: Incomplete products listed
 - **WHEN** the Coach lists incomplete products
 - **THEN** own products and stored database foods with empty core fields are returned with id, name, brand, EAN, basis, origin and their missing fields, and complete products are not.
