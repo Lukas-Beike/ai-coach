@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import threading
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from support import temp_database
 
 from backend.db import row_factory
+from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import FoodDatabaseMirror
@@ -329,6 +330,103 @@ class LookupChainTests(unittest.TestCase):
         )
         self.assertEqual(result["kcal"], 185)
         self.assertEqual(result["nutrition_basis"]["ingredients"][0]["source"], "Yazio")
+
+    def test_a_re_check_fills_remaining_gaps_from_yazio_by_ean(self):
+        self.mirror.store([off_food()])
+        with_salt = yazio_food()
+        with_salt["per_100"] |= {"salt_g": 0.01, "fat_g": 99.0}
+        self.yazio.barcode_food = with_salt
+        self.now += timedelta(days=1)
+
+        refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+
+        self.assertEqual(
+            (refreshed["per_100"]["salt_g"], refreshed["per_100"]["fat_g"]), (0.01, 6.0)
+        )
+        self.assertEqual(
+            refreshed["filled_fields"],
+            {"salt_g": {"origin": "yazio", "fetched_at": self.now.isoformat()}},
+        )
+        self.assertEqual(refreshed["missing_fields"], ["sugar_g", "fiber_g"])
+        # An own product filling from this entry keeps the Yazio origin.
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO nutrition_products(id, barcode, name, basis_amount, "
+                "basis_unit, source, created_at, updated_at) VALUES "
+                "('own', ?, 'Eigen', 100, 'g', 'manual', 'now', 'now')",
+                (BARCODE,),
+            )
+            NutritionProductRepository.fill_from_database_entries(db, "own", BARCODE)
+            filled = NutritionProductRepository().get(db, "own")["filled_fields"]
+        self.assertEqual(filled["salt_g"]["origin"], "yazio")
+        self.assertEqual(filled["kcal"]["origin"], "open_food_facts")
+        # A later Open Food Facts value wins and drops the Yazio origin.
+        later = off_food()
+        later["per_100"]["salt_g"] = 0.02
+        self.off.product = lambda barcode: later
+        self.yazio.barcode_food = None
+        self.now += timedelta(days=1)
+        refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+        self.assertEqual(
+            (refreshed["per_100"]["salt_g"], refreshed["filled_fields"]), (0.02, {})
+        )
+
+    def test_a_basis_change_ends_a_yazio_fill(self):
+        self.mirror.store([off_food()])
+        with_salt = yazio_food()
+        with_salt["per_100"]["salt_g"] = 0.01
+        self.yazio.barcode_food = with_salt
+        self.now += timedelta(days=1)
+        self.service.refresh_stored(f"off:{BARCODE}")
+        in_ml = off_food()
+        in_ml["basis_unit"] = "ml"
+        self.off.product = lambda barcode: in_ml
+        self.now += timedelta(days=1)
+
+        refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+
+        self.assertIsNone(refreshed["per_100"]["salt_g"])
+        self.assertEqual(refreshed["filled_fields"], {})
+
+    def test_lookups_and_calculations_ask_yazio_at_most_once(self):
+        self.mirror.store([off_food()])
+        self.now += timedelta(days=100)
+
+        self.service.lookup({"barcode": BARCODE})
+        self.service.resolve(f"off:{BARCODE}")
+
+        self.assertEqual(self.yazio.calls, [("barcode", BARCODE)])
+
+    def test_yazio_fills_nothing_without_a_match_on_the_same_basis(self):
+        portion = yazio_food()
+        portion["basis_unit"] = "ml"
+        portion["per_100"]["salt_g"] = 0.01
+        for case, setup in (
+            ("not configured", lambda: setattr(self.yazio, "configured", False)),
+            ("failure", lambda: setattr(self.yazio, "error", UNAVAILABLE)),
+            ("no product", lambda: setattr(self.yazio, "barcode_food", None)),
+            ("other basis", lambda: setattr(self.yazio, "barcode_food", portion)),
+        ):
+            with self.subTest(case=case):
+                self.setUp()
+                self.mirror.store([off_food()])
+                setup()
+                self.now += timedelta(days=1)
+                refreshed = self.service.refresh_stored(f"off:{BARCODE}")
+                self.assertIsNone(refreshed["per_100"]["salt_g"])
+                self.assertNotIn("filled_fields", refreshed)
+                self.assertEqual("notice" in refreshed, case == "failure")
+
+    def test_a_complete_re_check_does_not_ask_yazio(self):
+        complete = off_food()
+        complete["per_100"] |= {"sugar_g": 1.0, "fiber_g": 10.0, "salt_g": 0.01}
+        self.off.product = lambda barcode: complete
+        self.mirror.store([complete])
+        self.now += timedelta(days=1)
+
+        self.service.refresh_stored(f"off:{BARCODE}")
+
+        self.assertEqual(self.yazio.calls, [])
 
     def test_unknown_yazio_id_is_not_found(self):
         self.yazio.error = AppError(404, "x", reason="food_not_found")

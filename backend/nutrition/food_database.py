@@ -346,6 +346,28 @@ class FoodDatabaseService:
             return stored, LOCAL_DATABASE_STALE
         return self._kept([food])[0], LIVE
 
+    def _fill_from_yazio(
+        self, food: dict[str, Any]
+    ) -> tuple[dict[str, Any], str | bool]:
+        """Fill an Open Food Facts food's empty core values from Yazio by EAN.
+
+        Only when Yazio is configured and knows the EAN; otherwise, and on any
+        failure, the food stays as it is. The second value tells why Yazio
+        failed, if it did.
+        """
+        if not (
+            self._mirror
+            and str(food["id"]).startswith("off:")
+            and any(food["per_100"].get(key) is None for key in NUTRIENT_COLUMNS)
+        ):
+            return food, False
+        filled: dict[str, Any] | None = None
+        failed: str | bool = True
+        with contextlib.suppress(Exception):
+            source, failed = self._yazio_barcode(str(food["id"])[4:])
+            filled = source and self._mirror.fill_gaps(food["id"], source)
+        return filled or food, failed
+
     def _kept(self, foods: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Store live foods and return them as kept, with their gaps filled."""
         kept: list[dict[str, Any]] = []
@@ -564,7 +586,21 @@ class FoodDatabaseService:
                 "Der Datenbankeintrag konnte nicht aktualisiert werden.",
                 reason="food_database_unavailable",
             )
-        return self._stored_food(refreshed)
+        filled, yazio_failed = self._fill_from_yazio(refreshed)
+        return {
+            **self._stored_food(filled),
+            **(
+                {
+                    "notice": _chain_notice(
+                        skipped=True,
+                        auth_failed=yazio_failed == "food_database_auth_failed",
+                        version_blocked=yazio_failed == "food_database_version_blocked",
+                    ).strip()
+                }
+                if yazio_failed
+                else {}
+            ),
+        }
 
     def forget(self, food_id: Any) -> None:
         if self._mirror is None or not isinstance(food_id, str):

@@ -398,3 +398,28 @@ The athlete SHALL be able to re-check one stored database food online now throug
 - **THEN** an error is returned instead of a success message.
 
 Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/http_api/nutrition.py::NutritionPostRoutes._refresh_database_food`, `public/nutrition.js::loadNutritionDatabase`; `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_failed_or_unknown_re_check_changes_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_whose_write_fails_is_reported`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_refresh_names_the_entry`, `e2e/nutrition.spec.js` ("a stored database entry is refreshed on request").
+
+### Requirement: Yazio fills remaining gaps by EAN
+After a manual re-check of an Open Food Facts entry, still-empty core fields SHALL be looked up in Yazio by the entry's EAN when Yazio is configured. Only empty fields SHALL be filled, only from a Yazio product on the same basis, each with origin `yazio` and its fetch time; known values SHALL stay. Lookups and calculations SHALL make no extra Yazio request.
+
+#### Scenario: Gap filled from Yazio
+- **WHEN** a re-checked Open Food Facts entry still lacks salt and Yazio has the same EAN with salt on the same basis
+- **THEN** the entry's salt is the Yazio value, its provenance names `yazio` and the fetch time, and its other values are unchanged.
+
+#### Scenario: No Yazio, no match or another basis
+- **WHEN** Yazio is not configured, fails, has no product for the EAN, or reports another basis
+- **THEN** no field is filled from Yazio, the re-check still succeeds, and a Yazio failure is named in its notice.
+
+#### Scenario: Complete entry
+- **WHEN** the re-checked entry has every core field
+- **THEN** Yazio is not asked.
+
+#### Scenario: Open Food Facts later has the value or another basis
+- **WHEN** a later re-check returns the field from Open Food Facts, or returns the food on another basis
+- **THEN** the field no longer names `yazio` as its origin.
+
+#### Scenario: Lookup of a stale entry
+- **WHEN** a barcode lookup or a calculation re-checks a stale Open Food Facts entry
+- **THEN** Yazio is asked at most once, by the barcode chain itself.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._fill_from_yazio`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_stored`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.fill_gaps`; `tests/test_food_lookup_chain.py::LookupChainTests.test_a_re_check_fills_remaining_gaps_from_yazio_by_ean`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_fills_nothing_without_a_match_on_the_same_basis`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_complete_re_check_does_not_ask_yazio`, `tests/test_food_lookup_chain.py::LookupChainTests.test_a_basis_change_ends_a_yazio_fill`, `tests/test_food_lookup_chain.py::LookupChainTests.test_lookups_and_calculations_ask_yazio_at_most_once`.
