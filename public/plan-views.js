@@ -79,14 +79,24 @@ function plannedStepList(profile) {
   const axis = profile.axis === "distance" ? "distance" : "duration";
   const rows = segments.map((segment) => {
     const zone = Number.isInteger(segment.zone) && segment.zone >= 1 && segment.zone <= 7 ? segment.zone : null;
-    const size = Number(segment[axis]);
-    const extent = axis === "distance" ? distanceLabel(size) : size < 60 ? `${Math.round(size)} s` : AppFormat.duration(size);
+    // The zone text is the written zone target ("Z1–Z2"); a percent or watt target shows its own text instead.
+    const label = String(segment.label || "");
+    const written = /^Z([1-7])(?:\s*-\s*Z([1-7]))?/.exec(label);
+    const zoneText = written ? [written[1], written[2]].filter(Boolean).map((value) => `Z${value}`).join("–") : null;
+    const range = plannedStepRange(segment.range) || (written ? "" : label.slice(0, 40));
     return h("li", { dataset: { zone: zone || "unknown" } },
       h("span", { className: "planned-step-mark", "aria-hidden": "true" }),
-      h("span", "planned-step-text", [extent, zone ? `Z${zone}` : null].filter(Boolean).join(" · ")),
-      h("span", "planned-step-range", plannedStepRange(segment.range)));
+      h("span", "planned-step-text", [plannedStepExtent(Number(segment[axis]), axis), zoneText].filter(Boolean).join(" · ")),
+      h("span", "planned-step-range", range));
   });
   return h("ol", { className: "planned-steps", "aria-label": "Ablauf" }, rows);
+}
+
+// A step's exact length: "30 s", "1:30 min", "55 min", "1:10 h"; "400 m" below a kilometre.
+function plannedStepExtent(size, axis) {
+  if (axis === "distance") return size < 1000 ? `${Math.round(size)} m` : distanceLabel(size);
+  if (size < 60) return `${Math.round(size)} s`;
+  return size < 3600 && Math.round(size) % 60 ? `${AppFormat.clock(size)} min` : AppFormat.duration(size);
 }
 
 // "110–128 bpm", "≤ 109 bpm" for the lowest zone, "≥ 155 bpm" for the open top; pace in min/km, slower end first.
@@ -105,8 +115,9 @@ function plannedStepRange(range) {
 
 // The description without its step lines ("- 10m Z2 HR") and repeat headers ("4x").
 function plannedDescriptionText(text) {
-  const step = /^\s*-\s/;
-  const repeat = /^\s*(\S.*\s)?\d+\s*x\s*$/i;
+  // As the workout parser reads them: a step starts with "-", a repeat header ends with "4x".
+  const step = /^\s*-/;
+  const repeat = /\b\d+x\s*$/i;
   return String(text || "").split("\n").filter((line) => !step.test(line) && !repeat.test(line)).join("\n").trim();
 }
 
