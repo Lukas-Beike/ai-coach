@@ -6,12 +6,12 @@ import json
 import logging
 from typing import Any
 
-from backend.coach.attachments import model_input
 from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
 from backend.coach.request_payload import model_confirmed_steps
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest
 
 
 class CoachConversationRecoveryService:
@@ -32,8 +32,8 @@ class CoachConversationRecoveryService:
     def recover_if_invalid(
         self,
         exc: AppError,
-        payload: dict[str, Any],
-        request_payload: dict[str, Any],
+        request: ModelRequest,
+        turn_request: ModelRequest,
         *,
         context: dict[str, Any],
         message: str,
@@ -52,34 +52,33 @@ class CoachConversationRecoveryService:
             return False
 
         recovery_state["conversation_recovered"] = True
-        if payload.get("conversation"):
+        if request.conversation_id:
             with self._database_lock, self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, "openai_conversation_id", "")
-        for candidate in (request_payload, payload):
-            candidate.pop("conversation", None)
-        payload["input"] = model_input(
-            json.dumps(
-                {
-                    "dialogue": compact_coach_dialogue(
+        for candidate in (turn_request, request):
+            candidate.conversation_id = None
+        # The rebuilt dialogue carries the confirmed steps: no tool results to resend.
+        request.steps = []
+        request.input = json.dumps(
+            {
+                "dialogue": compact_coach_dialogue(
+                    context,
+                    select_coach_context(
+                        message,
                         context,
-                        select_coach_context(
-                            message,
-                            context,
-                            attachments=bool(attachments),
-                            has_receipts=bool(command_receipts),
-                        ),
+                        attachments=bool(attachments),
+                        has_receipts=bool(command_receipts),
                     ),
-                    "current_message": message,
-                    "confirmed_steps": model_confirmed_steps(command_receipts),
-                },
-                ensure_ascii=False,
-            ),
-            attachments,
+                ),
+                "current_message": message,
+                "confirmed_steps": model_confirmed_steps(command_receipts),
+            },
+            ensure_ascii=False,
         )
         # Later stateless rounds chain from the request's input, so they must
         # start from the rebuilt local dialogue and not the original input.
-        request_payload["input"] = payload["input"]
-        payload["instructions"] += (
+        turn_request.input = request.input
+        request.instructions += (
             "\nThe remote conversation was unavailable. Continue only unfinished work "
             "using local dialogue and confirmed_steps. Earlier image pixels may be "
             "unavailable; ask for missing evidence only if essential. Never invent "

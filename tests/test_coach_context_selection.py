@@ -48,7 +48,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             retain_openai_attachment_context=False,
             has_prior_openai_attachments=False,
         )
-        return {tool["name"] for tool in payload["tools"]}
+        return {tool["name"] for tool in payload.tools}
 
     def test_explicit_dates_without_planning_keywords_use_full_context(self):
         for message in (
@@ -769,7 +769,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             retain_openai_attachment_context=True,
             has_prior_openai_attachments=True,
         )
-        self.assertIsNone(json.loads(payload["input"])["pending_request"])
+        self.assertIsNone(json.loads(payload.input)["pending_request"])
 
 
 class CoachContextRuleTests(unittest.TestCase):

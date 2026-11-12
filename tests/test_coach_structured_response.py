@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest, ModelTurn
 
 
 class CoachStructuredResponseTests(unittest.TestCase):
@@ -22,12 +23,11 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.service = CoachStructuredResponseService(
             self.transport, self.recovery, self.retry, self.jobs
         )
-        self.payload: dict[str, Any] = {
-            "input": [{"role": "user", "content": "synthetic"}],
-            "model": "synthetic",
-        }
+        self.payload = ModelRequest(
+            model="synthetic", instructions="synthetic", input="synthetic"
+        )
         self.options: dict[str, Any] = {
-            "request_payload": self.payload,
+            "turn_request": self.payload,
             "context": {"synthetic": True},
             "message": "Synthetic question",
             "command_receipts": [],
@@ -40,7 +40,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
         }
 
     def test_request_streams_and_drops_deltas_when_no_stream_is_attached(self) -> None:
-        expected = {"id": "synthetic-response"}
+        expected = ModelTurn()
         self.transport.stream_request.return_value = expected
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
@@ -56,7 +56,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
     def test_job_marks_that_openai_was_reached_without_keeping_the_response_id(
         self,
     ) -> None:
-        expected = {"id": "synthetic-response"}
+        expected = ModelTurn()
 
         def finish(_payload, _on_delta, _cancel_event, on_response_id):
             on_response_id("resp-new")
@@ -73,7 +73,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
         )
 
     def test_rate_limit_retries_without_stream_delta(self) -> None:
-        expected = {"id": "after-retry"}
+        expected = ModelTurn()
         self.transport.stream_request.side_effect = [
             AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
             expected,
@@ -112,7 +112,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
     def test_invalid_conversation_recovery_retries_once_with_shared_payload(
         self,
     ) -> None:
-        expected = {"id": "recovered"}
+        expected = ModelTurn()
         self.transport.stream_request.side_effect = [
             AppError(
                 409,
@@ -162,48 +162,47 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.transport.stream_request.assert_called_once()
 
     @staticmethod
-    def _incomplete(*output: dict) -> dict:
-        return {
-            "id": "synthetic-incomplete",
-            "status": "incomplete",
-            "incomplete_details": {"reason": "max_output_tokens"},
-            "output": list(output),
-        }
+    def _incomplete(text: str = "", tool_calls: tuple[dict, ...] = ()) -> ModelTurn:
+        return ModelTurn(
+            text=text, tool_calls=list(tool_calls), stop_reason="max_tokens"
+        )
 
     def test_reasoning_only_token_exhaustion_repeats_with_the_larger_budget(
         self,
     ) -> None:
-        self.payload["max_output_tokens"] = 16_000
-        expected = {"id": "after-escalation", "status": "completed"}
-        responses = [self._incomplete({"type": "reasoning"}), expected]
+        self.payload.max_output_tokens = 16_000
+        expected = ModelTurn(text="Fertig")
+        responses = [self._incomplete(), expected]
         sent: list[int] = []
 
-        def request(payload, *_args, **_kwargs):
-            sent.append(payload["max_output_tokens"])
+        def serve(request, *_args, **_kwargs):
+            sent.append(request.max_output_tokens)
             return responses.pop(0)
 
-        self.transport.stream_request.side_effect = request
+        self.transport.stream_request.side_effect = serve
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
         self.assertEqual(sent, [16_000, 32_000])
         # Later tool rounds keep the larger budget.
-        self.assertEqual(self.payload["max_output_tokens"], 32_000)
+        self.assertEqual(self.payload.max_output_tokens, 32_000)
 
     def test_token_exhaustion_is_returned_when_text_or_a_tool_call_exists(
         self,
     ) -> None:
-        self.payload["max_output_tokens"] = 16_000
-        for item in (
-            {
-                "type": "message",
-                "content": [{"type": "output_text", "text": "Teilantwort"}],
-            },
-            {"type": "function_call", "name": "read_profile", "call_id": "call-1"},
+        self.payload.max_output_tokens = 16_000
+        for name, partial in (
+            ("text", self._incomplete("Teilantwort")),
+            (
+                "tool_call",
+                self._incomplete(
+                    tool_calls=({"call_id": "call-1", "name": "read_profile"},)
+                ),
+            ),
         ):
-            with self.subTest(item=item["type"]):
+            with self.subTest(item=name):
                 self.transport.stream_request.reset_mock()
-                response = self._incomplete(item)
+                response = partial
                 self.transport.stream_request.return_value = response
 
                 self.assertIs(
@@ -214,9 +213,9 @@ class CoachStructuredResponseTests(unittest.TestCase):
     def test_token_exhaustion_is_not_repeated_in_a_server_side_conversation(
         self,
     ) -> None:
-        self.payload["max_output_tokens"] = 16_000
-        self.payload["conversation"] = "conv-synthetic"
-        response = self._incomplete({"type": "reasoning"})
+        self.payload.max_output_tokens = 16_000
+        self.payload.conversation_id = "conv-synthetic"
+        response = self._incomplete()
         self.transport.stream_request.return_value = response
 
         self.assertIs(self.service.respond(self.payload, **self.options), response)
@@ -226,33 +225,33 @@ class CoachStructuredResponseTests(unittest.TestCase):
     def test_token_exhaustion_after_retryable_failures_still_gets_the_larger_budget(
         self,
     ) -> None:
-        self.payload["max_output_tokens"] = 16_000
+        self.payload.max_output_tokens = 16_000
         self.retry.retry_delay.return_value = 0.01
-        expected = {"id": "after-escalation", "status": "completed"}
+        expected = ModelTurn(text="Fertig")
         sent: list[int] = []
         responses = [
             AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
             AppError(429, "Synthetic rate limit", reason="rate_limit_exceeded"),
-            self._incomplete({"type": "reasoning"}),
+            self._incomplete(),
             expected,
         ]
 
-        def request(payload, *_args, **_kwargs):
-            sent.append(payload["max_output_tokens"])
+        def serve(request, *_args, **_kwargs):
+            sent.append(request.max_output_tokens)
             result = responses.pop(0)
             if isinstance(result, AppError):
                 raise result
             return result
 
-        self.transport.stream_request.side_effect = request
+        self.transport.stream_request.side_effect = serve
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
 
         self.assertEqual(sent, [16_000, 16_000, 16_000, 32_000])
 
     def test_token_exhaustion_is_not_repeated_at_the_larger_budget(self) -> None:
-        self.payload["max_output_tokens"] = 32_000
-        response = self._incomplete({"type": "reasoning"})
+        self.payload.max_output_tokens = 32_000
+        response = self._incomplete()
         self.transport.stream_request.return_value = response
 
         self.assertIs(self.service.respond(self.payload, **self.options), response)
@@ -277,9 +276,9 @@ class CoachTransientRetryTests(unittest.TestCase):
             CoachResponseRetryPolicy(Mock(spec=logging.Logger)),
             Mock(),
         )
-        self.payload: dict[str, Any] = {"input": [{"role": "user"}], "model": "m"}
+        self.payload = ModelRequest(model="m", instructions="synthetic")
         self.options: dict[str, Any] = {
-            "request_payload": self.payload,
+            "turn_request": self.payload,
             "context": {},
             "message": "Synthetic question",
             "command_receipts": [],
@@ -302,7 +301,7 @@ class CoachTransientRetryTests(unittest.TestCase):
         return AppError(status, "Synthetic provider failure", reason=reason)
 
     def test_gateway_and_network_failures_before_output_are_retried(self) -> None:
-        expected = {"id": "completed"}
+        expected = ModelTurn()
         for status, reason in (
             (502, "provider_unavailable"),
             (503, "provider_unavailable"),
@@ -328,14 +327,14 @@ class CoachTransientRetryTests(unittest.TestCase):
         failed = _ServerErrorFailure(
             502, "Synthetic provider failure", reason="response_failed"
         )
-        expected = {"id": "completed"}
+        expected = ModelTurn()
         self.transport.stream_request.side_effect = [failed, expected]
 
         self.assertIs(self.service.respond(self.payload, **self.options), expected)
         self.sleep.assert_called_once_with(2)
 
     def test_job_failure_after_the_response_started_is_requested_again(self) -> None:
-        expected = {"id": "completed"}
+        expected = ModelTurn()
         calls = 0
 
         def stream(_payload, _on_delta, _cancel_event, on_response_id):

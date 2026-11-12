@@ -20,6 +20,7 @@ from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
     validate_packaging_extraction,
 )
+from backend.providers.model_seam import ModelTurn
 
 
 class NutritionProductContractTests(unittest.TestCase):
@@ -556,7 +557,7 @@ class NutritionProductContractTests(unittest.TestCase):
         }
         extractor = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna",
-            openai_request=lambda _path, _payload: response,
+            complete=lambda _request: ModelTurn(text=response["output_text"]),
         )
         self.service = self.build_service(photo_extractor=extractor)
         data_url = "data:image/jpeg;base64," + base64.b64encode(

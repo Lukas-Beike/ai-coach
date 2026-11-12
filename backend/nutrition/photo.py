@@ -12,7 +12,7 @@ from typing import Any
 
 from backend.errors import AppError
 from backend.nutrition.models import ambiguous_number_text, nutrition_number
-from backend.providers.openai_responses import response_text
+from backend.providers.model_seam import ModelRequest, ModelTurn
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 # Body cap of the extract route: the base64 data URL of the largest accepted
@@ -179,12 +179,10 @@ class NutritionPhotoExtractionService:
         self,
         *,
         selected_model: Callable[[], str] | None = None,
-        openai_request: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
-        openai_path: str = "/v1/responses",
+        complete: Callable[[ModelRequest], ModelTurn] | None = None,
     ) -> None:
         self._selected_model = selected_model
-        self._openai_request = openai_request
-        self._openai_path = openai_path
+        self._complete = complete
 
     def extract(self, data_url: Any) -> dict[str, Any]:
         mime, image = _image_data(data_url)
@@ -215,33 +213,18 @@ class NutritionPhotoExtractionService:
     def _request_text(
         self, model: str, mime: str, encoded: str, instruction: str
     ) -> str:
-        if self._openai_request is None:
+        if self._complete is None:
             raise AppError(
                 503,
                 "Der OpenAI-Dienst ist nicht verfügbar.",
                 reason="provider_unavailable",
             )
-        response = self._openai_request(
-            self._openai_path,
-            {
-                "model": model,
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": instruction},
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:{mime};base64,{encoded}",
-                            },
-                        ],
-                    }
-                ],
-                "text": {"format": {"type": "json_object"}},
-            },
-        )
-        return _openai_text(response)
-
-
-def _openai_text(response: Any) -> str:
-    return response_text(response) if isinstance(response, dict) else ""
+        return self._complete(
+            ModelRequest(
+                model=model,
+                input=instruction,
+                images=[{"mime": mime, "data": encoded}],
+                json_output=True,
+                stateless=False,
+            )
+        ).text

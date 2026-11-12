@@ -1328,12 +1328,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_coach_response_transport.py",
-      "code": "var-annotated",
-      "message_sha256": "6797e377ccdd96cb1a1ba656b01f06555b2805a23eead0e2b58e0de11bf46a87"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_http_athlete_get_routes.py",
       "code": "var-annotated",
       "message_sha256": "75715854f4847bc1944b040c7bd84fd225a3efcc6273f1e40bf445cc371ee603"

@@ -8,8 +8,11 @@ import threading
 import unittest
 from unittest.mock import MagicMock, Mock
 
+from backend.coach.attachments import model_attachments
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.errors import AppError
+from backend.providers.model_seam import ModelRequest, ModelStep
+from backend.providers.openai_responses_adapter import request_payload
 
 PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
@@ -38,26 +41,23 @@ class CoachConversationRecoveryTests(unittest.TestCase):
     def recover(
         self,
         *,
-        payload=None,
-        request_payload=None,
+        remote=True,
         attempt=0,
         request_delta_emitted=False,
         recovery_state=None,
         attachments=None,
     ):
-        payload = (
-            payload
-            if payload is not None
-            else {
-                "conversation": "remote-id",
-                "input": "old",
-                "instructions": "base",
-            }
+        conversation_id = "remote-id" if remote else None
+        request = ModelRequest(
+            model="m",
+            instructions="base",
+            input="old",
+            attachments=model_attachments(attachments or []),
+            conversation_id=conversation_id,
+            steps=[ModelStep([], [{"call_id": "c", "output": "{}"}])],
         )
-        request_payload = (
-            request_payload
-            if request_payload is not None
-            else {"conversation": "remote-id"}
+        turn_request = ModelRequest(
+            model="m", instructions="base", conversation_id=conversation_id
         )
         recovery_state = (
             recovery_state
@@ -66,8 +66,8 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         )
         result = self.service.recover_if_invalid(
             self.error,
-            payload,
-            request_payload,
+            request,
+            turn_request,
             context={"prior": "lokal"},
             message="Bitte fortsetzen",
             command_receipts=[{"tool": "read_training_state", "result": {"ok": True}}],
@@ -76,32 +76,32 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             request_delta_emitted=request_delta_emitted,
             attempt=attempt,
         )
-        return result, payload, request_payload, recovery_state
+        return result, request, turn_request, recovery_state
 
     def test_remote_conversation_is_cleared_and_local_context_rebuilt(
         self,
     ) -> None:
-        recovered, payload, request_payload, state = self.recover()
+        recovered, request, turn_request, state = self.recover()
         self.assertTrue(recovered)
         self.assertTrue(state["conversation_recovered"])
-        self.assertNotIn("conversation", payload)
-        self.assertNotIn("conversation", request_payload)
+        self.assertIsNone(request.conversation_id)
+        self.assertIsNone(turn_request.conversation_id)
+        # The rebuilt dialogue replaces the tool results of the failed follow-up.
+        self.assertEqual(request.steps, [])
         self.key_values.set.assert_called_once_with(
             self.db, "openai_conversation_id", ""
         )
-        recovery_input = json.loads(payload["input"])
+        recovery_input = json.loads(request.input)
         self.assertEqual(recovery_input["dialogue"], {"prior": "lokal"})
         self.assertEqual(recovery_input["current_message"], "Bitte fortsetzen")
         self.assertTrue(recovery_input["confirmed_steps"][0]["result"]["ok"])
-        self.assertIn("Never invent attachment details", payload["instructions"])
+        self.assertIn("Never invent attachment details", request.instructions)
         # Later stateless tool rounds seed their chain from the request's input.
-        self.assertEqual(request_payload["input"], payload["input"])
+        self.assertEqual(turn_request.input, request.input)
         self.logger.warning.assert_called_once()
 
     def test_no_remote_conversation_does_not_clear_stored_conversation(self) -> None:
-        recovered, _, _, _ = self.recover(
-            payload={"input": "old", "instructions": "base"}
-        )
+        recovered, _, _, _ = self.recover(remote=False)
         self.assertTrue(recovered)
         self.manager.unit_of_work.assert_not_called()
         self.key_values.set.assert_not_called()
@@ -128,14 +128,15 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             "mime": "image/png",
             "data": PNG,
         }
-        recovered, payload, _, _ = self.recover(attachments=[attachment])
+        recovered, request, _, _ = self.recover(attachments=[attachment])
         self.assertTrue(recovered)
+        parts = request_payload(request)["input"][0]["content"]
         self.assertEqual(
-            payload["input"][0]["content"][1]["text"],
+            parts[1]["text"],
             json.dumps({"untrusted_attachment_name": "Beweis.png"}, ensure_ascii=False),
         )
         self.assertEqual(
-            payload["input"][0]["content"][2]["image_url"],
+            parts[2]["image_url"],
             "data:image/png;base64," + PNG,
         )
 

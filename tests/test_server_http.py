@@ -43,6 +43,8 @@ from backend.http_api.state_events_transport import StateEventTransport
 from backend.providers import http as provider_http
 from backend.providers import openai_requests, openai_stream
 from backend.providers import weather as weather_provider
+from backend.providers.model_seam import ModelRequest
+from backend.providers.openai_responses_adapter import request_payload
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -1981,18 +1983,18 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(summary["status"]["state"], "ok")
 
     def test_responses_request_routes_openai_to_provider_client(self):
-        payload = {"model": "gpt-6-luna"}
+        request = ModelRequest(model="gpt-6-luna", instructions="")
         with patch.object(
             openai_requests.OpenAIResponsesClient,
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.COACH_CONVERSATION.response_transport().request(payload)
-        self.assertEqual(result["output_text"], "ok")
-        responses.assert_called_once_with(payload)
+            result = server.COACH_CONVERSATION.response_transport().request(request)
+        self.assertEqual(result.text, "ok")
+        responses.assert_called_once_with(request_payload(request))
 
     def test_responses_stream_request_routes_openai_to_provider_client(self):
-        payload = {"model": "gpt-6-luna"}
+        request = ModelRequest(model="gpt-6-luna", instructions="")
         cancel_event = threading.Event()
         on_delta = Mock()
         on_response_id = Mock()
@@ -2003,12 +2005,12 @@ class ServerHttpTests(ServerTestCase):
             return_value={"status": "completed"},
         ) as stream:
             result = server.COACH_CONVERSATION.response_transport().stream_request(
-                payload, on_delta, cancel_event, on_response_id
+                request, on_delta, cancel_event, on_response_id
             )
 
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result.stop_reason, "completed")
         stream.assert_called_once_with(
-            payload,
+            request_payload(request),
             on_delta,
             cancel_event=cancel_event,
             on_response_id=on_response_id,

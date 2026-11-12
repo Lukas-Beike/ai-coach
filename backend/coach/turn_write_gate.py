@@ -9,6 +9,8 @@ from typing import Any
 from backend.coach.context_selection import request_chain_ids, select_coach_context
 from backend.coach.tool_specs import TOOL_DOMAIN, UNGATED_TOOLS
 from backend.coach.write_gate import (
+    CLASSIFIER_INSTRUCTIONS,
+    CLASSIFIER_SCHEMA,
     REMOTE_DENIALS,
     REMOTE_GARMIN,
     REMOTE_INTERVALS,
@@ -20,8 +22,45 @@ from backend.coach.write_gate import (
     TurnGateState,
     build_turn_authority,
     check_write,
+    classifier_input,
     illness_override_confirmed,
+    parse_verdict,
 )
+from backend.providers.model_seam import ModelRequest, ModelTurn
+
+
+def build_impact_classifier(
+    complete: Callable[[ModelRequest], ModelTurn],
+    *,
+    model: str,
+    reasoning_effort: str | None = None,
+) -> ImpactClassifier:
+    """Build a classifier over an injected one-shot model call.
+
+    ``complete`` sends the request and returns the model's turn. Invalid output
+    confirms nothing; transport errors propagate to ``check_write``, which fails
+    closed.
+    """
+
+    def classify(
+        current_text: str, previous_assistant_text: str, origin_text: str = ""
+    ) -> ImpactVerdict:
+        turn = complete(
+            ModelRequest(
+                model=model,
+                instructions=CLASSIFIER_INSTRUCTIONS,
+                input=classifier_input(
+                    current_text, previous_assistant_text, origin_text
+                ),
+                reasoning_effort=reasoning_effort,
+                max_output_tokens=1024,
+                output_schema={"name": "write_impact", "schema": CLASSIFIER_SCHEMA},
+            )
+        )
+        return parse_verdict(turn.text)
+
+    return classify
+
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
 _NOT_PERFORMED = (

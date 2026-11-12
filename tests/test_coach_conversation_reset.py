@@ -238,7 +238,7 @@ class CoachConversationResetTests(unittest.TestCase):
         self.service.reset()
         self.finish_remote_delete()
         client = Mock()
-        client.request.return_value = {"id": "new-openai-id"}
+        client.create_conversation.return_value = "new-openai-id"
         provision = CoachConversationProvisionService(
             self.database_manager,
             self.key_values,
@@ -248,7 +248,7 @@ class CoachConversationResetTests(unittest.TestCase):
         )
 
         self.assertEqual(provision.ensure(), "new-openai-id")
-        client.request.assert_called_once()
+        client.create_conversation.assert_called_once()
         self.assertEqual(self.read("openai_conversation_id"), "new-openai-id")
 
     def test_repeated_reset_is_idempotent_and_deletes_the_remote_chat_once(

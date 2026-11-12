@@ -17,6 +17,7 @@ from backend.coach import streams as coach_streams
 from backend.errors import AppError, ClientDisconnected
 from backend.providers import calendar as calendar_provider
 from backend.providers import http as provider_http
+from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses import response_text
 from backend.providers.transport_assembly import ProviderTransportAssembly
 from backend.sync import freshness as sync_freshness
@@ -244,7 +245,8 @@ class ServerProvidersTests(ServerTestCase):
             ) as urlopen,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "foundry-deployment"}, lambda _: None
+                ModelRequest(model="foundry-deployment", instructions=""),
+                lambda _: None,
             )
 
         self.assertEqual(
@@ -270,7 +272,7 @@ class ServerProvidersTests(ServerTestCase):
             ),
         ):
             server.COACH_CONVERSATION.response_transport().request(
-                {"model": "gpt-6-luna", "input": "test"}
+                ModelRequest(model="gpt-6-luna", instructions="", input="test")
             )
         self.assertEqual(captured["reasoning"], {"effort": "low"})
 
@@ -298,15 +300,11 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIsNotNone(server.COACH_BACKGROUND_JOBS.job_store().claim())
         deltas = []
 
-        def streamed_response(_payload, on_delta, _cancel_event, **kwargs):
+        def streamed_response(_request, on_delta, _cancel_event, **kwargs):
             if kwargs.get("on_response_id"):
                 kwargs["on_response_id"]("resp_attached_stream")
             on_delta("Heute locker.")
-            return {
-                "id": "resp_attached_stream",
-                "status": "completed",
-                "output_text": "Heute locker.",
-            }
+            return ModelTurn(text="Heute locker.", stop_reason="completed")
 
         with patch.object(
             server.COACH_CONVERSATION, "response_transport"
@@ -695,7 +693,7 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, lambda _: None
+                ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
         self.assertEqual(raised.exception.retry_after_seconds, 9)
@@ -724,7 +722,7 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, lambda _: None
+                ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
         captured = server.DIAGNOSTIC_CAPTURE.entries()
@@ -780,10 +778,10 @@ class ServerProvidersTests(ServerTestCase):
             provider_http, "urlopen", return_value=FakeResponse()
         ) as urlopen:
             result = server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, deltas.append
+                ModelRequest(model="gpt-6-luna", instructions=""), deltas.append
             )
         self.assertEqual("".join(deltas), "Hallo")
-        self.assertEqual(result["id"], "resp-test")
+        self.assertEqual(result.text, "Hallo")
         request = urlopen.call_args.args[0]
         self.assertTrue(json.loads(request.data)["stream"])
         self.assertEqual(request.get_header("Accept"), "text/event-stream")
@@ -817,7 +815,7 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, lambda _: None
+                ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
 
         self.assertEqual(raised.exception.status, 502)
@@ -844,7 +842,9 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, lambda _: None, cancel_event
+                ModelRequest(model="gpt-6-luna", instructions=""),
+                lambda _: None,
+                cancel_event,
             )
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         urlopen.assert_not_called()
@@ -872,7 +872,7 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(AppError) as raised,
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"}, lambda _: None
+                ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "provider_timeout")
         self.assertEqual(raised.exception.status, 504)
@@ -913,7 +913,7 @@ class ServerProvidersTests(ServerTestCase):
             self.assertRaises(ClientDisconnected),
         ):
             server.COACH_CONVERSATION.response_transport().stream_request(
-                {"model": "gpt-6-luna"},
+                ModelRequest(model="gpt-6-luna", instructions=""),
                 lambda _: (_ for _ in ()).throw(ClientDisconnected()),
             )
         self.assertEqual(

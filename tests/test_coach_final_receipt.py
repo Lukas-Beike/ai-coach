@@ -12,6 +12,7 @@ from support import temp_database
 
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.db.repositories import ChatRepository, KeyValueRepository
+from backend.providers.model_seam import ModelTurn
 from backend.runtime.events import StateEventBuffer
 
 
@@ -61,7 +62,7 @@ class CoachFinalReceiptTests(unittest.TestCase):
         final = self.service.build(
             receipt,
             status="awaiting_clarification",
-            response={"status": "incomplete"},
+            turn=ModelTurn(stop_reason="max_tokens"),
             client_turn_id="turn-1",
             command_receipts=steps,
             sync_job_ids=["sync-1"],
@@ -166,7 +167,7 @@ class CoachFinalReceiptTests(unittest.TestCase):
         final = self.service.build(
             {"text": "Fertig"},
             status="completed",
-            response={},
+            turn=ModelTurn(),
             client_turn_id="turn-1",
             command_receipts=steps,
             sync_job_ids=[],
@@ -216,7 +217,7 @@ class CoachFinalReceiptTests(unittest.TestCase):
         final = self.service.build(
             {"text": "Fertig"},
             status="completed",
-            response={},
+            turn=ModelTurn(),
             client_turn_id="turn-1",
             command_receipts=steps,
             sync_job_ids=[],

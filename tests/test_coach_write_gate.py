@@ -15,7 +15,9 @@ from backend.coach.proposal_models import (
 )
 from backend.coach.tool_registry import build_tool_contracts
 from backend.coach.training_template_tools import TrainingTemplateToolService
-from backend.coach.turn_write_gate import CoachTurnWriteGate
+from backend.coach.turn_write_gate import CoachTurnWriteGate, build_impact_classifier
+from backend.providers.model_seam import ModelTurn
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 _DELETE_TOOLS = (
     "delete_competition",
@@ -964,12 +966,13 @@ class WriteCapTests(unittest.TestCase):
 
 class OpenAIClassifierTests(unittest.TestCase):
     def _classifier(self, response, calls):
-        def create_response(payload):
-            calls.append(payload)
-            return response
+        def complete(request):
+            # Assert what goes on the wire: the request through the OpenAI adapter.
+            calls.append(request_payload(request))
+            return model_turn(response)
 
-        return gate.build_openai_impact_classifier(
-            create_response, model="test-model", reasoning_effort="low"
+        return build_impact_classifier(
+            complete, model="test-model", reasoning_effort="low"
         )
 
     def test_payload_uses_strict_schema_without_remote_domain(self):
@@ -1032,8 +1035,8 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_reasoning_is_omitted_without_effort(self):
         calls = []
-        classify = gate.build_openai_impact_classifier(
-            lambda payload: calls.append(payload) or {"output_text": "{}"},
+        classify = build_impact_classifier(
+            lambda request: calls.append(request_payload(request)) or ModelTurn(),
             model="m",
         )
         classify("x", "y", "")
@@ -1041,9 +1044,11 @@ class OpenAIClassifierTests(unittest.TestCase):
 
     def test_output_items_are_parsed(self):
         text = '{"requests":[{"domain":"planning","delete":false,"bulk":true}]}'
+        # Only the message text is the verdict (#2073): a reasoning item's text,
+        # which the former parser could pick first, is never read.
         response = {
             "output": [
-                {"type": "reasoning", "summary": []},
+                {"type": "reasoning", "content": [{"type": "text", "text": "x"}]},
                 {"type": "message", "content": [{"type": "output_text", "text": text}]},
             ]
         }
@@ -1064,6 +1069,19 @@ class OpenAIClassifierTests(unittest.TestCase):
             {
                 "output_text": '{"requests":[{"domain":"remote_intervals",'
                 '"delete":true},{"domain":"admin"},{"domain":["profile"]},3]}'
+            },
+            # Two message text parts are one joined text, not a JSON verdict
+            # (#2073): the classifier confirms nothing.
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": '{"requests":[]}'},
+                            {"type": "output_text", "text": "{}"},
+                        ],
+                    }
+                ]
             },
         ):
             with self.subTest(response=response):
@@ -1097,7 +1115,7 @@ class OpenAIClassifierTests(unittest.TestCase):
         def broken(_payload):
             raise OSError("network down")
 
-        classify = gate.build_openai_impact_classifier(broken, model="m")
+        classify = build_impact_classifier(broken, model="m")
         decision = _check("delete_competition", "Lösch das", classifier=classify)
         self.assertFalse(decision.allowed)
 

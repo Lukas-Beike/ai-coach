@@ -38,6 +38,7 @@ from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.providers.calendar import parse_ical_calendar
+from backend.providers.model_seam import ModelRequest
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server
@@ -645,7 +646,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             if len(emitted) == 1:
                 cancel_event.set()
 
-        payload = {"input": json.dumps({"current_message": "E2E fixture: slow stream"})}
+        payload = ModelRequest(
+            model="fixture",
+            instructions="",
+            input=json.dumps({"current_message": "E2E fixture: slow stream"}),
+        )
         with self.assertRaises(AppError) as fixture_error:
             fixture_runtime.FixtureResponseTransport().stream_request(
                 payload, on_text_delta, cancel_event=cancel_event
@@ -673,7 +678,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         cancel_event = threading.Event()
         cancel_event.set()
         emitted = []
-        payload = {"input": json.dumps({"current_message": "E2E fixture: slow stream"})}
+        payload = ModelRequest(
+            model="fixture",
+            instructions="",
+            input=json.dumps({"current_message": "E2E fixture: slow stream"}),
+        )
 
         with self.assertRaises(AppError) as raised:
             fixture_runtime.FixtureResponseTransport().stream_request(
@@ -996,8 +1005,13 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
         transport = fixture_runtime.FixtureResponseTransport()
         state = Mock()
         calls = [
-            lambda: transport.request({"input": "{}"}),
-            lambda: transport.stream_request({"input": "{}"}, lambda _delta: None),
+            lambda: transport.request(
+                ModelRequest(model="fixture", instructions="", input="{}")
+            ),
+            lambda: transport.stream_request(
+                ModelRequest(model="fixture", instructions="", input="{}"),
+                lambda _delta: None,
+            ),
         ]
         with (
             patch.dict(os.environ, {"FIXTURE_OPENAI_MODE": "offline"}),
@@ -1030,9 +1044,11 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             ) as canned,
         ):
             os.environ.pop("FIXTURE_OPENAI_MODE", None)
-            result = transport.request({"input": "{}"})
+            result = transport.request(
+                ModelRequest(model="fixture", instructions="", input="{}")
+            )
 
-        self.assertEqual(result, {"output_text": "canned"})
+        self.assertEqual(result.text, "canned")
         canned.assert_called_once()
 
     def test_unknown_openai_mode_is_rejected_at_startup(self):
