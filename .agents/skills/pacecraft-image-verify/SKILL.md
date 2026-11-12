@@ -15,4 +15,5 @@ prints the digest of the tag and of `latest`. Exit 0 the tag exists and
 missing tag: do not update the container; 2 the registry could not be read.
 
 Run it immediately before the container update, and again with `--running`
-after it, taking the running digest from the Unraid MCP's container details.
+after it, taking the running digest from the Unraid MCP's container details:
+the repository digest (`ghcr.io/...@sha256:...`), not the local image ID.
