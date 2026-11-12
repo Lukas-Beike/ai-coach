@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,11 @@ NON_SOURCE_DIRECTORIES = {
 # within this path budget, while mypy reads the complete list from an argument
 # file to keep cross-module analysis.
 COMMAND_LINE_PATH_BUDGET = 30000
+# Sonar's JavaScript rules S3776 (cognitive complexity) and S3358 (nested
+# ternary) through eslint-plugin-sonarjs. CI's quality job installs no Node
+# packages, so there the step reports that it was skipped; the pre-push hook
+# points PACECRAFT_NODE_MODULES at the clone because its HEAD export has none.
+ESLINT_CONFIG = ROOT / "tools/eslint.sonar.config.mjs"
 
 
 def tool_command(tool: str) -> list[str]:
@@ -223,6 +229,61 @@ def cognitive_diagnostics(root: Path, files: list[str]) -> list[dict]:
     return diagnostics
 
 
+def eslint_script() -> Path | None:
+    modules = os.environ.get("PACECRAFT_NODE_MODULES")
+    script = Path(modules or ROOT / "node_modules") / "eslint/bin/eslint.js"
+    return script if script.is_file() and shutil.which("node") else None
+
+
+def javascript_diagnostics(root: Path) -> list[dict] | None:
+    """Sonar's complexity and nested-ternary rules for public/*.js; None if skipped."""
+    script = eslint_script()
+    if script is None:
+        print("Quality ratchet: ESLint not installed (npm ci); skipped public/*.js")
+        return None
+    files = sorted(
+        path.relative_to(root).as_posix() for path in (root / "public").glob("*.js")
+    )
+    if not files:
+        return []
+    output = run(
+        [
+            "node",
+            str(script),
+            "--no-config-lookup",
+            "--config",
+            str(ESLINT_CONFIG),
+            "--format",
+            "json",
+            *files,
+        ],
+        root,
+    )
+    diagnostics = []
+    for result in json.loads(output):
+        path = Path(result["filePath"]).resolve().relative_to(root.resolve()).as_posix()
+        lines = (root / path).read_text(encoding="utf-8").splitlines()
+        for item in result["messages"]:
+            if not item.get("ruleId"):
+                raise RuntimeError(f"ESLint could not check {path}: {item['message']}")
+            # Sonar suppresses an issue on a line marked NOSONAR.
+            if "NOSONAR" in lines[item["line"] - 1]:
+                continue
+            # The score changes with the code and is not part of the identity.
+            message = re.sub(r"\b\d+\b", "N", item["message"])
+            diagnostics.append(
+                {
+                    "tool": "eslint",
+                    "path": path,
+                    "line": item["line"],
+                    "column": item["column"],
+                    "code": item["ruleId"],
+                    "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
+                }
+            )
+    return diagnostics
+
+
 def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
     files = source_files(root)
     if not files:
@@ -274,6 +335,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
         if item["severity"] == "error":
             diagnostics.append(diagnostic("mypy", item, root))
     diagnostics.extend(cognitive_diagnostics(root, files))
+    diagnostics.extend(javascript_diagnostics(root) or [])
 
     return versions, sorted(
         diagnostics, key=lambda item: json.dumps(item, sort_keys=True)
@@ -331,7 +393,12 @@ def aligned_baseline(baseline_text: str, requirements: str) -> str | None:
     return json.dumps(baseline, indent=2) + "\n"
 
 
-def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> int:
+def check(
+    baseline: dict,
+    versions: dict[str, str],
+    diagnostics: list[dict],
+    skipped: tuple[str, ...] = (),
+) -> int:
     if baseline["schema"] != 1:
         raise RuntimeError("Quality baseline schema does not match")
     if baseline["versions"] != versions:
@@ -341,14 +408,15 @@ def check(baseline: dict, versions: dict[str, str], diagnostics: list[dict]) -> 
             "--align-versions` and commit tests/fixtures/quality_baseline.json."
         )
     if any(
-        item.get("tool") not in {*TOOLS, COGNITIVE}
+        item.get("tool") not in {*TOOLS, COGNITIVE, "eslint"}
         for item in [*baseline["diagnostics"], *diagnostics]
     ):
         raise RuntimeError(
-            "Quality baseline supports Ruff, mypy and cognitive complexity "
-            "diagnostics only"
+            "Quality baseline supports Ruff, mypy, cognitive complexity and "
+            "ESLint diagnostics only"
         )
-    added, obsolete = compare(baseline["diagnostics"], diagnostics)
+    expected = [item for item in baseline["diagnostics"] if item["tool"] not in skipped]
+    added, obsolete = compare(expected, diagnostics)
     for label, items in (("NEW", added), ("OBSOLETE", obsolete)):
         for item in items:
             location = (
@@ -407,7 +475,10 @@ def main() -> int:
         )
         return 0
     return check(
-        json.loads(BASELINE.read_text(encoding="utf-8")), versions, diagnostics
+        json.loads(BASELINE.read_text(encoding="utf-8")),
+        versions,
+        diagnostics,
+        () if eslint_script() else ("eslint",),
     )
 
 

@@ -76,7 +76,12 @@ no scan. After a clean scan the hook runs CI's repository quality ratchet
 (`python tools/quality_baseline.py`: mypy and Ruff, about 35 seconds
 on Windows) on a clean export of HEAD; new findings block the push. The same
 ratchet reports a function above Sonar's cognitive complexity 15 (rule
-`python:S3776`) as a `cognitive` finding named by function, not score. Do not use `--no-verify`.
+`python:S3776`) as a `cognitive` finding named by function, not score. It
+also checks `public/*.js` for Sonar's cognitive complexity above 15
+(S3776) and nested ternaries (S3358) through `eslint-plugin-sonarjs`, using the
+clone's `node_modules` (`npm ci`); without them it prints that it skipped the
+check, as in CI's `quality` job, and a `NOSONAR` comment on the reported line
+suppresses a finding as it does in Sonar. Do not use `--no-verify`.
 
 Enable the hook in each clone (the relative path also works in its worktrees):
 
