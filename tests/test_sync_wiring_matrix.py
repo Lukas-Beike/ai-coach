@@ -483,7 +483,7 @@ class RunningProbeWiringTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(probes))
         probe = cast(ast.Dict, probes[0])
-        self.assertEqual(["WAHOO_ID"], [ast.unparse(key) for key in probe.keys])
+        self.assertEqual(["WAHOO_ID"], [ast.unparse(key) for key in probe.keys if key])
         self.assertIn("WAHOO_SYNC.sync_service().running()", ast.unparse(probe))
 
 
