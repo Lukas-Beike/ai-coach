@@ -2,8 +2,9 @@
 
     python scripts/check_changed.py [--base origin/develop] [--js]
 
-Every step runs even after a failure. One line per step, then the last lines of
-each failed step's output. Node tests run with --js or when the diff against the
+Every step runs even after a failure. One line per step; for each failed step its
+unittest FAIL/ERROR lines, the last lines of its output, and the path of a
+temporary file with its full output. Node tests run with --js or when the diff against the
 base touches a .js, .cjs or .mjs file. Exit 0: all passed; 1: a step failed;
 2: bad base ref or a tool is missing.
 """
@@ -11,8 +12,10 @@ base touches a .js, .cjs or .mjs file. Exit 0: all passed; 1: a step failed;
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -21,14 +24,16 @@ from gh_cli import CliError, git
 ROOT = Path(__file__).resolve().parents[1]
 JS_SUFFIXES = (".js", ".cjs", ".mjs")
 TAIL_LINES = 20
+# The unittest lines that name a failed test; they sit far above the tail.
+FAILED_TEST = re.compile(r"^(?:FAIL|ERROR): ")
 
 
 class MissingTool(Exception):
     """A step's program is not installed."""
 
 
-def run_step(argv: list[str]) -> tuple[bool, float, list[str]]:
-    """Run one step; return (passed, seconds, tail of its combined output)."""
+def run_step(argv: list[str]) -> tuple[bool, float, str]:
+    """Run one step; return (passed, seconds, its combined output)."""
     started = time.monotonic()
     try:
         done = subprocess.run(
@@ -45,8 +50,27 @@ def run_step(argv: list[str]) -> tuple[bool, float, list[str]]:
     except FileNotFoundError as exc:
         raise MissingTool(f"{argv[0]} is not installed.") from exc
     seconds = time.monotonic() - started
-    tail = (done.stdout or "").strip().splitlines()[-TAIL_LINES:]
-    return done.returncode == 0, seconds, tail
+    return done.returncode == 0, seconds, done.stdout or ""
+
+
+def failure_report(name: str, output: str) -> list[str]:
+    """The failed test names, the tail and where the full output was kept."""
+    lines = output.strip().splitlines()
+    named = [line for line in lines if FAILED_TEST.match(line)]
+    report = [*named, *lines[-TAIL_LINES:]]
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            prefix=f"check-changed-{name}-",
+            suffix=".log",
+            delete=False,
+        ) as log:
+            log.write(output)
+    except OSError:
+        # A full or unwritable temp directory must not stop the later steps.
+        return report
+    return [*report, f"full output: {log.name}"]
 
 
 def run_steps(steps: list[tuple[str, list[str]]]) -> int:
@@ -54,7 +78,7 @@ def run_steps(steps: list[tuple[str, list[str]]]) -> int:
     failed = missing = False
     for name, argv in steps:
         try:
-            passed, seconds, tail = run_step(argv)
+            passed, seconds, output = run_step(argv)
         except MissingTool as exc:
             print(f"FAILED {name} (0.0s)\n  {exc}")
             missing = True
@@ -62,7 +86,7 @@ def run_steps(steps: list[tuple[str, list[str]]]) -> int:
         print(f"{'ok' if passed else 'FAILED'} {name} ({seconds:.1f}s)")
         if not passed:
             failed = True
-            for line in tail:
+            for line in failure_report(name, output):
                 print(f"  {line}")
     if missing:
         return 2
