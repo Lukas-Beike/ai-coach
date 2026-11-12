@@ -15,21 +15,26 @@ function contextFor(globals) {
   return vm.isContext(globals) ? globals : vm.createContext(globals);
 }
 
-// Runs whole public files (one name or a list, in order) and returns the context.
+// Scripts that render get the element helpers of components.js unless the test stubs them.
+function provideElementHelpers(files, globals) {
+  if ([files].flat().includes("components.js") || !globals.document || "h" in globals) return;
+  const { h, table } = extractFunctions("components.js", ["h", "table"], { document: globals.document });
+  Object.assign(globals, { h, table });
+}
+
+// Runs whole public files (one name or a list, in order) and returns the context. The element
+// helpers arrive after the files ran, as components.js loads after them in index.html.
 function loadPublicScript(files, globals = {}) {
   const context = contextFor(globals);
   for (const file of [files].flat()) new vm.Script(readPublic(file), { filename: file }).runInContext(context); // NOSONAR: test-only, runs the repository's own public/ files.
+  provideElementHelpers(files, context);
   return context;
 }
 
 // Runs only the named function declarations or consts of a public file (top level, or directly
 // inside a wrapping IIFE) and publishes each name as a property of the returned context.
-// Scripts that render get the element helpers of components.js unless the test stubs them.
 function extractFunctions(file, names, globals = {}) {
-  if (file !== "components.js" && globals.document && !("h" in globals)) {
-    const { h, table } = extractFunctions("components.js", ["h", "table"], { document: globals.document });
-    Object.assign(globals, { h, table });
-  }
+  provideElementHelpers(file, globals);
   const source = readPublic(file);
   const found = new Map();
   const outer = (item) => !item.parentPath.scope.parent?.parent;
