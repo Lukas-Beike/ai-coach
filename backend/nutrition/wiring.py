@@ -29,7 +29,6 @@ from backend.runtime import clock as runtime_clock
 @dataclass(frozen=True)
 class NutritionServices:
     secret_values: Callable[[], tuple[str, ...]]
-    food_database: Callable[[], FoodDatabaseService]
     food_mirror: Callable[[], FoodDatabaseMirror]
     meal_library_service: Callable[[], NutritionMealLibraryService]
     product_catalog_service: Callable[[], ProductCatalogService]
@@ -99,7 +98,6 @@ def build_nutrition(ctx: AppContext) -> NutritionServices:
     return NutritionServices(
         # Runtime-only provider tokens for the log redactor.
         secret_values=food_database.yazio_secret_values,
-        food_database=lambda: food_database,
         food_mirror=lambda: mirror,
         meal_library_service=meal_library_service,
         product_catalog_service=lambda: meal_library_service().product_catalog,

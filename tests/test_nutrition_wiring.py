@@ -55,6 +55,35 @@ class NutritionBuilderTests(unittest.TestCase):
             config=self.config, api_client=client.return_value, diary_service="diary"
         )
 
+    def test_each_owner_reaches_its_parameter(self) -> None:
+        ctx = Mock()
+        ctx.athlete_profile.get.return_value = {"sex": "female"}
+        with (
+            patch.object(nutrition_wiring, "OpenFoodFactsClient") as off,
+            patch.object(nutrition_wiring, "YazioClient") as yazio,
+            patch.object(nutrition_wiring, "NutritionMealLibraryService") as library,
+            patch.object(nutrition_wiring, "NutritionDiaryService") as diary,
+            patch.object(nutrition_wiring, "NutritionWebSearchService") as search,
+        ):
+            nutrition_wiring.build_nutrition(ctx).diary_service()
+
+        off.assert_called_once_with(opener=ctx.observed_opener.return_value)
+        self.assertEqual(
+            ["open_food_facts", "yazio"],
+            [call.args[0] for call in ctx.observed_opener.call_args_list],
+        )
+        self.assertIs(ctx.config, yazio.call_args.args[0])
+        self.assertEqual("female", yazio.call_args.kwargs["athlete_sex"]())
+        self.assertIs(ctx.database_lock, library.call_args.kwargs["db_lock"])
+        self.assertIs(ctx.database_lock, diary.call_args.kwargs["db_lock"])
+        self.assertIs(library.return_value, diary.call_args.kwargs["meal_library"])
+        self.assertEqual(
+            ctx.settings.selected_model, search.call_args.kwargs["selected_model"]
+        )
+        reader = diary.call_args.kwargs["observation_reader"]
+        ctx.canonical_read = "live reader"
+        self.assertEqual("live reader", reader())
+
 
 if __name__ == "__main__":
     unittest.main()

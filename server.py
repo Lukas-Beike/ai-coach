@@ -501,8 +501,8 @@ WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
 
 def _nutrition_secret_values() -> tuple[str, ...]:
     # Logging starts before NUTRITION_SERVICES exists.
-    assembly = globals().get("NUTRITION_SERVICES")
-    return () if assembly is None else assembly.secret_values()
+    nutrition = globals().get("NUTRITION_SERVICES")
+    return () if nutrition is None else nutrition.secret_values()
 
 
 # Environment secrets stay redacted while a stored credential overrides them.

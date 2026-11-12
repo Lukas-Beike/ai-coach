@@ -487,7 +487,6 @@
  "test_nutrition.NutritionRepositoryAndServiceTests": 0.241,
  "test_nutrition_api_and_sync.IntervalsNutritionSyncServiceTests": 0.01,
  "test_nutrition_api_and_sync.NutritionHttpApiTests": 0.013,
- "test_nutrition_assembly.NutritionAssemblyTests": 0.002,
  "test_nutrition_composition.NutritionCompositionTests": 0.138,
  "test_nutrition_garmin_expenditure.NutritionGarminExpenditureTests": 0.049,
  "test_nutrition_meal_times.NutritionMealTimeTests": 0.133,

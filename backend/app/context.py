@@ -8,10 +8,10 @@ with no ``Inputs`` bundle, no assembly class and no copied attributes.
 credentials replaces the configuration and a restore replaces the database
 manager, so services ask on every use and never cache either.
 
-The owner fields below the runtime owners are the domains whose builder step
-has not run yet (#2099-#2103). A builder reads them when a service is used,
-which keeps today's late edges; each becomes typed when its domain moves to a
-builder.
+The owner fields below the runtime owners are domain owners that server.py
+sets as it creates them. A builder reads them when a service is used, which
+keeps today's late edges. They stay untyped while server.py still assigns them
+late (a typed field would add a package cycle); #2103 types them.
 """
 
 from __future__ import annotations

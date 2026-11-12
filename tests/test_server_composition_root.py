@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from server_test_support import ServerTestCase, server
@@ -49,6 +50,12 @@ class CompositionRootTests(ServerTestCase):
             nutrition.intervals_sync_service(), IntervalsNutritionSyncService
         )
         self.assertIs(nutrition.food_mirror(), nutrition.food_mirror())
+
+    def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
+        # The log redactor looks the nutrition services up by name.
+        services = SimpleNamespace(secret_values=lambda: ("yazio-token",))
+        with patch.object(server, "NUTRITION_SERVICES", services):
+            self.assertIn("yazio-token", server._nutrition_secret_values())
 
     def test_the_context_reads_the_live_configuration_and_database(self) -> None:
         replaced = replace(server.CONFIG, calendar_ical_url="https://example.invalid")
