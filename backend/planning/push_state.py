@@ -48,6 +48,18 @@ if TYPE_CHECKING:
 # its way.
 _INTERVALS_PENDING: Final = frozenset({"local", "sync_error"})
 _REMOTE_LINKS = RemoteLinkRepository()
+# Stand-in references for the push-state check: every reference and zone exists,
+# so only steps Garmin can never take block a run unit.
+_ANY_REFERENCES: Final = garmin_run_workout.GarminRunTargets(
+    ftp=1,
+    threshold_hr=1,
+    max_hr=1,
+    threshold_speed=1,
+    hr_zone_basis=1,
+    power_limits=tuple(range(1, 10)),
+    hr_limits=tuple(range(1, 10)),
+    pace_limits=tuple(range(1, 10)),
+)
 
 
 def intervals_event_outdated(payload: Mapping[str, Any]) -> bool:
@@ -130,19 +142,26 @@ def pushable_fingerprint(
     A strength unit without a valid structure is ``no_structure``; one with an
     unmapped exercise is ``unmapped``, since every push would fail. No button is
     offered either way; the Coach or the job still names the exercise with
-    catalogue suggestions. A run unit whose step text does not parse, and other
-    sports, return ``(None, None)``: Garmin is simply not offered, since the
-    strength texts the calendar shows for a blocked unit do not fit a run.
+    catalogue suggestions. A run unit whose step text does not parse or holds a
+    step Garmin can never take (a ramp, another pace unit), and other sports,
+    return ``(None, None)``: Garmin is simply not offered, since the strength
+    texts the calendar shows for a blocked unit do not fit a run. Problems that
+    depend on the athlete's references surface when the push runs.
     """
     fingerprint = garmin_fingerprint(payload)
     sport, _environment = planned_sport_environment(payload)
     if sport is Sport.RUN:
         try:
-            structured_blocks(
-                str(payload.get("description") or ""),
-                str(payload.get("target") or "AUTO"),
+            garmin_run_workout.run_workout(
+                name="",
+                description="",
+                blocks=structured_blocks(
+                    str(payload.get("description") or ""),
+                    str(payload.get("target") or "AUTO"),
+                ),
+                targets=_ANY_REFERENCES,
             )
-        except ValueError:
+        except ValueError, AppError:
             return None, None
         return fingerprint, None
     if fingerprint is None:

@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from backend.activities.hr_cap import stored_cap
 from backend.activities.hr_cap_export import capped_description
 from backend.activities.workout_text import structured_blocks
 from backend.activities.zone_settings import ZoneSettings
@@ -58,6 +59,7 @@ from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
 from backend.providers.garmin_run_workout import (
+    GarminRunMappingError,
     GarminRunTargets,
     comparable_steps,
     run_workout,
@@ -712,7 +714,13 @@ def _run_document(
 ) -> dict[str, Any]:
     """The Garmin running workout of a run unit; relative targets need ``zones``."""
     description = str(unit.get("description") or "")
-    capped = capped_description(description, unit, lthr=zones.lthr if zones else None)
+    lthr = zones.lthr if zones else None
+    if stored_cap(unit) is not None and not lthr:
+        # The cap is percent of the threshold HR; without it the cap would be lost.
+        raise GarminRunMappingError(
+            "Die Pulsobergrenze braucht den Schwellenpuls, der nicht vorliegt."
+        )
+    capped = capped_description(description, unit, lthr=lthr)
     return run_workout(
         name=str(unit.get("name") or ""),
         description=f"{WORKOUT_MARKER}\n{description}",

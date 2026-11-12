@@ -1112,6 +1112,22 @@ class RunPushTests(PushHarness):
         self.assertEqual((low, high), (step["targetValueOne"], step["targetValueTwo"]))
         self.assertEqual("heart.rate.zone", step["targetType"]["workoutTargetTypeKey"])
 
+    def test_a_heart_rate_cap_without_threshold_hr_writes_nothing(self) -> None:
+        # The cap is percent of the threshold HR: without it the cap would be lost.
+        self.zones = ZoneSettings(max_hr=190.0)
+        unit = {
+            **RUN,
+            "description": "- 10m 140-150bpm",
+            "session_focus": next(iter(HR_CAP_PERCENT)),
+            "hr_cap": CAP,
+        }
+
+        result = self.push((U1, self.insert(U1, unit)))
+
+        self.assertEqual("error", result["status"])
+        self.assertIn("Schwellenpuls", result["results"][0]["error"])
+        self.assertEqual([], self.garmin.calls)
+
     def test_a_second_push_updates_the_same_workout(self) -> None:
         self.push((U1, self.insert(U1, RUN)))
         moved = self.update(U1, {**RUN, "date": "2026-11-10"})
@@ -1194,6 +1210,12 @@ class RunPushTests(PushHarness):
         )
 
         self.update(U1, {**RUN, "description": "Locker laufen"})
+        self.assertEqual(
+            [U1], [i.local_id for i in find_orphans_listed(self.database_manager)]
+        )
+
+        # A step Garmin can never take (a ramp) blocks the unit like missing steps.
+        self.update(U1, {**RUN, "description": "- 10m ramp 120-140bpm"})
         self.assertEqual(
             [U1], [i.local_id for i in find_orphans_listed(self.database_manager)]
         )

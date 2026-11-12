@@ -21,6 +21,7 @@ from backend.planning.push_state import (
     attach_push_state,
     garmin_baselines,
     garmin_fingerprint,
+    pushable_fingerprint,
 )
 from backend.planning.wahoo_orphans import WahooOrphan
 from backend.providers import garmin_run_workout
@@ -406,6 +407,17 @@ class PushStateTests(unittest.TestCase):
                 self.assertTrue(
                     pending({**RUN, field: value})["push_pending"]["garmin"]
                 )
+
+    def test_a_run_step_garmin_never_takes_offers_no_garmin_push(self) -> None:
+        for text in ("- 10m ramp 120-140bpm", "- 400mtr 1:30/400m Pace"):
+            with self.subTest(text=text):
+                unit = {**RUN, "description": text}
+                self.assertEqual((None, None), pushable_fingerprint(unit, {}))
+        # A zone target needs the athlete's references only at push time.
+        zoned = {**RUN, "description": "- 10m Z2 HR"}
+        self.assertEqual(
+            (garmin_fingerprint(zoned), None), pushable_fingerprint(zoned, {})
+        )
 
     def test_run_text_without_steps_offers_no_garmin_push(self) -> None:
         plain = json.dumps({**RUN, "description": "Locker laufen"})
