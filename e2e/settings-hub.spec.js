@@ -138,8 +138,15 @@ test("@responsive collapsible sections share one chevron and the page passes the
   expect(await summary.evaluate((node) => getComputedStyle(node, "::after").content)).not.toBe("none");
   expect(await summary.evaluate((node) => getComputedStyle(node).listStyleType)).toBe("none");
   await expandConnections(page);
-  for (const segment of ["connections", "profile"]) {
-    await page.goto(`/#more/${segment}`);
+  // A local and a Garmin item, so the audit covers closed equipment cards with their bar.
+  await page.route("**/api/analysis/training-records", (route) => route.fulfill({ json: { equipment: {
+    items: [{ id: "local-bike", name: "Local bike", sport: "Ride", kind: "bike", status: "active", revision: 1, usage: { distance_km: 120, hours: 0, assigned_sessions: 1 }, lifetime: { usage_km: 120, target_km: 100, percent: 120, progress_percent: 100 } }],
+    garmin_items: [{ id: "garmin-bike", name: "Garmin bike", kind: "Bike", status: "active", garmin_status: "Active", distance_km: 25, goal_km: 100, lifetime: { usage_km: 25, target_km: 100, percent: 25, progress_percent: 25 } }],
+  } } }));
+  for (const segment of ["connections", "profile", "equipment"]) {
+    await page.evaluate(async (target) => { await AppRouter.navigate(`more/${target}`, { historyMode: "replace" }); }, segment);
+    // Equipment loads its cards after the route; audit them, not the loading state.
+    if (segment === "equipment") await expect(page.locator("#equipmentItems .equipment-card").first()).toBeAttached();
     const results = await new AxeBuilder({ page }).include(".panel.active").withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(results.violations, `${segment} accessibility violations`).toEqual([]);
   }

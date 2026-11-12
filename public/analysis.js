@@ -1587,9 +1587,13 @@ function equipmentCard(item, source, parents, place) {
   summary.append(h("strong", null, item.name));
   if (!local && garmin) summary.append(h("span", "equipment-source-tag", garmin));
   summary.append(h("span", `connection-chip is-${kind}`, label));
-  const line = [equipmentParent(item, local, parents), Number.isFinite(Number(distance ?? Number.NaN)) ? analysisValue(distance, "km") : "", life.percent == null ? "" : analysisPercent(life.percent)];
-  if (line.some(Boolean)) summary.append(h("span", "equipment-card-line", line.filter(Boolean).join(" · ")));
-  if (life.percent != null) summary.append(equipmentBar(item.name, life));
+  // #2358: the percent is read once, followed by its meaning (and an exceeded target the
+  // chip does not name); the bar below is decorative.
+  const meaning = `Lebensdauer${life.over && kind !== "error" ? ", Ziel überschritten" : ""}`;
+  const percent = life.percent == null ? null : [analysisPercent(life.percent), " ", h("span", "sr-only", meaning)];
+  const line = [equipmentParent(item, local, parents), Number.isFinite(Number(distance ?? Number.NaN)) ? analysisValue(distance, "km") : "", percent].filter(Boolean);
+  if (line.length) summary.append(h("span", "equipment-card-line", ...line.flatMap((part, index) => [...(index ? [" · "] : []), ...[part].flat()])));
+  if (life.percent != null) summary.append(equipmentBar(life));
   const body = h("div", "connection-card-body");
   body.append(equipmentSection("Nutzung", equipmentUsage(item, local, life)));
   if (local) body.append(equipmentSection("Wartung", equipmentMaintenance(item)));
@@ -1616,12 +1620,13 @@ function equipmentGarmin(item, local, title) {
   ]);
 }
 
-// The slim lifetime bar of a closed card; its colour follows the card's state.
-function equipmentBar(name, life) {
+// The slim lifetime bar of a closed card; its colour follows the card's state. The card
+// line already says the percent and the chip the state, so the bar stays out of the tree.
+function equipmentBar(life) {
   const progress = h("progress", "connection-sync-progress-bar");
   progress.max = 100;
   progress.value = life.progress;
-  progress.setAttribute("aria-label", `${name}: ${analysisPercent(life.percent)} Lebensdauer${life.over ? ", Ziel überschritten" : ""}`);
+  progress.setAttribute("aria-hidden", "true");
   return progress;
 }
 
