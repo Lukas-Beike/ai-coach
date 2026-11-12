@@ -65,7 +65,14 @@ class QualityBaselineTests(unittest.TestCase):
 
     def test_snapshot_writes_line_independent_entries(self):
         output = io.StringIO()
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        target = Path(temp.name) / "tests/fixtures/quality_baseline.json"
+        target.parent.mkdir(parents=True)
+        target.write_text(json.dumps(self.baseline), encoding="utf-8")
         with (
+            patch("tools.quality_baseline.ROOT", Path(temp.name)),
+            patch("tools.quality_baseline.BASELINE", target),
             patch(
                 "tools.quality_baseline.collect",
                 return_value=(self.versions, [self.existing]),
@@ -76,7 +83,8 @@ class QualityBaselineTests(unittest.TestCase):
             contextlib.redirect_stdout(output),
         ):
             self.assertEqual(quality_baseline.main(), 0)
-        snapshot = json.loads(output.getvalue())
+        self.assertIn("wrote tests/fixtures/quality_baseline.json", output.getvalue())
+        snapshot = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(
             snapshot["diagnostics"],
             [
