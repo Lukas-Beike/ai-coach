@@ -205,6 +205,7 @@ _BOUNDS = (
     ("exclusiveMaximum", "<{}"),
     ("maximum", "≤{}"),
     ("minItems", "≥{} items"),
+    ("minProperties", "≥{} properties"),
     ("maxItems", "≤{} items"),
     ("pattern", "pattern `{}`"),
     ("format", "{}"),
@@ -213,10 +214,48 @@ _BOUNDS = (
 
 def _terms(item: dict, each: str = "") -> list[str]:
     terms = [f"{each}{text.format(item[key])}" for key, text in _BOUNDS if key in item]
+    if item.get("uniqueItems"):
+        terms.append(f"{each}unique items")
     if "enum" in item:
         values = ", ".join(f"`{json.dumps(value)}`" for value in item["enum"])
         terms.append(f"{each}one of {values}")
     return terms
+
+
+def _clause(option: dict) -> str:
+    """A ``oneOf`` branch made of ``required`` and ``not`` conditions."""
+    names = lambda fields: ", ".join(f"`{field}`" for field in fields)
+    parts = [f"with {names(option['required'])}"] if "required" in option else []
+    excluded = option.get("not", {})
+    fields = excluded.get("required", []) + [
+        field for branch in excluded.get("anyOf", ()) for field in branch["required"]
+    ]
+    if fields:
+        parts.append(f"without {names(fields)}")
+    return " ".join(parts)
+
+
+# Every schema keyword the catalogue renders or deliberately leaves out.
+RENDERED_KEYWORDS = frozenset(
+    {key for key, _ in _BOUNDS}
+    | {"type", "properties", "items", "required", "enum", "anyOf", "oneOf", "not"}
+    | {"uniqueItems", "additionalProperties", "description"}
+)
+
+
+def schema_keywords(schema) -> set[str]:
+    """The JSON-schema keywords used anywhere in ``schema``."""
+    if isinstance(schema, list):
+        return set().union(*map(schema_keywords, schema)) if schema else set()
+    if not isinstance(schema, dict):
+        return set()
+    found = set(schema)
+    for key, value in schema.items():
+        if key == "properties":
+            found |= schema_keywords(list(value.values()))
+        elif key != "enum":
+            found |= schema_keywords(value)
+    return found
 
 
 def _parameters(schema: dict, prefix: str = "") -> list[str]:
@@ -227,6 +266,8 @@ def _parameters(schema: dict, prefix: str = "") -> list[str]:
         path = f"{prefix}{name}"
         kind = item.get("type", "any")
         kind = "/".join(kind) if isinstance(kind, list) else kind
+        if "oneOf" in item:
+            kind += "; exactly one of: " + " | ".join(map(_clause, item["oneOf"]))
         options = item.get("anyOf", ())
         if options and all(set(option) == {"required"} for option in options):
             kind += "; needs one of " + ", ".join(
@@ -280,7 +321,7 @@ def _gate_facts(spec) -> str:
     for flag, text in (
         (spec.deletes, "needs a confirmed delete request"),
         (spec.whole_plan, "whole-plan change"),
-        (spec.no_record, "draft or preview, changes no record"),
+        (spec.no_record, "counts no records toward the bulk check"),
         (spec.needs_approval, "applies only an approved preview"),
         (spec.plan_checked, "plan checked"),
         (spec.self_guarded, "plan check inside the tool"),
@@ -300,9 +341,9 @@ def _gate_facts(spec) -> str:
         facts.append(f"proposal card „{spec.action}“")
     if spec.effect != "read":
         facts.append(
-            "turn undo"
+            "fully tracked by change history"
             if spec.name in _FULLY_TRACKED_TOOLS
-            else "no turn undo (untracked effects)"
+            else "not fully tracked (no turn undo)"
         )
     return "; ".join(facts)
 
@@ -1703,6 +1744,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             tool_map_table(),
             "Regenerate with: python tests/test_coach_tool_coverage.py --write",
         )
+        used = schema_keywords(
+            [tool["parameters"] for tool in server.COACH_DIALOGUE_TOOLS]
+            + [tool["parameters"] for tool in server.COACH_STRUCTURED_TOOLS]
+        )
+        self.assertEqual(sorted(used - RENDERED_KEYWORDS), [])
         self.assertEqual(
             _generated(TOOL_MAP_DOC, CONTRACTS_BEGIN, CONTRACTS_END),
             tool_contracts(),
