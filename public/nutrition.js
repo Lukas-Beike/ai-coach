@@ -1106,7 +1106,8 @@ async function loadNutritionProducts(query = "", { background = false, throwOnEr
   const status = document.querySelector("#nutritionProductStatus");
   try {
     if (!preserveLookup) status.textContent = "Produkte werden gesucht …";
-    const result = await api(`/api/nutrition/products?scope=all${query ? `&q=${encodeURIComponent(query)}` : ""}`);
+    const search = query ? "&q=" + encodeURIComponent(query) : "";
+    const result = await api(`/api/nutrition/products?scope=all${search}`);
     if (!isCurrentNutritionProductLoad(sequence, generation, expectedQuery)) return;
     renderNutritionProducts(result.products || [], { search: query });
     if (!preserveLookup) status.textContent = result.products?.length ? "" : "Keine Produkte gefunden.";
@@ -1116,20 +1117,25 @@ async function loadNutritionProducts(query = "", { background = false, throwOnEr
   }
 }
 
-async function saveNutritionProduct(product) {
+async function submitNutritionProductForm(form) {
   const generation = state.sessionGeneration;
   const editor = document.querySelector("#nutritionExtraction");
-  const form = product instanceof HTMLFormElement ? product : nutritionProductForm(normalizeNutritionProduct(product));
-  if (product instanceof HTMLFormElement) {
-    try {
-      const payload = nutritionProductPayload(form);
-      const saved = await api("/api/nutrition/products", { method: payload.id ? "PUT" : "POST", body: JSON.stringify({ ...payload, confirmed: true }) });
-      if (generation !== state.sessionGeneration) return;
-      editor.hidden = true; editor.replaceChildren(); await loadNutritionProducts();
-      if (generation === state.sessionGeneration) showNutritionReceipt(document.querySelector("#nutritionProductStatus"), form.dataset.database === "true" ? `Nährwerte von „${saved.product?.name || "Produkt"}“ gespeichert.` : `Produkt „${saved.product?.name || "Produkt"}“ lokal gespeichert.`, saved.change, () => loadNutritionProducts());
-    } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
-    return;
-  }
+  const status = document.querySelector("#nutritionProductStatus");
+  try {
+    const payload = nutritionProductPayload(form);
+    const saved = await api("/api/nutrition/products", { method: payload.id ? "PUT" : "POST", body: JSON.stringify({ ...payload, confirmed: true }) });
+    if (generation !== state.sessionGeneration) return;
+    editor.hidden = true; editor.replaceChildren(); await loadNutritionProducts();
+    const name = saved.product?.name || "Produkt";
+    const message = form.dataset.database === "true" ? `Nährwerte von „${name}“ gespeichert.` : `Produkt „${name}“ lokal gespeichert.`;
+    if (generation === state.sessionGeneration) showNutritionReceipt(status, message, saved.change, () => loadNutritionProducts());
+  } catch (error) { if (generation === state.sessionGeneration) status.textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
+}
+
+async function saveNutritionProduct(product) {
+  if (product instanceof HTMLFormElement) return submitNutritionProductForm(product);
+  const editor = document.querySelector("#nutritionExtraction");
+  const form = nutritionProductForm(normalizeNutritionProduct(product));
   editor.replaceChildren(); editor.append(form); editor.hidden = false;
   form.scrollIntoView({ block: "nearest" });
   form.addEventListener("submit", (event) => { event.preventDefault(); void saveNutritionProduct(form); });
