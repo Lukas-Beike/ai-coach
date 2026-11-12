@@ -107,7 +107,7 @@ class SonarCheckTests(unittest.TestCase):
 
     def test_forbidden_global_error_is_a_limit_not_a_pass(self):
         code, out, _ = run_main([], FakeSonar(FORBIDDEN, returncode=1))
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 3)
         self.assertIn("issues 0, failures 0", out)
         self.assertIn("limit:", out)
         self.assertIn("not a pass", out)

@@ -8,7 +8,8 @@ matched text and every other payload field are never printed. A forbidden
 global error (the server-side agentic analysis is not available) is printed as
 a `limit` line: that part was not analyzed and is not a pass.
 Exit 0: no issues; 1: issues, failures or an unusable result; 2: bad input or
-the Sonar CLI is missing.
+the Sonar CLI is missing; 3: no issues, but part of the analysis was not run
+(the `limit` line).
 """
 
 from __future__ import annotations
@@ -167,7 +168,9 @@ def report(label: str, data: Any) -> int:
     for items in sections.values():
         for issue in items:
             print(f"issue {location(issue)}")
-    return 1 if issues or failures else 0
+    if issues or failures:
+        return 1
+    return 3 if global_error_kind(data) == "forbidden" else 0
 
 
 def main(argv: list[str] | None = None) -> int:
