@@ -114,8 +114,8 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   credentials, keys, tokens, session data, or raw OpenAI error text. Voice is
   short-lived transcription; never persist audio.
 - Never hand-write asset `?v=` versions or the service-worker cache name; the
-  server stamps them from content hashes. A new public file goes into the
-  service-worker `ASSETS` list (if cached) and `STATIC_TARGETS`.
+  server stamps them from content hashes. A new public file is served from the
+  `public/` listing; add it to the service-worker `ASSETS` list if cached.
 - Cut taglines, helper texts and secondary labels. If the screen needs them to
   make sense, fix the layout.
 
