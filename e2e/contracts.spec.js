@@ -125,11 +125,11 @@ test("appearance choice updates the theme and survives reload on this device", {
   await ready(page);
   await page.getByRole("link", { name: "Mehr", exact: true }).click();
   await page.locator("#settingsPanel").getByRole("link", { name: "Darstellung", exact: true }).click();
-  await page.locator("#appearanceSelect").selectOption("light");
+  await page.locator("#appearanceSelect").getByRole("radio", { name: "Hell", exact: true }).check();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect.poll(() => page.locator('meta[name="theme-color"]').getAttribute("content")).toBe("#ffffff");
+  await expect.poll(() => page.locator('meta[name="theme-color"]').getAttribute("content")).toBe("#f4f5f6");
   await page.reload();
-  await expect(page.locator("#appearanceSelect")).toHaveValue("light");
+  await expect(page.locator("#appearanceSelect").getByRole("radio", { name: "Hell", exact: true })).toBeChecked();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 

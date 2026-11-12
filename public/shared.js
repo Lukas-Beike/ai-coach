@@ -22,9 +22,9 @@ function applyAppearance(appearance = "system") {
   if (selected === "system") resolved = globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
   document.documentElement.dataset.theme = resolved;
   const themeColor = $("meta[name='theme-color']");
-  if (themeColor) themeColor.content = resolved === "light" ? "#ffffff" : "#0b0b0d";
-  const select = $("#appearanceSelect");
-  if (select && select.value !== selected) select.value = selected;
+  if (themeColor) themeColor.content = resolved === "light" ? "#f4f5f6" : "#0c0d0f";
+  const choice = $(`#appearanceSelect input[value="${selected}"]`);
+  if (choice) choice.checked = true;
   return selected;
 }
 
