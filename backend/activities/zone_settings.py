@@ -394,7 +394,7 @@ def effective_zone_configuration(
 def zone_two_top(
     configuration: ZoneConfiguration, threshold_pace: float | None = None
 ) -> float | None:
-    """The upper limit of zone 2: watts for power, seconds per km for pace.
+    """The upper limit of zone 2: bpm, watts, or seconds per km for pace.
 
     Percent pace limits are percent of the threshold speed: the configuration's
     own threshold (m/s), else ``threshold_pace`` (s/km). None when it cannot be
@@ -412,9 +412,15 @@ def zone_two_top(
         return None
     if absolute:
         return absolute[0]
+    basis = configuration.percent_basis
+    if basis is ZonePercentBasis.RESERVE:
+        maximum, resting = configuration.maximum, configuration.resting
+        if not (percent and maximum and resting is not None):
+            return None
+        return resting + (maximum - resting) * percent[0] / 100
     base = (
         configuration.maximum
-        if configuration.percent_basis is ZonePercentBasis.MAXIMUM
+        if basis is ZonePercentBasis.MAXIMUM
         else configuration.threshold
     )
     return base * percent[0] / 100 if percent and base else None

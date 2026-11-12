@@ -236,11 +236,11 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 
 #### Scenario: Thresholds
 - **WHEN** the athlete opens a sport's page
-- **THEN** LT2 shows the current threshold power (FTP) or threshold pace and the threshold heart rate with their source and date; LT1 shows the heart rate and the power or pace from the performance thresholds, and its source line names the heart rate's origin (gemessen, aus der Herzfrequenzvariabilität, Schätzung) and the power's or pace's where it differs (aus Zone 2, Schätzung); a missing value shows "—".
+- **THEN** LT2 shows the current threshold power (FTP) or threshold pace and the threshold heart rate with their source and date; LT1 shows the heart rate and the power or pace from the performance thresholds, and its source line names the heart rate's origin (gemessen, aus der Herzfrequenzvariabilität, Schätzung aus Zone 2, Schätzung) and the power's or pace's where it differs; a missing value shows "—".
 
 #### Scenario: LT1 without a measured value or zones
-- **WHEN** no first threshold is stored and the sport has no pace or power zones
-- **THEN** LT1 shows the fixed shares of LT2 with the source "LT1 Schätzung", and Analyse lists the same values with the "Schätzung" chip; saving or removing zones reloads the thresholds.
+- **WHEN** no first threshold is stored and the sport has no heart-rate, pace or power zones
+- **THEN** LT1 shows the fixed shares of LT2 with the source "LT1 Schätzung", and Analyse lists the same values with the "Schätzung" chip, as it does for a value from zone 2; saving or removing zones reloads the thresholds.
 
 #### Scenario: Zone kinds
 - **WHEN** a sport has power, pace or heart-rate zones in effect, including Garmin's zones for all sports

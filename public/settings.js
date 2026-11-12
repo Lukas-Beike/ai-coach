@@ -607,7 +607,7 @@ function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, 
   };
 }
 
-const FIRST_THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität (App)", zone_2: "aus Zone 2", fixed_share: "Schätzung" };
+const FIRST_THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität (App)", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung" };
 
 // "LT1 gemessen, Pace Schätzung": the heart rate's origin, then the pace's or power's where it differs.
 function firstThresholdSource(metric, values) {

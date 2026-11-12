@@ -100,14 +100,15 @@ def coach_thresholds(
     return result
 
 
-# LT1 as a fixed share of LT2 when no measured or adopted value exists (athlete
-# decision 2026-11-12, #2427): heart rate of the threshold HR, cycling power of
-# the FTP and running speed of the threshold speed. Change them here only.
-LT1_HR_SHARE: Final = 0.90
+# LT1 as a fixed share of LT2 when no measured or adopted value and no zone 2 of
+# that kind exists (athlete decisions 2026-11-12, #2427): heart rate of the
+# threshold HR, cycling power of the FTP and running speed of the threshold
+# speed. Change them here only.
+LT1_HR_SHARE: Final = 0.85
 LT1_POWER_SHARE: Final = 0.75
 LT1_RUN_SPEED_SHARE: Final = 0.88
 # Where an LT1 value comes from: the profile value (measured, or the adopted
-# DFA-a1 estimate), the top of the configured zone 2, or a fixed share of LT2.
+# DFA-a1 estimate), the top of the zone 2 in effect, or a fixed share of LT2.
 LT1_ZONE_TWO: Final = "zone_2"
 LT1_FIXED_SHARE: Final = "fixed_share"
 
@@ -121,32 +122,36 @@ def first_thresholds(
     """LT1 of running and cycling with the origin of each value.
 
     Heart rate: the stored share of the threshold HR (``origin``, measured or
-    estimated) or else ``LT1_HR_SHARE``. Pace and power: the top of zone 2 when
-    ``zone_two_tops`` has one for the sport (``"run"`` in s/km, ``"ride"`` in W),
-    otherwise the fixed share of the threshold pace or the FTP. A value without
-    its LT2 is left out.
+    estimated), else the top of the heart-rate zone 2, else ``LT1_HR_SHARE``.
+    Pace and power: the top of zone 2, else the fixed share of the threshold pace
+    or the FTP. ``zone_two_tops`` holds the tops in effect by ``<sport>_hr``
+    (bpm) and ``run_pace`` (s/km) or ``ride_power`` (W). A value with neither is
+    left out.
     """
     tops = zone_two_tops or {}
     result: dict[str, dict[str, Any]] = {}
-    for sport, lthr_key, lt2_key, main_key, main_origin_key, share in (
+    for sport, lthr_key, lt2_key, main, share in (
         ("run", "run_threshold_hr_bpm", "run_threshold_pace_seconds_per_km",
-         "pace_seconds_per_km", "pace_origin", 1 / LT1_RUN_SPEED_SHARE),
+         ("pace_seconds_per_km", "pace_origin", "run_pace"), 1 / LT1_RUN_SPEED_SHARE),
         ("ride", "bike_threshold_hr_bpm", "cycling_ftp_watts",
-         "watts", "power_origin", LT1_POWER_SHARE),
+         ("watts", "power_origin", "ride_power"), LT1_POWER_SHARE),
     ):  # fmt: skip
-        values: dict[str, Any] = {}
         lthr = as_number(metrics.get(lthr_key, {}).get("value"))
-        if lthr is not None and lthr > 0:
-            pct = first_threshold_pct
-            values["hr_bpm"] = round(lthr * (pct / 100 if pct else LT1_HR_SHARE))
-            values["hr_origin"] = origin if pct else LT1_FIXED_SHARE
-        lt2 = as_number(metrics.get(lt2_key, {}).get("value"))
-        if tops.get(sport):
-            values[main_key] = round(tops[sport])
-            values[main_origin_key] = LT1_ZONE_TWO
-        elif lt2 is not None and lt2 > 0:
-            values[main_key] = round(lt2 * share)
-            values[main_origin_key] = LT1_FIXED_SHARE
+        hr_share = first_threshold_pct / 100 if first_threshold_pct else None
+        values: dict[str, Any] = {}
+        for value_key, origin_key, chosen in (
+            ("hr_bpm", "hr_origin",
+             (lthr, hr_share, origin) if hr_share and lthr else
+             (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO) if tops.get(f"{sport}_hr") else
+             (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE)),
+            (main[0], main[1],
+             (tops[main[2]], 1, LT1_ZONE_TWO) if tops.get(main[2]) else
+             (as_number(metrics.get(lt2_key, {}).get("value")), share, LT1_FIXED_SHARE)),
+        ):  # fmt: skip
+            base, factor, value_origin = chosen
+            if base is not None and base > 0:
+                values[value_key] = round(base * factor)
+                values[origin_key] = value_origin
         if values:
             result[sport] = values
     return result

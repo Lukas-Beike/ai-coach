@@ -75,7 +75,8 @@ test("LT2 comes from the performance values, LT1 and the origin of each value fr
   const ride = { hr_bpm: 142, hr_origin: "estimated", watts: 214, power_origin: "zone_2" };
   const rows = thresholdRows("ride", metrics, { first_thresholds: { ride } });
   assert.deepEqual([rows.lt2.main, rows.lt2.hr, rows.lt1.hr, rows.lt1.main], [285, 163, 142, 214]);
-  assert.equal(rows.lt1Source, "LT1 aus der Herzfrequenzvariabilität (App), Leistung aus Zone 2");
+  assert.equal(rows.lt1Source, "LT1 aus der Herzfrequenzvariabilität (App), Leistung Schätzung aus Zone 2");
+  assert.equal(firstThresholdSource("pace", { hr_origin: "zone_2", pace_origin: "fixed_share" }), "LT1 Schätzung aus Zone 2, Pace Schätzung");
   assert.equal(rows.lt2Source, "Garmin Connect");
   assert.equal(rows.validFrom, "2026-11-09T08:00:00Z");
   // A fixed share of LT2 is named an estimate once; a measured value names the other origin.

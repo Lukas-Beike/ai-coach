@@ -145,14 +145,16 @@ def _zone_two_tops(
     metrics: dict[str, Any],
     today: date,
 ) -> dict[str, float]:
-    """The top of zone 2 of the run pace and the ride power zones, where set."""
+    """The top of zone 2 of the heart-rate, run pace and ride power zones, where set."""
     pace = performance_current_metrics.as_number(
         metrics["run_threshold_pace_seconds_per_km"]["value"]
     )
     tops: dict[str, float] = {}
     for key, metric, sport in (
-        ("run", ZoneConfigurationMetric.PACE, Sport.RUN),
-        ("ride", ZoneConfigurationMetric.POWER, Sport.RIDE),
+        ("run_pace", ZoneConfigurationMetric.PACE, Sport.RUN),
+        ("ride_power", ZoneConfigurationMetric.POWER, Sport.RIDE),
+        ("run_hr", ZoneConfigurationMetric.HEART_RATE, Sport.RUN),
+        ("ride_hr", ZoneConfigurationMetric.HEART_RATE, Sport.RIDE),
     ):
         chosen = effective_zone_configuration(configurations, metric, sport, day=today)
         top = zone_two_top(chosen, pace) if chosen is not None else None
@@ -172,8 +174,8 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from canonical inputs only.
 
-    ``zone_configurations`` give LT1 pace and power the top of zone 2 when the
-    athlete has pace or power zones for the sport.
+    ``zone_configurations`` give LT1 the top of zone 2 of the sport's heart-rate,
+    pace or power zones in effect.
 
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.

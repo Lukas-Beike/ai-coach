@@ -32,11 +32,11 @@ The current performance thresholds SHALL carry `first_thresholds`: LT1 of runnin
 
 #### Scenario: No measured or adopted value and no zones
 - **WHEN** the profile holds no first threshold and the sport has no pace or power zones
-- **THEN** the heart rate is 90 % of the threshold HR, run pace 88 % of the threshold speed and ride power 75 % of the FTP, all `fixed_share` (LTHR 170 bpm, 4:30 /km and 280 W give 153 bpm, 5:07 /km and 210 W); a value without its LT2 is left out.
+- **THEN** the heart rate is 85 % of the threshold HR, run pace 88 % of the threshold speed and ride power 75 % of the FTP, all `fixed_share` (LTHR 172 bpm, 4:30 /km and 280 W give 146 bpm, 5:07 /km and 210 W); a value with neither its LT2 nor a zone 2 is left out.
 
 #### Scenario: Measured value and zone 2
-- **WHEN** a measured or adopted share is stored, or pace or power zones are in effect
-- **THEN** the heart rate uses that share with its origin and the pace or power the top of zone 2 (`zone_2`); the other values keep the fixed share.
+- **WHEN** a measured or adopted share is stored, or heart-rate, pace or power zones are in effect
+- **THEN** the heart rate uses that share with its origin, else the top of the heart-rate zone 2, and the pace or power the top of their zone 2 (`zone_2`); the other values keep the fixed share.
 
 Evidence: `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`.
 
