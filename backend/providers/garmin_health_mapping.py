@@ -711,6 +711,11 @@ def _first_value(record: Mapping[str, object], names: tuple[str, ...]) -> object
     return None if named is None else named[1]
 
 
+def _object_day(item: object) -> date | None:
+    """The ``calendarDate`` an object carries itself, or None."""
+    return _parse_day(item.get(_DATE_FIELD)) if isinstance(item, Mapping) else None
+
+
 def _parse_day(text: object) -> date | None:
     """Parse a strict ``YYYY-MM-DD`` calendar date, or return None."""
     if not isinstance(text, str) or len(text) != _DAY_TEXT_LENGTH:
@@ -1284,12 +1289,11 @@ class _HealthMapping:
                 item = None if group.key is None else record.get(group.key)
                 if item is None:
                     continue
-                own = item.get(_DATE_FIELD) if isinstance(item, Mapping) else None
-                day = _parse_day(own) or row_day
+                day = _object_day(item) or row_day
                 if day is None:
                     self.issue(ref, _DATE_FIELD, IssueReason.MISSING)
-                    continue
-                self._map_group(_MAX_METRICS, record, group, ref, day, index=index)
+                else:
+                    self._map_group(_MAX_METRICS, record, group, ref, day, index=index)
 
     def _map_grouped(
         self, name: str, payload: object, groups: tuple[_Group, ...]
