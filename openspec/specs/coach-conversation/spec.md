@@ -237,7 +237,7 @@ Evidence: `backend/coach/session_checks.py:matched_focus`, `backend/performance/
 
 #### Scenario: Stored receipt at enqueue
 - **WHEN** a turn is accepted
-- **THEN** its command receipt holds `status`, `mode` (`background`), `phase` (`queued`, then `preparing` and `running` in the worker), `operation_id`, `session_key` (SHA-256 of the session's CSRF hash), `user_message_id`, `client_turn_id`, `plan_scope`, `ai_provider`, `model`, `thinking_level` and `request_kind`
+- **THEN** its command receipt holds `status` (`queued`, then `running` in the worker), `mode` (`background`), `phase` (`queued`, then `preparing`, `waiting_openai`, `executing_tools` and `waiting_final_response` in the worker; `waiting_for_coach_slot` on requeue, `cancelling` on cancel), `operation_id`, `session_key` (SHA-256 of the session's CSRF hash), `user_message_id`, `client_turn_id`, `plan_scope`, `ai_provider`, `model`, `thinking_level` and `request_kind`
 
 Evidence: `backend/http_api/chat_stream.py:CoachChatStreamTransport._stream`, `backend/http_api/chat_stream.py:CoachChatStreamTransport._relay_events`; `backend/coach/background_job.py:CoachBackgroundJobRunner._delta_callback`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`; `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `tests/test_http_chat_stream.py:test_stream_relays_events_and_unregisters_after_terminal_event`, `tests/test_http_chat_stream.py:test_disconnect_does_not_cancel_or_stop_durable_submission`, `tests/test_http_chat_stream.py:test_pending_maintenance_detaches_a_queued_turn_relay`, `tests/test_http_chat_stream.py:test_restart_replay_returns_original_job_as_background`, `tests/test_http_chat_stream.py:test_timeout_heartbeats_while_active_then_reads_final_receipt`, `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`.
 
@@ -246,7 +246,7 @@ The fixed Coach instructions SHALL be the normative text of these modules, not r
 
 #### Scenario: Instruction order
 - **WHEN** a Coach turn's instructions are composed
-- **THEN** they are the dialogue rules, the attachment policy, the training context (the coaching rules, then the athlete context and library marked as untrusted external data), the playbook of the turn's kind and the nutrition playbook when nutrition is selected, then the notices for an earlier attachment summary, requeued confirmed steps and an advisory turn without writes; every tool round of the turn sends the same text
+- **THEN** they are the dialogue rules, the attachment policy, the training context (the coaching rules, then the athlete context and library marked as untrusted external data), the playbook of the turn's kind and the nutrition playbook when nutrition is selected, then the notices for an earlier attachment summary, requeued confirmed steps and an advisory turn without writes; tool rounds reuse the current composed text (rebuilt only when a context refresh changes it), and the final request after the tool budget is exhausted appends the tool-budget notice
 
 #### Scenario: Changing a rule
 - **WHEN** a rule in one of these modules changes
