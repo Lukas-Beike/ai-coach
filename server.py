@@ -2516,7 +2516,6 @@ def main() -> None:
         )
         sync_worker = sync_job_worker()
         sync_worker.start()
-        CANONICAL_BACKFILL.worker.start()
         COACH_JOB_WORKER.start(
             COACH_BACKGROUND_JOBS.job_store,
             COACH_BACKGROUND_JOBS.background_job_runner,
@@ -2526,6 +2525,9 @@ def main() -> None:
             ),
         )
         SYNC_SCHEDULERS.startup_scheduler().schedule()
+        # After the startup writes on this thread: a backfill batch holding the
+        # writer must not fail startup with DatabaseBusyError (#2287).
+        CANONICAL_BACKFILL.worker.start()
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
         daily_thread.start()

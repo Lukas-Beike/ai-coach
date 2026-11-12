@@ -65,7 +65,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, tzinfo
 from enum import StrEnum
@@ -98,6 +99,10 @@ DEFAULT_BATCH_SIZE: Final = 200
 MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
+# A follow-up stage that decodes streams in the writer stops its batch after this
+# long, so a waiting login, Coach turn or provider sync gets the writer within
+# seconds (#2287). Foreground writers wait up to 20 s.
+BATCH_SECONDS: Final = 2.0
 
 _LOGGER = logging.getLogger("intervals_coach")
 _REPROJECT: Final = "reproject"
@@ -117,6 +122,15 @@ class BatchReport:
 
     items: int
     done: bool
+
+
+def timed_batch[T](items: Sequence[T], size: int) -> Iterator[T]:
+    """Yield up to ``size`` items until ``BATCH_SECONDS`` have passed; always the first."""
+    deadline = time.monotonic() + BATCH_SECONDS
+    for index, item in enumerate(items[:size]):
+        if index and time.monotonic() >= deadline:
+            return
+        yield item
 
 
 @dataclass(frozen=True, slots=True)

@@ -49,6 +49,45 @@ class ServerRuntimeTests(ServerTestCase):
         sync_recovery.assert_not_called()
         coach_recovery.assert_not_called()
 
+    def test_startup_writes_its_jobs_before_the_canonical_backfill_starts(self):
+        # A backfill batch holding the writer must not fail the startup writes on
+        # the main thread with DatabaseBusyError (exit code 1, #2287).
+        calls = Mock()
+        calls.http.return_value.serve_forever.side_effect = KeyboardInterrupt
+        with (
+            patch.object(server.observability, "configure_logging"),
+            patch.object(
+                server.app_config, "security_configuration_error", return_value=None
+            ),
+            patch.object(server, "initialise_database"),
+            patch.object(server, "remove_orphaned_staging_files"),
+            patch.object(server.http_server, "CoachHTTPServer", calls.http),
+            patch.object(server.signal, "signal"),
+            patch.object(server.faulthandler, "register", create=True),
+            patch.object(server, "WORKOUT_LIBRARY_SYNC", Mock()),
+            patch.object(server, "SYNC_JOB_QUEUE", Mock()),
+            patch.object(server, "COACH_BACKGROUND_JOBS", Mock()),
+            patch.object(server, "sync_job_worker", calls.sync_worker),
+            patch.object(server, "COACH_JOB_WORKER", calls.coach_worker),
+            patch.object(server, "CANONICAL_BACKFILL", calls.backfill),
+            patch.object(server, "SYNC_SCHEDULERS", calls.schedulers),
+            patch.object(server, "METRIC_EXPORT_RUNNER", Mock()),
+            patch.object(server, "DIAGNOSTIC_CAPTURE", Mock()),
+        ):
+            server.main()
+        order = [
+            name
+            for name, *_ in calls.mock_calls
+            if name
+            in {
+                "schedulers.startup_scheduler().schedule",
+                "backfill.worker.start",
+            }
+        ]
+        self.assertEqual(
+            ["schedulers.startup_scheduler().schedule", "backfill.worker.start"], order
+        )
+
     def test_maintenance_gate_blocks_new_operations_and_waits_for_running_one(self):
         gate = runtime_maintenance.MaintenanceGate()
         started = threading.Event()

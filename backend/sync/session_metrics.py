@@ -4,12 +4,12 @@
 Each batch fingerprints every live ride and run from its summary, the content
 hashes of its full-resolution stream sets and its members, before any stream is
 decoded. Only sessions whose stored rows carry another fingerprint are
-recomputed, at most ``batch_size`` per transaction, so a pass without changes
-decodes nothing and writes nothing. A computed session upserts one derived
-observation per metric it has, owned by the session; its other rows and the
-rows of sessions that are gone are retired. Sessions computed without any value
-keep their fingerprint in the stage state, so they are not decoded again until
-an input changes. Streams missing from storage are not fetched here.
+recomputed, at most ``batch_size`` per transaction within the batch time
+(#2287), so a pass without changes decodes nothing and writes nothing. A
+computed session upserts one derived observation per metric it has, owned by
+the session; its other rows and the rows of sessions that are gone are
+retired. Sessions computed without any value keep their fingerprint in the
+stage state, so they are not decoded again until an input changes. Streams missing from storage are not fetched here.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ from backend.performance.session_metrics_reads import (
     DERIVED_LABEL,
     stored_session_metrics,
 )
-from backend.sync.canonical_backfill import BatchReport
+from backend.sync.canonical_backfill import BatchReport, timed_batch
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -261,17 +261,11 @@ class SessionMetricsStage:
         stored = stored_session_metrics(db)
         state = self._state(db)
         plan = _plan(summaries, sessions, stream_keys, stored, state.get("empty") or {})
-        batch = plan.changed[: self._batch_size]
-        pending = plan.changed[self._batch_size :]
         keep, next_empty = plan.keep, plan.empty
-        for waiting, _ in pending:
-            # Not recomputed yet: its stored rows stay until a later batch.
-            keep.update(
-                row["natural_key"]
-                for row in stored.get(str(waiting["id"]), {}).values()
-            )
         tally = _Tally()
-        for item, fingerprint in batch:
+        computed = 0
+        for item, fingerprint in timed_batch(plan.changed, self._batch_size):
+            computed += 1
             session_id = str(item["id"])
             activity = (
                 _analysis_activity(db, session_id, sessions[session_id])
@@ -285,6 +279,13 @@ class SessionMetricsStage:
                 keep.update(written)
             else:
                 next_empty[session_id] = fingerprint
+        pending = plan.changed[computed:]
+        for waiting, _ in pending:
+            # Not recomputed yet: its stored rows stay until a later batch.
+            keep.update(
+                row["natural_key"]
+                for row in stored.get(str(waiting["id"]), {}).values()
+            )
         retired = canonical_store.retire_derived_observations(
             db, METHOD_ID, keep=keep, now=now
         )
@@ -292,7 +293,7 @@ class SessionMetricsStage:
         counts = {
             "sessions": len(summaries),
             "with_streams": len(stream_keys),
-            "computed": len(batch),
+            "computed": computed,
             "pending": len(pending),
             "values": dict(sorted(tally.values.items())),
             "bases": dict(sorted(tally.bases.items())),
@@ -314,7 +315,7 @@ class SessionMetricsStage:
             "Local session metrics reconciled",
             extra={"event": "session_metrics_reconciled", "context": counts},
         )
-        return BatchReport(items=len(batch), done=done)
+        return BatchReport(items=computed, done=done)
 
     def mark_failed(self, db: Any) -> None:
         state = self._state(db)

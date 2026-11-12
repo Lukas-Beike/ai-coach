@@ -6,8 +6,8 @@ session from its Garmin, Wahoo and local records, the content hashes of their
 stream and lap sets, whether a provider detail is stale, the frozen target
 snapshot and the locally resolved thresholds, before any set is decoded. Only
 sessions whose stored ``activity_detail_analysis`` row is not a version-3 row
-with that fingerprint are recomputed, at most ``batch_size`` per transaction,
-so a pass without changes decodes nothing and writes nothing.
+with that fingerprint are recomputed, at most ``batch_size`` per transaction and
+no more than the backfill's batch time allows (#2287), so a pass without changes decodes nothing and writes nothing.
 
 A session without such a row is computed when it has a stream or lap set; a
 version-3 row whose session lost its sets is rewritten without an analysis.
@@ -69,7 +69,7 @@ from backend.performance.session_zones import (
 )
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.target_snapshot import freeze_targets
-from backend.sync.canonical_backfill import BatchReport
+from backend.sync.canonical_backfill import BatchReport, timed_batch
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -230,16 +230,17 @@ class SessionAnalysisStage:
             if (fingerprint := session.fingerprint(session.targets))
             != _current_fingerprint(row)
         ]
-        batch = changed[: self._batch_size]
         tally = _Tally()
         context = _FreezeContext(summaries, self._planned_units, now)
-        for session, fingerprint in batch:
+        computed = 0
+        for session, fingerprint in timed_batch(changed, self._batch_size):
             self._write(db, session, fingerprint, context, now, tally)
-        done = len(changed) <= self._batch_size
+            computed += 1
+        done = computed == len(changed)
         counts = {
             "sessions": len(sessions),
-            "computed": len(batch),
-            "pending": len(changed) - len(batch),
+            "computed": computed,
+            "pending": len(changed) - computed,
             "outcomes": dict(sorted(tally.outcomes.items())),
             "written": tally.written,
         }
@@ -258,7 +259,7 @@ class SessionAnalysisStage:
             "Canonical session analyses reconciled",
             extra={"event": "session_analysis_reconciled", "context": counts},
         )
-        return BatchReport(items=len(batch), done=done)
+        return BatchReport(items=computed, done=done)
 
     def _sessions(
         self, db: Any

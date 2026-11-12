@@ -37,7 +37,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import activity_detail_store
 from backend.db.repositories import KeyValueRepository
-from backend.sync.canonical_backfill import BatchReport
+from backend.sync.canonical_backfill import BatchReport, timed_batch
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # The application logger: only it has handlers (see observability.configure_logging).
@@ -165,8 +165,9 @@ class ActivityRoutesStage:
             for session_id, digest in hashes.items()
             if sessions.get(session_id, {}).get("h") != digest
         ]
-        batch = changed[: self._batch_size]
-        for session_id in batch:
+        placed = 0
+        for session_id in timed_batch(changed, self._batch_size):
+            placed += 1
             summary = wanted[session_id]
             sessions.setdefault(session_id, {"route": None})
             sessions[session_id].update(h=hashes[session_id], at=summary["started_at"])
@@ -176,10 +177,10 @@ class ActivityRoutesStage:
         routes.prune(index, wanted)
         if json.dumps(index, sort_keys=True) != before:
             route_store.save_index(self._key_values, db, index)
-        remaining = len(changed) - len(batch)
+        remaining = len(changed) - placed
         counts = {
             "sessions": len(wanted),
-            "placed": len(batch),
+            "placed": placed,
             "routes": len(index["routes"]),
             "with_route": sum(1 for item in sessions.values() if item.get("route")),
             "remaining": remaining,
@@ -197,7 +198,7 @@ class ActivityRoutesStage:
             "Activity routes reconciled",
             extra={"event": "activity_routes_reconciled", "context": counts},
         )
-        return BatchReport(items=len(batch), done=remaining == 0)
+        return BatchReport(items=placed, done=remaining == 0)
 
     def mark_failed(self, db: Any) -> None:
         state = _load_state(self._key_values, db)
