@@ -1109,12 +1109,26 @@ def _plan_note_codes(receipt: dict[str, Any]) -> list[str]:
 
 
 def _failed_tools(receipt: dict[str, Any]) -> list[str]:
-    """Tool steps the app refused, as tool:reason codes (never their message text)."""
-    return [
-        f"{step.get('tool')}:{(step.get('result') or {}).get('reason') or 'failed'}"
-        for step in receipt.get("command_receipts") or []
-        if isinstance(step, dict) and (step.get("result") or {}).get("ok") is False
-    ]
+    """Tool steps the app refused, as tool:reason codes (never their message text).
+
+    A refused plan write adds its blocking finding codes, so the report shows
+    which rule the model failed to repair.
+    """
+    refused = []
+    for step in receipt.get("command_receipts") or []:
+        result = (step.get("result") or {}) if isinstance(step, dict) else {}
+        if result.get("ok") is not False:
+            continue
+        codes = sorted(
+            {
+                str(item.get("code"))
+                for item in result.get("findings") or []
+                if isinstance(item, dict) and item.get("code")
+            }
+        )
+        suffix = f"[{','.join(codes)}]" if codes else ""
+        refused.append(f"{step.get('tool')}:{result.get('reason') or 'failed'}{suffix}")
+    return refused
 
 
 # --- CLI and report ------------------------------------------------------------
