@@ -235,7 +235,7 @@ class CoachAthleteRecordToolService:
                 else "local_nutrition"
             )
         if name == "fill_nutrition_product_gaps":
-            return "local_nutrition_product"
+            return "local_nutrition_gaps"
         if name != "save_nutrition_product":
             return "local_nutrition"
         product_id = str(structured_action_payload(arguments).get("id") or "").strip()

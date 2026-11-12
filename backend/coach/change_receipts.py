@@ -101,6 +101,11 @@ _ORIGIN_NAMES = {
 }
 
 
+def _number(value: float) -> str:
+    """A filled value as written (rounded to three decimals), German spelling."""
+    return f"{value:.3f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
 def _gap_fill_lines(tool: Any, entry: dict[str, Any]) -> list[str]:
     """One receipt line per filled product: each field with value and origin."""
     if tool != "fill_nutrition_product_gaps":
@@ -108,7 +113,7 @@ def _gap_fill_lines(tool: Any, entry: dict[str, Any]) -> list[str]:
     return [
         f"{change.get('name') or change.get('id')}: "
         + ", ".join(
-            f"{_FIELD_NAMES.get(item['field'], item['field'])} {format(item['value'], 'g').replace('.', ',')}"
+            f"{_FIELD_NAMES.get(item['field'], item['field'])} {_number(item['value'])}"
             f" ({_ORIGIN_NAMES.get(item['origin'], item['origin'])})"
             for item in change.get("written", [])
         )

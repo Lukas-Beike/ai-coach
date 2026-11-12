@@ -555,7 +555,10 @@ class DestructiveTierTests(unittest.TestCase):
                 classifier=_Classifier(_verdict(["nutrition"], bulk=True)),
             ).allowed
         )
-        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1), {"bulk"})
+        # Only this tool's own earlier records count toward its threshold: a
+        # product saved earlier in the turn does not make one fill bulk.
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 0), set())
+        self.assertEqual(gate.call_impact(fill, {"products": [{}]}, 1, 1), {"bulk"})
 
         # Small calls add up across the turn.
         authority = _authority("Verschieb alles")

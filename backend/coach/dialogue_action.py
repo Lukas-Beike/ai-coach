@@ -49,6 +49,7 @@ LOCAL_BROAD_SCOPES = frozenset(
         "wahoo_sync",
         "local_nutrition",
         "local_nutrition_product",
+        "local_nutrition_gaps",
         "local_equipment",
         "local_activity_session",
     }
@@ -439,7 +440,7 @@ class CoachDialogueActionService:
                     else "local_nutrition_product",
                 )
             elif name == "fill_nutrition_product_gaps":
-                require_coach_scope(action, "local_nutrition_product")
+                require_coach_scope(action, "local_nutrition_gaps")
             elif name != "save_nutrition_template" or template_id is None:
                 require_coach_scope(action, "local_nutrition")
             if template_id is not None:

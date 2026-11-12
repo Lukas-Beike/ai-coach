@@ -12,6 +12,12 @@ from backend.activities.hr_cap import (
     cap_table_text,
 )
 from backend.athlete.profile import COACH_READ_ONLY_FIELDS
+from backend.nutrition.catalog import (
+    GAP_ORIGINS,
+    MAX_GAP_GRAMS,
+    MAX_GAP_KCAL,
+    MAX_GAP_PRODUCTS,
+)
 from backend.planning.plan_checks import BLOCKING_CODES, REQUIRED_CODES
 from backend.planning.session_focus import (
     ALL_FOCI,
@@ -1454,7 +1460,7 @@ def build_structured_tool_schemas(
                 "products": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 25,
+                    "maxItems": MAX_GAP_PRODUCTS,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
@@ -1468,13 +1474,13 @@ def build_structured_tool_schemas(
                                     "kcal": {
                                         "type": "number",
                                         "minimum": 0,
-                                        "maximum": 9000,
+                                        "maximum": MAX_GAP_KCAL,
                                     },
                                     **{
                                         field: {
                                             "type": "number",
                                             "minimum": 0,
-                                            "maximum": 1000,
+                                            "maximum": MAX_GAP_GRAMS,
                                         }
                                         for field in (
                                             "carbs_g",
@@ -1489,7 +1495,7 @@ def build_structured_tool_schemas(
                             },
                             "origin": {
                                 "type": "string",
-                                "enum": ["open_food_facts", "yazio", "bls", "web"],
+                                "enum": sorted(GAP_ORIGINS),
                             },
                             "source_url": {"type": "string", "maxLength": 500},
                         },

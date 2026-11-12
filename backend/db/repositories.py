@@ -93,11 +93,6 @@ def _store_fills(
             for key in updates
         }
     )
-    if "absent_nutrients" in details:
-        # A stored food lists nutrients its source lacked; a filled one is present.
-        details["absent_nutrients"] = [
-            key for key in details["absent_nutrients"] if key not in updates
-        ]
     db.execute(
         "UPDATE nutrition_products SET "
         + ", ".join(f"{key}=?" for key in updates)
@@ -461,7 +456,10 @@ class FoodDatabaseEntryRepository:
     def _entry(row: Any) -> dict[str, Any]:
         details = json.loads(row["details"])
         # Foods stored before sugar, fibre and salt were read lack those keys.
-        absent = set(details.pop("absent_nutrients", ()))
+        # A filled one is present; undo empties it, so it is absent again.
+        absent = {
+            key for key in details.pop("absent_nutrients", ()) if row[key] is None
+        }
         missing = details.pop("absent_fields", ())
         entry = {
             "id": row["id"],

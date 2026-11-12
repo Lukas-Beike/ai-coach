@@ -198,8 +198,10 @@ class NutritionProductContractTests(unittest.TestCase):
             [{"id": own["id"], "values": {"salt_g": 9}, "origin": "bls"}]
         )
         self.assertEqual(
-            (again["changes"], again["unchanged"][0]["skipped"]), ([], ["salt_g"])
+            (again["ok"], again["status"], again["changes"]),
+            (False, "unchanged", []),
         )
+        self.assertEqual(again["unchanged"][0]["skipped"], ["salt_g"])
         self.assertEqual(catalog.get_product(own["id"])["salt_g"], 0.4)
 
     def test_invalid_gap_fills_are_rejected_without_a_write(self):
@@ -239,6 +241,12 @@ class NutritionProductContractTests(unittest.TestCase):
         for items in ([], "x", [base] * 26):
             with self.subTest(items=items), self.assertRaises(AppError):
                 catalog.fill_product_gaps(items)
+        # An archived product is no longer the athlete's, so it is not filled.
+        catalog.archive_product(own["id"])
+        self.assertEqual(
+            catalog.fill_product_gaps([base])["unchanged"][0]["rejected"],
+            "Produkt nicht gefunden.",
+        )
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
         saved = self.library.product_catalog.save_product(self.product_payload())

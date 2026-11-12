@@ -155,7 +155,11 @@ class CoachTurnUndoTests(ServerTestCase):
 
         self.assertEqual(
             self._messages(turn_id)[1]["coach_changes"]["labels"],
-            ["Produktlücken gefüllt (2)"],
+            [
+                "Produktlücken gefüllt (2)",
+                "Synthetic skyr: Fett 0,2 (BLS)",
+                "Synthetic bar: Salz 0,7 (BLS)",
+            ],
         )
         self.assertEqual(
             [(item["name"], item["written"][0]["field"]) for item in result["changes"]],
@@ -167,7 +171,8 @@ class CoachTurnUndoTests(ServerTestCase):
         self.assertIsNone(catalog.get_product(own["id"])["fat_g"])
         restored = server.NUTRITION_ASSEMBLY.food_mirror().get(food["id"])
         assert restored is not None
-        self.assertIsNone(restored["per_100"]["salt_g"])
+        # Undo restores the food as it was stored: salt is absent again.
+        self.assertNotIn("salt_g", restored["per_100"])
 
     def test_a_record_changed_after_the_turn_aborts_the_whole_undo(self) -> None:
         turn_id = self._coach_turn()

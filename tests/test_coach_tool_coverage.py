@@ -1757,7 +1757,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "yazio"},
                 ]
             },
-            ["local_nutrition_product"],
+            ["local_nutrition_gaps"],
             message="Ja, trag die Lücken beider Produkte ein.",
         )
 

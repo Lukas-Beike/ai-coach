@@ -32,8 +32,8 @@ INCOMPLETE_PRODUCTS_NOTICE = (
 # Where a gap value may come from; a web value names its source page.
 GAP_ORIGINS = frozenset({"open_food_facts", "yazio", "bls", "web"})
 MAX_GAP_PRODUCTS = 25
-_MAX_KCAL = 9000
-_MAX_GRAMS = 1000
+MAX_GAP_KCAL = 9000
+MAX_GAP_GRAMS = 1000
 
 
 class ProductCatalogService:
@@ -175,6 +175,14 @@ class ProductCatalogService:
             for item in items:
                 outcome = self._fill_one(db, item, now)
                 (changes if outcome.get("written") else unchanged).append(outcome)
+        if not changes:
+            # Nothing written: no change to report, receipt or undo.
+            return {
+                "ok": False,
+                "status": "unchanged",
+                "changes": [],
+                "unchanged": unchanged,
+            }
         return {"ok": True, "changes": changes, "unchanged": unchanged}
 
     def _fill_one(self, db: Any, item: Any, fetched_at: str) -> dict[str, Any]:
@@ -185,7 +193,9 @@ class ProductCatalogService:
             return {"id": product_id, "rejected": str(exc)}
         previous = self._products.get(db, product_id)
         entry = None if previous else FoodDatabaseEntryRepository().get(db, product_id)
-        if previous is None and entry is None:
+        if (previous is None and entry is None) or (
+            previous and previous.get("status") != "active"
+        ):
             return {"id": product_id, "rejected": PRODUCT_NOT_FOUND}
         written = fill_empty_nutrients(
             db,
@@ -463,7 +473,7 @@ def _gap_values(item: Any) -> tuple[dict[str, float], str, str]:
         raise ValueError("values muss Kernfelder mit Zahlen enthalten.")
     values: dict[str, float] = {}
     for field, value in raw.items():
-        limit = _MAX_KCAL if field == "kcal" else _MAX_GRAMS
+        limit = MAX_GAP_KCAL if field == "kcal" else MAX_GAP_GRAMS
         if (
             field not in NUTRIENT_COLUMNS
             or isinstance(value, bool)

@@ -14,6 +14,7 @@ from backend.db.repositories import (
     NUTRIENT_COLUMNS,
     FoodDatabaseEntryRepository,
     database_origin,
+    fill_empty_nutrients,
 )
 from backend.errors import AppError
 
@@ -110,23 +111,17 @@ class FoodDatabaseMirror:
             if entry is None or not _same_basis(entry, source):
                 return entry
             values = source["per_100"]
-            gaps = {
-                key: values[key]
-                for key, value in entry["per_100"].items()
-                if value is None and values.get(key) is not None
-            }
-            if gaps:
-                origin = database_origin(str(source["id"]))
-                fetched_at = entry.pop("fetched_at")
-                entry["per_100"].update(gaps)
-                entry["filled_fields"] = {
-                    **entry.get("filled_fields", {}),
-                    **{
-                        key: {"origin": origin, "fetched_at": self._utc_now()}
-                        for key in gaps
-                    },
-                }
-                self._entries.upsert(db, entry, fetched_at)
+            fill_empty_nutrients(
+                db,
+                food_id,
+                {
+                    key: values[key]
+                    for key in NUTRIENT_COLUMNS
+                    if values.get(key) is not None
+                },
+                origin=database_origin(str(source["id"])),
+                fetched_at=self._utc_now(),
+            )
             return self._entries.get(db, food_id)
 
     def current(

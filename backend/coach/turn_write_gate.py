@@ -164,6 +164,11 @@ class CoachTurnWriteGate:
             writes_count=len(writes),
             records_count=sum(_entry_records(entry) for entry in writes),
         )
+        for entry in writes:
+            tool = str(entry["tool"])
+            self._state.tool_records[tool] = self._state.tool_records.get(
+                tool, 0
+            ) + _entry_records(entry)
         self._model = model
         self._read_only_tools = read_only_tools
         self._classifier_factory = classifier_factory

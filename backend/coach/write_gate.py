@@ -525,6 +525,8 @@ class TurnGateState:
 
     writes_count: int = 0
     records_count: int = 0
+    # Records per tool, for a tool's own bulk threshold.
+    tool_records: dict[str, int] = field(default_factory=dict)
     verdict: ImpactVerdict | None = None
 
     @property
@@ -597,9 +599,16 @@ def _removes_records(tool_name: str, arguments: Mapping[str, Any] | None) -> boo
 
 
 def call_impact(
-    tool_name: str, arguments: Mapping[str, Any] | None, records_so_far: int = 0
+    tool_name: str,
+    arguments: Mapping[str, Any] | None,
+    records_so_far: int = 0,
+    tool_records_so_far: int = 0,
 ) -> frozenset[str]:
-    """The high-impact kinds of one local call: ``delete`` and/or ``bulk``."""
+    """The high-impact kinds of one local call: ``delete`` and/or ``bulk``.
+
+    ``tool_records_so_far`` counts the records this tool already touched in the
+    turn, for a tool that counts as bulk from fewer records than the rest.
+    """
     impact = set()
     if _removes_records(tool_name, arguments):
         impact.add(DELETE)
@@ -609,7 +618,7 @@ def call_impact(
     if (
         tool_name in WHOLE_PLAN_TOOLS
         or (records and records_so_far + records > BULK_THRESHOLD)
-        or (bulk_from and records_so_far + records >= bulk_from)
+        or (bulk_from and tool_records_so_far + records >= bulk_from)
     ):
         impact.add(BULK)
     return frozenset(impact)
@@ -793,7 +802,12 @@ def check_write(
     impact = (
         frozenset()
         if domain == REMOTE_INTERVALS
-        else call_impact(tool_name, arguments, state.records_count)
+        else call_impact(
+            tool_name,
+            arguments,
+            state.records_count,
+            state.tool_records.get(tool_name, 0),
+        )
     )
     denied = _classifier_denial(
         tool_name,
@@ -805,6 +819,7 @@ def check_write(
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
     state.records_count += records
+    state.tool_records[tool_name] = state.tool_records.get(tool_name, 0) + records
     return GateDecision(True, domain, "ok", state.classifier_used)
 
 
@@ -820,7 +835,8 @@ CLASSIFIER_INSTRUCTIONS = (
     "area (domain) the athlete asks to change. delete: true only when the "
     "athlete asks to delete, remove, archive or cancel records of that domain. "
     "bulk: true only when the athlete asks to create, replace or rework a whole "
-    "plan, a period such as a week, or many records of that domain at once. "
+    "plan, a period such as a week, or many records of that domain at once; "
+    "filling missing values of two or more products is bulk in nutrition. "
     "Questions, discussion, advice, thanks and refusals such as 'don't delete "
     "anything' yield an empty list; a request phrased as a question ('Kannst "
     "du ...?') still counts. A reply that clearly accepts the change proposed "
