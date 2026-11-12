@@ -52,26 +52,31 @@ async function openPrivacy(page) {
   const loaded = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET");
   if (!(await panel.evaluate((element) => element.open))) await panel.locator("summary").click();
   // #2390: start from the state the server reported, once the switch shows it.
-  const { enabled } = await (await loaded).json();
-  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: Boolean(enabled) });
-  return Boolean(enabled);
+  const response = await loaded;
+  expect(response.ok()).toBe(true);
+  const enabled = Boolean((await response.json()).enabled);
+  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: enabled });
+  return enabled;
+}
+
+async function flipGpsTracks(page) {
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
+  await page.locator("#gpsTracksToggle").click();
+  expect((await saved).ok()).toBe(true);
 }
 
 test("the GPS-tracks switch persists across a reload", async ({ page }) => {
   const before = await openPrivacy(page);
-  const toggle = page.locator("#gpsTracksToggle");
-  const saved = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
-  await toggle.click();
-  expect((await saved).ok()).toBe(true);
-  await expect(toggle).toBeChecked({ checked: !before });
-
-  await page.reload();
-  expect(await openPrivacy(page)).toBe(!before);
-
-  // Restore the fixture state for later specs.
-  const restored = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
-  await page.locator("#gpsTracksToggle").click();
-  await restored;
+  try {
+    await flipGpsTracks(page);
+    await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: !before });
+    await page.reload();
+    expect(await openPrivacy(page)).toBe(!before);
+  } finally {
+    // Restore the fixture state for later specs, also after a failure.
+    await page.reload();
+    if ((await openPrivacy(page)) !== before) await flipGpsTracks(page);
+  }
   await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: before });
 });
 
