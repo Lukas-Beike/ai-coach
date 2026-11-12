@@ -13,7 +13,7 @@ export default [
   {
     files: ["public/**/*.js"],
     plugins: { sonarjs },
-    linterOptions: { reportUnusedDisableDirectives: "off" },
+    linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "script" },
     rules: {
       "sonarjs/cognitive-complexity": ["error", 15],
