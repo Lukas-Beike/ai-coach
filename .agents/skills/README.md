@@ -76,7 +76,7 @@ Sonar and CodeQL flag argument-driven files, hosts and TLS in these scripts, so
 use the patterns they accept: a file named by an argument goes through the
 temp-directory guard (`scratch_path` in `scripts/prod_client.py`); remote hosts
 are fixed in code (`scripts/image_verify.py`), except the athlete's app address
-for production checks, which `base_url` reduces to scheme and host; TLS contexts set a TLS 1.2
+for production checks, which `base_url` reduces to scheme and host:port; TLS contexts set a TLS 1.2
 minimum; tests generate fake credentials at runtime instead of literals; error
 output never echoes text that can quote a file.
 
