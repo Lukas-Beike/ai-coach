@@ -236,7 +236,11 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 
 #### Scenario: Thresholds
 - **WHEN** the athlete opens a sport's page
-- **THEN** LT2 shows the current threshold power (FTP) or threshold pace and the threshold heart rate with their source and date; LT1 shows the heart rate from the stored share of that threshold heart rate (measured or estimated from heart-rate variability) and the power or pace at the upper limit of zone 2 of the zones in effect, labelled as derived from the zones; a missing value shows "—".
+- **THEN** LT2 shows the current threshold power (FTP) or threshold pace and the threshold heart rate with their source and date; LT1 shows the heart rate and the power or pace from the performance thresholds, and its source line names the heart rate's origin (gemessen, aus der Herzfrequenzvariabilität, Schätzung aus Zone 2, Schätzung) and the power's or pace's where it differs; a missing value shows "—".
+
+#### Scenario: LT1 without a measured value or zones
+- **WHEN** no first threshold is stored and the sport has no heart-rate, pace or power zones
+- **THEN** LT1 shows the fixed shares of LT2 with the source "LT1 Schätzung", and Analyse lists the same values with the "Schätzung" chip, as it does for a value from zone 2; saving or removing zones reloads the thresholds.
 
 #### Scenario: Zone kinds
 - **WHEN** a sport has power, pace or heart-rate zones in effect, including Garmin's zones for all sports
@@ -254,4 +258,4 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 - **WHEN** the athlete opens Profil, also with a stale-threshold warning
 - **THEN** every section starts closed.
 
-Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `e2e/zones-thresholds.spec.js`.
+Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/settings.js::firstThresholdSource`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `tests/analysis-presentation.test.cjs`, `e2e/zones-thresholds.spec.js`.

@@ -117,11 +117,6 @@ function ensureRouteData(route = state.route) {
   refreshOpenProviderChecks();
   if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) {
     void renderCyclingPowerProfile();
-    // LT1 power and pace read the zones once; their arrival redraws the current values (#2262).
-    if (!zoneDataLoad) void ensureZoneData().then(() => {
-      const performance = state.data?.performance;
-      if (performance) renderCurrentPerformance(performance.metrics || {}, performance.history, performanceDataStatus(performance));
-    });
   }
 }
 

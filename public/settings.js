@@ -433,7 +433,6 @@ let zoneConfigurations = [];
 let zoneEffective = [];
 let zoneToday = "";
 let zoneSport = "ride";
-let zoneDataLoad = null;
 
 function applyZoneData(result) {
   zoneConfigurations = result.configurations || [];
@@ -454,13 +453,6 @@ async function loadZones() {
     renderZoneWarnings(null);
     toast(error.message, true);
   }
-}
-
-// Analyse reads the zones once for its LT1 values; the profile page reloads them on opening.
-// A failed read stays failed until then, so a render never starts another one.
-function ensureZoneData() {
-  zoneDataLoad ||= api("/api/zones").then(applyZoneData, () => {});
-  return zoneDataLoad;
 }
 
 const SDK_FAILURE_TEXT = {
@@ -596,30 +588,34 @@ function zoneSourceText(item) {
   return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
 }
 
-// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values; LT1 is the
-// stored share of the threshold heart rate and the power or pace at the top of zone 2.
-function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, profile = state.data?.profile || {}) {
+// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values; LT1 and the
+// origin of each of its values from the performance thresholds (#2427).
+function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, thresholds = state.data?.performance?.thresholds || {}) {
   const spec = ZONE_SPORTS[sport];
   const metric = sport === "ride" ? "power" : "pace";
   const lt2 = { main: zoneMetricValue(spec.lt2[0], metrics), hr: zoneMetricValue(spec.lt2[1], metrics) };
-  const share = Number(profile.first_threshold_pct);
-  const zones = zoneConfigurationFor(sport, metric);
-  const zoneTwo = zones ? zoneLimitValue(zones, zoneLimitsOf(zones)[1], lt2.main) : null;
-  const lt1 = { main: zoneTwo, hr: lt2.hr && share > 0 ? lt2.hr * share / 100 : null };
+  const values = thresholds.first_thresholds?.[sport] || {};
+  const lt1 = { main: (metric === "power" ? values.watts : values.pace_seconds_per_km) ?? null, hr: values.hr_bpm ?? null };
   const sources = [metrics[spec.lt2[0]], metrics[spec.lt2[1]]].filter((item) => item?.value != null);
   return {
     metric,
     lt1,
     lt2,
-    lt1Source: share > 0 ? firstThresholdSource(profile) : null,
-    lt1Derived: zoneTwo != null,
+    lt1Source: firstThresholdSource(metric, values),
     lt2Source: sources[0]?.source || null,
     validFrom: sources.map((item) => String(item.observed_at || "")).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) || null,
   };
 }
 
-function firstThresholdSource(profile) {
-  return profile.first_threshold_origin === "estimated" ? "LT1 aus der Herzfrequenzvariabilität (App)" : "LT1 gemessen";
+const FIRST_THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität (App)", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung" };
+
+// "LT1 gemessen, Pace Schätzung": the heart rate's origin, then the pace's or power's where it differs.
+function firstThresholdSource(metric, values) {
+  const hr = FIRST_THRESHOLD_ORIGINS[values.hr_origin];
+  const main = FIRST_THRESHOLD_ORIGINS[metric === "power" ? values.power_origin : values.pace_origin];
+  const mainLabel = metric === "power" ? "Leistung" : "Pace";
+  if (!hr) return main ? `LT1 · ${mainLabel} ${main}` : null;
+  return main && main !== hr ? `LT1 ${hr}, ${mainLabel} ${main}` : `LT1 ${hr}`;
 }
 
 function thresholdMainText(metric, value) {
@@ -641,9 +637,7 @@ function thresholdBox(sport) {
       h("b", { dataset: { threshold: names.main } }, thresholdMainText(rows.metric, values.main)),
       h("b", { dataset: { threshold: names.hr } }, values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
   }
-  let lt1Line = rows.lt1Source;
-  if (lt1Line && rows.lt1Derived) lt1Line += rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
-  const source = [lt1Line, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
+  const source = [rows.lt1Source, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
   const foot = h("p", "zone-source", source || null, zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
   return h("section", { className: "zone-box", dataset: { zoneBox: "thresholds" } }, heading, grid, foot);
 }
@@ -791,7 +785,7 @@ async function saveZones(event) {
       }),
     });
     showZoneReceipt("Lokale Zonen gespeichert", result.change);
-    await loadZones();
+    await reloadZonesAndThresholds();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
 }
@@ -804,9 +798,15 @@ async function removeZones() {
   try {
     const result = await api("/api/zones/remove", { method: "PUT", body: JSON.stringify({ key: button.dataset.key, confirmed: true }) });
     showZoneReceipt("Lokale Zonen entfernt", result.change);
-    await loadZones();
+    await reloadZonesAndThresholds();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
+}
+
+// A zone change moves LT1 and LT2, which the performance values carry; the zones draw after them.
+async function reloadZonesAndThresholds() {
+  await globalThis.load?.(undefined, ["performance"]);
+  await loadZones();
 }
 
 function showZoneReceipt(message, change) {
@@ -819,7 +819,7 @@ function showZoneReceipt(message, change) {
       try {
         await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
         receipt.replaceChildren("Zurückgenommen.");
-        await loadZones();
+        await reloadZonesAndThresholds();
       } catch (error) {
         undo.disabled = false;
         toast(error.message, true);

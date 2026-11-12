@@ -100,6 +100,67 @@ def coach_thresholds(
     return result
 
 
+# LT1 as a fixed share of LT2 when no measured or adopted value and no zone 2 of
+# that kind exists (athlete decisions 2026-11-12, #2427): heart rate of the
+# threshold HR, cycling power of the FTP and running speed of the threshold
+# speed. Change them here only.
+LT1_HR_SHARE: Final = 0.85
+LT1_POWER_SHARE: Final = 0.75
+LT1_RUN_SPEED_SHARE: Final = 0.88
+# Where an LT1 value comes from: the profile value (measured, or the adopted
+# DFA-a1 estimate), the top of the zone 2 in effect, or a fixed share of LT2.
+LT1_ZONE_TWO: Final = "zone_2"
+LT1_FIXED_SHARE: Final = "fixed_share"
+
+
+def first_thresholds(
+    metrics: Mapping[str, Mapping[str, Any]],
+    first_threshold_pct: float | None,
+    origin: str,
+    zone_two_tops: Mapping[str, float] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """LT1 of running and cycling with the origin of each value.
+
+    Heart rate: the stored share of the threshold HR (``origin``, measured or
+    estimated), else the top of the heart-rate zone 2, else ``LT1_HR_SHARE``.
+    Pace and power: the top of zone 2, else the fixed share of the threshold pace
+    or the FTP. ``zone_two_tops`` holds the tops in effect by ``<sport>_hr``
+    (bpm) and ``run_pace`` (s/km) or ``ride_power`` (W). A value with neither is
+    left out, and a sport without any LT2 value has no LT1.
+    """
+    tops = zone_two_tops or {}
+    hr_share = first_threshold_pct / 100 if first_threshold_pct else None
+    result: dict[str, dict[str, Any]] = {}
+    for sport, lthr_key, lt2_key, (main_key, main_origin_key, top_key), share in (
+        ("run", "run_threshold_hr_bpm", "run_threshold_pace_seconds_per_km",
+         ("pace_seconds_per_km", "pace_origin", "run_pace"), 1 / LT1_RUN_SPEED_SHARE),
+        ("ride", "bike_threshold_hr_bpm", "cycling_ftp_watts",
+         ("watts", "power_origin", "ride_power"), LT1_POWER_SHARE),
+    ):  # fmt: skip
+        lthr = as_number(metrics.get(lthr_key, {}).get("value"))
+        lt2 = as_number(metrics.get(lt2_key, {}).get("value"))
+        if not (lthr and lthr > 0) and not (lt2 and lt2 > 0):
+            continue
+        values: dict[str, Any] = {}
+        for value_key, origin_key, candidates in (
+            ("hr_bpm", "hr_origin", ((lthr, hr_share, origin),
+                                     (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO),
+                                     (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE))),
+            (main_key, main_origin_key, ((tops.get(top_key), 1, LT1_ZONE_TWO),
+                                         (lt2, share, LT1_FIXED_SHARE))),
+        ):  # fmt: skip
+            # The first candidate with a positive base and a factor wins.
+            chosen = next(
+                ((base * factor, name) for base, factor, name in candidates
+                 if base and factor and base > 0),
+                None,
+            )  # fmt: skip
+            if chosen:
+                values[value_key], values[origin_key] = round(chosen[0]), chosen[1]
+        result[sport] = values
+    return result
+
+
 def as_number(value: Any) -> float | int | None:
     """Return a finite number parsed from a provider value, or None."""
     try:

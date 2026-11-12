@@ -2,6 +2,7 @@
 
 import unittest
 from datetime import date, timedelta
+from typing import ClassVar
 
 from canonical_domain_support import provenance, zone_configuration
 from performance_day_support import (
@@ -10,6 +11,7 @@ from performance_day_support import (
     garmin_threshold_observations,
 )
 
+from backend.activities.zone_settings import zone_two_top
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     Environment,
@@ -19,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
     ZoneConfigurationMetric,
+    ZonePercentBasis,
 )
 from backend.performance.canonical_current import (
     read_current_inputs,
@@ -27,6 +30,7 @@ from backend.performance.canonical_current import (
 from backend.performance.current_metrics import (
     coach_thresholds,
     current_performance_metrics,
+    first_thresholds,
 )
 from backend.performance.current_thresholds import (
     configured_thresholds,
@@ -409,6 +413,107 @@ class ExportThresholdTests(unittest.TestCase):
             (winner.provenance.provider, winner.value.value), (GARMIN, 172.0)
         )
         self.assertNotIn((MetricKind.THRESHOLD_HR, Sport.RIDE), exported)
+
+
+class FirstThresholdTests(unittest.TestCase):
+    """LT1 per sport (#2427): measured or adopted > zone 2 > fixed share of LT2."""
+
+    METRICS: ClassVar[dict[str, dict[str, float]]] = {
+        "run_threshold_hr_bpm": {"value": 172},
+        "run_threshold_pace_seconds_per_km": {"value": 270},
+        "bike_threshold_hr_bpm": {"value": 160},
+        "cycling_ftp_watts": {"value": 280},
+    }
+    TOPS: ClassVar[dict[str, float]] = {
+        "run_hr": 128.0,
+        "ride_hr": 131.4,
+        "run_pace": 300.4,
+        "ride_power": 200.0,
+    }
+
+    def test_precedence_of_each_value(self) -> None:
+        # Worked examples: 85 % of 172 and 160 bpm is 146 and 136 bpm; 4:30 /km at
+        # 88 % speed is 5:07 /km; 75 % of 280 W is 210 W; 86 % of 172 and 160 bpm
+        # is 148 and 138 bpm.
+        fixed, zone = "fixed_share", "zone_2"
+        for name, pct, origin, tops, expected in (
+            ("no LT1 value and no zones", None, "", None, {
+                "run": {"hr_bpm": 146, "hr_origin": fixed,
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 136, "hr_origin": fixed,
+                         "watts": 210, "power_origin": fixed}}),
+            ("zone 2 of every kind", None, "", self.TOPS, {
+                "run": {"hr_bpm": 128, "hr_origin": zone,
+                        "pace_seconds_per_km": 300, "pace_origin": zone},
+                "ride": {"hr_bpm": 131, "hr_origin": zone,
+                         "watts": 200, "power_origin": zone}}),
+            ("measured wins over zone 2", 86.0, "measured", self.TOPS, {
+                "run": {"hr_bpm": 148, "hr_origin": "measured",
+                        "pace_seconds_per_km": 300, "pace_origin": zone},
+                "ride": {"hr_bpm": 138, "hr_origin": "measured",
+                         "watts": 200, "power_origin": zone}}),
+            ("adopted DFA estimate", 86.0, "estimated", None, {
+                "run": {"hr_bpm": 148, "hr_origin": "estimated",
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 138, "hr_origin": "estimated",
+                         "watts": 210, "power_origin": fixed}}),
+        ):  # fmt: skip
+            with self.subTest(name):
+                self.assertEqual(
+                    expected, first_thresholds(self.METRICS, pct, origin, tops)
+                )
+
+    def test_a_value_without_its_lt2_or_zone_is_left_out(self) -> None:
+        metrics = {"run_threshold_hr_bpm": {"value": 172}}
+        self.assertEqual(
+            {"run": {"hr_bpm": 146, "hr_origin": "fixed_share"}},
+            first_thresholds(metrics, None, ""),
+        )
+        self.assertEqual({}, first_thresholds({}, 86.0, "measured"))
+        # Garmin's all-sport heart-rate zones give no LT1 to a sport without LT2.
+        self.assertEqual({}, first_thresholds({}, 86.0, "measured", {"ride_hr": 131.4}))
+        # With an FTP but no threshold HR, the heart-rate zone still gives LT1.
+        self.assertEqual(
+            {"ride": {"hr_bpm": 131, "hr_origin": "zone_2",
+                      "watts": 210, "power_origin": "fixed_share"}},
+            first_thresholds({"cycling_ftp_watts": {"value": 280}}, None, "",
+                             {"ride_hr": 131.4}),
+        )  # fmt: skip
+
+    def test_zone_two_top_of_each_zone_kind(self) -> None:
+        pace = {
+            "metric": ZoneConfigurationMetric.PACE,
+            "threshold": None,
+            "maximum": None,
+            "resting": None,
+            "limits": None,
+        }
+        for name, configuration, threshold_pace, expected in (
+            # 4:30 /km at 87.7 % of the threshold speed: 270 * 100 / 87.7.
+            ("pace percent of the run threshold", zone_configuration(
+                **pace, percent_limits=(77.5, 87.7, 94.3),
+                percent_basis=ZonePercentBasis.THRESHOLD), 270.0, 307.87),
+            ("pace percent without any threshold", zone_configuration(
+                **pace, percent_limits=(77.5, 87.7, 94.3),
+                percent_basis=ZonePercentBasis.THRESHOLD), None, None),
+            # 3.5 m/s is 285.71 s/km.
+            ("absolute pace limits", zone_configuration(
+                **{**pace, "limits": (3.0, 3.5, 4.0)}), None, 285.71),
+            ("absolute power limits", _local_power(300.0), None, 200.0),
+            ("absolute heart-rate limits", zone_configuration(), None, 145.0),
+            # 48 + 70 % of the reserve of 192 - 48 bpm.
+            ("heart-rate reserve percent", zone_configuration(
+                limits=None, percent_limits=(60.0, 70.0, 80.0),
+                percent_basis=ZonePercentBasis.RESERVE), None, 148.8),
+            ("power percent of the FTP", zone_configuration(
+                metric=ZoneConfigurationMetric.POWER, sport=Sport.RIDE,
+                threshold=300.0, maximum=None, resting=None, limits=None,
+                percent_limits=(55.0, 75.0, 90.0),
+                percent_basis=ZonePercentBasis.THRESHOLD), None, 225.0),
+        ):  # fmt: skip
+            with self.subTest(name):
+                top = zone_two_top(configuration, threshold_pace)
+                self.assertEqual(expected, None if top is None else round(top, 2))
 
 
 if __name__ == "__main__":

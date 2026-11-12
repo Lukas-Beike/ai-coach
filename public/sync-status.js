@@ -115,7 +115,8 @@ function changedSyncAreas(nextVersions) {
     library: ["library", "plan"],
     checkins: ["feedback", "plan"],
     activity_feedback: ["feedback", "plan", "performance"],
-    profile: ["profile"],
+    // LT1 in the performance values derives from the profile's first threshold (#2427).
+    profile: ["profile", "performance"],
     plan: ["plan"],
   };
   const areas = new Set();
