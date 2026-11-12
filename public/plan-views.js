@@ -1402,6 +1402,29 @@ function plannedZoneBuckets(zone) {
     });
 }
 
+// Built when the card first opens, as most cards never are: the larger profile and, for a session,
+// the time in zones from the session read of "Details" (#2195).
+function appendOpenedPlannedParts(details, head, entry, actual) {
+  if (!details.querySelector(".planned-detail-profile")) {
+    const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
+    if (detailProfile) head.after(detailProfile);
+  }
+  const activityId = actual ? String(actual.activity_id || actual.id || "") : "";
+  if (activityId && !details.querySelector(".planned-zone-time")) {
+    void appendPlannedZoneTime(details, activityId, ["Radfahren", "Rad indoor"].includes(activitySportLabel(calendarSportType(actual))));
+  }
+}
+
+// A planned unit's body: its load, its steps (#2447) and its actions; returns the step list, if any.
+function appendPlannedUnitBody(details, entry, dateKey, todayKey) {
+  const metrics = plannedSessionMetrics(entry);
+  if (metrics) details.append(metrics);
+  const steps = plannedStepList(entry.workout_profile);
+  if (steps) details.append(steps);
+  details.append(...plannedUnitActions(entry, dateKey, todayKey));
+  return steps;
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
   const actual = calendarActualActivity(entry);
   const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1434,22 +1457,10 @@ function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPl
     plannedGarminBlocked(entry, dateKey, todayKey, actual));
   const head = plannedDetailHead(entry, actual, title, dateKey, status, plannedDetailStatus(entry, dateKey, todayKey, restDayLabel, weekHasPlan), plannedDayWeather(dayContext, dateKey));
   const details = h("div", "planned-entry-details", head);
-  // The larger profile is drawn when the card first opens; most cards never do.
   card.addEventListener("toggle", () => {
-    if (!card.open || details.querySelector(".planned-detail-profile")) return;
-    const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
-    if (detailProfile) head.after(detailProfile);
+    if (card.open) appendOpenedPlannedParts(details, head, entry, actual);
   });
-  // The time in zones is read when the card first opens, from the session read of "Details" (#2195).
-  const activityId = actual ? String(actual.activity_id || actual.id || "") : "";
-  if (activityId) card.addEventListener("toggle", () => {
-    if (card.open && !details.querySelector(".planned-zone-time")) void appendPlannedZoneTime(details, activityId, ["Radfahren", "Rad indoor"].includes(activitySportLabel(calendarSportType(actual))));
-  });
-  const metrics = actual ? null : plannedSessionMetrics(entry);
-  if (metrics) details.append(metrics);
-  const steps = actual ? null : plannedStepList(entry.workout_profile);
-  if (steps) details.append(steps);
-  if (!actual) details.append(...plannedUnitActions(entry, dateKey, todayKey));
+  const steps = actual ? null : appendPlannedUnitBody(details, entry, dateKey, todayKey);
   appendActualCalendarDetails(details, actual);
   if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
   appendPlannedCalendarComparison(details, entry, actual);
