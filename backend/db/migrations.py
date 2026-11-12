@@ -154,7 +154,16 @@ _V27_NUTRIENTS: Final = (
 )
 _V27_ORIGINS: Final = {"off": "open_food_facts", "yazio": "yazio", "bls": "bls"}
 _V27_FOOD_COLUMN_FIELDS: Final = frozenset(
-    {"id", "name", "brands", "basis_amount", "basis_unit", "per_100", "source_url", "barcode"}
+    {
+        "id",
+        "name",
+        "brands",
+        "basis_amount",
+        "basis_unit",
+        "per_100",
+        "source_url",
+        "barcode",
+    }
 )
 
 
@@ -162,7 +171,9 @@ def _v27_origin(food_id: str) -> str:
     return _V27_ORIGINS[food_id.split(":", 1)[0]]
 
 
-def _v27_store_food(db: Any, food: dict[str, Any], fetched_at: str, updated_at: str) -> bool:
+def _v27_store_food(
+    db: Any, food: dict[str, Any], fetched_at: str, updated_at: str
+) -> bool:
     """Store a mirrored food as a product of its database; an own product of its id wins."""
     payload = {key: value for key, value in food.items() if key != "fetched_at"}
     food_id = str(payload["id"])
@@ -175,7 +186,9 @@ def _v27_store_food(db: Any, food: dict[str, Any], fetched_at: str, updated_at: 
     per_100 = payload.get("per_100")
     per_100 = per_100 if isinstance(per_100, dict) else {}
     details = {
-        key: value for key, value in payload.items() if key not in _V27_FOOD_COLUMN_FIELDS
+        key: value
+        for key, value in payload.items()
+        if key not in _V27_FOOD_COLUMN_FIELDS
     }
     if absent := [key for key in _V27_NUTRIENTS if key not in per_100]:
         details["absent_nutrients"] = absent
@@ -221,7 +234,9 @@ def _v27_store_food(db: Any, food: dict[str, Any], fetched_at: str, updated_at: 
     )
 
 
-def _v27_fill_own(db: Any, product_id: str, food: Mapping[str, Any], fetched_at: str) -> bool:
+def _v27_fill_own(
+    db: Any, product_id: str, food: Mapping[str, Any], fetched_at: str
+) -> bool:
     """Fill an own product's empty brand and nutrients from a food; existing values win."""
     row = db.execute(
         "SELECT brand, basis_amount, basis_unit, details, "
@@ -231,7 +246,8 @@ def _v27_fill_own(db: Any, product_id: str, food: Mapping[str, Any], fetched_at:
     ).fetchone()
     per_100 = food.get("per_100")
     same_unit = (
-        food.get("basis_unit") is not None and food.get("basis_unit") == row["basis_unit"]
+        food.get("basis_unit") is not None
+        and food.get("basis_unit") == row["basis_unit"]
     )
     values = per_100 if same_unit and isinstance(per_100, dict) else {}
     scale = row["basis_amount"] / (food.get("basis_amount") or 100)

@@ -129,7 +129,9 @@ NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "sal
 
 
 # SHA-256 of the baseline's product rows after the v26 to v27 step (#2364).
-V27_PRODUCT_ROWS_DIGEST = "45f2e88b3a0e022417d55050c06790272c63dab4ecaabd64ba99aa98445423d7"
+V27_PRODUCT_ROWS_DIGEST = (
+    "f7d7c73f042c17cebc01b0486195189428de376ecd1911b9339533965a2c7595"
+)
 
 
 def mirror_food(food_id: str, unit: str | None, **per_100: float | None) -> dict:
@@ -323,12 +325,43 @@ class DatabaseSchemaGateTests(unittest.TestCase):
 
     def test_v27_product_step_is_frozen_against_live_repository_changes(self):
         # #2364: the step neither calls the live product repositories nor
-        # moves with them; its rows match the result recorded for schema v27.
+        # moves with them; its rows match the result recorded for schema v27
+        # by the step before it was frozen.
+        source = Path(migrations.__file__).read_text(encoding="utf-8")
+        for live in (
+            "backend.db.repositories",
+            "NUTRITION_PRODUCTS_DDL",
+            "NUTRIENT_COLUMNS",
+        ):
+            self.assertNotIn(live, source)
         db = self.connect()
         populated_baseline_database(db)
+        # A 50 g own product: scaled fills, a passed-on origin, another unit.
+        ean_half = "4000000000031"
+        db.execute(
+            "INSERT INTO nutrition_products(id, barcode, name, basis_amount, basis_unit, "
+            "source, created_at, updated_at) VALUES ('prod-half', ?, 'Halb', 50, 'g', "
+            "'manual', ?, ?)",
+            (ean_half, STAMP, STAMP),
+        )
+        passed_on = {
+            **mirror_food(f"off:{ean_half}", "g", kcal=200.0, fat_g=3.0),
+            "filled_fields": {"kcal": {"origin": "bls", "fetched_at": "2026-09-01"}},
+        }
+        other_unit = mirror_food(YAZIO_ID.replace("1", "3"), "ml", protein_g=5.0)
+        db.executemany(
+            "INSERT INTO food_database_entries(food_id, barcode, name, brand, payload, "
+            "fetched_at, updated_at) VALUES (?, ?, ?, 'Marke', ?, ?, ?)",
+            [
+                (food["id"], ean_half, food["name"], json.dumps(food), day, day)
+                for food, day in ((passed_on, "2026-10-04"), (other_unit, "2026-10-05"))
+            ],
+        )
         with (
             mock.patch.object(
-                repositories.FoodDatabaseEntryRepository, "upsert", side_effect=AssertionError
+                repositories.FoodDatabaseEntryRepository,
+                "upsert",
+                side_effect=AssertionError,
             ),
             mock.patch.object(
                 repositories.NutritionProductRepository,
@@ -344,6 +377,15 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             dict(row)
             for row in db.execute("SELECT * FROM nutrition_products ORDER BY id")
         ]
+        half = next(row for row in rows if row["id"] == "prod-half")
+        # 200 kcal and 3 g fat per 100 g fill 50 g; the ml food fills no nutrient.
+        self.assertEqual(
+            (half["kcal"], half["fat_g"], half["protein_g"], half["brand"]),
+            (100.0, 1.5, None, "Marke"),
+        )
+        self.assertEqual(
+            json.loads(half["details"])["filled_fields"]["kcal"]["origin"], "bls"
+        )
         self.assertEqual(
             hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest(),
             V27_PRODUCT_ROWS_DIGEST,
