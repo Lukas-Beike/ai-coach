@@ -321,6 +321,39 @@
    "truncation": "auto"
   }
  ],
+ "nutrition_photo": [
+  {
+   "method": "POST",
+   "payload": {
+    "input": [
+     {
+      "content": [
+       {
+        "text": "Lies die deutsche Nährwerttabelle dieses Produktfotos. Antworte ausschließlich als JSON mit name, brand, barcode, basis_amount, basis_unit, kcal, carbs_g, protein_g, fat_g, sugar_g, fiber_g, salt_g und confidence. Unlesbare Werte sowie unbekannte basis_amount/basis_unit sind null; nicht raten. basis_unit ist g, ml oder portion. Der Produktname darf fehlen, wenn nur eine Nährwerttabelle sichtbar ist.",
+        "type": "input_text"
+       },
+       {
+        "image_url": "data:image/jpeg;base64,/9j/c3ludGhldGljLWltYWdl",
+        "type": "input_image"
+       }
+      ],
+      "role": "user"
+     }
+    ],
+    "model": "gpt-6-luna",
+    "reasoning": {
+     "effort": "medium"
+    },
+    "service_tier": "fast",
+    "text": {
+     "format": {
+      "type": "json_object"
+     }
+    }
+   },
+   "url": "https://api.openai.com/v1/responses"
+  }
+ ],
  "plain": [
   {
    "include": [

@@ -4,6 +4,7 @@ import json
 import struct
 import unittest
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -312,6 +313,39 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             for payload in sent
         ]
 
+    def _photo_wire(self):
+        """Run a packaging-photo extraction; return the POSTs that reach OpenAI."""
+        sent = []
+
+        def post(method, url, payload=None, **_kwargs):
+            sent.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "payload": json.loads(json.dumps(payload)),
+                }
+            )
+            return {
+                "output_text": '{"name": "Synthetic whey", "kcal": 376}',
+                "output": [],
+            }
+
+        image = base64.b64encode(b"\xff\xd8\xffsynthetic-image").decode("ascii")
+        with (
+            patch.object(
+                server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key")
+            ),
+            patch.object(
+                server.PROVIDER_TRANSPORT.json_http_client(),
+                "request",
+                side_effect=post,
+            ),
+        ):
+            server.NUTRITION_ASSEMBLY.meal_library_service().extract_packaging_photo(
+                {"image_data_url": "data:image/jpeg;base64," + image}
+            )
+        return sent
+
     def _budget_exhausted(self, read, text):
         with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):
             return self._wire(
@@ -370,6 +404,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 "wire-tokens", "Erkläre die Woche", [incomplete, text]
             ),
             "tool_budget_exhausted": self._budget_exhausted(read, text),
+            "nutrition_photo": self._photo_wire(),
             "attachment_conversation": self._wire(
                 "wire-image", "Analysiere das", [read("c-3"), text], [image]
             ),
