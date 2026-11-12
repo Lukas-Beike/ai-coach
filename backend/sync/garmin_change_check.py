@@ -134,15 +134,14 @@ class GarminChangeCheck:
                 # A rejected key or endpoint queues the refresh at the backoff
                 # pace, so its error shows and the retry hold can apply.
                 return getattr(error, "status", None) in {401, 403}
-            self._failures = 0
             self._next_check_at = now + delay
             changes = set(newest) - set(self._known_activity_ids(ACTIVITY_DAYS))
             if night:
                 changes.add(f"night:{today.isoformat()}")
             changes = self._settle(changes, now)
             if not changes:
-                self._refresh_daytime(local, now)
-                return False
+                return self._refresh_daytime(local, now)
+            self._failures = 0
             self._awaiting = (frozenset(changes), local)
             self.counts["changes"] += 1
             self._log(
@@ -177,11 +176,13 @@ class GarminChangeCheck:
         night = not stored_night and has_night(client.get_sleep_daily(day, day), today)
         return newest, night
 
-    def _refresh_daytime(self, local: datetime, now: float) -> None:
+    def _refresh_daytime(self, local: datetime, now: float) -> bool:
         """By day, store today's summary and Body Battery where Garmin changed them.
 
         A change makes the full refresh due, which reads them too; at night
-        they barely move, so only the day cadence reads them.
+        they barely move, so only the day cadence reads them. The backoff
+        resets only once this read succeeded too, and a rejected key or
+        endpoint makes the refresh due as for the change markers.
         """
         client = self._personal()
         if (
@@ -189,16 +190,19 @@ class GarminChangeCheck:
             or client is None
             or check_seconds(local) != DAY_CHECK_SECONDS
         ):
-            return
+            self._failures = 0
+            return False
         try:
             values = fetch_daytime_values(client, local.date())
         except Exception as error:  # noqa: BLE001 - a failed read must not stop the loop
             self._next_check_at = now + self._failed(DAY_CHECK_SECONDS, error)
-            return
+            return getattr(error, "status", None) in {401, 403}
+        self._failures = 0
         stored = self._store_daytime(local.date(), values)
         if stored:
             self.counts["daytime"] += 1
             self._log("garmin_daytime_stored", sections=len(stored))
+        return False
 
     def _settle(self, changes: set[str], now: float) -> set[str]:
         """Hold back for an hour what a successful refresh since its trigger left out.

@@ -392,6 +392,24 @@ class GarminChangeCheckTests(unittest.TestCase):
         self.assertEqual(0, writes.call_count)
         self.assertEqual(1, self.check.counts["throttled"])
 
+    def test_failing_day_reads_keep_backing_off_and_a_rejected_key_surfaces(
+        self,
+    ) -> None:
+        self.daytime_check()
+        self.personal.day_error = OSError("synthetic outage")
+        self.assertFalse(self.due())
+        # The activity read succeeds, but the day read fails again: 40 minutes.
+        self.mono += 1200
+        self.assertFalse(self.due())
+        self.mono += 1200
+        self.assertFalse(self.due())
+        self.assertEqual(4, len(self.personal.calls))
+        self.mono += 1200
+        self.personal.day_error = provider_http.ProviderHTTPError(
+            "garmin", "authentication", 403
+        )
+        self.assertTrue(self.due())
+
     def test_a_slow_check_never_delays_a_foreground_write(self) -> None:
         # The check reads remotely outside any database lease (#2287 style):
         # a login waiting for the writer gets it while Garmin is slow.
