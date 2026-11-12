@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const { test } = require("node:test");
-const { loadPublicScript } = require("./frontend-harness.cjs");
+const { loadPublicScript, extractFunctions } = require("./frontend-harness.cjs");
 
 
 function deferred() {
@@ -626,4 +626,107 @@ test("after an app update a loaded area stores its fresh data", async () => {
   );
   context.saveStateSnapshot();
   assert.deepEqual(plain(context.readStateSnapshot().data.library), [{ id: "w2" }]);
+});
+
+// The real showLogin, logout, api and bootstrapAuth run on top of the loader, so the device
+// data is cleared by the code paths that the athlete's logout, a 401 and a start trigger.
+function deviceSession(request) {
+  const harness = { ...loader(), loginErrors: [] };
+  const { context, state } = harness;
+  const sessionWrites = [];
+  const elements = {};
+  const element = () => ({ attributes: {}, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, close() {}, value: "" });
+  state.stateEventRefreshAreas = new Set();
+  Object.assign(context, {
+    DOMException, AbortController,
+    AppApi: { request },
+    sessionStorage: { getItem: () => null, setItem: (key) => sessionWrites.push(key), removeItem() {} },
+    $: (selector) => (selector === "#appShell" ? harness.shell : (elements[selector] ??= element())),
+    AppState: { setPlanSegment() {} },
+    cancelBootstrapRetry() {}, stopVoiceRecording() {}, stopVoiceCapture() {}, cancelDeferredLoads() {}, rememberChatTurn() {},
+    disconnectStateEvents() {}, resetNutritionView() {}, clearAnalysisReportCache() {}, cancelScheduledChatStreamRender() {},
+    renderChatAttachments() {}, showAccessibleDialog() {}, renderConnectivityStatus() {}, renderMaintenanceStatus() {},
+    setChatCacheSyncing() {}, retryBootstrapAuth() {}, showAppShellLoading() {}, notePwaActivity() {},
+    confirmDiscardChanges: async () => true, requestConfirmation: async () => true,
+    toast() {}, setLoginError(message) { harness.loginErrors.push(message); },
+  });
+  extractFunctions("auth.js", ["showLogin", "showStateSnapshot", "bootstrapAuth", "logout", "login", "loginErrorMessage"], context);
+  extractFunctions("shared.js", ["api", "sessionEndedError"], context);
+  return { ...harness, elements, sessionWrites };
+}
+
+const DEVICE_KEYS = ["coach-chat-cache", "coach-state-snapshot", "coach-view-cache"];
+
+// Fills the device with a snapshot, the latest messages and a view read, as a running session does.
+function storeDeviceData({ context, state, storage }) {
+  state.initialStateLoaded = true;
+  state.data = { messages: [{ id: 1, content: "Hallo" }], planned: [{ id: "p1" }] };
+  context.saveStateSnapshot();
+  context.rememberChatCache(state.data);
+  context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);
+  state.data = null;
+  state.initialStateLoaded = false;
+  assert.deepEqual([...storage.keys()].sort(), DEVICE_KEYS);
+}
+
+const httpFailure = (status) => Object.assign(new Error("Fehler"), { status, reason: "http_error" });
+
+test("logout clears the device data once the server confirmed it, and a failed logout keeps it", async () => {
+  let outcome = httpFailure(500);
+  const device = deviceSession(async () => { if (outcome) throw outcome; return {}; });
+  storeDeviceData(device);
+  await device.context.logout();
+  assert.deepEqual([...device.storage.keys()].sort(), DEVICE_KEYS);
+  outcome = null;
+  await device.context.logout();
+  assert.equal(device.storage.size, 0);
+  assert.equal(device.context.readStateSnapshot(), null);
+});
+
+test("a 401 clears the device data and the session that asked ends", async () => {
+  const device = deviceSession(async (_path, _options, onUnauthorized) => { onUnauthorized(); throw httpFailure(401); });
+  storeDeviceData(device);
+  await assert.rejects(device.context.api("/api/plan"), { status: 401 });
+  assert.equal(device.storage.size, 0);
+  assert.equal(device.state.sessionGeneration, 1);
+});
+
+test("an unauthenticated start clears the stored data that it showed, an unreachable server keeps it", async () => {
+  const device = deviceSession(async () => ({ authenticated: false }));
+  storeDeviceData(device);
+  await device.context.bootstrapAuth();
+  assert.equal(device.renders.length, 1);
+  assert.equal(device.storage.size, 0);
+  const offline = deviceSession(async () => { throw Object.assign(new Error("offline"), { status: 0 }); });
+  storeDeviceData(offline);
+  await offline.context.bootstrapAuth();
+  assert.equal(offline.renders.length, 1);
+  assert.deepEqual([...offline.storage.keys()].sort(), DEVICE_KEYS);
+});
+
+test("the typed password, the session and the CSRF token never reach device storage", async () => {
+  const typedLogin = "fixture-typed-login";
+  const sent = [];
+  const device = deviceSession(async (path, options) => {
+    sent.push(path);
+    if (path === "/api/login") assert.equal(JSON.parse(options.body).password, typedLogin);
+    return { "/api/bootstrap": { state_versions: {}, messages: [{ id: 1 }] }, "/api/performance": { performance: { ctl: 40 } } }[path] || {};
+  });
+  const { context, state, storage, elements, sessionWrites } = device;
+  context.document.cookie = "ic_session=session-secret; ic_csrf=csrf-secret";
+  context.loadInitialState = async () => {
+    await context.load("/api/bootstrap", ["performance"]);
+    state.initialStateLoaded = true;
+    context.saveStateSnapshot();
+  };
+  elements["#loginPassword"] = { value: typedLogin, attributes: {}, setAttribute() {}, removeAttribute() {} };
+  await context.login({ preventDefault() {} });
+  assert.deepEqual([sent[0], device.loginErrors], ["/api/login", [""]]);
+  assert.ok(storage.has("coach-state-snapshot"));
+  for (const [key, value] of storage) {
+    assert.ok(DEVICE_KEYS.includes(key), key);
+    for (const secret of [typedLogin, "session-secret", "csrf-secret"]) assert.ok(!value.includes(secret), `${key} holds a secret`);
+  }
+  assert.deepEqual(sessionWrites, []);
+  assert.equal(elements["#loginPassword"].value, "");
 });

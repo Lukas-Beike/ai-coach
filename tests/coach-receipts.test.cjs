@@ -36,6 +36,14 @@ test("a different unresolved failure remains visible beside the saved workout", 
   assert.equal(cards[1].status, "success");
 });
 
+test("an adaptive replan preview is a review receipt, only the apply action reports saved changes", () => {
+  const [preview, applied] = [
+    render([{ tool: "preview_adaptive_replan", result: { ok: true } }]),
+    render([{ tool: "apply_adaptive_replan", result: { ok: true } }]),
+  ];
+  assert.deepEqual([preview[0].title, applied[0].title], ["Plananpassung zur Prüfung bereit", "Plananpassung gespeichert"]);
+});
+
 test("synchronization progress does not create chat cards", () => {
   const cards = render([
     { tool: "start_intervals_plan_sync", result: { ok: true, status: "queued", sync_job_id: "sync-1" } },
