@@ -178,7 +178,7 @@ def request_payload(request: ModelRequest, *, stream: bool = False) -> dict[str,
     tools = _tools(request)
     if tools:
         payload["tools"] = tools
-    if request.tools:
+    if any(tool.get("type") == "function" for tool in request.tools):
         payload["tool_choice"] = (
             {"type": "none"}
             if request.tool_choice == "none"

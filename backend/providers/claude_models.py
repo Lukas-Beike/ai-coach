@@ -9,6 +9,7 @@ a model choice within Claude, never a switch to another provider.
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,8 +24,10 @@ DEFAULT_MODELS = {
     "haiku": "claude-haiku-5-5",
 }
 REFRESH_AFTER = timedelta(hours=24)
+# After a failed listing, the next attempt waits this long instead of a day.
+RETRY_AFTER = timedelta(hours=1)
 # A family model id: no dated snapshot, no -fast or other deployment suffix.
-_MODEL_ID = re.compile(r"^claude-(opus|sonnet|haiku)-\d+(?:-\d+)?$")
+_MODEL_ID = re.compile(r"^claude-(opus|sonnet|haiku)-\d{1,2}(?:-\d{1,2})?$")
 # A newly resolved model that rejects the request shape or is unknown.
 _REJECTION_STATUSES = frozenset({400, 404})
 
@@ -78,6 +81,8 @@ class ClaudeModelResolver:
         self._list_models = list_models
         self._now = now
         self._logger = logger
+        # One read-modify-write at a time, so a slow listing loses no mark.
+        self._lock = threading.Lock()
 
     def _state(self) -> dict[str, Any]:
         raw = self._read()
@@ -96,7 +101,7 @@ class ClaudeModelResolver:
         try:
             newest = newest_by_family(self._list_models())
         except AppError as error:
-            # A failed listing keeps the last known models until the next request.
+            # A failed listing keeps the last known models and retries later.
             self._logger.warning(
                 "Claude model listing failed",
                 extra={
@@ -104,6 +109,9 @@ class ClaudeModelResolver:
                     "context": {"reason": error.reason or "request_failed"},
                 },
             )
+            retry_at = self._now() - REFRESH_AFTER + RETRY_AFTER
+            state = {**state, "fetched_at": retry_at.isoformat()}
+            self._write(state)
             return state
         state = {
             **state,
@@ -115,7 +123,8 @@ class ClaudeModelResolver:
 
     def resolve(self, family: str) -> str:
         """The model to use now: the newest one unless it was rejected."""
-        state = self._refreshed(self._state())
+        with self._lock:
+            state = self._refreshed(self._state())
         newest = state["newest"].get(family) or DEFAULT_MODELS[family]
         if state["rejected"].get(family) == newest:
             return state["working"].get(family) or DEFAULT_MODELS[family]
@@ -140,11 +149,12 @@ class ClaudeModelResolver:
         return result
 
     def _mark(self, key: str, family: str, model: str) -> None:
-        state = self._state()
-        if state[key].get(family) == model:
-            return
-        state[key] = {**state[key], family: model}
-        self._write(state)
+        with self._lock:
+            state = self._state()
+            if state[key].get(family) == model:
+                return
+            state[key] = {**state[key], family: model}
+            self._write(state)
 
     def call(self, family: str, send: Callable[[str], Any]) -> Any:
         """Send with the resolved model; step back once if a new model is rejected."""

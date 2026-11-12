@@ -73,8 +73,16 @@ class FakeProviderState:
     def __init__(self):
         self.usage = []
 
+        self.status = []
+
     def record_usage(self, provider, response, operation):
         self.usage.append((provider, response, operation))
+
+    def record_success(self, provider):
+        self.status.append((provider, "ok", None))
+
+    def record_status(self, provider, *, state, reason, message, **kwargs):
+        self.status.append((provider, state, reason))
 
 
 class FakeLogger:
@@ -396,13 +404,67 @@ class ClaudeStreamClientTests(unittest.TestCase):
             sse_body(FIXTURES["paused_search"]), sse_body(FIXTURES["web_search"])
         )
         turn = client.complete(
-            ModelRequest(model="claude-sonnet-5-5", input="Suche", web_search=True)
+            ModelRequest(
+                model="claude-sonnet-5-5",
+                input="Suche",
+                web_search=True,
+                json_output=True,
+            )
         )
         self.assertEqual(turn.stop_reason, "completed")
         resumed = opener.payload(1)["messages"]
         self.assertEqual(resumed[-1]["role"], "assistant")
         self.assertEqual(resumed[-1]["content"][0]["type"], "server_tool_use")
         self.assertEqual(len(state.usage), 2)
+        # The turn keeps what came before the pause: replay needs the call.
+        self.assertEqual(
+            [block["type"] for block in turn.opaque_state][:2],
+            ["server_tool_use", "text"],
+        )
+        self.assertEqual(json.loads(turn.final_text)["products"][0]["ref"], 1)
+
+    def test_a_search_pauses_at_most_three_times_more(self):
+        paused = sse_body(FIXTURES["paused_search"])
+        client, opener, _, _ = make_client(paused, paused, paused, paused)
+        turn = client.complete(
+            ModelRequest(model="claude-sonnet-5-5", input="Suche", web_search=True)
+        )
+        self.assertEqual(len(opener.requests), 4)
+        self.assertEqual(turn.stop_reason, "incomplete")
+
+    def test_malformed_events_are_invalid_responses(self):
+        for events in (
+            [
+                {
+                    "type": "content_block_delta",
+                    "index": 3,
+                    "delta": {"type": "text_delta", "text": "x"},
+                }
+            ],
+            [{"type": "content_block_start"}],
+            [{"type": "message_delta", "delta": {}}],
+        ):
+            with self.subTest(events=events):
+                client, _, state, _ = make_client(sse_body(events))
+                with self.assertRaises(AppError) as raised:
+                    client.complete(ModelRequest(model="claude-opus-5-5"))
+                self.assertEqual(raised.exception.reason, "invalid_response")
+                self.assertEqual(state.usage[0][2], "messages_stream_failed")
+        client, _, _, _ = make_client(b"data: \xff\xfe\n\n")
+        with self.assertRaises(AppError) as raised:
+            client.complete(ModelRequest(model="claude-opus-5-5"))
+        self.assertEqual(raised.exception.reason, "invalid_response")
+
+    def test_status_follows_success_and_failure(self):
+        client, _, state, _ = make_client(sse_body(FIXTURES["tool_round"]))
+        client.complete(ModelRequest(model="claude-opus-5-5"))
+        self.assertEqual(state.status, [("anthropic", "ok", None)])
+        client, _, state, _ = make_client(http_error(401, "authentication_error"))
+        with self.assertRaises(AppError):
+            client.complete(ModelRequest(model="claude-opus-5-5"))
+        self.assertEqual(
+            state.status, [("anthropic", "error", "authentication_or_permission")]
+        )
 
     def test_refusal_after_the_fallback_chain_ends_with_a_safe_error(self):
         client, _, state, logger = make_client(sse_body(FIXTURES["refusal"]))
@@ -458,6 +520,23 @@ class ClaudeStreamClientTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             client.complete(ModelRequest(model="claude-opus-5-5"))
         self.assertEqual(raised.exception.reason, "invalid_response")
+
+    def test_a_cancel_that_closes_the_response_is_a_cancel(self):
+        cancel = threading.Event()
+
+        class ClosedOnRead(FakeResponse):
+            def readline(self, size=-1):
+                cancel.set()
+                return b""
+
+        client, _, state, _ = make_client()
+        client.opener = lambda request, timeout: ClosedOnRead(b"")
+        with self.assertRaises(AppError) as raised:
+            client.stream(
+                ModelRequest(model="claude-opus-5-5"), lambda _t: None, cancel
+            )
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertEqual(state.usage[0][2], "messages_stream_cancelled")
 
     def test_cancellation_stops_the_stream_and_bills_what_it_reported(self):
         cancel = threading.Event()
@@ -518,6 +597,13 @@ class ClaudeModelResolverTests(unittest.TestCase):
             },
         )
         self.assertEqual(newest_by_family({"data": "x"}), {})
+        # An old-style dated snapshot is no family model.
+        self.assertEqual(
+            newest_by_family(
+                {"data": [{"id": "claude-sonnet-4-20250514", "created_at": "2030"}]}
+            ),
+            {},
+        )
 
     def test_resolution_lists_models_once_a_day_and_keeps_them_on_failure(self):
         resolver, store, calls = self.make()
@@ -529,8 +615,14 @@ class ClaudeModelResolverTests(unittest.TestCase):
             AppError(503, "x", reason="provider_unavailable")
         )
         self.assertEqual(resolver.resolve("opus"), "claude-opus-5-6")
-        failing, _, _ = self.make(listing=AppError(503, "x", reason="x"))
+        failing, _, failed_calls = self.make(listing=AppError(503, "x", reason="x"))
         self.assertEqual(failing.resolve("sonnet"), "claude-sonnet-5-5")
+        # A failed listing is retried an hour later, not on every request.
+        self.assertEqual(failing.resolve("sonnet"), "claude-sonnet-5-5")
+        self.assertEqual(len(failed_calls), 1)
+        failing._now = lambda: self.NOW + timedelta(hours=1, minutes=1)
+        failing.resolve("sonnet")
+        self.assertEqual(len(failed_calls), 2)
 
     def test_a_rejected_new_model_steps_back_to_the_last_working_one(self):
         resolver, store, _ = self.make(state={"working": {"opus": "claude-opus-5-5"}})

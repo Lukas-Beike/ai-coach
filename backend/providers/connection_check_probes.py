@@ -48,9 +48,7 @@ def _models_check(
 ) -> None:
     """List the models of a model provider: the cheapest authenticated read."""
     try:
-        url = provider_http.endpoint(
-            base_url, path, default_base_url=default_base_url
-        )
+        url = provider_http.endpoint(base_url, path, default_base_url=default_base_url)
     except AppError as error:
         raise AppError(
             400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON

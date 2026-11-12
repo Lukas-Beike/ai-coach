@@ -73,13 +73,22 @@ def read_sse_events(
             raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
         if not isinstance(event, dict):
             raise AppError(502, _INVALID_EVENT, reason="invalid_response")
-        on_event(event)
+        try:
+            on_event(event)
+        except (KeyError, TypeError, ValueError) as exc:
+            # An event for a block that never started, or without a field.
+            raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
 
-    while True:
+    def check_cancelled() -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise provider_http.ProviderRequestCancelled
+
+    while True:
+        check_cancelled()
         # One byte over the remaining budget detects an overlong line.
         line = response.readline(max(1, max_bytes - size + 1))
+        # A cancel closes the response, which ends the read: that is no truncation.
+        check_cancelled()
         size += len(line)
         if size > max_bytes:
             raise provider_http.ProviderResponseTooLarge(
@@ -87,7 +96,10 @@ def read_sse_events(
             )
         if not line:
             break
-        text = line.decode("utf-8").rstrip("\r\n")
+        try:
+            text = line.decode("utf-8").rstrip("\r\n")
+        except UnicodeDecodeError as exc:
+            raise AppError(502, _INVALID_EVENT, reason="invalid_response") from exc
         if text.startswith("data:"):
             data.append(text[5:].lstrip())
         elif not text and data:
@@ -174,11 +186,13 @@ class ClaudeMessagesClient:
             raise AppError(503, ANTHROPIC_API_KEY_ERROR, reason="not_configured")
         payload = request_payload(request, stream=True)
         json_answer = request.json_output or request.output_schema is not None
+        paused: list[Any] = []
+        message = self._send(payload, on_text_delta, cancel_event)
         for _ in range(MAX_PAUSE_CONTINUATIONS):
-            message = self._send(payload, on_text_delta, cancel_event)
             if message.get("stop_reason") != "pause_turn":
                 break
             # Resend the paused content as is; the API continues the search.
+            paused += message.get("content") or []
             payload = {
                 **payload,
                 "messages": [
@@ -186,8 +200,11 @@ class ClaudeMessagesClient:
                     {"role": "assistant", "content": message.get("content") or []},
                 ],
             }
+            message = self._send(payload, on_text_delta, cancel_event)
         if message.get("stop_reason") == "refusal":
             raise AppError(502, REFUSED_MESSAGE, reason="refused")
+        # One turn: the content before each pause belongs to the answer.
+        message = {**message, "content": [*paused, *(message.get("content") or [])]}
         return model_turn(message, json_answer=json_answer)
 
     def _request(self, payload: dict[str, Any]) -> Request:
@@ -227,6 +244,7 @@ class ClaudeMessagesClient:
             if text:
                 on_text_delta(text)
 
+        response: Any = None
         try:
             response = provider_http.open_interruptibly(
                 self._request(payload),
@@ -248,9 +266,12 @@ class ClaudeMessagesClient:
             self._record("messages_stream_cancelled", assembler, context, started)
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled") from exc
         except HTTPError as exc:
-            raise self._http_error(exc, context, started) from exc
+            error = self._http_error(exc, context, started)
+            self._record_status(error)
+            raise error from exc
         except AppError as exc:
             self._record("messages_stream_failed", assembler, context, started, exc)
+            self._record_status(exc)
             raise
         except provider_http.ProviderResponseTooLarge as exc:
             error = AppError(
@@ -277,13 +298,27 @@ class ClaudeMessagesClient:
             self._record("messages_stream_failed", assembler, context, started, error)
             raise error from exc
         finally:
+            # Release only the handle this request set.
             if (
                 cancel_event is not None
-                and getattr(cancel_event, "_provider_response", None) is not None
+                and response is not None
+                and getattr(cancel_event, "_provider_response", None) is response
             ):
                 delattr(cancel_event, "_provider_response")
         self._record("messages_stream", assembler, context, started)
+        self.provider_state.record_success("anthropic")
         return message
+
+    def _record_status(self, error: AppError) -> None:
+        """Keep Claude's last failure, as the OpenAI path does, without its text."""
+        self.provider_state.record_status(
+            "anthropic",
+            state="error",
+            reason=error.reason or "request_failed",
+            message=error.message,
+            http_status=error.upstream_status,
+            provider_error_code=None,
+        )
 
     def _record(
         self,
