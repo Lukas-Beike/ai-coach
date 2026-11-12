@@ -116,6 +116,12 @@ def _guidance(decision: GateDecision) -> str:
     return _DENIAL_GUIDANCE.get(decision.reason, _DEFAULT_GUIDANCE)
 
 
+def _succeeded(result: Any) -> bool:
+    """Whether a call is no recorded failure; a waiting card or a receipt kept
+    without its result still counts, so the budget never shrinks by doubt."""
+    return not (isinstance(result, Mapping) and result.get("ok") is False)
+
+
 def _entry_records(entry: Mapping[str, Any]) -> int:
     """Records one earlier call counted; receipts without a count use history rows."""
     count = entry.get("record_count")
@@ -197,12 +203,18 @@ class CoachTurnWriteGate:
                 message, context, current_id if isinstance(current_id, int) else 0
             ),
         )
-        # A resumed turn already spent part of its write and bulk budget.
+        # A resumed turn already spent part of its write and bulk budget; only
+        # a call that did not fail counts toward the bulk budget (#2335).
         writes = [
             entry for entry in command_receipts if entry.get("tool") in TOOL_DOMAIN
         ]
         self._state = TurnGateState(writes_count=len(writes))
+        # The bulk counters before the last allowed call, until it settles.
+        self._before_call: tuple[int, dict[str, int], dict[str, frozenset[str]]] | None
+        self._before_call = None
         for entry in writes:
+            if not _succeeded(entry.get("result")):
+                continue
             tool = str(entry["tool"])
             ids = frozenset(str(item) for item in entry.get("record_ids") or ())
             count_records(
@@ -242,6 +254,12 @@ class CoachTurnWriteGate:
         """Return the structured not-performed result, or None when allowed."""
         if tool_name in self._read_only_tools:
             return None
+        state = self._state
+        before = (
+            state.records_count,
+            dict(state.tool_records),
+            dict(state.tool_record_ids),
+        )
         decision = check_write(
             tool_name,
             self._authority,
@@ -252,6 +270,7 @@ class CoachTurnWriteGate:
             arguments=arguments,
         )
         if decision.allowed:
+            self._before_call = before
             return None
         self._log(tool_name, decision)
         return {
@@ -263,6 +282,19 @@ class CoachTurnWriteGate:
             "gate_reason": decision.reason,
             "message": f"{_NOT_PERFORMED} " + _guidance(decision),
         }
+
+    def settle(self, result: Any) -> None:
+        """Refund the bulk records of the last allowed call when it failed.
+
+        A failed write saved nothing, so its corrected retry stays within the
+        original authority (#2335); it still counts toward the write cap.
+        """
+        if self._before_call is not None and not _succeeded(result):
+            state = self._state
+            (state.records_count, state.tool_records, state.tool_record_ids) = (
+                self._before_call
+            )
+        self._before_call = None
 
     def _log(self, tool_name: str, decision: GateDecision) -> None:
         self._logger.warning(

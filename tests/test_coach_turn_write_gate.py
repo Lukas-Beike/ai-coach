@@ -25,6 +25,7 @@ from backend.coach.write_gate import (
     WRITE_CAP,
     ImpactVerdict,
 )
+from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses_adapter import request_payload
 
@@ -172,6 +173,26 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertEqual(
             denied(gate, "update_profile", {})["gate_reason"], "impact_not_confirmed"
         )
+        # A failed call saved nothing and spends no bulk budget (#2335).
+        failed = [{**full[0], "result": {"ok": False, "reason": "tool_failed"}}]
+        gate, _factory = make_gate("Verschieb die Woche", receipts=failed)
+        self.assertIsNone(gate.denial("update_profile", {}))
+
+    def test_a_failed_write_refunds_its_bulk_records_to_the_retry(self) -> None:
+        # Repro of #2335: four workouts fail on a revision conflict; the
+        # corrected retry of the same four needs no bulk confirmation, while a
+        # turn that really writes more than the threshold still does.
+        four = {"changes": [{"action": "create"} for _ in range(4)]}
+        gate, factory = make_gate("Plane mir vier Einheiten")
+        self.assertIsNone(gate.denial("apply_training_patch", four))
+        gate.settle({"ok": False, "reason": "planning_revision_conflict"})
+        self.assertIsNone(gate.denial("apply_training_patch", four))
+        gate.settle({"ok": True})
+        self.assertEqual(
+            denied(gate, "apply_training_patch", four)["gate_reason"],
+            "impact_not_confirmed",
+        )
+        factory.assert_called_once()
 
     def test_a_resumed_gap_fill_counts_each_product_once(self) -> None:
         # Receipts keep the product ids: two calls for p1 are one product, so a
@@ -580,6 +601,24 @@ class ChokePointTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "saved": True})
         self.execution.execute.assert_called_once()
         self.assertEqual(len(state.command_receipts), 1)
+        self.logger.warning.assert_not_called()
+
+    def test_a_failed_write_leaves_the_bulk_budget_to_its_retry(self) -> None:
+        # Two failed 5-record patches stay below the threshold of 7 (#2335).
+        five = {"changes": [{"action": "create"}] * 5}
+        self.metadata = lambda name: {
+            **ChokePointTests.metadata(name),
+            "arguments": five,
+        }
+        self.execution.execute.side_effect = AppError(409, "synthetic conflict")
+        self.failure.project.return_value = {"ok": False, "reason": "tool_failed"}
+        state = self.state("Plane mir fünf Einheiten")
+
+        for _attempt in range(2):
+            result = self.execute(state, "apply_training_patch")[2]
+            self.assertEqual(result["reason"], "tool_failed")
+
+        self.assertEqual(self.execution.execute.call_count, 2)
         self.logger.warning.assert_not_called()
 
     def test_only_write_tools_collect_changes_and_store_the_gates_record_count(

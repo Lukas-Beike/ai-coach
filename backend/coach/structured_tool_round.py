@@ -247,6 +247,7 @@ class CoachStructuredToolRoundService:
                     return name, call_id, denial, {"operation": name}
 
                 result = self._execute_and_record(metadata, action, state)
+                self._turn_write_gate(state).settle(result)
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
                 _log_context_reload(state, result, round_number, name)
@@ -270,6 +271,8 @@ class CoachStructuredToolRoundService:
                 action=action,
                 command_receipts=state.command_receipts,
             )
+            if state.write_gate is not None:
+                state.write_gate.settle(result)
         state.model_instructions = model_instructions
         return name, call_id, result, action
 
