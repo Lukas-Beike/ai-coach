@@ -20,8 +20,8 @@
   no versions: reference assets as `/app.js` in `index.html` and `ASSETS`, and
   keep the `__ASSET_HASH__` cache-name placeholder. `StaticAssetService` stamps
   `?v=<content hash>` and the cache name when serving, so a fresh installation
-  receives a consistent current asset set. Add a new file to `ASSETS` (if
-  cached) and `STATIC_TARGETS`; never bump versions by hand. Do not add
+  receives a consistent current asset set. Add a new file to `ASSETS` if
+  cached; never bump versions by hand. Do not add
   interactive application update dialogs, cache conversion or earlier-client support.
 - The last loaded state and recent view reads are stored on the device, so a
   start or view shows them at once while fresh data loads. The latest 20 Coach

@@ -39,40 +39,8 @@ const ASSETS = [
   "/manifest.webmanifest"
 ];
 const CACHED_PATHS = new Set(ASSETS.map((asset) => asset.split("?")[0]));
-const VERSIONED_ASSETS = new Set([
-  "/format.js",
-  "/activity-details.js",
-  "/activity-analysis.js",
-  "/analysis.js",
-  "/nutrition.js",
-  "/view-refresh.js",
-  "/api.js",
-  "/navigation.js",
-  "/appearance.js",
-  "/state.js",
-  "/views.js",
-  "/plan-views.js",
-  "/components.js",
-  "/connection-status.js",
-  "/status-strip.js",
-  "/coach.js",
-  "/shared.js",
-  "/auth.js",
-  "/sync-status.js",
-  "/notifications.js",
-  "/performance-view.js",
-  "/diagnostics.js",
-  "/state-loader.js",
-  "/sync-actions.js",
-  "/wahoo-connection.js",
-  "/provider-connections.js",
-  "/provider-checks.js",
-  "/settings.js",
-  "/app.js",
-  "/styles.css",
-  "/icon.svg",
-  "/apple-touch-icon.png"
-]);
+// The server stamps a version query onto every versioned entry of ASSETS.
+const VERSIONED_ASSETS = new Set(ASSETS.filter((asset) => asset.includes("?")).map((asset) => asset.split("?")[0]));
 const NAVIGATION_TIMEOUT_MS = 2500;
 // A new worker takes over at once; the open page reloads itself when nothing would be lost (notifications.js).
 globalThis.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => globalThis.skipWaiting())));

@@ -13,125 +13,21 @@ from urllib.parse import parse_qs, urlparse
 from backend.errors import AppError
 
 ASSET_INDEX_HTML = "index.html"
-ASSET_API_JS = "api.js"
-ASSET_FORMAT_JS = "format.js"
-ASSET_APP_JS = "app.js"
-ASSET_SHARED_JS = "shared.js"
-ASSET_AUTH_JS = "auth.js"
-ASSET_SYNC_STATUS_JS = "sync-status.js"
-ASSET_VIEW_REFRESH_JS = "view-refresh.js"
-ASSET_NOTIFICATIONS_JS = "notifications.js"
-ASSET_PERFORMANCE_VIEW_JS = "performance-view.js"
-ASSET_DIAGNOSTICS_JS = "diagnostics.js"
-ASSET_STATE_LOADER_JS = "state-loader.js"
-ASSET_SYNC_ACTIONS_JS = "sync-actions.js"
-ASSET_WAHOO_CONNECTION_JS = "wahoo-connection.js"
-ASSET_PROVIDER_CONNECTIONS_JS = "provider-connections.js"
-ASSET_PROVIDER_CHECKS_JS = "provider-checks.js"
-ASSET_SETTINGS_JS = "settings.js"
-ASSET_NAVIGATION_JS = "navigation.js"
-ASSET_APPEARANCE_JS = "appearance.js"
-ASSET_STATE_JS = "state.js"
-ASSET_VIEWS_JS = "views.js"
-ASSET_PLAN_VIEWS_JS = "plan-views.js"
-ASSET_COMPONENTS_JS = "components.js"
-ASSET_CONNECTION_STATUS_JS = "connection-status.js"
-ASSET_STATUS_STRIP_JS = "status-strip.js"
-ASSET_COACH_JS = "coach.js"
-ASSET_NUTRITION_JS = "nutrition.js"
-ASSET_ANALYSIS_JS = "analysis.js"
-ASSET_ACTIVITY_DETAILS_JS = "activity-details.js"
-ASSET_ACTIVITY_ANALYSIS_JS = "activity-analysis.js"
-ASSET_STYLES_CSS = "styles.css"
 ASSET_SERVICE_WORKER_JS = "service-worker.js"
 ASSET_MANIFEST = "manifest.webmanifest"
-ASSET_LOGO = "logo.png"
-ASSET_ICON = "icon.svg"
-ASSET_APPLE_TOUCH_ICON = "apple-touch-icon.png"
-ASSET_ICON_192 = "icon-192.png"
-ASSET_ICON_512 = "icon-512.png"
-ASSET_ICON_MASKABLE = "icon-maskable-512.png"
-STATIC_TARGETS = (
-    ASSET_INDEX_HTML,
-    ASSET_API_JS,
-    ASSET_FORMAT_JS,
-    ASSET_APP_JS,
-    ASSET_SHARED_JS,
-    ASSET_AUTH_JS,
-    ASSET_SYNC_STATUS_JS,
-    ASSET_VIEW_REFRESH_JS,
-    ASSET_NOTIFICATIONS_JS,
-    ASSET_PERFORMANCE_VIEW_JS,
-    ASSET_DIAGNOSTICS_JS,
-    ASSET_STATE_LOADER_JS,
-    ASSET_SYNC_ACTIONS_JS,
-    ASSET_WAHOO_CONNECTION_JS,
-    ASSET_PROVIDER_CONNECTIONS_JS,
-    ASSET_PROVIDER_CHECKS_JS,
-    ASSET_SETTINGS_JS,
-    ASSET_NAVIGATION_JS,
-    ASSET_APPEARANCE_JS,
-    ASSET_STATE_JS,
-    ASSET_VIEWS_JS,
-    ASSET_PLAN_VIEWS_JS,
-    ASSET_COMPONENTS_JS,
-    ASSET_CONNECTION_STATUS_JS,
-    ASSET_STATUS_STRIP_JS,
-    ASSET_COACH_JS,
-    ASSET_NUTRITION_JS,
-    ASSET_ANALYSIS_JS,
-    ASSET_ACTIVITY_DETAILS_JS,
-    ASSET_ACTIVITY_ANALYSIS_JS,
-    ASSET_STYLES_CSS,
-    ASSET_SERVICE_WORKER_JS,
-    ASSET_MANIFEST,
-    ASSET_LOGO,
-    ASSET_ICON,
-    ASSET_APPLE_TOUCH_ICON,
-    ASSET_ICON_192,
-    ASSET_ICON_512,
-    ASSET_ICON_MASKABLE,
-)
-VERSIONED_STATIC_ASSETS = frozenset(
-    {
-        ASSET_API_JS,
-        ASSET_FORMAT_JS,
-        ASSET_NAVIGATION_JS,
-        ASSET_APPEARANCE_JS,
-        ASSET_STATE_JS,
-        ASSET_VIEWS_JS,
-        ASSET_PLAN_VIEWS_JS,
-        ASSET_COMPONENTS_JS,
-        ASSET_CONNECTION_STATUS_JS,
-        ASSET_STATUS_STRIP_JS,
-        ASSET_COACH_JS,
-        ASSET_NUTRITION_JS,
-        ASSET_ANALYSIS_JS,
-        ASSET_ACTIVITY_DETAILS_JS,
-        ASSET_ACTIVITY_ANALYSIS_JS,
-        ASSET_APP_JS,
-        ASSET_SHARED_JS,
-        ASSET_AUTH_JS,
-        ASSET_SYNC_STATUS_JS,
-        ASSET_VIEW_REFRESH_JS,
-        ASSET_NOTIFICATIONS_JS,
-        ASSET_PERFORMANCE_VIEW_JS,
-        ASSET_DIAGNOSTICS_JS,
-        ASSET_STATE_LOADER_JS,
-        ASSET_SYNC_ACTIONS_JS,
-        ASSET_WAHOO_CONNECTION_JS,
-        ASSET_PROVIDER_CONNECTIONS_JS,
-        ASSET_PROVIDER_CHECKS_JS,
-        ASSET_SETTINGS_JS,
-        ASSET_STYLES_CSS,
-        ASSET_LOGO,
-        ASSET_ICON,
-        ASSET_APPLE_TOUCH_ICON,
-    }
-)
+# Every non-hidden file of public/ with one of these suffixes is served; other
+# files there (AGENTS.md, notes) are not.
+STATIC_SUFFIXES = frozenset({".html", ".js", ".css", ".svg", ".png", ".webmanifest"})
 STATIC_REVALIDATE_ASSETS = frozenset(
     {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS, ASSET_MANIFEST}
 )
+# Every other served file is stamped with "?v=<content hash>". The manifest
+# names its icons without versions, so those stay plain.
+UNVERSIONED_STATIC_ASSETS = STATIC_REVALIDATE_ASSETS | {
+    "icon-192.png",
+    "icon-512.png",
+    "icon-maskable-512.png",
+}
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 OCTET_STREAM_MIME = "application/octet-stream"
 # Source files carry no version numbers: the server stamps them when serving.
@@ -155,7 +51,13 @@ class StaticAssetResponse:
 
 class StaticAssetService:
     def __init__(self, public_dir: Path):
-        self._targets = {name: public_dir / name for name in STATIC_TARGETS}
+        self._targets = {
+            path.name: path
+            for path in public_dir.iterdir()
+            if path.is_file()
+            and not path.name.startswith(".")
+            and path.suffix in STATIC_SUFFIXES
+        }
         self._stamp_lock = threading.Lock()
         self._stamp_signature: tuple | None = None
         self._stamped: dict[str, bytes] = {}
@@ -184,9 +86,9 @@ class StaticAssetService:
             if path.is_file()
         }
         hashes = {
-            name: content_hash(sources[name])
-            for name in VERSIONED_STATIC_ASSETS
-            if name in sources
+            name: content_hash(source)
+            for name, source in sources.items()
+            if name not in UNVERSIONED_STATIC_ASSETS
         }
 
         def versioned(path: str) -> str:
@@ -244,7 +146,7 @@ class StaticAssetService:
         mime = mimetypes.guess_type(target.name)[0] or OCTET_STREAM_MIME
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
         query = parse_qs(urlparse(request_path).query)
-        versioned = target.name in VERSIONED_STATIC_ASSETS and bool(
+        versioned = target.name not in UNVERSIONED_STATIC_ASSETS and bool(
             str(query.get("v", [""])[0]).strip()
         )
         if versioned:
