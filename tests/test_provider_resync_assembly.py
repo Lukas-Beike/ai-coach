@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.errors import AppError
 from backend.sync import provider_resync_assembly as assembly_module
-from backend.sync.full_resync import resync_field_keys
+from backend.sync.full_resync import PROVIDER_RESYNC_KEYS, resync_field_keys
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
@@ -71,6 +71,13 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         garmin.sync.assert_called_once_with(
             days=-1, operation_id="op-1", reason="Vollständiger Resync"
         )
+
+    def test_every_handler_has_its_registered_state_keys(self):
+        # Replaces the former build-time check of the runtime bindings (#2070).
+        handlers = full_resync_handlers(
+            garmin_service=Mock(), wahoo_service=Mock(), all_sync_days=-1
+        )
+        self.assertEqual(set(PROVIDER_RESYNC_KEYS), set(handlers))
 
 
 class ResyncFieldKeysTests(unittest.TestCase):

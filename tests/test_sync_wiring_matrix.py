@@ -46,6 +46,7 @@ from backend.sync.execution_assembly import (
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
     WahooJobDependencies,
+    configured_for_job,
     provider_configured_checks,
 )
 from backend.sync.gates import ProviderResyncGate
@@ -400,7 +401,7 @@ class ProviderJobWiringTests(unittest.TestCase):
 
 
 class ConfiguredCheckTests(unittest.TestCase):
-    """The HTTP layer's configured check is the runtime registry's, per provider."""
+    """The HTTP layer's configured check is the provider's live check."""
 
     def test_each_message_provider_follows_its_own_configuration(self) -> None:
         for only in sorted(CONFIGURABLE):
@@ -451,6 +452,39 @@ class ConfiguredCheckTests(unittest.TestCase):
             ast.unparse(cast(ast.Lambda, wired[0]).body),
             "HttpSyncServices must take provider_configured from PROVIDER_CONFIGURED",
         )
+
+
+class ConfiguredForJobTests(unittest.TestCase):
+    def test_follows_table_order_job_type_and_live_configuration(self) -> None:
+        state = dict.fromkeys(DEFAULT_PROVIDER_REGISTRY.ids(), True)
+        checks = {
+            provider: (lambda provider=provider: state[provider]) for provider in state
+        }
+
+        self.assertEqual(
+            (INTERVALS_ID, GARMIN_ID, WAHOO_ID), configured_for_job(checks, "plan_push")
+        )
+        self.assertEqual((GARMIN_ID,), configured_for_job(checks, "activity_details"))
+        state[GARMIN_ID] = False
+        self.assertEqual((), configured_for_job(checks, "activity_details"))
+
+
+class RunningProbeWiringTests(unittest.TestCase):
+    def test_the_composition_root_gives_the_public_state_the_wahoo_probe(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "server.py"
+        tree = ast.parse(root.read_text(encoding="utf-8"))
+        probes = [
+            keyword.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", "") == "PublicStateAssembly"
+            for keyword in node.keywords
+            if keyword.arg == "running_probes"
+        ]
+        self.assertEqual(1, len(probes))
+        probe = cast(ast.Dict, probes[0])
+        self.assertEqual(["WAHOO_ID"], [ast.unparse(key) for key in probe.keys])
+        self.assertIn("WAHOO_SYNC.sync_service().running()", ast.unparse(probe))
 
 
 if __name__ == "__main__":

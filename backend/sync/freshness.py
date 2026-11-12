@@ -185,9 +185,8 @@ def _check_sources_match_registry(
 ) -> None:
     """Reject sources that disagree with the registry's declared areas.
 
-    A provider with sources must supply exactly its declared area names, as the
-    runtime registry requires of a binding; a source for an undeclared provider
-    is an error. Failing here keeps a partial projection from being returned.
+    A provider with sources must supply exactly its declared area names; a
+    source for an undeclared provider is an error. Failing here keeps a partial projection from being returned.
     """
     declared: dict[str, set[str]] = {}
     for provider_id, area in registry.freshness_areas():
