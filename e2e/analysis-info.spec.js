@@ -127,7 +127,7 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   for (const key of ["development-Rad", "current-performance"]) {
     await page.evaluate((key) => {
       document.querySelector(`[data-analysis-section='${key}'] > summary`).click();
-      if (key === "current-performance") renderCurrentPerformance(state.data.performance?.metrics || {}, state.data.performance?.history);
+      if (key === "current-performance") renderCurrentPerformance(state.data.performance?.metrics || {}, state.data.performance?.history, [], state.data.performance?.thresholds);
       else renderAnalysisHistory(state.data.performance.history);
     }, key);
     await expect(page.locator(`[data-analysis-section='${key}']`)).not.toHaveAttribute("open", "");

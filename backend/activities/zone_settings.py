@@ -400,8 +400,10 @@ def zone_two_top(
     own threshold (m/s), else ``threshold_pace`` (s/km). None when it cannot be
     resolved.
     """
-    percent = next(iter((configuration.percent_limits or ())[1:2]), None)
-    absolute = next(iter((configuration.limits or ())[1:2]), None)
+    percents = configuration.percent_limits or ()
+    limits = configuration.limits or ()
+    percent = percents[1] if len(percents) > 1 else None
+    absolute = limits[1] if len(limits) > 1 else None
     if configuration.metric is ZoneConfigurationMetric.PACE:
         return _pace_top(absolute, percent, configuration.threshold, threshold_pace)
     if absolute is not None or not percent:

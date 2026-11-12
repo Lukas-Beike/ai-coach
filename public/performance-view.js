@@ -142,8 +142,8 @@ function currentPerformanceRows(metrics, items) {
 
 // LT1 per sport from the performance values (#2427): measured, the adopted HRV estimate,
 // the top of zone 2 or a fixed share of LT2; both stand-ins carry the estimate chip.
-function withFirstThresholds(metrics) {
-  const lt1 = state.data?.performance?.thresholds?.first_thresholds || {};
+function withFirstThresholds(metrics, thresholds) {
+  const lt1 = thresholds?.first_thresholds || {};
   const value = (number, unit, origin) => (number == null ? undefined : { value: number, unit, estimated: origin === "zone_2" || origin === "fixed_share" });
   return {
     ...metrics,
@@ -154,8 +154,9 @@ function withFirstThresholds(metrics) {
   };
 }
 
-function renderCurrentPerformance(metrics, history, status = []) {
-  metrics = withFirstThresholds(currentPerformanceValues(metrics, history));
+// LT1 comes from the thresholds of the same performance values as the metrics.
+function renderCurrentPerformance(metrics, history, status = [], thresholds = null) {
+  metrics = withFirstThresholds(currentPerformanceValues(metrics, history), thresholds);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
   root.replaceChildren(h("h3", null, "Aktuelle Werte"));
@@ -212,7 +213,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
-  renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
+  renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance), performance?.thresholds);
   refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;

@@ -252,7 +252,6 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 });
 
 test("current performance shows the status lines below its heading", () => {
-  const state = { data: { performance: { thresholds: {} } } };
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const h = (tag, className, text) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
   const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "currentPerformanceRows", "withFirstThresholds", "renderCurrentPerformance"], {
@@ -265,7 +264,6 @@ test("current performance shows the status lines below its heading", () => {
     ESTIMATED_METRICS: new Set(),
     analysisValue: (value, unit) => `${value} ${unit}`,
     createEstimateChip: () => ({ tag: "chip", text: "Schätzung" }),
-    state,
   });
   renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
   assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Werte"], ["p", "Daten werden vorbereitet"]]);
@@ -278,8 +276,8 @@ test("current performance shows the status lines below its heading", () => {
   renderCurrentPerformance({ cycling_ftp_watts: { value: 260, unit: "W" } }, undefined);
   assert.deepEqual([root.dataset.analysisEmptyRunning, root.dataset.analysisEmptyCycling, root.dataset.analysisEmpty], ["true", "false", "false"]);
   // LT1 rows come from the thresholds without any zones; zone 2 and a fixed share carry the estimate chip (#2427).
-  state.data.performance.thresholds.first_thresholds = { run: { hr_bpm: 128, hr_origin: "zone_2", pace_seconds_per_km: 307, pace_origin: "fixed_share" }, ride: { hr_bpm: 138, hr_origin: "measured" } };
-  renderCurrentPerformance({}, undefined);
+  const thresholds = { first_thresholds: { run: { hr_bpm: 128, hr_origin: "zone_2", pace_seconds_per_km: 307, pace_origin: "fixed_share" }, ride: { hr_bpm: 138, hr_origin: "measured" } } };
+  renderCurrentPerformance({}, undefined, [], thresholds);
   const rows = [];
   const walk = (node) => { if (node?.dataset?.metric) rows.push(node); (node?.children || []).forEach(walk); };
   root.children.forEach(walk);
