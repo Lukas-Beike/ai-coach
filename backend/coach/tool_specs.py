@@ -155,7 +155,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "search_web_for_product_values",
         external_food_lookup=True,
         requirements=(
-            "food-catalog-and-meal-library/Coach fills empty product fields",
+            "food-catalog-and-meal-library/Coach web search for missing product values",
             CA1,
         ),
     ),
