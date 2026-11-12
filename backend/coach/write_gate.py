@@ -40,6 +40,7 @@ from typing import Any
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.tool_specs import (
     APPROVAL_TOOLS,
+    BULK_FROM,
     CHECKIN,
     COMPETITION,
     DELETE_TOOLS,
@@ -603,8 +604,12 @@ def call_impact(
     if _removes_records(tool_name, arguments):
         impact.add(DELETE)
     records = record_count(tool_name, arguments)
-    if tool_name in WHOLE_PLAN_TOOLS or (
-        records and records_so_far + records > BULK_THRESHOLD
+    # A tool may count as bulk from fewer records than the general threshold.
+    bulk_from = BULK_FROM.get(tool_name)
+    if (
+        tool_name in WHOLE_PLAN_TOOLS
+        or (records and records_so_far + records > BULK_THRESHOLD)
+        or (bulk_from and records_so_far + records >= bulk_from)
     ):
         impact.add(BULK)
     return frozenset(impact)

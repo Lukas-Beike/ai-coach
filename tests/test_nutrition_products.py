@@ -118,6 +118,128 @@ class NutritionProductContractTests(unittest.TestCase):
         )
         self.assertEqual((cleared["salt_g"], cleared["filled_fields"]), (None, {}))
 
+    def test_incomplete_products_are_listed_and_only_their_empty_fields_filled(self):
+        catalog = self.library.product_catalog
+        own = catalog.save_product(
+            self.product_payload(barcode="4006381333931", fat_g=None, salt_g=None)
+        )
+        complete = catalog.save_product(
+            self.product_payload(barcode="4006381333948", name="Complete")
+        )
+        stored = {
+            "id": "yazio:0a1b2c3d-0000-4000-8000-000000000001",
+            "name": "Synthetic oat drink",
+            "brands": "Synthetic",
+            "basis_amount": 100,
+            "basis_unit": "ml",
+            "per_100": {"kcal": 45, "carbs_g": 6.5, "protein_g": 1, "fat_g": 1.5},
+        }
+        twin = {**stored, "id": "off:4006381333931", "name": "Twin of the own EAN"}
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(db, stored, "2026-10-01")
+            FoodDatabaseEntryRepository().upsert(db, twin, "2026-10-01")
+
+        listed = catalog.list_incomplete_products()
+        by_id = {item["id"]: item for item in listed}
+        # The complete product and the food of the own product's EAN are absent.
+        self.assertEqual(set(by_id), {own["id"], stored["id"]})
+        self.assertEqual(by_id[own["id"]]["origin"], "own")
+        self.assertEqual(by_id[own["id"]]["missing_fields"], ["fat_g", "salt_g"])
+        self.assertEqual(by_id[own["id"]]["barcode"], "4006381333931")
+        self.assertEqual(by_id[stored["id"]]["origin"], "yazio")
+        self.assertEqual(
+            by_id[stored["id"]]["missing_fields"], ["sugar_g", "fiber_g", "salt_g"]
+        )
+        self.assertEqual(by_id[stored["id"]]["basis_unit"], "ml")
+
+        result = catalog.fill_product_gaps(
+            [
+                {
+                    "id": own["id"],
+                    # Known protein stays; fat and salt are empty.
+                    "values": {"fat_g": 5.5, "salt_g": 0.4, "protein_g": 1},
+                    "origin": "web",
+                    "source_url": "https://example.test/whey",
+                },
+                {"id": stored["id"], "values": {"salt_g": 0.1}, "origin": "bls"},
+                {"id": complete["id"], "values": {"kcal": 1}, "origin": "yazio"},
+            ]
+        )
+
+        self.assertEqual(
+            [item["id"] for item in result["changes"]], [own["id"], stored["id"]]
+        )
+        page = {"origin": "web", "source_url": "https://example.test/whey"}
+        self.assertEqual(
+            result["changes"][0]["written"],
+            [
+                {"field": "fat_g", "value": 5.5, **page},
+                {"field": "salt_g", "value": 0.4, **page},
+            ],
+        )
+        self.assertEqual(result["changes"][0]["skipped"], ["protein_g"])
+        self.assertEqual(result["unchanged"][0]["skipped"], ["kcal"])
+        filled = catalog.get_product(own["id"])
+        self.assertEqual((filled["fat_g"], filled["protein_g"]), (5.5, 78.0))
+        self.assertEqual(
+            filled["filled_fields"]["salt_g"],
+            {**page, "fetched_at": "2026-10-05T12:00:00+00:00"},
+        )
+        with self.manager.reader() as db:
+            food = FoodDatabaseEntryRepository().get(db, stored["id"])
+        self.assertEqual(food["per_100"]["salt_g"], 0.1)
+        self.assertEqual(food["filled_fields"]["salt_g"]["origin"], "bls")
+        self.assertEqual(food["fetched_at"], "2026-10-01")
+        self.assertEqual(
+            [item["id"] for item in catalog.list_incomplete_products()], [stored["id"]]
+        )
+        # A second call finds nothing left to write.
+        again = catalog.fill_product_gaps(
+            [{"id": own["id"], "values": {"salt_g": 9}, "origin": "bls"}]
+        )
+        self.assertEqual(
+            (again["changes"], again["unchanged"][0]["skipped"]), ([], ["salt_g"])
+        )
+        self.assertEqual(catalog.get_product(own["id"])["salt_g"], 0.4)
+
+    def test_invalid_gap_fills_are_rejected_without_a_write(self):
+        catalog = self.library.product_catalog
+        own = catalog.save_product(self.product_payload(fat_g=None, salt_g=None))
+        base = {"id": own["id"], "values": {"fat_g": 5}, "origin": "bls"}
+        for label, item, reason in (
+            ("unknown id", {**base, "id": "missing"}, "Produkt nicht gefunden."),
+            ("non-core field", {**base, "values": {"name": 5}}, "name"),
+            ("negative", {**base, "values": {"fat_g": -1}}, "fat_g"),
+            ("too large", {**base, "values": {"fat_g": 1000.5}}, "fat_g"),
+            ("energy", {**base, "values": {"kcal": 9001}}, "kcal"),
+            ("not finite", {**base, "values": {"fat_g": float("nan")}}, "fat_g"),
+            ("text", {**base, "values": {"fat_g": "5"}}, "fat_g"),
+            ("boolean", {**base, "values": {"fat_g": True}}, "fat_g"),
+            ("empty", {**base, "values": {}}, "values"),
+            ("origin", {**base, "origin": "guess"}, "origin"),
+            ("web without page", {**base, "origin": "web"}, "source_url"),
+            (
+                "web with other scheme",
+                {**base, "origin": "web", "source_url": "file:///x"},
+                "source_url",
+            ),
+            (
+                "one bad field rejects the item",
+                {**base, "values": {"fat_g": 5, "salt_g": -2}},
+                "salt_g",
+            ),
+            ("not an object", "fat_g", "Objekt"),
+        ):
+            with self.subTest(label):
+                result = catalog.fill_product_gaps([item])
+                self.assertEqual(result["changes"], [])
+                self.assertIn(reason, result["unchanged"][0]["rejected"])
+        stored = catalog.get_product(own["id"])
+        self.assertEqual((stored["fat_g"], stored["salt_g"]), (None, None))
+        for items in ([], "x", [base] * 26):
+            with self.subTest(items=items), self.assertRaises(AppError):
+                catalog.fill_product_gaps(items)
+
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
         saved = self.library.product_catalog.save_product(self.product_payload())
 

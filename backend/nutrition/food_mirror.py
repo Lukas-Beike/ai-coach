@@ -8,12 +8,28 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from backend import change_history
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import FoodDatabaseEntryRepository, database_origin
+from backend.db.repositories import (
+    NUTRIENT_COLUMNS,
+    FoodDatabaseEntryRepository,
+    database_origin,
+)
 from backend.errors import AppError
 
 # Nutrition values rarely change; older entries are re-checked online when used.
 MAX_AGE = timedelta(days=90)
+FOOD_ENTITY_TYPE = "food_database_entry"
+
+
+def food_history_value(entry: dict[str, Any]) -> dict[str, Any]:
+    """The nutrient values of a stored food as change history records them."""
+    return {
+        "id": entry["id"],
+        "basis_amount": entry["basis_amount"],
+        "basis_unit": entry["basis_unit"],
+        **{key: entry["per_100"].get(key) for key in NUTRIENT_COLUMNS},
+    }
 
 
 class FoodDatabaseMirror:
@@ -112,6 +128,31 @@ class FoodDatabaseMirror:
                 }
                 self._entries.upsert(db, entry, fetched_at)
             return self._entries.get(db, food_id)
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored food of one recorded change, for change history."""
+        entry = self._entries.get(db, entity_id)
+        value = None if entry is None else food_history_value(entry)
+        return value, change_history.audit_projection(FOOD_ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Empty the nutrient fields a gap fill wrote; other values stay as they are."""
+        entry = self._entries.get(db, entity_id)
+        if current is None or target is None or entry is None:
+            raise AppError(409, "Der Datenbankeintrag ist nicht mehr verfügbar.")
+        self._entries.restore_nutrients(
+            db, entity_id, {k: v for k, v in target.items() if k in NUTRIENT_COLUMNS}
+        )
+        restored = self._entries.get(db, entity_id)
+        return food_history_value(restored) if restored else {}
 
     def delete(self, food_id: str) -> None:
         with self._db_lock, self._database_manager().unit_of_work() as db:

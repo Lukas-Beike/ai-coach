@@ -420,6 +420,7 @@ class CoachDialogueActionService:
         if name in {
             "save_nutrition_template",
             "save_nutrition_product",
+            "fill_nutrition_product_gaps",
             "delete_nutrition_template",
             "log_nutrition_template",
             "save_nutrition_entry",
@@ -437,6 +438,8 @@ class CoachDialogueActionService:
                     if product_id
                     else "local_nutrition_product",
                 )
+            elif name == "fill_nutrition_product_gaps":
+                require_coach_scope(action, "local_nutrition_product")
             elif name != "save_nutrition_template" or template_id is None:
                 require_coach_scope(action, "local_nutrition")
             if template_id is not None:

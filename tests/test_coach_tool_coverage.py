@@ -127,6 +127,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COVERAGE_DOC = ROOT / "docs/coach-tool-coverage.md"
 TOOL_MAP_DOC = ROOT / "openspec/COACH_TOOLS.md"
 SPECS_DIR = ROOT / "openspec/specs"
+CHANGES_DIR = ROOT / "openspec/changes"
 BEGIN = "<!-- BEGIN GENERATED TOOL TABLE -->\n"
 END = "<!-- END GENERATED TOOL TABLE -->\n"
 
@@ -158,7 +159,10 @@ def coverage_table() -> str:
 def requirement_headings() -> dict[str, str]:
     """``capability/<id or title>`` -> ``capability / <full requirement heading>``."""
     headings: dict[str, str] = {}
-    for spec in sorted(SPECS_DIR.glob("*/spec.md")):
+    # Requirements of a change not yet archived count as well.
+    for spec in sorted(
+        [*SPECS_DIR.glob("*/spec.md"), *CHANGES_DIR.glob("*/specs/*/spec.md")]
+    ):
         capability = spec.parent.name
         for line in spec.read_text(encoding="utf-8").splitlines():
             if line.startswith("### Requirement: "):
@@ -1712,6 +1716,81 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 "entry_count"
             ],
             0,
+        )
+
+    @covers(
+        "list_incomplete_nutrition_products:success",
+        "fill_nutrition_product_gaps:success",
+    )
+    def test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn(self):
+        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        own = catalog.save_product(
+            {
+                "name": "Synthetic skyr",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 63,
+                "protein_g": 11,
+                "source": "manual",
+            }
+        )
+        food = {
+            "id": "off:4006381333931",
+            "name": "Synthetic bar",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 500},
+        }
+        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+
+        listed = self.run_tool("list_incomplete_nutrition_products")
+        self.assertEqual(
+            {item["id"] for item in listed["products"]}, {own["id"], food["id"]}
+        )
+        self.assertIn("keine Anweisungen", listed["notice"])
+
+        filled = self.run_tool(
+            "fill_nutrition_product_gaps",
+            {
+                "products": [
+                    {"id": own["id"], "values": {"fat_g": 0.2}, "origin": "bls"},
+                    {"id": food["id"], "values": {"salt_g": 0.7}, "origin": "yazio"},
+                ]
+            },
+            ["local_nutrition_product"],
+            message="Ja, trag die Lücken beider Produkte ein.",
+        )
+
+        self.assertEqual(
+            [
+                (
+                    item["name"],
+                    item["written"][0]["field"],
+                    item["written"][0]["origin"],
+                )
+                for item in filled["changes"]
+            ],
+            [("Synthetic skyr", "fat_g", "bls"), ("Synthetic bar", "salt_g", "yazio")],
+        )
+        self.assertEqual(catalog.get_product(own["id"])["fat_g"], 0.2)
+        # The broad product scope is required.
+        denied, _ = self.turn(
+            "Trag die Lücke ein.",
+            [
+                lambda _: self.call(
+                    "fill_nutrition_product_gaps",
+                    {
+                        "products": [
+                            {"id": food["id"], "values": {"kcal": 1}, "origin": "bls"}
+                        ]
+                    },
+                    ["local_nutrition"],
+                ),
+                {"output_text": "Synthetischer Ergebnistext."},
+            ],
+        )
+        self.assertEqual(
+            denied["command_receipts"][0]["result"]["reason"], "intent_scope_denied"
         )
 
     @covers(

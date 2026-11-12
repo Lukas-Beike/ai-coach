@@ -18,6 +18,7 @@ from backend.coach.context_selection import (
 )
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
+from backend.nutrition.catalog import INCOMPLETE_PRODUCTS_NOTICE
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
@@ -162,7 +163,18 @@ class CoachReadToolService:
             return self._read_nutrition(arguments)
         if name in {"lookup_food", "calculate_food_nutrition"}:
             return self._food_database_read(name, arguments)
+        if name == "list_incomplete_nutrition_products":
+            return self._list_incomplete_products()
         return None
+
+    def _list_incomplete_products(self) -> dict[str, Any]:
+        if self._nutrition_meal_library is None:
+            raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
+        return {
+            "ok": True,
+            "products": self._nutrition_meal_library().product_catalog.list_incomplete_products(),
+            "notice": INCOMPLETE_PRODUCTS_NOTICE,
+        }
 
     def _food_database_read(
         self, name: str, arguments: dict[str, Any]

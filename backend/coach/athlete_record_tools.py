@@ -57,6 +57,7 @@ class CoachAthleteRecordToolService:
         if name in {
             "save_nutrition_template",
             "save_nutrition_product",
+            "fill_nutrition_product_gaps",
             "delete_nutrition_template",
             "log_nutrition_template",
             "save_nutrition_entry",
@@ -193,6 +194,10 @@ class CoachAthleteRecordToolService:
             return self._save_nutrition_template(arguments, intent)
         if name == "save_nutrition_product":
             return self._save_nutrition_product(arguments, intent)
+        if name == "fill_nutrition_product_gaps":
+            return self._nutrition_meal_library.product_catalog.fill_product_gaps(
+                arguments.get("products")
+            )
         if name == "delete_nutrition_template":
             return {
                 "ok": True,
@@ -229,6 +234,8 @@ class CoachAthleteRecordToolService:
                 if template_id
                 else "local_nutrition"
             )
+        if name == "fill_nutrition_product_gaps":
+            return "local_nutrition_product"
         if name != "save_nutrition_product":
             return "local_nutrition"
         product_id = str(structured_action_payload(arguments).get("id") or "").strip()
