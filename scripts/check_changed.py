@@ -64,7 +64,9 @@ def run_steps(steps: list[tuple[str, list[str]]]) -> int:
             failed = True
             for line in tail:
                 print(f"  {line}")
-    return 2 if missing else 1 if failed else 0
+    if missing:
+        return 2
+    return 1 if failed else 0
 
 
 def touches_js(base: str) -> bool:
