@@ -422,3 +422,16 @@ Freshness checks outside the sync owner SHALL read current summary fingerprints 
 - **THEN** only the Garmin value is returned and it equals its record's payload hash, so no stored detail, analysis or profile becomes stale.
 
 Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_are_the_payload_hash_and_intervals_has_none`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.
+
+### Requirement: Strength sessions lead with their total time
+A completed strength session SHALL be shown and counted with its total (elapsed) time, because rest between sets is part of the work; every other sport SHALL keep its moving time first, each falling back to the other time when one is missing. One rule per side SHALL apply to the calendar card and week sum, the session details, the Analyse training time, the nutrition carbohydrate range and the Coach.
+
+#### Scenario: Calendar and details
+- **WHEN** a strength session with 58 minutes total and 31 minutes moving time and a run with 50 minutes total and 45 minutes moving time are completed in one week
+- **THEN** their cards show 58 min and 45 min, the week sums 1:43 h, the strength details list "Gesamtzeit" before "Bewegungszeit" and the run's details keep "Bewegungszeit" first.
+
+#### Scenario: Training time, carbohydrates and Coach
+- **WHEN** the Analyse training time, the day's carbohydrate range or the Coach reads a completed strength session
+- **THEN** the training time and the carbohydrate range count its total time, the Coach's compact session row names `elapsed_duration_s` instead of `moving_duration_s`, and the session tools tell the Coach that a strength session's duration is its total time and its moving time is additional information; session-RPE load keeps its elapsed minutes for every sport.
+
+Evidence: `public/format.js::sessionSeconds`, `public/plan-views.js::plannedEntryDurationLabel`, `public/activity-analysis.js::overview`, `backend/canonical/activity_summary.py:summary_leading_duration_s`, `backend/performance/chart_history.py:_training_time_history`, `backend/nutrition/macro_ranges.py:_session_totals`, `backend/coach/context.py:compact_coach_activity`, `backend/coach/tool_schemas.py:build_structured_tool_schemas`; `e2e/activity-details.spec.js::@responsive a strength session leads with its total time, a run keeps its moving time`, `tests/format.test.cjs::a completed session's duration leads with the total time for strength only`, `tests/test_performance_chart_history.py:test_training_time_counts_strength_with_its_total_time`, `tests/test_nutrition_macro_ranges.py:test_strength_counts_its_total_time_and_other_sports_their_moving_time`, `tests/test_coach_activity_summary_parity.py:test_a_strength_row_names_its_total_time_and_a_run_its_moving_time`, `tests/test_coach_tool_schemas.py:test_session_tools_name_the_total_time_as_a_strength_duration`.

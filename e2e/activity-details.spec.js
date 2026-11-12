@@ -433,3 +433,35 @@ test("@responsive deleting an activity locally asks first and can be undone", as
   expect(await page.evaluate(() => deleteBodies)).toEqual([{ action: "delete", confirmed: true }, { change_id: "c3", expected_current_hash: "h3" }]);
   await page.evaluate(() => ActivityDetails.close(false));
 });
+
+test("@responsive a strength session leads with its total time, a run keeps its moving time", async ({ page }) => {
+  // #2317: rest between sets is part of a strength session's work.
+  await page.route(/\/api\/activities\//, (route) => {
+    const strength = route.request().url().includes("act_str");
+    return route.fulfill({ json: {
+      session: { activity_id: strength ? "act_str" : "act_run45", sport: strength ? "strength" : "run" },
+      metrics: strength
+        ? { elapsed_duration_s: { value: 3480 }, moving_duration_s: { value: 1860 } }
+        : { elapsed_duration_s: { value: 3000 }, moving_duration_s: { value: 2700 } },
+      detail_data: { providers: [] },
+    } });
+  });
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await renderCalendarSessions(page, [
+    { id: "act_str", name: "Synthetic strength", sport: "strength", started_at_local: "2026-10-17T07:00:00", elapsed_duration_s: 3480, moving_duration_s: 1860 },
+    { id: "act_run45", name: "Synthetic easy run", sport: "run", started_at_local: "2026-10-17T18:00:00", elapsed_duration_s: 3000, moving_duration_s: 2700 },
+  ]);
+  const card = (name) => page.locator(".planned-entry.is-completed").filter({ hasText: name }).first();
+  await expect(card("Synthetic strength").locator(".planned-session-value strong")).toHaveText("58 min");
+  await expect(card("Synthetic easy run").locator(".planned-session-value strong")).toHaveText("45 min");
+  // The week sums the same durations as the cards: 58 + 45 min.
+  await expect(page.locator(".planned-week-metrics").first()).toContainText("1:43 h");
+  const strength = await openSessionDetails(page, "Synthetic strength");
+  const strengthTimes = strength.locator(".activity-analysis-stats div").filter({ hasText: /^(Gesamtzeit|Bewegungszeit)/ });
+  await expect(strengthTimes).toHaveText([/^Gesamtzeit\s*58:00$/, /^Bewegungszeit\s*31:00$/]);
+  const run = await openSessionDetails(page, "Synthetic easy run");
+  const runTimes = run.locator(".activity-analysis-stats div").filter({ hasText: /^(Gesamtzeit|Bewegungszeit)/ });
+  await expect(runTimes).toHaveText([/^Bewegungszeit\s*45:00$/, /^Gesamtzeit\s*50:00$/]);
+});

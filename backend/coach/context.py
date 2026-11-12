@@ -25,6 +25,7 @@ from backend.canonical.planning_fields import PLANNED_LOAD as TRAINING_LOAD
 from backend.canonical.vocabulary import (
     ActivityPurpose,
     ProviderId,
+    Sport,
     ZoneConfigurationMetric,
 )
 from backend.coach.context_selection import (
@@ -273,6 +274,13 @@ def compact_coach_activity(
         select(activity, COACH_ACTIVITY_FIELDS),
         {"id": 200, "name": 200, "sport": 80},
     )
+    # A strength session's duration is its total time (#2317): its compact row names the
+    # elapsed time instead of the moving time; the session details carry both.
+    if compacted.get("sport") == Sport.STRENGTH.value and isinstance(activity, Mapping):
+        elapsed = activity.get("elapsed_duration_s")
+        if elapsed is not None:
+            compacted.pop("moving_duration_s", None)
+            compacted["elapsed_duration_s"] = elapsed
     purpose = compacted.get("purpose")
     if purpose in ActivityPurpose._value2member_map_:
         compacted["purpose_label"] = PURPOSE_LABELS_DE[ActivityPurpose(str(purpose))]

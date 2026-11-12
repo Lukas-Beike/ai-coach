@@ -102,7 +102,15 @@
     return typeof category === "string" ? STRENGTH_CATEGORIES[category] || null : null;
   }
 
-  const AppFormat = Object.freeze({ number, distance, duration, clock, date, dateTime, relativeDay, strengthCategory, STRENGTH_CATEGORIES });
+  // The duration a completed session is shown and summed with (#2317): strength leads with the
+  // total time, because rest between sets is part of the work; other sports with the moving time.
+  function sessionSeconds(activity, sport = activity?.sport) {
+    const moving = activity?.moving_duration_s ?? activity?.duration_s;
+    const elapsed = activity?.elapsed_duration_s;
+    return sport === "strength" ? elapsed ?? moving : moving ?? elapsed;
+  }
+
+  const AppFormat = Object.freeze({ number, distance, duration, clock, date, dateTime, relativeDay, strengthCategory, sessionSeconds, STRENGTH_CATEGORIES });
   globalThis.AppFormat = AppFormat;
   if (typeof module !== "undefined") module.exports = AppFormat;
 })();

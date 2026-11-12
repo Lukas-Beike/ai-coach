@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Final, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.canonical.vocabulary import Assist, LoadModel, Terrain
+from backend.canonical.vocabulary import Assist, LoadModel, Sport, Terrain
 
 # Load models on the TSS scale: one hour at threshold is about 100.
 TSS_LIKE_LOAD_MODELS: Final = frozenset(
@@ -156,6 +156,19 @@ def summary_duration_s(summary: Mapping[str, Any]) -> float | None:
         if value is not None and float(value) > 0:
             return float(value)
     return None
+
+
+def summary_leading_duration_s(summary: Mapping[str, Any]) -> float | None:
+    """Return the duration a session is shown and counted with (#2317).
+
+    Strength leads with the positive elapsed time, because rest between sets is
+    part of the work; every other sport with the moving time first.
+    """
+    if summary.get("sport") == Sport.STRENGTH.value:
+        elapsed = summary.get("elapsed_duration_s")
+        if elapsed is not None and float(elapsed) > 0:
+            return float(elapsed)
+    return summary_duration_s(summary)
 
 
 def summary_is_indoor(summary: Mapping[str, Any]) -> bool:

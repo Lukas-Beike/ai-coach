@@ -58,6 +58,34 @@ class MacroRangeTests(unittest.TestCase):
             (270, 450), macro_ranges(90, [planned], "2026-11-02", 2700)["carbs_g"]
         )
 
+    def test_strength_counts_its_total_time_and_other_sports_their_moving_time(self):
+        # #2317: rest between sets is part of a strength session's work.
+        def completed(sport: str) -> dict:
+            planned = self.workout(30)
+            planned["compliance"] = {
+                "actual_activity": {
+                    "date": "2026-11-02",
+                    "sport": sport,
+                    "elapsed_duration_s": 7200,
+                    "moving_duration_s": 1800,
+                    "heart_rate_zone_times": [{"id": "Z4", "secs": 600}],
+                }
+            }
+            return planned
+
+        def carbs(minutes: int) -> tuple:
+            return macro_ranges(90, [self.workout(minutes, 600)], "2026-11-02", 2700)[
+                "carbs_g"
+            ]
+
+        self.assertNotEqual(carbs(120), carbs(30))
+        for sport, minutes in (("strength", 120), ("run", 30)):
+            with self.subTest(sport=sport):
+                self.assertEqual(
+                    carbs(minutes),
+                    macro_ranges(90, [completed(sport)], "2026-11-02", 2700)["carbs_g"],
+                )
+
     def test_missing_inputs_do_not_invent_ranges(self):
         self.assertEqual({}, macro_ranges(None, None, "2026-11-02", 0))
         self.assertEqual((270, 450), macro_ranges(90, None, "2026-11-02", 0)["carbs_g"])

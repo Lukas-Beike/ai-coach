@@ -274,7 +274,7 @@
 
 
   function renderMetadata(session, metrics, content) {
-    const duration = metrics.moving_duration_s ?? metrics.duration_s;
+    const duration = AppFormat.sessionSeconds(metrics, session.sport);
     const values = [
       session.sport ? activitySportLabel(session) : null,
       session.started_at ? formatTime(session.started_at) : null,

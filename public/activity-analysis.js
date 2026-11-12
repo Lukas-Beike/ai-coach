@@ -233,8 +233,9 @@
     const cadence = cadenceChannel(activity, metrics);
     const values = [
       ["Distanz", AppFormat.distance(metrics.distance_m)],
-      ["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)],
-      ["Gesamtzeit", duration(metrics.elapsed_duration_s)],
+      // Strength leads with the total time, the moving time follows (#2317).
+      ...(activity?.sport === "strength" ? [["Gesamtzeit", duration(metrics.elapsed_duration_s)], ["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)]]
+        : [["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)], ["Gesamtzeit", duration(metrics.elapsed_duration_s)]]),
       [speed.invert ? "Ø Pace" : "Ø Geschwindigkeit", averageSpeed && `${averageSpeed} ${speed.unit}`],
       ["Ø Herzfrequenz", measure(metrics.avg_hr, "bpm")],
       ["Max. Herzfrequenz", measure(metrics.max_hr, "bpm")],

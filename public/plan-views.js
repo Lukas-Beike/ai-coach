@@ -535,7 +535,7 @@ function plannedDayNotes(dayContext, competitions, dateKey) {
 }
 
 function plannedEntryDurationLabel(actual, entry) {
-  if (actual) return AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s);
+  if (actual) return AppFormat.duration(AppFormat.sessionSeconds(actual));
   if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
   return AppFormat.duration(entry.planned_duration_s);
 }
@@ -757,7 +757,7 @@ function plannedEntryGroups(dayEntries) {
   const groups = [];
   for (const entry of dayEntries) {
     const key = entry.is_completed_activity && !entry.workout_profile
-      ? JSON.stringify([entry.name || "", entry.type || entry.sport || "", entry.environment || "", entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
+      ? JSON.stringify([entry.name || "", entry.type || entry.sport || "", entry.environment || "", AppFormat.sessionSeconds(entry) ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
       : null;
     const previous = groups.at(-1);
     if (key && previous?.key === key) previous.entries.push(entry);
@@ -803,7 +803,7 @@ function plannedWeekMetrics(planned, actual) {
   totals.className = "planned-week-metrics";
   totals.dataset.columns = String(columns.length);
   const plannedSeconds = planned.reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
-  const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
+  const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(AppFormat.sessionSeconds(entry)) || 0), 0);
   const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
   const rows = [
     ["Dauer", { planned: plannedSeconds > 0 ? { value: calendarHours(plannedSeconds) } : null, actual: { value: calendarHours(actualSeconds) } }],
@@ -1607,7 +1607,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       // As on the card: a missed unit on a rest or pause day counts as skipped.
       mark.className = `planned-month-mark is-${status === "missed" && plannedDayStatusLabel(dayContext.day_status) ? "skipped" : status}`;
       mark.dataset.sport = activitySportLabel(calendarSportType(actual || entry));
-      const seconds = actual ? Number(actual.moving_duration_s ?? actual.elapsed_duration_s) : plannedDurationSeconds(entry);
+      const seconds = actual ? Number(AppFormat.sessionSeconds(actual)) : plannedDurationSeconds(entry);
       // h:mm fits a day cell; the full label stays on the card.
       mark.textContent = seconds >= 30 ? calendarClock(seconds) : "•";
       marks.append(mark);

@@ -97,6 +97,17 @@ class CoachToolSchemaTests(unittest.TestCase):
         self.assertIn("any connected provider", description)
         self.assertIn("act_", description)
 
+    def test_session_tools_name_the_total_time_as_a_strength_duration(self):
+        # #2317: rest between sets is part of a strength session's work.
+        for name in ("list_recent_activities", "get_activity_details"):
+            with self.subTest(tool=name):
+                description = _tools()[name]["description"]
+                self.assertIn(
+                    "A strength session's duration is its total time "
+                    "(elapsed_duration_s)",
+                    description,
+                )
+
     def test_nested_object_schemas_reject_unknown_keys(self):
         open_objects = [
             f"{name}.{path}"
