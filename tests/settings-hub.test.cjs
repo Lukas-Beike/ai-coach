@@ -113,3 +113,18 @@ test("the chat needs the selected model's key; before a load it stays usable", (
   // An older server without the coach flag keeps the OpenAI rule.
   assert.equal(coachConfigured({ openai: false }), false);
 });
+
+test("the microphone needs the OpenAI key whichever model answers", () => {
+  const button = { disabled: false, classList: { toggle() {} }, setAttribute() {}, title: "", innerHTML: "" };
+  const state = { data: { messages: [], configured: { openai: false, coach: true } }, voiceTranscribing: false };
+  const { updateVoiceButton } = extractFunctions("coach.js", ["voiceIsRecording", "setVoiceButtonIcon", "updateVoiceButton"], {
+    $: () => button,
+    state,
+    updateChatControls: () => {},
+  });
+  updateVoiceButton();
+  assert.equal(button.disabled, true);
+  state.data.configured.openai = true;
+  updateVoiceButton();
+  assert.equal(button.disabled, false);
+});
