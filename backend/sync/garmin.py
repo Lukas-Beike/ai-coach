@@ -17,6 +17,7 @@ from backend.canonical.garmin_payload import (
     SECTIONS,
 )
 from backend.canonical.section_items import merge_records
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
@@ -25,7 +26,6 @@ from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
 from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
-from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_capability import (
     capability_failure_class,
     capability_key,

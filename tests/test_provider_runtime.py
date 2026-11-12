@@ -19,11 +19,6 @@ from provider_runtime_fakes import (
 )
 
 from backend.errors import AppError
-from backend.providers.descriptors import (
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    ProviderDescriptor,
-    SchedulePolicy,
-)
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_runtime import (
@@ -32,6 +27,11 @@ from backend.sync.provider_runtime import (
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
     ProviderSchedulePolicy,
+)
+from backend.sync.provider_table import (
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    ProviderDescriptor,
+    SchedulePolicy,
 )
 
 BETA_ID = "beta-mock"
@@ -327,7 +327,9 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
                 freshness={ACME_AREA: acme_freshness_source()},
             )
 
-        beta = dataclasses.replace(_beta_descriptor(), job_types=frozenset({"plan_push"}))
+        beta = dataclasses.replace(
+            _beta_descriptor(), job_types=frozenset({"plan_push"})
+        )
         registry = _build(
             [binding(BETA_ID), binding(ACME_ID)], (acme_descriptor(), beta)
         )

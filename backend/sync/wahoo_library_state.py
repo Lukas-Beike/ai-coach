@@ -15,11 +15,10 @@ import json
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Final
 
-from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
+from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
 from backend.planning.library import library_payload_hash
-from backend.providers.descriptors import WAHOO_ID
 from backend.sync.wahoo_plan_push import plan_baseline
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 

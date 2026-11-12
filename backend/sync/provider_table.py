@@ -1,20 +1,15 @@
-"""Declarative descriptors for external data providers.
+"""The fixed table of the five providers synchronization knows.
 
-The descriptors hold provider data that synchronization used to keep in literal
-tables: freshness areas and labels, sync-window limits, the durable keys of
-full-resync state, and the orchestration policy (job types, scheduling order,
-Coach refresh targets, manual and full-resync HTTP routes). They name providers
-by design, so they live in the provider package, which the provider coupling
-ratchet exempts. The sync registry (backend/sync/provider_registry.py) reads
-them and names no provider.
+One entry per provider holds its freshness areas and labels, sync-window
+limits, the durable keys of full-resync state and the orchestration policy (job
+types, scheduling order, Coach refresh targets, manual and full-resync HTTP
+routes). A further provider is a new entry. This is the one sync module that
+names providers; ``ProviderRegistry`` (backend/sync/provider_registry.py) reads
+the table and names none.
 
-Migration is incomplete: the freshness projection still keeps its per-area
-fallback sources and configured predicates in backend/sync/freshness.py, and
-those must move into descriptors in a later change.
-
-Capabilities describe what each provider can supply. They are declarative;
-``ProviderRegistry.ids_with`` reads them, and the explicit library and metric
-exports check that their target declares the export capability.
+Capabilities describe what each provider can supply. ``ProviderRegistry.ids_with``
+reads them, and the explicit library and metric exports check that their target
+declares the export capability.
 """
 
 from __future__ import annotations
@@ -22,11 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID, MetricKind
 
-INTERVALS_ID = ProviderId.INTERVALS.value
-GARMIN_ID = ProviderId.GARMIN.value
-WAHOO_ID = ProviderId.WAHOO.value
 WEATHER_ID = "weather"
 CALENDAR_ID = "calendar"
 
@@ -72,55 +64,6 @@ class Capability(StrEnum):
     PUBLIC_CALENDAR = "public_calendar"
 
 
-def _require_text(value: object, name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be non-empty text")
-
-
-def _require_positive_int(value: object, name: str) -> None:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def _require_optional_positive_int(value: object, name: str) -> None:
-    if value is not None:
-        _require_positive_int(value, name)
-
-
-def _require_optional_rank(value: object, name: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer or None")
-
-
-def _require_bool(value: object, name: str) -> None:
-    if not isinstance(value, bool):
-        raise TypeError(f"{name} must be a boolean")
-
-
-def _require_text_set(value: object, name: str) -> None:
-    if not isinstance(value, frozenset):
-        raise TypeError(f"{name} must be a frozenset of text")
-    for item in value:
-        _require_text(item, name)
-
-
-def _require_metric_exports(value: object, capabilities: frozenset[Capability]) -> None:
-    if not isinstance(value, frozenset) or not all(
-        isinstance(kind, MetricKind) for kind in value
-    ):
-        raise ValueError("metric_exports must be a frozenset of MetricKind values")
-    if bool(value) != (Capability.METRIC_EXPORT in capabilities):
-        raise ValueError("metric_exports must be declared with METRIC_EXPORT")
-
-
-def _require_route_path(value: object, name: str) -> None:
-    _require_text(value, name)
-    if not str(value).startswith("/"):
-        raise ValueError(f"{name} must be an absolute path")
-
-
 @dataclass(frozen=True, slots=True)
 class FreshnessArea:
     """One freshness-tracked area of a provider and how it is presented."""
@@ -129,13 +72,6 @@ class FreshnessArea:
     label: str
     stale_after_s: int
     read_only: bool
-
-    def __post_init__(self) -> None:
-        _require_text(self.area, "area")
-        _require_text(self.label, "label")
-        _require_positive_int(self.stale_after_s, "stale_after_s")
-        if not isinstance(self.read_only, bool):
-            raise TypeError("read_only must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,11 +87,6 @@ class SchedulePolicy:
     startup_rank: int | None = None
     daily_marker: bool = False
 
-    def __post_init__(self) -> None:
-        _require_optional_rank(self.daily_rank, "daily_rank")
-        _require_optional_rank(self.startup_rank, "startup_rank")
-        _require_bool(self.daily_marker, "daily_marker")
-
 
 @dataclass(frozen=True, slots=True)
 class ManualSyncRoute:
@@ -167,15 +98,6 @@ class ManualSyncRoute:
     path: str
     uses_sync_period: bool
     payload: tuple[tuple[str, object], ...] = ()
-
-    def __post_init__(self) -> None:
-        _require_route_path(self.path, "path")
-        _require_bool(self.uses_sync_period, "uses_sync_period")
-        if not isinstance(self.payload, tuple) or not all(
-            isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
-            for item in self.payload
-        ):
-            raise ValueError("payload must be a tuple of (name, value) pairs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,46 +130,6 @@ class ProviderDescriptor:
     manual_sync: ManualSyncRoute | None = None
     full_resync_path: str | None = None
     metric_exports: frozenset[MetricKind] = frozenset()
-
-    def __post_init__(self) -> None:
-        _require_text(self.provider_id, "provider_id")
-        _require_text(self.label, "label")
-        if not isinstance(self.capabilities, frozenset) or not all(
-            isinstance(capability, Capability) for capability in self.capabilities
-        ):
-            raise ValueError("capabilities must be a frozenset of Capability values")
-        if not isinstance(self.freshness_areas, tuple) or not all(
-            isinstance(area, FreshnessArea) for area in self.freshness_areas
-        ):
-            raise ValueError("freshness_areas must be a tuple of FreshnessArea values")
-        _require_positive_int(self.max_sync_days, "max_sync_days")
-        if not isinstance(self.resync_keys, tuple):
-            raise TypeError("resync_keys must be a tuple of key names")
-        for key in self.resync_keys:
-            _require_text(key, "resync key")
-        if len(set(self.resync_keys)) != len(self.resync_keys):
-            raise ValueError("resync_keys must be unique")
-        _require_text_set(self.job_types, "job_types")
-        _require_text_set(self.refresh_fields, "refresh_fields")
-        _require_optional_positive_int(self.default_sync_days, "default_sync_days")
-        if (
-            self.default_sync_days is not None
-            and self.default_sync_days > self.max_sync_days
-        ):
-            raise ValueError("default_sync_days must not exceed max_sync_days")
-        if not isinstance(self.schedule, SchedulePolicy):
-            raise TypeError("schedule must be a SchedulePolicy")
-        _require_optional_rank(self.coach_rank, "coach_rank")
-        _require_bool(self.coach_waits_for_completion, "coach_waits_for_completion")
-        if self.not_configured_message is not None:
-            _require_text(self.not_configured_message, "not_configured_message")
-        if self.manual_sync is not None and not isinstance(
-            self.manual_sync, ManualSyncRoute
-        ):
-            raise ValueError("manual_sync must be a ManualSyncRoute")
-        if self.full_resync_path is not None:
-            _require_route_path(self.full_resync_path, "full_resync_path")
-        _require_metric_exports(self.metric_exports, self.capabilities)
 
 
 DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (

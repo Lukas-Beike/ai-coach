@@ -16,6 +16,7 @@ from canonical_detail_support import NOW, ZONE, open_manager
 from support import make_config
 
 from backend.canonical.vocabulary import (
+    GARMIN_ID,
     ActivityDetailOrigin,
     ActivityRecordState,
     ProviderId,
@@ -24,7 +25,6 @@ from backend.canonical.vocabulary import (
 from backend.db.activity_detail_store import detail_sets_for
 from backend.errors import AppError
 from backend.providers import canonical_plans as plans
-from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_ingest import ingest_plan

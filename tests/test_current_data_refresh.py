@@ -8,8 +8,8 @@ import threading
 import unittest
 from unittest.mock import MagicMock, Mock
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync.commands import (
     GarminSynchronousRefresh,
     ProviderRefreshCommandService,

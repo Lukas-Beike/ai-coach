@@ -12,13 +12,13 @@ from support import temp_database
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.daily import (
     DailySyncMarkerService,
     daily_attempt_marker_key,
     daily_marker_key,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 
 
 class CountingDatabaseManager(DatabaseManager):

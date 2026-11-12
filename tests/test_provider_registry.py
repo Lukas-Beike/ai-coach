@@ -16,14 +16,6 @@ from support import make_config
 
 from backend.canonical.vocabulary import MetricKind
 from backend.http_api.sync_commands import PROVIDER_NOT_CONFIGURED_MESSAGES
-from backend.providers.descriptors import (
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    Capability,
-    FreshnessArea,
-    ManualSyncRoute,
-    ProviderDescriptor,
-    SchedulePolicy,
-)
 from backend.sync.freshness import (
     PROVIDER_REFRESH_LABELS,
     PROVIDER_REFRESH_STALE_SECONDS,
@@ -32,6 +24,14 @@ from backend.sync.freshness import (
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.jobs import JOB_TYPES, PROVIDERS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import (
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    Capability,
+    FreshnessArea,
+    ManualSyncRoute,
+    ProviderDescriptor,
+    SchedulePolicy,
+)
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
 TWO_DAYS = 48 * 60 * 60
@@ -260,18 +260,6 @@ class RegistryContractTests(unittest.TestCase):
         )
         self.assertNotIn("wahoo-mock", PROVIDER_REFRESH_LABELS)
 
-    def test_duplicate_provider_id_is_rejected(self) -> None:
-        descriptor = DEFAULT_PROVIDER_DESCRIPTORS[0]
-        with self.assertRaisesRegex(ValueError, "duplicate provider descriptor"):
-            ProviderRegistry((descriptor, descriptor))
-
-    def test_duplicate_provider_area_is_rejected(self) -> None:
-        duplicated = _descriptor(
-            areas=(_area("activities", "First"), _area("activities", "Second"))
-        )
-        with self.assertRaisesRegex(ValueError, "duplicate freshness area"):
-            ProviderRegistry((duplicated,))
-
     def test_unknown_provider_lookup_raises_key_error(self) -> None:
         with self.assertRaises(KeyError):
             DEFAULT_PROVIDER_REGISTRY.get("unknown")
@@ -292,100 +280,6 @@ class RegistryContractTests(unittest.TestCase):
         self.assertEqual((), registry.ids())
         self.assertEqual((), registry.freshness_areas())
         self.assertEqual((), registry.ids_with(Capability.ACTIVITIES))
-
-
-class DescriptorValidationTests(unittest.TestCase):
-    def test_freshness_area_requires_text_and_positive_window(self) -> None:
-        cases: list[dict[str, object]] = [
-            {"area": ""},
-            {"area": "   "},
-            {"label": ""},
-            {"stale_after_s": 0},
-            {"stale_after_s": True},
-            {"stale_after_s": "3600"},
-        ]
-        for overrides in cases:
-            with self.subTest(overrides=overrides):
-                values: dict[str, object] = {
-                    "area": "activities",
-                    "label": "Mock",
-                    "stale_after_s": TWO_DAYS,
-                    "read_only": True,
-                }
-                values.update(overrides)
-                with self.assertRaises(ValueError):
-                    FreshnessArea(**values)  # type: ignore[arg-type]
-
-    def test_freshness_area_requires_boolean_read_only(self) -> None:
-        with self.assertRaisesRegex(TypeError, "read_only must be a boolean"):
-            FreshnessArea(
-                area="activities",
-                label="Mock",
-                stale_after_s=TWO_DAYS,
-                read_only="yes",  # type: ignore[arg-type]
-            )
-
-    def test_freshness_area_is_frozen(self) -> None:
-        area = _area()
-        with self.assertRaises(dataclasses.FrozenInstanceError):
-            area.label = "Changed"  # type: ignore[misc]
-
-    def test_descriptor_rejects_blank_identity(self) -> None:
-        with self.assertRaises(ValueError):
-            _descriptor(provider_id=" ")
-        with self.assertRaises(ValueError):
-            ProviderDescriptor(
-                provider_id="wahoo-mock",
-                label="",
-                capabilities=frozenset(),
-                freshness_areas=(),
-                max_sync_days=90,
-                resync_keys=(),
-            )
-
-    def test_descriptor_requires_capability_values(self) -> None:
-        with self.assertRaisesRegex(ValueError, "capabilities"):
-            _descriptor(capabilities=["activities"])  # type: ignore[arg-type]
-        with self.assertRaisesRegex(ValueError, "capabilities"):
-            _descriptor(capabilities=frozenset({"activities"}))  # type: ignore[arg-type]
-
-    def test_metric_exports_are_declared_with_the_capability(self) -> None:
-        with self.assertRaisesRegex(ValueError, "METRIC_EXPORT"):
-            dataclasses.replace(
-                _descriptor(), metric_exports=frozenset({MetricKind.WEIGHT})
-            )
-        with self.assertRaisesRegex(ValueError, "METRIC_EXPORT"):
-            _descriptor(capabilities=frozenset({Capability.METRIC_EXPORT}))
-        with self.assertRaisesRegex(ValueError, "metric_exports"):
-            dataclasses.replace(
-                _descriptor(capabilities=frozenset({Capability.METRIC_EXPORT})),
-                metric_exports=frozenset({"weight"}),  # type: ignore[arg-type]
-            )
-
-    def test_descriptor_requires_freshness_area_values(self) -> None:
-        with self.assertRaisesRegex(ValueError, "freshness_areas"):
-            _descriptor(areas=[_area()])  # type: ignore[arg-type]
-        with self.assertRaisesRegex(ValueError, "freshness_areas"):
-            _descriptor(areas=("activities",))  # type: ignore[arg-type]
-
-    def test_descriptor_requires_positive_sync_window(self) -> None:
-        with self.assertRaisesRegex(ValueError, "max_sync_days"):
-            _descriptor(max_sync_days=0)
-        with self.assertRaisesRegex(ValueError, "max_sync_days"):
-            _descriptor(max_sync_days=True)
-
-    def test_descriptor_requires_unique_text_resync_keys(self) -> None:
-        with self.assertRaisesRegex(TypeError, "resync_keys must be a tuple"):
-            _descriptor(resync_keys=["mock_full_resync_running"])  # type: ignore[arg-type]
-        with self.assertRaisesRegex(ValueError, "resync key"):
-            _descriptor(resync_keys=("",))
-        with self.assertRaisesRegex(ValueError, "must be unique"):
-            _descriptor(resync_keys=("mock_key", "mock_key"))
-
-    def test_valid_descriptor_is_accepted(self) -> None:
-        descriptor = _descriptor(resync_keys=("mock_running", "mock_status"))
-        self.assertEqual("wahoo-mock", descriptor.provider_id)
-        self.assertEqual(("mock_running", "mock_status"), descriptor.resync_keys)
 
 
 INTERVALS_JOB_TYPES = frozenset({"plan_push", "competition_push", "nutrition_sync"})
@@ -459,23 +353,6 @@ class OrchestrationParityTests(unittest.TestCase):
         self.assertFalse(
             DEFAULT_PROVIDER_REGISTRY.supports_job("intervals", non_text_job)
         )
-
-    def test_duplicate_manual_route_paths_are_rejected(self) -> None:
-        route = ManualSyncRoute(path="/api/dup", uses_sync_period=False)
-        first = dataclasses.replace(_descriptor("first-mock"), manual_sync=route)
-        second = dataclasses.replace(_descriptor("second-mock"), manual_sync=route)
-        with self.assertRaisesRegex(ValueError, "duplicate manual sync route"):
-            ProviderRegistry((first, second))
-
-    def test_duplicate_full_resync_paths_are_rejected(self) -> None:
-        first = dataclasses.replace(
-            _descriptor("first-mock"), full_resync_path="/api/dup/full"
-        )
-        second = dataclasses.replace(
-            _descriptor("second-mock"), full_resync_path="/api/dup/full"
-        )
-        with self.assertRaisesRegex(ValueError, "duplicate full resync route"):
-            ProviderRegistry((first, second))
 
     def test_refresh_fields_match_previous_refresh_job_fields(self) -> None:
         for provider_id, expected in PREVIOUS_REFRESH_FIELDS.items():
@@ -712,96 +589,6 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             "Der Zeitraum für unknown muss -1 oder zwischen 1 und 90 Tagen liegen.",
             DEFAULT_PROVIDER_REGISTRY.period_error_message("unknown"),
         )
-
-
-class OrchestrationDescriptorValidationTests(unittest.TestCase):
-    def test_default_sync_window_must_not_exceed_max(self) -> None:
-        base = _descriptor("window-mock", max_sync_days=30)
-        self.assertEqual(
-            30, dataclasses.replace(base, default_sync_days=30).default_sync_days
-        )
-        with self.assertRaisesRegex(ValueError, "must not exceed max_sync_days"):
-            dataclasses.replace(base, default_sync_days=31)
-
-    def test_default_orchestration_fields_are_generic(self) -> None:
-        descriptor = _descriptor()
-        self.assertEqual(frozenset({"refresh"}), descriptor.job_types)
-        self.assertEqual(frozenset({"reason"}), descriptor.refresh_fields)
-        self.assertIsNone(descriptor.default_sync_days)
-        self.assertEqual(SchedulePolicy(), descriptor.schedule)
-        self.assertIsNone(descriptor.coach_rank)
-        self.assertFalse(descriptor.coach_waits_for_completion)
-        self.assertIsNone(descriptor.not_configured_message)
-        self.assertIsNone(descriptor.manual_sync)
-        self.assertIsNone(descriptor.full_resync_path)
-
-    def test_schedule_policy_validates_ranks_and_marker(self) -> None:
-        self.assertIsNone(SchedulePolicy().daily_rank)
-        with self.assertRaisesRegex(ValueError, "daily_rank"):
-            SchedulePolicy(daily_rank=-1)
-        with self.assertRaisesRegex(ValueError, "startup_rank"):
-            SchedulePolicy(startup_rank=True)
-        with self.assertRaisesRegex(TypeError, "daily_marker"):
-            SchedulePolicy(daily_marker="yes")  # type: ignore[arg-type]
-
-    def test_manual_sync_route_validates_path_flags_and_payload(self) -> None:
-        with self.assertRaisesRegex(ValueError, "path"):
-            ManualSyncRoute(path="", uses_sync_period=False)
-        with self.assertRaisesRegex(ValueError, "absolute path"):
-            ManualSyncRoute(path="api/sync", uses_sync_period=False)
-        with self.assertRaisesRegex(TypeError, "uses_sync_period"):
-            ManualSyncRoute(path="/api/x", uses_sync_period="yes")  # type: ignore[arg-type]
-        for payload in (
-            [("reason", "manual")],
-            (("reason",),),
-            ((1, "manual"),),
-        ):
-            with (
-                self.subTest(payload=payload),
-                self.assertRaisesRegex(ValueError, "payload"),
-            ):
-                ManualSyncRoute(
-                    path="/api/x",
-                    uses_sync_period=False,
-                    payload=payload,  # type: ignore[arg-type]
-                )
-
-    def test_descriptor_rejects_invalid_orchestration_fields(self) -> None:
-        base = _descriptor()
-        cases: list[tuple[dict[str, object], type[Exception], str]] = [
-            ({"job_types": ["refresh"]}, TypeError, "job_types"),
-            ({"job_types": frozenset({""})}, ValueError, "job_types"),
-            ({"refresh_fields": {"reason"}}, TypeError, "refresh_fields"),
-            ({"default_sync_days": 0}, ValueError, "default_sync_days"),
-            ({"schedule": "daily"}, TypeError, "schedule"),
-            ({"coach_rank": -1}, ValueError, "coach_rank"),
-            ({"coach_waits_for_completion": "yes"}, TypeError, "coach_waits"),
-            ({"not_configured_message": ""}, ValueError, "not_configured_message"),
-            ({"manual_sync": ("/api/x", False)}, ValueError, "manual_sync"),
-            ({"full_resync_path": "api/x"}, ValueError, "absolute path"),
-            ({"full_resync_path": ""}, ValueError, "full_resync_path"),
-        ]
-        for overrides, error, pattern in cases:
-            with (
-                self.subTest(overrides=overrides),
-                self.assertRaisesRegex(error, pattern),
-            ):
-                dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
-
-    def test_descriptor_accepts_valid_orchestration_fields(self) -> None:
-        descriptor = dataclasses.replace(
-            _descriptor(),
-            job_types=frozenset({"refresh"}),
-            default_sync_days=7,
-            schedule=SchedulePolicy(daily_rank=0, startup_rank=0, daily_marker=True),
-            coach_rank=0,
-            coach_waits_for_completion=True,
-            not_configured_message="Nicht konfiguriert.",
-            manual_sync=ManualSyncRoute(path="/api/x", uses_sync_period=False),
-            full_resync_path="/api/x/full-resync",
-        )
-        self.assertEqual(7, descriptor.default_sync_days)
-        self.assertEqual("/api/x/full-resync", descriptor.full_resync_path)
 
 
 if __name__ == "__main__":

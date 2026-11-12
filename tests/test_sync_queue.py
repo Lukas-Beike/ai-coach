@@ -10,11 +10,11 @@ from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.errors import AppError
-from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import JobValidationError, SyncJobStore, validate_job_request
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+from backend.sync.provider_table import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.queue_assembly import (
     SyncJobQueueAssembly,

@@ -10,12 +10,12 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers import garmin as garmin_provider
-from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_personal import GarminPersonalClient
 from backend.sync import garmin, garmin_service
 from backend.sync.garmin_activity_details import GarminActivityDetailService

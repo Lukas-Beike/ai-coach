@@ -10,10 +10,10 @@ from unittest.mock import Mock
 import backend.errors
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
-from backend.providers.descriptors import WAHOO_NOT_CONFIGURED_MESSAGE, Capability
 from backend.sync.executor import WahooJobAdapter
 from backend.sync.jobs import JobValidationError, normalize_sync_job_request
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_table import WAHOO_NOT_CONFIGURED_MESSAGE, Capability
 
 WORKOUT_ID = "11111111-1111-4111-8111-111111111111"
 ENTRY = {"library_workout_id": WORKOUT_ID, "expected_payload_hash": "a" * 64}

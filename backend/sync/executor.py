@@ -8,14 +8,9 @@ from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    GARMIN_ID,
-    INTERVALS_ID,
-    WEATHER_ID,
-)
 from backend.sync.competitions import CompetitionSyncService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import GarminFixtureLoader
@@ -38,6 +33,7 @@ from backend.sync.jobs import (
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import ProviderJobOwner
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository

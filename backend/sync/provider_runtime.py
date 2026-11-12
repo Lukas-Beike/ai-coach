@@ -19,10 +19,10 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol, TypeVar
 
 from backend.errors import AppError
-from backend.providers.descriptors import ProviderDescriptor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.provider_table import ProviderDescriptor
 
 _T = TypeVar("_T")
 

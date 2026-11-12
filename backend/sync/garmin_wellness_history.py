@@ -27,9 +27,9 @@ from datetime import date, timedelta
 from typing import Any, Final, Protocol
 
 from backend.canonical.section_items import SectionItem, split_section
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.db import garmin_store
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.providers.garmin import merge_weight_snapshots
 from backend.providers.garmin_wellness_history import (
     WellnessSourcePaused,
@@ -37,6 +37,7 @@ from backend.providers.garmin_wellness_history import (
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.jobs import WELLNESS_HISTORY_CURSOR
+from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 
 ITEM_SOURCES: Final = ("sleep", "hrv", "daily_stats", "resting_hr", "body_battery")
 WELLNESS_SOURCES: Final = frozenset((*ITEM_SOURCES, "weight"))

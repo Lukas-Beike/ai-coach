@@ -7,8 +7,8 @@ import unittest
 
 from provider_runtime_fakes import ACME_ID
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,

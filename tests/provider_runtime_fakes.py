@@ -10,16 +10,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from backend.providers.descriptors import (
-    Capability,
-    FreshnessArea,
-    ProviderDescriptor,
-    SchedulePolicy,
-)
 from backend.sync.provider_runtime import (
     FreshnessInputs,
     FreshnessSource,
     ProviderRuntimeBinding,
+)
+from backend.sync.provider_table import (
+    Capability,
+    FreshnessArea,
+    ProviderDescriptor,
+    SchedulePolicy,
 )
 
 ACME_ID = "acme-mock"

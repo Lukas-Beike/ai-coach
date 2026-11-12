@@ -19,15 +19,10 @@ from provider_runtime_fakes import (
 )
 from support import make_config, temp_database
 
+from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.providers.descriptors import (
-    CALENDAR_ID,
-    DEFAULT_PROVIDER_DESCRIPTORS,
-    GARMIN_ID,
-    WEATHER_ID,
-)
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.freshness import ProviderFreshnessService, provider_freshness_state
 from backend.sync.freshness_sources import (
@@ -39,6 +34,11 @@ from backend.sync.freshness_sources import (
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import FreshnessInputs, ProviderRuntimeRegistry
+from backend.sync.provider_table import (
+    CALENDAR_ID,
+    DEFAULT_PROVIDER_DESCRIPTORS,
+    WEATHER_ID,
+)
 from backend.sync.status import SyncPublicStateService
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
