@@ -6,7 +6,9 @@ description: Base skill. Create one GitHub issue after a duplicate search, with 
 # Create an issue
 
 Write the body to a file in the session scratchpad: context, observed and
-expected behaviour, evidence, acceptance criteria. Nothing private (no app
+expected behaviour, evidence, acceptance criteria. A checkbox is a check the
+delivering lane can tick itself; a check another issue owns is a plain note
+("Covered later by #N, case 2"), or a checkbox in that issue. Nothing private (no app
 address, host names, passwords, athlete data); the repository is public. When the
 athlete approved a rendered mockup for the issue, put that mockup's HTML into
 the body (a collapsed block), so the delivering thread builds from the approved
