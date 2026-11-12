@@ -730,6 +730,8 @@ class ScorerTests(unittest.TestCase):
             text="Vorlage?",
         )
         self.assertEqual(library["misses"], ["extra_write:library"])
+        silent = scored("t03-swim-without-template", lambda a: None, text="Okay.")
+        self.assertIn("neither_unit_nor_question", silent["misses"])
 
 
 CALL_IDS = itertools.count(1)
