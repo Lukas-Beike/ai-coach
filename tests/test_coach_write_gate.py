@@ -756,6 +756,24 @@ class RemoteTierTests(unittest.TestCase):
             # and an "ohne" phrase that names the target negates its part.
             "Nein, synchronisiere den Plan mit Intervals.",
             "Lade die Woche ohne die Krafteinheiten zu Intervals hoch.",
+            # A negated or self-kept sync blocks the whole message, and the
+            # training term "Intervals" names no sync (#2341).
+            "Plane die Woche. Synchronisieren mache ich selbst.",
+            "Nicht synchronisieren! Nur lokal speichern. Der Sync kommt später.",
+            "Sync den Plan. Nein, doch nicht synchronisieren.",
+            "Mach mir 5x4 min Intervals am Dienstag.",
+            "Plane 6x800 m Intervals für Donnerstag und sync es nicht.",
+            "Pack 5x4 min Intervals in den Dienstag.",
+            "Plane die Intervals gleich ab Montag.",
+            "Plane gleich 5x4 min Intervals ab Montag.",
+            "Ändere den Dienstag zu Intervals.",
+            "Wandle den Lauf in Intervals um.",
+            "Nicht synchronisieren, aber plane die Woche neu. Der Sync kommt später.",
+            "Den Sync mache ich selber.",
+            "I'll sync it myself.",
+            # Accepted fail-closed limit: a negation that only narrows the
+            # scope still blocks the whole message.
+            "Sync den Plan zu Intervals.icu. Die Ruhetage nicht hochladen.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(gate.remote_requested(text))
@@ -772,6 +790,13 @@ class RemoteTierTests(unittest.TestCase):
             "Sync mit Intervals bitte.",
             "Nicht verschieben. Sync den Plan zu Intervals.",
             "Synchronisiere mit Intervals.icu.",
+            "Nicht synchronisieren. Aber den Plan danach zu Intervals hochladen.",
+            "Synchronisier den Plan bitte selbst mit Intervals.",
+            "Mach mir 5x4 min Intervals und schick sie zu Intervals.icu.",
+            "Keine Intervals diese Woche. Synchronisiere den Plan mit Intervals.icu.",
+            "Nicht zu Garmin synchronisieren. Sync den Plan zu Intervals.icu.",
+            "Trag die Woche in Intervals ein.",
+            "Ich möchte, dass du den Plan selbst zu Intervals.icu hochlädst.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(gate.remote_requested(text))

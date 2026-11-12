@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,7 +119,8 @@ def _words(text: str) -> list[str]:
 
 
 # Remote sync wording in normalized form; defense in depth for remote writes
-# only. A sync verb or the provider name asks for the sync on its own; planning
+# only. A sync verb or the provider name asks for the sync on its own (the bare
+# training term "Intervals" only as a target, see ``_names_sync``); planning
 # words such as "Kalender", "doppelt" or "Konflikt" never do ("Trag den Lauf in
 # den Kalender ein" asks for no write to Intervals.icu). A leading "^" anchors a
 # stem at a word start.
@@ -191,11 +192,60 @@ _POLITE_REQUEST = re.compile(
 )
 
 
+# "Synchronisieren mache ich selbst": the athlete keeps the action (#2341).
+_KEEP_VERBS = "|".join(
+    normalize(verb) for verb in _words("mach,erledig,übernehm,kümmer")
+)
+_SELF_KEPT = re.compile(
+    rf"(?<![a-z])(?:(?:{_KEEP_VERBS})[a-z]*\s+ich|"
+    rf"ich\s+(?:{_KEEP_VERBS}|sync|synchronisier|lad|schick|trag)[a-z]*)"
+    r"\s+(?:[a-z]+\s+){0,3}?(?:selbst|selber)(?![a-z])|"
+    r"(?<![a-z])i(?:'ll| will)?\s+(?:do|sync|upload|handle)\s+(?:it|that|this|them)"
+    r"\s+myself(?![a-z])"
+)
+# The training term ("5x4 min Intervals") names the provider only as the
+# target of a transfer verb ("Lade ... zu Intervals hoch", "Trag ... in Intervals
+# ein") or in a split "gleiche ... mit Intervals ab".
+_TRAINING_INTERVALS = re.compile(r"(?<![a-z])intervals(?!\.icu)(?![a-z])")
+_INTERVALS_TARGET = re.compile(
+    r"(?<![a-z])(?:an|in|ins|zu|zum|nach|to|into|on|onto)\s+"
+    r"(?:(?:den|dem|die|das|my|mein[a-z]*)\s+)?intervals(?![a-z])"
+)
+_TRANSFER_VERB = _compile(
+    "^" + stem for stem in _words("trag,übertrag,schick,send,push,lad,export")
+)
+_SPLIT_ABGLEICH = re.compile(
+    r"(?<![a-z])gleich(?:e|st|t)?\s+(?:[a-z0-9]+\s+){0,5}?mit\s+intervals\s+ab(?![a-z])"
+)
+
+
 def _negates(part: str) -> bool:
-    return bool(_NEGATION.search(part)) or any(
+    return bool(_NEGATION.search(part) or _SELF_KEPT.search(part)) or any(
         _SYNC_TARGET_PATTERN.search(_loose(normalize(phrase)))
         for phrase in _WITHOUT.findall(part)
     )
+
+
+def _names_sync(part: str) -> bool:
+    """Whether a part names the sync; the bare training term needs a transfer."""
+    return (
+        _mentions_remote(_TRAINING_INTERVALS.sub(" ", part))
+        or bool(_SPLIT_ABGLEICH.search(part))
+        or bool(_INTERVALS_TARGET.search(part) and _TRANSFER_VERB.search(_loose(part)))
+    )
+
+
+def _request_parts(text: str) -> Iterator[tuple[int, str]]:
+    """Each sentence part with its index after contrast words, skipping
+    information questions unless they address the coach with a request verb."""
+    for sentence in _SENTENCE.findall(normalize(text)):
+        if (
+            sentence.rstrip().endswith(("?", "？"))
+            and _INFORMATION_QUESTION.search(sentence)
+            and not _POLITE_REQUEST.search(sentence)
+        ):
+            continue
+        yield from enumerate(_CONTRAST.split(sentence))
 
 
 def remote_requested(text: str) -> bool:
@@ -209,23 +259,20 @@ def remote_requested(text: str) -> bool:
     ohne die Ruhetage" still asks for it. A part that names Garmin or Wahoo but
     not Intervals.icu ("Sync meine Garmin-Daten"), or that describes a past sync
     ("Ich habe gestern synchronisiert"), names no Intervals.icu sync (#2134).
+    A negated or self-kept sync ("Synchronisieren mache ich selbst") blocks the
+    whole message until a contrast part that names an unnegated sync, and the
+    training term "Intervals" names the provider only as a transfer target
+    ("zu Intervals hochladen") (#2341).
     """
-    for sentence in _SENTENCE.findall(normalize(text)):
-        if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
-        ):
+    requested = blocked = False
+    for index, part in _request_parts(text):
+        if not _names_sync(part) or _names_other_provider(part):
             continue
-        if any(
-            _mentions_remote(part)
-            and not _negates(part)
-            and not _names_other_provider(part)
-            and not _describes_past(part)
-            for part in _CONTRAST.split(sentence)
-        ):
-            return True
-    return False
+        if _negates(part):
+            requested, blocked = False, True
+        elif (index or not blocked) and not _describes_past(part):
+            requested, blocked = True, False
+    return requested
 
 
 # One group per provider, named by its id. Garmin is named as the provider or
@@ -262,24 +309,17 @@ def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
     information questions ask nothing, as for ``remote_requested``.
     """
     found: set[str] = set()
-    for sentence in _SENTENCE.findall(normalize(text)):
+    for _, part in _request_parts(text):
+        loose = _loose(part)
         if (
-            sentence.rstrip().endswith(("?", "？"))
-            and _INFORMATION_QUESTION.search(sentence)
-            and not _POLITE_REQUEST.search(sentence)
+            verbs.search(loose)
+            and _PROVIDER_OBJECT.search(loose)
+            and not _INTERVALS_NAME.search(part)
+            and not _negates(part)
         ):
-            continue
-        for part in _CONTRAST.split(sentence):
-            loose = _loose(part)
-            if (
-                verbs.search(loose)
-                and _PROVIDER_OBJECT.search(loose)
-                and not _INTERVALS_NAME.search(part)
-                and not _negates(part)
-            ):
-                found.update(
-                    str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
-                )
+            found.update(
+                str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
+            )
     return frozenset(found)
 
 
