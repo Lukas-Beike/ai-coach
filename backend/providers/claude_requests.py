@@ -281,6 +281,7 @@ class ClaudeMessagesClient:
                 reason="response_too_large",
             )
             self._record("messages_stream_failed", assembler, context, started, error)
+            self._record_status(error)
             raise error from exc
         except TimeoutError as exc:
             error = AppError(
@@ -289,6 +290,7 @@ class ClaudeMessagesClient:
                 reason="provider_timeout",
             )
             self._record("messages_stream_failed", assembler, context, started, error)
+            self._record_status(error)
             raise error from exc
         except OSError as exc:
             error = AppError(
@@ -297,6 +299,7 @@ class ClaudeMessagesClient:
                 reason="provider_unavailable",
             )
             self._record("messages_stream_failed", assembler, context, started, error)
+            self._record_status(error)
             raise error from exc
         finally:
             # Release only the handle this request set.

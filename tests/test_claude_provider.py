@@ -465,6 +465,14 @@ class ClaudeStreamClientTests(unittest.TestCase):
         self.assertEqual(
             state.status, [("anthropic", "error", "authentication_or_permission")]
         )
+        client, _, state, _ = make_client(TimeoutError())
+        with self.assertRaises(AppError):
+            client.complete(ModelRequest(model="claude-opus-5-5"))
+        self.assertEqual(state.status, [("anthropic", "error", "provider_timeout")])
+        client, _, state, _ = make_client(OSError("synthetic network failure"))
+        with self.assertRaises(AppError):
+            client.complete(ModelRequest(model="claude-opus-5-5"))
+        self.assertEqual(state.status, [("anthropic", "error", "provider_unavailable")])
 
     def test_refusal_after_the_fallback_chain_ends_with_a_safe_error(self):
         client, _, state, logger = make_client(sse_body(FIXTURES["refusal"]))
