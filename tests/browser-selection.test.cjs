@@ -93,7 +93,9 @@ for file in files:
     commands.append({"child": child, "arguments": creation[creation.index("browser-image-id") + 3:]})
 print(json.dumps({"baseline": baseline, "partitions": partitions, "commands": commands}))
 `, directory], {
+      // The JSON crosses stdin and stdout as UTF-8 on every platform, not the Windows code page.
       cwd: root, input: JSON.stringify(report), encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
     }));
 
     function reportIdentities(suite, titles = []) {
