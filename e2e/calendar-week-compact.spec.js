@@ -331,3 +331,40 @@ test("@responsive Mit dem Coach besprechen puts the planned unit into the Coach 
   expect(sent).toEqual([]);
   expect(await input.evaluate((element) => element.dataset.requestKind)).toBeUndefined();
 });
+
+test("@responsive an opened completed session shows its time in zones as one bar with the source", async ({ page, request }) => {
+  await openCalendar(page, request);
+  // The session read of "Details" carries the zones (#2195); routed before the cards render.
+  const reads = [];
+  await page.route("**/api/activities/*", async (route) => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1));
+    reads.push(id);
+    if (id === "past-run") return route.fulfill({ status: 500, json: { error: "Fehler" } });
+    const zones = id === "today-ride" ? {
+      power: { source: { label: "Garmin Connect" }, buckets: [
+        { index: 1, label: "Z1", seconds: 360 }, { index: 2, label: "Z2", seconds: 840 }, { index: 3, label: "Z3", seconds: 0 }, { index: 4, label: "Z4", seconds: 1620 },
+      ] },
+      heart_rate: { source: { label: "Garmin Connect" }, buckets: [{ index: 2, label: "Z2", seconds: 2820 }] },
+    } : {};
+    await route.fulfill({ json: { zones } });
+  });
+  const days = await renderSyntheticCalendar(page);
+  await showCalendarDay(page, days.today);
+  const ride = page.locator(`.planned-day[data-date="${days.today}"] .planned-entry`).filter({ hasText: "Heutige Ausfahrt" });
+  if (!await ride.evaluate((element) => element.open)) await ride.locator(":scope > summary").click();
+  const zone = ride.locator(".planned-zone-time");
+  await expect(zone.locator(".planned-zone-time-bar i")).toHaveCount(3);
+  // Every zone is named, one without time too; the bar draws only zones with time.
+  await expect(zone.locator(".planned-zone-time-bar")).toHaveAttribute("aria-label", "Zeit in Leistungszonen: Z1 6 min, Z2 14 min, Z3 0 min, Z4 27 min");
+  await expect(zone.locator(".planned-zone-time-legend span")).toHaveText(["Z1 6′", "Z2 14′", "Z3 0′", "Z4 27′"]);
+  await expect(zone.locator(".planned-zone-time-source")).toHaveText("Leistungszonen · Garmin Connect");
+  // A session without zones, and one whose read fails, show no bar.
+  await showCalendarDay(page, days.past);
+  for (const name of ["Vergangene Ausfahrt", "Vergangener Lauf"]) {
+    const card = page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`).filter({ hasText: name });
+    await card.evaluate((element) => { for (let node = element; node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true; });
+    await expect.poll(() => reads.includes(name === "Vergangene Ausfahrt" ? "past-ride" : "past-run")).toBe(true);
+    await expect(card.locator(".planned-zone-time")).toHaveCount(0);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});

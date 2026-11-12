@@ -1358,6 +1358,50 @@ function showPlannedDay(dateKey) {
   if (calendarView === "month") selectedDayKey = dateKey;
 }
 
+// One slim bar of the session's time per zone with every zone's minutes below and the zone kind and source:
+// rides use power zones when they have them, every other sport heart-rate zones. No zones, no bar.
+async function appendPlannedZoneTime(details, activityId, ride) {
+  const box = h("div", "planned-zone-time");
+  const facts = details.querySelector(".planned-actual-facts");
+  if (facts) facts.after(box);
+  else details.querySelector(":scope > .planned-activity-more")?.before(box);
+  if (!box.isConnected) details.append(box);
+  let zones;
+  try {
+    zones = (await api(`/api/activities/${encodeURIComponent(activityId)}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }))?.zones;
+  } catch {
+    box.remove();
+    return;
+  }
+  const power = ride && plannedZoneBuckets(zones?.power).some((item) => item.seconds > 0) ? zones.power : null;
+  const zone = power || zones?.heart_rate;
+  const buckets = plannedZoneBuckets(zone);
+  if (!buckets.some((item) => item.seconds > 0)) {
+    box.remove();
+    return;
+  }
+  const kind = power ? "Leistungszonen" : "HF-Zonen";
+  const minutes = (seconds) => `${Math.round(seconds / 60)}′`;
+  const spoken = buckets.map((item) => `${item.name} ${Math.round(item.seconds / 60)} min`).join(", ");
+  const bar = h("div", { className: "planned-zone-time-bar", role: "img", "aria-label": `Zeit in ${kind}: ${spoken}` },
+    buckets.filter((item) => item.seconds > 0).map((item) => {
+      const part = h("i", { dataset: { zone: item.zone } });
+      part.style.setProperty("flex-grow", String(item.seconds));
+      return part;
+    }));
+  const legend = h("div", { className: "planned-zone-time-legend", "aria-hidden": "true" }, buckets.map((item) => h("span", null, `${item.name} ${minutes(item.seconds)}`)));
+  box.append(bar, legend, h("p", "planned-zone-time-source", [kind, zone.source?.label].filter(Boolean).join(" · ")));
+}
+
+function plannedZoneBuckets(zone) {
+  return (zone?.buckets || [])
+    .filter((bucket) => Number.isFinite(bucket.seconds) && bucket.seconds >= 0)
+    .map((bucket) => {
+      const name = String(bucket.label || `Z${bucket.index}`).slice(0, 12);
+      return { name, seconds: bucket.seconds, zone: /^Z(\d)/.exec(name)?.[1] || "" };
+    });
+}
+
 function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
   const actual = calendarActualActivity(entry);
   const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1395,6 +1439,11 @@ function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPl
     if (!card.open || details.querySelector(".planned-detail-profile")) return;
     const detailProfile = plannedDetailProfile(actual?.workout_profile || entry.workout_profile);
     if (detailProfile) head.after(detailProfile);
+  });
+  // The time in zones is read when the card first opens, from the session read of "Details" (#2195).
+  const activityId = actual ? String(actual.activity_id || actual.id || "") : "";
+  if (activityId) card.addEventListener("toggle", () => {
+    if (card.open && !details.querySelector(".planned-zone-time")) void appendPlannedZoneTime(details, activityId, ["Radfahren", "Rad indoor"].includes(activitySportLabel(calendarSportType(actual))));
   });
   const metrics = actual ? null : plannedSessionMetrics(entry);
   if (metrics) details.append(metrics);
