@@ -1328,6 +1328,22 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.assertIsNotNone(self.link(U1))
         self.assertEqual([], self.garmin.calls)
 
+    def test_an_unreadable_readiness_state_never_fails_the_refresh(self) -> None:
+        self.service._write_ready = Mock(side_effect=RuntimeError("database locked"))
+        adapter = GarminJobAdapter(
+            jobs=Mock(execute=Mock(return_value={"ok": True})), plan_push=self.service
+        )
+
+        with self.assertLogs("intervals_coach", "INFO") as logs:
+            result = adapter.execute({"id": "j"}, {}, "r", job_type="refresh")
+
+        self.assertEqual({"ok": True}, result)
+        self.assertEqual(
+            ["garmin_past_workout_removal_failed"],
+            [getattr(record, "event", None) for record in logs.records],
+        )
+        self.assertEqual([], self.garmin.calls)
+
     def test_every_run_logs_and_records_its_count_zero_included(self) -> None:
         # #2408: a quiet run must be told apart from one that never ran.
         later = datetime(2026, 11, 7, 9, 30, tzinfo=UTC)

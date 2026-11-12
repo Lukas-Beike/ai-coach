@@ -193,9 +193,17 @@ class GarminStrengthPushService:
         removals and the links still waiting for the diagnostics (#2408); a skip
         logs its reason.
         """
-        if not self._configured():
+        try:
+            if not self._configured():
+                return 0
+            ready = self._write_ready()
+        except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
+            _LOGGER.warning(
+                "Garmin past workout removal failed",
+                extra={"event": "garmin_past_workout_removal_failed"},
+            )
             return 0
-        if not self._write_ready():
+        if not ready:
             # Counts only: the removal waits for a refresh that logs the SDK in.
             _LOGGER.info(
                 "Garmin past workout removal skipped",
