@@ -508,7 +508,7 @@ class ServerFrontendTests(ServerTestCase):
         ).read_text(encoding="utf-8")
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
         app_source = frontend_source()
-        for route in ("#coach", "plan/overview", "analysis/performance", "#more"):
+        for route in ("#coach", "plan/overview", "analysis/running", "#more"):
             self.assertIn(route, e2e_source)
         self.assertNotIn("#today", e2e_source)
         for guard in (

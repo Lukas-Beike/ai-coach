@@ -119,8 +119,8 @@ test("an analysis chart without data is omitted and its title is collected once 
 test("an analysis segment is empty only when every content container reports no data", () => {
   const markers = {};
   const { analysisSegmentEmpty } = extractFunctions("analysis.js", ["analysisSegmentEmpty"], {
-    ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], recovery: ["recovery"] },
-    document: { getElementById: (id) => (id in markers ? { dataset: { analysisEmpty: markers[id] } } : { dataset: {} }) },
+    ANALYSIS_SEGMENT_CONTENT: { load: [["focus"], ["charts"]], recovery: [["recovery"]], running: [["shared", "analysisEmptyRunning"]], cycling: [["shared", "analysisEmptyCycling"]] },
+    document: { getElementById: (id) => (id in markers ? { dataset: typeof markers[id] === "object" ? markers[id] : { analysisEmpty: markers[id] } } : { dataset: {} }) },
   });
   assert.equal(analysisSegmentEmpty("load"), false, "unrendered containers are not empty");
   Object.assign(markers, { focus: "true", charts: "loading" });
@@ -131,6 +131,9 @@ test("an analysis segment is empty only when every content container reports no 
   assert.equal(analysisSegmentEmpty("load"), true);
   markers.recovery = "false";
   assert.equal(analysisSegmentEmpty("recovery"), false);
+  // Laufen and Radfahren share a container and read their own sport's marker (#2265).
+  markers.shared = { analysisEmpty: "false", analysisEmptyRunning: "true", analysisEmptyCycling: "false" };
+  assert.deepEqual([analysisSegmentEmpty("running"), analysisSegmentEmpty("cycling")], [true, false]);
 });
 
 test("the analysis empty card offers one action that depends on the connected sources", () => {
@@ -240,7 +243,7 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 
 test("current performance shows the status lines below its heading", () => {
   const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
-  const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
+  const reportNode = (tag, text, className) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
   const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
     reportNode,
@@ -248,13 +251,19 @@ test("current performance shows the status lines below its heading", () => {
     makeAnalysisSectionCollapsible() {},
     analysisValidPoint: () => true,
     isPreferredSource: () => false,
+    ESTIMATED_METRICS: new Set(),
+    analysisValue: (value, unit) => `${value} ${unit}`,
   });
   renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
-  assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Leistungswerte"], ["p", "Daten werden vorbereitet"]]);
+  assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Werte"], ["p", "Daten werden vorbereitet"]]);
   assert.equal(root.dataset.analysisEmpty, "false", "a status line keeps the section visible");
+  assert.deepEqual([root.dataset.analysisEmptyRunning, root.dataset.analysisEmptyCycling], ["false", "false"]);
   renderCurrentPerformance({}, undefined);
   assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
   assert.equal(root.dataset.analysisEmpty, "true");
+  // A sport with values keeps its own segment while the other one is empty (#2265).
+  renderCurrentPerformance({ cycling_ftp_watts: { value: 260, unit: "W" } }, undefined);
+  assert.deepEqual([root.dataset.analysisEmptyRunning, root.dataset.analysisEmptyCycling, root.dataset.analysisEmpty], ["true", "false", "false"]);
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {

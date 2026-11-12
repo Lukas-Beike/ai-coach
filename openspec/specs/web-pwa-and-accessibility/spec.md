@@ -381,10 +381,31 @@ The calendar card of a completed session SHALL carry its single-session analysis
 
 #### Scenario: No sessions segment in Analyse
 - **WHEN** the athlete opens the Analyse tab or an old `#analysis/sessions` link
-- **THEN** Analyse shows Belastung, Leistung and Erholung only, and the old link opens the calendar overview instead.
+- **THEN** Analyse shows Laufen, Radfahren, Belastung and Erholung only, and the old link opens the calendar overview instead.
 
 #### Scenario: Paging back without limit
 - **WHEN** the athlete pages back to a week before the configured weeks back and before the loaded sessions
 - **THEN** the calendar loads the older completed sessions page by page from the session list, newest first, adds only sessions older than the loaded ones, and shows them with Details and Feedback like any other session.
 
 Evidence: `public/plan-views.js::plannedActivityActions`, `public/plan-views.js::loadOlderSessions`, `public/activity-analysis.js::loadPanel`, `public/navigation.js::routeFromHash`, `backend/activities/detail_contract.py:activity_detail_contract`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService`; `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`, `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`, `e2e/activity-details.spec.js::@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar`, `e2e/activity-details.spec.js::@responsive the calendar pages back past the loaded weeks and loads older sessions`, `e2e/ux-polish.spec.js::a session's calendar details keep a flat series as a line on a real axis @responsive`, `tests/test_activity_detail_contract.py:StreamTests.test_streams_are_downsampled_with_aligned_equal_length_channels`, `tests/test_coach_activity_read_tools.py:test_activity_detail_exposes_the_session_bundle_for_corrections`.
+
+### Requirement: Analyse is split by sport
+The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholung in this order, without a Leistung segment. Laufen and Radfahren SHALL each show only their sport's current values, best efforts, development charts and estimates; Belastung and Erholung SHALL stay sport-independent. Every value and chart of the former Leistung segment SHALL appear in exactly one segment, and an old Leistung link SHALL open Laufen.
+
+#### Scenario: Laufen
+- **WHEN** the athlete opens Analyse › Laufen
+- **THEN** it shows the running current values (threshold pace, threshold power, threshold heart rate, VO2max), the development charts (threshold pace, VO2max, running tolerance), the best efforts of the last 90 days (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date and source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
+
+#### Scenario: Radfahren
+- **WHEN** the athlete opens Analyse › Radfahren
+- **THEN** it shows the cycling current values (FTP, power per weight, threshold heart rate, VO2max), the power profile with its coverage note and the experimental critical-power line, and the development charts (FTP, VO2max); no running value appears.
+
+#### Scenario: Cross-sport values
+- **WHEN** the athlete opens Analyse › Belastung or Erholung
+- **THEN** the endurance score is charted in Belastung, readiness stays in Erholung, and the weekly training status is not charted because it repeats the acute load in Belastung.
+
+#### Scenario: Empty sport and old links
+- **WHEN** one sport has no current values, charts, best efforts or estimates, or the athlete opens `#analysis/performance`
+- **THEN** that sport's segment shows its one empty card while the other sport keeps its content, and the old link opens Laufen.
+
+Evidence: `public/analysis.js::renderAnalysisSegments`, `public/analysis.js::renderRunningBestEfforts`, `public/analysis.js::criticalPowerLine`, `public/analysis.js::renderAnalysisHistory`, `public/performance-view.js::renderCurrentPerformance`, `public/navigation.js::routeFromHash`; `tests/analysis-presentation.test.cjs::an analysis segment is empty only when every content container reports no data`, `tests/analysis-presentation.test.cjs::current performance shows the status lines below its heading`, `e2e/performance-values.spec.js::@responsive Laufen and Radfahren each show only their sport`.
