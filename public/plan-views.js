@@ -71,6 +71,45 @@ function appendPlannedDescription(details, text) {
   details.append(h("p", "planned-description", text || "Keine weiteren Details hinterlegt."));
 }
 
+// The planned steps as a list (#2447, mockup B): zone mark, duration or distance, zone, and the target
+// range of the zones in effect on the unit's day right-aligned; a step without a range shows none.
+function plannedStepList(profile) {
+  const segments = profile?.source === "planned" && Array.isArray(profile.segments) ? profile.segments : [];
+  if (!segments.length || segments.length > 200) return null;
+  const axis = profile.axis === "distance" ? "distance" : "duration";
+  const rows = segments.map((segment) => {
+    const zone = Number.isInteger(segment.zone) && segment.zone >= 1 && segment.zone <= 7 ? segment.zone : null;
+    const size = Number(segment[axis]);
+    const extent = axis === "distance" ? distanceLabel(size) : size < 60 ? `${Math.round(size)} s` : AppFormat.duration(size);
+    return h("li", { dataset: { zone: zone || "unknown" } },
+      h("span", { className: "planned-step-mark", "aria-hidden": "true" }),
+      h("span", "planned-step-text", [extent, zone ? `Z${zone}` : null].filter(Boolean).join(" · ")),
+      h("span", "planned-step-range", plannedStepRange(segment.range)));
+  });
+  return h("ol", { className: "planned-steps", "aria-label": "Ablauf" }, rows);
+}
+
+// "110–128 bpm", "≤ 109 bpm" for the lowest zone, "≥ 155 bpm" for the open top; pace in min/km, slower end first.
+function plannedStepRange(range) {
+  if (!range || !["bpm", "W", "s/km"].includes(range.unit)) return "";
+  const pace = range.unit === "s/km";
+  const text = (value) => (pace ? AppFormat.clock(value) : String(value));
+  const unit = pace ? "/km" : range.unit;
+  const { min, max } = range;
+  if (Number.isFinite(min) && Number.isFinite(max)) return min === max ? `${text(min)} ${unit}` : `${text(min)}–${text(max)} ${unit}`;
+  // Pace counts down with intensity: the lowest zone is slower than its limit, the top one faster.
+  if (Number.isFinite(max)) return `${pace ? "≥" : "≤"} ${text(max)} ${unit}`;
+  if (Number.isFinite(min)) return `${pace ? "≤" : "≥"} ${text(min)} ${unit}`;
+  return "";
+}
+
+// The description without its step lines ("- 10m Z2 HR") and repeat headers ("4x").
+function plannedDescriptionText(text) {
+  const step = /^\s*-\s/;
+  const repeat = /^\s*(\S.*\s)?\d+\s*x\s*$/i;
+  return String(text || "").split("\n").filter((line) => !step.test(line) && !repeat.test(line)).join("\n").trim();
+}
+
 function stopSummaryToggle(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -1330,13 +1369,16 @@ function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPl
   });
   const metrics = actual ? null : plannedSessionMetrics(entry);
   if (metrics) details.append(metrics);
+  const steps = actual ? null : plannedStepList(entry.workout_profile);
+  if (steps) details.append(steps);
   if (!actual) details.append(...plannedUnitActions(entry, dateKey, todayKey));
   appendActualCalendarDetails(details, actual);
   if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title, entryKey));
   appendPlannedCalendarComparison(details, entry, actual);
   const focusForm = plannedFocusForm(entry, dateKey);
   if (focusForm) details.append(focusForm);
-  appendPlannedDescription(details, entry.description);
+  // With the step list, the description keeps only its free text; the stored text is unchanged (#2447).
+  appendPlannedDescription(details, steps ? plannedDescriptionText(entry.description) : entry.description);
   card.append(cardSummary, details);
   return card;
 }
