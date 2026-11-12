@@ -492,10 +492,7 @@ class FirstThresholdTests(unittest.TestCase):
         ):  # fmt: skip
             with self.subTest(name):
                 top = zone_two_top(configuration, threshold_pace)
-                if expected is None:
-                    self.assertIsNone(top)
-                else:
-                    self.assertAlmostEqual(expected, top, places=2)
+                self.assertEqual(expected, None if top is None else round(top, 2))
 
 
 if __name__ == "__main__":
