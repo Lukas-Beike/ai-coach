@@ -227,6 +227,17 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     ):
         local_id = self.seed(wrong_sport=True)
         period = {"start": "2026-09-09", "end": "2026-09-09"}
+        # The corrected run is a library template (#2379).
+        run = server.PLANNING_DATA.workout_library().create_template(
+            {
+                "sport": "Run",
+                "name": "Lockerer 10-km-Lauf",
+                "description": "- 75m Z1 HR",
+                "duration_minutes": 75,
+                "session_focus": "easy",
+                "hr_cap": effective_caps(None)["easy"],
+            }
+        )
 
         def correct(_):
             return self.call(
@@ -241,6 +252,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                             "session_focus": "easy",
                             "hr_cap": effective_caps(None)["easy"],
                             "description": "- 75m Z1 HR",
+                            "template_id": run["id"],
                             "expected_payload_hash": self.selection(local_id)[
                                 "expected_payload_hash"
                             ],

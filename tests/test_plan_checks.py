@@ -223,6 +223,150 @@ class PlanCheckRuleTests(unittest.TestCase):
         ]
         self.assertEqual([], check(plan, done))
 
+    def test_a_unit_keeps_its_library_template_and_only_scales_load(self):
+        # Athlete rule (#2379): units come only from the library, variants only
+        # scale load and intensity; exercise or step changes are new templates.
+        press = {"name": "Bankdrücken", "sets": 3, "reps": 8, "kg": 50}
+        row = {"name": "Rudern", "sets": 3, "reps": 10, "kg": 40}
+        upper = {
+            "sport": "strength",
+            "name": "Oberkörper",
+            "strength_structure": [press, row],
+        }
+        intervals = {
+            "sport": "run",
+            "name": "Intervalle",
+            "description": "- 10m Z1 HR\n\n4x\n- 4m Z4 HR\n- 2m Z1 HR\n\n- 10m Z1 HR",
+        }
+        templates = {"T-upper": upper, "T-run": intervals}
+
+        def strength(**extra):
+            fields = {
+                "template_id": "T-upper",
+                "strength_structure": [press, row],
+                **extra,
+            }
+            return unit("1", "2026-11-04", "strength", 45, **fields)
+
+        cases = (
+            (
+                "no template",
+                unit("1", "2026-11-04", "strength", 45, strength_structure=[press]),
+                "template_missing",
+            ),
+            ("unknown template", strength(template_id="T-gone"), "template_missing"),
+            ("from the template", strength(), None),
+            (
+                "lighter kg",
+                strength(strength_structure=[{**press, "kg": 40}, row]),
+                "template_scaled",
+            ),
+            (
+                "fewer sets",
+                strength(strength_structure=[press, {**row, "sets": 2}]),
+                "template_scaled",
+            ),
+            (
+                "dropped exercise",
+                strength(strength_structure=[press]),
+                "template_mismatch",
+            ),
+            (
+                "swapped exercise",
+                strength(strength_structure=[press, {**row, "name": "Klimmzug"}]),
+                "template_mismatch",
+            ),
+            (
+                "reordered",
+                strength(strength_structure=[row, press]),
+                "template_mismatch",
+            ),
+            (
+                "Garmin pairing only",
+                strength(
+                    strength_structure=[
+                        {**press, "garmin_exercise": "Barbell Bench Press"},
+                        row,
+                    ]
+                ),
+                None,
+            ),
+            (
+                "intervals from the template",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    50,
+                    template_id="T-run",
+                    description=intervals["description"],
+                ),
+                None,
+            ),
+            (
+                "one more repeat",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    54,
+                    template_id="T-run",
+                    description=intervals["description"].replace("4x", "5x"),
+                ),
+                "template_scaled",
+            ),
+            (
+                "other step kind",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    50,
+                    template_id="T-run",
+                    description="- 50m 70% pace",
+                ),
+                "template_mismatch",
+            ),
+            (
+                "other sport",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "ride",
+                    50,
+                    template_id="T-run",
+                    description=intervals["description"],
+                ),
+                "template_mismatch",
+            ),
+            (
+                "adaptive easy run",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    30,
+                    source="adaptive",
+                    description="- 30m Z1 HR",
+                ),
+                None,
+            ),
+        )
+        for label, planned, expected in cases:
+            with self.subTest(label):
+                found = plan_checks.template_conformance([planned], templates)
+                self.assertEqual(codes(found), [expected] if expected else [])
+                if expected in plan_checks.REQUIRED_CODES:
+                    self.assertTrue(found[0]["blocking"])
+        # Moving an older unit keeps its finding, so it never blocks the move.
+        older = unit("3", "2026-11-04", "run", 30, description="- 30m Z2 HR")
+        moved = {**older, "date": "2026-11-06"}
+        keys = [
+            plan_checks.finding_key(item)
+            for item in plan_checks.template_conformance([older, moved], templates)
+        ]
+        self.assertEqual(keys[0], keys[1])
+
 
 class AdjustWeekMoveTests(unittest.TestCase):
     """A missed key session moved to a free day, as the adjust_week playbook asks."""

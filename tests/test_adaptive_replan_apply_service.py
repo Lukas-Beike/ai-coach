@@ -555,7 +555,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual(saved["target"], "AUTO")
         self.assertIsNone(planning_calendar.calendar_constraint_decision(saved, event))
 
-    def test_pain_replan_resets_focus_cap_and_lightens_strength(self):
+    def test_pain_replan_eases_the_run_and_only_lightens_strength_intensity(self):
         run_id, strength_id = str(uuid.uuid4()), str(uuid.uuid4())
         run = self.workout(
             run_id,
@@ -597,13 +597,14 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual(saved_run["session_focus"], "easy")
         self.assertNotIn("hr_cap", saved_run)  # no caps wired in this fixture
         self.assertFalse(is_hard(saved_run))
+        # The generic easy run is no template of the athlete (#2379).
+        self.assertEqual(saved_run["source"], "adaptive")
         saved_strength = self.saved(strength_id)
         self.assertEqual(saved_strength["strength_intensity"], "light")
-        exercise = saved_strength["strength_structure"][0]
-        self.assertEqual((exercise["sets"], exercise["kg"]), (3, 50))
-        self.assertLess(exercise["pct_1rm"], 65)
-        self.assertEqual(exercise["warmup"]["kg"], 30)
-        self.assertNotEqual(push_state.garmin_fingerprint(saved_strength), before)
+        # Exercises, sets and weights stay (athlete decision on #2379), so the
+        # Garmin workout itself is unchanged.
+        self.assertEqual(saved_strength["strength_structure"], heavy)
+        self.assertEqual(push_state.garmin_fingerprint(saved_strength), before)
 
     def test_no_complaint_answers_propose_nothing(self):
         for answer in ("keine", "Nein.", "gesund", " - "):

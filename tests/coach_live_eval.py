@@ -390,6 +390,23 @@ class CountingTransport:
         )
 
 
+# The synthetic library's plain template per sport (#2379).
+TEMPLATE_NAMES = {
+    "WeightTraining": "Oberkörper Standard",
+    "Run": "Lockerer Lauf",
+    "Ride": "Lockere Radeinheit",
+}
+
+
+def template_id(server: Any, sport: str) -> str:
+    """The id of the synthetic library's plain template for ``sport``."""
+    return next(
+        item["id"]
+        for item in server.PLANNING_DATA.workout_library().list()
+        if item.get("name") == TEMPLATE_NAMES[sport]
+    )
+
+
 def _workout(day: str, name: str, sport: str, **extra: Any) -> dict[str, Any]:
     from backend.activities.hr_cap import effective_caps
 
@@ -418,9 +435,22 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
     setup = case["setup"]
     tags: dict[str, str] = {}
     creation = server.PLANNING_WORKFLOWS.local_plan_creation_service()
+    library = server.PLANNING_DATA.workout_library()
+
+    def template(workout: dict[str, Any]) -> str:
+        """Units come only from the athlete's library templates (#2379)."""
+        return library.create_template(
+            {k: v for k, v in workout.items() if k not in {"date", "rationale"}}
+        )["id"]
+
+    # One plain template per sport for new units, as the athlete's library has.
+    for sport, name in TEMPLATE_NAMES.items():
+        tags[f"template:{sport}"] = template(_workout("2026-09-07", name, sport))
 
     def unit(tag: str, day: str, name: str, sport: str, **extra: Any) -> None:
-        tags[tag] = creation.save([_workout(day, name, sport, **extra)])[0]["id"]
+        workout = _workout(day, name, sport, **extra)
+        workout["template_id"] = template(workout)
+        tags[tag] = creation.save([workout])[0]["id"]
 
     unit("strength", "2026-09-09", "Oberkörper moderat + Core", "WeightTraining")
     unit("later", "2026-10-05", "Nach dem Giro", "Ride")

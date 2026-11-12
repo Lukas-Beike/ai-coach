@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -147,7 +148,9 @@ class PublicPlanStateService:
         return {**row, "workout_profile": profile}
 
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
-        local_planned = self._planned_units.list(500, push_state=True)
+        local_planned = _with_template_names(
+            db, self._planned_units.list(500, push_state=True)
+        )
         canonical_planned = calendar_canonical.canonical_planned_workouts(local_planned)
         activities = self._activity_rows.compact() if self._activity_rows else []
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
@@ -196,3 +199,21 @@ class PublicPlanStateService:
             ),
             "coach_quick_actions": self._coach_quick_actions.state(),
         }
+
+
+def _with_template_names(db: Any, units: list[Any]) -> list[Any]:
+    """Each unit with the name of the library template it comes from (#2379)."""
+    names = {}
+    for row in db.execute("SELECT local_id, payload FROM workout_library"):
+        try:
+            names[str(row["local_id"])] = str(
+                json.loads(row["payload"]).get("name") or ""
+            )
+        except TypeError, ValueError, AttributeError:
+            continue
+    return [
+        {**unit, "template_name": names[str(unit["template_id"])]}
+        if isinstance(unit, dict) and names.get(str(unit.get("template_id") or ""))
+        else unit
+        for unit in units
+    ]

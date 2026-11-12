@@ -649,11 +649,23 @@ def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
     return kinds
 
 
+def _steps(unit: Mapping[str, Any]) -> list[dict] | str:
+    """The expanded steps, or the plain text when the unit has none."""
+    description = str(unit.get("description") or "")
+    try:
+        return structured_steps(description, str(unit.get("target") or "AUTO"))
+    except WorkoutTextError:
+        return description.strip()
+
+
 def _scaled(unit: Mapping[str, Any], template: Mapping[str, Any]) -> bool:
-    keys = ("description", "duration_minutes", "planned_duration_s", "target")
-    return any(unit.get(key) != template.get(key) for key in keys) or (
-        _strength_content(unit) != _strength_content(template)
-    )
+    """Whether a unit with its template's structure changes its load."""
+    own, base = _duration_s(unit), _duration_s(template)
+    if own and base and own != base:
+        return True
+    if _strength_content(unit) or _strength_content(template):
+        return _strength_content(unit) != _strength_content(template)
+    return _steps(unit) != _steps(template)
 
 
 def template_conformance(

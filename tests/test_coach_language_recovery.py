@@ -217,6 +217,16 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             "target": "HR",
             "duration_minutes": 40,
         }
+        # The run comes from its own library template (#2379).
+        original["template_id"] = (
+            server.PLANNING_DATA.workout_library().create_template(
+                {
+                    k: v
+                    for k, v in original.items()
+                    if k not in {"date", "rationale", "template_id"}
+                }
+            )["id"]
+        )
         unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([original])[
             0
         ]

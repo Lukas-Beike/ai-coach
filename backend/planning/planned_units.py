@@ -219,6 +219,7 @@ def _apply_planned_workout_update(
         "description",
         "duration_minutes",
         "target",
+        TEMPLATE_ID,
         *FOCUS_KEYS,
     ):
         if key in values:
