@@ -348,12 +348,11 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(state["progress"], {"completed": 1, "total": 1})
 
     def test_replacement_follow_up_sync_accepts_complete_plan_size(self):
+        today = server.ATHLETE_CLOCK.now().date()
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
-                    "date": (
-                        server.ATHLETE_CLOCK.now().date() + timedelta(days=index + 1)
-                    ).isoformat(),
+                    "date": (today + timedelta(days=index + 1)).isoformat(),
                     "sport": "Run",
                     "name": "Synthetic replacement run",
                     "description": "- 30m 60% Synthetic easy session",
@@ -530,12 +529,11 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(result["status"], "queued")
 
     def test_changed_batch_sync_accepts_the_coach_change_limit(self):
+        today = server.ATHLETE_CLOCK.now().date()
         for index in range(101):
             server.PLANNING_DATA.planned_unit().create(
                 {
-                    "date": (
-                        server.ATHLETE_CLOCK.now().date() + timedelta(days=index + 10)
-                    ).isoformat(),
+                    "date": (today + timedelta(days=index + 10)).isoformat(),
                     "sport": "Ride",
                     "name": f"Changed {index}",
                     "description": "- 20m 60% easy",

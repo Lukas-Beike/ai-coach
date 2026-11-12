@@ -130,16 +130,18 @@ class AthleteLocalClockTests(unittest.TestCase):
     def test_tests_take_today_from_the_athlete_clock_not_the_runner_zone(self):
         # #2310: the runner (UTC in CI) and the athlete clock (Europe/Berlin by
         # default) are on different days for an hour each night.
+        # A naive now() turned into a date or a local datetime, or today(), on
+        # any name and across wrapped lines; a clock's own now() is allowed.
         runner_today = re.compile(
-            r"\.now\(\)\.astimezone\(\)|\bdate\.today\(\)|datetime\.now\(\)\.date\(\)"
+            r"(?<![Cc][Ll][Oo][Cc][Kk])\.now\(\s*(?:tz\s*=\s*)?(?:None)?\s*\)"
+            r"\s*\.\s*(?:date|astimezone)\(\s*\)|\.today\(\s*\)"
         )
+        tests = Path(__file__).resolve().parents[1] / "tests"
         found = [
-            f"{path.name}:{number}"
-            for path in sorted(Path(__file__).parent.rglob("*.py"))
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), 1
-            )
-            if runner_today.search(line)
+            f"{path.name}:{text.count(chr(10), 0, match.start()) + 1}"
+            for path in sorted(tests.rglob("*.py"))
+            for text in [path.read_text(encoding="utf-8")]
+            for match in runner_today.finditer(text)
         ]
         self.assertEqual(
             found, [], "use server.ATHLETE_CLOCK.now().date() or a pinned clock"

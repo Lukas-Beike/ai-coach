@@ -936,18 +936,8 @@ class ServerFrontendTests(ServerTestCase):
 
     def test_provider_refresh_markup_and_versioned_icon(self):
         index = served_page("index.html")
-        for provider in (
-            "garmin",
-            "wahoo",
-            "intervals",
-            "openai",
-            "yazio",
-            "calendar",
-            "weather",
-        ):
-            self.assertIn(
-                f'<details id="connection-{provider}" class="connection-card">', index
-            )
+        for provider in ("garmin", "wahoo", "intervals", "openai", "yazio", "calendar", "weather"):
+            self.assertIn(f'<details id="connection-{provider}" class="connection-card">', index)
         # Only the registered providers have freshness and retry entries.
         for provider in ("garmin", "wahoo", "intervals", "calendar", "weather"):
             self.assertIn(f'id="freshness-{provider}"', index)
