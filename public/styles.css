@@ -260,6 +260,7 @@ button { cursor: pointer; }
 .appearance-control input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
 .appearance-control label:has(input:checked) { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-soft); }
 .appearance-control label:has(input:focus-visible) { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+@media (forced-colors: active) { .appearance-control label:has(input:checked) { outline: 2px solid Highlight; } }
 .empty-state { display: grid; gap: 8px; place-items: center; min-height: 132px; padding: var(--space-5); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--muted); text-align: center; }
 .empty-state strong { color: var(--ink); font-size: 20px; }
 .empty-state .push-button { min-height: 44px; }
@@ -1155,7 +1156,7 @@ h2 {
 .settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 17px; background: var(--surface); box-shadow: var(--shadow-soft); }
 #privacySection .settings-inline-action ~ .settings-inline-action { padding-top: 12px; border-top: 1px solid var(--line); }
 #privacySection .chip span { gap: 12px; padding: 0; border: 0; color: var(--ink); background: none; }
-#privacySection .chip span::before { content: ""; flex: none; width: 44px; height: 26px; border-radius: 999px; background: var(--line-strong) radial-gradient(circle at 13px 50%, var(--surface) 10px, var(--transparent) 10.5px); transition: background-position .15s ease; }
+#privacySection .chip span::before { content: ""; flex: none; width: 44px; height: 26px; border-radius: 999px; background: var(--muted) radial-gradient(circle at 13px 50%, var(--surface) 10px, var(--transparent) 10.5px); }
 #privacySection .chip input:checked + span { color: var(--ink); background: none; }
 #privacySection .chip input:checked + span::before { content: ""; margin: 0; background: var(--accent) radial-gradient(circle at 31px 50%, var(--on-accent) 10px, var(--transparent) 10.5px); }
 .collapsible-section > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -17px -17px 0; padding: 17px; color: var(--ink); list-style: none; }
@@ -1178,7 +1179,7 @@ h2 {
 .settings-section h3 { margin: 0; color: var(--ink); font-size: 1.02rem; }
 .settings-section > p, .settings-section-heading p { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .connection-cards { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.settings-section[data-more-segment-panel="connections"] { padding: 0; border: 0; background: none; }
+.settings-section[data-more-segment-panel="connections"] { padding: 0; border: 0; background: none; box-shadow: none; }
 .connection-card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .connection-card > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 16px; border-radius: var(--radius-lg); cursor: pointer; list-style: none; }
 .connection-card > summary::-webkit-details-marker { display: none; }
