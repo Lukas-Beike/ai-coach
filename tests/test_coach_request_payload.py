@@ -240,6 +240,13 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self.assertEqual(payload["reasoning"], {"effort": "high"})
         self.assertEqual(payload["max_output_tokens"], 32_000)
 
+    def test_only_openai_models_keep_a_remote_conversation(self) -> None:
+        self.assertTrue(self.service.keeps_remote_conversation("gpt-6-luna"))
+        self.assertFalse(self.service.keeps_remote_conversation("claude-sonnet"))
+        # Without a stored turn model the selected one decides.
+        self.settings.selected_model.return_value = "claude-opus"
+        self.assertFalse(self.service.keeps_remote_conversation(None))
+
     def test_current_message_is_sent_once_with_full_provenance(
         self,
     ) -> None:

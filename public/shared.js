@@ -316,13 +316,16 @@ function renderStatus(data) {
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   const connections = { href: "#more/connections", label: "Anbindungen" };
+  const modelKeyMissing = (provider, action) => provider === "anthropic"
+    ? { level: "critical", title: "Anthropic-API-Schlüssel fehlt", action: { ...action, connection: "anthropic" } }
+    : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...action, connection: "openai" } };
   // The OpenAI key is read from the server environment only. Intervals.icu only
   // receives workouts, so its missing key is the slimmest line; more important
   // notices replace it. The Mehr tab shows its problems on the cards themselves.
   updateStatusSources({
     loading: null,
     load_failure: null,
-    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: { ...connections, connection: "openai" } },
+    openai: configured.coach ?? configured.openai ? null : modelKeyMissing(data.model?.provider, connections),
     coach_error: error && activePanel !== "settingsPanel" ? { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: error } : null,
     thresholds: thresholdStatusItem(data.threshold_warnings),
     intervals_key: configured.intervals || intervalsHintDismissed() ? null : {

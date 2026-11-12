@@ -11,6 +11,7 @@ import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 from urllib.error import HTTPError
 
 from backend.errors import AppError
@@ -485,6 +486,16 @@ class ClaudeStreamClientTests(unittest.TestCase):
         self.assertNotIn("Synthetic explanation", raised.exception.message)
         # The refused message was billed and names the model that answered.
         self.assertEqual(state.usage[0][2], "messages_stream")
+        capture = Mock()
+        client, _, _, _ = make_client(sse_body(FIXTURES["refusal"]))
+        client.diagnostic_capture = capture
+        with self.assertRaises(AppError):
+            client.complete(ModelRequest(model="claude-opus-5-5", input="private"))
+        kind, details = capture.capture.call_args.args
+        self.assertEqual(kind, "anthropic_stream")
+        self.assertEqual(details["served_model"], "claude-opus-5")
+        self.assertNotIn("private", json.dumps(details))
+        self.assertNotIn("Dazu", json.dumps(details))
         self.assertEqual(
             logger.calls[-1][2]["extra"]["context"]["served_model"], "claude-opus-5"
         )
@@ -518,7 +529,7 @@ class ClaudeStreamClientTests(unittest.TestCase):
         client, opener, _, _ = make_client(api_key=" ")
         with self.assertRaises(AppError) as raised:
             client.complete(ModelRequest(model="claude-opus-5-5"))
-        self.assertEqual(raised.exception.reason, "not_configured")
+        self.assertEqual(raised.exception.reason, "anthropic_not_configured")
         self.assertEqual(opener.requests, [])
         client, _, _, _ = make_client(sse_body(FIXTURES["tool_round"]), max_bytes=200)
         with self.assertRaises(AppError) as raised:

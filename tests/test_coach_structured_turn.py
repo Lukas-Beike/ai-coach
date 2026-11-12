@@ -201,6 +201,24 @@ class StructuredTurnTests(unittest.TestCase):
             "synthetic-remote-conversation",
         )
 
+    def test_a_claude_turn_keeps_attachments_local_and_never_goes_remote(self) -> None:
+        attachment = {"type": "image", "name": "synthetic.png"}
+        for loaded in (([attachment], False, False), ([], True, True)):
+            with self.subTest(loaded=loaded):
+                self.conversations.reset_mock()
+                self.payload.keeps_remote_conversation.return_value = False
+                self.attachments.load_for_receipt.return_value = loaded
+
+                self.run_turn(model="claude-opus")
+
+                self.payload.keeps_remote_conversation.assert_called_with("claude-opus")
+                self.conversations.rotate.assert_not_called()
+                self.conversations.bind_remote.assert_not_called()
+                kwargs = self.payload.build.call_args.kwargs
+                self.assertFalse(kwargs["retain_openai_attachment_context"])
+                self.assertEqual(kwargs["conversation_id"], "synthetic-conversation")
+                self.assertEqual(kwargs["attachments"], loaded[0])
+
     def test_failure_persists_safe_receipt_without_session_key(self) -> None:
         self.response.respond.side_effect = AppError(
             502, "synthetic outage", reason="provider_unavailable"

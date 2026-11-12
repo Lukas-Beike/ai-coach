@@ -63,8 +63,8 @@ your yes. The turn's change line in the chat lists each product, field, value an
 undo of the turn empties exactly those fields again (change history entity
 `food_database_entry` for stored database foods).
 Missing values can also come from the web: `search_web_for_product_values`
-(up to five named products) sends one separate OpenAI Responses request with the
-`web_search` tool and the selected model. The request carries only each
+(up to five named products) sends one separate request to the selected model's
+provider with its `web_search` tool. The request carries only each
 product's name, brand, EAN, basis and missing field names, never an athlete
 record or message; it runs at low reasoning effort and the default service tier.
 A value is returned only when it is a plausible number for a still-empty core
@@ -169,7 +169,7 @@ density.
 When a barcode matches, the product form appears directly below it. Available values for sugar, fiber and salt are taken over; missing values stay empty. Only saving creates the product locally.
 
 A photo of the nutrition table is size-limited and transmitted only temporarily to the
-configured OpenAI Responses-compatible API. The API returns a
+provider of the selected Coach model (OpenAI or Claude). The API returns a
 structured, editable proposal; image data, provider responses and
 unconfirmed values are not stored in the product library. Name,
 reference amount and recognized nutrient values must be reviewed before saving.

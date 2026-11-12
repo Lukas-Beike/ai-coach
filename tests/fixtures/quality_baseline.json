@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "2a015e5bb5aa2805bfae2e99b087dc1c1644e26c",
+  "base": "5a0b4e39fbcb04ec9a9caa18eb918fb973e03ae2",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -797,18 +797,6 @@
       "path": "server.py",
       "code": "has-type",
       "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
     },
     {
       "tool": "mypy",

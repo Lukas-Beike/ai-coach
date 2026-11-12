@@ -90,3 +90,41 @@ test("long goals are cut for the one-line summary", () => {
   assert.equal(summaries.profileGoalsSummary.length, 40);
   assert.ok(summaries.profileGoalsSummary.endsWith("…"));
 });
+
+test("the Coach model list groups OpenAI and Claude and names the resolved Claude model", () => {
+  const { modelOptionLabel, modelNoticeText } = extractFunctions("views.js", ["modelOptionLabel", "modelNoticeText"]);
+  assert.equal(modelOptionLabel({ id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai" }), "GPT-6 Luna");
+  assert.equal(modelOptionLabel({ id: "claude-opus", label: "Opus", provider: "anthropic", model: "claude-opus-5-5" }), "Opus (claude-opus-5-5)");
+  assert.equal(modelOptionLabel({ id: "claude-haiku", label: "Haiku", provider: "anthropic", model: null }), "Haiku");
+  const options = [
+    { id: "claude-opus", label: "Opus", provider: "anthropic", model: "claude-opus-5-5", rejected: "claude-opus-5-6" },
+    { id: "claude-sonnet", label: "Sonnet", provider: "anthropic", model: "claude-sonnet-5-5", rejected: null },
+  ];
+  assert.equal(modelNoticeText({ selected: "claude-opus", options }), "claude-opus-5-6 abgelehnt – Coach nutzt claude-opus-5-5.");
+  assert.equal(modelNoticeText({ selected: "claude-sonnet", options }), "");
+  assert.equal(modelNoticeText(undefined), "");
+});
+
+test("the chat needs the selected model's key; before a load it stays usable", () => {
+  const { coachConfigured } = extractFunctions("coach.js", ["coachConfigured"]);
+  assert.equal(coachConfigured(undefined), true);
+  assert.equal(coachConfigured({ openai: true, coach: false }), false);
+  assert.equal(coachConfigured({ openai: false, coach: true }), true);
+  // An older server without the coach flag keeps the OpenAI rule.
+  assert.equal(coachConfigured({ openai: false }), false);
+});
+
+test("the microphone needs the OpenAI key whichever model answers", () => {
+  const button = { disabled: false, classList: { toggle() {} }, setAttribute() {}, title: "", innerHTML: "" };
+  const state = { data: { messages: [], configured: { openai: false, coach: true } }, voiceTranscribing: false };
+  const { updateVoiceButton } = extractFunctions("coach.js", ["voiceIsRecording", "setVoiceButtonIcon", "updateVoiceButton"], {
+    $: () => button,
+    state,
+    updateChatControls: () => {},
+  });
+  updateVoiceButton();
+  assert.equal(button.disabled, true);
+  state.data.configured.openai = true;
+  updateVoiceButton();
+  assert.equal(button.disabled, false);
+});

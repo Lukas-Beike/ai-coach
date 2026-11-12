@@ -863,6 +863,7 @@ class ServerHttpTests(ServerTestCase):
                 "wahoo",
                 "credentials",
                 "usage",
+                "provider_status",
                 "threshold_warnings",
             ],
         )

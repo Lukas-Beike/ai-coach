@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.authorization import coach_session_key
-from backend.coach.constants import AI_PROVIDER
+from backend.coach.constants import turn_ai_provider
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
@@ -64,7 +64,7 @@ class CoachTurnOpeningService:
                     "user_message_id": user["id"],
                     "status": "running",
                     "command_receipts": [],
-                    "ai_provider": AI_PROVIDER,
+                    "ai_provider": turn_ai_provider(model),
                     "model": model,
                 }
                 db.execute(

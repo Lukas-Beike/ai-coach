@@ -119,7 +119,11 @@ class CoachFinalReceiptService:
                                 preview_id,
                             ),
                         )
-            self._key_values.set(db, "last_coach_ai_provider", AI_PROVIDER)
+            self._key_values.set(
+                db,
+                "last_coach_ai_provider",
+                str(final_receipt.get("ai_provider") or AI_PROVIDER),
+            )
             db.execute(
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                 (

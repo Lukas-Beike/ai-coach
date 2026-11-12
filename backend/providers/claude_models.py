@@ -23,6 +23,8 @@ DEFAULT_MODELS = {
     "sonnet": "claude-sonnet-5-5",
     "haiku": "claude-haiku-5-5",
 }
+# The model setting names a family; the request resolves it to a model id.
+SETTING_FAMILIES = {f"claude-{family}": family for family in FAMILIES}
 REFRESH_AFTER = timedelta(hours=24)
 # After a failed listing, the next attempt waits this long instead of a day.
 RETRY_AFTER = timedelta(hours=1)
@@ -30,6 +32,11 @@ RETRY_AFTER = timedelta(hours=1)
 _MODEL_ID = re.compile(r"^claude-(opus|sonnet|haiku)-\d{1,2}(?:-\d{1,2})?$")
 # A newly resolved model that rejects the request shape or is unknown.
 _REJECTION_STATUSES = frozenset({400, 404})
+
+
+def setting_family(model: str | None) -> str | None:
+    """The Claude family a model setting selects, or None for an OpenAI model."""
+    return SETTING_FAMILIES.get(str(model or ""))
 
 
 def newest_by_family(models: Any) -> dict[str, str]:
@@ -91,15 +98,18 @@ class ClaudeModelResolver:
         state["fetched_at"] = fetched if isinstance(fetched, str) else ""
         return state
 
-    def _refreshed(self, state: dict[str, Any]) -> dict[str, Any]:
+    def _stale(self, state: dict[str, Any]) -> bool:
         try:
             fetched = datetime.fromisoformat(state["fetched_at"])
         except ValueError:
-            fetched = None
-        if fetched is not None and self._now() - fetched < REFRESH_AFTER:
-            return state
+            return True
+        return self._now() - fetched >= REFRESH_AFTER
+
+    def _refresh(self) -> dict[str, Any]:
+        """List the models outside the lock; merge the result into fresh state."""
         try:
             newest = newest_by_family(self._list_models())
+            fetched_at = self._now()
         except AppError as error:
             # A failed listing keeps the last known models and retries later.
             self._logger.warning(
@@ -109,22 +119,20 @@ class ClaudeModelResolver:
                     "context": {"reason": error.reason or "request_failed"},
                 },
             )
-            retry_at = self._now() - REFRESH_AFTER + RETRY_AFTER
-            state = {**state, "fetched_at": retry_at.isoformat()}
+            newest, fetched_at = {}, self._now() - REFRESH_AFTER + RETRY_AFTER
+        with self._lock:
+            state = self._state()
+            state["newest"] = {**state["newest"], **newest}
+            state["fetched_at"] = fetched_at.isoformat()
             self._write(state)
             return state
-        state = {
-            **state,
-            "newest": {**state["newest"], **newest},
-            "fetched_at": self._now().isoformat(),
-        }
-        self._write(state)
-        return state
 
     def resolve(self, family: str) -> str:
         """The model to use now: the newest one unless it was rejected."""
         with self._lock:
-            state = self._refreshed(self._state())
+            state = self._state()
+        if self._stale(state):
+            state = self._refresh()
         newest = state["newest"].get(family) or DEFAULT_MODELS[family]
         if state["rejected"].get(family) == newest:
             return state["working"].get(family) or DEFAULT_MODELS[family]

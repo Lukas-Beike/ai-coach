@@ -45,6 +45,8 @@ ANTHROPIC_API_KEY_ERROR = (
     "Kein Anthropic-API-Schlüssel konfiguriert. Hinterlege ihn in der Karte "
     "Claude (Anthropic) unter Mehr › Anbindungen."
 )
+# The model listing is a small read before a request: it must not hold one up.
+MODELS_TIMEOUT_SECONDS = 15
 # A server-side search loop may pause; resend it a bounded number of times.
 MAX_PAUSE_CONTINUATIONS = 3
 _INVALID_EVENT = "Claude hat ein ungültiges Streaming-Ereignis zurückgegeben."
@@ -111,6 +113,23 @@ def read_sse_events(
     return size
 
 
+def _transport_error(exc: BaseException) -> AppError:
+    """The safe error for an oversized, timed-out or unreachable stream."""
+    if isinstance(exc, provider_http.ProviderResponseTooLarge):
+        return AppError(
+            502,
+            "Die Streaming-Antwort von Claude ist zu groß.",
+            reason="response_too_large",
+        )
+    if isinstance(exc, TimeoutError):
+        return AppError(
+            504, "Claude hat nicht rechtzeitig geantwortet.", reason="provider_timeout"
+        )
+    return AppError(
+        503, error_message("provider_unavailable"), reason="provider_unavailable"
+    )
+
+
 @dataclass(frozen=True)
 class ClaudeTransportConfig:
     api_key: str
@@ -133,18 +152,22 @@ class ClaudeMessagesClient:
         logger: Any,
         opener: Any = urlopen,
         clock: Callable[[], float] = time.perf_counter,
+        diagnostic_capture: Any = None,
     ) -> None:
         self.config = config
         self.provider_state = provider_state
         self.logger = logger
         self.opener = opener
         self.clock = clock
+        self.diagnostic_capture = diagnostic_capture
 
     def list_models(self) -> Any:
         """One page of the Models API: the newest models are on it."""
         config = self.config
         if not config.api_key.strip():
-            raise AppError(503, ANTHROPIC_API_KEY_ERROR, reason="not_configured")
+            raise AppError(
+                503, ANTHROPIC_API_KEY_ERROR, reason="anthropic_not_configured"
+            )
         request = Request(
             endpoint(
                 config.base_url,
@@ -159,7 +182,7 @@ class ClaudeMessagesClient:
         try:
             return provider_http.request_json(
                 request,
-                timeout=self.config.timeout_seconds,
+                timeout=MODELS_TIMEOUT_SECONDS,
                 max_bytes=self.config.max_response_bytes,
                 opener=self.opener,
             ).payload
@@ -181,14 +204,17 @@ class ClaudeMessagesClient:
         request: ModelRequest,
         on_text_delta: Callable[[str], None],
         cancel_event: Any = None,
+        on_response_id: Callable[[str], None] | None = None,
     ) -> ModelTurn:
         """Stream one request, resuming a paused server-side search loop."""
         if not self.config.api_key.strip():
-            raise AppError(503, ANTHROPIC_API_KEY_ERROR, reason="not_configured")
+            raise AppError(
+                503, ANTHROPIC_API_KEY_ERROR, reason="anthropic_not_configured"
+            )
         payload = request_payload(request, stream=True)
         json_answer = request.json_output or request.output_schema is not None
         paused: list[Any] = []
-        message = self._send(payload, on_text_delta, cancel_event)
+        message = self._send(payload, on_text_delta, cancel_event, on_response_id)
         for _ in range(MAX_PAUSE_CONTINUATIONS):
             if message.get("stop_reason") != "pause_turn":
                 break
@@ -201,7 +227,7 @@ class ClaudeMessagesClient:
                     {"role": "assistant", "content": message.get("content") or []},
                 ],
             }
-            message = self._send(payload, on_text_delta, cancel_event)
+            message = self._send(payload, on_text_delta, cancel_event, on_response_id)
         if message.get("stop_reason") == "refusal":
             raise AppError(502, REFUSED_MESSAGE, reason="refused")
         # One turn: the content before each pause belongs to the answer.
@@ -235,6 +261,7 @@ class ClaudeMessagesClient:
         payload: dict[str, Any],
         on_text_delta: Callable[[str], None],
         cancel_event: Any,
+        on_response_id: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         assembler = StreamAssembler()
         started = self.clock()
@@ -244,6 +271,9 @@ class ClaudeMessagesClient:
             text = assembler.feed(event)
             if text:
                 on_text_delta(text)
+            # The provider has the request: a retry must not repeat its deltas.
+            if event.get("type") == "message_start" and on_response_id is not None:
+                on_response_id(str((assembler.message or {}).get("id") or ""))
 
         response: Any = None
         try:
@@ -274,30 +304,8 @@ class ClaudeMessagesClient:
             self._record("messages_stream_failed", assembler, context, started, exc)
             self._record_status(exc)
             raise
-        except provider_http.ProviderResponseTooLarge as exc:
-            error = AppError(
-                502,
-                "Die Streaming-Antwort von Claude ist zu groß.",
-                reason="response_too_large",
-            )
-            self._record("messages_stream_failed", assembler, context, started, error)
-            self._record_status(error)
-            raise error from exc
-        except TimeoutError as exc:
-            error = AppError(
-                504,
-                "Claude hat nicht rechtzeitig geantwortet.",
-                reason="provider_timeout",
-            )
-            self._record("messages_stream_failed", assembler, context, started, error)
-            self._record_status(error)
-            raise error from exc
-        except OSError as exc:
-            error = AppError(
-                503,
-                error_message("provider_unavailable"),
-                reason="provider_unavailable",
-            )
+        except (provider_http.ProviderResponseTooLarge, OSError) as exc:
+            error = _transport_error(exc)
             self._record("messages_stream_failed", assembler, context, started, error)
             self._record_status(error)
             raise error from exc
@@ -334,23 +342,25 @@ class ClaudeMessagesClient:
     ) -> None:
         """Bill the usage the stream reported (none when it never started)."""
         message = assembler.message or {}
-        self.provider_state.record_usage(
-            "anthropic", {"usage": neutral_usage(message.get("usage"))}, operation
-        )
+        usage = neutral_usage(message.get("usage"))
+        self.provider_state.record_usage("anthropic", {"usage": usage}, operation)
+        details = {
+            **context,
+            "operation": operation,
+            "served_model": str(message.get("model") or ""),
+            "stop_reason": str(message.get("stop_reason") or ""),
+            "reason": error.reason if error is not None else "ok",
+            "duration_ms": round((self.clock() - started) * 1000, 1),
+        }
         self.logger.info(
             "Claude request finished",
-            extra={
-                "event": "anthropic_request",
-                "context": {
-                    **context,
-                    "operation": operation,
-                    "served_model": str(message.get("model") or ""),
-                    "stop_reason": str(message.get("stop_reason") or ""),
-                    "reason": error.reason if error is not None else "ok",
-                    "duration_ms": round((self.clock() - started) * 1000, 1),
-                },
-            },
+            extra={"event": "anthropic_request", "context": details},
         )
+        if self.diagnostic_capture is not None:
+            # Metadata and counters only: no request or response text.
+            self.diagnostic_capture.capture(
+                "anthropic_stream", {**details, "usage": usage}
+            )
 
     def _http_error(
         self, exc: HTTPError, context: dict[str, Any], started: float

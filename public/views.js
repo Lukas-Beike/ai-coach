@@ -446,26 +446,65 @@ function renderFirstThresholdEstimate(estimate, profile = {}) {
   if (stored) stored.textContent = profile?.first_threshold_pct && profile.first_threshold_origin === "estimated" ? "Gespeichert (% LSHF, geschätzt)" : "Gespeichert (% LSHF)";
 }
 
+const MODEL_PROVIDER_GROUPS = Object.freeze({ openai: "OpenAI", anthropic: "Claude" });
+
+// Pure: a Claude family names the model it resolves to; the rest keep their label.
+function modelOptionLabel(option) {
+  return option.provider === "anthropic" && option.model ? `${option.label} (${option.model})` : option.label;
+}
+
+function modelOptionElement(option) {
+  const element = document.createElement("option");
+  element.value = option.id;
+  element.textContent = modelOptionLabel(option);
+  element.title = option.description || "";
+  element.disabled = Boolean(option.disabled);
+  return element;
+}
+
 function renderModelChoice(model, selectId) {
   if (!model) return;
   const select = $(selectId);
-  const currentIds = [...select.options].map((option) => option.value).join(",");
-  const nextIds = (model.options || []).map((option) => option.id).join(",");
-  if (currentIds !== nextIds) {
+  const options = model.options || [];
+  const signature = options.map((option) => [option.id, modelOptionLabel(option), Boolean(option.disabled)].join(":")).join(",");
+  if (select.dataset.signature !== signature) {
     select.replaceChildren();
-    for (const option of model.options || []) {
-      const element = document.createElement("option");
-      element.value = option.id;
-      element.textContent = option.label;
-      element.title = option.description || "";
-      select.append(element);
+    const groups = new Map();
+    for (const option of options) {
+      const name = MODEL_PROVIDER_GROUPS[option.provider];
+      if (!name) {
+        select.append(modelOptionElement(option));
+        continue;
+      }
+      if (!groups.has(name)) {
+        const group = document.createElement("optgroup");
+        group.label = name;
+        groups.set(name, group);
+        select.append(group);
+      }
+      groups.get(name).append(modelOptionElement(option));
     }
+    select.dataset.signature = signature;
   }
   select.value = model.selected;
 }
 
+// Pure: the notice for a newly resolved Claude model that was rejected.
+function modelNoticeText(model) {
+  const selected = (model?.options || []).find((option) => option.id === model.selected);
+  return selected?.rejected ? `${selected.rejected} abgelehnt – Coach nutzt ${selected.model}.` : "";
+}
+
 function renderModel(model) {
   renderModelChoice(model, "#modelSelect");
+  const notice = $("#modelNotice");
+  if (notice) {
+    notice.textContent = modelNoticeText(model);
+    notice.hidden = !notice.textContent;
+  }
+  // Speed modes exist only at OpenAI.
+  const tierRow = $("#serviceTierRow");
+  if (tierRow) tierRow.hidden = model?.provider === "anthropic";
 }
 
 function renderThinkingLevel(thinkingLevel) {
@@ -520,9 +559,9 @@ function renderAiConnection(configured, status) {
   }
 }
 
-// No Claude traffic reports a status yet, so a configured key reads as not checked.
-function renderClaudeConnection(configured) {
-  setConnectionChip("#anthropicConnectionStatus", connectionKind({ configured, unchecked: true }));
+// Before a first Claude request a configured key reads as not checked.
+function renderClaudeConnection(configured, status) {
+  setConnectionChip("#anthropicConnectionStatus", connectionKind({ configured, error: status.state === "error", unchecked: !status.state }));
 }
 
 function intervalsConnectionState(data, configured) {
@@ -665,9 +704,9 @@ function renderGarminConnection(data) {
 
 function renderSettings(data) {
   const configured = data.configured || {};
-  const status = data.usage?.status || {};
+  const status = data.provider_status?.openai || {};
   renderAiConnection(configured.openai, status);
-  renderClaudeConnection(Boolean(configured.anthropic));
+  renderClaudeConnection(Boolean(configured.anthropic), data.provider_status?.anthropic || {});
   renderIntervalsConnection(data, configured);
   renderGarminConnection(data);
   renderWeatherConnection(data.weather || {});

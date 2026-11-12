@@ -24,6 +24,8 @@ from backend.coach.tool_specs import ACTION_LABELS
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
+from backend.providers.claude_messages_adapter import REFUSED_MESSAGE
+from backend.providers.claude_requests import ANTHROPIC_API_KEY_ERROR
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +214,8 @@ class CoachTurnFailureService:
             "openai_not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
             # OpenAI configuration errors carry the shared not_configured reason.
             "not_configured": OPENAI_NOT_CONFIGURED_MESSAGE,
+            "anthropic_not_configured": ANTHROPIC_API_KEY_ERROR,
+            "refused": REFUSED_MESSAGE,
             "conversation_state_invalid": "Der KI-Dienst konnte den Gesprächszustand nicht fortsetzen. Bitte versuche es erneut; dein lokaler Chat bleibt erhalten.",
             "conversation_locked": "Der KI-Dienst verarbeitet noch eine andere Anfrage. Bitte warte kurz und versuche es erneut.",
             "authentication_or_permission": "Der KI-Dienst hat den Zugriff abgelehnt. Bitte prüfe den API-Zugang in den Einstellungen.",

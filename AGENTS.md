@@ -4,7 +4,8 @@
 
 Pacecraft is a private, mobile-first PWA for one athlete, using Python
 `http.server`, SQLCipher, Garmin and Wahoo as sources, Intervals.icu as
-output-only target, and OpenAI Responses.
+output-only target, and OpenAI Responses or the Claude API (Anthropic Messages),
+explicitly selected.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
 Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) and [docs/operations.md](docs/operations.md) for setup and operational commands.
 
@@ -107,8 +108,10 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 - Explicit current-data requests refresh through existing sync before coaching
   where supported; do not refresh every chat unconditionally.
 - Preserve explicit model selection; verify options/defaults against provider code
-  and configuration. Only Responses API is supported, including compatible
-  `OPENAI_BASE_URL` endpoints; no Chat Completions or provider fallback paths.
+  and configuration. Only OpenAI Responses (including compatible
+  `OPENAI_BASE_URL` endpoints) or the Anthropic Messages API, explicitly
+  selected; no Chat Completions and no cross-provider fallback; voice
+  transcription stays OpenAI.
 - `APP_VERSION` in `server.py` must match the release tag. Daily release version
   changes require a PR, never a direct protected-`main` push; publishing rejects
   version mismatches.

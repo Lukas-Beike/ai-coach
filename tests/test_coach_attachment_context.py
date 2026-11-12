@@ -118,6 +118,44 @@ class CoachAttachmentContextServiceTests(unittest.TestCase):
         # Message 10 is the fourth user message after the attachment turn.
         self.assertFalse(self.service.load_for_receipt({"user_message_id": 10})[2])
 
+    def test_a_turn_of_another_provider_closes_the_window(self) -> None:
+        # OpenAI image turn, then a Claude turn: the OpenAI conversation lacks
+        # the Claude turn, so a later OpenAI turn needs the local dialogue.
+        self._message(1, [{"type": "image", "name": "plate.png"}])
+        self._command(
+            "openai",
+            {"ai_provider": "openai", "user_message_id": 1, "openai_reached": True},
+        )
+        self._message(2, [])
+        self.assertTrue(self.service.load_for_receipt({"user_message_id": 2})[2])
+        self._command(
+            "claude",
+            {"ai_provider": "anthropic", "user_message_id": 2, "status": "completed"},
+        )
+        self._message(3, [])
+
+        _, has_prior, within_window = self.service.load_for_receipt(
+            {"user_message_id": 3}
+        )
+
+        self.assertTrue(has_prior)
+        self.assertFalse(within_window)
+
+    def test_a_claude_attachment_turn_opens_no_openai_window(self) -> None:
+        self._message(1, [{"type": "image", "name": "plate.png"}])
+        self._command(
+            "claude",
+            {"ai_provider": "anthropic", "user_message_id": 1, "status": "completed"},
+        )
+        self._message(2, [])
+
+        _, has_prior, within_window = self.service.load_for_receipt(
+            {"user_message_id": 2}
+        )
+
+        self.assertFalse(has_prior)
+        self.assertFalse(within_window)
+
     def test_retention_window_boundary_at_one_and_three_and_outside_at_four(
         self,
     ) -> None:
