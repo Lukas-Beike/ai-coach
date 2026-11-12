@@ -84,12 +84,33 @@ class GarminChangeCheck:
         self._awaiting: tuple[frozenset[str], datetime] | None = None
         self._held: dict[str, float] = {}
         self.counts = dict.fromkeys(
-            ("checks", "changes", "daytime", "throttled", "failed"), 0
+            ("checks", "changes", "daily", "daytime", "throttled", "failed"), 0
         )
+        # Athlete-local times of the last read and the last due answer.
+        self._last_check_at: datetime | None = None
+        self._last_due_at: datetime | None = None
 
     def active(self) -> bool:
         """The check replaces the hourly refresh only with a Personal API key."""
         return self._personal() is not None
+
+    def status(self) -> dict[str, Any]:
+        """Counts and times for the diagnostics; no provider payload or id.
+
+        Read without the lock, so a slow check never delays the report.
+        """
+        next_check_at = self._next_check_at
+        return {
+            "active": self.active(),
+            **self.counts,
+            "failures": self._failures,
+            "held": len(self._held),
+            "next_check_seconds": None
+            if next_check_at is None
+            else max(0, round(next_check_at - self._monotonic())),
+            "last_check_at": _iso(self._last_check_at),
+            "last_due_at": _iso(self._last_due_at),
+        }
 
     def morning_due(self) -> bool:
         """Whether the daily loop runs the morning reading now.
@@ -117,6 +138,8 @@ class GarminChangeCheck:
             and not self._refreshed_today(local)
             and marker_due()
         ):
+            self.counts["daily"] += 1
+            self._last_due_at = local
             return True
         with self._lock:
             now = self._monotonic()
@@ -127,6 +150,7 @@ class GarminChangeCheck:
             # maintenance or busy database is never counted as a Garmin failure.
             stored_night = has_night(self._stored_sleep(today), today)
             self.counts["checks"] += 1
+            self._last_check_at = local
             try:
                 newest, night = self._read(today, stored_night=stored_night)
             except Exception as error:  # noqa: BLE001 - a failed check must not stop the loop
@@ -144,6 +168,7 @@ class GarminChangeCheck:
             self._failures = 0
             self._awaiting = (frozenset(changes), local)
             self.counts["changes"] += 1
+            self._last_due_at = local
             self._log(
                 "garmin_change_found",
                 activities=sum(not key.startswith("night:") for key in changes),
@@ -248,3 +273,7 @@ class GarminChangeCheck:
             "Garmin change check",
             extra={"event": event, "context": {**context, **self.counts}},
         )
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat(timespec="seconds")

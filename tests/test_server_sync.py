@@ -1711,6 +1711,10 @@ class ServerSyncTests(ServerTestCase):
         self.assertIs(check, server.GARMIN_ASSEMBLY.change_check())
         policy = server.SYNC_SCHEDULERS.daily_scheduler()._policies["garmin"]
         self.assertIs(check, policy._change_check)
+        report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
+        self.assertEqual(
+            check.status()["checks"], report["garmin_change_check"]["checks"]
+        )
         for key, active in (("", False), ("synthetic-personal-key", True)):
             config = replace(
                 server.CONFIG, garmin_personal_api_key=key, garmin_fixture_path=""

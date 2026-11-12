@@ -38,6 +38,7 @@ class DiagnosticGarminServices:
     client_factory: Callable[[], Any]
     fixture_loader: Callable[[], Any]
     sync_state: Callable[[], Any]
+    change_check: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class DiagnosticsAssembly:
         self._garmin_client_factory = garmin.client_factory
         self._garmin_fixture_loader = garmin.fixture_loader
         self._garmin_sync_state = garmin.sync_state
+        self._garmin_change_check = garmin.change_check
         self._profile = local.profile
         self._external_calendar_sync = local.external_calendar_sync
         self._external_calendar_reader = local.external_calendar_reader
@@ -149,6 +151,11 @@ class DiagnosticsAssembly:
                 ),
                 canonical_read=(
                     self._canonical_read() if self._canonical_read is not None else None
+                ),
+                garmin_change_check=(
+                    (lambda: self._garmin_change_check().status())
+                    if self._garmin_change_check is not None
+                    else None
                 ),
             )
         )

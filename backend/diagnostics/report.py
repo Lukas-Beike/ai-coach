@@ -94,6 +94,8 @@ class DiagnosticReportDependencies:
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
     canonical_read: CanonicalReadStatusReader | None = None
+    # The Garmin change check's counts and times (#2372).
+    garmin_change_check: Callable[[], dict[str, Any]] | None = None
 
 
 # Large kv values whose stored size the report shows: the Garmin state, the
@@ -294,6 +296,10 @@ class DiagnosticReportService:
                 ),
                 "local_load": section(
                     "local_load", lambda: summarize_local_load(key_values, db)
+                ),
+                "garmin_change_check": section(
+                    "garmin_change_check",
+                    deps.garmin_change_check or (lambda: {"active": False}),
                 ),
                 "stream_backfill": section(
                     "stream_backfill",
