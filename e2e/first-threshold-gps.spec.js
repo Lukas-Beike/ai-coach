@@ -51,21 +51,22 @@ async function openPrivacy(page) {
   const panel = page.locator("#privacySection");
   const loaded = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET");
   if (!(await panel.evaluate((element) => element.open))) await panel.locator("summary").click();
-  await loaded;
+  // #2390: start from the state the server reported, once the switch shows it.
+  const { enabled } = await (await loaded).json();
+  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: Boolean(enabled) });
+  return Boolean(enabled);
 }
 
 test("the GPS-tracks switch persists across a reload", async ({ page }) => {
-  await openPrivacy(page);
+  const before = await openPrivacy(page);
   const toggle = page.locator("#gpsTracksToggle");
-  const before = await toggle.isChecked();
   const saved = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
   await toggle.click();
   expect((await saved).ok()).toBe(true);
   await expect(toggle).toBeChecked({ checked: !before });
 
   await page.reload();
-  await openPrivacy(page);
-  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: !before });
+  expect(await openPrivacy(page)).toBe(!before);
 
   // Restore the fixture state for later specs.
   const restored = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
@@ -75,9 +76,8 @@ test("the GPS-tracks switch persists across a reload", async ({ page }) => {
 });
 
 test("a failed GPS-tracks save restores the previous switch state", async ({ page }) => {
-  await openPrivacy(page);
+  const before = await openPrivacy(page);
   const toggle = page.locator("#gpsTracksToggle");
-  const before = await toggle.isChecked();
   await page.route("**/api/privacy/gps", (route) => (
     route.request().method() === "POST"
       ? route.fulfill({ status: 500, json: { error: "Synthetischer Fehler" } })
