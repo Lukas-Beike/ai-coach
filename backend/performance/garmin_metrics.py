@@ -217,8 +217,14 @@ def assemble_garmin_metrics(
     max_hr: tuple[
         dict[str, float | int], dict[str, list[float | int]], dict[str, str | None]
     ],
+    *,
+    vo2_observed: tuple[str | None, str | None] = (None, None),
 ) -> dict[str, dict[str, Any]]:
-    """Build the labelled, freshness-stamped Garmin metrics from extracted values."""
+    """Build the labelled, freshness-stamped Garmin metrics from extracted values.
+
+    ``vo2_observed`` names the day of the cycling and the running VO2max, so each
+    is dated by its own reading rather than by the newest day of the whole read.
+    """
     profile_max_hr, max_hr_values, activity_observed_at = max_hr
     units = _garmin_performance_units(
         weight,
@@ -240,9 +246,20 @@ def assemble_garmin_metrics(
         key = f"{kind}_max_hr_bpm"
         if source_keys[key] == "activities":
             result[key]["observed_at"] = activity_observed_at[kind]
+    for key, day in zip(
+        ("cycling_vo2max_ml_kg_min", "running_vo2max_ml_kg_min"),
+        vo2_observed,
+        strict=True,
+    ):
+        if day:
+            result[key]["observed_at"] = day
     return _garmin_performance_freshness(
         status, result, source_keys, race_values, current_date
     )
+
+
+def _iso_day(day: date | None) -> str | None:
+    return None if day is None else day.isoformat()
 
 
 def garmin_performance_metrics(
@@ -266,6 +283,10 @@ def garmin_performance_metrics(
         races,
         _garmin_canonical_thresholds(canonical),
         _garmin_canonical_max_hr_samples(canonical),
+        vo2_observed=(
+            _iso_day(canonical.cycling_vo2max_on),
+            _iso_day(canonical.running_vo2max_on),
+        ),
     )
 
 

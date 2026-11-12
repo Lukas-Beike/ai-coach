@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo
 
+from canonical_consumer_cases import MAX_METRICS_DAILY
+
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
@@ -690,6 +692,41 @@ class AliasAndUnitTests(unittest.TestCase):
 
         self.assertEqual(_rows(result), [("vo2max", 57.4, DAY, "-")])
         self.assertEqual(_issues(result), [])
+
+    def test_maxmet_daily_rows_date_each_sport_object(self) -> None:
+        # #2345: the daily range leaves the row undated; each object keeps its own day,
+        # the current day's included, and running (generic) and cycling stay apart.
+        rows = [
+            *MAX_METRICS_DAILY,
+            {
+                "generic": {"calendarDate": None},
+                "cycling": {"calendarDate": "2026-11-09", "vo2MaxPreciseValue": 57.0},
+            },
+        ]
+        result = _map(
+            {"max_metrics": rows},
+            retrieved_at=datetime(2026, 11, 12, 9, 0, tzinfo=ZONE),
+        )
+        by_day = {
+            (item.observed_on.isoformat(), item.sport): item.value.value
+            for item in result.records
+            if item.kind is MetricKind.VO2MAX
+        }
+        self.assertEqual(
+            by_day,
+            {
+                ("2026-11-09", Sport.RIDE): 57.0,
+                ("2026-11-10", None): 53.9,
+                ("2026-11-11", None): 54.1,
+                ("2026-11-11", Sport.RIDE): 58.6,
+                ("2026-11-12", None): 54.3,
+            },
+        )
+        # An object without any day is reported, never dated by the sync day.
+        self.assertEqual(
+            [(issue.record_ref, issue.field) for issue in result.issues],
+            [("max_metrics[3]", "calendarDate")],
+        )
 
     def test_multiple_records_in_a_list_each_map(self) -> None:
         result = _map(
@@ -1899,7 +1936,7 @@ class PersonalApiShapeTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 22)
+        self.assertEqual(MAPPER_VERSION, 23)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
