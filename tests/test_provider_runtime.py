@@ -11,7 +11,6 @@ from typing import Any
 from provider_runtime_fakes import (
     ACME_AREA,
     ACME_ID,
-    FakeJobOwner,
     FakeSchedulePolicy,
     acme_descriptor,
     acme_freshness_source,
@@ -23,7 +22,6 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_runtime import (
     FreshnessSource,
-    ProviderJobOwner,
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
     ProviderSchedulePolicy,
@@ -111,10 +109,8 @@ def _binding(
     full_resync: Callable[[], Any] | None = None,
     gate: ProviderResyncGate | None = None,
 ) -> ProviderRuntimeBinding:
-    job_owner = FakeJobOwner()
     return ProviderRuntimeBinding(
         provider_id=provider_id,
-        job_owner=lambda: job_owner,
         configured=lambda: True,
         gate=gate,
         freshness=(
@@ -185,19 +181,16 @@ class ProviderRuntimeValidationTests(unittest.TestCase):
 
 class ProviderRuntimeAccessorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.owner = _CountingFactory(FakeJobOwner())
         self.acme_policy = _CountingFactory(FakeSchedulePolicy())
         self.beta_policy = _CountingFactory(FakeSchedulePolicy())
         self.acme = ProviderRuntimeBinding(
             provider_id=ACME_ID,
-            job_owner=self.owner,
             configured=lambda: True,
             schedule=self.acme_policy,
             freshness={ACME_AREA: acme_freshness_source()},
         )
         self.beta = ProviderRuntimeBinding(
             provider_id=BETA_ID,
-            job_owner=lambda: FakeJobOwner(),
             configured=lambda: True,
             schedule=self.beta_policy,
             freshness={ACME_AREA: acme_freshness_source()},
@@ -214,26 +207,11 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
             self.registry.binding("intervals")
 
     def test_unbound_providers_are_absent_from_every_mapping(self) -> None:
-        self.assertNotIn("intervals", self.registry.job_owners())
         self.assertNotIn("intervals", self.registry.schedule_policies()["daily"])
         self.assertNotIn("intervals", self.registry.freshness_sources())
         self.assertNotIn("intervals", self.registry.resync_handlers())
         self.assertNotIn("intervals", self.registry.synchronous_refreshes())
         self.assertNotIn("intervals", self.registry.running_probes())
-
-    def test_job_owners_are_built_lazily_once_in_registry_order(self) -> None:
-        self.assertEqual(0, self.owner.calls)
-        owners = self.registry.job_owners()
-        self.assertEqual(1, self.owner.calls)
-        self.assertEqual((ACME_ID, BETA_ID), tuple(owners))
-        self.assertIsInstance(owners[ACME_ID], FakeJobOwner)
-        self.registry.job_owners()
-        self.assertEqual(1, self.owner.calls)
-
-    def test_job_owner_protocol_is_satisfied_by_fake(self) -> None:
-        owner: ProviderJobOwner = FakeJobOwner()
-        result = owner.execute({"id": "job-1"}, {}, "manual", job_type="refresh")
-        self.assertEqual({"status": "completed"}, result)
 
     def test_schedule_policies_follow_daily_and_startup_order(self) -> None:
         policies = self.registry.schedule_policies()
@@ -250,7 +228,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
     def test_bound_provider_without_schedule_factory_is_absent(self) -> None:
         unscheduled = ProviderRuntimeBinding(
             provider_id=ACME_ID,
-            job_owner=lambda: FakeJobOwner(),
             configured=lambda: True,
             freshness={ACME_AREA: acme_freshness_source()},
         )
@@ -280,7 +257,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
         refresh = _CountingFactory(_FakeSynchronousRefresh())
         bound = ProviderRuntimeBinding(
             provider_id=ACME_ID,
-            job_owner=lambda: FakeJobOwner(),
             configured=lambda: True,
             gate=gate,
             freshness={ACME_AREA: acme_freshness_source()},
@@ -303,7 +279,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
         probe = _CountingFactory(True)
         probed = ProviderRuntimeBinding(
             provider_id=ACME_ID,
-            job_owner=lambda: FakeJobOwner(),
             configured=lambda: True,
             freshness={ACME_AREA: acme_freshness_source()},
             running_probe=probe,
@@ -322,7 +297,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
         def binding(provider_id: str) -> ProviderRuntimeBinding:
             return ProviderRuntimeBinding(
                 provider_id=provider_id,
-                job_owner=lambda: FakeJobOwner(),
                 configured=lambda: configured[provider_id],
                 freshness={ACME_AREA: acme_freshness_source()},
             )
@@ -342,7 +316,6 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
 
     def test_every_mapping_is_read_only(self) -> None:
         for mapping in (
-            self.registry.job_owners(),
             self.registry.schedule_policies(),
             self.registry.freshness_sources(),
             self.registry.resync_handlers(),
@@ -359,11 +332,10 @@ class ProviderRuntimeIterableInputTests(unittest.TestCase):
     def test_bindings_may_be_any_iterable(self) -> None:
         bindings = (binding for binding in [fake_binding()])
         registry = _build(bindings, descriptors=(acme_descriptor(),))
-        self.assertEqual((ACME_ID,), tuple(registry.job_owners()))
+        self.assertEqual((ACME_ID,), tuple(registry.freshness_sources()))
 
     def test_empty_bindings_yield_empty_mappings(self) -> None:
         registry = _build([], descriptors=(acme_descriptor(),))
-        self.assertEqual({}, dict(registry.job_owners()))
         self.assertEqual({}, dict(registry.freshness_sources()))
 
 
@@ -409,16 +381,16 @@ class RuntimeOrchestrationBindingTests(unittest.TestCase):
     def test_factory_may_read_another_accessor_without_deadlock(self) -> None:
         holder: list[ProviderRuntimeRegistry] = []
 
-        def job_owner() -> ProviderJobOwner:
-            holder[0].schedule_policies()
-            return FakeJobOwner()
+        def schedule() -> FakeSchedulePolicy:
+            holder[0].resync_handlers()
+            return FakeSchedulePolicy()
 
-        binding = dataclasses.replace(fake_binding(), job_owner=job_owner)
+        binding = dataclasses.replace(fake_binding(), schedule=schedule)
         registry = ProviderRuntimeRegistry(
             ProviderRegistry((acme_descriptor(),)), [binding]
         )
         holder.append(registry)
-        self.assertIn(ACME_ID, registry.job_owners())
+        self.assertIn(ACME_ID, registry.schedule_policies()["daily"])
 
 
 if __name__ == "__main__":

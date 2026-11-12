@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync import executor as sync_executor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.provider_runtime import ProviderRuntimeRegistry
+from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,16 @@ class GarminJobDependencies:
     stream_backfill_service: Callable[[], Any] | None = None
     # The light change check that schedules the automatic refresh (#2303).
     change_check: Callable[[], Any] | None = None
+
+
+@dataclass(frozen=True)
+class WahooJobDependencies:
+    """The Wahoo sync and plan-push services, resolved only when needed."""
+
+    sync_service: Callable[[], Any]
+    plan_push_service: Callable[[], Any]
+    resync_gate: ProviderResyncGate
+    stream_backfill_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -119,10 +130,10 @@ def build_calendar_weather_owner(
 
 
 class SyncJobExecutionAssembly:
-    """Build provider job routing over explicit domain service factories.
+    """Build the job dispatcher with one owner per provider.
 
-    Without ``provider_runtime`` the built-in owners are composed directly. With
-    it, the dispatcher routes through the registry's job owners instead.
+    Intervals.icu and Garmin owners are rebuilt for each job, so credentials
+    saved or removed in the app apply to the next job without a restart.
     """
 
     @dataclass(frozen=True)
@@ -132,55 +143,58 @@ class SyncJobExecutionAssembly:
         intervals: IntervalsJobDependencies
         garmin: GarminJobDependencies
         calendar_weather: CalendarWeatherJobDependencies
+        wahoo: WahooJobDependencies
 
     def __init__(
         self,
         *,
         dependencies: SyncJobExecutionAssembly.Inputs,
-        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
         after_job: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
-        self._historical = dependencies.historical
-        self._state = dependencies.state
-        self._intervals = dependencies.intervals
-        self._garmin = dependencies.garmin
-        self._calendar_weather = dependencies.calendar_weather
-        self._provider_runtime = provider_runtime
+        self._deps = dependencies
         self._after_job = after_job
 
     def executor(self) -> sync_executor.SyncJobExecutor:
         """Create one dispatcher with shared historical sync policy."""
-        if self._provider_runtime is not None:
-            return self._runtime_executor(self._provider_runtime())
-        historical_sync = build_historical_owner(self._historical, self._state)
-        nutrition_sync_service = self._intervals.nutrition_sync_service()
-        intervals_jobs = build_intervals_owner(self._intervals)
-        garmin_jobs = build_garmin_owner(
-            historical_sync, self._garmin, self._historical.all_sync_days
-        )
-        calendar_weather_jobs = build_calendar_weather_owner(self._calendar_weather)
-        job_owners = sync_executor.build_job_owners(
-            intervals_jobs=intervals_jobs,
-            nutrition_sync_service=nutrition_sync_service,
-            garmin_jobs=garmin_jobs,
-            calendar_weather_jobs=calendar_weather_jobs,
-        )
+        deps = self._deps
+        all_sync_days = deps.historical.all_sync_days
+
+        def intervals() -> sync_executor.IntervalsJobAdapter:
+            return sync_executor.IntervalsJobAdapter(
+                jobs=build_intervals_owner(deps.intervals),
+                nutrition_sync_service=deps.intervals.nutrition_sync_service(),
+            )
+
+        def garmin() -> sync_executor.GarminJobAdapter:
+            historical_sync = build_historical_owner(deps.historical, deps.state)
+            push = deps.garmin.strength_push_service
+            return sync_executor.GarminJobAdapter(
+                jobs=build_garmin_owner(historical_sync, deps.garmin, all_sync_days),
+                plan_push=None if push is None else push(),
+            )
+
+        wahoo = deps.wahoo
+        backfill = wahoo.stream_backfill_service
+        calendar_weather = build_calendar_weather_owner(deps.calendar_weather)
+        job_owners: dict[str, sync_executor.ProviderJobOwner] = {
+            INTERVALS_ID: sync_executor.PerJobOwner(intervals),
+            GARMIN_ID: sync_executor.PerJobOwner(garmin),
+            WEATHER_ID: sync_executor.CalendarWeatherJobAdapter(
+                jobs=calendar_weather, provider_id=WEATHER_ID
+            ),
+            CALENDAR_ID: sync_executor.CalendarWeatherJobAdapter(
+                jobs=calendar_weather, provider_id=CALENDAR_ID
+            ),
+            WAHOO_ID: sync_executor.WahooJobAdapter(
+                sync=wahoo.sync_service(),
+                plan_push=wahoo.plan_push_service(),
+                stream_backfill=None if backfill is None else backfill(),
+            ),
+        }
         return sync_executor.SyncJobExecutor(
             job_owners=job_owners,
-            historical_sync=historical_sync,
-            outcome_service=self._state.outcome_service(),
-            all_sync_days=self._historical.all_sync_days,
-            after_job=self._after_job,
-        )
-
-    def _runtime_executor(
-        self, runtime: ProviderRuntimeRegistry
-    ) -> sync_executor.SyncJobExecutor:
-        return sync_executor.SyncJobExecutor(
-            job_owners=runtime.job_owners(),
-            historical_sync=build_historical_owner(self._historical, self._state),
-            outcome_service=self._state.outcome_service(),
-            all_sync_days=self._historical.all_sync_days,
-            registry=runtime.static,
+            historical_sync=build_historical_owner(deps.historical, deps.state),
+            outcome_service=deps.state.outcome_service(),
+            all_sync_days=all_sync_days,
             after_job=self._after_job,
         )

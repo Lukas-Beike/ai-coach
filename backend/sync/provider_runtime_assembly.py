@@ -29,25 +29,13 @@ from backend.sync.execution_assembly import (
     HistoricalSyncDependencies,
     IntervalsJobDependencies,
     SyncJobStateDependencies,
-    build_calendar_weather_owner,
-    build_garmin_owner,
-    build_historical_owner,
-    build_intervals_owner,
-)
-from backend.sync.executor import (
-    CalendarWeatherJobAdapter,
-    GarminJobAdapter,
-    IntervalsJobAdapter,
-    PerJobOwner,
-    WahooJobAdapter,
-    WahooStreamBackfill,
+    WahooJobDependencies,
 )
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_resync_assembly import GarminFullResync, WahooFullResync
 from backend.sync.provider_runtime import (
-    ProviderJobOwner,
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
 )
@@ -58,18 +46,6 @@ from backend.sync.schedule_policies import (
     WahooSchedulePolicy,
     WeatherSchedulePolicy,
 )
-from backend.sync.wahoo_plan_push import WahooPlanPushService
-from backend.sync.wahoo_sync import WahooSyncService
-
-
-@dataclass(frozen=True)
-class WahooRuntimeDependencies:
-    """The Wahoo sync and plan-push services, resolved only when the registry asks."""
-
-    sync_service: Callable[[], WahooSyncService]
-    plan_push_service: Callable[[], WahooPlanPushService]
-    resync_gate: ProviderResyncGate
-    stream_backfill_service: Callable[[], WahooStreamBackfill] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,43 +64,23 @@ class ProviderRuntimeDependencies:
     intervals: IntervalsJobDependencies
     garmin: GarminJobDependencies
     calendar_weather: CalendarWeatherJobDependencies
-    wahoo: WahooRuntimeDependencies
+    wahoo: WahooJobDependencies
 
 
 def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the Intervals.icu output job routing: plan, competition and nutrition."""
-    intervals = deps.intervals
-
-    def build() -> ProviderJobOwner:
-        return IntervalsJobAdapter(
-            jobs=build_intervals_owner(intervals),
-            nutrition_sync_service=intervals.nutrition_sync_service(),
-        )
-
+    """Bind the Intervals.icu output target's configured check and freshness."""
     return ProviderRuntimeBinding(
         provider_id=INTERVALS_ID,
-        job_owner=lambda: PerJobOwner(build),
         configured=lambda: bool(deps.config().intervals_api_key),
-        gate=intervals.resync_gate,
+        gate=deps.intervals.resync_gate,
         freshness=DEFAULT_FRESHNESS_SOURCES[INTERVALS_ID],
     )
 
 
 def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the Garmin job routing, automatic schedule and full resync."""
+    """Bind the Garmin automatic schedule, full resync and Coach refresh."""
     garmin = deps.garmin
     all_sync_days = deps.historical.all_sync_days
-
-    def build() -> ProviderJobOwner:
-        historical_sync = build_historical_owner(deps.historical, deps.state)
-        return GarminJobAdapter(
-            jobs=build_garmin_owner(historical_sync, garmin, all_sync_days),
-            plan_push=(
-                garmin.strength_push_service()
-                if garmin.strength_push_service is not None
-                else None
-            ),
-        )
 
     def schedule() -> GarminSchedulePolicy:
         return GarminSchedulePolicy(
@@ -148,7 +104,6 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     return ProviderRuntimeBinding(
         provider_id=GARMIN_ID,
-        job_owner=lambda: PerJobOwner(build),
         configured=lambda: bool(garmin.sync_service().configured()),
         gate=deps.garmin_resync_gate,
         schedule=schedule,
@@ -159,23 +114,9 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
 
 def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the Wahoo workout sync, scheduled once the athlete connected.
-
-    The same adapter runs the explicit library export (``plan_push``).
-    """
+    """Bind the Wahoo workout sync, scheduled once the athlete connected."""
     wahoo = deps.wahoo
     all_sync_days = deps.historical.all_sync_days
-
-    def job_owner() -> ProviderJobOwner:
-        return WahooJobAdapter(
-            sync=wahoo.sync_service(),
-            plan_push=wahoo.plan_push_service(),
-            stream_backfill=(
-                wahoo.stream_backfill_service()
-                if wahoo.stream_backfill_service is not None
-                else None
-            ),
-        )
 
     def schedule() -> WahooSchedulePolicy:
         return WahooSchedulePolicy(
@@ -203,7 +144,6 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     return ProviderRuntimeBinding(
         provider_id=WAHOO_ID,
-        job_owner=job_owner,
         configured=lambda: wahoo.sync_service().configured(),
         gate=wahoo.resync_gate,
         schedule=schedule,
@@ -215,7 +155,7 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
 
 def weather_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the weather forecast job and its location-driven schedule."""
+    """Bind the weather forecast's location-driven schedule."""
 
     def schedule() -> WeatherSchedulePolicy:
         return WeatherSchedulePolicy(
@@ -225,15 +165,8 @@ def weather_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding
             ),
         )
 
-    def job_owner() -> ProviderJobOwner:
-        return CalendarWeatherJobAdapter(
-            jobs=build_calendar_weather_owner(deps.calendar_weather),
-            provider_id=WEATHER_ID,
-        )
-
     return ProviderRuntimeBinding(
         provider_id=WEATHER_ID,
-        job_owner=job_owner,
         configured=lambda: schedule().configured(),
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[WEATHER_ID],
@@ -241,20 +174,13 @@ def weather_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding
 
 
 def calendar_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the external calendar job and its configured-URL schedule."""
+    """Bind the external calendar's configured-URL schedule."""
 
     def schedule() -> CalendarSchedulePolicy:
         return CalendarSchedulePolicy(enabled=bool(deps.config().calendar_ical_url))
 
-    def job_owner() -> ProviderJobOwner:
-        return CalendarWeatherJobAdapter(
-            jobs=build_calendar_weather_owner(deps.calendar_weather),
-            provider_id=CALENDAR_ID,
-        )
-
     return ProviderRuntimeBinding(
         provider_id=CALENDAR_ID,
-        job_owner=job_owner,
         configured=lambda: schedule().configured(),
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[CALENDAR_ID],

@@ -19,7 +19,6 @@ class ProductionProviderWiringTests(unittest.TestCase):
         runtime = server.provider_runtime()
         expected = (INTERVALS_ID, GARMIN_ID, WEATHER_ID, CALENDAR_ID, WAHOO_ID)
 
-        self.assertEqual(expected, tuple(runtime.job_owners()))
         self.assertEqual(expected, tuple(runtime.freshness_sources()))
         # Intervals.icu is an output target without a full resync (#1728).
         self.assertEqual((GARMIN_ID, WAHOO_ID), tuple(runtime.resync_handlers()))

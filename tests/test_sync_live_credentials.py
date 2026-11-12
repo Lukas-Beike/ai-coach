@@ -36,17 +36,11 @@ from backend.sync.execution_assembly import (
     IntervalsJobDependencies,
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
+    WahooJobDependencies,
 )
 from backend.sync.executor import PerJobOwner
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
-from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.provider_runtime_assembly import (
-    ProviderRuntimeDependencies,
-    WahooRuntimeDependencies,
-    build_provider_runtime,
-    builtin_bindings,
-)
 from backend.sync.selected import SelectedWorkoutSyncService
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
@@ -164,29 +158,10 @@ class LiveCredentialHarness:
         calendar_weather = CalendarWeatherJobDependencies(
             calendar_sync_service=mock.Mock, weather_sync_service=mock.Mock
         )
-        runtime = build_provider_runtime(
-            DEFAULT_PROVIDER_REGISTRY,
-            builtin_bindings(
-                ProviderRuntimeDependencies(
-                    config=lambda: self.config,
-                    profile=mock.Mock,
-                    database_manager=lambda: self.database,
-                    key_values=KeyValueRepository(NOW.isoformat),
-                    database_lock=lock,
-                    garmin_resync_gate=ProviderResyncGate("Garmin"),
-                    garmin_automatic_sync_days=7,
-                    historical=historical,
-                    state=state,
-                    intervals=intervals,
-                    garmin=garmin,
-                    calendar_weather=calendar_weather,
-                    wahoo=WahooRuntimeDependencies(
-                        sync_service=mock.Mock,
-                        plan_push_service=mock.Mock,
-                        resync_gate=ProviderResyncGate("Wahoo"),
-                    ),
-                )
-            ),
+        wahoo = WahooJobDependencies(
+            sync_service=mock.Mock,
+            plan_push_service=mock.Mock,
+            resync_gate=ProviderResyncGate("Wahoo"),
         )
         # Built once, like the sync worker; every later job reuses this executor.
         self.executor = SyncJobExecutionAssembly(
@@ -196,8 +171,8 @@ class LiveCredentialHarness:
                 intervals=intervals,
                 garmin=garmin,
                 calendar_weather=calendar_weather,
+                wahoo=wahoo,
             ),
-            provider_runtime=lambda: runtime,
         ).executor()
 
     def _apply(self, config: Config) -> None:

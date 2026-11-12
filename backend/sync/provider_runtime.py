@@ -1,6 +1,6 @@
 """Runtime contracts for provider-owned synchronization orchestration.
 
-Providers contribute runtime objects (job owners, schedule policies, freshness
+Providers contribute runtime objects (schedule policies, freshness
 sources, full-resync handlers, synchronous refreshes, running probes) through a
 ``ProviderRuntimeBinding``. ``ProviderRuntimeRegistry`` checks each binding
 against the static descriptor in ``ProviderRegistry`` and exposes the bound
@@ -25,20 +25,6 @@ from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_table import ProviderDescriptor
 
 _T = TypeVar("_T")
-
-
-class ProviderJobOwner(Protocol):
-    """Executes the provider's queued sync jobs."""
-
-    def execute(
-        self,
-        job: Mapping[str, Any],
-        payload: dict[str, Any],
-        reason: str,
-        *,
-        job_type: str,
-    ) -> dict[str, Any]:
-        """Run one queued job and return its outcome."""
 
 
 class ProviderSchedulePolicy(Protocol):
@@ -114,7 +100,6 @@ class ProviderRuntimeBinding:
     """
 
     provider_id: str
-    job_owner: Callable[[], ProviderJobOwner]
     configured: Callable[[], bool]
     gate: ProviderResyncGate | None = None
     schedule: Callable[[], ProviderSchedulePolicy] | None = None
@@ -230,9 +215,6 @@ class ProviderRuntimeRegistry:
     def binding(self, provider_id: str) -> ProviderRuntimeBinding:
         """Return a provider's binding; an unbound provider raises KeyError."""
         return self._by_id[provider_id]
-
-    def job_owners(self) -> Mapping[str, ProviderJobOwner]:
-        return self._factory_mapping("job_owner", lambda binding: binding.job_owner)
 
     def schedule_policies(self) -> Mapping[str, Mapping[str, ProviderSchedulePolicy]]:
         """Return policies keyed by "daily" and "startup", each in that order."""
