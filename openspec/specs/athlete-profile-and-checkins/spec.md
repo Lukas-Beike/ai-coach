@@ -258,4 +258,4 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 - **WHEN** the athlete opens Profil, also with a stale-threshold warning
 - **THEN** every section starts closed.
 
-Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/settings.js::firstThresholdSource`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `tests/analysis-presentation.test.cjs`, `e2e/zones-thresholds.spec.js`.
+Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `tests/analysis-presentation.test.cjs`, `e2e/zones-thresholds.spec.js`.
