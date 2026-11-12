@@ -11,7 +11,9 @@ from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
 from backend.sync import executor as sync_executor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
+from backend.sync.schedule_policies import WeatherSchedulePolicy
 
 
 @dataclass(frozen=True)
@@ -198,3 +200,31 @@ class SyncJobExecutionAssembly:
             all_sync_days=all_sync_days,
             after_job=self._after_job,
         )
+
+
+def provider_configured_checks(
+    deps: SyncJobExecutionAssembly.Inputs,
+    *,
+    config: Callable[[], Any],
+    profile: Callable[[], Any],
+) -> dict[str, Callable[[], bool]]:
+    """Return each provider's live "has the settings it needs" check."""
+    return {
+        INTERVALS_ID: lambda: bool(config().intervals_api_key),
+        GARMIN_ID: lambda: bool(deps.garmin.sync_service().configured()),
+        WEATHER_ID: lambda: WeatherSchedulePolicy(profile()).configured(),
+        CALENDAR_ID: lambda: bool(config().calendar_ical_url),
+        WAHOO_ID: lambda: bool(deps.wahoo.sync_service().configured()),
+    }
+
+
+def configured_for_job(
+    checks: Mapping[str, Callable[[], bool]], job_type: str
+) -> tuple[str, ...]:
+    """Return the configured providers that accept the job type, in table order."""
+    registry = DEFAULT_PROVIDER_REGISTRY
+    return tuple(
+        provider_id
+        for provider_id in registry.ids()
+        if registry.supports_job(provider_id, job_type) and checks[provider_id]()
+    )

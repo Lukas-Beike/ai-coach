@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -34,7 +34,6 @@ from backend.runtime.ports import (
     ObservationReader,
     ProviderCoverageReader,
 )
-from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
 
 
@@ -120,7 +119,7 @@ class PublicStateAssembly:
         self,
         *,
         dependencies: PublicStateAssembly.Inputs,
-        provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+        running_probes: Mapping[str, Callable[[], bool]] | None = None,
         provider_credentials: Callable[[], Any] | None = None,
     ) -> None:
         core = dependencies.core
@@ -173,7 +172,7 @@ class PublicStateAssembly:
         self._sync_period_defaults = calendar.sync_period_defaults
         self._all_sync_days = calendar.all_sync_days
         self._planned_workout_label = calendar.planned_workout_label
-        self._provider_runtime = provider_runtime
+        self._running_probes = running_probes
         self._provider_credentials = provider_credentials
 
     def performance_state_service(self) -> PublicPerformanceStateService:
@@ -252,11 +251,6 @@ class PublicStateAssembly:
         config = self._config()
         athlete = self._athlete_data()
         garmin = self._garmin()
-        running_probes = (
-            None
-            if self._provider_runtime is None
-            else self._provider_runtime().running_probes()
-        )
         return SyncPublicStateService(
             config,
             self._database_manager(),
@@ -267,7 +261,7 @@ class PublicStateAssembly:
             self._maintenance_gate(),
             self._sync_job_queue().service(),
             self.state_version_service(),
-            running_probes=running_probes,
+            running_probes=self._running_probes,
         )
 
     def weather_state_service(self) -> PublicWeatherStateService:

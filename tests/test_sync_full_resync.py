@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
+from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.canonical.vocabulary import GARMIN_ID
@@ -29,7 +29,6 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import OPERATION_CONTEXT
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.provider_resync_assembly import full_resync_handlers
-from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 
 NOW = "2026-09-20T12:00:00+00:00"
@@ -133,6 +132,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         gates = {GARMIN_ID: self.garmin_gate}
         handlers = full_resync_handlers(
             garmin_service=self.garmin_service,
+            wahoo_service=Mock(),
             all_sync_days=-1,
         )
         return FullProviderResyncService(
@@ -494,25 +494,20 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
             return self.key_values.get(db, key)
 
     def _runtime(self, *, with_handler=True):
+        """Return (handlers, registry) for the acme provider, with or without one."""
         if not with_handler:
-            return ProviderRuntimeRegistry(
-                ProviderRegistry([acme_descriptor()]), [fake_binding(ACME_ID)]
-            )
+            return {}, ProviderRegistry([acme_descriptor()])
         descriptor = replace(acme_descriptor(), resync_keys=ACME_KEYS)
-        binding = replace(
-            fake_binding(ACME_ID),
-            gate=self.gate,
-            full_resync=lambda: self.handler,
-        )
-        return ProviderRuntimeRegistry(ProviderRegistry([descriptor]), [binding])
+        return {ACME_ID: self.handler}, ProviderRegistry([descriptor])
 
     def _service(self, runtime):
+        handlers, registry = runtime
         return FullProviderResyncService(
-            runtime.resync_handlers(),
+            handlers,
             FullResyncStateStore(
                 self.database,
                 self.key_values,
-                resync_field_keys(runtime.static.resync_key_map()),
+                resync_field_keys(registry.resync_key_map()),
             ),
             FullResyncOperationJournal(
                 self.observer,
@@ -523,7 +518,7 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
                 lambda: "generated-operation",
             ),
             gates={ACME_ID: self.gate},
-            registry=runtime.static,
+            registry=registry,
         )
 
     def test_registered_provider_runs_full_resync_through_its_handler(self):

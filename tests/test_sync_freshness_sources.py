@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
@@ -15,7 +15,6 @@ from provider_runtime_fakes import (
     ACME_ID,
     acme_descriptor,
     acme_freshness_source,
-    fake_binding,
 )
 from support import make_config, temp_database
 
@@ -31,9 +30,10 @@ from backend.sync.freshness_sources import (
     GARMIN_TOKENSTORE_SIGNAL,
     WEATHER_CACHE_KEY,
     WEATHER_FAILURE_KEY,
+    FreshnessInputs,
+    FreshnessSource,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import FreshnessInputs, ProviderRuntimeRegistry
 from backend.sync.provider_table import (
     CALENDAR_ID,
     DEFAULT_PROVIDER_DESCRIPTORS,
@@ -177,12 +177,9 @@ def _getter(values: dict[str, Any]) -> Callable[[str], Any]:
     return lambda key: values.get(key)
 
 
-def _acme_runtime(*, running: Any = None) -> ProviderRuntimeRegistry:
-    """Bind the test-only acme-mock provider with its default freshness source."""
-    binding = fake_binding()
-    if running is not None:
-        binding = dataclasses.replace(binding, running_probe=running)
-    return ProviderRuntimeRegistry(ACME_REGISTRY, [binding])
+def _acme_sources() -> dict[str, dict[str, FreshnessSource]]:
+    """The test-only acme-mock provider with its default freshness source."""
+    return {ACME_ID: {ACME_AREA: acme_freshness_source()}}
 
 
 class _DatabaseCase(unittest.TestCase):
@@ -201,7 +198,7 @@ class _DatabaseCase(unittest.TestCase):
 class AcmeMockProjectionTests(_DatabaseCase):
     def _project(
         self,
-        runtime: ProviderRuntimeRegistry,
+        sources: Mapping[str, Mapping[str, FreshnessSource]],
         profile: dict[str, Any],
     ) -> list[dict[str, Any]]:
         with self.manager.unit_of_work() as db:
@@ -213,14 +210,14 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 garmin_has_core_error=False,
                 garmin_tokenstore_exists=False,
                 now=NOW,
-                freshness_sources=runtime.freshness_sources(),
+                freshness_sources=sources,
                 registry=ACME_REGISTRY,
             )
 
     def test_acme_area_carries_label_read_only_flag_and_its_stale_threshold(
         self,
     ) -> None:
-        runtime = _acme_runtime()
+        sources = _acme_sources()
         threshold = timedelta(hours=48)
         cases = (
             (NOW - threshold + timedelta(hours=1), "fresh", False),
@@ -230,7 +227,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         for last_sync, state, stale in cases:
             with self.subTest(state=state):
                 self.set_values(**{ACME_AT_KEY: last_sync.isoformat()})
-                [item] = self._project(runtime, {"acme_enabled": True})
+                [item] = self._project(sources, {"acme_enabled": True})
                 self.assertEqual(item["provider"], ACME_ID)
                 self.assertEqual(item["area"], ACME_AREA)
                 self.assertEqual(item["label"], "Acme mock · Training")
@@ -243,7 +240,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 self.assertTrue(item["has_last_good"])
 
     def test_a_skipped_row_is_neither_a_success_nor_the_latest_attempt(self) -> None:
-        runtime = _acme_runtime()
+        sources = _acme_sources()
         rows = (
             ("ok", NOW - timedelta(hours=3), "success", None),
             ("failed", NOW - timedelta(hours=2), "error", "provider_error"),
@@ -267,7 +264,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
                     ),
                 )
 
-        [item] = self._project(runtime, {"acme_enabled": True})
+        [item] = self._project(sources, {"acme_enabled": True})
 
         self.assertEqual(item["state"], "stale")
         self.assertEqual(item["error_code"], "provider_error")
@@ -285,7 +282,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
         )
         descriptor = dataclasses.replace(acme_descriptor(), freshness_areas=(area,))
         registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, descriptor))
-        runtime = ProviderRuntimeRegistry(registry, [fake_binding()])
+        sources = _acme_sources()
         last_push = NOW - timedelta(days=30)
         self.set_values(**{ACME_AT_KEY: last_push.isoformat()})
         with self.manager.unit_of_work() as db:
@@ -297,7 +294,7 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 garmin_has_core_error=False,
                 garmin_tokenstore_exists=False,
                 now=NOW,
-                freshness_sources=runtime.freshness_sources(),
+                freshness_sources=sources,
                 registry=registry,
             )
         self.assertFalse(item["read_only"])
@@ -315,22 +312,22 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 garmin_has_core_error=False,
                 garmin_tokenstore_exists=False,
                 now=NOW,
-                freshness_sources=runtime.freshness_sources(),
+                freshness_sources=sources,
                 registry=registry,
             )
         self.assertEqual(failed["state"], "stale")
         self.assertEqual(failed["error_code"], "provider_error")
 
     def test_acme_unconfigured_and_error_states_use_its_own_settings(self) -> None:
-        runtime = _acme_runtime()
+        sources = _acme_sources()
         self.set_values(**{ACME_ERROR_KEY: "upstream failed"})
 
-        [unconfigured] = self._project(runtime, {})
+        [unconfigured] = self._project(sources, {})
         self.assertFalse(unconfigured["configured"])
         self.assertEqual(unconfigured["state"], "not_configured")
         self.assertEqual(unconfigured["error_code"], "provider_error")
 
-        [failed] = self._project(runtime, {"acme_enabled": True})
+        [failed] = self._project(sources, {"acme_enabled": True})
         self.assertEqual(failed["state"], "error")
         self.assertEqual(failed["error_code"], "provider_error")
         self.assertIsNone(failed["last_success_at"])
@@ -389,14 +386,14 @@ class AcmeMockProjectionTests(_DatabaseCase):
 class AcmeMockStatusTests(_DatabaseCase):
     def test_status_carries_acme_freshness_and_its_running_probe(self) -> None:
         active = {"running": False}
-        runtime = _acme_runtime(running=lambda: active["running"])
+        sources = _acme_sources()
         self.set_values(**{ACME_AT_KEY: (NOW - timedelta(hours=3)).isoformat()})
         freshness = ProviderFreshnessService(
             make_config(),
             self.manager,
             self.key_values,
             lambda: NOW,
-            freshness_sources=runtime.freshness_sources(),
+            freshness_sources=sources,
             registry=ACME_REGISTRY,
         )
         profile = Mock()
@@ -417,7 +414,7 @@ class AcmeMockStatusTests(_DatabaseCase):
             MaintenanceGate(),
             jobs,
             versions,
-            running_probes=runtime.running_probes(),
+            running_probes={ACME_ID: lambda: active["running"]},
         )
 
         idle = status.state()

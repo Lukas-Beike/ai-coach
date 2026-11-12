@@ -13,11 +13,11 @@ from backend.errors import AppError
 from backend.sync.commands import (
     GarminSynchronousRefresh,
     ProviderRefreshCommandService,
+    SynchronousRefresh,
     WahooSynchronousRefresh,
 )
 from backend.sync.jobs import JobValidationError, normalize_sync_job_request
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.provider_runtime import SynchronousRefresh
 
 
 def _command_service(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Mapping
 from datetime import date
-from typing import Any
+from typing import Any, Protocol
 
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
@@ -20,7 +20,6 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_runtime import SynchronousRefresh
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.wahoo_sync import WahooSyncService
 
@@ -60,6 +59,18 @@ def _raise_if_busy(result: Mapping[str, Any], provider_label: str) -> None:
             f"Die aktuelle {provider_label}-Synchronisierung ist noch nicht abgeschlossen.",
             reason="provider_busy",
         )
+
+
+class SynchronousRefresh(Protocol):
+    """Performs a refresh inline for a Coach request that waits for completion."""
+
+    def refresh(
+        self,
+        provider: str,
+        arguments: Mapping[str, Any],
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        """Run the refresh and return its result."""
 
 
 class GarminSynchronousRefresh:
