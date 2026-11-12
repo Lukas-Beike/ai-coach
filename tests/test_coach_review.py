@@ -7,7 +7,6 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime as _local_datetime
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -73,7 +72,7 @@ class CoachReviewTests(unittest.TestCase):
     def workout(self, offset=0, sport="Run"):
         return {
             "date": (
-                _local_datetime.now().astimezone().date() + timedelta(days=50 + offset)
+                server.ATHLETE_CLOCK.now().date() + timedelta(days=50 + offset)
             ).isoformat(),
             "sport": sport,
             "name": "Synthetic session",
@@ -493,7 +492,7 @@ class CoachReviewTests(unittest.TestCase):
         )
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
-        today = _local_datetime.now().astimezone().date().isoformat()
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
