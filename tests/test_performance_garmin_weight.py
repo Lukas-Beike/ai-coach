@@ -35,6 +35,8 @@ class GarminWeightTests(unittest.TestCase):
                 "minWeight": {"date": "2026-08-30", "weightKg": 999},
                 "max-weight": {"date": "2026-08-30", "weightKg": 999},
                 "weightDelta": {"date": "2026-08-30", "weightKg": 999},
+                # The undated range aggregate is no reading (#2467).
+                "totalAverage": {"weightKg": 71.0},
             }
         }
         records = garmin_weight_records(snapshot)

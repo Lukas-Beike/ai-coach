@@ -59,14 +59,26 @@
       "functionalThresholdPower": 328
     }
   },
-  "max_metrics": {
-    "running": {
-      "vo2MaxPreciseValue": 49
-    },
-    "cycling": {
-      "vo2MaxValue": 52
+  "max_metrics": [
+    {
+      "userId": 12345678,
+      "generic": {
+        "calendarDate": "2026-08-29",
+        "vo2MaxPreciseValue": 49.0,
+        "vo2MaxValue": 49.0,
+        "fitnessAge": null,
+        "maxMetCategory": 0
+      },
+      "cycling": {
+        "calendarDate": "2026-08-29",
+        "vo2MaxPreciseValue": 52.0,
+        "vo2MaxValue": 52.0,
+        "fitnessAge": null,
+        "maxMetCategory": 1
+      },
+      "heatAltitudeAcclimation": null
     }
-  },
+  ],
   "race_predictions": {
     "5k": 1310,
     "10k": 2740,

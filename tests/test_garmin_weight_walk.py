@@ -57,6 +57,9 @@ class AlnumKeyTests(unittest.TestCase):
         self.assertIn("timestampGMT", WALK_DATE_KEYS)
         self.assertIn("minweight", WEIGHT_SKIP_KEYS)
         self.assertIn("bodyfatdelta", BODY_FAT_SKIP_KEYS)
+        # The range answer's undated aggregate is no reading (#2467).
+        self.assertIn("totalaverage", WEIGHT_SKIP_KEYS)
+        self.assertIn("totalaverage", BODY_FAT_SKIP_KEYS)
 
 
 class WeightPayloadTests(unittest.TestCase):
