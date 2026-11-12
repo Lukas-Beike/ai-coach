@@ -84,10 +84,13 @@ class PushSecretTests(unittest.TestCase):
             if command[0] == "synthetic-sonar":
                 hit = any(b"forbidden" in Path(p).read_bytes() for p in command[3:])
                 return subprocess.CompletedProcess(command, int(hit))
+            if command[0] == "broken-sonar":
+                return subprocess.CompletedProcess(command, 2)
             return run(command, **kwargs)
 
         cases = (
             (None, "Sonar CLI not found"),
+            ("broken-sonar", "Outgoing Git secret check failed"),
             ("synthetic-sonar", "Secret scan flagged added lines in fixture.py;"),
         )
         for found, message in cases:

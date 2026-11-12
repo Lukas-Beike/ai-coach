@@ -171,6 +171,9 @@ def check(updates: str) -> int:
             if flagged([path for path, _ in batch]):
                 # Rescan one by one so the refusal names each flagged source.
                 labels = [label for path, label in batch if flagged([path])]
+                if len(batch) > 1 and len(labels) == len(batch):
+                    # Every source failing alone points at the scanner itself.
+                    raise RuntimeError("Sonar failed on every source")
                 raise SecretFinding("; ".join(labels) or "a batch, no single source")
             for filename, _ in batch:
                 Path(filename).unlink()

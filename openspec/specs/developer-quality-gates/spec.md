@@ -40,8 +40,8 @@ Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHook
 - **WHEN** the `sonar` command is missing, or the scanner flags added lines of one file
 - **THEN** the refusal says the CLI was not found, or names the flagged file, without printing the flagged value
 
-#### Scenario: Scanner unavailable or object id malformed
-- **WHEN** the `sonar` command is not installed, or a pushed id is not 40 or 64 hex characters
+#### Scenario: Scanner failure or object id malformed
+- **WHEN** the scanner fails on every source, or a pushed id is not 40 or 64 hex characters
 - **THEN** the push is refused with one fixed message that carries no repository or scanner content
 
 #### Scenario: Deletion or no outgoing object
