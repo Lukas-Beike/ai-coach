@@ -92,18 +92,19 @@ function garminSourceLines(garmin, sdkConnected) {
   return lines;
 }
 
-// #2443: these chips also follow the provider's last explicit connection check.
+// #2443: a configured but not yet used Intervals.icu or Claude card takes its chip
+// from the provider's last explicit connection check.
 const CHECKED_CONNECTION_CHIPS = Object.freeze({
-  intervals: "#intervalsConnectionStatus",
-  anthropic: "#anthropicConnectionStatus",
+  "#intervalsConnectionStatus": "intervals",
+  "#anthropicConnectionStatus": "anthropic",
 });
 
 function setConnectionChip(selector, kind) {
   const node = document.querySelector(selector);
   if (!node) return;
-  node.dataset.base = kind;
-  const provider = Object.keys(CHECKED_CONNECTION_CHIPS).find((name) => CHECKED_CONNECTION_CHIPS[name] === selector);
-  const shown = provider && typeof checkedConnectionKind === "function" ? checkedConnectionKind(kind, providerCheckResults.get(provider)) : kind;
+  const provider = CHECKED_CONNECTION_CHIPS[selector];
+  if (provider) node.dataset.base = kind;
+  const shown = provider ? checkedConnectionKind(kind, providerCheckResults.get(provider)) : kind;
   const chip = Object.hasOwn(CONNECTION_CHIPS, shown) ? shown : "unchecked";
   node.textContent = CONNECTION_CHIPS[chip];
   node.className = `connection-chip is-${chip}`;
