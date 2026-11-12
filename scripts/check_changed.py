@@ -57,15 +57,20 @@ def failure_report(name: str, output: str) -> list[str]:
     """The failed test names, the tail and where the full output was kept."""
     lines = output.strip().splitlines()
     named = [line for line in lines if FAILED_TEST.match(line)]
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        prefix=f"check-changed-{name}-",
-        suffix=".log",
-        delete=False,
-    ) as log:
-        log.write(output)
-    return [*named, *lines[-TAIL_LINES:], f"full output: {log.name}"]
+    report = [*named, *lines[-TAIL_LINES:]]
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            prefix=f"check-changed-{name}-",
+            suffix=".log",
+            delete=False,
+        ) as log:
+            log.write(output)
+    except OSError:
+        # A full or unwritable temp directory must not stop the later steps.
+        return report
+    return [*report, f"full output: {log.name}"]
 
 
 def run_steps(steps: list[tuple[str, list[str]]]) -> int:

@@ -3,6 +3,7 @@
 import io
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -73,7 +74,10 @@ class CheckChangedTests(unittest.TestCase):
 
     def test_a_failure_does_not_stop_later_steps_and_shows_a_tail(self):
         runner = FakeRun(failing=("compileall",))
-        code, out, _ = run_main(check_changed, [], runner)
+        logs = tempfile.TemporaryDirectory()
+        self.addCleanup(logs.cleanup)
+        with mock.patch.object(check_changed.tempfile, "tempdir", logs.name):
+            code, out, _ = run_main(check_changed, [], runner)
         self.assertEqual(code, 1)
         self.assertEqual(len(runner.calls), 3)
         self.assertIn("FAILED compile", out)
@@ -85,8 +89,16 @@ class CheckChangedTests(unittest.TestCase):
         # and the whole output is kept in a temporary file.
         self.assertIn("FAIL: test_x (mod.Case.test_x)", out)
         log = Path(out.split("full output: ", 1)[1].splitlines()[0])
-        self.addCleanup(log.unlink)
+        self.assertEqual(log.parent, Path(logs.name))
         self.assertIn("line 5\n", log.read_text(encoding="utf-8"))
+        # An unwritable temp directory drops only the log line.
+        with mock.patch.object(
+            check_changed.tempfile, "NamedTemporaryFile", side_effect=OSError
+        ):
+            code, out, _ = run_main(check_changed, [], runner)
+        self.assertEqual(code, 1)
+        self.assertIn("ok quality", out)
+        self.assertNotIn("full output:", out)
 
     def test_node_tests_run_with_the_flag_or_when_the_diff_has_js(self):
         cases = [
