@@ -659,8 +659,8 @@ function thresholdBox(sport) {
     hr.dataset.threshold = names.hr;
     grid.append(reportNode("span", label, "zone-muted"), main, hr);
   }
-  const derived = rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
-  const lt1Line = rows.lt1Source ? rows.lt1Source + (rows.lt1Derived ? derived : "") : null;
+  let lt1Line = rows.lt1Source;
+  if (lt1Line && rows.lt1Derived) lt1Line += rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
   const source = [lt1Line, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
   const foot = reportNode("p", source || null, "zone-source");
   foot.append(zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
