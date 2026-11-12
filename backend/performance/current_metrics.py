@@ -129,8 +129,9 @@ def first_thresholds(
     left out, and a sport without any LT2 value has no LT1.
     """
     tops = zone_two_tops or {}
+    hr_share = first_threshold_pct / 100 if first_threshold_pct else None
     result: dict[str, dict[str, Any]] = {}
-    for sport, lthr_key, lt2_key, main, share in (
+    for sport, lthr_key, lt2_key, (main_key, main_origin_key, top_key), share in (
         ("run", "run_threshold_hr_bpm", "run_threshold_pace_seconds_per_km",
          ("pace_seconds_per_km", "pace_origin", "run_pace"), 1 / LT1_RUN_SPEED_SHARE),
         ("ride", "bike_threshold_hr_bpm", "cycling_ftp_watts",
@@ -140,23 +141,23 @@ def first_thresholds(
         lt2 = as_number(metrics.get(lt2_key, {}).get("value"))
         if not (lthr and lthr > 0) and not (lt2 and lt2 > 0):
             continue
-        hr_share = first_threshold_pct / 100 if first_threshold_pct else None
         values: dict[str, Any] = {}
-        for value_key, origin_key, chosen in (
-            ("hr_bpm", "hr_origin",
-             (lthr, hr_share, origin) if hr_share and lthr else
-             (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO) if tops.get(f"{sport}_hr") else
-             (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE)),
-            (main[0], main[1],
-             (tops[main[2]], 1, LT1_ZONE_TWO) if tops.get(main[2]) else
-             (lt2, share, LT1_FIXED_SHARE)),
+        for value_key, origin_key, candidates in (
+            ("hr_bpm", "hr_origin", ((lthr, hr_share, origin),
+                                     (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO),
+                                     (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE))),
+            (main_key, main_origin_key, ((tops.get(top_key), 1, LT1_ZONE_TWO),
+                                         (lt2, share, LT1_FIXED_SHARE))),
         ):  # fmt: skip
-            base, factor, value_origin = chosen
-            if base is not None and base > 0:
-                values[value_key] = round(base * factor)
-                values[origin_key] = value_origin
-        if values:
-            result[sport] = values
+            # The first candidate with a positive base and a factor wins.
+            chosen = next(
+                ((base * factor, name) for base, factor, name in candidates
+                 if base and factor and base > 0),
+                None,
+            )  # fmt: skip
+            if chosen:
+                values[value_key], values[origin_key] = round(chosen[0]), chosen[1]
+        result[sport] = values
     return result
 
 

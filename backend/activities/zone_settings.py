@@ -400,30 +400,44 @@ def zone_two_top(
     own threshold (m/s), else ``threshold_pace`` (s/km). None when it cannot be
     resolved.
     """
-    percent = (configuration.percent_limits or ())[1:2]
-    absolute = (configuration.limits or ())[1:2]
+    percent = next(iter((configuration.percent_limits or ())[1:2]), None)
+    absolute = next(iter((configuration.limits or ())[1:2]), None)
     if configuration.metric is ZoneConfigurationMetric.PACE:
-        if absolute and absolute[0] > 0:
-            return 1000 / absolute[0]
-        if percent and percent[0] > 0 and configuration.threshold:
-            return 1000 / (configuration.threshold * percent[0] / 100)
-        if percent and percent[0] > 0 and threshold_pace:
-            return threshold_pace * 100 / percent[0]
-        return None
-    if absolute:
-        return absolute[0]
-    basis = configuration.percent_basis
-    if basis is ZonePercentBasis.RESERVE:
-        maximum, resting = configuration.maximum, configuration.resting
-        if not (percent and maximum and resting is not None):
+        return _pace_top(absolute, percent, configuration.threshold, threshold_pace)
+    if absolute is not None or not percent:
+        return absolute
+    return _percent_value(configuration, percent)
+
+
+def _pace_top(
+    speed: float | None,
+    percent: float | None,
+    threshold_speed: float | None,
+    threshold_pace: float | None,
+) -> float | None:
+    """A pace limit in s/km from a speed (m/s) or a percent of the threshold speed."""
+    if speed:
+        return 1000 / speed
+    if percent and threshold_speed:
+        return 1000 / (threshold_speed * percent / 100)
+    if percent and threshold_pace:
+        return threshold_pace * 100 / percent
+    return None
+
+
+def _percent_value(configuration: ZoneConfiguration, percent: float) -> float | None:
+    """A percent limit in the metric's unit; heart-rate reserve starts at rest."""
+    maximum, resting = configuration.maximum, configuration.resting
+    if configuration.percent_basis is ZonePercentBasis.RESERVE:
+        if maximum is None or resting is None:
             return None
-        return resting + (maximum - resting) * percent[0] / 100
+        return resting + (maximum - resting) * percent / 100
     base = (
-        configuration.maximum
-        if basis is ZonePercentBasis.MAXIMUM
+        maximum
+        if configuration.percent_basis is ZonePercentBasis.MAXIMUM
         else configuration.threshold
     )
-    return base * percent[0] / 100 if percent and base else None
+    return base * percent / 100 if base else None
 
 
 def _later_stand_in(
