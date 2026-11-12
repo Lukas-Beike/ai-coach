@@ -8,7 +8,8 @@ with the local database. Only a new activity or a newly published night makes
 the existing refresh due. A full refresh is still guaranteed once per local
 day from noon, for the data only the SDK serves, repeated at most hourly.
 
-An unchanged check writes nothing and queues nothing. A change that a later
+An unchanged check queues nothing. By day it also reads today's summary and
+Body Battery and writes them only when Garmin changed them. A change that a later
 successful refresh still did not store is held back for an hour, so data the
 refresh does not keep queues at most an hourly refresh, as before. Throttling
 and errors back off in memory; a ``Retry-After`` wait is never undercut. A
@@ -27,6 +28,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.performance.morning_battery_service import MORNING_SLEEP_WAIT_UNTIL_HOUR
+from backend.providers.garmin import fetch_daytime_values
 from backend.providers.garmin_morning import has_night
 from backend.providers.garmin_personal import GarminPersonalClient
 
@@ -63,7 +65,9 @@ class GarminChangeCheck:
         local_now: Callable[[], datetime],
         logger: logging.Logger,
         monotonic: Callable[[], float] = time.monotonic,
+        store_daytime: Callable[[date, dict[str, Any]], list[str]] | None = None,
     ) -> None:
+        self._store_daytime = store_daytime
         self._personal = personal
         self._known_activity_ids = known_activity_ids
         self._stored_sleep = stored_sleep
@@ -79,7 +83,9 @@ class GarminChangeCheck:
         # it cannot make the refresh due every check.
         self._awaiting: tuple[frozenset[str], datetime] | None = None
         self._held: dict[str, float] = {}
-        self.counts = dict.fromkeys(("checks", "changes", "throttled", "failed"), 0)
+        self.counts = dict.fromkeys(
+            ("checks", "changes", "daytime", "throttled", "failed"), 0
+        )
 
     def active(self) -> bool:
         """The check replaces the hourly refresh only with a Personal API key."""
@@ -120,6 +126,7 @@ class GarminChangeCheck:
             # Local reads stay outside the remote error handling, so a
             # maintenance or busy database is never counted as a Garmin failure.
             stored_night = has_night(self._stored_sleep(today), today)
+            self.counts["checks"] += 1
             try:
                 newest, night = self._read(today, stored_night=stored_night)
             except Exception as error:  # noqa: BLE001 - a failed check must not stop the loop
@@ -127,15 +134,14 @@ class GarminChangeCheck:
                 # A rejected key or endpoint queues the refresh at the backoff
                 # pace, so its error shows and the retry hold can apply.
                 return getattr(error, "status", None) in {401, 403}
-            self._failures = 0
             self._next_check_at = now + delay
-            self.counts["checks"] += 1
             changes = set(newest) - set(self._known_activity_ids(ACTIVITY_DAYS))
             if night:
                 changes.add(f"night:{today.isoformat()}")
             changes = self._settle(changes, now)
             if not changes:
-                return False
+                return self._refresh_daytime(local, now)
+            self._failures = 0
             self._awaiting = (frozenset(changes), local)
             self.counts["changes"] += 1
             self._log(
@@ -170,6 +176,34 @@ class GarminChangeCheck:
         night = not stored_night and has_night(client.get_sleep_daily(day, day), today)
         return newest, night
 
+    def _refresh_daytime(self, local: datetime, now: float) -> bool:
+        """By day, store today's summary and Body Battery where Garmin changed them.
+
+        A change makes the full refresh due, which reads them too; at night
+        they barely move, so only the day cadence reads them. The backoff
+        resets only once this read succeeded too, and a rejected key or
+        endpoint makes the refresh due as for the change markers.
+        """
+        client = self._personal()
+        if (
+            self._store_daytime is None
+            or client is None
+            or check_seconds(local) != DAY_CHECK_SECONDS
+        ):
+            self._failures = 0
+            return False
+        try:
+            values = fetch_daytime_values(client, local.date())
+        except Exception as error:  # noqa: BLE001 - a failed read must not stop the loop
+            self._next_check_at = now + self._failed(DAY_CHECK_SECONDS, error)
+            return getattr(error, "status", None) in {401, 403}
+        self._failures = 0
+        stored = self._store_daytime(local.date(), values)
+        if stored:
+            self.counts["daytime"] += 1
+            self._log("garmin_daytime_stored", sections=len(stored))
+        return False
+
     def _settle(self, changes: set[str], now: float) -> set[str]:
         """Hold back for an hour what a successful refresh since its trigger left out.
 
@@ -191,7 +225,6 @@ class GarminChangeCheck:
 
     def _failed(self, delay: float, error: Exception) -> float:
         self._failures += 1
-        self.counts["checks"] += 1
         factor = min(2**self._failures, MAX_BACKOFF_FACTOR)
         delay *= factor
         retry_after = getattr(error, "retry_after", None)

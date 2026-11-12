@@ -47,6 +47,7 @@ from backend.providers.garmin_wellness_history import (
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
+    DAYTIME_SOURCES,
     NUTRITION_SOURCES,
     GarminSnapshotWriter,
 )
@@ -749,6 +750,55 @@ class GarminNutritionRefreshService:
             finally:
                 self._coordination.release()
 
+    def store_daytime(
+        self, day: date, values: Mapping[str, list[dict[str, Any]]]
+    ) -> list[str]:
+        """Store the day's values that differ from the stored ones (#2303).
+
+        Skipped while another Garmin read holds the coordination; an unchanged
+        answer writes nothing. Returns the stored sections.
+        """
+        with self._coordination.operation():
+            if not self._coordination.acquire():
+                return []
+            try:
+                snapshot = self._payload_service.view(
+                    list(values), start=day.isoformat(), end=day.isoformat()
+                )
+                changed = {
+                    source: rows
+                    for source, rows in values.items()
+                    if rows and rows != _day_rows(snapshot.get(source), day)
+                }
+                if not changed:
+                    return []
+                fetched_at = self._utc_now()
+                for source, rows in changed.items():
+                    snapshot[source] = garmin_morning.merge_garmin_records(
+                        rows,
+                        [
+                            row
+                            for row in snapshot.get(source) or []
+                            if not _record_date_in_range(row, day, day)
+                        ],
+                    )
+                if "daily_stats" in changed:
+                    self._mark_nutrition_freshness(
+                        snapshot, "daily_stats", day, day, True, fetched_at
+                    )
+                with self._database_manager.unit_of_work() as db:
+                    self._snapshot_writer.write_refresh(
+                        db,
+                        fetched_at=fetched_at,
+                        sections={source: snapshot[source] for source in changed},
+                        view=snapshot,
+                        windows=dict.fromkeys(changed, (day, day)),
+                        allowed=DAYTIME_SOURCES,
+                    )
+                return sorted(changed)
+            finally:
+                self._coordination.release()
+
     def _apply_nutrition_refresh(
         self,
         snapshot: dict[str, Any],
@@ -1008,6 +1058,13 @@ class GarminAnalysisRefreshService:
             "window_start": start.isoformat(),
             "window_end": end.isoformat(),
         }
+
+
+def _day_rows(rows: Any, day: date) -> list[Any]:
+    """The stored rows of one day, to compare with a fresh answer."""
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if _record_date_in_range(row, day, day)]
 
 
 def _record_date_in_range(record: Any, start: date, end: date) -> bool:

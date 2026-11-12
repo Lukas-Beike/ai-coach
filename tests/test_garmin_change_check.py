@@ -24,6 +24,10 @@ from backend.providers.garmin_morning import has_night
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_change_check import GarminChangeCheck
+from backend.sync.garmin_service import (
+    GarminNutritionRefreshService,
+    GarminSyncCoordination,
+)
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.schedule_policies import GarminSchedulePolicy
 from backend.sync.state import SyncStateRepository
@@ -60,6 +64,9 @@ class _Personal:
         self.error: Exception | None = None
         self.release: threading.Event | None = None
         self.reading = threading.Event()
+        self.steps = 4000
+        self.battery_level = 60
+        self.day_error: Exception | None = None
 
     def newest_activity_ids(self, start: str, end: str) -> list[str]:
         self.calls.append("activities")
@@ -73,6 +80,24 @@ class _Personal:
     def get_sleep_daily(self, start: str, end: str) -> list[dict[str, Any]]:
         self.calls.append("sleep")
         return list(self.nights)
+
+    def get_daily_summaries(self, start: str, end: str) -> dict[str, Any]:
+        self.calls.append("summary")
+        if self.day_error is not None:
+            raise self.day_error
+        return {
+            "data": [
+                {
+                    "calendarDate": start,
+                    "totalSteps": self.steps,
+                    "bmrKilocalories": 1700,
+                }
+            ]
+        }
+
+    def get_body_battery(self, start: str, end: str) -> list[dict[str, Any]]:
+        self.calls.append("battery")
+        return [{"date": start, "charged": 40, "drained": 100 - self.battery_level}]
 
 
 class GarminChangeCheckTests(unittest.TestCase):
@@ -95,7 +120,12 @@ class GarminChangeCheckTests(unittest.TestCase):
         self.personal = _Personal()
         self.keyed = True
         self.logger = Mock(spec=logging.Logger)
-        self.check = GarminChangeCheck(
+        self.check = self.make_check()
+        self.store(activities=[_activity(900001)], sleep=[_night()])
+        self.markers.mark("garmin", self.local.replace(hour=6))
+
+    def make_check(self, store_daytime: Any = None) -> GarminChangeCheck:
+        return GarminChangeCheck(
             personal=lambda: cast(Any, self.personal) if self.keyed else None,
             known_activity_ids=self.payload.known_activity_ids,
             stored_sleep=lambda day: self.payload.view(
@@ -105,9 +135,30 @@ class GarminChangeCheckTests(unittest.TestCase):
             local_now=lambda: self.local,
             logger=self.logger,
             monotonic=lambda: self.mono,
+            store_daytime=store_daytime,
         )
-        self.store(activities=[_activity(900001)], sleep=[_night()])
-        self.markers.mark("garmin", self.local.replace(hour=6))
+
+    def daytime_check(self) -> tuple[GarminSyncCoordination, Mock]:
+        """Store the values of the day through the nutrition refresh's writer."""
+        writer = GarminSnapshotWriter(self.key_values, lambda: ZONE)
+        spy = Mock(wraps=writer.write_refresh)
+        writer.write_refresh = spy  # type: ignore[method-assign]
+        coordination = GarminSyncCoordination(threading.Lock())
+        service = GarminNutritionRefreshService(
+            Mock(),
+            self.database,
+            writer,
+            self.payload,
+            coordination,
+            lambda: NOW,
+            lambda: True,
+        )
+        self.check = self.make_check(service.store_daytime)
+        return coordination, spy
+
+    def stored_day(self, source: str) -> list[dict[str, Any]]:
+        day = self.local.date().isoformat()
+        return self.payload.view([source], start=day, end=day).get(source) or []
 
     def store(self, **sections: Any) -> None:
         """Store sections as a refresh does, outside the check."""
@@ -141,7 +192,7 @@ class GarminChangeCheckTests(unittest.TestCase):
         self.assertEqual(["activities"] * 8, self.personal.calls)
         self.assertEqual((6, 2), (day_reads, len(self.personal.calls) - day_reads))
         self.assertEqual(
-            {"checks": 8, "changes": 0, "throttled": 0, "failed": 0},
+            {"checks": 8, "changes": 0, "daytime": 0, "throttled": 0, "failed": 0},
             self.check.counts,
         )
 
@@ -281,6 +332,83 @@ class GarminChangeCheckTests(unittest.TestCase):
         self.assertTrue(self.check.morning_due())
         self.assertTrue(policy.refresh_due(lambda: True))
         self.assertFalse(policy.refresh_due(lambda: False))
+
+    def test_by_day_changed_values_are_stored_and_unchanged_ones_write_nothing(
+        self,
+    ) -> None:
+        _coordination, writes = self.daytime_check()
+
+        self.assertFalse(self.due())
+        self.assertEqual(["activities", "summary", "battery"], self.personal.calls)
+        self.assertEqual(4000, self.stored_day("daily_stats")[0]["totalSteps"])
+        self.assertEqual(40, self.stored_day("body_battery")[0]["drained"])
+        self.assertEqual(1, writes.call_count)
+
+        self.mono += 600
+        self.assertFalse(self.due())
+        self.assertEqual(1, writes.call_count)
+
+        self.personal.steps = 5200
+        self.mono += 600
+        self.assertFalse(self.due())
+        self.assertEqual(2, writes.call_count)
+        self.assertEqual({"daily_stats"}, set(writes.call_args.kwargs["sections"]))
+        self.assertEqual(5200, self.stored_day("daily_stats")[0]["totalSteps"])
+        self.assertEqual(2, self.check.counts["daytime"])
+
+    def test_the_values_of_the_day_wait_for_a_change_a_running_sync_and_the_night(
+        self,
+    ) -> None:
+        coordination, writes = self.daytime_check()
+        # A change makes the full refresh due, which reads the day too.
+        self.personal.activity_ids.insert(0, "900005")
+        self.assertTrue(self.due())
+        self.store(activities=[_activity(900005)])
+        # A running Garmin sync holds the coordination: nothing is written.
+        self.assertTrue(coordination.acquire())
+        self.mono += 600
+        self.assertFalse(self.due())
+        coordination.release()
+        # At night only the change markers are read.
+        self.local = datetime(2026, 11, 12, 23, 30, tzinfo=ZONE)
+        self.personal.calls.clear()
+        self.mono += 600
+        self.assertFalse(self.due())
+
+        self.assertEqual(["activities"], self.personal.calls)
+        self.assertEqual(0, writes.call_count)
+
+    def test_a_throttled_day_read_backs_off_like_the_check(self) -> None:
+        _coordination, writes = self.daytime_check()
+        self.personal.day_error = provider_http.ProviderHTTPError(
+            "garmin", "rate_limited", 429, retry_after=1800.0
+        )
+        self.assertFalse(self.due())
+        self.personal.day_error = None
+        self.mono += 1200
+        self.assertFalse(self.due())
+
+        self.assertEqual(["activities", "summary"], self.personal.calls)
+        self.assertEqual(0, writes.call_count)
+        self.assertEqual(1, self.check.counts["throttled"])
+
+    def test_failing_day_reads_keep_backing_off_and_a_rejected_key_surfaces(
+        self,
+    ) -> None:
+        self.daytime_check()
+        self.personal.day_error = OSError("synthetic outage")
+        self.assertFalse(self.due())
+        # The activity read succeeds, but the day read fails again: 40 minutes.
+        self.mono += 1200
+        self.assertFalse(self.due())
+        self.mono += 1200
+        self.assertFalse(self.due())
+        self.assertEqual(4, len(self.personal.calls))
+        self.mono += 1200
+        self.personal.day_error = provider_http.ProviderHTTPError(
+            "garmin", "authentication", 403
+        )
+        self.assertTrue(self.due())
 
     def test_a_slow_check_never_delays_a_foreground_write(self) -> None:
         # The check reads remotely outside any database lease (#2287 style):
