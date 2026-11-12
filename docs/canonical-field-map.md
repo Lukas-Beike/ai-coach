@@ -1769,11 +1769,11 @@ mapping, list items capped at 100); every node yields at most one value.
 #### Weight and body fat (`weight`, `weigh_ins`, `weighIns`)
 
 First truthy section wins (`weight_payload`: `weight`, `weigh_ins`, `weighIns`). `_WeightWalk` visits every mapping
-(depth 20, 2000 visits, 500 list items, keys `minweight`/`maxweight`/`weightdelta` and the body-fat equivalents not
+(depth 20, 2000 visits, 500 list items, keys `minweight`/`maxweight`/`weightdelta`, the body-fat equivalents and `totalaverage` not
 entered); a record's day is the first present of `calendarDate` → `summaryDate` → `date` → `timestampGMT` →
 `timestamp` (`WALK_DATE_KEYS`), inherited from the nearest dated ancestor when absent. Observed
 `garmin_personal_weight_range` (`dailyWeightSummaries[].latestWeight`, plus `totalAverage` and `nextDateWeight`
-objects the walk also visits: `nextDateWeight` is mapped as a dated weigh-in outside the requested range, weight and body fat; the undated `totalAverage` holds `weight`, so it is reported as `MISSING calendarDate`).
+objects: `nextDateWeight` is visited and mapped as a dated weigh-in outside the requested range, weight and body fat; the undated aggregate `totalAverage` is not entered, so it maps nothing and reports no issue, #2467).
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
@@ -1889,8 +1889,8 @@ come from their own sections). HRV: `lastNight5MinHigh`, `baseline.*`, `feedback
 `createTimeStamp`. Daily summary: `heartRate.*` (resting heart rate is read via the `resting_hr` rows),
 `bodyBattery.*`, `respiration.*`, `pulseOx.*`, `intensityMinutes.*`, `hydration.*`, `movement.floorsDescended`,
 `stress.maxLevel` and proportions. Weight: `bmi`, `bodyWater`, `boneMass`, `muscleMass`, `physiqueRating`,
-`visceralFat`, `metabolicAge`, min/max/delta values, `totalAverage`/`nextDateWeight` are visited by the walk like any
-dated mapping. `activities` and `gear` sections are ignored here (own mappers). Fitness age (observed
+`visceralFat`, `metabolicAge`, min/max/delta values and `totalAverage` (not entered), `nextDateWeight` (visited by the walk like any
+dated mapping). `activities` and `gear` sections are ignored here (own mappers). Fitness age (observed
 `garmin_personal_fitnessage`) and profile settings (observed `garmin_personal_userprofile_settings`) have no mapper in
 this module. Zone floors, `restingHeartRateUsed`, `lactateThresholdHeartRateUsed` and `trainingMethod` of the heart-rate
 zones are mapped by `garmin_zone_mapping.py` into zone configurations, not into observations. `hrvStatus`, readiness `level` and `trainingStatus` are mapped as categorical codes by the status

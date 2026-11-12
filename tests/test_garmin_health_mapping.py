@@ -481,6 +481,25 @@ class FixtureSnapshotTests(unittest.TestCase):
         self.assertEqual(_rows(result), sorted(EXPECTED_FIXTURE_ROWS))
         self.assertEqual(_issues(result), EXPECTED_FIXTURE_ISSUES)
 
+    def test_developer_fixture_maps_the_recorded_vo2max_shape(self) -> None:
+        # #2467: fixture mode serves garmin-fixture.example.json; its maxmet rows
+        # take the recorded daily shape, so VO2max is mapped again.
+        example = json.loads(
+            (FIXTURES.parents[3] / "garmin-fixture.example.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        result = _map({"max_metrics": example["max_metrics"]})
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("vo2max", 49.0, "2026-08-29", "-"),
+                ("vo2max", 52.0, "2026-08-29", "ride"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
     def test_fixture_observations_carry_no_timestamp(self) -> None:
         result = _map(_fixture_sections())
 
@@ -929,6 +948,8 @@ class AliasAndUnitTests(unittest.TestCase):
                 )
 
     def test_weight_daily_weight_summaries_nested_without_unit_maps_grams(self) -> None:
+        # The recorded range answer also holds the undated aggregate ``totalAverage``
+        # (#2467): it is no weigh-in, so it maps nothing and reports no issue.
         result = _map(
             {
                 "weight": {
@@ -939,10 +960,17 @@ class AliasAndUnitTests(unittest.TestCase):
                                 "weight": 72800,
                             },
                         }
-                    ]
+                    ],
+                    "totalAverage": {
+                        "from": 1788566400000,
+                        "until": 1788652799999,
+                        "weight": 72800.0,
+                        "bodyFat": 18.5,
+                    },
                 }
             }
         )
+        self.assertEqual(result.issues, ())
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0].kind, MetricKind.WEIGHT)
         self.assertEqual(result.records[0].value.value, 72.8)

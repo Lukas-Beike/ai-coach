@@ -17,8 +17,13 @@ from backend.providers.garmin_fields import GARMIN_DATE_ALIASES
 
 WEIGHT_SECTIONS: Final = ("weight", "weigh_ins", "weighIns")
 WALK_DATE_KEYS: Final = (*GARMIN_DATE_ALIASES, "timestampGMT", "timestamp")
-WEIGHT_SKIP_KEYS: Final = frozenset({"minweight", "maxweight", "weightdelta"})
-BODY_FAT_SKIP_KEYS: Final = frozenset({"minbodyfat", "maxbodyfat", "bodyfatdelta"})
+# ``totalAverage`` is the range answer's undated aggregate, not a weigh-in (#2467).
+WEIGHT_SKIP_KEYS: Final = frozenset(
+    {"minweight", "maxweight", "weightdelta", "totalaverage"}
+)
+BODY_FAT_SKIP_KEYS: Final = frozenset(
+    {"minbodyfat", "maxbodyfat", "bodyfatdelta", "totalaverage"}
+)
 WALK_MAX_DEPTH: Final = 20
 WALK_MAX_VISITS: Final = 2000
 WALK_MAX_LIST_ITEMS: Final = 500
