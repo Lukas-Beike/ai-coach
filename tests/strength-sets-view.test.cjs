@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { extractFunctions, loadPublicScript, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, loadPublicScript, FakeElement, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 function text(node) {
   if (typeof node === "string") return node;
@@ -110,7 +110,7 @@ test("the calendar comparison shows executed sets next to the planned structure"
       { name: null, category: "deadlift", status: "matched", planned_sets: 1, planned_reps: 5, planned_kg: null, completed_sets: 1, reps: [5] },
     ],
   });
-  const [matched, unknown, unnamed] = list.children.map((item) => item.textContent);
+  const [matched, unknown, unnamed] = list.children.map(textOf);
   assert.equal(matched, "Kniebeuge: 2/4 Sätze erreicht · Ist 5/5/3 Wdh. · Plan 4×5 @ 82,5 kg");
   assert.equal(unknown, "Mystery: nicht zugeordnet · Plan 3×10");
   assert.equal(unnamed, "Kreuzheben: 1/1 Sätze erreicht · Ist 5 Wdh. · Plan 1×5");
