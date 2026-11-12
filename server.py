@@ -1836,6 +1836,11 @@ def _plan_guard_service() -> PlanGuardService:
             ATHLETE_CLOCK.now().date(),
         ),
         calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
+        templates=lambda: {
+            str(item["id"]): item
+            for item in PLANNING_DATA.workout_library().list(1000)
+            if not item.get("date")
+        },
         history=BriefHistory(
             lessons=lambda: read_lessons(_block_lessons),
             recent_units=lambda: PLANNING_DATA.planned_unit().list(

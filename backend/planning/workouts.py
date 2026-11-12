@@ -16,7 +16,7 @@ from backend.activities.workout_text import (
     canonical_workout_zones,
     verify_workout_readback,
 )
-from backend.canonical.planning_fields import SESSION_FOCUS_KEYS
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS, TEMPLATE_ID
 from backend.errors import AppError
 from backend.planning.session_focus import normalize_session_focus
 from backend.planning.sport import planned_stored_sport
@@ -198,6 +198,8 @@ def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
     for key in SESSION_FOCUS_KEYS:
         if workout.get(key) is not None:
             draft[key] = workout[key]
+    if workout.get(TEMPLATE_ID):
+        draft[TEMPLATE_ID] = str(workout[TEMPLATE_ID]).strip()[:120]
     normalize_session_focus(draft)
     starts_at_local = workout.get("starts_at_local")
     if starts_at_local is not None:

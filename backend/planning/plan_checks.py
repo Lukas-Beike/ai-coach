@@ -50,10 +50,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
+from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE, TEMPLATE_ID
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import (
@@ -96,6 +97,9 @@ FINDING_CODES = (
     leg_strength.FREQUENCY,
     "calendar_load",
     ALL_DAY_EVENT,
+    "template_missing",
+    "template_mismatch",
+    "template_scaled",
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
@@ -106,7 +110,14 @@ BLOCKING_CODES = ("illness_hard",)
 # a focus vocabulary (run, ride) its focus, and a capped run unit its heart-rate
 # cap. It blocks like the health rule but can never be accepted, so it is not in
 # BLOCKING_CODES.
-REQUIRED_CODES = ("strength_incomplete", "focus_missing", "hr_cap_invalid")
+REQUIRED_CODES = (
+    "strength_incomplete",
+    "focus_missing",
+    "hr_cap_invalid",
+    # A Coach unit comes from a library template and keeps its structure (#2379).
+    "template_missing",
+    "template_mismatch",
+)
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
     "load_spike": load_checks.LOAD_EVIDENCE,
@@ -124,6 +135,9 @@ EVIDENCE = {
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
     "calendar_load": "calendar overlap and locally chosen eight-hour busy-day threshold",
     ALL_DAY_EVENT: "calendar all-day event; soft context, not a block",
+    "template_missing": "athlete rule: planned units come only from the training library",
+    "template_mismatch": "athlete rule: a variant keeps its template's exercises or steps",
+    "template_scaled": "athlete rule: a variant only scales load and intensity",
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -142,6 +156,9 @@ _RULE_TEXT = {
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
     "calendar_load": "long or hard unit overlaps a calendar event or falls on a day with at least eight hours of events.",
     ALL_DAY_EVENT: "a hard or long unit on a day with an all-day calendar event (soft note; calendar markers still apply).",
+    "template_missing": "a unit the Coach created or changed without the template_id of a library template.",
+    "template_mismatch": "a unit whose exercises or steps differ from its library template beyond load and intensity.",
+    "template_scaled": "a unit planned from a library template with scaled load or intensity.",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in (*BLOCKING_CODES, *REQUIRED_CODES) else 'Note'}: {text}"
@@ -575,6 +592,115 @@ _FOCUS_CONTENT = (
 _FOCUS_SPORTS = frozenset({Sport.RUN, Sport.RIDE})
 
 
+_TEMPLATE_CODES = ("template_missing", "template_mismatch", "template_scaled")
+# What makes a unit's content: moving it (date, start) or setting its focus,
+# intensity or Garmin exercise never changes it, so an older unit without a
+# template can still move (athlete decision on #2379).
+_TEMPLATE_CONTENT = (
+    TEMPLATE_ID,
+    "sport",
+    "environment",
+    "description",
+    "duration_minutes",
+    "planned_duration_s",
+    "target",
+    STRENGTH_STRUCTURE,
+)
+_TEMPLATE_HINT = (
+    "Plan only from the training library: set template_id to a template from "
+    "list_workout_library and keep its exercises or steps in order; only sets, "
+    "reps, loads, durations and targets may change. If no template fits, propose "
+    "a new one to the athlete and create it with manage_training_templates first."
+)
+
+
+def _strength_content(unit: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The exercises without the Garmin pairing, which the athlete sets later."""
+    exercises = unit.get(STRENGTH_STRUCTURE)
+    if not isinstance(exercises, list):
+        return []
+    return [
+        {k: v for k, v in item.items() if k not in {"garmin_exercise", "garmin_pair"}}
+        for item in exercises
+        if isinstance(item, Mapping)
+    ]
+
+
+def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
+    """The part of a unit a variant keeps: exercise names, or step kinds in order.
+
+    Repeats may change (5x4 or 4x4 min is load), so each step kind counts once,
+    in the order it first appears. None when the unit has no readable structure.
+    """
+    exercises = _strength_content(unit)
+    if exercises:
+        return [str(item.get("name") or "").strip().casefold() for item in exercises]
+    try:
+        steps = structured_steps(
+            str(unit.get("description") or ""), str(unit.get("target") or "AUTO")
+        )
+    except WorkoutTextError:
+        return None
+    kinds: list[Any] = []
+    for step in steps:
+        signature = (step.get("kind"), bool(step.get("ramp")), "distance" in step)
+        if signature not in kinds:
+            kinds.append(signature)
+    return kinds
+
+
+def _scaled(unit: Mapping[str, Any], template: Mapping[str, Any]) -> bool:
+    keys = ("description", "duration_minutes", "planned_duration_s", "target")
+    return any(unit.get(key) != template.get(key) for key in keys) or (
+        _strength_content(unit) != _strength_content(template)
+    )
+
+
+def template_conformance(
+    units: Sequence[Mapping[str, Any]], templates: Mapping[str, Mapping[str, Any]]
+) -> list[dict]:
+    """Required findings for units without their library template, and a note
+    for a variant that scales one (#2379).
+
+    Only Coach writes run it (``PlanGuardService``). The content fingerprint
+    leaves an untouched or merely moved older unit the same finding, so it never
+    blocks an unrelated write. An adaptive run or ride replacement is exempt
+    (athlete decision).
+    """
+    findings = []
+    for unit in units:
+        sport = planned_sport_environment(unit)[0]
+        if unit.get("source") == "adaptive" and sport in {Sport.RUN, Sport.RIDE}:
+            continue
+        template = templates.get(str(unit.get(TEMPLATE_ID) or ""))
+        evidence: dict[str, Any] = {
+            "name": str(unit.get("name") or ""),
+            "content": _content_digest(
+                {**unit, STRENGTH_STRUCTURE: _strength_content(unit)}, _TEMPLATE_CONTENT
+            ),
+        }
+        if template is None:
+            message = "Planned unit without a library template. " + _TEMPLATE_HINT
+            findings.append(_finding("template_missing", [unit], message, evidence))
+            continue
+        evidence["template"] = str(template.get("name") or "")
+        if _structure_of(unit) != _structure_of(template) or (
+            planned_sport_environment(template)[0] is not sport
+        ):
+            message = (
+                f"Planned unit differs from its library template {evidence['template']!r} "
+                "beyond load and intensity. " + _TEMPLATE_HINT
+            )
+            findings.append(_finding("template_mismatch", [unit], message, evidence))
+        elif _scaled(unit, template):
+            message = (
+                f"Scaled variant of the library template {evidence['template']!r}; "
+                "name the changed loads."
+            )
+            findings.append(_finding("template_scaled", [unit], message, evidence))
+    return findings
+
+
 def focus_missing(units: Sequence[Mapping[str, Any]]) -> list[dict]:
     """One finding per run or ride unit without a stored ``session_focus``.
 
@@ -609,8 +735,7 @@ def _with_computed_hard(
 ) -> list[Mapping[str, Any]]:
     """Unit copies carrying the hardness computed from their workout steps."""
     computed = {
-        id(session.unit): computed_hard(session.estimate)
-        for session in sessions
+        id(session.unit): computed_hard(session.estimate) for session in sessions
     }
     return [
         {**unit, COMPUTED_HARD: computed[id(unit)]}
@@ -737,7 +862,12 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
         return (finding["code"], evidence["sport"], evidence["week_start"])
-    if finding["code"] in {"strength_incomplete", "focus_missing", "hr_cap_invalid"}:
+    if finding["code"] in {
+        "strength_incomplete",
+        "focus_missing",
+        "hr_cap_invalid",
+        *_TEMPLATE_CODES,
+    }:
         evidence = finding["evidence"]
         return (finding["code"], tuple(finding["local_ids"]), evidence["content"])
     if finding["code"] == "load_unknown":

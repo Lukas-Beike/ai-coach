@@ -455,7 +455,11 @@ class PlanGuardService:
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         profile: Callable[[], Mapping[str, Any]] = dict,
         history: BriefHistory | None = None,
+        templates: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
     ) -> None:
+        # The undated library templates by id; None leaves the template rule
+        # unchecked, as for a guard built without the library (#2379).
+        self._templates = templates
         self._history = history or BriefHistory()
         self._return_stage: Callable[[], int | None] = lambda: None
         self._profile = profile
@@ -515,6 +519,11 @@ class PlanGuardService:
             *plan_checks.strength_incomplete(units),
             *plan_checks.focus_missing(units),
             *self._hr_cap_findings(units),
+            *(
+                plan_checks.template_conformance(units, self._templates())
+                if self._templates is not None
+                else ()
+            ),
         ]
 
     def _hr_cap_findings(self, units: Sequence[Mapping[str, Any]]) -> list[dict]:

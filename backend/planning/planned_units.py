@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
-from backend.canonical.planning_fields import HR_CAP
+from backend.canonical.planning_fields import HR_CAP, TEMPLATE_ID
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -35,9 +35,9 @@ from backend.providers.intervals_workouts import (
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
-# The focus keys no provider receives; the heart-rate cap reaches the watch, so a
-# change of it is a change of the exported unit.
-LOCAL_ONLY_KEYS = tuple(key for key in FOCUS_KEYS if key != HR_CAP)
+# The focus keys and the template reference no provider receives; the heart-rate
+# cap reaches the watch, so a change of it is a change of the exported unit.
+LOCAL_ONLY_KEYS = (*(key for key in FOCUS_KEYS if key != HR_CAP), TEMPLATE_ID)
 
 
 def planned_unit_payload_hash(payload: Any) -> str:

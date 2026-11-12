@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend import change_history
+from backend.canonical.planning_fields import TEMPLATE_ID
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
@@ -144,9 +145,18 @@ class LocalTrainingPlanCreationService:
         plan_id: str,
         plan_name: str,
     ) -> dict[str, Any]:
-        match = planning_library.find_similar_library_workout(workout, templates)
+        # A unit planned from a template keeps it; otherwise a matching template
+        # is taken, and without one the plan check rejects the unit (#2379).
+        match = (
+            None
+            if workout.get(TEMPLATE_ID)
+            else planning_library.find_similar_library_workout(workout, templates)
+        )
         if match is None:
-            stored = {**workout, "source": "coach"}
+            stored = {
+                **workout,
+                "source": "library" if workout.get(TEMPLATE_ID) else "coach",
+            }
         else:
             match_duration = planning_library.library_workout_duration_minutes(match)
             stored = {
@@ -169,6 +179,7 @@ class LocalTrainingPlanCreationService:
                     else "AUTO"
                 ),
                 "source": "library",
+                TEMPLATE_ID: str(match["id"]),
             }
             self._logger.info(
                 "Reusing matching workout library template for local plan",

@@ -26,7 +26,6 @@ from backend.canonical.vocabulary import Sport
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
 from backend.planning import calendar as planning_calendar
-from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.plan_checks import ILLNESS_DAYS
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
@@ -43,6 +42,8 @@ ADAPTIVE_REPLACEMENT_KEYS = (
     "rationale",
     "archived",
     "private_calendar_adjustment",
+    # "adaptive" marks a run or ride replacement that has no template (#2379).
+    "source",
     # Re-derived for the easier content; None removes a field that no longer fits.
     SESSION_FOCUS,
     STRENGTH_INTENSITY,
@@ -69,44 +70,15 @@ def adaptive_recovery_description(sport: str, duration: int) -> str:
     )
 
 
-def _half_kg(kg: Any) -> float:
-    """Half the weight, to the nearest 0.5 kg."""
-    return round(float(kg)) / 2
-
-
-def lightened_structure(value: Any) -> list[dict[str, Any]] | None:
-    """The same exercises made light: half the sets, half the weight, low effort."""
-    try:
-        exercises = strength_structure.normalize_structure(value)
-    except AppError:
-        return None
-    if not exercises:
-        return None
-    light = []
-    for exercise in exercises:
-        item = {**exercise, "sets": max(1, -(-int(exercise["sets"]) // 2))}
-        if item.get("kg") is not None:
-            item["kg"] = _half_kg(item["kg"])
-        if isinstance(item.get("warmup"), dict) and item["warmup"].get("kg"):
-            item["warmup"] = {**item["warmup"], "kg": _half_kg(item["warmup"]["kg"])}
-        if item.get("pct_1rm") is not None:
-            item["pct_1rm"] = min(item["pct_1rm"], strength_structure.MODERATE_PCT - 15)
-        if item.get("rpe") is not None:
-            item["rpe"] = min(item["rpe"], strength_structure.MODERATE_RPE - 1)
-        if item.get("rir") is not None:
-            item["rir"] = max(item["rir"], strength_structure.MODERATE_RIR + 1)
-        light.append(item)
-    return light
-
-
 def easier_fields(
     workout: dict[str, Any], run_caps: dict[str, dict[str, Any]] | None = None
 ) -> dict[str, Any]:
     """Focus, strength and cap fields that match an easy replacement.
 
     A run or ride becomes ``easy`` (a run with the easy cap from ``run_caps``,
-    the athlete's effective caps); a strength unit keeps its exercises made
-    light. Other sports keep their fields.
+    the athlete's effective caps); a strength unit keeps its exercises, sets and
+    weights and only gets the light intensity (athlete decision on #2379). Other
+    sports keep their fields.
     """
     sport = planned_sport_environment(workout)[0]
     if sport is Sport.RUN:
@@ -117,10 +89,7 @@ def easier_fields(
     if sport is Sport.RIDE:
         return {SESSION_FOCUS: ADAPTIVE_EASY_FOCUS, HR_CAP: None}
     if sport is Sport.STRENGTH:
-        return {
-            STRENGTH_STRUCTURE: lightened_structure(workout.get(STRENGTH_STRUCTURE)),
-            STRENGTH_INTENSITY: "light",
-        }
+        return {STRENGTH_INTENSITY: "light"}
     return {}
 
 
@@ -132,6 +101,13 @@ def adaptive_recovery_replacement(
     run_caps: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     sport = planned_activity_type(workout)
+    rationale = (
+        f"Adaptive adjustment: {reason}. The original workout remains available "
+        "in the local library history."
+    )
+    if planned_sport_environment(workout)[0] is Sport.STRENGTH:
+        # Its template stays: exercises, sets, weights and duration (#2379).
+        return {**workout, **easier_fields(workout), "rationale": rationale}
     duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
     duration = max(
         15,
@@ -148,7 +124,9 @@ def adaptive_recovery_replacement(
         "duration_minutes": duration,
         "description": adaptive_recovery_description(sport, duration),
         "target": "AUTO",
-        "rationale": f"Adaptive adjustment: {reason}. The original workout remains available in the local library history.",
+        "rationale": rationale,
+        # A run or ride replacement is not one of the athlete's templates.
+        "source": "adaptive",
     }
 
 
