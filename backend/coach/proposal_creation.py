@@ -365,6 +365,11 @@ class CoachProposalCreationService:
         return diff
 
 
+# Card rows of what a sync deletes at the provider; the receipt lists them too.
+_INTERVALS_REMOVAL = "Wird bei Intervals.icu entfernt"
+_GARMIN_REMOVAL = "Wird bei Garmin entfernt"
+
+
 def _approved_remote_arguments(
     tool: str,
     arguments: dict[str, Any],
@@ -704,7 +709,7 @@ def _garmin_approval_details(
         {
             "name": item.name,
             "date": _approval_date(item.date),
-            "sport": "Wird bei Garmin entfernt",
+            "sport": _GARMIN_REMOVAL,
             "id": item.local_id,
         }
         for local_id, item in orphans.items()
@@ -784,7 +789,7 @@ def _label_intervals_removals(
         }
     for detail in details:
         if detail["id"] in removed:
-            detail["sport"] = "Wird bei Intervals.icu entfernt"
+            detail["sport"] = _INTERVALS_REMOVAL
     return details
 
 
@@ -829,7 +834,7 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         return {
             "name": label["name"][:120],
             "date": _approval_date(label["event_date"]),
-            "sport": "Wird bei Intervals.icu entfernt",
+            "sport": _INTERVALS_REMOVAL,
             "id": str(row["intervals_event_id"] or row["id"]),
         }
     return {
@@ -894,9 +899,7 @@ def _nutrition_approval_arguments(
 
 
 # A card-free run never carries an explicit Garmin removal ("Von Garmin entfernen").
-_REMOVAL_LABELS = frozenset(
-    {"Wird bei Intervals.icu entfernt", "Wird bei Garmin entfernt"}
-)
+_REMOVAL_LABELS = frozenset({_INTERVALS_REMOVAL, _GARMIN_REMOVAL})
 
 
 def remote_removal_lines(details: list[dict[str, str]]) -> list[str]:
