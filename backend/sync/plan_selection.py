@@ -10,6 +10,8 @@ from backend.db import DatabaseManager
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
+from backend.planning.intervals_orphans import leftover_ids
+from backend.planning.leftovers import MAX_CLEANUP
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.plan_commands import PlanPushCommandService
 
@@ -125,7 +127,8 @@ class StructuredPlanSyncService:
         if intent.get("_sync_all_pending"):
             max_entries = _ALL_PENDING_MAX_ENTRIES
         elif authorized_ids:
-            max_entries = self._coach_training_change_limit
+            # The turn's units plus the leftovers its proposal adds (#2373).
+            max_entries = self._coach_training_change_limit + MAX_CLEANUP
         else:
             max_entries = planning_library.LIBRARY_BULK_MAX_ENTRIES
         normalized = planning_library.library_bulk_request_entries(
@@ -165,9 +168,19 @@ class StructuredPlanSyncService:
             groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             groups = self._scope_groups(normalized, intent)
-        if authorized_ids and normalized_ids != authorized_ids:
+        if authorized_ids and not self._turn_scope(normalized_ids, authorized_ids):
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
         return groups
+
+    def _turn_scope(self, normalized_ids: set[str], authorized_ids: set[str]) -> bool:
+        """Every unit of the turn, plus only leftovers of hidden units (#2373)."""
+        extra = normalized_ids - authorized_ids
+        if not authorized_ids <= normalized_ids:
+            return False
+        if not extra:
+            return True
+        with self._database_manager.reader() as db:
+            return leftover_ids(db, extra) == extra
 
     @staticmethod
     def _scope_groups(

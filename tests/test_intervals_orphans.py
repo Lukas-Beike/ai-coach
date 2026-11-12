@@ -143,16 +143,30 @@ class IntervalsOrphanTests(unittest.TestCase):
             {item["id"]: item["sport"] for item in details},
         )
 
-    def test_a_turn_bound_sync_gets_no_extra_entries(self) -> None:
-        self.insert(NEW, {**UNIT, "remote_event_id": ""})
-        self.insert(OLD, {**UNIT, "archived": True})
+    def test_a_turn_bound_sync_also_removes_the_replaced_units_event(self) -> None:
+        # The Coach replaces a ride by a run on the same day and sends the run:
+        # the ride's event goes too, or Intervals.icu keeps it in Garmin (#2373).
+        self.insert(NEW, {**UNIT, "sport": "Run", "remote_event_id": ""})
+        self.insert(OLD, {**UNIT, "archived": True, "local_deleted": True})
 
-        for key in ("_replacement_sync_entry_ids", "_changed_sync_entry_ids"):
+        for scope, key in (
+            ("created", "_created_sync_entry_ids"),
+            ("changed", "_changed_sync_entry_ids"),
+            ("selected", "_replacement_sync_entry_ids"),
+        ):
             with self.subTest(key=key):
-                approved = self.selected(
-                    {"request": {"sync_scope": "selected"}, key: [NEW]}
+                approved = self.selected({"request": {"sync_scope": scope}, key: [NEW]})
+                self.assertEqual(
+                    [NEW, OLD],
+                    [
+                        entry.get("library_workout_id") or entry.get("local_id")
+                        for entry in approved["entries"]
+                    ],
                 )
-                self.assertEqual(1, len(approved["entries"]))
+        all_pending = self.selected(
+            {"request": {"sync_scope": "all_pending"}, "_sync_all_pending": True}
+        )
+        self.assertEqual(1, len(all_pending["entries"]))
 
     def test_sync_entries_carry_the_hash_the_job_checks(self) -> None:
         self.insert(OLD, {**UNIT, "archived": True})
