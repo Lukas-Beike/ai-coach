@@ -106,7 +106,9 @@ class QualityBaselineTests(unittest.TestCase):
 
     def test_formatter_diagnostics_are_rejected_from_the_quality_baseline(self):
         self.baseline["diagnostics"] = [{"tool": "format"}]
-        with self.assertRaisesRegex(RuntimeError, "Ruff, mypy and cognitive"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Ruff, mypy, cognitive complexity and ESLint"
+        ):
             self.check([])
 
     def test_formatter_is_not_collected_by_the_quality_gate(self):
@@ -157,6 +159,7 @@ class QualityBaselineTests(unittest.TestCase):
             patch("tools.quality_baseline.source_files", return_value=files),
             patch("tools.quality_baseline.cognitive_diagnostics", return_value=[]),
             patch("tools.quality_baseline.run", side_effect=fake_run),
+            patch("tools.quality_baseline.javascript_diagnostics", return_value=[]),
         ):
             quality_baseline.collect(Path.cwd())
         self.assertGreater(len(ruff_commands), 1)
@@ -256,6 +259,64 @@ class QualityBaselineTests(unittest.TestCase):
             self.assertNotIn("synthetic", str(result))
             self.assertEqual(result["path"], "server.py")
             self.assertEqual(len(result["message_sha256"]), 64)
+
+    def javascript_findings(self, *source):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "public").mkdir()
+            (root / "public/sample.js").write_text(
+                chr(10).join(source), encoding="utf-8"
+            )
+            return quality_baseline.javascript_diagnostics(root)
+
+    @staticmethod
+    def tangled_function(depth, marker=""):
+        body = "if (a) {" * depth + "work();" + "}" * depth
+        return [
+            f"function tangled(a) {{{marker}",
+            f"  for (const x of a) {{ {body} }}",
+            "}",
+        ]
+
+    @unittest.skipUnless(quality_baseline.eslint_script(), "needs npm ci for ESLint")
+    def test_complex_function_and_nested_ternary_in_public_js_are_found(self):
+        found = self.javascript_findings(
+            *self.tangled_function(6),
+            "const pick = (a, b) => (a ? 1 : b ? 2 : 3);",
+        )
+        self.assertEqual(
+            [(item["path"], item["line"], item["code"]) for item in found],
+            [
+                ("public/sample.js", 1, "sonarjs/cognitive-complexity"),
+                ("public/sample.js", 4, "sonarjs/no-nested-conditional"),
+            ],
+        )
+        self.assertEqual(self.check(found)[0], 1)
+
+    @unittest.skipUnless(quality_baseline.eslint_script(), "needs npm ci for ESLint")
+    def test_complexity_score_is_not_part_of_the_identity_and_nosonar_suppresses(self):
+        short = self.javascript_findings(*self.tangled_function(6))
+        long = self.javascript_findings(*self.tangled_function(8))
+        self.assertEqual(short[0]["message_sha256"], long[0]["message_sha256"])
+        self.assertEqual(
+            self.javascript_findings(*self.tangled_function(8, " // NOSONAR")), []
+        )
+
+    def test_skipped_eslint_ignores_its_baseline_entries(self):
+        self.baseline["diagnostics"].append(
+            {**self.existing, "tool": "eslint", "code": "sonarjs/no-nested-conditional"}
+        )
+        self.assertEqual(self.check([self.existing])[0], 1)
+        result = quality_baseline.check(
+            self.baseline, self.versions, [self.existing], ("eslint",)
+        )
+        self.assertEqual(result, 0)
+        with (
+            patch("tools.quality_baseline.eslint_script", return_value=None),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertIsNone(quality_baseline.javascript_diagnostics(Path.cwd()))
+        self.assertIn("skipped public/*.js", output.getvalue())
 
     @patch("tools.quality_baseline.subprocess.run")
     def test_tool_failure_cannot_become_baseline_debt(self, mocked_run):
