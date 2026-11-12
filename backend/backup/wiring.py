@@ -30,6 +30,7 @@ from backend.db import row_factory
 from backend.db.bootstrap import apply_startup_invariants
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.runtime import clock as runtime_clock
+from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.worker import shared_sync_job_wake_event
 
@@ -89,7 +90,8 @@ def build_backup(ctx: AppContext) -> BackupServices:
                 backup=backup_service(),
                 database_manager=ctx.database,
                 database_lock=ctx.database_lock,
-                maintenance_gate=ctx.maintenance,
+                # Read live, like the maintenance decorators.
+                maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
                 profile_mutation_coordinator=ctx.profile_mutation_coordinator,
                 sync_jobs=ctx.sync_job_queue.service(),
                 coach_jobs=ctx.coach_background_jobs.job_store(),

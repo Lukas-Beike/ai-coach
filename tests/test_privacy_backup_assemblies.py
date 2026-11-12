@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
+from backend.athlete.profile import DEFAULT_PROFILE
+from backend.backup import wiring as backup_wiring
 from backend.backup.database import (
     EXPORT_TIME_LIMIT_SECONDS,
     MAX_BACKUP_BYTES,
@@ -13,6 +16,8 @@ from backend.backup.database import (
 )
 from backend.backup.wiring import build_backup
 from backend.coach.job_worker import COACH_JOB_WORKER
+from backend.db import row_factory
+from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.privacy import (
     PrivacyArchiveSettings,
     PrivacyAssembly,
@@ -22,6 +27,8 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
+from backend.runtime import maintenance as runtime_maintenance
+from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.worker import shared_sync_job_wake_event
 
 
@@ -125,7 +132,9 @@ class BackupBuilderTests(unittest.TestCase):
             )
             dependencies = restore._dependencies
             self.assertIs(dependencies.database_lock, replacement_lock)
-            self.assertIs(dependencies.maintenance_gate, ctx.maintenance)
+            self.assertIs(
+                dependencies.maintenance_gate, runtime_maintenance.MAINTENANCE_GATE
+            )
             self.assertIs(
                 dependencies.profile_mutation_coordinator,
                 ctx.profile_mutation_coordinator,
@@ -169,6 +178,26 @@ class BackupBuilderTests(unittest.TestCase):
         cancel_turns.assert_called_once_with()
         self.assertIs(dependencies.refresh_credentials, ctx.refresh_config)
         self.assertIs(dependencies.redact, ctx.redactor.redact_text)
+
+    def test_restore_validation_gets_the_cipher_schema_and_startup_invariants(
+        self,
+    ) -> None:
+        ctx = Mock()
+        validation = build_backup(ctx).restore_validation_service()
+        config = validation._config
+
+        self.assertIs(configure_cipher, config.configure_cipher)
+        self.assertIs(row_factory, config.row_factory)
+        self.assertIs(database_schema_is_current, config.schema_is_current)
+        with patch.object(backup_wiring, "apply_startup_invariants") as invariants:
+            config.startup_invariants("db")
+        kwargs = invariants.call_args.kwargs
+        self.assertEqual("db", invariants.call_args.args[0])
+        self.assertIs(ctx.key_values, kwargs["key_values"])
+        self.assertEqual(json.dumps(DEFAULT_PROFILE), kwargs["default_profile_json"])
+        self.assertEqual(
+            list(PROVIDER_RESYNC_KEYS.values()), list(kwargs["provider_resync_keys"])
+        )
 
 
 if __name__ == "__main__":
