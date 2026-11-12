@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     _preview_nutrient,
@@ -26,6 +27,7 @@ from backend.coach.proposal_validation import (
     remote_write_target,
     validated_coach_action_preview_input,
 )
+from backend.coach.write_gate import garmin_effects
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import CompetitionRepository, PlanAdjustmentRepository
 from backend.errors import AppError
@@ -115,6 +117,41 @@ class CoachProposalCreationService:
                 "proposed_action": coach_action_view(dict(row)),
             }
         return result
+
+    def removes_garmin_workouts(self, tool: str, arguments: dict[str, Any]) -> bool:
+        """Whether a named remote write still asks on a card (#2342).
+
+        An explicit Garmin removal does, and so does a retry of a Garmin job
+        that removes a workout other than the orphans a send cleans up itself.
+        """
+        if tool == "push_strength_to_garmin":
+            return garmin_effects(arguments)[0]
+        if tool != "resolve_training_sync_conflict" or not arguments.get("job_id"):
+            return False
+        with self._database_manager.reader() as db:
+            row = db.execute(
+                "SELECT provider, payload FROM sync_jobs WHERE id=?",
+                (str(arguments["job_id"]),),
+            ).fetchone()
+            try:
+                payload = json.loads(row["payload"]) if row else {}
+            except TypeError, ValueError:
+                payload = {}
+            if (
+                row is None
+                or row["provider"] != ProviderId.GARMIN
+                or not isinstance(payload, dict)
+            ):
+                return False
+            orphans = {
+                item.local_id for item in find_orphans(db, self._today(), limit=None)[0]
+            }
+        return any(
+            isinstance(entry, dict)
+            and entry.get("remove") is True
+            and entry.get("library_workout_id") not in orphans
+            for entry in payload.get("entries") or []
+        )
 
     def prepare_remote_write(
         self,

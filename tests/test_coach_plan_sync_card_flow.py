@@ -762,25 +762,35 @@ class RetryByJobProviderTests(unittest.TestCase):
     def test_a_named_push_retry_runs_without_a_card_unless_it_removes_from_garmin(
         self,
     ) -> None:
-        # A retry is a named sync (#2342); a Garmin removal keeps its card.
-        for provider, removes, expected in (
-            ("intervals", False, "queued"),
-            ("garmin", False, "queued"),
-            ("garmin", True, "approval_required"),
+        # A retry is a named sync (#2342); an explicit Garmin removal keeps its
+        # card, the orphan cleanup a card-free send added does not.
+        orphan = "00000000-0000-4000-8000-0000000000ee"
+        for provider, removed, expected in (
+            ("intervals", None, "queued"),
+            ("garmin", None, "queued"),
+            ("garmin", STRENGTH_IDS[0], "approval_required"),
+            ("garmin", orphan, "queued"),
         ):
-            with self.subTest(provider=provider, removes=removes):
+            with self.subTest(provider=provider, removed=removed):
                 self.flow = wire_card_flow(self)
                 job = failed_job(self.flow, provider, "plan_push")
-                if removes:
+                if removed:
                     payload = json.loads(queued_jobs(self.flow)[0]["payload"])
                     payload["entries"][0] = {
-                        "library_workout_id": STRENGTH_IDS[0],
+                        "library_workout_id": removed,
                         "remove": True,
                     }
                     with self.flow.database.unit_of_work() as db:
                         db.execute(
                             "UPDATE sync_jobs SET payload=? WHERE id=?",
                             (json.dumps(payload), job["id"]),
+                        )
+                        # The pushed workout of a unit that no longer exists.
+                        db.execute(
+                            "INSERT INTO remote_links (entity_kind, local_id, provider,"
+                            " remote_id, sync_state) VALUES ('planned_unit', ?,"
+                            " 'garmin', 'garmin-orphan', 'synced')",
+                            (orphan,),
                         )
                 call = retry_call(
                     self.flow, job, target=provider, scope=f"{provider}_sync", push=True
@@ -789,7 +799,9 @@ class RetryByJobProviderTests(unittest.TestCase):
                 result = run_in_turn(self.flow, call)
 
                 self.assertEqual(expected, result["status"], result)
-                self.assertEqual(int(removes), card_count(self.flow))
+                self.assertEqual(
+                    int(expected == "approval_required"), card_count(self.flow)
+                )
 
     def test_a_push_retry_without_the_job_providers_sync_scope_is_denied(self) -> None:
         for provider, job_type, label in RETRIED_JOBS:
