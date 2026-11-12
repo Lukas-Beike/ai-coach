@@ -124,6 +124,7 @@ from backend.coach.turn_assembly import (
     TurnPersistence,
 )
 from backend.config import (
+    DEFAULT_ANTHROPIC_BASE_URL,
     DEFAULT_OPENAI_BASE_URL,
     load_config,
 )
@@ -2314,6 +2315,7 @@ PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
             *args, **kwargs
         ),
         default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
+        default_anthropic_base_url=DEFAULT_ANTHROPIC_BASE_URL,
         intervals_get=lambda path: PROVIDER_TRANSPORT.intervals_client().get(path),
         wahoo_status=lambda: WAHOO_CONNECTION.service().status(),
         wahoo_user=lambda: WAHOO_SYNC.client().user(),

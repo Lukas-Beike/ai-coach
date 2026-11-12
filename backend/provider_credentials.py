@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from backend.canonical.vocabulary import ProviderId
-from backend.config import Config, validated_openai_base_url
+from backend.config import Config, validated_base_url
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -56,6 +56,7 @@ PERSONAL_KEY_EXPIRES_FIELD = "garmin_personal_api_key_expires"
 SECRET_FIELDS = frozenset(
     {
         "openai_api_key",
+        "anthropic_api_key",
         "intervals_api_key",
         "garmin_personal_api_key",
         "wahoo_client_secret",
@@ -66,6 +67,7 @@ SECRET_FIELDS = frozenset(
 VISIBLE_FIELDS = frozenset(
     {
         "openai_base_url",
+        "anthropic_base_url",
         "intervals_athlete_id",
         "wahoo_client_id",
         PERSONAL_KEY_EXPIRES_FIELD,
@@ -74,9 +76,16 @@ VISIBLE_FIELDS = frozenset(
 # Reported as configured only; the address itself is not echoed back.
 MASKED_FIELDS = frozenset({"garmin_email", "yazio_email"})
 CREDENTIAL_FIELDS = SECRET_FIELDS | VISIBLE_FIELDS | MASKED_FIELDS
-# Setting one of these redirects the OpenAI key or replaces the Wahoo OAuth app,
-# so it needs the APP_PASSWORD again on top of the session.
-REAUTH_FIELDS = frozenset({"openai_base_url", "wahoo_client_id", "wahoo_client_secret"})
+# Setting one of these redirects a model provider key or replaces the Wahoo OAuth
+# app, so it needs the APP_PASSWORD again on top of the session.
+REAUTH_FIELDS = frozenset(
+    {"openai_base_url", "anthropic_base_url", "wahoo_client_id", "wahoo_client_secret"}
+)
+# Base URL fields and the setting name their validation errors refer to.
+BASE_URL_SETTINGS = {
+    "openai_base_url": "OPENAI_BASE_URL",
+    "anthropic_base_url": "ANTHROPIC_BASE_URL",
+}
 
 MAX_VALUE_LENGTH = 4096
 SOURCE_DB = "db"
@@ -138,12 +147,12 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
     for field, value in stored.items():
         if field not in CREDENTIAL_FIELDS:
             continue
-        if field == "openai_base_url":
+        if field in BASE_URL_SETTINGS:
             try:
-                value = validated_openai_base_url(value)
+                value = validated_base_url(value, BASE_URL_SETTINGS[field])
             except AppError:
                 _LOGGER.warning(
-                    "Ignoring stored OPENAI_BASE_URL that failed validation",
+                    "Ignoring stored base URL that failed validation",
                     extra={
                         "event": "provider_credential_invalid",
                         "context": {"setting": field},
@@ -187,6 +196,7 @@ def credential_status(
         "garmin_connected": garmin_source in {GARMIN_SOURCE_DB, GARMIN_SOURCE_FILE},
         "garmin_connection_source": garmin_source,
         "openai_configured": bool(effective.openai_api_key.strip()),
+        "anthropic_configured": bool(effective.anthropic_api_key.strip()),
         "intervals_configured": bool(
             effective.intervals_api_key.strip()
             and str(effective.intervals_athlete_id).strip()
@@ -224,13 +234,11 @@ def _validated_change(field: str, value: object) -> str | None:
         return None
     if len(text) > MAX_VALUE_LENGTH or any(_is_control(char) for char in text):
         raise AppError(400, f"Ungültiger Wert für {field}.")
-    if field == "openai_base_url":
+    if field in BASE_URL_SETTINGS:
         try:
-            return validated_openai_base_url(text)
+            return validated_base_url(text, BASE_URL_SETTINGS[field])
         except AppError as exc:
-            raise AppError(
-                400, "OPENAI_BASE_URL muss HTTPS oder HTTP auf Loopback verwenden."
-            ) from exc
+            raise AppError(400, exc.message) from exc
     if field == PERSONAL_KEY_EXPIRES_FIELD:
         try:
             return date.fromisoformat(text).isoformat()

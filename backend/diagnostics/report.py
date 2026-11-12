@@ -14,7 +14,7 @@ from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
-from backend.config import DEFAULT_OPENAI_BASE_URL, Config
+from backend.config import DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.canonical_backfill import (
@@ -184,6 +184,9 @@ class DiagnosticReportService:
                     # Only whether the endpoint differs from the default, never the URL.
                     "openai_base_url_custom": deps.config.openai_base_url
                     != DEFAULT_OPENAI_BASE_URL,
+                    "anthropic_configured": bool(deps.config.anthropic_api_key),
+                    "anthropic_base_url_custom": deps.config.anthropic_base_url
+                    != DEFAULT_ANTHROPIC_BASE_URL,
                     "intervals_configured": bool(deps.config.intervals_api_key),
                     "garmin_library_available": deps.garmin_client_factory.available(),
                     "garmin_configured": garmin_status.get("configured"),

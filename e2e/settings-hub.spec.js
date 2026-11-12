@@ -97,14 +97,14 @@ test("@responsive Mehr keeps its title and shows the active area and fits all si
   }
 });
 
-test("@responsive the seven connections start collapsed and name their status in words", async ({ page }) => {
+test("@responsive the eight connections start collapsed and name their status in words", async ({ page }) => {
   await openMore(page, "connections");
   const cards = page.locator(".connection-cards > details.connection-card");
-  await expect(cards.locator("summary strong")).toHaveText(["Garmin", "Wahoo", "Intervals.icu", "OpenAI", "Yazio", "Gemeinsamer Kalender", "Open-Meteo"]);
+  await expect(cards.locator("summary strong")).toHaveText(["Garmin", "Wahoo", "Intervals.icu", "OpenAI", "Claude (Anthropic)", "Yazio", "Gemeinsamer Kalender", "Open-Meteo"]);
   await expect(page.locator(".connection-card[open]")).toHaveCount(0);
   for (const card of await cards.all()) await expect(card.locator(".connection-card-body")).toBeHidden();
   const chips = cards.locator("summary .connection-chip");
-  await expect(chips).toHaveCount(7);
+  await expect(chips).toHaveCount(8);
   await expect(page.locator(".connection-cards .connection-chip:not([data-state])")).toHaveCount(0);
   for (const chip of await chips.all()) expect(["Verbunden", "Nicht eingerichtet", "Fehler", "Nicht geprüft"]).toContain((await chip.textContent()).trim());
   await expect(page.locator("#providerCredentials, #providerFreshnessTimeline, #connectionsSummary")).toHaveCount(0);
@@ -122,7 +122,7 @@ test("@responsive an open card holds only its own provider's status, access, set
   for (const selector of ["#garminSourceLines", "#freshness-garmin", "#garmin-connection-status", "#cred-garmin_personal_api_key", "#cred-garmin_personal_api_key_expires", "#garmin-metric-export", "#garminSyncButton", "[data-check-button='garmin']"]) {
     await expect(garmin.locator(selector)).toHaveCount(1);
   }
-  await expect(garmin.locator("[id*='openai'], [id*='wahoo'], [id*='intervals_'], [id*='yazio']")).toHaveCount(0);
+  await expect(garmin.locator("[id*='openai'], [id*='anthropic'], [id*='wahoo'], [id*='intervals_'], [id*='yazio']")).toHaveCount(0);
   await expect(page.locator("#connection-wahoo .connection-card-body")).toBeHidden();
   await expect(page.locator("#connection-weather a[href='https://open-meteo.com/']")).toHaveText("Open-Meteo.com");
   await expandConnections(page, ["wahoo"]);

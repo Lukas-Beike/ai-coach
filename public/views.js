@@ -520,6 +520,11 @@ function renderAiConnection(configured, status) {
   }
 }
 
+// No Claude traffic reports a status yet, so a configured key reads as not checked.
+function renderClaudeConnection(configured) {
+  setConnectionChip("#anthropicConnectionStatus", connectionKind({ configured, unchecked: true }));
+}
+
 function intervalsConnectionState(data, configured) {
   return data.intervals || {
     configured: Boolean(configured.intervals),
@@ -662,6 +667,7 @@ function renderSettings(data) {
   const configured = data.configured || {};
   const status = data.usage?.status || {};
   renderAiConnection(configured.openai, status);
+  renderClaudeConnection(Boolean(configured.anthropic));
   renderIntervalsConnection(data, configured);
   renderGarminConnection(data);
   renderWeatherConnection(data.weather || {});

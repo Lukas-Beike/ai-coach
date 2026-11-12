@@ -43,7 +43,7 @@ class ProviderConnectionPostRoutes:
         ]
 
     def _check(self, handler: Any, request: RouteRequest) -> None:
-        """Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result."""
+        """Explicitly run one bounded read-only connection check for an OpenAI, Claude, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result."""
         provider = request.params["provider"]
         checks = self._checks()
         # Drain the body first, like the other command routes.

@@ -793,11 +793,11 @@ def _preflight(args: argparse.Namespace) -> str | None:
     A loopback endpoint or the OpenAI API only; the OpenAI API needs the
     evaluation key and the model's prices, so the cost ceiling can hold.
     """
-    from backend.config import validated_openai_base_url
+    from backend.config import validated_base_url
     from backend.errors import AppError
 
     try:
-        args.base_url = validated_openai_base_url(args.base_url)
+        args.base_url = validated_base_url(args.base_url, "OPENAI_BASE_URL")
     except AppError:
         return "Base URL must be http on loopback or https."
     host = urlsplit(args.base_url).hostname

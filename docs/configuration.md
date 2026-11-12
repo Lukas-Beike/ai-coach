@@ -14,6 +14,8 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `OPENAI_API_KEY` | *None* | For the Coach | Server-side API key for the OpenAI Responses API or compatible endpoint. Can also be set in its card under **Mehr > Anbindungen**. |
 | `OPENAI_MODEL` | `gpt-6-luna` | No | Default OpenAI model deployment; selectable in Coach settings. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
+| `ANTHROPIC_API_KEY` | *None* | No | Server-side API key for the Claude API (Anthropic Messages API). Can also be set in the Claude (Anthropic) card under **Mehr > Anbindungen**. |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | No | Optional Messages-compatible API base URL without the `/v1` path (the app appends `/v1/...`), validated like `OPENAI_BASE_URL`. An empty value counts as unset. |
 | `INTERVALS_API_KEY` | *None* | No | Personal API key of Intervals.icu, the output target. Needed only to synchronize workouts, competitions, nutrition and sport settings. Can also be set in its card under **Mehr > Anbindungen**. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |

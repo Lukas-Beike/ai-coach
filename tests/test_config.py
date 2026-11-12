@@ -17,7 +17,7 @@ from backend.config import (
     local_env_defines,
     proxy_list_warning,
     security_configuration_error,
-    validated_openai_base_url,
+    validated_base_url,
 )
 from backend.errors import AppError
 
@@ -79,6 +79,7 @@ class ConfigTests(unittest.TestCase):
                 root,
                 {
                     "OPENAI_BASE_URL": "  ",
+                    "ANTHROPIC_BASE_URL": " ",
                     "OPENAI_MODEL": "",
                     "INTERVALS_ATHLETE_ID": " ",
                     "GARMINTOKENS": "",
@@ -86,6 +87,8 @@ class ConfigTests(unittest.TestCase):
             )
 
         self.assertEqual(config.openai_base_url, "https://api.openai.com/v1")
+        self.assertEqual(config.anthropic_base_url, "https://api.anthropic.com")
+        self.assertEqual(config.anthropic_api_key, "")
         # A blank model id was offered and selected in the settings (#2137).
         self.assertEqual(config.openai_model, "gpt-6-luna")
         self.assertEqual(config.intervals_athlete_id, "0")
@@ -210,15 +213,16 @@ class ConfigTests(unittest.TestCase):
 
     def test_openai_base_url_requires_https_or_loopback_http(self):
         self.assertEqual(
-            validated_openai_base_url("https://api.example.test/v1/"),
+            validated_base_url("https://api.example.test/v1/", "OPENAI_BASE_URL"),
             "https://api.example.test/v1",
         )
         self.assertEqual(
-            validated_openai_base_url("http://127.0.0.1:8080/v1"),
+            validated_base_url("http://127.0.0.1:8080/v1", "OPENAI_BASE_URL"),
             "http://127.0.0.1:8080/v1",
         )
         self.assertEqual(
-            validated_openai_base_url("http://[::1]:8080/v1"), "http://[::1]:8080/v1"
+            validated_base_url("http://[::1]:8080/v1", "OPENAI_BASE_URL"),
+            "http://[::1]:8080/v1",
         )
         for value in (
             "http://192.168.1.5/v1",
@@ -226,7 +230,12 @@ class ConfigTests(unittest.TestCase):
             "ftp://api.example.test/v1",
         ):
             with self.subTest(value=value), self.assertRaises(AppError):
-                validated_openai_base_url(value)
+                validated_base_url(value, "OPENAI_BASE_URL")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(AppError) as raised:
+                load_config(root, root, {"ANTHROPIC_BASE_URL": "http://example.test"})
+        self.assertIn("ANTHROPIC_BASE_URL", raised.exception.message)
 
     def test_import_has_no_filesystem_side_effect(self):
         with tempfile.TemporaryDirectory() as temporary:

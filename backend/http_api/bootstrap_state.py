@@ -199,6 +199,7 @@ class PublicBootstrapService:
                 },
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
+                    "anthropic": bool(deps.config.anthropic_api_key),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
                     "weather": bool(
                         deps.profile_service().get().get("weather_location")
