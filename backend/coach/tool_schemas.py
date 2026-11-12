@@ -140,7 +140,8 @@ TEMPLATE_ID_SCHEMA: dict[str, Any] = {
     "type": ["string", "null"],
     "description": (
         "Id of the training-library template (list_workout_library) this unit "
-        "comes from; required for every new unit and for a changed structure. "
+        "comes from; required for every new unit and for a changed structure; "
+        "null on a change keeps the current link. "
         "Keep its exercises or steps in order; only sets, reps, loads, durations "
         "and targets may change. No fitting template: propose one to the athlete "
         "and create it with manage_training_templates first."

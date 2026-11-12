@@ -107,10 +107,18 @@ def adaptive_recovery_replacement(
         f"Adaptive adjustment: {reason}. The original workout remains available "
         "in the local library history."
     )
+    planned = int(workout.get("duration_minutes") or 30)
     if planned_sport_environment(workout)[0] is Sport.STRENGTH:
-        # Its template stays: exercises, sets, weights and duration (#2379).
-        return {**workout, **easier_fields(workout), "rationale": rationale}
-    duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
+        # Its exercises, sets and weights stay (#2379); only a time limit
+        # (availability, [SHORT_ONLY], return stage) shortens it.
+        limits = [int(v) for v in (available_minutes, max_minutes) if v is not None]
+        return {
+            **workout,
+            **easier_fields(workout),
+            "duration_minutes": max(15, min(planned, *limits)) if limits else planned,
+            "rationale": rationale,
+        }
+    duration_limit = int(available_minutes or planned)
     duration = max(
         15,
         min(

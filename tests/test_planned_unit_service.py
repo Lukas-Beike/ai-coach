@@ -595,6 +595,12 @@ class PlannedUnitServiceTests(unittest.TestCase):
             (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
         )
         self.assertEqual(json.loads(planned[0]["payload"])["template_id"], "template-1")
+        # A null template id on a change keeps the link.
+        self.service.update(
+            str(self.id), {"template_id": None, "session_focus": "easy"}
+        )
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["template_id"], "template-1")
 
         self.service.update(str(self.id), {"name": "Anders"})
         planned, _history, _revision = self.state()

@@ -219,11 +219,13 @@ def _apply_planned_workout_update(
         "description",
         "duration_minutes",
         "target",
-        TEMPLATE_ID,
         *FOCUS_KEYS,
     ):
         if key in values:
             candidate[key] = values.get(key)
+    # Only a template id replaces the link; a null one (a move) keeps it.
+    if values.get(TEMPLATE_ID):
+        candidate[TEMPLATE_ID] = values[TEMPLATE_ID]
     # An adaptive replacement edited again is the Coach's content, which the
     # template rule checks (#2379).
     if (

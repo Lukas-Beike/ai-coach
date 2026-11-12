@@ -637,6 +637,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                         "local_id": older["id"],
                         "action": "update",
                         "date": "2026-09-12",
+                        # A move names no template; null keeps the stored link.
+                        "template_id": None,
                         "expected_payload_hash": next(
                             u["expected_payload_hash"]
                             for u in state["planned_units"]
@@ -1148,11 +1150,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Ja, diese vorgeschlagene Anpassung übernehmen.",
         )
         self.assertEqual(applied["updated"], 1)
-        # A strength unit keeps its exercises, weights and duration and only gets
-        # the light intensity (athlete decision on #2379).
+        # A strength unit keeps its exercises and weights and gets the light
+        # intensity (athlete decision on #2379); the 30 available minutes still
+        # shorten it.
         stored = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(
-            (stored["duration_minutes"], stored["strength_intensity"]), (90, "light")
+            (stored["duration_minutes"], stored["strength_intensity"]), (30, "light")
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
