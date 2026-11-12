@@ -1038,6 +1038,8 @@ h2 {
 .chip input:checked + span { border-color: var(--accent); color: var(--white); background: var(--accent); }
 .chip input:checked + span::before { content: "✓"; margin-right: 6px; }
 .chip input:focus-visible + span { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.chip input:disabled { cursor: wait; }
+.chip input:disabled + span { opacity: .55; }
 .save-bar { position: sticky; bottom: var(--composer-offset); z-index: 4; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 8px 8px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-raised); box-shadow: var(--shadow-soft); }
 .save-bar .dirty-indicator { margin: 0; font-size: .78rem; }
 .save-clean { color: var(--muted); font-size: .78rem; font-weight: 650; }

@@ -322,17 +322,38 @@ function renderGpsTracks(gps) {
   button.textContent = `GPS-Spuren löschen (${gps.stored_tracks || 0})`;
 }
 
+// #2418: the switch takes clicks only once the latest load showed the stored
+// state and no save is pending; a save renders its own confirmed result.
+let gpsTracksLoad = 0;
+let gpsTracksSaving = false;
+
 async function loadGpsTracks() {
-  try { renderGpsTracks(await api("/api/privacy/gps")); } catch (error) { toast(error.message, true); }
+  if (gpsTracksSaving) return;
+  const load = ++gpsTracksLoad;
+  const toggle = $("#gpsTracksToggle");
+  toggle.disabled = true;
+  try {
+    const gps = await api("/api/privacy/gps");
+    if (load !== gpsTracksLoad) return;
+    renderGpsTracks(gps);
+    toggle.disabled = false;
+  } catch (error) {
+    if (load === gpsTracksLoad) toast(error.message, true);
+  }
 }
 
 async function saveGpsTracks(event) {
   const toggle = event.currentTarget;
+  gpsTracksSaving = true;
+  toggle.disabled = true;
   try {
     renderGpsTracks(await api("/api/privacy/gps", { method: "POST", body: JSON.stringify({ enabled: toggle.checked }) }));
   } catch (error) {
-    toggle.checked = !toggle.checked;
+    toggle.checked = Boolean(gpsTracksState.enabled);
     toast(error.message, true);
+  } finally {
+    gpsTracksSaving = false;
+    toggle.disabled = false;
   }
 }
 
