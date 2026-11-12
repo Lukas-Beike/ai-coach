@@ -15,7 +15,9 @@ from support import temp_database
 from backend.errors import AppError
 from backend.nutrition import web_search
 from backend.nutrition.web_search import NutritionWebSearchService
+from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_requests import OpenAIResponsesClient, ResponsesClock
+from backend.providers.openai_responses_adapter import model_turn, request_payload
 
 PAGE = "https://example.test/synthetic-bar"
 NOW = datetime(2026, 11, 12, 8, 0, tzinfo=UTC)
@@ -64,15 +66,16 @@ def value(field: Any, number: Any, url: str = PAGE) -> dict[str, Any]:
 def service(result: Any) -> tuple[NutritionWebSearchService, list[dict[str, Any]]]:
     sent: list[dict[str, Any]] = []
 
-    def request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        sent.append({"path": path, **payload})
+    def complete(request: ModelRequest) -> ModelTurn:
+        # Through the real adapter: the wire payload out, the reply read back.
+        sent.append({"path": "/v1/responses", **request_payload(request)})
         if isinstance(result, Exception):
             raise result
-        return result
+        return model_turn(result)
 
     return (
         NutritionWebSearchService(
-            selected_model=lambda: "synthetic-model", openai_request=request
+            selected_model=lambda: "synthetic-model", complete=complete
         ),
         sent,
     )
@@ -126,8 +129,7 @@ def wire_search(http: _WireHttp) -> NutritionWebSearchService:
     )
     return NutritionWebSearchService(
         selected_model=lambda: "synthetic-model",
-        openai_request=client.request,
-        openai_path="/responses",
+        complete=client.complete,
     )
 
 
@@ -326,7 +328,7 @@ class NutritionWebSearchTests(unittest.TestCase):
             NutritionWebSearchService(),
             NutritionWebSearchService(selected_model=lambda: "model"),
             NutritionWebSearchService(
-                selected_model=lambda: "", openai_request=lambda *_: {}
+                selected_model=lambda: "", complete=lambda _request: ModelTurn()
             ),
         ):
             self.assertEqual(searcher.search([ROW])["status"], "unavailable")

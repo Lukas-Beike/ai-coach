@@ -15,6 +15,8 @@ from backend.providers.model_seam import ModelRequest, ModelTurn
 from backend.providers.openai_responses import response_text
 
 ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content"
+# The sources a web search read; JSON output carries no inline citations.
+WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources"
 
 
 def _data_url(mime: str, data: str) -> str:
@@ -123,6 +125,11 @@ def _one_shot_payload(request: ModelRequest) -> dict[str, Any]:
         payload["max_output_tokens"] = request.max_output_tokens
     if request.reasoning_effort:
         payload["reasoning"] = {"effort": request.reasoning_effort}
+    if request.web_search:
+        payload["tools"] = [{"type": "web_search"}]
+        payload["include"] = [WEB_SEARCH_SOURCES_INCLUDE]
+    if request.service_tier:
+        payload["service_tier"] = request.service_tier
     return payload
 
 
@@ -181,4 +188,37 @@ def model_turn(response: Any) -> ModelTurn:
         ],
         usage=usage if isinstance(usage, dict) else {},
         stop_reason=stop_reason,
+        final_text=_final_text(output),
+        sources=_sources(output),
     )
+
+
+def _final_text(output: list[dict[str, Any]]) -> str:
+    messages = [item for item in output if item.get("type") == "message"]
+    return "".join(
+        str(content.get("text") or "")
+        for content in (messages[-1].get("content") or [] if messages else [])
+        if isinstance(content, dict) and content.get("type") == "output_text"
+    )
+
+
+def _sources(output: list[dict[str, Any]]) -> list[str]:
+    """The pages a web search read and the pages the answer cites."""
+    urls: list[Any] = []
+    for item in output:
+        if item.get("type") == "web_search_call":
+            action = item.get("action")
+            found = action.get("sources") if isinstance(action, dict) else None
+            urls += [
+                source.get("url") for source in found or [] if isinstance(source, dict)
+            ]
+        elif item.get("type") == "message":
+            urls += [
+                annotation.get("url")
+                for content in item.get("content") or []
+                if isinstance(content, dict)
+                for annotation in content.get("annotations") or []
+                if isinstance(annotation, dict)
+                and annotation.get("type") == "url_citation"
+            ]
+    return [url for url in urls if isinstance(url, str)]
