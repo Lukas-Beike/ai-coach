@@ -347,5 +347,11 @@ class PublicStateAssembly:
                 activity_rows=self.activity_summary_source(),
                 zone_configurations=athlete.zones().configurations,
                 sport_thresholds=self._plan_zone_thresholds,
+                template_names=lambda: {
+                    str(item["id"]): str(item.get("name") or "")
+                    for item in planning.workout_library().list(
+                        1000, include_archived=True
+                    )
+                },
             )
         )

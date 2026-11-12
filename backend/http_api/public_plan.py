@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -50,6 +49,8 @@ class PublicPlanDependencies:
     zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
     # (db) -> the plan-zone thresholds, read inside the plan's read snapshot.
     sport_thresholds: Callable[[Any], Sequence[Observation]] = lambda _db: ()
+    # Library template names by id, for the planned units' "Vorlage" (#2379).
+    template_names: Callable[[], Mapping[str, str]] = dict
 
 
 class PublicPlanStateService:
@@ -57,6 +58,7 @@ class PublicPlanStateService:
 
     def __init__(self, dependencies: PublicPlanDependencies) -> None:
         self._planned_units = dependencies.planned_units
+        self._template_names = dependencies.template_names
         self._activity_feedback = dependencies.activity_feedback
         self._weather = dependencies.weather
         self._adaptive_followup = dependencies.adaptive_followup
@@ -149,7 +151,7 @@ class PublicPlanStateService:
 
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
         local_planned = _with_template_names(
-            db, self._planned_units.list(500, push_state=True)
+            self._template_names(), self._planned_units.list(500, push_state=True)
         )
         canonical_planned = calendar_canonical.canonical_planned_workouts(local_planned)
         activities = self._activity_rows.compact() if self._activity_rows else []
@@ -201,16 +203,8 @@ class PublicPlanStateService:
         }
 
 
-def _with_template_names(db: Any, units: list[Any]) -> list[Any]:
+def _with_template_names(names: Mapping[str, str], units: list[Any]) -> list[Any]:
     """Each unit with the name of the library template it comes from (#2379)."""
-    names = {}
-    for row in db.execute("SELECT local_id, payload FROM workout_library"):
-        try:
-            names[str(row["local_id"])] = str(
-                json.loads(row["payload"]).get("name") or ""
-            )
-        except TypeError, ValueError, AttributeError:
-            continue
     return [
         {**unit, "template_name": names[str(unit["template_id"])]}
         if isinstance(unit, dict) and names.get(str(unit.get("template_id") or ""))
