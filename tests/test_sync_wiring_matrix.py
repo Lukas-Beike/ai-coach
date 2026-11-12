@@ -397,6 +397,22 @@ class ProviderJobWiringTests(unittest.TestCase):
                 )
                 self.assertEqual(0, harness.stored_jobs())
 
+    def test_the_configured_guard_normalizes_the_provider_id(self) -> None:
+        # The check reads the normalized id (a raw " Garmin " would miss the
+        # check table), so case and spaces cannot slip past the 409.
+        for spelled, provider in ((" Garmin ", GARMIN_ID), ("WAHOO", WAHOO_ID)):
+            with self.subTest(provider=spelled):
+                harness = Harness(self, intervals_key="", garmin=False, wahoo=False)
+
+                with self.assertRaises(AppError) as caught:
+                    harness.post(spelled, "refresh", CASES[provider, "refresh"][0])
+
+                self.assertEqual(
+                    (409, "not_configured"),
+                    (caught.exception.status, caught.exception.reason),
+                )
+                self.assertEqual(0, harness.stored_jobs())
+
     def test_providers_without_a_message_are_admitted_when_others_are_not(self) -> None:
         for provider, job_type in sorted(EXPECTED_PAIRS):
             if provider in CONFIGURABLE:
