@@ -557,8 +557,13 @@ class PlannedUnitServiceTests(unittest.TestCase):
                 self.service.move(str(self.id), day, expected_hash)
             self.assertEqual(status, caught.exception.status)
         self.assertEqual(before, self.state())
+        # The unit's own day changes nothing: it stays sent and unrecorded.
+        self.service.move(str(self.id), "2026-09-21", listed["payload_hash"])
+        self.assertEqual(before, self.state())
         # Today is the earliest day; the start keeps its time of day.
-        result = self.service.move(str(self.id), "2026-09-20", listed["payload_hash"])
+        result = self.service.move(
+            str(self.id).upper(), "2026-09-20", listed["payload_hash"]
+        )
         planned, history, _revision = self.state()
         payload = json.loads(planned[0]["payload"])
         self.assertEqual("local", result["status"])
@@ -571,6 +576,11 @@ class PlannedUnitServiceTests(unittest.TestCase):
             ("local", 1), (planned[0]["sync_state"], planned[0]["sync_dirty"])
         )
         self.assertEqual("update", history[-1]["action"])
+        self.service.update(str(self.id), {"action": "archive"})
+        archived = self.service.list(include_archived=True, push_state=True)[0]
+        with self.assertRaises(AppError) as caught:
+            self.service.move(str(self.id), "2026-09-22", archived["payload_hash"])
+        self.assertEqual(404, caught.exception.status)
 
     def test_unknown_start_stays_unknown_across_date_move_and_undo(self):
         self.service.create(self.workout())

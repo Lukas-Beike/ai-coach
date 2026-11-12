@@ -665,20 +665,31 @@ class PlannedUnitService:
         It is an ordinary local edit: the calendar conflict checks apply, the
         change history records it for undo, and a unit already sent to a
         provider shows its pending sync. A unit changed since the browser read
-        it is refused.
+        it, or archived or deleted, is refused; its own day changes nothing.
         """
+        normalized_id = planned_units.planned_workout_update_request(local_id, {})[0]
         try:
-            day = LocalDate.parse(target_date, allow_datetime=False)
+            day = LocalDate.parse(target_date, allow_datetime=False).isoformat()
         except (TypeError, ValueError) as exc:
             raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
-        if day.value < self._today():
+        if day < self._today().isoformat():
             raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht geplant.")
         with self._database_manager.unit_of_work() as db:
-            _unchanged_row(db, local_id, expected_hash)
+            current = json.loads(
+                _unchanged_row(db, normalized_id, expected_hash)["payload"] or "{}"
+            )
+            if current.get("archived") or current.get("local_deleted"):
+                raise AppError(404, "Einheit nicht gefunden.")
+            if current.get("date") == day:
+                return {
+                    "status": "local",
+                    "local_id": normalized_id,
+                    "library_entry": current,
+                }
             result = self._update_in_db(
                 db,
-                local_id,
-                {"date": day.isoformat()},
+                normalized_id,
+                {"date": day},
                 skip_calendar_conflict=False,
                 bump_planning_revision=True,
             )

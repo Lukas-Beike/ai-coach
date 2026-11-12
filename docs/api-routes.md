@@ -1044,10 +1044,11 @@ unit's content hash from the read the move was made on.
 
 Response: 200 `{"status": "local", "local_id", "library_entry", "change"}`
 with the moved unit and the undo reference (`change` is missing when the
-date did not change). A unit already sent to a provider shows its pending
-sync; nothing is written remotely.
+date did not change; the unit is then left as it is). A unit already sent
+to a provider shows its pending sync; nothing is written remotely.
 
-Errors: 404 "Einheit nicht gefunden." for an unknown or deleted unit; 409
+Errors: 400 "Ungültige lokale Planungs-ID." for an id that is no UUID; 404
+"Einheit nicht gefunden." for an unknown, archived or deleted unit; 409
 `planning_revision_conflict` "Die Einheit wurde inzwischen geändert." for a
 missing or outdated `expected_payload_hash`; 400 "Das Planungsdatum muss das
 Format JJJJ-MM-TT haben."; 400 "Eine Einheit in der Vergangenheit wird nicht

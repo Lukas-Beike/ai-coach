@@ -50,10 +50,11 @@ class PlannedUnitFocusPostRoutes:
 
         Response: 200 `{"status": "local", "local_id", "library_entry", "change"}`
         with the moved unit and the undo reference (`change` is missing when the
-        date did not change). A unit already sent to a provider shows its pending
-        sync; nothing is written remotely.
+        date did not change; the unit is then left as it is). A unit already sent
+        to a provider shows its pending sync; nothing is written remotely.
 
-        Errors: 404 "Einheit nicht gefunden." for an unknown or deleted unit; 409
+        Errors: 400 "Ungültige lokale Planungs-ID." for an id that is no UUID; 404
+        "Einheit nicht gefunden." for an unknown, archived or deleted unit; 409
         `planning_revision_conflict` "Die Einheit wurde inzwischen geändert." for a
         missing or outdated `expected_payload_hash`; 400 "Das Planungsdatum muss das
         Format JJJJ-MM-TT haben."; 400 "Eine Einheit in der Vergangenheit wird nicht
@@ -69,9 +70,8 @@ class PlannedUnitFocusPostRoutes:
                 payload.get("date"),
                 payload.get("expected_payload_hash"),
             )
-        handler.send_json(
-            200, {**result, **({"change": changes[-1]} if changes else {})}
-        )
+        moved = [item for item in changes if item["entity_type"] == "planned_unit"]
+        handler.send_json(200, {**result, **({"change": moved[-1]} if moved else {})})
 
     def _exercise(self, handler: Any, request: RouteRequest) -> None:
         """Assign the Garmin catalogue exercise of one strength exercise of a unit.
