@@ -30,16 +30,11 @@ def commit(repo, name, text, subject):
     git(repo, "commit", "-q", "-m", subject)
 
 
-NOEXEC = "the temporary directory does not allow executables (noexec /tmp in the SQLCipher container)"
-
-
 def make_sonar(directory):
     directory.mkdir(parents=True)
     tool = directory / SONAR_NAME
     tool.write_text("@echo off\n" if os.name == "nt" else "#!/bin/sh\n")
     tool.chmod(0o755)
-    if not os.access(tool, os.X_OK):
-        raise unittest.SkipTest(NOEXEC)
 
 
 class BranchSyncTests(unittest.TestCase):
@@ -126,8 +121,6 @@ class BranchSyncTests(unittest.TestCase):
             "#!/bin/sh\ntouch hook-ran\n", encoding="utf-8", newline="\n"
         )
         (hooks / "pre-push").chmod(0o755)
-        if not os.access(hooks / "pre-push", os.X_OK):
-            self.skipTest(NOEXEC)
         git(self.work, "add", ".githooks")
         git(self.work, "commit", "-q", "-m", "chore: add hook")
         with mock.patch.object(branch_sync, "push_env", return_value=dict(os.environ)):

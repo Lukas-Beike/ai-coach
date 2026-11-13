@@ -43,6 +43,15 @@ def asset_ref(path):
     return ref_in(served_page("index.html"), path)
 
 
+def copy_public(target):
+    """Copy public/ writable: the image's public/ files and directory are read-only."""
+    shutil.copytree(
+        server.PUBLIC_DIR, target, dirs_exist_ok=True, copy_function=shutil.copyfile
+    )
+    for directory in [target, *(path for path in target.rglob("*") if path.is_dir())]:
+        directory.chmod(0o700)
+
+
 def frontend_source():
     return "\n".join(
         (server.PUBLIC_DIR / name).read_text(encoding="utf-8")
@@ -784,12 +793,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_cache_name_follows_cached_assets_and_ignores_the_rest(self):
         with tempfile.TemporaryDirectory() as directory:
             public = Path(directory)
-            shutil.copytree(
-                server.PUBLIC_DIR,
-                public,
-                dirs_exist_ok=True,
-                copy_function=shutil.copyfile,
-            )
+            copy_public(public)
             service = StaticAssetService(public)
 
             def stamps():
@@ -858,9 +862,7 @@ class ServerFrontendTests(ServerTestCase):
             roots = {}
             for branch, asset in (("a", "app.js"), ("b", "styles.css")):
                 roots[branch] = Path(directory) / branch
-                shutil.copytree(
-                    server.PUBLIC_DIR, roots[branch], copy_function=shutil.copyfile
-                )
+                copy_public(roots[branch])
                 with (roots[branch] / asset).open("ab") as handle:
                     handle.write(f"\n/* {branch} */\n".encode())
             for root in roots.values():
@@ -885,12 +887,7 @@ class ServerFrontendTests(ServerTestCase):
     def test_stamping_refuses_a_worker_without_its_cache_token_or_asset_files(self):
         with tempfile.TemporaryDirectory() as directory:
             public = Path(directory)
-            shutil.copytree(
-                server.PUBLIC_DIR,
-                public,
-                dirs_exist_ok=True,
-                copy_function=shutil.copyfile,
-            )
+            copy_public(public)
             worker = public / "service-worker.js"
             source = worker.read_text(encoding="utf-8")
             worker.write_text(
@@ -911,14 +908,7 @@ class ServerFrontendTests(ServerTestCase):
         # (AGENTS.md, notes) must never be served.
         with tempfile.TemporaryDirectory() as directory:
             public = Path(directory)
-            shutil.copytree(
-                server.PUBLIC_DIR,
-                public,
-                dirs_exist_ok=True,
-                copy_function=shutil.copyfile,
-            )
-            # copytree copies the directory mode, and the image's public/ is read-only.
-            public.chmod(0o700)
+            copy_public(public)
             (public / ".hidden.js").write_text("secret()", encoding="utf-8")
             (public / "notes.md").write_text("notes", encoding="utf-8")
             service = StaticAssetService(public)

@@ -271,6 +271,8 @@ class SupervisorTests(unittest.TestCase):
             "backend",
             "openspec",
             ".gitattributes",
+            ".gitignore",
+            ".dockerignore",
             ".githooks",
             "garmin-fixture.example.json",
             "requirements-graphify.in",

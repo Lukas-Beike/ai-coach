@@ -28,6 +28,7 @@ import subprocess
 import sys
 import time
 import unittest
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -343,9 +344,7 @@ def main() -> int:
     assert isinstance(result, ClassTimingResult)
     elapsed = time.perf_counter() - started
     # Environment skips (#2553) stay visible by reason, not only as a count.
-    skip_reasons: dict[str, int] = {}
-    for _test, reason in result.skipped:
-        skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    skip_reasons = Counter(reason for _test, reason in result.skipped)
     evidence.update(
         status="passed" if result.wasSuccessful() else "failed",
         tests_run=result.testsRun,
@@ -364,7 +363,7 @@ def main() -> int:
         f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
     )
     for reason, count in sorted(skip_reasons.items()):
-        print(f"  skipped {count}: {reason}")
+        print(f"  skip reason ({count}): {reason}")
     # Last, so a reader of the output's tail still sees which tests failed.
     for kind, entries in (("FAILED", result.failures), ("ERROR", result.errors)):
         for test, _trace in entries:
