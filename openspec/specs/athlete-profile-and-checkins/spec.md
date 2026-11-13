@@ -263,25 +263,27 @@ The athlete SHALL be able to read and explicitly edit local zones and thresholds
 - **THEN** the previous local state is restored and effective selection follows local authority or the applicable provider alternative when no local configuration remains.
 
 Evidence:
-- `backend/athlete/zones.py:ZoneConfigurationService.save`
+- `backend/activities/zone_settings.py`
+- `backend/athlete/zones.py:local_configuration`
 - `backend/athlete/zones.py:ZoneConfigurationService.remove`
 - `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`
-- `backend/athlete/zones.py:local_configuration`
+- `backend/athlete/zones.py:ZoneConfigurationService.save`
 - `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`
-- `backend/activities/zone_settings.py`
 - `backend/performance/threshold_staleness.py`
-- `public/settings.js::saveZones`
 - `public/settings.js::removeZones`
+- `public/settings.js::saveZones`
 - `public/settings.js::zoneWarningLine`
+- `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`
+- `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`
+- `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`
-- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`
-- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`
-- `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`
-- `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`
-- `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`
+- `tests/test_zone_settings.py`
 - `tests/zone-warnings.test.cjs`
-- `tests/test_zone_settings.py`. Backup/restore of local zones has no dedicated test.
+
+Backup/restore of local zones has no dedicated test.
 
 ### Requirement: Zones and thresholds on one page per sport
 Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen, Training, Quellen & Coach. Zonen & Schwellen SHALL show one page per sport with LT1 and LT2 on top and every zone kind of the sport below, each with its source and a "Bearbeiten" that opens the editor prefilled with the values in effect today; saving stores local values only.

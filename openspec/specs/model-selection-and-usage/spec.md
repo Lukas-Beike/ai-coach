@@ -97,25 +97,27 @@ The system SHALL send every model request to the provider of the selected model,
 - **THEN** the request fails as not configured with a safe message naming that provider and no other provider is called; the chat shows the missing key instead of accepting a message.
 
 Evidence:
-- `backend/providers/model_wiring.py:build_model_transport`
 - `backend/coach/response_transport.py:CoachResponseTransport`
 - `backend/config.py:validated_base_url`
-- `backend/providers/openai_requests.py:OpenAIResponsesClient._require_api_key`
-- `backend/providers/http.py:endpoint`
-- `backend/providers/model_seam.py:ModelRequest`
-- `backend/providers/openai_responses_adapter.py`
-- `backend/providers/claude_messages_adapter.py`
 - `backend/nutrition/photo.py:NutritionPhotoExtractionService`
 - `backend/nutrition/web_search.py:NutritionWebSearchService`
+- `backend/providers/claude_messages_adapter.py`
+- `backend/providers/http.py:endpoint`
+- `backend/providers/model_seam.py:ModelRequest`
+- `backend/providers/model_wiring.py:build_model_transport`
+- `backend/providers/openai_requests.py:OpenAIResponsesClient._require_api_key`
+- `backend/providers/openai_responses_adapter.py`
 - `public/coach.js:coachConfigured`
-- `tests/test_model_transport_wiring.py:test_openai_models_use_the_responses_adapter`
-- `tests/test_model_transport_wiring.py:test_claude_families_resolve_their_model_without_an_openai_fallback`
-- `tests/test_coach_response_transport.py`
 - `tests/test_coach_attachments.py:test_outgoing_wire_payloads_of_representative_turns_are_unchanged`
+- `tests/test_coach_response_transport.py`
+- `tests/test_model_transport_wiring.py:test_claude_families_resolve_their_model_without_an_openai_fallback`
+- `tests/test_model_transport_wiring.py:test_openai_models_use_the_responses_adapter`
 - `tests/test_nutrition_photo_extraction.py`
 - `tests/test_nutrition_web_search.py`
+- `tests/test_provider_openai.py:test_endpoint_uses_default_for_empty_base_and_rejects_unsafe_base_urls`
 - `tests/test_provider_openai.py:test_responses_client_requires_api_key`
-- `tests/test_provider_openai.py:test_endpoint_uses_default_for_empty_base_and_rejects_unsafe_base_urls`. This documents code routing, not an external provider parity probe.
+
+This documents code routing, not an external provider parity probe.
 
 ### Requirement: MU5 Durable per-turn model and reasoning identity
 The system SHALL store the selected model and thinking level with an accepted background turn and reuse those stored values when it is requested again, independently from later model-setting changes.
@@ -175,18 +177,20 @@ The system SHALL persist daily OpenAI request/input/output/total-token counters 
 - **THEN** its usage is recorded once from the final response (MU6 covers a cancelled stream); the UI exposes requests, tokens and last request rather than fabricated monetary costs.
 
 Evidence:
-- `backend/providers/usage.py:daily_summary`
-- `backend/providers/usage.py:usage_counts`
-- `backend/providers/usage.py:recorded_usage`
-- `backend/providers/state.py:ProviderStateService.record_usage`
 - `backend/providers/openai_stream.py:OpenAIStreamClient`
+- `backend/providers/state.py:ProviderStateService.record_usage`
+- `backend/providers/usage.py:daily_summary`
+- `backend/providers/usage.py:recorded_usage`
+- `backend/providers/usage.py:usage_counts`
 - `public/views.js:renderSettingsUsage`
-- `tests/test_provider_usage.py:test_daily_summary_decodes_valid_state_and_resets_stale_state`
-- `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`
-- `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`
-- `tests/test_provider_state.py:test_usage_accumulates_atomically_and_logs_only_operation_and_counts`
+- `tests/test_provider_openai.py:test_stream_client_failed_response_records_its_usage_before_raising`
 - `tests/test_provider_openai.py:test_stream_client_requires_final_response_and_records_usage_once_on_success`
-- `tests/test_provider_openai.py:test_stream_client_failed_response_records_its_usage_before_raising`. This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
+- `tests/test_provider_state.py:test_usage_accumulates_atomically_and_logs_only_operation_and_counts`
+- `tests/test_provider_usage.py:test_daily_summary_decodes_valid_state_and_resets_stale_state`
+- `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`
+- `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`
+
+This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
 
 ### Requirement: MU8 Safe provider status, error classification and bounded retries
 The system SHALL persist safe provider availability/rate-limit state, distinguish actionable protocol/authentication/quota/billing/timeout failures and keep raw provider error text out of user-facing failures and diagnostic markers.

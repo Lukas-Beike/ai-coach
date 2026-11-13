@@ -82,24 +82,26 @@ Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks 
 - **THEN** the JavaScript step prints that it was skipped and baseline entries of the ESLint tool are ignored, except under the pre-push hook (`PACECRAFT_NODE_MODULES` set), where it fails and asks for `npm ci`
 
 Evidence:
-- `tools/quality_baseline.py`
-- `tests/fixtures/quality_baseline.json`
-- `tools/eslint.sonar.config.mjs`
 - `pyproject.toml`
-- Tests: `tests/test_quality_baseline.py::CognitiveComplexityTests.test_limit_is_exclusive_at_fifteen`
+- `tests/fixtures/quality_baseline.json`
 - `tests/test_quality_baseline.py::CognitiveComplexityTests.test_existing_over_limit_function_is_baseline_debt_and_new_ones_fail`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`
+- `tests/test_quality_baseline.py::CognitiveComplexityTests.test_limit_is_exclusive_at_fifteen`
 - `tests/test_quality_baseline.py::QualityBaselineTests.test_alignment_records_only_the_pinned_tool_versions`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`
 - `tests/test_quality_baseline.py::QualityBaselineTests.test_all_source_boundaries_and_new_files_are_discovered`
 - `tests/test_quality_baseline.py::QualityBaselineTests.test_complex_function_and_nested_ternary_in_public_js_are_found`
 - `tests/test_quality_baseline.py::QualityBaselineTests.test_complexity_score_is_not_part_of_the_identity_and_nosonar_suppresses`
-- `tests/test_quality_baseline.py::QualityBaselineTests.test_skipped_eslint_ignores_its_baseline_entries`. The pre-push hook points `PACECRAFT_NODE_MODULES` at the clone because its export of `HEAD` has no `node_modules`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_skipped_eslint_ignores_its_baseline_entries`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`
+- `tools/eslint.sonar.config.mjs`
+- `tools/quality_baseline.py`
+
+The pre-push hook points `PACECRAFT_NODE_MODULES` at the clone because its export of `HEAD` has no `node_modules`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
 
 ### Requirement: Merged branch coverage has a floor
 CI SHALL combine exactly one coverage file from every Python test shard and fail when the combined branch coverage of `server` and `backend` is below `fail_under` in `pyproject.toml`. The floor SHALL equal the coverage recorded in the quality baseline, rounded down to the configured precision.
