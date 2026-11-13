@@ -1,13 +1,16 @@
 """Measure word error rate and latency of a local Whisper server per model (#2596).
 
-Run from a LAN machine against an OpenAI-compatible server such as LocalAI:
+Run from a LAN machine against an OpenAI-compatible server such as LocalAI,
+addressed like the app: `TRANSCRIPTION_BASE_URL` (HTTPS through the LAN-only
+reverse-proxy host, validated like the app's setting) and the optional
+`TRANSCRIPTION_API_KEY` come from the environment:
 
-    python scripts/measure_transcription.py --base-url http://<LAN IP>:8080 \
+    python scripts/measure_transcription.py \
         --model whisper-small-q5_1 --model whisper-large-turbo-q5_0
 
 The samples are public German read speech from Google FLEURS (dev split,
 CC BY 4.0), streamed until enough clips sit in the temp directory; never the athlete's
-recordings. An optional server key comes from TRANSCRIPTION_API_KEY. The
+recordings. The
 request matches the app's: multipart `file`, `model`, `language=de`, `prompt`. Prints a
 Markdown table for the issue.
 """
@@ -17,7 +20,6 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import ipaddress
 import json
 import os
 import re
@@ -26,11 +28,12 @@ import sys
 import tarfile
 import tempfile
 import time
-import urllib.parse
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.config import validated_base_url
+from backend.errors import AppError
 from backend.providers.audio import TRANSCRIPTION_PROMPT
 from backend.providers.http import multipart_form_data
 
@@ -58,17 +61,6 @@ def word_errors(reference: list[str], hypothesis: list[str]) -> int:
             )
         previous = current
     return previous[-1]
-
-
-def lan_base_url(value: str) -> str:
-    """Rebuild `http(s)://<private or loopback IP>:<port>/v1`; LAN servers only."""
-    parsed = urllib.parse.urlsplit(value)
-    address = ipaddress.ip_address(parsed.hostname or "")
-    if not (address.is_private or address.is_loopback):
-        raise ValueError("the server must be a private LAN or loopback IP address")
-    scheme = "https" if parsed.scheme == "https" else "http"
-    host = f"[{address}]" if address.version == 6 else str(address)
-    return f"{scheme}://{host}:{int(parsed.port or 8080)}/v1"
 
 
 def fetch_samples(count: int) -> list[tuple[Path, str]]:
@@ -175,15 +167,15 @@ def measure(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument(
-        "--base-url",
-        required=True,
-        type=lan_base_url,
-        help="http://<LAN IP>:<port>; the path is always /v1",
-    )
     parser.add_argument("--model", action="append", required=True, help="repeatable")
     parser.add_argument("--samples", type=int, default=20)
     args = parser.parse_args()
+    try:
+        base_url = validated_base_url(
+            os.environ.get("TRANSCRIPTION_BASE_URL", ""), "TRANSCRIPTION_BASE_URL"
+        )
+    except AppError as error:
+        parser.error(error.message)
     if args.samples < 1:
         parser.error("--samples must be at least 1")
     samples = fetch_samples(args.samples)
@@ -197,7 +189,7 @@ def main() -> None:
     print("| Model | Clips | WER | Median latency | p90 latency | Real-time factor |")
     print("|---|---|---|---|---|---|")
     for model in args.model:
-        print(measure(args.base_url, key, model, samples), flush=True)
+        print(measure(base_url, key, model, samples), flush=True)
 
 
 if __name__ == "__main__":
