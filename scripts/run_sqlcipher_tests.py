@@ -347,6 +347,8 @@ class Supervisor:
             "selection_mode": "modules"
             if args.module
             else ("complete" if args.suite == "all" else args.suite),
+            "suite": args.suite,
+            "modules": args.module,
             "workers": args.workers,
             "selection_status": "pending_discovery",
             "cache_state": args.cache_state,
@@ -816,6 +818,15 @@ def parse_args(argv=None):
     )
     args = parser.parse_args(argv)
     args.suite = args.suite or ("all" if args.module else "container")
+    unknown = [
+        name
+        for name in args.module
+        if not (ROOT / "tests" / f"{name.split('.')[0]}.py").is_file()
+    ]
+    if unknown:
+        parser.error(
+            f"--module needs test module names such as test_db_manager: {unknown}"
+        )
     if args.record_durations_directory and (
         args.workers != 1
         or args.suite != "all"

@@ -94,11 +94,6 @@ that need the repository checkout, Git or the Sonar CLI report environment failu
 ./tests/run_sqlcipher_tests.ps1 -Workers 1 -ResultsDirectory $env:TEMP\coach-test-results
 ```
 
-For modules that need the image's dependencies (`garminconnect`, SQLCipher),
-`python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) runs
-only those modules in the same container with the same mounts, including `docs/`
-and `openspec/`; without `--suite` it selects from every module.
-
 The serial default is preserved; `-Workers` accepts 1-4, with two as the first
 benchmark candidate. Each run owns a unique directory below
 `$env:TEMP/ai-coach-tests` (or the supplied parent), with `summary.json`, per-shard
@@ -107,6 +102,11 @@ cannot report complete success. Every class remains in one shard; all selected
 IDs must form the complete selected suite exactly once. Compare complete one- and
 two-worker runs on the same host, including the additional CPU/memory and summed
 runner time, before increasing concurrency.
+
+For modules that need the image's dependencies (`garminconnect`, SQLCipher),
+`python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) runs
+only those modules in the same container with the same mounts, including `docs/`
+and `openspec/`; without `--suite` it selects from every module.
 
 Coverage is optional. Prepare an offline wheel matching the locked dev pin and
 the image's Python/Linux architecture separately; for the default amd64 image:

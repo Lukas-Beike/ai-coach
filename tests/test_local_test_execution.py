@@ -104,6 +104,28 @@ class RunnerEvidenceTests(unittest.TestCase):
                     run_tests.parse_args()
                 self.assertEqual(path.read_text(), "existing")
 
+    def test_module_selection_loads_only_the_named_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            argv = ["runner", "--module", "test_changed_tests", "--list"]
+            with (
+                mock.patch.object(sys, "argv", [*argv, "--result-json", str(path)]),
+                mock.patch.object(
+                    run_tests, "discover_tests", side_effect=AssertionError
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(run_tests.main(), 0)
+            result = json.loads(path.read_text())
+        self.assertEqual(result["modules"], ["test_changed_tests"])
+        self.assertTrue(result["selected_ids"])
+        self.assertTrue(
+            all(
+                item.startswith("test_changed_tests.")
+                for item in result["selected_ids"]
+            )
+        )
+
     def test_empty_list_fails_with_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.json"
@@ -631,10 +653,21 @@ class SupervisorTests(unittest.TestCase):
         )
 
     def test_module_selection_reaches_every_list_and_test_command(self):
-        # Focused runs keep the mounts and the shard partition check (#2545).
-        self.owner.args.module = ["test_db_manager", "test_config"]
-        code, spawned, _summary = self.run_mocked()
+        # Focused runs keep the mounts and the shard partition check (#2545);
+        # without --suite they select from every module.
+        args = ["--results-dir", str(self.root), "--workers", "2"]
+        modules = ["--module", "test_db_manager", "--module", "test_config"]
+        self.assertEqual(local.parse_args([*args, *modules]).suite, "all")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            local.parse_args([*args, "--module", "tests/test_db_manager.py"])
+        # The mocked plans describe the container suite.
+        self.args = local.parse_args([*args, *modules, "--suite", "container"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.owner = local.Supervisor(self.args)
+        code, spawned, summary = self.run_mocked()
         self.assertEqual(code, 0)
+        self.assertEqual(summary["selection_mode"], "modules")
+        self.assertEqual(summary["modules"], ["test_db_manager", "test_config"])
         commands = [
             command for command, name in spawned if name.startswith(("list-", "test-"))
         ]
