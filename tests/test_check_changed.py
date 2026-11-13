@@ -17,9 +17,10 @@ import gh_cli
 class FakeRun:
     """Stands in for subprocess.run; `failing` names a word in the argv to fail."""
 
-    def __init__(self, failing=(), missing=()):
+    def __init__(self, failing=(), missing=(), extra=""):
         self.failing = failing
         self.missing = missing
+        self.extra = extra
         self.calls = []
 
     def __call__(self, argv, **_kwargs):
@@ -30,6 +31,7 @@ class FakeRun:
         output = (
             "FAIL: test_x (mod.Case.test_x)\n"
             + "\n".join(f"line {n}" for n in range(30))
+            + self.extra
             if failed
             else "fine"
         )
@@ -99,6 +101,19 @@ class CheckChangedTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("ok quality", out)
         self.assertNotIn("full output:", out)
+        # A cp1252 console cannot encode the Node reporter's mark (#2637): the
+        # report replaces it instead of ending in a traceback.
+        console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        runner = FakeRun(failing=("compileall",), extra="\n✖ node �")
+        with (
+            mock.patch.object(check_changed.subprocess, "run", runner),
+            mock.patch.object(check_changed, "git", fake_git(["backend/x.py"])),
+            redirect_stdout(console),
+        ):
+            code = check_changed.main([])
+        console.flush()
+        self.assertEqual(code, 1)
+        self.assertIn("? node ?", console.buffer.getvalue().decode("cp1252"))
 
     def test_node_tests_run_with_the_flag_or_when_the_diff_has_js(self):
         cases = [
