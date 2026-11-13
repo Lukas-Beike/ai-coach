@@ -202,7 +202,21 @@ The client SHALL keep history reading independent of live announcements, preserv
 - **WHEN** a Coach reply carries recorded changes, or the chat has no messages
 - **THEN** the reply shows its changes in one line with a visible "Rückgängig" action that asks for confirmation and undoes the whole turn locally (shown as "Zurückgenommen" afterwards, absent when not undoable); an empty chat shows one empty state with a "Profil ausfüllen" action that starts a normal Coach turn.
 
-Evidence: `public/coach.js::chatUserScrolledAway`, `public/coach.js::restoreChatHistoryAnchor`, `public/coach.js::renderMessageNode`, `public/coach.js::undoCoachTurn`, `public/coach.js::appendMessageChanges`, `public/coach.js::profileSetupButton`; `e2e/contracts.spec.js::a prior user message can be copied or edited as a regular draft`, `e2e/coach.spec.js::coach reload opens at the latest message and tab navigation restores the scroll position`, `e2e/coach-history-anchor.spec.js::older chat history keeps the reading position without moving focus @responsive`, `tests/coach-turn-undo.test.cjs::an undoable turn lists its changes with one undo button`, `tests/coach-turn-undo.test.cjs::a confirmed undo marks the answer as undone and reloads the local areas`, `e2e/coach-layout.spec.js::empty coach chat does not promise quick actions and keeps the composer gap @responsive`. Announcement updates are bounded by `public/coach.js::announceChatStatus` and `e2e/coach.spec.js::chat status announcements update once and keep history outside the live region @responsive`.
+Evidence:
+- `e2e/coach-history-anchor.spec.js::older chat history keeps the reading position without moving focus @responsive`
+- `e2e/coach-layout.spec.js::empty coach chat does not promise quick actions and keeps the composer gap @responsive`
+- `e2e/coach.spec.js::coach reload opens at the latest message and tab navigation restores the scroll position`
+- `e2e/contracts.spec.js::a prior user message can be copied or edited as a regular draft`
+- `public/coach.js::appendMessageChanges`
+- `public/coach.js::chatUserScrolledAway`
+- `public/coach.js::profileSetupButton`
+- `public/coach.js::renderMessageNode`
+- `public/coach.js::restoreChatHistoryAnchor`
+- `public/coach.js::undoCoachTurn`
+- `tests/coach-turn-undo.test.cjs::a confirmed undo marks the answer as undone and reloads the local areas`
+- `tests/coach-turn-undo.test.cjs::an undoable turn lists its changes with one undo button`
+
+Announcement updates are bounded by `public/coach.js::announceChatStatus` and `e2e/coach.spec.js::chat status announcements update once and keep history outside the live region @responsive`.
 
 ### Requirement: Attachments stay bound to their own editable turn
 The client SHALL accept bounded GPX, FIT, JPEG, PNG, and WebP attachments, expose their names/types and removal controls, and preserve each submitted or queued message's own attachment set. Attachment processing SHALL not silently replace another draft or session.
@@ -330,7 +344,55 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 - **WHEN** equipment is displayed or maintenance is requested
 - **THEN** each item is one collapsible card that starts collapsed on every visit and shows its name (with a Garmin source tag for Garmin-only items), one status chip, one short line (parent bike for components, distance, lifetime percent) and a slim lifetime bar; a screen reader hears the name (and the Garmin source tag), the state and the lifetime percent once, with its meaning and an exceeded target the chip does not name, because the bar is decorative and hidden from the accessibility tree; an open card shows usage, maintenance with its history, Garmin state and status conflict, and the maintenance action with its receipt and undo, which only eligible active local gear offers under the equipment domain contract; archived items appear only in a collapsed "Ausgemustert (n)" group.
 
-Evidence: `public/plan-views.js::renderPlanned`, `public/plan-views.js::plannedUnitActions`, `public/plan-views.js::plannedDiscussButton`, `public/coach.js::askCoach`, `public/plan-views.js::plannedStepList`, `public/plan-views.js::renderLibrary`, `public/analysis.js::renderAnalysisHistory`, `public/analysis.js::renderTrainingRecords`, `public/analysis.js::equipmentCard`, `public/analysis.js::equipmentState`, `public/analysis.js::recoveryReferenceLabel`, `public/analysis.js::recoveryRollingNote`, `public/components.js::createErrorState`, `public/components.js::createLoadingState`, `public/components.js::markValueMissing`, `public/analysis.js::requestAnalysisReport`, `public/analysis.js::renderRecoveryCharts`, `public/performance-view.js::renderPerformance`, `public/activity-analysis.js::renderPanel`, `public/activity-details.js::render`; `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`, `e2e/calendar-week-compact.spec.js::@responsive compact calendar week shows one week, groups repeats and keeps one conflict style`, `e2e/calendar-week-compact.spec.js::@responsive the Monat switch shows the month grid and the calendar returns to the week`, `e2e/calendar-week-compact.spec.js::@responsive Verschieben moves a planned unit to a tapped day and Rückgängig puts it back`, `e2e/calendar-week-compact.spec.js::@responsive Mit dem Coach besprechen puts the planned unit into the Coach field without sending`, `e2e/calendar-week-compact.spec.js::@responsive a planned unit lists its steps with zone and target range instead of the workout notation`, `tests/plan-views-hr-cap.test.cjs::a step range reads as a span, an open lowest or top zone, or a pace in min/km`, `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`, `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`, `e2e/activity-details.spec.js::@responsive calendar details show running step frequency and cycling cadence`, `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`, `e2e/data-states.spec.js::@responsive an empty install shows one empty card with one action per analysis tab`, `e2e/data-states.spec.js::@responsive a failed analysis read shows an error with retry instead of a permanent loading line`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/data-states.spec.js::@responsive a failed equipment read offers a retry`, `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`, `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`, `e2e/analysis-info.spec.js::@responsive steps and floors show per-day units, whole numbers and the plotted basis`, `tests/analysis-presentation.test.cjs`, `tests/plan-views-sport-label.test.cjs`, `e2e/planned-sync-button.spec.js::@responsive a week with pending units offers one sync button that queues their pushes`, `e2e/strength-garmin-blocked.spec.js::@responsive a strength unit says why it does not reach Garmin and offers the fix`, `e2e/library-wahoo-state.spec.js::@responsive a changed Wahoo library workout offers the explicit send`, `e2e/session-focus.spec.js::@responsive a planned strength unit keeps its field labels whole at phone width`, `e2e/settings-hub.spec.js::@responsive collapsible sections share one chevron and the page passes the contrast check` (axe on the equipment page). Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
+Evidence:
+- `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`
+- `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`
+- `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`
+- `e2e/activity-details.spec.js::@responsive calendar details show running step frequency and cycling cadence`
+- `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`
+- `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`
+- `e2e/analysis-info.spec.js::@responsive steps and floors show per-day units, whole numbers and the plotted basis`
+- `e2e/calendar-detail-pane.spec.js::@responsive a planned unit lists its steps with zone and target range instead of the workout notation`
+- `e2e/calendar-detail-pane.spec.js::@responsive Mit dem Coach besprechen puts the planned unit into the Coach field without sending`
+- `e2e/calendar-detail-pane.spec.js::@responsive Verschieben moves a planned unit to a tapped day and Rückgängig puts it back`
+- `e2e/calendar-week-compact.spec.js::@responsive compact calendar week shows one week, groups repeats and keeps one conflict style`
+- `e2e/calendar-week-compact.spec.js::@responsive the Monat switch shows the month grid and the calendar returns to the week`
+- `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`
+- `e2e/data-states.spec.js::@responsive a failed analysis read shows an error with retry instead of a permanent loading line`
+- `e2e/data-states.spec.js::@responsive a failed equipment read offers a retry`
+- `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`
+- `e2e/data-states.spec.js::@responsive an empty install shows one empty card with one action per analysis tab`
+- `e2e/library-wahoo-state.spec.js::@responsive a changed Wahoo library workout offers the explicit send`
+- `e2e/planned-sync-button.spec.js::@responsive a week with pending units offers one sync button that queues their pushes`
+- `e2e/session-focus.spec.js::@responsive a planned strength unit keeps its field labels whole at phone width`
+- `e2e/settings-hub.spec.js::@responsive collapsible sections share one chevron and the page passes the contrast check` (axe on the equipment page)
+- `e2e/strength-garmin-blocked.spec.js::@responsive a strength unit says why it does not reach Garmin and offers the fix`
+- `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`
+- `public/activity-analysis.js::renderPanel`
+- `public/activity-details.js::render`
+- `public/analysis.js::equipmentCard`
+- `public/analysis.js::equipmentState`
+- `public/analysis.js::recoveryReferenceLabel`
+- `public/analysis.js::recoveryRollingNote`
+- `public/analysis.js::renderAnalysisHistory`
+- `public/analysis.js::renderRecoveryCharts`
+- `public/analysis.js::renderTrainingRecords`
+- `public/analysis.js::requestAnalysisReport`
+- `public/coach.js::askCoach`
+- `public/components.js::createErrorState`
+- `public/components.js::createLoadingState`
+- `public/components.js::markValueMissing`
+- `public/performance-view.js::renderPerformance`
+- `public/plan-views.js::plannedDiscussButton`
+- `public/plan-views.js::plannedStepList`
+- `public/plan-views.js::plannedUnitActions`
+- `public/plan-views.js::renderLibrary`
+- `public/plan-views.js::renderPlanned`
+- `tests/analysis-presentation.test.cjs`
+- `tests/plan-views-hr-cap.test.cjs::a step range reads as a span, an open lowest or top zone, or a pace in min/km`
+- `tests/plan-views-sport-label.test.cjs`
+
+Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
 
 ### Requirement: Action reviews distinguish known rejection from unknown outcome
 The client SHALL offer confirmation only for current confirmable proposals, preserve pending/failed/completed receipt states, and keep an action locked when its execution outcome cannot be confirmed. Reconciliation SHALL determine whether retry is safe rather than automatically repeating an uncertain write.
@@ -410,7 +472,22 @@ The calendar card of a completed session SHALL carry its single-session analysis
 - **WHEN** the athlete pages back to a week before the configured weeks back and before the loaded sessions
 - **THEN** the calendar loads the older completed sessions page by page from the session list, newest first, adds only sessions older than the loaded ones, and shows them with Details and Feedback like any other session.
 
-Evidence: `public/plan-views.js::plannedActivityActions`, `public/plan-views.js::appendPlannedZoneTime`, `public/plan-views.js::loadOlderSessions`, `public/activity-analysis.js::loadPanel`, `public/navigation.js::routeFromHash`, `backend/activities/detail_contract.py:activity_detail_contract`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService`; `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`, `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`, `e2e/activity-details.spec.js::@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar`, `e2e/activity-details.spec.js::@responsive the calendar pages back past the loaded weeks and loads older sessions`, `e2e/ux-polish.spec.js::a session's calendar details keep a flat series as a line on a real axis @responsive`, `tests/test_activity_detail_contract.py:StreamTests.test_streams_are_downsampled_with_aligned_equal_length_channels`, `tests/test_coach_activity_read_tools.py:test_activity_detail_exposes_the_session_bundle_for_corrections`, `e2e/calendar-week-compact.spec.js::@responsive an opened completed session shows its time in zones as one bar with the source`.
+Evidence:
+- `backend/activities/detail_contract.py:activity_detail_contract`
+- `backend/coach/activity_read_tools.py:CoachActivityReadToolService`
+- `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`
+- `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`
+- `e2e/activity-details.spec.js::@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar`
+- `e2e/activity-details.spec.js::@responsive the calendar pages back past the loaded weeks and loads older sessions`
+- `e2e/calendar-detail-pane.spec.js::@responsive an opened completed session shows its time in zones as one bar with the source`
+- `e2e/ux-polish.spec.js::a session's calendar details keep a flat series as a line on a real axis @responsive`
+- `public/activity-analysis.js::loadPanel`
+- `public/navigation.js::routeFromHash`
+- `public/plan-views.js::appendPlannedZoneTime`
+- `public/plan-views.js::loadOlderSessions`
+- `public/plan-views.js::plannedActivityActions`
+- `tests/test_activity_detail_contract.py:StreamTests.test_streams_are_downsampled_with_aligned_equal_length_channels`
+- `tests/test_coach_activity_read_tools.py:test_activity_detail_exposes_the_session_bundle_for_corrections`
 
 ### Requirement: Analyse is split by sport
 The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholung in this order, without a Leistung segment. Laufen and Radfahren SHALL each show only their sport's current values, best efforts, development charts and estimates; Belastung and Erholung SHALL stay sport-independent. Every value and chart of the former Leistung segment SHALL appear in exactly one segment, and an old Leistung link SHALL open Laufen.

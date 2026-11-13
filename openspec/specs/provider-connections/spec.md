@@ -168,7 +168,30 @@ The system SHALL read the Garmin families the official Personal API serves throu
 
 Detailed contract (transport): the key is exchanged with `Authorization: ApiKey <key>` for a bearer token that is kept in memory until 600 seconds before its own expiry claim (else 24 hours) and exchanged once more after a 401. A request times out after 45 seconds and an answer above 10 MB is refused; an activity file may reach 50 MB and is a bare FIT file or the first `.fit` member of a zip, and a 404 or another format means no file. Activity lists come in pages of 20 and at most 500 pages, and sleep, daily-summary and Body Battery ranges in requests of at most 31 days. The method table belongs to the provider endpoint reference.
 
-Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:GarminPersonalClient`, `backend/providers/garmin_personal.py:fit_from_archive`, `backend/sync/garmin_service.py:_verify_personal_key`, `backend/sync/garmin_service.py:GarminRemoteReader.personal_client`, `backend/sync/garmin.py:GarminSyncStateService.sdk_threshold_failure`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/sync/garmin_personal_status.py:personal_key_state`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`, `backend/sync/garmin_projection_service.py:GarminProjectionService._personal_api_state`, `backend/provider_credentials.py`; `tests/test_garmin_personal_key_status.py:test_state_follows_the_entered_expiry_date`, `tests/test_garmin_personal_key_status.py:test_a_rejected_key_wins_over_every_expiry_state`, `tests/test_garmin_personal_key_status.py:test_unreachable_personal_api_is_not_a_rejection`, `tests/test_garmin_personal_key_status.py:test_saving_or_removing_the_key_clears_its_expiry`, `tests/test_garmin_personal_only_batches.py:test_two_personal_only_jobs_exchange_the_key_once`, `tests/test_garmin_personal_transport.py:test_ranges_are_split_into_the_personal_api_day_limits`, `tests/test_garmin_personal_transport.py:test_bare_fit_is_accepted_and_other_archives_are_rejected`, `tests/test_sync_garmin.py:test_sdk_threshold_failure_counts_syncs_in_a_row`, `tests/test_sync_garmin.py:test_skipped_sdk_login_freezes_thresholds_at_once`, `tests/test_garmin_personal_transport.py:test_personal_key_alone_syncs_every_personal_family_without_errors`, `tests/test_garmin_personal_transport.py:test_failed_sdk_login_keeps_the_personal_families`, `tests/test_garmin_personal_transport.py:test_pending_mfa_keeps_the_personal_families`.
+Evidence:
+- `backend/provider_credentials.py`
+- `backend/providers/garmin_personal.py:fit_from_archive`
+- `backend/providers/garmin_personal.py:GarminPersonalClient`
+- `backend/providers/garmin_personal.py:GarminTransportClient`
+- `backend/providers/garmin_personal.py:PERSONAL_METHODS`
+- `backend/sync/garmin.py:GarminSyncStateService.sdk_threshold_failure`
+- `backend/sync/garmin_personal_status.py:personal_key_state`
+- `backend/sync/garmin_projection_service.py:GarminProjectionService._personal_api_state`
+- `backend/sync/garmin_service.py:_verify_personal_key`
+- `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`
+- `backend/sync/garmin_service.py:GarminRemoteReader.personal_client`
+- `tests/test_garmin_personal_key_status.py:test_a_rejected_key_wins_over_every_expiry_state`
+- `tests/test_garmin_personal_key_status.py:test_saving_or_removing_the_key_clears_its_expiry`
+- `tests/test_garmin_personal_key_status.py:test_state_follows_the_entered_expiry_date`
+- `tests/test_garmin_personal_key_status.py:test_unreachable_personal_api_is_not_a_rejection`
+- `tests/test_garmin_personal_only_batches.py:test_two_personal_only_jobs_exchange_the_key_once`
+- `tests/test_garmin_personal_transport.py:test_bare_fit_is_accepted_and_other_archives_are_rejected`
+- `tests/test_garmin_personal_transport.py:test_failed_sdk_login_keeps_the_personal_families`
+- `tests/test_garmin_personal_transport.py:test_pending_mfa_keeps_the_personal_families`
+- `tests/test_garmin_personal_transport.py:test_personal_key_alone_syncs_every_personal_family_without_errors`
+- `tests/test_garmin_personal_transport.py:test_ranges_are_split_into_the_personal_api_day_limits`
+- `tests/test_sync_garmin.py:test_sdk_threshold_failure_counts_syncs_in_a_row`
+- `tests/test_sync_garmin.py:test_skipped_sdk_login_freezes_thresholds_at_once`
 
 ### Requirement: Wahoo authorization state and callback
 The system SHALL initiate Wahoo OAuth only through an authenticated, CSRF-protected action, require a credential-free HTTPS redirect URI without a fragment, and persist only a digest of one pending authorization state with a ten-minute expiry. The cross-site callback SHALL use that single-use state instead of requiring a session cookie, exchange a bounded code only after state validation, and redirect to fixed connected/error targets without echoing callback values.
@@ -284,7 +307,26 @@ The system SHALL export metrics only to a capable target and only automatically;
 - **WHEN** a local zone change or a finished Wahoo refresh asks for the automatic export
 - **THEN** one run starts 5 seconds later off the request thread, a request during a run causes exactly one more run, and the status line "Intervals.icu: <n> Werte gesendet, <n> Konflikte, <n> fehlgeschlagen." is stored.
 
-Evidence: `backend/sync/metric_export.py:MetricExportService.configure_automatic`, `backend/sync/metric_export.py:MetricExportService._candidates`, `backend/sync/intervals_metric_export.py:_remote_number`, `backend/sync/metric_export_runner.py:MetricExportRunner.request`, `backend/sync/metric_export.py:MetricExportService.sync_automatic`, `backend/sync/metric_export_consent.py:enabled_fields`, `backend/performance/canonical_current.py:read_export_thresholds`, `backend/sync/metric_export_runner.py:MetricExportRunner`, `backend/sync/garmin_service.py:GarminSyncService._execute`; `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`, `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`, `tests/test_metric_export.py:test_new_consent_starts_with_heart_rate_and_pace_thresholds_only`, `tests/test_metric_export.py:test_a_target_side_threshold_change_is_overwritten_after_restart`, `tests/test_metric_export.py:test_heart_rate_thresholds_recalculate_target_zones`, `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`, `tests/test_current_thresholds.py:test_local_then_garmin_then_wahoo_and_never_intervals`, `tests/test_metric_export_runner.py`, `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`, `tests/metric-export.test.cjs`.
+Evidence:
+- `backend/performance/canonical_current.py:read_export_thresholds`
+- `backend/sync/garmin_service.py:GarminSyncService._execute`
+- `backend/sync/intervals_metric_export.py:_remote_number`
+- `backend/sync/metric_export.py:MetricExportService._candidates`
+- `backend/sync/metric_export.py:MetricExportService.configure_automatic`
+- `backend/sync/metric_export.py:MetricExportService.sync_automatic`
+- `backend/sync/metric_export_consent.py:enabled_fields`
+- `backend/sync/metric_export_runner.py:MetricExportRunner.request`
+- `backend/sync/metric_export_runner.py:MetricExportRunner`
+- `tests/metric-export.test.cjs`
+- `tests/test_current_thresholds.py:test_local_then_garmin_then_wahoo_and_never_intervals`
+- `tests/test_metric_export.py:test_a_target_side_threshold_change_is_overwritten_after_restart`
+- `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`
+- `tests/test_metric_export.py:test_heart_rate_thresholds_recalculate_target_zones`
+- `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`
+- `tests/test_metric_export.py:test_new_consent_starts_with_heart_rate_and_pace_thresholds_only`
+- `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`
+- `tests/test_metric_export_runner.py`
+- `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`
 
 ### Requirement: Explicit Wahoo library-plan export
 The system SHALL export local library workouts to Wahoo only through an explicit Wahoo `plan_push` request with expected payload hashes. It SHALL serialize supported workouts before remote writes, retain Wahoo links separately from Intervals slots, verify readback, and reuse the existing remote plan or matching coach external identity on repeat export. It SHALL refuse Wahoo calendar scheduling and repair operations.
@@ -401,7 +443,21 @@ The system SHALL offer an explicit read-only connection check on the OpenAI, Int
 
 Detailed contract: the route answers and the twelve statuses are the contract of `docs/api-routes.md`; results live in memory and are bound to a fingerprint of the effective credentials (Garmin: connection, login digest and key; Wahoo: client id, secret and connection time).
 
-Evidence: `backend/providers/connection_checks.py:ProviderConnectionChecks`, `backend/providers/connection_checks.py:classify_failure`, `backend/sync/garmin_assembly.py:GarminAssembly.check_stored_login`, `tests/test_provider_connection_checks.py:test_model_provider_listing_failures_are_classified`, `tests/test_provider_connection_checks.py:test_other_provider_404_is_a_misconfiguration_not_unsupported`, `tests/test_provider_connection_checks.py:test_unknown_intervals_athlete_is_a_misconfiguration`, `tests/test_provider_connection_checks.py:test_a_check_past_its_deadline_reports_checking_and_still_stores_its_result`, `tests/test_provider_connection_checks.py:test_running_resync_reports_busy_and_skips_the_login`, `tests/test_provider_connection_checks.py:test_local_failure_is_not_reported_as_a_provider_outage_and_not_stored`, `tests/test_provider_connection_checks.py:test_restore_during_the_check_is_not_stored_as_verified`, `backend/providers/connection_check_probes.py:build_probes`, `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`; `tests/test_provider_connection_checks.py`, `tests/provider-connections.test.cjs`.
+Evidence:
+- `backend/providers/connection_check_probes.py:build_probes`
+- `backend/providers/connection_checks.py:classify_failure`
+- `backend/providers/connection_checks.py:ProviderConnectionChecks`
+- `backend/sync/garmin_assembly.py:GarminAssembly.check_stored_login`
+- `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`
+- `tests/provider-connections.test.cjs`
+- `tests/test_provider_connection_checks.py:test_a_check_past_its_deadline_reports_checking_and_still_stores_its_result`
+- `tests/test_provider_connection_checks.py:test_local_failure_is_not_reported_as_a_provider_outage_and_not_stored`
+- `tests/test_provider_connection_checks.py:test_model_provider_listing_failures_are_classified`
+- `tests/test_provider_connection_checks.py:test_other_provider_404_is_a_misconfiguration_not_unsupported`
+- `tests/test_provider_connection_checks.py:test_restore_during_the_check_is_not_stored_as_verified`
+- `tests/test_provider_connection_checks.py:test_running_resync_reports_busy_and_skips_the_login`
+- `tests/test_provider_connection_checks.py:test_unknown_intervals_athlete_is_a_misconfiguration`
+- `tests/test_provider_connection_checks.py`
 
 ### Requirement: Yazio connection status and explicit check
 The system SHALL present Yazio on the connections screen, distinguish missing configuration, an unchecked configuration, a successful check, and a safely classified failure, and provide an explicit authenticated connection check. Status SHALL describe the last check rather than promise current availability.

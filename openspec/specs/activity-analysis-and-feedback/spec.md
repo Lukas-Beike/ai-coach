@@ -112,7 +112,20 @@ The system SHALL read local details without implicit provider refresh, serve onl
 
 Detailed contract: A session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the canonical activity records and the local session metrics (card M8); no provider summary row is read. Analysis aggregation for reports and calendar profiles SHALL read only version-3 canonical analysis rows of live sessions, keyed by session id, except the best-effort curve, which reads full-resolution canonical stream sets; Intervals.icu-path rows and kv records are never read. The recorded profile colors power by the FTP and heart rate by the threshold HR resolved locally (local, Garmin, Wahoo) for the session day. Existing target snapshots, also those kept under a session merged into another, carry over unchanged; a session without one freezes its matched planned targets at its first computation when it started within the last seven days, and a legacy kv copy hands its frozen targets to a canonical row without one. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
 
-Evidence: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/canonical_detail.py:CanonicalDetailReader.read`, `backend/activities/stream_zones.py:with_stream_zones`; `tests/test_stream_zones.py`, `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`, `tests/test_canonical_detail_reader.py:test_intervals_detail_and_decoupling_are_never_analysis_inputs`, `tests/test_session_analysis_stage.py`. `tests/test_canonical_detail_reader.py:test_intervals_copies_are_never_served`, `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_keeps_the_streams`, `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`, `tests/test_characterization_activity_reads.py:test_intervals_detail_is_never_served`. `tests/test_activity_read_service.py:test_detail_reads_no_provider_summary_row_without_snapshot_activities`, `tests/test_activity_read_service.py:test_detail_service_requires_a_canonical_source`.
+Evidence:
+- `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`
+- `backend/performance/report_service.py:TrainingRecordsService.observations`
+- `backend/performance/canonical_detail.py:CanonicalDetailReader.read`
+- `backend/activities/stream_zones.py:with_stream_zones`
+- `tests/test_stream_zones.py`
+- `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`
+- `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`
+- `tests/test_canonical_detail_reader.py:test_intervals_detail_and_decoupling_are_never_analysis_inputs`
+- `tests/test_session_analysis_stage.py`. `tests/test_canonical_detail_reader.py:test_intervals_copies_are_never_served`
+- `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_keeps_the_streams`
+- `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`
+- `tests/test_characterization_activity_reads.py:test_intervals_detail_is_never_served`. `tests/test_activity_read_service.py:test_detail_reads_no_provider_summary_row_without_snapshot_activities`
+- `tests/test_activity_read_service.py:test_detail_service_requires_a_canonical_source`.
 
 ### Requirement: Descriptive session execution
 The system SHALL describe how one run or ride was executed from its own merged streams and laps, without a plan match, norms or other sessions: structure, work laps, recoveries, warm-up, cool-down, halves of a continuous main part, and sensor-quality flags. Other sports are not applicable.
@@ -434,4 +447,23 @@ A completed strength session SHALL be shown and counted with its total (elapsed)
 - **WHEN** the Analyse training time, the day's carbohydrate range or the Coach reads a completed strength session
 - **THEN** the training time, the carbohydrate range, the plan compliance and plan matching and the Coach's weekly strength volume count its total time, the Coach's compact session row names `elapsed_duration_s` instead of `moving_duration_s`, and the session tools tell the Coach that a strength session's duration is its total time and its moving time is additional information; session-RPE load keeps its elapsed minutes for every sport.
 
-Evidence: `public/format.js::sessionSeconds`, `public/plan-views.js::plannedEntryDurationLabel`, `public/activity-analysis.js::overview`, `backend/canonical/activity_summary.py:summary_leading_duration_s`, `backend/performance/chart_history.py:_training_time_history`, `backend/nutrition/macro_ranges.py:_session_totals`, `backend/coach/context.py:compact_coach_activity`, `backend/coach/tool_schemas.py:build_structured_tool_schemas`, `backend/activities/calendar_projection.py:workout_compliance`, `backend/activities/matching.py:_duration_gap`, `backend/performance/progress_report.py:_bucket`; `e2e/activity-details.spec.js::@responsive a strength session leads with its total time, a run keeps its moving time`, `tests/format.test.cjs::a completed session's duration leads with the total time for strength only`, `tests/test_performance_chart_history.py:test_training_time_counts_strength_with_its_total_time`, `tests/test_nutrition_macro_ranges.py:test_strength_counts_its_total_time_and_other_sports_their_moving_time`, `tests/test_coach_activity_summary_parity.py:test_a_strength_row_names_its_total_time_and_a_run_its_moving_time`, `tests/test_coach_tool_schemas.py:test_session_tools_name_the_total_time_as_a_strength_duration`, `tests/test_activity_calendar_projection.py:test_duration_and_unavailable_fallbacks`, `tests/test_weekly_progress.py:test_weekly_aggregation_per_sport_and_intensity_mapping`.
+Evidence:
+- `backend/activities/calendar_projection.py:workout_compliance`
+- `backend/activities/matching.py:_duration_gap`
+- `backend/canonical/activity_summary.py:summary_leading_duration_s`
+- `backend/coach/context.py:compact_coach_activity`
+- `backend/coach/tool_schemas.py:build_structured_tool_schemas`
+- `backend/nutrition/macro_ranges.py:_session_totals`
+- `backend/performance/chart_history.py:_training_time_history`
+- `backend/performance/progress_report.py:_bucket`
+- `e2e/activity-details.spec.js::@responsive a strength session leads with its total time, a run keeps its moving time`
+- `public/activity-analysis.js::overview`
+- `public/format.js::sessionSeconds`
+- `public/plan-views.js::plannedEntryDurationLabel`
+- `tests/format.test.cjs::a completed session's duration leads with the total time for strength only`
+- `tests/test_activity_calendar_projection.py:test_duration_and_unavailable_fallbacks`
+- `tests/test_coach_activity_summary_parity.py:test_a_strength_row_names_its_total_time_and_a_run_its_moving_time`
+- `tests/test_coach_tool_schemas.py:test_session_tools_name_the_total_time_as_a_strength_duration`
+- `tests/test_nutrition_macro_ranges.py:test_strength_counts_its_total_time_and_other_sports_their_moving_time`
+- `tests/test_performance_chart_history.py:test_training_time_counts_strength_with_its_total_time`
+- `tests/test_weekly_progress.py:test_weekly_aggregation_per_sport_and_intensity_mapping`

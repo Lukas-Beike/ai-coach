@@ -117,7 +117,37 @@ The system SHALL require the athlete's named sync request for the step's own pro
 - **WHEN** the athlete's own message names Garmin or the watch with a transfer verb, or accepts the directly preceding Garmin offer
 - **THEN** `push_strength_to_garmin` queues the selected strength or run units with target `garmin` and scope `garmin_sync` without a card, each bound to its stored payload hash; a call with an explicit removal entry, or a retry of a Garmin job that has one, asks on a card, and only its approval queues that job. A refusal blocks the Garmin wording of the whole message as it does for Intervals.icu. Intervals.icu wording never grants it, a Garmin push or removal request never grants an Intervals.icu write, an upload entry needs the athlete's own push wording and a removal entry the athlete's own Garmin removal wording (no classifier is asked).
 
-Evidence: `backend/coach/write_gate.py:remote_requested`, `backend/coach/write_gate.py:build_turn_authority`, `backend/coach/write_gate.py:check_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/proposal_creation.py:CoachProposalCreationService.prepare_remote_write`, `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`, `backend/coach/proposal_creation.py:remote_removal_lines`; `tests/test_coach_plan_sync_card_flow.py:test_a_named_sync_queues_the_same_job_without_a_card`, `tests/test_coach_plan_sync_card_flow.py:test_an_explicit_garmin_removal_still_asks_on_a_card`, `tests/test_coach_plan_sync_card_flow.py:test_without_a_card_the_request_scope_bounds_the_units`, `tests/test_coach_plan_sync_card_flow.py:test_a_named_push_retry_runs_without_a_card_unless_it_removes_from_garmin`, `tests/test_coach_tool_execution_service.py:test_a_named_illness_sync_runs_the_bound_payload_with_accepted_findings`, `tests/test_coach_change_receipts.py:test_a_card_free_sync_lists_its_remote_removals_without_turn_undo`; `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`, `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`, `tests/test_coach_write_gate.py:test_negation_covers_its_sentence_up_to_a_contrast_word`, `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`, `tests/test_coach_write_gate.py:GarminTierTests`; `backend/coach/write_gate.py:requested_providers`, `backend/coach/write_gate.py:garmin_removal_requested`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`; `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`; `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`; `backend/coach/write_gate.py:is_bare_affirmation`, `backend/coach/write_gate.py:is_contextual_affirmation`; `tests/test_coach_write_gate.py:test_without_negates_only_a_phrase_that_names_the_sync`, `tests/test_coach_write_gate.py:test_contextual_affirmation_accepts_a_detailed_yes_to_a_sync_offer`, `tests/test_coach_write_gate.py:test_pending_origin_carries_a_sync_request`.
+Evidence:
+- `backend/coach/proposal_creation.py:_approved_garmin_arguments`
+- `backend/coach/proposal_creation.py:CoachProposalCreationService.create_remote_write`
+- `backend/coach/proposal_creation.py:CoachProposalCreationService.prepare_remote_write`
+- `backend/coach/proposal_creation.py:remote_removal_lines`
+- `backend/coach/sync_tools.py:CoachSyncToolService._push_strength_to_garmin`
+- `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`
+- `backend/coach/write_gate.py:build_turn_authority`
+- `backend/coach/write_gate.py:check_write`
+- `backend/coach/write_gate.py:garmin_removal_requested`
+- `backend/coach/write_gate.py:is_bare_affirmation`
+- `backend/coach/write_gate.py:is_contextual_affirmation`
+- `backend/coach/write_gate.py:remote_requested`
+- `backend/coach/write_gate.py:requested_providers`
+- `tests/test_coach_change_receipts.py:test_a_card_free_sync_lists_its_remote_removals_without_turn_undo`
+- `tests/test_coach_plan_sync_card_flow.py:test_a_named_push_retry_runs_without_a_card_unless_it_removes_from_garmin`
+- `tests/test_coach_plan_sync_card_flow.py:test_a_named_sync_queues_the_same_job_without_a_card`
+- `tests/test_coach_plan_sync_card_flow.py:test_an_explicit_garmin_removal_still_asks_on_a_card`
+- `tests/test_coach_plan_sync_card_flow.py:test_without_a_card_the_request_scope_bounds_the_units`
+- `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`
+- `tests/test_coach_tool_coverage.py:test_competition_lifecycle_syncs_only_after_explicit_followup`
+- `tests/test_coach_tool_coverage.py:test_garmin_strength_push_is_bound_to_the_stored_units`
+- `tests/test_coach_tool_execution_service.py:test_a_named_illness_sync_runs_the_bound_payload_with_accepted_findings`
+- `tests/test_coach_write_gate.py:GarminTierTests`
+- `tests/test_coach_write_gate.py:test_contextual_affirmation_accepts_a_detailed_yes_to_a_sync_offer`
+- `tests/test_coach_write_gate.py:test_named_sync_requests_allow_remote_tools_without_the_classifier`
+- `tests/test_coach_write_gate.py:test_negation_covers_its_sentence_up_to_a_contrast_word`
+- `tests/test_coach_write_gate.py:test_pending_origin_carries_a_sync_request`
+- `tests/test_coach_write_gate.py:test_the_classifier_never_grants_the_illness_sync_to_intervals`
+- `tests/test_coach_write_gate.py:test_unnamed_negated_or_asked_syncs_are_denied`
+- `tests/test_coach_write_gate.py:test_without_negates_only_a_phrase_that_names_the_sync`
 
 ### Requirement: CA6 Session-bound immutable approval contents
 The system SHALL bind a proposal to its session, bounded lifetime and stored payload identity, reject a supplied mismatching payload hash, consume its approval token once, and validate original athlete provenance and frozen remote selections before dispatch.
@@ -150,7 +180,28 @@ The system SHALL bind a proposal to its session, bounded lifetime and stored pay
 - **WHEN** open proposals are listed or a new one is written
 - **THEN** the chat history lists at most 30 unexpired `preview` or `ready` proposals of the session, newest first, and a turn receipt shows an expired open one as expired; expired rows are deleted only when the next proposal is written, and a chat reset cancels the open remote and local write proposals
 
-Evidence: `backend/coach/proposal_models.py:COACH_ACTION_TTL_SECONDS`, `backend/coach/proposal_models.py:coach_action_view`, `backend/coach/proposal_read.py:CoachProposalConfirmationService`, `backend/coach/proposal_creation.py:CoachProposalCreationService.create`, `backend/coach/conversation.py:CoachConversationResetService._reset_local`; `tests/test_coach_proposal_confirmation.py:test_reconfirm_rotates_unused_token`, `tests/test_coach_proposal_confirmation.py:test_ttl_boundary_is_expired_and_does_not_mutate`, `tests/test_coach_proposal_read_service.py:test_returns_newest_30_and_never_exposes_payload_or_action_token`; `backend/coach/proposal_execution.py:CoachProposalExecutionService._load_ready_action`, `backend/coach/proposal_execution.py:CoachProposalExecutionService._consume_action`, `backend/coach/proposal_execution.py:CoachProposalExecutionService._validate_remote_write_provenance`; `backend/coach/proposal_creation.py:_approved_remote_arguments`, `backend/coach/proposal_creation.py:_card_authorized_intent`; `tests/test_coach_plan_sync_card_flow.py:ApprovedCardAuthorizesItsUnitsTests`; `tests/test_coach_proposal_execution.py:test_foreign_session_wrong_hash_and_expiry_cannot_consume_or_dispatch`, `tests/test_coach_proposal_execution.py:test_competing_execution_dispatches_only_once`; `public/coach.js:reconcileCoachActionProposal`; `tests/frontend-write-safety.test.cjs:a lost execute response keeps the action locked and is not reported as a failed confirmation`, `tests/frontend-write-safety.test.cjs:reconcile re-enables a proposal the server still reports as confirmable`; `tests/test_coach_tool_coverage.py:test_all_pending_sync_binds_the_units_pending_at_the_request`; `tests/test_coach_dialogue.py:test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job`.
+Evidence:
+- `backend/coach/conversation.py:CoachConversationResetService._reset_local`
+- `backend/coach/proposal_creation.py:_approved_remote_arguments`
+- `backend/coach/proposal_creation.py:_card_authorized_intent`
+- `backend/coach/proposal_creation.py:CoachProposalCreationService.create`
+- `backend/coach/proposal_execution.py:CoachProposalExecutionService._consume_action`
+- `backend/coach/proposal_execution.py:CoachProposalExecutionService._load_ready_action`
+- `backend/coach/proposal_execution.py:CoachProposalExecutionService._validate_remote_write_provenance`
+- `backend/coach/proposal_models.py:COACH_ACTION_TTL_SECONDS`
+- `backend/coach/proposal_models.py:coach_action_view`
+- `backend/coach/proposal_read.py:CoachProposalConfirmationService`
+- `public/coach.js:reconcileCoachActionProposal`
+- `tests/frontend-write-safety.test.cjs:a lost execute response keeps the action locked and is not reported as a failed confirmation`
+- `tests/frontend-write-safety.test.cjs:reconcile re-enables a proposal the server still reports as confirmable`
+- `tests/test_coach_dialogue.py:test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job`
+- `tests/test_coach_plan_sync_card_flow.py:ApprovedCardAuthorizesItsUnitsTests`
+- `tests/test_coach_proposal_confirmation.py:test_reconfirm_rotates_unused_token`
+- `tests/test_coach_proposal_confirmation.py:test_ttl_boundary_is_expired_and_does_not_mutate`
+- `tests/test_coach_proposal_execution.py:test_competing_execution_dispatches_only_once`
+- `tests/test_coach_proposal_execution.py:test_foreign_session_wrong_hash_and_expiry_cannot_consume_or_dispatch`
+- `tests/test_coach_proposal_read_service.py:test_returns_newest_30_and_never_exposes_payload_or_action_token`
+- `tests/test_coach_tool_coverage.py:test_all_pending_sync_binds_the_units_pending_at_the_request`
 
 ### Requirement: CA7 Idempotent calls and checkpointed rounds
 The system SHALL return cached receipts for repeated identical calls/effects, reject a reused call ID with changed effect, and checkpoint tool-round progress so a turn that is requested again after an interruption does not repeat successful durable writes.
@@ -175,7 +226,22 @@ The system SHALL return cached receipts for repeated identical calls/effects, re
 - **WHEN** a tool round runs
 - **THEN** the receipt gets phase `executing_tools` with `pending_tool_calls` (call id and tool) at the start, the step list and the shrinking pending list after each call, phase `waiting_final_response` once none is pending, and `tool_rounds` after the round; no provider response or tool output is kept for resuming, so an interrupted turn is rebuilt from its original input and these steps (CC3).
 
-Evidence: `backend/coach/tool_replay.py:CoachStructuredToolReplayService.lookup`, `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_tool_call`; `tests/test_coach_tool_coverage.py:test_nutrition_entries_can_be_saved_read_and_deleted`; `backend/coach/tool_round_journal.py:CoachStructuredToolRoundJournal`; `tests/test_coach_tool_replay.py:test_replays_matching_call_id_and_rejects_changed_effect`, `tests/test_coach_tool_replay.py:test_replays_successful_mutating_effect_with_different_call_id`, `tests/test_coach_tool_replay.py:test_does_not_replay_effect_for_read_only_tool`, `tests/test_coach_tool_replay.py:test_does_not_replay_failed_effect`, `tests/test_coach_tool_replay.py:test_does_not_replay_missing_or_stale_draft`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`; `backend/coach/service.py:dialogue_effect_key`, `backend/coach/tool_call_metadata.py:structured_tool_call_metadata`, `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_and_record`; `tests/test_coach_dialogue.py:test_rephrasing_request_metadata_does_not_duplicate_same_write`, `tests/test_coach_tool_round_journal.py`.
+Evidence:
+- `backend/coach/service.py:dialogue_effect_key`
+- `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_and_record`
+- `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_tool_call`
+- `backend/coach/tool_call_metadata.py:structured_tool_call_metadata`
+- `backend/coach/tool_replay.py:CoachStructuredToolReplayService.lookup`
+- `backend/coach/tool_round_journal.py:CoachStructuredToolRoundJournal`
+- `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`
+- `tests/test_coach_dialogue.py:test_rephrasing_request_metadata_does_not_duplicate_same_write`
+- `tests/test_coach_tool_coverage.py:test_nutrition_entries_can_be_saved_read_and_deleted`
+- `tests/test_coach_tool_replay.py:test_does_not_replay_effect_for_read_only_tool`
+- `tests/test_coach_tool_replay.py:test_does_not_replay_failed_effect`
+- `tests/test_coach_tool_replay.py:test_does_not_replay_missing_or_stale_draft`
+- `tests/test_coach_tool_replay.py:test_replays_matching_call_id_and_rejects_changed_effect`
+- `tests/test_coach_tool_replay.py:test_replays_successful_mutating_effect_with_different_call_id`
+- `tests/test_coach_tool_round_journal.py`
 
 ### Requirement: CA8 Bounded execution and cancellation boundaries
 The system SHALL bound tool calls and rounds, count allowed mutations across resumed receipts, stop further writes on clarification/cancellation, and preserve completed effects when stopping.
@@ -204,7 +270,20 @@ The system SHALL bound tool calls and rounds, count allowed mutations across res
 - **WHEN** a tool is called after the turn's command was closed by a stale release or by recovery
 - **THEN** it is not executed and returns `{"ok": false, "status": "not_performed", "reason": "turn_released"}`, checked under the same lock as the release
 
-Evidence: `backend/coach/tool_call_metadata.py:structured_tool_call_metadata`; `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._request_is_paused`; `tests/test_coach_write_gate.py:test_cap_is_25_and_counts_allowed_writes`, `tests/test_coach_write_gate.py:test_denied_calls_do_not_count`; `tests/test_coach_turn_write_gate.py:test_resumed_turn_seeds_cap_from_existing_receipts`; `tests/test_coach_dialogue.py:test_clarification_blocks_writes_in_either_tool_order`, `tests/test_coach_dialogue.py:test_tool_round_limit_submits_outputs_and_keeps_provider_selection`; `backend/coach/structured_tool_round.py:COACH_TOOL_MAX_ROUNDS`, `backend/coach/turn_outcome.py:_BUDGET_EXHAUSTED_NOTE`; `tests/test_coach_structured_tool_round.py:test_exhausted_budget_tells_model_and_logs_only_counts`, `tests/test_coach_structured_tool_round.py:test_released_turn_cannot_execute_tools_or_record_receipts`, `tests/test_coach_tool_call_metadata.py:test_command_limit_allows_only_existing_replay_id`.
+Evidence:
+- `backend/coach/structured_tool_round.py:COACH_TOOL_MAX_ROUNDS`
+- `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService`
+- `backend/coach/tool_call_metadata.py:structured_tool_call_metadata`
+- `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._request_is_paused`
+- `backend/coach/turn_outcome.py:_BUDGET_EXHAUSTED_NOTE`
+- `tests/test_coach_dialogue.py:test_clarification_blocks_writes_in_either_tool_order`
+- `tests/test_coach_dialogue.py:test_tool_round_limit_submits_outputs_and_keeps_provider_selection`
+- `tests/test_coach_structured_tool_round.py:test_exhausted_budget_tells_model_and_logs_only_counts`
+- `tests/test_coach_structured_tool_round.py:test_released_turn_cannot_execute_tools_or_record_receipts`
+- `tests/test_coach_tool_call_metadata.py:test_command_limit_allows_only_existing_replay_id`
+- `tests/test_coach_turn_write_gate.py:test_resumed_turn_seeds_cap_from_existing_receipts`
+- `tests/test_coach_write_gate.py:test_cap_is_25_and_counts_allowed_writes`
+- `tests/test_coach_write_gate.py:test_denied_calls_do_not_count`
 
 ### Requirement: CA9 Truthful durable receipts and supported undo
 The system SHALL persist actual tool outcomes and confirmed change references, distinguish local effects, approval-pending actions and sync jobs, and expose whole-turn undo only when every applied effect is fully tracked.
@@ -262,7 +341,28 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 - **WHEN** the Coach calls `undo_training_change`
 - **THEN** an undo of a creation, or one requested without `apply`, returns the preview with an `undo_change` proposal card (`confirmation_required` for a creation) and executes nothing; an undo of an update or delete with `apply: true` is applied at once without a card.
 
-Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`, `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`; `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`, `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`, `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`; `backend/coach/planning_action_tools.py:CoachPlanningActionToolService._undo_training_change`; `tests/test_coach_planning_action_tools.py:CoachPlanningActionToolServiceTests.test_create_undo_with_apply_is_only_offered_as_a_card`, `tests/test_coach_planning_action_tools.py:CoachUndoToolPersistenceTests.test_update_undo_with_apply_still_runs_directly`; `backend/coach/outcomes.py:unresolved_coach_steps`, `backend/coach/service.py:dialogue_scope_repair_key`, `backend/coach/service.py:dialogue_request_binding_key`, `backend/coach/service.py:dialogue_plan_effect_key`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._prepare_plan_sync`; `tests/test_coach_repair_outcomes.py:test_same_tool_success_only_repairs_same_target_scope_and_period`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_different_workout_with_same_request`, `tests/test_coach_dialogue.py:test_profile_conflict_repair_does_not_hide_an_independent_field_failure`, `tests/test_coach_tool_preparation.py:test_remote_write_is_blocked_by_unresolved_local_failure`.
+Evidence:
+- `backend/coach/outcomes.py:unresolved_coach_steps`
+- `backend/coach/planning_action_tools.py:CoachPlanningActionToolService._undo_training_change`
+- `backend/coach/service.py:dialogue_plan_effect_key`
+- `backend/coach/service.py:dialogue_request_binding_key`
+- `backend/coach/service.py:dialogue_scope_repair_key`
+- `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`
+- `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`
+- `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._prepare_plan_sync`
+- `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`
+- `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`
+- `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`
+- `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_different_workout_with_same_request`
+- `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`
+- `tests/test_coach_dialogue.py:test_profile_conflict_repair_does_not_hide_an_independent_field_failure`
+- `tests/test_coach_planning_action_tools.py:CoachPlanningActionToolServiceTests.test_create_undo_with_apply_is_only_offered_as_a_card`
+- `tests/test_coach_planning_action_tools.py:CoachUndoToolPersistenceTests.test_update_undo_with_apply_still_runs_directly`
+- `tests/test_coach_repair_outcomes.py:test_same_tool_success_only_repairs_same_target_scope_and_period`
+- `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`
+- `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`
+- `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`
+- `tests/test_coach_tool_preparation.py:test_remote_write_is_blocked_by_unresolved_local_failure`
 
 ### Requirement: CA11 Server-side plan checks before Coach plan writes
 The system SHALL check the resulting future plan of every Coach tool write that creates or moves planned units against the plan rules, roll back a write that adds a new or riskier illness_hard finding the athlete did not accept, or a new strength_incomplete, focus_missing, hr_cap_invalid, template_missing or template_mismatch finding (which can never be accepted), and return the other new findings as notes with their evidence strength. Explicit athlete UI/API edits are not checked.
@@ -319,7 +419,41 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **WHEN** a successful Coach plan write produces notes
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
-Evidence: `backend/planning/unit_intensity.py:unit_band`; `tests/test_intensity_distribution.py:UnitFallbackTests`; `backend/planning/plan_checks.py:check_plan`; `backend/planning/load_checks.py:completed_load`; `backend/planning/session_focus.py:is_hard`; `tests/test_session_focus.py:HardRuleTests`; `tests/test_load_checks.py:SessionSpikeTests.test_reference_is_the_stored_m6_load_not_the_raw_power`; `backend/planning/load_checks.py:session_spikes`; `backend/planning/load_checks.py:weekly_rises`; `backend/planning/load_checks.py:unknown_load`; `tests/test_load_checks.py`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/planning/leg_strength.py`; `tests/test_leg_strength.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:illness_override_confirmed`; `backend/coach/adaptive_apply.py:CoachAdaptiveApplyService._apply_checked`; `backend/planning/running_week.py`; `tests/test_coach_write_gate.py:IllnessOverrideTests`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_listing_without_a_finding_does_not_ask`, `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_finding_without_confirmation_rolls_back`; `tests/test_coach_adaptive_apply.py:AdaptiveApplyPlanGuardTests`; `tests/test_load_checks.py:LocalThresholdPrecedenceTests`; `tests/test_intensity_distribution.py:RunningWeekTests`; `tests/test_leg_strength.py:RunningWeekTests`; `backend/planning/brief_budget.py:fit_brief`; `tests/test_plan_guard_service.py:test_all_day_events_are_listed_per_date_and_trimmed_last_day_first`.
+Evidence:
+- `backend/coach/adaptive_apply.py:CoachAdaptiveApplyService._apply_checked`
+- `backend/coach/change_receipts.py:change_summary`
+- `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`
+- `backend/coach/write_gate.py:illness_override_confirmed`
+- `backend/planning/brief_budget.py:fit_brief`
+- `backend/planning/intensity_distribution.py:distribution_findings`
+- `backend/planning/leg_strength.py`
+- `backend/planning/load_checks.py:completed_load`
+- `backend/planning/load_checks.py:session_spikes`
+- `backend/planning/load_checks.py:unknown_load`
+- `backend/planning/load_checks.py:weekly_rises`
+- `backend/planning/plan_checks.py:check_plan`
+- `backend/planning/plan_guard_service.py:PlanGuardService.verify`
+- `backend/planning/running_week.py`
+- `backend/planning/session_focus.py:is_hard`
+- `backend/planning/unit_intensity.py:unit_band`
+- `public/coach.js:appendMessageChanges`
+- `tests/coach-turn-undo.test.cjs`
+- `tests/test_coach_adaptive_apply.py:AdaptiveApplyPlanGuardTests`
+- `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`
+- `tests/test_coach_write_gate.py:IllnessOverrideTests`
+- `tests/test_intensity_distribution.py:RunningWeekTests`
+- `tests/test_intensity_distribution.py:UnitFallbackTests`
+- `tests/test_intensity_distribution.py`
+- `tests/test_leg_strength.py:RunningWeekTests`
+- `tests/test_leg_strength.py`
+- `tests/test_load_checks.py:LocalThresholdPrecedenceTests`
+- `tests/test_load_checks.py:SessionSpikeTests.test_reference_is_the_stored_m6_load_not_the_raw_power`
+- `tests/test_load_checks.py`
+- `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_finding_without_confirmation_rolls_back`
+- `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_listing_without_a_finding_does_not_ask`
+- `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`
+- `tests/test_plan_guard_service.py:test_all_day_events_are_listed_per_date_and_trimmed_last_day_first`
+- `tests/test_session_focus.py:HardRuleTests`
 
 ### Requirement: Coach sets the session focus
 The Coach plan and template tools SHALL accept `session_focus` and `strength_intensity`, require them in strict plan payloads, validate them per sport on the server and list upcoming units' focus with its origin in `planning_brief.planned_sessions`.
@@ -376,7 +510,22 @@ The write gate SHALL decide every non-read tool call in one fixed order and SHAL
 - **WHEN** `resolve_training_sync_conflict` names a `job_id` and its validated target is Garmin or Wahoo
 - **THEN** a retry with `remote_write` not true (a read job) is allowed without sync wording and counts no write; a push job needs the athlete's own text to ask to send workouts to that provider, else it is denied with `remote_garmin_not_requested` or `remote_wahoo_not_requested`, and an allowed push retry counts one write and one record; a retry whose target is Intervals.icu keeps the Intervals.icu rule
 
-Evidence: `backend/coach/write_gate.py:check_write`, `backend/coach/write_gate.py:_check_job_retry`, `backend/coach/write_gate.py:_check_garmin_write`, `backend/coach/write_gate.py:record_count`; `backend/coach/turn_write_gate.py:CoachTurnWriteGate.denial`, `backend/coach/turn_write_gate.py:CoachTurnWriteGate.__init__`; `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_tool_call`; `tests/test_coach_write_gate.py:RegistryCoverageTests.test_every_non_read_registry_tool_is_gated_or_explicitly_ungated`, `tests/test_coach_write_gate.py:WriteCapTests.test_cap_is_25_and_counts_allowed_writes`, `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_read_retry_needs_no_sync_wording`, `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_garmin_plan_push_retry_needs_garmin_to_be_named`, `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_wahoo_plan_push_retry_needs_wahoo_to_be_named`, `tests/test_coach_write_gate.py:JobRetryTierTests.test_an_intervals_retry_keeps_the_intervals_gate`; `tests/test_coach_turn_write_gate.py:test_denied_write_does_not_execute_record_or_open_a_transaction`, `tests/test_coach_turn_write_gate.py:test_resumed_turn_seeds_cap_from_existing_receipts`.
+Evidence:
+- `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService._execute_tool_call`
+- `backend/coach/turn_write_gate.py:CoachTurnWriteGate.__init__`
+- `backend/coach/turn_write_gate.py:CoachTurnWriteGate.denial`
+- `backend/coach/write_gate.py:_check_garmin_write`
+- `backend/coach/write_gate.py:_check_job_retry`
+- `backend/coach/write_gate.py:check_write`
+- `backend/coach/write_gate.py:record_count`
+- `tests/test_coach_turn_write_gate.py:test_denied_write_does_not_execute_record_or_open_a_transaction`
+- `tests/test_coach_turn_write_gate.py:test_resumed_turn_seeds_cap_from_existing_receipts`
+- `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_garmin_plan_push_retry_needs_garmin_to_be_named`
+- `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_read_retry_needs_no_sync_wording`
+- `tests/test_coach_write_gate.py:JobRetryTierTests.test_a_wahoo_plan_push_retry_needs_wahoo_to_be_named`
+- `tests/test_coach_write_gate.py:JobRetryTierTests.test_an_intervals_retry_keeps_the_intervals_gate`
+- `tests/test_coach_write_gate.py:RegistryCoverageTests.test_every_non_read_registry_tool_is_gated_or_explicitly_ungated`
+- `tests/test_coach_write_gate.py:WriteCapTests.test_cap_is_25_and_counts_allowed_writes`
 
 ### Requirement: CA13 Impact classifier request
 The impact classifier SHALL be one stateless model request with a strict JSON schema, fed only the athlete's text, the tail of the previous Coach message and the original text of a retried request, and its verdict SHALL never grant a remote write or an Intervals.icu sync.
@@ -439,7 +588,24 @@ The system SHALL execute a non-read tool only when its classified scope holds th
 - **WHEN** a sync or refresh tool executes
 - **THEN** `start_provider_refresh` needs `<target>_refresh`; `start_intervals_plan_sync` intervals_sync plus the unit groups its plan-sync owner derives from the entries; `push_strength_to_garmin` garmin_sync and `planned_unit:<id>` for each entry; `sync_competitions` intervals_sync and local_competitions; `sync_nutrition` intervals_sync (its owner accepts local_nutrition or intervals_sync, and the remote target needs intervals_sync); `resolve_training_sync_conflict` `competition:<id>` with a `local_id`, or with a `job_id` `sync_job:<id>` and `<provider>_sync` for a push job, else `<provider>_refresh`; `get_sync_job` `sync_job:<id>` unless the job was started in this turn (preparation grants it, see CP6)
 
-Evidence: `backend/coach/authorization.py:require_coach_scope`, `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService._nutrition_scope`, `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`, `backend/coach/profile_update.py:CoachProfileUpdateService.apply`, `backend/coach/plan_artifact_tools.py:CoachPlanArtifactToolService.execute`, `backend/coach/planning_change_tools.py:CoachPlanningChangeToolService._replace_training_plan`, `backend/coach/training_patch.py:CoachTrainingPatchService.apply`, `backend/coach/training_template_tools.py`, `backend/coach/library_plan_tools.py`, `backend/coach/planning_action_tools.py:CoachPlanningActionToolService.execute`, `backend/coach/adaptive_apply.py:CoachAdaptiveApplyService.apply`, `backend/coach/sync_tools.py:CoachSyncToolService.execute`, `backend/coach/dialogue_action.py:CoachDialogueActionService._apply_nutrition_object_scope`; `tests/test_coach_athlete_record_tools.py:test_operation_and_scope_denials_block_each_tool`, `tests/test_coach_athlete_record_tools.py:test_meal_template_tools_require_operation_and_nutrition_scope`, `tests/test_coach_planning_change_tools.py:test_apply_rejects_update_outside_planned_unit_scope`, `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`.
+Evidence:
+- `backend/coach/adaptive_apply.py:CoachAdaptiveApplyService.apply`
+- `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService._nutrition_scope`
+- `backend/coach/athlete_record_tools.py:CoachAthleteRecordToolService.execute`
+- `backend/coach/authorization.py:require_coach_scope`
+- `backend/coach/dialogue_action.py:CoachDialogueActionService._apply_nutrition_object_scope`
+- `backend/coach/library_plan_tools.py`
+- `backend/coach/plan_artifact_tools.py:CoachPlanArtifactToolService.execute`
+- `backend/coach/planning_action_tools.py:CoachPlanningActionToolService.execute`
+- `backend/coach/planning_change_tools.py:CoachPlanningChangeToolService._replace_training_plan`
+- `backend/coach/profile_update.py:CoachProfileUpdateService.apply`
+- `backend/coach/sync_tools.py:CoachSyncToolService.execute`
+- `backend/coach/training_patch.py:CoachTrainingPatchService.apply`
+- `backend/coach/training_template_tools.py`
+- `tests/test_coach_athlete_record_tools.py:test_meal_template_tools_require_operation_and_nutrition_scope`
+- `tests/test_coach_athlete_record_tools.py:test_operation_and_scope_denials_block_each_tool`
+- `tests/test_coach_planning_change_tools.py:test_apply_rejects_update_outside_planned_unit_scope`
+- `tests/test_coach_sync_tools.py:test_garmin_push_needs_the_garmin_target_scope_and_approved_entries`
 
 ### Requirement: CA16 What a remote write binds
 The system SHALL bind every Coach remote write to stored local state before it runs, whether the athlete's named sync runs it without a card or an explicit Garmin removal asks on a card, and SHALL execute only the stored arguments, never the model's selection.
@@ -460,7 +626,23 @@ The system SHALL bind every Coach remote write to stored local state before it r
 - **WHEN** an approved card executes
 - **THEN** its payload is validated before the token is consumed (every source message is still stored for the same conversation and session and one belongs to the card's turn, else 409); a remote write returns the queue result with `sync_job_ids` and a failure leaves the card `used`, so a new card is needed; a legacy local write returns its result with `status: applied` and a failed validation returns the card to `ready`
 
-Evidence: `backend/coach/proposal_creation.py:CoachProposalCreationService.prepare_remote_write`, `backend/coach/proposal_creation.py:_approved_plan_sync_arguments`, `backend/coach/proposal_creation.py:_with_intervals_leftovers`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/coach/proposal_creation.py:_competition_approval_details`, `backend/coach/proposal_creation.py:_nutrition_approval_arguments`, `backend/coach/proposal_creation.py:_adaptive_approval_arguments`, `backend/coach/proposal_creation.py:_check_approval_row_limit`, `backend/planning/library.py:LIBRARY_BULK_MAX_ENTRIES`, `backend/coach/proposal_execution.py:CoachProposalExecutionService._dispatch_action`, `backend/coach/proposal_execution.py:CoachProposalExecutionService._validate_remote_write_provenance`; `tests/test_coach_plan_sync_card_flow.py:test_unit_tokens_from_the_model_never_widen_the_card`, `tests/test_coach_proposal_creation.py:test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval`, `tests/test_coach_proposal_creation.py:test_all_pending_plan_approval_freezes_and_displays_pending_entries`, `tests/test_coach_proposal_creation.py:test_illness_sync_proposal_is_built_from_the_stored_preview`, `tests/test_coach_proposal_execution.py:test_local_write_validation_conflict_keeps_approved_proposal_retryable`.
+Evidence:
+- `backend/coach/proposal_creation.py:_adaptive_approval_arguments`
+- `backend/coach/proposal_creation.py:_approved_garmin_arguments`
+- `backend/coach/proposal_creation.py:_approved_plan_sync_arguments`
+- `backend/coach/proposal_creation.py:_check_approval_row_limit`
+- `backend/coach/proposal_creation.py:_competition_approval_details`
+- `backend/coach/proposal_creation.py:_nutrition_approval_arguments`
+- `backend/coach/proposal_creation.py:_with_intervals_leftovers`
+- `backend/coach/proposal_creation.py:CoachProposalCreationService.prepare_remote_write`
+- `backend/coach/proposal_execution.py:CoachProposalExecutionService._dispatch_action`
+- `backend/coach/proposal_execution.py:CoachProposalExecutionService._validate_remote_write_provenance`
+- `backend/planning/library.py:LIBRARY_BULK_MAX_ENTRIES`
+- `tests/test_coach_plan_sync_card_flow.py:test_unit_tokens_from_the_model_never_widen_the_card`
+- `tests/test_coach_proposal_creation.py:test_all_pending_plan_approval_freezes_and_displays_pending_entries`
+- `tests/test_coach_proposal_creation.py:test_competition_remote_write_binds_dirty_rows_and_tombstones_to_approval`
+- `tests/test_coach_proposal_creation.py:test_illness_sync_proposal_is_built_from_the_stored_preview`
+- `tests/test_coach_proposal_execution.py:test_local_write_validation_conflict_keeps_approved_proposal_retryable`
 
 ### Requirement: CA17 The answer is corrected against the recorded effects
 The system SHALL correct the model's final text when it disagrees with the turn's recorded effects, and SHALL store only a compact final receipt.
