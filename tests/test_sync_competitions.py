@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sqlite3
 import unittest
 from datetime import date
 from types import SimpleNamespace
@@ -617,6 +618,40 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(result["pushed"], 1)
         self.assertEqual(result["skipped"], 0)
         self.assertEqual(result["skipped_items"], [])
+
+    def test_lost_local_write_after_remote_calls_recovers_on_the_next_run(self):
+        # The remote calls run before the local link is stored (#2080): a failed
+        # local write leaves the row dirty, and the next run links the pushed
+        # event by its external id instead of pushing a second one.
+        self.insert_competition(self.local_competition("local-push"))
+        external_id = planning_competitions.competition_external_id("local-push")
+        remote = self.remote_event("remote-created", external_id)
+        client = FakeCompetitionClient(pushed=[remote])
+        service = self.make_sync_service(client)
+        with (
+            patch.object(
+                self.reconciler,
+                "reconcile",
+                side_effect=sqlite3.OperationalError("disk I/O error"),
+            ),
+            self.assertRaises(sqlite3.OperationalError),
+        ):
+            service.sync()
+        self.assertEqual(self.stored_competition("local-push")["sync_dirty"], 1)
+
+        client.events = [remote]
+        result = service.sync()
+
+        self.assertEqual(
+            [[event["external_id"] for event in call] for call in client.upsert_calls],
+            [[external_id]],
+        )
+        stored = self.stored_competition("local-push")
+        self.assertEqual(
+            (stored["sync_state"], stored["intervals_event_id"]),
+            ("synced", "remote-created"),
+        )
+        self.assertEqual(result["conflicts"], 0)
 
     def test_failed_remote_delete_does_not_clear_tombstones_or_upsert(self):
         self.insert_tombstone("tombstone", "remote-delete", None, "created")
