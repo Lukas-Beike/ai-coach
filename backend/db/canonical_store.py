@@ -933,7 +933,16 @@ def upsert_observation(
         (natural_key,),
     )
     if existing is None:
-        _insert_observation(db, natural_key=natural_key, values=values, now=now)
+        insert_row(
+            db,
+            "observations",
+            {
+                "natural_key": natural_key,
+                **{column: values[column] for column in _OBSERVATION_COLUMNS},
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
         return WriteOutcome.WRITTEN
     if (
         fill_only
@@ -1405,33 +1414,26 @@ def _update_activity_columns(
     )
 
 
-def _insert_observation(
-    db: Any, *, natural_key: str, values: dict[str, Any], now: str
-) -> None:
-    insert_row(
-        db,
-        "observations",
-        {
-            "natural_key": natural_key,
-            **{column: values[column] for column in _OBSERVATION_COLUMNS},
-            "created_at": now,
-            "updated_at": now,
-        },
-    )
-
-
 def insert_row(db: Any, table: str, row: Mapping[str, object]) -> None:
-    """Insert one full row; the mapping's keys are the column names."""
+    """Insert one full row; the mapping's keys are the column names.
+
+    Table and column names are written into the statement: pass only the
+    stores' own trusted identifiers, never keys taken from a payload.
+    """
+    values = tuple(row.values())
     db.execute(
-        f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
-        tuple(row.values()),
+        f"INSERT INTO {table} ({', '.join(row)}) VALUES ({_placeholders(values)})",
+        values,
     )
 
 
 def update_row(
     db: Any, table: str, row: Mapping[str, object], key: Mapping[str, object]
 ) -> None:
-    """Overwrite ``row``'s columns of the row that matches every ``key`` column."""
+    """Overwrite ``row``'s columns of the row that matches every ``key`` column.
+
+    Names are trusted identifiers, as for ``insert_row``.
+    """
     db.execute(
         f"UPDATE {table} SET {', '.join(f'{column} = ?' for column in row)} "
         f"WHERE {' AND '.join(f'{column} = ?' for column in key)}",

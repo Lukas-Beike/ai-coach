@@ -61,27 +61,29 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
-# Every table the canonical stores write (#2121).
+# The tables the fixture ingest fills (#2121); the domain, detail and update
+# paths of the store helpers are pinned by their own store tests.
 CANONICAL_TABLES = (
     "provider_records",
     "activity_records",
     "activity_sessions",
     "observations",
-    "sleep_periods",
-    "zone_configurations",
-    "categorical_observations",
-    "gear_items",
-    "gear_activity_links",
-    "power_curve_points",
-    "power_curve_fetches",
-    "activity_detail_sets",
-    "activity_detail_analysis",
 )
-# Row digests after the fixture ingest and after a re-projection at bumped
-# mapper versions, taken on the code before the helpers were shared.
+# Row digests per table after the fixture ingest and after a re-projection at
+# bumped mapper versions, taken on the code before the helpers were shared.
 PINNED_ROW_DIGESTS = [
-    "45918cbe73067d26b14893db23b08829cb5a8975787cebd6bc421e45fd92301e",
-    "5607d8911b08aefc5b27de4d8418545fd9fef62d71cfab5c4f4c2a5b836f2ee2",
+    {
+        "provider_records": "48cd921ba14bafbbb3736ed987ca126497a9728f235880efb63400ce598dbbee",
+        "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
+        "activity_sessions": "2265a7cb2643b650e02394225a8423b5143516071e36e0640b2b6d28d0776014",
+        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+    },
+    {
+        "provider_records": "5aae914b346d01814e28bf563a7f0a913cb0bca0ca0be57216849a3a0af71e52",
+        "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
+        "activity_sessions": "2265a7cb2643b650e02394225a8423b5143516071e36e0640b2b6d28d0776014",
+        "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
+    },
 ]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
@@ -1113,20 +1115,22 @@ class ReprojectionTests(BackfillFixture):
         digests.append(self.table_digest())
         self.assertEqual(digests, PINNED_ROW_DIGESTS)
 
-    def table_digest(self) -> str:
-        """SHA-256 of every canonical row without generated ids."""
-        snapshot = {
-            table: sorted(
+    def table_digest(self) -> dict[str, str]:
+        """SHA-256 per table of its rows without generated ids."""
+        return {
+            table: hashlib.sha256(
                 json.dumps(
-                    {key: value for key, value in row.items() if key != "activity_id"},
-                    sort_keys=True,
-                    default=str,
-                )
-                for row in self.rows(f"SELECT * FROM {table}")
-            )
+                    sorted(
+                        json.dumps(
+                            {k: v for k, v in row.items() if k != "activity_id"},
+                            sort_keys=True,
+                        )
+                        for row in self.rows(f"SELECT * FROM {table}")
+                    )
+                ).encode()
+            ).hexdigest()
             for table in CANONICAL_TABLES
         }
-        return hashlib.sha256(json.dumps(snapshot).encode()).hexdigest()
 
     def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
         self,
