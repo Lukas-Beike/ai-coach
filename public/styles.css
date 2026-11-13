@@ -994,6 +994,9 @@ h2 {
 .planned-event-chip[data-impact="none"] { color: var(--muted); }
 .planned-event-chip[data-impact="open"] { --event-edge: var(--orange); border-color: var(--orange); border-style: dashed; border-left-style: solid; background: none; }
 .planned-event-chip:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-undecided-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 8px 8px 12px; border: 1px solid var(--orange); border-radius: 12px; color: var(--ink); background: var(--warning-surface-soft); font-size: .82rem; font-weight: 650; }
+.planned-undecided-banner > span:nth-child(2) { flex: 1; min-width: 0; }
+.planned-undecided-banner button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 10px; color: var(--primary-control-ink); background: var(--primary-control-bg); font-weight: 700; }
 .planned-event-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--orange); }
 .planned-event-sheet { width: 100%; max-width: 100%; margin: auto 0 0; padding: 12px 16px max(18px, env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line-strong); border-radius: 20px 20px 0 0; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
 .planned-event-head { display: flex; align-items: center; gap: 10px; }
@@ -1377,6 +1380,9 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: var(--on-accent); background: var(--accent); font-size: .72rem; }
 .nav-item b:empty { display: none; }
+.nav-item:has(> b.nav-count) { position: relative; }
+.nav-item > b.nav-count { position: absolute; top: 4px; left: calc(50% + 4px); margin: 0; }
+.desktop-nav .nav-item > b.nav-count { position: static; margin-left: auto; }
 /* Large text: labels that no longer fit collapse to icons; each link keeps its aria-label as accessible name.
    Thresholds are the bar's content width in rem at which the widest label ("Ernährung") stops fitting. */
 .bottom-nav, .desktop-nav { container-type: inline-size; }
