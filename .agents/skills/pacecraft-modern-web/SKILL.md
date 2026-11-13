@@ -24,5 +24,6 @@ npm run modern-web -- retrieve <guide-id>[,<guide-id>]
 - `legacy-scan public --json` reports legacy patterns for a whole-directory
   audit only (#2633; the wrapper accepts only paths in `public/`); triage each
   finding by the guide's keep/drop rubric.
-- Raise the pin deliberately: change the exact version in `package.json`, run
-  `npm install --ignore-scripts`, and keep `tests/modern-web.test.cjs` green.
+- Raise the pin by hand only (Dependabot ignores the package): change the exact
+  version in `package.json`, run `npm install --ignore-scripts`, and update the
+  hash in `tests/modern-web.test.cjs` after reviewing the new release.

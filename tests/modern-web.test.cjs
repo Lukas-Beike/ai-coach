@@ -6,6 +6,8 @@ const { spawnSync } = require("node:child_process");
 
 const ROOT = path.join(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
+// Updated by hand only (athlete, #2633): a new version changes this hash too.
+const INTEGRITY = "sha512-vafIZwC8AS6QjM2yyoflZbnc7n3/TVOMLbEMRdPTwcFy0f9/Tq8s5rJQ8UIqRt2KPl9ixravyaMR4nTGuUrcmg==";
 
 test("modern-web-guidance runs pinned, with telemetry off, and only read-only commands (#2633)", () => {
   const manifest = JSON.parse(read("package.json"));
@@ -14,7 +16,7 @@ test("modern-web-guidance runs pinned, with telemetry off, and only read-only co
   const locked = JSON.parse(read("package-lock.json")).packages["node_modules/modern-web-guidance"];
   assert.equal(locked.version, pinned);
   assert.equal(locked.resolved, `https://registry.npmjs.org/modern-web-guidance/-/modern-web-guidance-${pinned}.tgz`);
-  assert.match(locked.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/);
+  assert.equal(locked.integrity, INTEGRITY);
   assert.equal(manifest.scripts["modern-web"], "node scripts/modern_web.mjs");
   const wrapper = read("scripts/modern_web.mjs");
   const telemetry = wrapper.indexOf('process.env.DISABLE_TELEMETRY = "1";');
