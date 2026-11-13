@@ -74,8 +74,10 @@ HEAVY_MODULES = {
 # imports, name the fixtures directory as a path segment: loaders build fixture
 # paths from parts, so the file name alone would miss them.
 FIXTURES = "tests/fixtures/"
-# Tests that check every tracked file, so a changed fixture can break them too.
-REPOSITORY_WIDE = ("test_line_endings",)
+# Tests that check tracked files across the repository (line endings, guidance
+# links to files such as tests/fixtures/providers/README.md), so a changed
+# fixture can break them too.
+REPOSITORY_WIDE = ("test_line_endings", "test_ai_docs_contract")
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
 # Too generic to identify one file by name alone.
