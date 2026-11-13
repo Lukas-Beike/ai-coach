@@ -1,14 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { showCalendarDay } = require("./helpers/ui");
-
-async function openCalendar(page, request) {
-  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
-  await page.goto("/#plan/overview");
-  await page.waitForFunction(() => state.initialStateLoaded);
-  await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
-  await expect(page.locator(".planned-day.is-today")).toHaveCount(1);
-}
+const { openCalendar } = require("./helpers/calendar");
 
 // Three future endurance units on one day: already sent, never sent, and changed since it was sent.
 async function renderUnits(page) {
