@@ -248,7 +248,8 @@ async function restoreDatabaseBackup() {
 // One select that saves on change: PUT /api/settings/<name> with the chosen value, then names the active option.
 function saveSelectSetting({ currentTarget: select }, name, field, label) {
   return runAction(select, async () => {
-    await api(`/api/settings/${name}`, { method: "PUT", body: JSON.stringify({ [field]: select.value }) });
+    const task = select.dataset?.task ? { task: select.dataset.task } : {};
+    await api(`/api/settings/${name}`, { method: "PUT", body: JSON.stringify({ [field]: select.value, ...task }) });
     return `${label}: ${select.options[select.selectedIndex].text}`;
   });
 }

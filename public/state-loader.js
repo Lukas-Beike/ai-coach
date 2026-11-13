@@ -20,7 +20,7 @@ function render(data, { reloadRoute = true } = {}) {
   renderExternalCalendar(data);
   renderPerformance(data.performance);
   renderModel(data.model);
-  renderThinkingLevel(data.thinking_level);
+  renderThinkingLevel(data.thinking_level, data.model?.tasks);
   renderServiceTier(data.service_tier);
   renderDiagnosticCapture(data.diagnostic_capture);
   renderSettings(data);

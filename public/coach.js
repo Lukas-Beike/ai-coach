@@ -1757,6 +1757,10 @@ function renderMessageNode(message, latest = false) {
   appendMessageRetry(node, message);
   appendFailedTurnRetry(node, message, latest);
   appendMessageChanges(node, message);
+  if (message.role === "assistant" && message.coach_model) {
+    const option = (state.data?.model?.options || []).find((entry) => entry.id === message.coach_model);
+    node.append(h("small", "message-model", option?.label || message.coach_model));
+  }
   const actions = h("div", "message-actions");
   const copy = messageActionButton("copy", "Nachricht kopieren");
   copy.addEventListener("click", async () => {
@@ -1919,7 +1923,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null, Boolean(message.coach_failed)]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null, Boolean(message.coach_failed), message.coach_model || null]),
     appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
     state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,

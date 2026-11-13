@@ -532,6 +532,7 @@ h2 {
 .message-changes.is-undone { color: var(--muted); }
 .message-changes.is-undone .message-changes-icon { color: var(--muted); }
 .message-changes-text { flex: 1 1 12rem; min-width: 0; }
+.message-model { display: block; margin-top: 8px; color: var(--subtle); font-size: .72rem; }
 .message.assistant.is-failed { padding: 12px 14px; border: 1px solid var(--danger-border-strong); border-radius: 16px; background: var(--surface-raised); }
 .message-retry { display: block; min-height: 44px; margin-top: 10px; }
 .message-plan-note { margin-top: 4px; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
@@ -1103,7 +1104,10 @@ h2 {
   .competition-card-facts { grid-template-columns: 1fr; }
 }
 
-.model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.model-selector, .diagnostic-actions, .task-model { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.task-model h3 { margin: 0 0 8px; font-size: .8rem; font-weight: 600; }
+.task-model-pair { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+.task-model-pair select { width: 100%; }
 .model-notice { display: block; margin-top: 8px; color: var(--orange); font-size: .74rem; }
 .model-notice[hidden], .model-selector[hidden] { display: none; }
 .calendar-display-form { display: grid; gap: 14px; padding: 18px 0 10px; }

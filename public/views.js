@@ -496,8 +496,16 @@ function modelNoticeText(model) {
   return selected?.rejected ? `${selected.rejected} abgelehnt – Coach nutzt ${selected.model}.` : "";
 }
 
+// The selects of one task: conversation keeps the original ids.
+const COACH_TASKS = ["conversation", "planning", "nutrition"];
+function taskSelectId(task, name) {
+  return task === "conversation" ? `#${name[0].toLowerCase()}${name.slice(1)}Select` : `#${task}${name}Select`;
+}
+
 function renderModel(model) {
-  renderModelChoice(model, "#modelSelect");
+  for (const task of COACH_TASKS) {
+    renderModelChoice(model && { ...model, selected: model.tasks?.[task]?.model ?? model.selected }, taskSelectId(task, "Model"));
+  }
   const notice = $("#modelNotice");
   if (notice) {
     notice.textContent = modelNoticeText(model);
@@ -505,29 +513,30 @@ function renderModel(model) {
   }
   // Speed modes exist only at OpenAI.
   const tierRow = $("#serviceTierRow");
-  if (tierRow) tierRow.hidden = model?.provider === "anthropic";
+  const provider = (id) => (model?.options || []).find((option) => option.id === id)?.provider;
+  if (tierRow) tierRow.hidden = Boolean(model) && COACH_TASKS.every((task) => provider(model.tasks?.[task]?.model ?? model.selected) === "anthropic");
 }
 
-function renderThinkingLevel(thinkingLevel) {
+function renderThinkingLevel(thinkingLevel, tasks = {}) {
   if (!thinkingLevel) return;
-  const select = $("#thinkingLevelSelect");
-  const currentIds = [...select.options].map((option) => option.value).join(",");
   const nextIds = (thinkingLevel.options || []).map((option) => option.id).join(",");
-  if (currentIds !== nextIds) {
-    select.replaceChildren();
-    for (const option of thinkingLevel.options || []) {
-      const element = document.createElement("option");
-      element.value = option.id;
-      element.textContent = option.label;
-      element.title = option.description || "";
-      select.append(element);
+  for (const task of COACH_TASKS) {
+    const select = $(taskSelectId(task, "ThinkingLevel"));
+    if ([...select.options].map((option) => option.value).join(",") !== nextIds) {
+      select.replaceChildren();
+      for (const option of thinkingLevel.options || []) {
+        const element = document.createElement("option");
+        element.value = option.id;
+        element.textContent = option.label;
+        element.title = option.description || "";
+        select.append(element);
+      }
     }
+    select.value = tasks?.[task]?.thinking_level ?? thinkingLevel.selected;
   }
-  select.value = thinkingLevel.selected;
-  const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
-  const modelSelect = $("#modelSelect");
   const modelSummary = $("#modelSettingsSummary");
-  if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
+  const labels = COACH_TASKS.map((task) => $(taskSelectId(task, "Model"))?.selectedOptions?.[0]?.textContent).filter(Boolean);
+  if (modelSummary) modelSummary.textContent = [...new Set(labels)].join(" · ");
 }
 
 function renderAppVersion(app = {}) {

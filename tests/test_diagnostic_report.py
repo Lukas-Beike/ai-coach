@@ -131,6 +131,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     selected_model=lambda: "gpt-test",
                     selected_provider=lambda: "openai",
                     selected_thinking_level=lambda: "medium",
+                    task_settings=lambda: {"planning": {"model": "gpt-plan"}},
                     available_model_options=lambda: [{"id": "gpt-test"}],
                 ),
                 app_name="Test Coach",
@@ -459,6 +460,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertIs(report["configuration"]["anthropic_base_url_custom"], False)
         self.assertIs(report["configuration"]["transcription_endpoint_custom"], False)
         self.assertEqual(report["configuration"]["model_provider"], "openai")
+        self.assertEqual(
+            report["configuration"]["tasks"], {"planning": {"model": "gpt-plan"}}
+        )
         self.assertEqual(
             report["wahoo"],
             {

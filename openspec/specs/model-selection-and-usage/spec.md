@@ -15,7 +15,7 @@ The system SHALL expose endpoint-appropriate model options, persist a supported 
 
 #### Scenario: Ids and stored values
 - **WHEN** the athlete saves a model, thinking level or speed (route contracts in `docs/api-routes.md`, generated)
-- **THEN** the model ids are `gpt-6-luna` (the default of `OPENAI_MODEL`), `gpt-6-sol`, `gpt-6.1-sol` and `gpt-6-astra` for the official endpoint, plus the configured model when it is none of these, and `claude-opus`, `claude-sonnet` and `claude-haiku`; the model id is trimmed and case-sensitive, the thinking level and speed are lower-cased before the check, and the three values are stored under `selected_model_openai` (for both providers), `selected_thinking_level` and `selected_service_tier`; when a model change leaves a stored speed that the new model does not offer, the stored value stays and requests use `fast` where the model offers it, else no tier
+- **THEN** the model ids are `gpt-6-luna` (the default of `OPENAI_MODEL`), `gpt-6-sol`, `gpt-6.1-sol` and `gpt-6-astra` for the official endpoint, plus the configured model when it is none of these, and `claude-opus`, `claude-sonnet` and `claude-haiku`; the model id is trimmed and case-sensitive, the thinking level and speed are lower-cased before the check, and the three values are stored under `selected_model_openai` (for both providers), `selected_thinking_level` and `selected_service_tier` for the conversation task (MU17 adds the other tasks); when a model change leaves a stored speed that the new model does not offer, the stored value stays and requests use `fast` where the model offers it, else no tier
 
 #### Scenario: Compatible endpoint
 - **WHEN** a nondefault compatible base URL is configured
@@ -352,3 +352,24 @@ The system SHALL sum the usage of every provider request recorded during a Coach
 - **THEN** `usage_month` holds the athlete's local month and, per model, the finished turns started in it that carry usage, with summed tokens and the answers among them (failed and cancelled turns add tokens, no answer); older turns without usage are left out, and Mehr › Coach › Verbrauch shows them as a table below today's counters
 
 Evidence: `backend/providers/state.py:metered_turn`, `backend/providers/state.py:ProviderStateService.record_usage`, `backend/coach/final_receipt.py:CoachFinalReceiptService.build`, `backend/coach/turn_failures.py`, `backend/coach/receipt_reads.py:monthly_turn_usage`, `backend/db/coach_store.py:monthly_usage_rows`, `public/views.js:renderUsageMonth`; `tests/test_provider_state.py:test_metered_turn_adds_every_recorded_call_of_both_providers`, `tests/test_coach_final_receipt.py:test_month_sums_turns_with_usage_per_model_in_local_time`, `tests/test_coach_turn_failures.py:test_failed_and_cancelled_turns_keep_the_usage_they_spent`.
+
+### Requirement: MU17 Explicit model and thinking level per task
+The system SHALL let the athlete choose one model and one thinking level for each of three tasks, with no automatic routing by detected purpose and no fallback between providers: conversation (free chat, morning check-in, meal photos in chat), planning and analysis (the quick actions `plan_week`, `plan_block`, `adjust_week`, `block_review`, `progress_review`, `session_analysis`), and nutrition (the label photo and the product web search).
+
+#### Scenario: Nothing chosen per task
+- **WHEN** no planning or nutrition choice is stored, or the stored model is no longer offered
+- **THEN** that task uses the conversation model and thinking level, so an upgrade changes no behavior
+
+#### Scenario: Saving a task choice
+- **WHEN** the athlete saves a model or thinking level with `task` `planning` or `nutrition`
+- **THEN** it is validated like the conversation choice, a model needs its provider's key, and it is stored under `selected_model_<task>` or `selected_thinking_level_<task>`; an unknown task is rejected with "Unbekannte Coach-Aufgabe." without writing
+
+#### Scenario: Turn and helper routing
+- **WHEN** a Coach turn is enqueued or a nutrition helper calls the model
+- **THEN** a quick-action turn records the planning model and thinking level in its receipt, every other turn the conversation ones, and the label photo and product web search use the nutrition model, the photo with the nutrition thinking level and the web search with its fixed low effort; the bootstrap and the diagnostic report list each task's choice under `model.tasks` and `configuration.tasks`
+
+#### Scenario: Settings and answers
+- **WHEN** the athlete opens "Coach-Modell & Thinking" or reads the chat
+- **THEN** one block per task shows a model and a thinking select, the speed select stays below them while any task uses an OpenAI model and offers the speeds those models support (each request keeps only the speeds its own model supports), and each Coach answer shows the model that wrote it (`coach_model`)
+
+Evidence: `backend/settings.py:SettingsService.task_settings`, `backend/coach/job_submission.py:CoachJobSubmissionService._model_settings`, `backend/nutrition/wiring.py:build_nutrition`, `backend/db/repositories.py:_message_view`, `public/views.js:renderModel`, `public/coach.js:renderMessageNode`; `tests/test_settings.py:test_each_task_has_its_own_choice_and_falls_back_to_the_conversation`, `tests/test_coach_playbooks.py:test_quick_actions_use_the_planning_model_and_the_rest_the_conversation`, `tests/test_nutrition_wiring.py:test_label_photo_uses_the_nutrition_model_and_thinking`, `tests/test_coach_turn_failures.py:test_reloaded_reply_names_the_model_that_wrote_it`.
