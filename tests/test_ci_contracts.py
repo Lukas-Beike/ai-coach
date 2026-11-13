@@ -429,6 +429,8 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("verify published tag digest parity", workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
+        # A pipe into an early-exiting awk fails under pipefail with SIGPIPE (#2600).
+        self.assertIsNone(re.search(r"\| awk [^\n]*exit", workflow))
         self.assertIn("Verify image signature", workflow)
         self.assertIn("cosign verify", workflow)
 
