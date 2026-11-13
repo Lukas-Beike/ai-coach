@@ -28,8 +28,9 @@ _USAGE_KEYS = {provider: f"{provider}_usage" for provider in _PROVIDERS}
 _OPENAI_RATE_LIMITS_KEY = "openai_rate_limits"
 _SAFE_CODE = re.compile(r"(?a)^[a-z0-9][a-z0-9_.:/-]{0,79}$")
 TURN_USAGE_FIELDS = ("requests", "input_tokens", "cached_input_tokens", "output_tokens")
-# The usage of the Coach turn running in this thread; None outside a turn.
-_TURN_USAGE: ContextVar[dict[str, int] | None] = ContextVar(
+# The usage of the Coach turn running in this thread, with the same counts per
+# requested model under "by_model" (#2638); None outside a turn.
+_TURN_USAGE: ContextVar[dict[str, Any] | None] = ContextVar(
     "coach_turn_usage", default=None
 )
 
@@ -41,8 +42,20 @@ def metered_turn(stored: Any = None) -> Iterator[None]:
     A resumed turn continues the usage its receipt kept.
     """
     seed = stored if isinstance(stored, Mapping) else {}
+    totals = _usage_counts(seed)
+    models = seed.get("by_model")
+    # Usage kept before per-model counting stays with the turn's model ("").
+    if not isinstance(models, Mapping):
+        models = {"": totals} if any(totals.values()) else {}
     token = _TURN_USAGE.set(
-        {key: provider_usage.count(seed.get(key)) for key in TURN_USAGE_FIELDS}
+        {
+            **totals,
+            "by_model": {
+                str(model): _usage_counts(counts)
+                for model, counts in models.items()
+                if isinstance(counts, Mapping)
+            },
+        }
     )
     try:
         yield
@@ -50,10 +63,17 @@ def metered_turn(stored: Any = None) -> Iterator[None]:
         _TURN_USAGE.reset(token)
 
 
-def turn_usage() -> dict[str, int] | None:
+def _usage_counts(values: Mapping[str, Any]) -> dict[str, int]:
+    return {key: provider_usage.count(values.get(key)) for key in TURN_USAGE_FIELDS}
+
+
+def turn_usage() -> dict[str, Any] | None:
     """The running turn's usage so far, or None outside a metered turn."""
     usage = _TURN_USAGE.get()
-    return dict(usage) if usage is not None else None
+    if usage is None:
+        return None
+    models = {model: dict(counts) for model, counts in usage["by_model"].items()}
+    return {**usage, "by_model": models}
 
 
 def _provider(value: Any) -> str:
@@ -249,8 +269,9 @@ class ProviderStateService:
             raise error from failure
 
     def record_usage(
-        self, provider: str, response: Any, operation: Any
+        self, provider: str, response: Any, operation: Any, model: str = ""
     ) -> dict[str, int]:
+        """Bill one request; ``model`` is the requested model, "" when unknown."""
         provider = _provider(provider)
         safe_operation = _safe_code(operation, default="unknown")
         with self._lock, self._manager.unit_of_work() as db:
@@ -265,10 +286,13 @@ class ProviderStateService:
             self._repository.set(db, _USAGE_KEYS[provider], _json(updated))
         cached_tokens = provider_usage.openai_cached_input_tokens(response)
         if (turn := _TURN_USAGE.get()) is not None:
-            turn["requests"] += 1
-            turn["input_tokens"] += counts["input_tokens"]
-            turn["cached_input_tokens"] += cached_tokens
-            turn["output_tokens"] += counts["output_tokens"]
+            spent = {**counts, "requests": 1, "cached_input_tokens": cached_tokens}
+            per_model = turn["by_model"].setdefault(
+                str(model)[:120], dict.fromkeys(TURN_USAGE_FIELDS, 0)
+            )
+            for totals in (turn, per_model):
+                for key in TURN_USAGE_FIELDS:
+                    totals[key] += spent[key]
         if self._logger is not None:
             self._logger.info(
                 "OpenAI usage recorded"

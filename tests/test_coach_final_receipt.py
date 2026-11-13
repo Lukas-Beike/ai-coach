@@ -100,15 +100,13 @@ class CoachFinalReceiptTests(unittest.TestCase):
         }
         with metered_turn({"requests": 3, "input_tokens": 9000}):
             final = self.service.build({"model": "claude-opus"}, **options)
-        self.assertEqual(
-            final["usage"],
-            {
-                "requests": 3,
-                "input_tokens": 9000,
-                "cached_input_tokens": 0,
-                "output_tokens": 0,
-            },
-        )
+        counts = {
+            "requests": 3,
+            "input_tokens": 9000,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+        }
+        self.assertEqual(final["usage"], {**counts, "by_model": {"": counts}})
 
     def test_completed_command_returns_stored_receipt_without_duplicate_effect(
         self,
@@ -405,6 +403,23 @@ class MonthlyTurnUsageTests(unittest.TestCase):
                 {**opus, "status": "failed"},
                 "2026-11-06T08:00:00+00:00",
             ),
+            # A turn on gpt-6-luna whose web search ran on claude-opus (#2638);
+            # a request of unknown model counts under the turn's model.
+            (
+                "j",
+                "completed",
+                {
+                    "model": "gpt-6-luna",
+                    "usage": {
+                        **usage,
+                        "by_model": {
+                            "claude-opus": {"input_tokens": 70, "output_tokens": 7},
+                            "": {"input_tokens": 30, "cached_input_tokens": 5},
+                        },
+                    },
+                },
+                "2026-11-08T08:00:00+00:00",
+            ),
             # Older turns without usage, other months and open turns are left out.
             ("e", "completed", {"model": "gpt-6-luna"}, "2026-11-05T08:00:00+00:00"),
             ("f", "completed", opus, "2026-11-30T23:00:00+00:00"),
@@ -427,7 +442,6 @@ class MonthlyTurnUsageTests(unittest.TestCase):
                     ),
                 )
             result = monthly_turn_usage(db, date(2026, 11, 13), "Europe/Berlin")
-        totals = {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 50}
         self.assertEqual(
             result,
             {
@@ -436,9 +450,17 @@ class MonthlyTurnUsageTests(unittest.TestCase):
                     {
                         "model": "claude-opus",
                         "answers": 2,
-                        **{key: value * 3 for key, value in totals.items()},
+                        "input_tokens": 3070,
+                        "cached_input_tokens": 1800,
+                        "output_tokens": 157,
                     },
-                    {"model": "gpt-6-luna", "answers": 1, **totals},
+                    {
+                        "model": "gpt-6-luna",
+                        "answers": 2,
+                        "input_tokens": 1030,
+                        "cached_input_tokens": 605,
+                        "output_tokens": 50,
+                    },
                 ],
             },
         )

@@ -118,17 +118,33 @@ def command_export_rows(db: Any) -> Iterable[Any]:
 
 
 def monthly_usage_rows(db: Any, start: str, end: str) -> list[Any]:
-    """Answers and summed usage per model of the turns created in [start, end)."""
+    """Answers and summed usage per model of the turns created in [start, end).
+
+    A turn counts its answer under its model and its tokens under the model of
+    each request (``usage.by_model``, #2638); an older receipt without that map,
+    or a request of unknown model, counts under the turn's model.
+    """
+    tokens = ("input_tokens", "cached_input_tokens", "output_tokens")
+    part = ", ".join(f"json_extract(part.value, '$.{key}') AS {key}" for key in tokens)
+    whole = ", ".join(
+        f"json_extract(receipt, '$.usage.{key}') AS {key}" for key in tokens
+    )
+    zero = ", ".join(["0"] * len(tokens))
+    sums = ", ".join(f"SUM({key}) AS {key}" for key in tokens)
     return db.execute(
-        "SELECT json_extract(receipt, '$.model') AS model, "
-        "SUM(COALESCE(json_extract(receipt, '$.status'), '') "
-        "NOT IN ('failed', 'cancelled')) AS answers, "
-        "SUM(json_extract(receipt, '$.usage.input_tokens')) AS input_tokens, "
-        "SUM(json_extract(receipt, '$.usage.cached_input_tokens')) AS cached_input_tokens, "
-        "SUM(json_extract(receipt, '$.usage.output_tokens')) AS output_tokens "
+        "WITH turns AS (SELECT receipt, json_extract(receipt, '$.model') AS model, "
+        "COALESCE(json_extract(receipt, '$.status'), '') "
+        "NOT IN ('failed', 'cancelled') AS answered, "
+        "json_type(receipt, '$.usage.by_model') IS 'object' AS split "
         "FROM coach_commands WHERE created_at >= ? AND created_at < ? "
         "AND status='completed' AND json_valid(receipt) "
-        "AND json_type(receipt, '$.usage')='object' "
+        "AND json_type(receipt, '$.usage')='object'), "
+        f"parts AS (SELECT model, answered AS answers, {whole} FROM turns WHERE NOT split "
+        f"UNION ALL SELECT model, answered, {zero} FROM turns WHERE split "
+        "UNION ALL SELECT COALESCE(NULLIF(part.key, ''), turns.model), 0, "
+        f"{part} FROM turns, json_each(turns.receipt, '$.usage.by_model') AS part "
+        "WHERE split) "
+        f"SELECT model, SUM(answers) AS answers, {sums} FROM parts "
         "GROUP BY model ORDER BY answers DESC, model",
         (start, end),
     ).fetchall()

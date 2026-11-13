@@ -80,16 +80,14 @@ class CoachStructuredResponseTests(unittest.TestCase):
         with metered_turn({"requests": 1, "output_tokens": 7}):
             self.service.respond(self.payload, **self.options)
 
+        counts = {
+            "requests": 1,
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "output_tokens": 7,
+        }
         self.jobs.merge_receipt.assert_called_once_with(
-            "turn-synthetic",
-            {
-                "usage": {
-                    "requests": 1,
-                    "input_tokens": 0,
-                    "cached_input_tokens": 0,
-                    "output_tokens": 7,
-                }
-            },
+            "turn-synthetic", {"usage": {**counts, "by_model": {"": counts}}}
         )
 
     def test_rate_limit_retries_without_stream_delta(self) -> None:

@@ -276,12 +276,13 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.assertIsNone(turn_usage())
         # A resumed turn continues the usage its receipt kept; junk counts as zero.
         with metered_turn({"requests": 2, "input_tokens": 500, "output_tokens": "x"}):
-            # A tool round, a cancelled stream without a body and a classifier call.
-            self.service.record_usage("openai", openai, "responses_stream")
+            # A tool round, a cancelled stream without a body and a classifier
+            # call; the web search runs on the nutrition model (#2638).
+            self.service.record_usage("openai", openai, "responses_stream", "gpt-a")
             self.service.record_usage(
-                "openai", {"usage": {}}, "responses_stream_cancelled"
+                "openai", {"usage": {}}, "responses_stream_cancelled", "gpt-a"
             )
-            self.service.record_usage("anthropic", claude, "messages")
+            self.service.record_usage("anthropic", claude, "messages", "claude-b")
             usage = turn_usage()
         self.assertEqual(
             usage,
@@ -290,8 +291,35 @@ class ProviderStateServiceTests(unittest.TestCase):
                 "input_tokens": 500 + 1200 + 2310,
                 "cached_input_tokens": 1024 + 2000,
                 "output_tokens": 80 + 40,
+                "by_model": {
+                    # The resumed usage predates per-model counting.
+                    "": {
+                        "requests": 2,
+                        "input_tokens": 500,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 0,
+                    },
+                    "gpt-a": {
+                        "requests": 2,
+                        "input_tokens": 1200,
+                        "cached_input_tokens": 1024,
+                        "output_tokens": 80,
+                    },
+                    "claude-b": {
+                        "requests": 1,
+                        "input_tokens": 2310,
+                        "cached_input_tokens": 2000,
+                        "output_tokens": 40,
+                    },
+                },
             },
         )
+        # A turn resumed with its per-model usage continues each model.
+        with metered_turn(usage):
+            self.service.record_usage("anthropic", claude, "messages", "claude-b")
+            resumed = turn_usage()
+        self.assertEqual(resumed["by_model"]["claude-b"]["requests"], 2)
+        self.assertEqual(resumed["by_model"]["gpt-a"], usage["by_model"]["gpt-a"])
         self.assertIsNone(turn_usage())
         # Outside a turn only the daily counters change.
         self.service.record_usage("openai", openai, "transcription")
