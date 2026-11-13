@@ -117,6 +117,23 @@ def command_export_rows(db: Any) -> Iterable[Any]:
     )
 
 
+def monthly_usage_rows(db: Any, start: str, end: str) -> list[Any]:
+    """Answers and summed usage per model of the turns created in [start, end)."""
+    return db.execute(
+        "SELECT json_extract(receipt, '$.model') AS model, "
+        "SUM(COALESCE(json_extract(receipt, '$.status'), '') "
+        "NOT IN ('failed', 'cancelled')) AS answers, "
+        "SUM(json_extract(receipt, '$.usage.input_tokens')) AS input_tokens, "
+        "SUM(json_extract(receipt, '$.usage.cached_input_tokens')) AS cached_input_tokens, "
+        "SUM(json_extract(receipt, '$.usage.output_tokens')) AS output_tokens "
+        "FROM coach_commands WHERE created_at >= ? AND created_at < ? "
+        "AND status='completed' AND json_valid(receipt) "
+        "AND json_type(receipt, '$.usage')='object' "
+        "GROUP BY model ORDER BY answers DESC, model",
+        (start, end),
+    ).fetchall()
+
+
 def prior_attachment_turn(db: Any, provider: str, message_id: int) -> Any:
     """The latest prior turn that sent attachments to ``provider``, how many user
     messages (including ``message_id``) follow it, and how many turns of another
