@@ -10,6 +10,7 @@ kinds seeded by ``DataKindFixture``.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import re
 import sqlite3
@@ -643,17 +644,18 @@ class CoverageGuardTests(DataKindFixture):
 
     def test_explicit_export_columns_cover_every_column_but_the_listed_ones(self):
         source = Path(export_module.__file__).read_text(encoding="utf-8")
-        # The persistence owners hold the column lists of some exported tables.
-        for store in (
-            Path(export_module.__file__).parents[1].joinpath("db").glob("*.py")
-        ):
-            text = store.read_text(encoding="utf-8")
-            source += "".join(
-                ast.get_source_segment(text, node) or ""
-                for node in ast.walk(ast.parse(text))
-                if isinstance(node, ast.FunctionDef)
-                and node.name.endswith("export_rows")
-            )
+        # The persistence owners hold the column lists of some exported tables:
+        # read every *_export_rows function the export calls.
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                owner, name = node.value.id, node.attr
+            elif isinstance(node, ast.Name):
+                owner, name = None, node.id
+            else:
+                continue
+            if name.endswith("export_rows"):
+                module = getattr(export_module, owner) if owner else export_module
+                source += inspect.getsource(getattr(module, name))
         joined = re.sub(r'"\s*\n\s*"', "", source)
         checked = set()
         for match in re.finditer(r'"SELECT (.*?) FROM (\w+)', joined):
@@ -684,6 +686,8 @@ class CoverageGuardTests(DataKindFixture):
                 "coach_commands",
                 "planned_units",
                 "workout_library",
+                "activity_stream_channels",
+                "activity_detail_analysis",
             },
             checked,
         )
