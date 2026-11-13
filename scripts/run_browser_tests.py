@@ -42,10 +42,12 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
-    """Safe diagnostics never contain child stdout or provider/environment text.
+    """Diagnostics never contain provider/environment text or credentials.
 
-    The only report text is a failing test's bounded first error line, which CI
-    already publishes with the failure artifacts.
+    Report text is a failing test's bounded first error line and, for a failed
+    required tool/container command, its program and subcommand words plus the
+    last 10 lines of its stdout and stderr, each cut at 300 characters with the
+    fixture password redacted (#2656).
     """
 
 
