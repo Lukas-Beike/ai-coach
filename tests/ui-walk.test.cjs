@@ -54,15 +54,16 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
     const victim = path.join(linkDir, "victim.txt");
     fs.writeFileSync(victim, "keep");
     fs.linkSync(victim, path.join(linkDir, "ui-walk.json"));
-    fs.writeFileSync(walk.freshFile(linkDir, "ui-walk.json"), "new", { flag: "wx" });
+    walk.writeFresh(linkDir, "ui-walk.json", "new");
     assert.equal(fs.readFileSync(victim, "utf8"), "keep");
     assert.equal(fs.readFileSync(path.join(linkDir, "ui-walk.json"), "utf8"), "new");
     assert.throws(() => walk.prepareOutDir(path.join(victim, "walk")));
     assert.equal(walk.prepareOutDir(path.join(linkDir, "walk")), path.join(linkDir, "walk"));
-    for (const name of ["victim.txt", "ui-walk.json", "walk"]) fs.rmSync(path.join(linkDir, name), { recursive: true });
   } finally {
     // Remove the link itself first so cleanup never descends into the checkout.
     fs.unlinkSync(link);
+    // Only the plain files and directory this test made; never a recursive delete through a link.
+    for (const name of ["victim.txt", "ui-walk.json", "walk"]) fs.rmSync(path.join(linkDir, name), { recursive: true, force: true });
     fs.rmdirSync(linkDir);
   }
   assert.throws(() => walk.scratchPath(path.join(t3, "shots")), /system temp directory/);
@@ -131,8 +132,13 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   const notJson = path.join(scratch, "previous.json");
   fs.writeFileSync(notJson, "fake-login-value is not JSON");
   done = run("--url", "http://127.0.0.1:9", "--password-file", secret, "--out-dir", path.join(scratch, "walk"), "--compare", notJson);
+  // An out-dir that cannot be created ends with exit 2, not a stack trace (#2661).
+  const blocked = run("--url", "http://127.0.0.1:9", "--password-file", secret, "--out-dir", path.join(secret, "walk"));
   fs.rmSync(scratch, { recursive: true, force: true });
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the previous walk/);
   assert.doesNotMatch(done.stdout, /fake-login-value/);
+  assert.equal(blocked.status, 2);
+  assert.match(blocked.stdout, /cannot create the out-dir/);
+  assert.equal(blocked.stderr, "");
 });

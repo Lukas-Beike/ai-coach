@@ -72,17 +72,17 @@ export function secretPath(target, secrets = T3_SECRETS) {
 
 // The out-dir is created, then checked again where it now resolves (#2661).
 export function prepareOutDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(scratchPath(dir), { recursive: true });
   return scratchPath(dir);
 }
 
-// A fixed output name inside the out-dir: the directory is checked again and an
-// existing entry is removed, so a link or hard link placed there is replaced,
-// never written through (#2661).
-export function freshFile(dir, name) {
+// Every output file is written here: the out-dir is checked again, an existing
+// entry at the fixed name is removed and the file is created exclusively, so a
+// link or hard link placed there is never written through (#2661).
+export function writeFresh(dir, name, data) {
   const target = path.join(scratchPath(dir), name);
   fs.rmSync(target, { force: true });
-  return target;
+  fs.writeFileSync(target, data, { flag: "wx" });
 }
 
 export function baseUrl(text) {
@@ -212,7 +212,7 @@ async function walk({ chromium, url, password, outDir }) {
       // Every error counts against a step: login, a view (with its calendar walk), or the rest.
       result.errors[`${name} login`] = errors.length;
       let counted = errors.length;
-      const shot = (label) => page.screenshot({ path: freshFile(outDir, `${name}-${label}.png`), fullPage: false });
+      const shot = async (label) => writeFresh(outDir, `${name}-${label}.png`, await page.screenshot({ fullPage: false }));
       for (const route of VIEWS) {
         const view = await rendered(page, route, open);
         result.loadMs[`${name} ${route}`] = view.ms;
@@ -301,7 +301,12 @@ async function main() {
     console.log(`FAIL walk stopped (${error.name})`);
     return 2;
   }
-  fs.writeFileSync(freshFile(outDir, "ui-walk.json"), JSON.stringify(result, null, 2), { flag: "wx" });
+  try {
+    writeFresh(outDir, "ui-walk.json", JSON.stringify(result, null, 2));
+  } catch {
+    console.log("FAIL cannot write the walk result in the out-dir");
+    return 2;
+  }
   const lines = [...reportLines(result), ...compareLines(result, previous)];
   for (const line of lines) console.log(line);
   return lines.some((line) => line.startsWith("FAIL")) ? 1 : 0;
