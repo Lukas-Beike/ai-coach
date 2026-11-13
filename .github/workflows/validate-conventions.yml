@@ -51,6 +51,9 @@ jobs:
         if: github.event.pull_request.user.type != 'Bot'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
@@ -60,3 +63,26 @@ jobs:
             echo "The PR body must name its issue with 'Closes #N' (completes it) or 'Part of #N' (one of several PRs)."
             exit 1
           fi
+          # GitHub closes every issue its keyword parser finds, also in "does not
+          # close #N"; compare the intent with that list (#2648).
+          numbers() { grep -oiE "$1" <<< "${PR_BODY:-}" | grep -oE '[0-9]+$' | sort -u || true; }
+          parts="$(numbers '(^|[^[:alnum:]_])part of #[0-9]+')"
+          closes="$(numbers '(^|[^[:alnum:]_])(closes|fixes|resolves) #[0-9]+')"
+          closing="$(gh api graphql -F owner="${REPOSITORY%%/*}" -F name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
+            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:50){nodes{number}}}}}' \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[].number')"
+          failed=0
+          for issue in $parts; do
+            if grep -qx "$issue" <<< "$closing"; then
+              phrase="$(grep -oiE "[[:alpha:] ]{0,20}(close[sd]?|fix(e[sd])?|resolve[sd]?) #$issue([^0-9]|$)" <<< "${PR_BODY:-}" | head -1 || true)"
+              echo "#$issue is named as 'Part of #$issue', but GitHub will close it on merge (phrase: '${phrase:-closing keyword}'); reword it, for example 'stays open'."
+              failed=1
+            fi
+          done
+          for issue in $closes; do
+            if ! grep -qx "$issue" <<< "$closing"; then
+              echo "'Closes #$issue' is in the body, but GitHub does not list #$issue as closed by this PR; move it out of code or quotes."
+              failed=1
+            fi
+          done
+          exit "$failed"
