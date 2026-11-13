@@ -23,7 +23,8 @@ python scripts/run_browser_tests.py --project all --keep-going
   selection without Docker or a browser. A spec a selected project does not
   list (a desktop-only spec on mobile) is skipped there with a note.
 - Rebuild the image (`docker build -t "$(python scripts/run_browser_tests.py --print-image)" .`)
-  after application changes; it is not rebuilt for you.
+  after application changes; it is not rebuilt for you, and a run against an
+  image that differs from the source stops before any fixture starts.
 - Exit 0: passed. Non-zero: a test failed (reports under
   `test-results/browser-runs/`) or the host ran out of resources; the output says
   which and how to rerun. Report what was not run.

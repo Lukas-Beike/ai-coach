@@ -1310,11 +1310,17 @@ def main(argv=None):
                         current = image_matches_source(
                             processes, containers, image, ROOT
                         )
+                        # A stale image would run new specs against old app code (#2644).
                         if current is False:
+                            raise RunnerError(
+                                f"{args.image} does not contain the current application "
+                                f"source; rebuild it with docker build -t {args.image} ."
+                            )
+                        if current is None:
                             print(
-                                f"Warning: {args.image} does not contain the current "
-                                "application source; rebuild it with "
-                                f"docker build -t {args.image} .",
+                                f"Warning: could not compare {args.image} with the current "
+                                "application source; rebuild it if public/, backend/, "
+                                "server.py or requirements.txt changed.",
                                 file=sys.stderr,
                                 flush=True,
                             )

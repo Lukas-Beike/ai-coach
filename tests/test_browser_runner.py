@@ -473,16 +473,23 @@ class BrowserRunnerTests(unittest.TestCase):
         self.assertEqual([], value["children"][0]["failures"])
         self.assertIn("no test report", self.stderr)
 
-    def test_outdated_application_image_warns_and_is_recorded(self):
-        code, value, _path = self.run_main(FakeProcesses(), current=False)
-        self.assertEqual(code, 0)
-        self.assertIs(False, value["images"]["application_matches_source"])
+    def test_outdated_application_image_stops_before_any_fixture(self):
+        # A stale image would run new specs against old app code (#2644).
+        fake = FakeProcesses()
+        code, value, _path = self.run_main(fake, current=False)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(value["status"], "failed")
         self.assertIn(
-            f"docker build -t {runner.worktree_image_tag(runner.ROOT)} .", self.stderr
+            f"docker build -t {runner.worktree_image_tag(runner.ROOT)} .",
+            value["error"],
         )
-        for current in (True, None):
-            self.run_main(FakeProcesses(), current=current)
-            self.assertNotIn("Warning", self.stderr)
+        self.assertFalse(fake.ids)
+        # An image that cannot be compared runs with a warning; a current one silently.
+        code, _value, _path = self.run_main(FakeProcesses(), current=None)
+        self.assertEqual(code, 0)
+        self.assertIn("could not compare", self.stderr)
+        self.run_main(FakeProcesses(), current=True)
+        self.assertNotIn("Warning", self.stderr)
 
     def test_each_checkout_gets_its_own_application_image_tag(self):
         with tempfile.TemporaryDirectory() as directory:
