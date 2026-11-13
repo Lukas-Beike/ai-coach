@@ -246,6 +246,7 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "ps")
         result, calls = self.run_script("-Name", DEMO_NAME, "-Stop")
         self.assertEqual((result.returncode, [c[0] for c in calls]), (0, ["ps"]))
+        self.assertIn("No container named", result.stdout)
         result, calls = self.run_script("-Name", "pacecraft", "-Stop")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(calls, [])

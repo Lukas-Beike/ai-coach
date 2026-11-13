@@ -39,7 +39,7 @@ if ($existingContainer) {
     if ($LASTEXITCODE -ne 0) { throw "Removing container '$Name' failed (exit $LASTEXITCODE)." }
 }
 if ($Stop) {
-    Write-Host "Demo removed: $Name"
+    if ($existingContainer) { Write-Host "Demo removed: $Name" } else { Write-Host "No container named $Name" }
     exit 0
 }
 $dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
