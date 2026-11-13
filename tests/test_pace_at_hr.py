@@ -9,6 +9,7 @@ from backend.performance.pace_at_hr import (
     pace_at_heart_rate,
     pace_at_heart_rate_trend,
     power_at_heart_rate,
+    ride_band_coverage,
     session_comparison,
 )
 from backend.planning.block_review import _performance
@@ -326,6 +327,44 @@ class OutputAtHeartRateTests(unittest.TestCase):
                 )
                 self.assertAlmostEqual(outdoor_value, output_at_heart_rate(
                     inside + outside, sport, heart_rate, self.TODAY), places=2)  # fmt: skip
+
+    def test_ride_coverage_counts_rides_per_variation_limit(self):
+        # Counts only for #2535: a band of 600 s at 200 W whose minute power
+        # varies by exactly ``cv`` (variance = (cv * 200) ** 2).
+        def ride(day, cv, environment="outdoor", sport="ride", status="ok"):
+            band = {
+                "seconds": 600,
+                "work_j": 600 * 200,
+                "watts_sq": 600 * (200**2 + (cv * 200) ** 2),
+            }
+            return {
+                "date": day,
+                "sport": sport,
+                "environment": environment,
+                "power_at_hr_profile": {"status": status, "bins": {"130": band}},
+            }
+
+        records = [
+            ride("2026-11-01", 0.10),
+            ride("2026-11-02", 0.18),
+            ride("2026-11-03", 0.30),
+            ride("2026-11-04", 0.22, "indoor"),
+            ride("2026-09-01", 0.10),  # older than 60 days
+            ride("2026-11-05", 0.10, sport="run"),
+            ride("2026-11-06", 0.10, status="insufficient_data"),
+        ]
+        self.assertEqual(
+            {
+                "days": 60,
+                "rides": {"outdoor": 3, "indoor": 1},
+                "qualifying": {
+                    "0.15": {"outdoor": 1, "indoor": 0},
+                    "0.20": {"outdoor": 2, "indoor": 0},
+                    "0.25": {"outdoor": 2, "indoor": 1},
+                },
+            },
+            ride_band_coverage(records, self.TODAY),
+        )
 
     def test_sessions_older_than_60_days_do_not_count(self):
         runs = [
