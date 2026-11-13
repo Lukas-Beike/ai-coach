@@ -114,18 +114,19 @@ class DiagnosticReportService:
         return self._deps.key_values.get(db, key)
 
     def _database_counts(self, db: Any) -> dict[str, int]:
-        queries = {
-            "messages": "SELECT COUNT(*) AS count FROM messages",
-            "competitions": "SELECT COUNT(*) AS count FROM competitions",
-            "athlete_checkins": "SELECT COUNT(*) AS count FROM athlete_checkins",
-            "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
-            "change_history": "SELECT COUNT(*) AS count FROM change_history",
+        def count(table: str) -> int:
+            return db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                "count"
+            ]
+
+        counts: dict[str, Any] = {
+            "messages": count("messages"),
+            "workout_library": planning_store.library_count(db),
+            "competitions": count("competitions"),
+            "athlete_checkins": count("athlete_checkins"),
+            "activity_feedback": count("activity_feedback"),
+            "change_history": count("change_history"),
         }
-        counts = {
-            name: db.execute(query).fetchone()["count"]
-            for name, query in queries.items()
-        }
-        counts["workout_library"] = planning_store.library_count(db)
         counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
         return counts
 
