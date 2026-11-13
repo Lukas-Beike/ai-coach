@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "da54f63d76d44a2d958d475a1ca75543e5bb8945",
+  "base": "a64c4607695bef4bc2fcbf7554cdd4f8a7bce92e",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -722,18 +722,6 @@
     },
     {
       "tool": "mypy",
-      "path": "e2e/fixture_runtime.py",
-      "code": "assignment",
-      "message_sha256": "63b223df9d3230073bbf9e36a3d550827f18d71602d0883452c44841a538f293"
-    },
-    {
-      "tool": "mypy",
-      "path": "e2e/fixture_runtime.py",
-      "code": "assignment",
-      "message_sha256": "743bb04ffff3138838807d44ce17c43f5e5037ce50d3da58f08cd0e465dc8698"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_job_status.py",
       "code": "assignment",
       "message_sha256": "b36029a87bf7c5ed066afb1a27c05bc8a7ef73963c1594a69da960616fa421ef"
@@ -952,31 +940,7 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "7fadfe3e746eaff9f0518c8e8252349ddb632785627d5bcb9e2c837b0403f130"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "892700d59fb80a8a5645595b733982b2de83a8406e613908b70e1ab652a23b9a"
     },
     {
       "tool": "mypy",
@@ -1175,18 +1139,6 @@
       "path": "tests/test_coach_tool_preparation.py",
       "code": "index",
       "message_sha256": "c137d8e31a4faf360fc543a5a1e758f33b869db1645f246e1d09e86fb7a7d940"
-    },
-    {
-      "tool": "mypy",
-      "path": "e2e/fixture_runtime.py",
-      "code": "method-assign",
-      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
-    },
-    {
-      "tool": "mypy",
-      "path": "e2e/fixture_runtime.py",
-      "code": "method-assign",
-      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
     },
     {
       "tool": "mypy",

@@ -22,8 +22,6 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     resolve_reader,
 )
-from backend.performance.mean_max_curve import SessionCurveReader
-from backend.performance.report_service import TrainingProfileSelectionService
 from backend.performance.season_inputs import SeasonSource
 from backend.performance.source_policy import (
     SourcePreferences,
@@ -36,7 +34,6 @@ from backend.runtime.ports import (
     ObservationReader,
     ProviderCoverageReader,
 )
-from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.status import SyncPublicStateService
 
 
@@ -61,6 +58,9 @@ class PublicStateCoreInputs:
     activity_summary_reader: Callable[[], ActivityRowAndSummaryReader] | None = None
     # When set, the activities' sync time comes from the canonical provider coverage.
     coverage: Callable[[], ProviderCoverageReader] | None = None
+    # When set, LT1 pace and power come from the session curves of the one
+    # process-wide reader the report services hold (#2427).
+    lt1_session_records: Callable[[int], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +143,7 @@ class PublicStateAssembly:
         self._canonical_serving = core.canonical_serving
         self._activity_summary_reader = core.activity_summary_reader
         self._coverage = core.coverage
+        self._lt1_session_records = core.lt1_session_records
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
         self._athlete_data = owners.athlete_data
@@ -177,8 +178,6 @@ class PublicStateAssembly:
         self._planned_workout_label = calendar.planned_workout_label
         self._running_probes = running_probes
         self._provider_credentials = provider_credentials
-        # A second session-curve memo until the composition shares one (#2427).
-        self._lt1_curves = SessionCurveReader(CanonicalTableReader().session_activities)
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         garmin = self._garmin()
@@ -197,9 +196,7 @@ class PublicStateAssembly:
             zone_configurations=athlete.zones().configurations,
             lt1_session_records=None
             if source is None or source.activity_summaries is None
-            else TrainingProfileSelectionService(
-                self._local_date, canonical=source, curves=self._lt1_curves
-            ).curve_records,
+            else self._lt1_session_records,
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:

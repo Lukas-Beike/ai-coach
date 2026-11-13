@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
 import test_coach_dialogue as dialogue
+from server_test_support import patch_coach_conversation
 from support import canonical_backfill_stopped, wire_step
 
 from backend.coach import dialogue as coach_dialogue
@@ -470,8 +471,7 @@ with patch.object(Path, 'read_text', deny):
             return step(payload) if callable(step) else step
 
         with (
-            patch.object(
-                server.COACH_CONVERSATION,
+            patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(binding=Mock(return_value="synthetic")),
             ),
@@ -479,9 +479,7 @@ with patch.object(Path, 'read_text', deny):
                 "backend.coach.context.CoachTrainingContextService.build",
                 side_effect=["Old Garmin data", "Fresh Garmin data"],
             ) as context,
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
-            ) as transport_factory,
+            patch_coach_conversation("response_transport") as transport_factory,
         ):
             transport_factory.return_value.stream_request.side_effect = wire_step(
                 response
@@ -594,9 +592,7 @@ with patch.object(Path, 'read_text', deny):
                         job["id"], "completed"
                     )
                     self.assertTrue(
-                        server.BACKUP.restore_service().restore(backup)[
-                            "restored"
-                        ]
+                        server.BACKUP.restore_service().restore(backup)["restored"]
                     )
                     self.assertEqual(
                         server.SYNC_JOB_QUEUE.service().state(job["id"])["status"],
@@ -610,7 +606,7 @@ with patch.object(Path, 'read_text', deny):
 
     def test_chat_reset_changes_history_generation(self):
         before = server.HTTP_API.chat_history_page_service().page()["generation"]
-        server.COACH_CONVERSATION.reset_service().reset()
+        server.APP.coach_conversation.reset_service().reset()
         self.assertNotEqual(
             server.HTTP_API.chat_history_page_service().page()["generation"], before
         )

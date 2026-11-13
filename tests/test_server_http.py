@@ -7,6 +7,7 @@ import queue
 import re
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import replace
 from datetime import timedelta
@@ -546,7 +547,7 @@ class ServerHttpTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-                (server.time.time() - 1, auth.session_token_hash(token)),
+                (time.time() - 1, auth.session_token_hash(token)),
             )
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -565,7 +566,7 @@ class ServerHttpTests(ServerTestCase):
                     (f"expired-{index}", f"csrf-{index}", 0, "now", "now"),
                 )
             auth = server.session_auth_service()
-            deleted = auth.cleanup_expired_sessions(db, server.time.time(), force=True)
+            deleted = auth.cleanup_expired_sessions(db, time.time(), force=True)
             remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()[
                 "count"
             ]
@@ -720,7 +721,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
-            server.COACH_CONVERSATION.message_service().add(
+            server.APP.coach_conversation.message_service().add(
                 "user", f"searchable {index}"
             )
         page_service = server.HTTP_API.chat_history_page_service()
@@ -750,7 +751,7 @@ class ServerHttpTests(ServerTestCase):
             "literal backslashmarker",
         )
         for content in contents:
-            server.COACH_CONVERSATION.message_service().add("user", content)
+            server.APP.coach_conversation.message_service().add("user", content)
 
         page_service = server.HTTP_API.chat_history_page_service()
         for search_term, expected in (
@@ -853,7 +854,9 @@ class ServerHttpTests(ServerTestCase):
             },
         )
         for index in range(500):
-            server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
+            server.APP.coach_conversation.message_service().add(
+                "user", f"message {index}"
+            )
         bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),
@@ -2019,7 +2022,7 @@ class ServerHttpTests(ServerTestCase):
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.COACH_CONVERSATION.response_transport().request(request)
+            result = server.APP.coach_conversation.response_transport().request(request)
         self.assertEqual(result.text, "ok")
         responses.assert_called_once_with(request_payload(request))
 
@@ -2034,7 +2037,7 @@ class ServerHttpTests(ServerTestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.COACH_CONVERSATION.response_transport().stream_request(
+            result = server.APP.coach_conversation.response_transport().stream_request(
                 request, on_delta, cancel_event, on_response_id
             )
 

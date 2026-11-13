@@ -886,7 +886,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(workout["properties"]["duration_minutes"]["minimum"], 5)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
-        server.COACH_CONVERSATION.message_service().add(
+        server.APP.coach_conversation.message_service().add(
             "user", "Wie soll ich morgen trainieren?"
         )
         preview = server.COACH_CONTEXT.preview_service().preview()
@@ -1164,7 +1164,7 @@ class ServerCoachTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            result = server.COACH_CONVERSATION.reset_service().reset()
+            result = server.APP.coach_conversation.reset_service().reset()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute(
@@ -1173,11 +1173,11 @@ class ServerCoachTests(ServerTestCase):
             ).fetchone()
         self.assertEqual(row["status"], "superseded")
         self.assertEqual(
-            server.COACH_CONVERSATION.dialogue_read_service().artifact_refs(), []
+            server.APP.coach_conversation.dialogue_read_service().artifact_refs(), []
         )
 
     def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
-        message = server.COACH_CONVERSATION.message_service().add(
+        message = server.APP.coach_conversation.message_service().add(
             "user", "Keep this message"
         )
         generation = server.key_value_service().get("chat_generation")
@@ -1194,7 +1194,7 @@ class ServerCoachTests(ServerTestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "synthetic reset failure"),
         ):
-            server.COACH_CONVERSATION.reset_service().reset()
+            server.APP.coach_conversation.reset_service().reset()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             saved = db.execute(
                 "SELECT id FROM messages WHERE id=?", (message["id"],)
@@ -1204,8 +1204,8 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
-        server.COACH_CONVERSATION.message_service().add("user", "Clear this message")
-        service = server.COACH_CONVERSATION.reset_service()
+        server.APP.coach_conversation.message_service().add("user", "Clear this message")
+        service = server.APP.coach_conversation.reset_service()
         with patch.object(
             openai_requests.OpenAIResponsesClient,
             "delete_conversation",
@@ -1216,7 +1216,7 @@ class ServerCoachTests(ServerTestCase):
         delete_conversation.assert_called_once_with("conv-reset-failure")
         self.assertIsNone(result["remote_conversation_deleted"])
         self.assertEqual(server.key_value_service().get("openai_conversation_id"), "")
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+        self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_background_job_replay_reuses_receipt_without_republishing(self):
         registry = server.coach_streams.CHAT_STREAM_REGISTRY
@@ -1553,7 +1553,7 @@ class ServerCoachTests(ServerTestCase):
                 }
             ),
         }
-        result = server.COACH_CONVERSATION.dialogue_read_service()._command_result(row)
+        result = server.APP.coach_conversation.dialogue_read_service()._command_result(row)
         self.assertEqual(result["client_turn_id"], "turn-1")
         self.assertEqual(len(result["sync_job_ids"]), 40)
         self.assertTrue(result["steps"][0]["scope_truncated"])

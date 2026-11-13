@@ -110,8 +110,7 @@ class CoachReviewTests(unittest.TestCase):
                 (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
             )
         with (
-            patch.object(
-                server.COACH_CONVERSATION,
+            fixtures.patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(
                     binding=Mock(return_value="summary-recovery-conversation")
@@ -121,8 +120,8 @@ class CoachReviewTests(unittest.TestCase):
                 "backend.coach.context.CoachTrainingContextService.build",
                 return_value="Synthetic summary context",
             ),
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
+            fixtures.patch_coach_conversation(
+                "response_transport"
             ) as transport_factory,
         ):
             transport_factory.return_value.stream_request.side_effect = AppError(
@@ -440,7 +439,7 @@ class CoachReviewTests(unittest.TestCase):
         )
         with (
             patch.object(
-                server.time,
+                time,
                 "time",
                 return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1,
             ),

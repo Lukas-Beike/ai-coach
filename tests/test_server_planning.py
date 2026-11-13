@@ -1422,7 +1422,7 @@ class ServerPlanningTests(ServerTestCase):
             server.CHAT_REPOSITORY.add(
                 db, "user", "Synthetic draft request", client_turn_id="draft-turn"
             )
-        refs = server.COACH_CONVERSATION.dialogue_read_service().artifact_refs()
+        refs = server.APP.coach_conversation.dialogue_read_service().artifact_refs()
 
         self.assertIn(draft["artifact_id"], [item["id"] for item in refs])
 

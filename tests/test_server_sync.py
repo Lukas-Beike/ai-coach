@@ -5,6 +5,7 @@ import signal
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from dataclasses import replace
@@ -1171,7 +1172,7 @@ class ServerSyncTests(ServerTestCase):
                 with self.lock:
                     self.active += 1
                     self.maximum = max(self.maximum, self.active)
-                server.time.sleep(0.01)
+                time.sleep(0.01)
                 with self.lock:
                     self.active -= 1
                 return [{"date": start, "end": end}]

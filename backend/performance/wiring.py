@@ -22,6 +22,8 @@ from backend.performance.report_service import (
 @dataclass(frozen=True)
 class PerformanceServices:
     training_reports: Callable[[], TrainingReportServices]
+    # The session curve records over the one reader, without the report bundle.
+    curve_records: Callable[[int], Any]
 
 
 def build_performance(
@@ -122,4 +124,9 @@ def build_performance(
             timezone=timezone,
         )
 
-    return PerformanceServices(training_reports)
+    def curve_records(days: int) -> Any:
+        return TrainingProfileSelectionService(
+            local_today, canonical=canonical_performance_source(), curves=power_curves
+        ).curve_records(days)
+
+    return PerformanceServices(training_reports, curve_records)

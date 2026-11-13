@@ -744,13 +744,21 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "responses_background_request",
             "responses_stream_request",
         }
+        tree = _parse(fixture)
         patched = [
             target.attr
-            for node in ast.walk(_parse(fixture))
+            for node in ast.walk(tree)
             if isinstance(node, ast.Assign)
             for target in node.targets
             if isinstance(target, ast.Attribute)
-            and ast.unparse(target.value) in {"server", "server.COACH_CONVERSATION"}
+            and ast.unparse(target.value) == "server"
+        ] + [
+            keyword.arg
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "replace"
+            and ast.unparse(node.args[0]) == "server.APP.coach_conversation"
+            for keyword in node.keywords
         ]
         self.assertTrue(removed.isdisjoint(patched))
         self.assertIn("response_transport", patched)

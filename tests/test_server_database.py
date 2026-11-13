@@ -1090,7 +1090,7 @@ class ServerDatabaseTests(ServerTestCase):
                 )
 
     def test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure(self):
-        server.COACH_CONVERSATION.message_service().add(
+        server.APP.coach_conversation.message_service().add(
             "user", "Synthetic private message"
         )
         snapshot_seed.save_snapshot(
@@ -1131,7 +1131,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_chat_history_cursor_and_generation_share_database_unit_of_work(self):
         added = [
-            server.COACH_CONVERSATION.message_service().add(
+            server.APP.coach_conversation.message_service().add(
                 "user", f"cursor message {index}"
             )
             for index in range(5)
@@ -1139,7 +1139,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.key_value_service().set("chat_generation", "synthetic-generation")
         manager = server.database_manager()
         page_service = ChatHistoryPageService(
-            server.COACH_CONVERSATION.history_service(),
+            server.APP.coach_conversation.history_service(),
             Mock(current=Mock(return_value=[])),
             maximum=server.CHAT_PAGE_MAX,
         )

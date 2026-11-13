@@ -83,6 +83,14 @@ class AppContext:
     sync_persistence: Any = None
     external_calendar: Any = None
     coach_local: Any = None
+    coach_context: Any = None
+    coach_read_tools: Any = None
+    coach_proposals: Any = None
+    coach_planning_tools: Any = None
+    coach_command_tools: Any = None
+    coach_tool_dispatch: Any = None
+    coach_tool_rounds: Any = None
+    coach_turns: Any = None
     workout_library_sync: Any = None
     # The structured Coach dialogue tool definitions; diagnostics lists their names.
     coach_dialogue_tools: Any = None

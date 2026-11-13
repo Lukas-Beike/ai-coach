@@ -840,7 +840,7 @@ def call_turn(name, arguments, scope, **extra):
     """A model answer asking for one tool call, with the current message as source."""
     current = [
         m
-        for m in server.COACH_CONVERSATION.message_service().list()
+        for m in server.APP.coach_conversation.message_service().list()
         if m["role"] == "user"
     ][-1]
     request = {
