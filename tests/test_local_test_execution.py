@@ -269,6 +269,9 @@ class SupervisorTests(unittest.TestCase):
         for relative in (
             "backend",
             "openspec",
+            ".gitattributes",
+            ".githooks",
+            "garmin-fixture.example.json",
             "requirements-graphify.in",
             "requirements-graphify.txt",
             "run-server.ps1",

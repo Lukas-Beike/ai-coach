@@ -48,6 +48,12 @@ INPUTS = (
     "README.md",
     "docs",
     "openspec",
+    # Repository files that tests read directly (#2553).
+    ".gitattributes",
+    ".gitignore",
+    ".dockerignore",
+    ".githooks",
+    "garmin-fixture.example.json",
     "public",
     "server.py",
     "playwright.config.cjs",
