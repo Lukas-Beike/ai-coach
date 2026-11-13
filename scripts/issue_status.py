@@ -12,7 +12,7 @@ import sys
 
 CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 
-HEADING = re.compile(r"^(#{1,6}) +(.+)$")
+HEADING = re.compile(r"^(#{1,6}) +(S.*)$")
 
 
 def open_boxes(body):
