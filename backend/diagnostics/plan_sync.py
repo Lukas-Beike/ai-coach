@@ -9,7 +9,7 @@ from backend.db import planning_store
 from backend.db.repositories import KeyValueRepository
 from backend.planning.push_state import skips_intervals
 from backend.sync.garmin_strength_push import APP_WORKOUT_CLEANUP_KEY
-from backend.sync.jobs import job_dto, read_job, recent_plan_push_rows
+from backend.sync.jobs import list_jobs
 
 _OUTCOMES = frozenset({"ok", "failed", "skipped"})
 
@@ -25,10 +25,7 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
     in ``sync.providers``.
     """
 
-    jobs = [
-        job_dto(*read_job(db, row["id"]))
-        for row in recent_plan_push_rows(db, _JOB_LIMIT)
-    ]
+    jobs = list_jobs(db, _JOB_LIMIT, "plan_push")
     unsynced = [
         row
         for row in planning_store.unsynced_planned_units(db)

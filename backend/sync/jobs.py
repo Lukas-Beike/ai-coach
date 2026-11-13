@@ -1,6 +1,7 @@
 """Provider-job contracts shared by the persistence and worker layers.
 
-The module deliberately has no database, HTTP, or provider transport dependency.
+The module owns the sync_jobs and sync_job_items SQL through the caller's
+connection; it has no HTTP or provider transport dependency.
 Provider rules (accepted providers, job types, refresh fields) come from the
 declarative provider registry. It owns the small state-machine vocabulary so the
 server can persist jobs without duplicating validation and retry decisions in
@@ -222,10 +223,14 @@ def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
     return job, items
 
 
-def list_jobs(db: Any, limit: int) -> builtins.list[dict[str, Any]]:
-    """Project recent jobs without taking ownership of the database scope."""
+def list_jobs(
+    db: Any, limit: int, job_type: str | None = None
+) -> builtins.list[dict[str, Any]]:
+    """Project recent jobs, of one type when given, through the caller's scope."""
+    where = " WHERE type=?" if job_type else ""
     jobs = db.execute(
-        "SELECT * FROM sync_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        f"SELECT * FROM sync_jobs{where} ORDER BY created_at DESC LIMIT ?",
+        (*((job_type,) if job_type else ()), limit),
     ).fetchall()
     return [job_dto(job, read_job(db, job["id"])[1]) for job in jobs]
 
@@ -245,14 +250,6 @@ def job_provider_payload(db: Any, job_id: str) -> Any:
     ).fetchone()
 
 
-def recent_plan_push_rows(db: Any, limit: int) -> builtins.list[Any]:
-    return db.execute(
-        "SELECT id FROM sync_jobs WHERE type='plan_push' "
-        "ORDER BY created_at DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-
-
 def last_completed_jobs(db: Any) -> builtins.list[Any]:
     """The newest finish time of each provider's completed job types."""
     return db.execute(
@@ -270,18 +267,6 @@ def queued_refresh_times(db: Any, provider: str) -> builtins.list[Any]:
         "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
         (provider,),
     ).fetchall()
-
-
-def job_export_rows(db: Any) -> Any:
-    return db.execute(
-        "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
-    )
-
-
-def job_item_export_rows(db: Any) -> Any:
-    return db.execute(
-        "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
-    )
 
 
 def utc_timestamp(now: datetime | None = None) -> str:
