@@ -5,8 +5,7 @@ and resolves each step's target (zone, percent, absolute watts/bpm/pace) against
 the athlete's current thresholds. Nothing is persisted and nothing is invented:
 a target, threshold or step that cannot be resolved leaves exactly the values
 that depend on it as ``None`` and names the reason in ``unknown``. Every value is
-derived (``SOURCE``); the thresholds it rests on keep their provider labels in
-``threshold_sources``. Callers pass only thresholds they consider current.
+derived (``SOURCE``). Callers pass only thresholds they consider current.
 
 Definitions (intensity = fraction of the threshold, 1.0 = threshold):
 - Power: % of FTP, watts / FTP. Pace: % of threshold speed, speed / threshold
@@ -26,7 +25,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
@@ -51,21 +50,6 @@ _PACE_UNIT = re.compile(r"/(KM|MI)\b")
 
 
 @dataclass(frozen=True)
-class AthleteThresholds:
-    """Current thresholds; ``None`` means unknown, never a default.
-
-    ``zones`` carries FTP, LTHR, max HR and the zone limits (local zone settings
-    first, then provider values, as built by ``ZoneSettings``).
-    ``threshold_speed_mps`` is the threshold running speed in m/s.
-    ``sources`` labels each threshold ("ftp", "lthr", "max_hr", "threshold_pace").
-    """
-
-    zones: ZoneSettings = field(default_factory=ZoneSettings)
-    threshold_speed_mps: float | None = None
-    sources: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class StepEstimate:
     kind: str
     target: str
@@ -76,7 +60,6 @@ class StepEstimate:
     band: str | None
     basis: str | None
     unknown: str | None
-    used: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,7 +73,6 @@ class WorkoutEstimate:
     load: float | None
     load_basis: str | None
     unknown: tuple[str, ...]
-    threshold_sources: dict[str, str]
     source: str = SOURCE
     method: str = METHOD
 
@@ -102,7 +84,6 @@ class _Target:
     zone: int | None = None
     basis: str | None = None
     unknown: str | None = None
-    used: tuple[str, ...] = ()
 
 
 def zone_band(zone: int, zone_count: int) -> str:
@@ -143,56 +124,45 @@ def _mean(match: re.Match[str]) -> float:
     return (float(match[1]) + float(match[2] or match[1])) / 2
 
 
-def _percent_target(
-    text: str, kind: str, thresholds: AthleteThresholds
-) -> _Target | None:
+def _percent_target(text: str, kind: str, thresholds: ZoneSettings) -> _Target | None:
     match = _PERCENT.fullmatch(text.split()[0]) if "%" in text else None
     if match is None:
         return None
     value = _mean(match) / 100
     if kind != "hr" or "LTHR" in text:
         label = {"power": "ftp", "pace": "threshold_pace", "hr": "lthr"}[kind]
-        return _Target(intensity=value, basis=f"percent_of_{label}", used=(label,))
+        return _Target(intensity=value, basis=f"percent_of_{label}")
     return _percent_of_max_hr(value, thresholds)
 
 
-def _percent_of_max_hr(value: float, thresholds: AthleteThresholds) -> _Target:
-    zones = thresholds.zones
+def _percent_of_max_hr(value: float, zones: ZoneSettings) -> _Target:
     if not zones.max_hr:
         return _Target(unknown="missing_max_hr")
     if zones.lthr:
         return _Target(
             intensity=value * zones.max_hr / zones.lthr,
             basis="percent_of_max_hr",
-            used=("max_hr", "lthr"),
         )
     return _Target(
         intensity=value / LTHR_SHARE_OF_MAX_HR,
         basis="percent_of_max_hr_assumed_lthr_share",
-        used=("max_hr",),
     )
 
 
-def _absolute_target(
-    text: str, kind: str, thresholds: AthleteThresholds
-) -> _Target | None:
+def _absolute_target(text: str, kind: str, thresholds: ZoneSettings) -> _Target | None:
     match = _ABSOLUTE.fullmatch(text.split()[0])
     if match is None:
         return None
     value = _mean(match)
     threshold, label = (
-        (thresholds.zones.ftp, "ftp")
-        if kind == "power"
-        else (thresholds.zones.lthr, "lthr")
+        (thresholds.ftp, "ftp") if kind == "power" else (thresholds.lthr, "lthr")
     )
     if not threshold:
         return _unknown(f"missing_{label}")
-    return _Target(
-        intensity=value / threshold, basis=f"absolute_over_{label}", used=(label,)
-    )
+    return _Target(intensity=value / threshold, basis=f"absolute_over_{label}")
 
 
-def _pace_target(text: str, thresholds: AthleteThresholds) -> _Target:
+def _pace_target(text: str, thresholds: ZoneSettings) -> _Target:
     unit = _PACE_UNIT.search(text)
     times = [int(m) * 60 + int(s) for m, s in _PACE.findall(text)]
     if unit is None or not times:
@@ -201,14 +171,13 @@ def _pace_target(text: str, thresholds: AthleteThresholds) -> _Target:
     if not sum(times):
         return _unknown("invalid_pace")
     speed = metres / (sum(times) / len(times))
-    reference = thresholds.threshold_speed_mps
+    reference = thresholds.threshold_pace
     if not reference:
         return _Target(speed_mps=speed, unknown="missing_threshold_pace")
     return _Target(
         intensity=speed / reference,
         speed_mps=speed,
         basis="absolute_over_threshold_pace",
-        used=("threshold_pace",),
     )
 
 
@@ -223,14 +192,14 @@ def _bare_run_target(text: str, kind: str, sport: Sport) -> bool:
 
 
 def _resolve_target(
-    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
+    step: Mapping[str, Any], thresholds: ZoneSettings, sport: Sport
 ) -> _Target:
     text, kind = str(step["target"]), str(step["kind"])
     if _bare_run_target(text, kind, sport):
         return _unknown("ambiguous_run_target")
     zone = _ZONE.fullmatch(text.split()[0])
     if zone:
-        return _zone_target(zone, kind, thresholds.zones)
+        return _zone_target(zone, kind, thresholds)
     if ":" in text:
         return _pace_target(text, thresholds)
     resolved = _percent_target(text, kind, thresholds) or _absolute_target(
@@ -240,18 +209,18 @@ def _resolve_target(
 
 
 def _pace_speed(
-    step: Mapping[str, Any], target: _Target, thresholds: AthleteThresholds
+    step: Mapping[str, Any], target: _Target, thresholds: ZoneSettings
 ) -> float | None:
     if target.speed_mps:
         return target.speed_mps
-    reference = thresholds.threshold_speed_mps
+    reference = thresholds.threshold_pace
     if step["kind"] == "pace" and target.intensity and reference:
         return target.intensity * reference
     return None
 
 
 def _estimate_step(
-    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
+    step: Mapping[str, Any], thresholds: ZoneSettings, sport: Sport
 ) -> StepEstimate:
     target = _resolve_target(step, thresholds, sport)
     speed = _pace_speed(step, target, thresholds)
@@ -266,11 +235,11 @@ def _estimate_step(
         unknown = unknown or "missing_pace_for_distance_step"
     zone = target.zone
     if zone is None and target.intensity is not None:
-        limits = _limits(str(step["kind"]), thresholds.zones)
+        limits = _limits(str(step["kind"]), thresholds)
         zone = percent_zone(target.intensity * 100, limits)
     band = None
     if zone is not None:
-        band = zone_band(zone, len(_limits(str(step["kind"]), thresholds.zones)) + 1)
+        band = zone_band(zone, len(_limits(str(step["kind"]), thresholds)) + 1)
     return StepEstimate(
         kind=str(step["kind"]),
         target=str(step["target"]),
@@ -281,7 +250,6 @@ def _estimate_step(
         band=band,
         basis=target.basis,
         unknown=unknown,
-        used=target.used,
     )
 
 
@@ -340,14 +308,13 @@ def _empty(sport: str, reason: str, duration_s: float | None = None) -> WorkoutE
         load=None,
         load_basis=None,
         unknown=(reason,),
-        threshold_sources={},
     )
 
 
 def estimate_workout(
     description: str,
     sport: Sport,
-    thresholds: AthleteThresholds,
+    thresholds: ZoneSettings,
     *,
     fallback_duration_s: float | None = None,
 ) -> WorkoutEstimate:
@@ -367,7 +334,6 @@ def estimate_workout(
     if _all_known(steps, "duration_s", "intensity"):
         factor, hours, basis = _unit_intensity(steps)
         load = hours * factor**2 * 100
-    used = {name for step in steps for name in step.used}
     return WorkoutEstimate(
         sport=sport.value,
         steps=steps,
@@ -378,11 +344,6 @@ def estimate_workout(
         load=load,
         load_basis=basis,
         unknown=_reasons(steps),
-        threshold_sources={
-            name: thresholds.sources[name]
-            for name in sorted(used)
-            if name in thresholds.sources
-        },
     )
 
 
@@ -406,7 +367,7 @@ class TargetRange:
 
 
 def step_target_range(
-    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
+    step: Mapping[str, Any], thresholds: ZoneSettings, sport: Sport
 ) -> TargetRange:
     """Bounds of a parsed workout step's target from the athlete's thresholds."""
     if step.get("ramp"):
@@ -417,11 +378,11 @@ def step_target_range(
         return _pace_range(text) or TargetRange(unknown="pace_unit_unknown")
     if target.unknown or target.intensity is None:
         return TargetRange(unknown=target.unknown or "unsupported_target")
-    bounds = _fraction_bounds(text, kind, target.intensity, thresholds.zones)
+    bounds = _fraction_bounds(text, kind, target.intensity, thresholds)
     reference = {
-        "power": ("watts", thresholds.zones.ftp),
-        "hr": ("heartrate", hr_reference(thresholds.zones)),
-        "pace": ("speed", thresholds.threshold_speed_mps),
+        "power": ("watts", thresholds.ftp),
+        "hr": ("heartrate", hr_reference(thresholds)),
+        "pace": ("speed", thresholds.threshold_pace),
     }[kind]
     metric, value = reference
     if not value:

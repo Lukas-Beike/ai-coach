@@ -155,11 +155,11 @@ class WatchLthrParityTests(unittest.TestCase):
         )
         zones = resolve_thresholds(
             winners, self.configurations, Sport.RUN, Environment.OUTDOOR, DAY
-        ).zones
+        )
         planned = load_thresholds(inputs, DAY, self.configurations).for_sport(
             Sport.RUN, Environment.OUTDOOR, DAY
         )
-        self.assertEqual((zones.lthr, planned.zones.lthr), (172.0, 172.0))
+        self.assertEqual((zones.lthr, planned.lthr), (172.0, 172.0))
         # The Garmin cap bpm export reads the zones' LTHR: 87 % of 172.
         easy = effective_caps(None)["easy"]
         self.assertEqual(resolved_range(easy, zones.lthr), (112, 150))
@@ -255,7 +255,7 @@ class WatchLthrParityTests(unittest.TestCase):
         exported = read_export_thresholds(
             reader, None, as_of=DAY, configurations=configurations
         )
-        self.assertEqual(zones.zones.lthr, 175.0)
+        self.assertEqual(zones.lthr, 175.0)
         assert used.threshold_hr is not None
         self.assertEqual(
             (used.threshold_hr.value, used.threshold_hr.source), (175.0, "local")
@@ -284,7 +284,7 @@ class DatedBehaviorTests(unittest.TestCase):
                 zones = resolve_thresholds(
                     (), configurations, Sport.RUN, Environment.OUTDOOR, day
                 )
-                self.assertEqual(zones.zones.lthr, expected)
+                self.assertEqual(zones.lthr, expected)
                 (configured,) = [
                     item
                     for item in configured_thresholds(configurations, day)
@@ -323,19 +323,19 @@ class ThresholdPaceParityTests(unittest.TestCase):
             reader, None, as_of=DAY, configurations=configurations
         )
         assert used.threshold_pace is not None
-        self.assertEqual(planned.threshold_speed_mps, 4.0)
-        self.assertEqual(planned.zones.threshold_pace, 4.0)
+        self.assertEqual(planned.threshold_pace, 4.0)
+        self.assertEqual(planned.threshold_pace, 4.0)
         self.assertEqual(used.threshold_pace.value, 4.0)
         self.assertEqual(exported[RUN_PACE].value.value, 4.0)
         self.assertEqual(plan_references(exported, Sport.RUN).threshold_speed, 4.0)
         # The absolute 4.0 m/s limit is 100 % of the local threshold, not 105 % of 3.8.
-        self.assertAlmostEqual(planned.zones.pace_limits[2], 100.0)
+        self.assertAlmostEqual(planned.pace_limits[2], 100.0)
 
     def test_without_a_local_pace_the_observation_leads(self) -> None:
         observation = _obs(MetricKind.THRESHOLD_PACE, 3.8, GARMIN, Sport.RUN, DAY)
         winners = provider_zone_thresholds((observation,), as_of=DAY)
         planned = resolve_thresholds(winners, (), Sport.RUN, Environment.OUTDOOR, DAY)
-        self.assertEqual(planned.threshold_speed_mps, 3.8)
+        self.assertEqual(planned.threshold_pace, 3.8)
 
 
 def _walk(**values):

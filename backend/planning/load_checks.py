@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
-from backend.activities.zone_settings import effective_zone_configuration
+from backend.activities.workout_load import WorkoutEstimate
+from backend.activities.zone_settings import ZoneSettings, effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
@@ -57,30 +57,21 @@ Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 
 @dataclass(frozen=True)
 class LoadThresholds:
-    """Per-sport thresholds; ``unavailable`` names why none may be used."""
+    """Thresholds of a sport on a day; ``unavailable`` names why none may be used."""
 
-    by_sport: Mapping[Sport, AthleteThresholds] = field(default_factory=dict)
     unavailable: str | None = None
-    indoor_ride: AthleteThresholds | None = None
-    # Resolves a sport on a given day; set when local configurations can differ
-    # by validity date, otherwise ``by_sport`` and ``indoor_ride`` apply.
-    resolver: Callable[[Sport, Environment, date | None], AthleteThresholds] | None = (
-        None
-    )
+    resolver: Callable[[Sport, Environment, date | None], ZoneSettings] | None = None
 
     def for_sport(
         self,
         sport: Sport,
         environment: Environment = Environment.UNKNOWN,
         day: date | None = None,
-    ) -> AthleteThresholds:
+    ) -> ZoneSettings:
         """Thresholds of a sport; indoor and virtual rides use the indoor FTP."""
-        if self.resolver is not None:
-            return self.resolver(sport, environment, day)
-        indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
-        if sport is Sport.RIDE and indoor and self.indoor_ride is not None:
-            return self.indoor_ride
-        return self.by_sport.get(sport, AthleteThresholds())
+        if self.resolver is None:
+            return ZoneSettings()
+        return self.resolver(sport, environment, day)
 
 
 @dataclass(frozen=True)
@@ -137,7 +128,7 @@ def load_thresholds(
 
     def resolve(
         sport: Sport, environment: Environment, day: date | None
-    ) -> AthleteThresholds:
+    ) -> ZoneSettings:
         return resolve_thresholds(
             observed, configurations, sport, environment, day or today
         )

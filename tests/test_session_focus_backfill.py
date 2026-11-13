@@ -9,7 +9,7 @@ from datetime import date
 
 from support import temp_database
 
-from backend.activities.workout_load import AthleteThresholds
+from backend.activities.zone_settings import ZoneSettings
 from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.db.schema import initialize_schema
@@ -69,9 +69,7 @@ class SessionFocusBackfillTests(unittest.TestCase):
             key_values=self.key_values,
             clock=lambda: NOW,
             future_units=lambda limit: self.units.list(limit, future_only=True),
-            estimator=lambda: (
-                lambda unit: estimate_planned_unit(unit, AthleteThresholds())
-            ),
+            estimator=lambda: lambda unit: estimate_planned_unit(unit, ZoneSettings()),
             update_unit=self.units.update,
             bump_planning_revision=self.revisions.bump,
             database_manager=lambda: self.manager,

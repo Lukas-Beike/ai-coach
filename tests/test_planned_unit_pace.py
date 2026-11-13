@@ -29,7 +29,7 @@ RUN = {
 class PlannedUnitPaceTests(unittest.TestCase):
     def test_pace_targeted_run_gets_a_load_with_the_threshold(self) -> None:
         thresholds = unit_thresholds(RUN, [PACE], [])
-        self.assertEqual(4.0, thresholds.threshold_speed_mps)
+        self.assertEqual(4.0, thresholds.threshold_pace)
         estimate = estimate_planned_unit(RUN, thresholds)
         self.assertEqual((), estimate.unknown)
         # 5:00/km = 3.33 m/s over 4.0 m/s: intensity 0.833, load 69.4
@@ -37,15 +37,15 @@ class PlannedUnitPaceTests(unittest.TestCase):
 
     def test_pace_targets_stay_unknown_without_the_threshold(self) -> None:
         thresholds = unit_thresholds(RUN, [], [])
-        self.assertIsNone(thresholds.threshold_speed_mps)
+        self.assertIsNone(thresholds.threshold_pace)
         estimate = estimate_planned_unit(RUN, thresholds)
         self.assertIsNone(estimate.load)
         self.assertEqual(("missing_threshold_pace",), estimate.unknown)
 
     def test_speed_is_per_sport(self) -> None:
         both = unit_thresholds(RUN, [RIDE_PACE, PACE], [])
-        self.assertEqual(4.0, both.threshold_speed_mps)
-        self.assertIsNone(unit_thresholds(RUN, [RIDE_PACE], []).threshold_speed_mps)
+        self.assertEqual(4.0, both.threshold_pace)
+        self.assertIsNone(unit_thresholds(RUN, [RIDE_PACE], []).threshold_pace)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ from unittest.mock import Mock
 from support import temp_database
 
 from backend.activities.hr_cap import effective_caps
-from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Sport
 from backend.coach.context_selection import select_coach_context
@@ -95,7 +94,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
         )
         self.dispatch = Mock()
         self.dispatch.execute.side_effect = self.write
@@ -177,7 +176,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "polarized",
             today=lambda: TODAY,
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
         )
         self.write_units = [
             {
@@ -212,7 +211,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
             calendar_events=lambda: [
                 {
                     "start_local": "2026-11-04T09:00:00",
@@ -385,9 +384,9 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
             thresholds=lambda: LoadThresholds(
-                {Sport.RIDE: AthleteThresholds(zones=ZoneSettings(ftp=250.0))}
+                resolver=lambda *_: ZoneSettings(ftp=250.0)
             ),
         )
         self.completed = [
