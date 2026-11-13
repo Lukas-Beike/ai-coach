@@ -118,7 +118,12 @@ def bootstrap_contract(state: dict) -> str:
 
 class ServerDatabaseTests(ServerTestCase):
     def test_bootstrap_contract_is_current(self):
-        rendered = bootstrap_contract(server.PUBLIC_STATE.bootstrap_service().read())
+        # A Personal API key adds fields to the Garmin state; render without one.
+        with patch.object(
+            server, "CONFIG", replace(server.CONFIG, garmin_personal_api_key="")
+        ):
+            state = server.PUBLIC_STATE.bootstrap_service().read()
+        rendered = bootstrap_contract(state)
         document = BOOTSTRAP_CONTRACT.read_text(encoding="utf-8")
         before, rest = document.split(CONTRACT_BEGIN, 1)
         if WRITE_DOCS:

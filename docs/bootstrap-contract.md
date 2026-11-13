@@ -12,9 +12,10 @@ a test fails when it is out of date. The producing code is
   snapshot, so an update never reuses outdated stored area data. Each is
   filled by its own area route (`docs/api-routes.md`).
 - The start data carries the newest 100 chat messages, the local planned units
-  (`planned`, at most 250) and the training-relevant external calendar events
-  (`calendar`), the profile and up to 100 competitions; the planned units are
-  sent once (#2115).
+  (`planned`, at most 250), the profile, up to 100 competitions and `calendar`,
+  which merges the planned units, the competitions and up to 250
+  training-relevant external calendar events; no further copy of the planned
+  units is sent (#2115 removed `training_calendar`).
 - `threshold_warnings` is always present (null when there is none), so a
   cleared warning also clears on a client that merges start data.
 
