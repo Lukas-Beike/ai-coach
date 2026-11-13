@@ -6,7 +6,6 @@ import shutil
 import struct
 import tempfile
 import unittest
-from datetime import datetime as _local_datetime
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock
@@ -164,7 +163,7 @@ class ServerFrontendTests(ServerTestCase):
             "voiceButton",
             "attachmentInput",
             "messageInput",
-            "openaiChatResetButton",
+            "coachChatResetButton",
         ):
             binding = f'$("#{selector}").addEventListener('
             self.assertIn(binding, coach)
@@ -194,7 +193,7 @@ class ServerFrontendTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Ride",
                 "name": "Remove me",
@@ -703,14 +702,16 @@ class ServerFrontendTests(ServerTestCase):
         index_refs = versioned_asset_refs(index)
         self.assertTrue(index_refs)
         self.assertEqual(len(index_refs), len(set(index_refs)))
-        # The shell, the unversioned manifest and its icons are cached; every
-        # other precache entry is exactly one stamped reference of index.html.
+        # The shell, the unversioned manifest, its icons and the stylesheet's
+        # font are cached; every other precache entry is exactly one stamped
+        # reference of index.html.
         unstamped = {
             "/",
             "/manifest.webmanifest",
             "/icon-192.png",
             "/icon-512.png",
             "/icon-maskable-512.png",
+            "/InterVariable.woff2",
         }
         self.assertEqual(unstamped, set(cached) - set(index_refs))
         self.assertEqual(set(index_refs), set(cached) - unstamped)

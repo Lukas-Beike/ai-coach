@@ -6,7 +6,8 @@ async function performanceFixture(page, changes, route = "running") {
   await page.route("**/api/performance", async (request) => {
     const response = await request.fetch();
     const data = await response.json();
-    Object.assign(data.performance, { metrics: {} }, typeof changes === "function" ? changes(data.performance) : changes);
+    // The thresholds (LT1, #2427) derive from the metrics, so they are emptied with them.
+    Object.assign(data.performance, { metrics: {}, thresholds: {} }, typeof changes === "function" ? changes(data.performance) : changes);
     await request.fulfill({ response, json: data });
   });
   await page.goto(`/#analysis/${route}`);
@@ -127,7 +128,7 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   for (const key of ["development-Rad", "current-performance"]) {
     await page.evaluate((key) => {
       document.querySelector(`[data-analysis-section='${key}'] > summary`).click();
-      if (key === "current-performance") renderCurrentPerformance(state.data.performance?.metrics || {}, state.data.performance?.history);
+      if (key === "current-performance") renderCurrentPerformance(state.data.performance?.metrics || {}, state.data.performance?.history, [], state.data.performance?.thresholds);
       else renderAnalysisHistory(state.data.performance.history);
     }, key);
     await expect(page.locator(`[data-analysis-section='${key}']`)).not.toHaveAttribute("open", "");

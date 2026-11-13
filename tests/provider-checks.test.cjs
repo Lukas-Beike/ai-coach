@@ -1,19 +1,23 @@
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const { test } = require("node:test");
-const { loadPublicScript } = require("./frontend-harness.cjs");
+const { loadPublicScript, FakeElement } = require("./frontend-harness.cjs");
 
-const { providerCheckView } = require("../public/provider-checks.js");
+const { providerCheckView, checkedConnectionKind } = require("../public/provider-checks.js");
 
 const PROVIDERS = ["alpha", "beta", "gamma"];
 
-function loadChecks(apiHandler) {
+function loadChecks(apiHandler, providers = PROVIDERS) {
   const results = new Map();
   const buttons = new Map();
   const classes = new Map();
-  for (const id of PROVIDERS) {
+  const chips = new Map();
+  // Each provider's card holds its chip ("#<id>ConnectionStatus") and its check button.
+  const card = (id) => ({ querySelector: (selector) => (selector === ".connection-chip" ? chips.get(`#${id}ConnectionStatus`) : buttons.get(id)) });
+  for (const id of providers) {
     results.set(id, { textContent: "", classList: { toggle: (_name, on) => classes.set(id, Boolean(on)) } });
-    buttons.set(id, { dataset: { checkButton: id, ...(id === "beta" ? { checkGroup: "beta beta-card" } : {}) }, disabled: false, addEventListener(_type, handler) { this.click = handler; } });
+    buttons.set(id, { dataset: { checkButton: id, ...(id === "beta" ? { checkGroup: "beta beta-card" } : {}) }, disabled: false, addEventListener(_type, handler) { this.click = handler; }, closest: () => card(id) });
+    chips.set(`#${id}ConnectionStatus`, Object.assign(new FakeElement(), { id: `${id}ConnectionStatus`, closest: () => card(id) }));
   }
   const calls = [];
   const toasts = [];
@@ -22,6 +26,7 @@ function loadChecks(apiHandler) {
       addEventListener: () => {},
       querySelectorAll: () => [...buttons.values()],
       querySelector: (selector) => {
+        if (selector.startsWith("#")) return chips.get(selector);
         const id = /"(\w+)"/.exec(selector)[1];
         return selector.includes("check-result") ? results.get(id) : buttons.get(id);
       },
@@ -35,8 +40,9 @@ function loadChecks(apiHandler) {
     clearTimeout: () => {},
     Date,
   };
-  loadPublicScript("provider-checks.js", context);
-  return { toasts, calls, results, buttons, classes, run: (code) => vm.runInContext(code, context) };
+  // Loaded in page order: the chips of connection-status.js follow the check results.
+  loadPublicScript(["connection-status.js", "provider-checks.js"], context);
+  return { toasts, calls, results, buttons, classes, chips, run: (code) => vm.runInContext(code, context) };
 }
 
 test("every status has a distinct view and only failures are flagged", () => {
@@ -233,4 +239,30 @@ test("an explicit check announces its outcome and a failed request re-reads the 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(toasts.length, 2);
   assert.ok(calls.some((call) => call.method === "GET"), "state is re-read after an aborted request");
+});
+
+// #2443: the chip of a configured Intervals.icu or Claude card said "Nicht geprüft" after a successful check.
+test("Intervals.icu and Claude chips follow the last explicit check, also after a reload", async () => {
+  for (const [provider, chip] of [["intervals", "#intervalsConnectionStatus"], ["anthropic", "#anthropicConnectionStatus"]]) {
+    for (const [status, shown] of [["success", "Verbunden"], ["auth_failed", "Fehler"]]) {
+      const card = loadChecks(async () => ({ status, checked_at: null }), [provider]);
+      card.run(`setConnectionChip("${chip}", "unchecked")`);
+      await card.run(`checkProviderConnection("${provider}")`);
+      assert.equal(card.chips.get(chip).textContent, shown, `${provider} ${status}`);
+      // After a reload the stored result may arrive before or after the card's own state.
+      for (const resultFirst of [true, false]) {
+        const reloaded = loadChecks(async () => ({ providers: { [provider]: { status, checked_at: null } } }), [provider]);
+        if (!resultFirst) reloaded.run(`setConnectionChip("${chip}", "unchecked")`);
+        await reloaded.run("loadProviderChecks()");
+        if (resultFirst) reloaded.run(`setConnectionChip("${chip}", "unchecked")`);
+        assert.equal(reloaded.chips.get(chip).textContent, shown, `${provider} ${status} after reload`);
+      }
+    }
+  }
+  // The card's own state wins once it has one; an unknown answer changes nothing.
+  for (const kind of ["off", "ok", "error"]) {
+    for (const status of ["success", "auth_failed"]) assert.equal(checkedConnectionKind(kind, { status }), kind);
+  }
+  assert.equal(checkedConnectionKind("unchecked", { status: "unchecked" }), "unchecked");
+  assert.equal(checkedConnectionKind("unchecked", undefined), "unchecked");
 });

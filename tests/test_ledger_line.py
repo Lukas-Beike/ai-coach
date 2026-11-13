@@ -24,11 +24,14 @@ MERGED = {
 NUMSTAT = "10\t2\tbackend/a.py\n6\t0\ttests/test_a.py\n3\t1\tdocs/a.md\n"
 
 
-def fake_run(pr):
+def fake_run(pr, issue_state="CLOSED"):
     calls = []
 
     def run(argv, **_kwargs):
         calls.append(argv)
+        if argv[:2] == ["gh", "issue"]:
+            data = json.dumps({"state": issue_state})
+            return subprocess.CompletedProcess(argv, 0, data, "")
         if argv[0] == "gh":
             return subprocess.CompletedProcess(argv, 0, json.dumps(pr), "")
         return subprocess.CompletedProcess(argv, 0, NUMSTAT, "")
@@ -42,8 +45,8 @@ class LedgerLineTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def run_script(self, pr, *args):
-        fake = fake_run(pr)
+    def run_script(self, pr, *args, issue_state="CLOSED"):
+        fake = fake_run(pr, issue_state)
         out, err = io.StringIO(), io.StringIO()
         with (
             mock.patch.object(gh_cli.subprocess, "run", fake),
@@ -61,7 +64,12 @@ class LedgerLineTests(unittest.TestCase):
             "2026-11-11 #2275 closed via PR #2280 01234567 prod +10/-2 tests +6/-0 "
             "other +3/-1: chore(skills): add the ledger line\n",
         )
-        self.assertEqual(fake.calls[1][-1], f"{SHA}^..{SHA}")
+        self.assertEqual(fake.calls[2][-1], f"{SHA}^..{SHA}")
+
+    def test_open_issue_is_written_as_part(self):
+        code, out, _, _ = self.run_script(MERGED, issue_state="OPEN")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("2026-11-11 #2275 part via PR #2280 "))
 
     def test_first_nonblank_note_line_replaces_the_title(self):
         note = Path(self.tmp.name) / "note.md"

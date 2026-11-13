@@ -20,7 +20,8 @@ python scripts/run_browser_tests.py --project all --keep-going
 - `--project` is required (one project name or `all`); `--spec` repeats. Run the
   smallest selection that covers the change: the affected spec on the affected
   project, then the other viewports for layout changes. `--list` resolves the
-  selection without Docker or a browser.
+  selection without Docker or a browser. A spec a selected project does not
+  list (a desktop-only spec on mobile) is skipped there with a note.
 - Rebuild the image (`docker build -t "$(python scripts/run_browser_tests.py --print-image)" .`)
   after application changes; it is not rebuilt for you.
 - Exit 0: passed. Non-zero: a test failed (reports under

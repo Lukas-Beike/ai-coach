@@ -119,7 +119,7 @@ class CoachTurnUndoTests(ServerTestCase):
     def test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields(
         self,
     ) -> None:
-        catalog = server.NUTRITION_ASSEMBLY.product_catalog_service()
+        catalog = server.NUTRITION_SERVICES.product_catalog_service()
         own = catalog.save_product(
             {
                 "name": "Synthetic skyr",
@@ -136,7 +136,7 @@ class CoachTurnUndoTests(ServerTestCase):
             "basis_unit": "g",
             "per_100": {"kcal": 500},
         }
-        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+        server.NUTRITION_SERVICES.food_mirror().refresh([food])
         # Filled before the turn: undo of the turn keeps this value and its origin.
         catalog.fill_product_gaps(
             [{"id": food["id"], "values": {"fat_g": 30}, "origin": "manual"}]
@@ -173,7 +173,7 @@ class CoachTurnUndoTests(ServerTestCase):
         self.assertEqual(self._undo(turn_id)["status"], "undone")
 
         self.assertIsNone(catalog.get_product(own["id"])["fat_g"])
-        restored = server.NUTRITION_ASSEMBLY.food_mirror().get(food["id"])
+        restored = server.NUTRITION_SERVICES.food_mirror().get(food["id"])
         assert restored is not None
         # Undo restores the food as it was stored: salt is absent again.
         self.assertNotIn("salt_g", restored["per_100"])

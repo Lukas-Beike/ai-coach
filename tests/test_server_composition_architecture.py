@@ -395,16 +395,16 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         )
 
     def test_provider_http_client_cache_is_owned_by_provider_transport(self) -> None:
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
-        assembly = next(
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_wiring.py")
+        builder = next(
             node
             for node in transport_tree.body
-            if isinstance(node, ast.ClassDef)
-            and node.name == "ProviderTransportAssembly"
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "build_provider_transport"
         )
         json_client = next(
             node
-            for node in assembly.body
+            for node in builder.body
             if isinstance(node, ast.FunctionDef) and node.name == "json_http_client"
         )
         self.assertIn(
@@ -429,7 +429,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
         self.assertIn(
-            "ProviderTransportAssembly",
+            "build_provider_transport",
             ast.unparse(provider_transport.value),
         )
         self.assertFalse(
@@ -467,7 +467,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
         self.assertIn(
-            "operation=INTERVALS_RESYNC_GATE.operation",
+            "intervals_operation=INTERVALS_RESYNC_GATE.operation",
             ast.unparse(provider_transport.value),
         )
 
@@ -486,21 +486,19 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "serving=lambda: CANONICAL_READ", ast.unparse(activity_reads.value)
         )
 
-        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
-        assembly = next(
+        transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_wiring.py")
+        builder = next(
             node
             for node in transport_tree.body
-            if isinstance(node, ast.ClassDef)
-            and node.name == "ProviderTransportAssembly"
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "build_provider_transport"
         )
         client_factory = next(
             node
-            for node in assembly.body
+            for node in builder.body
             if isinstance(node, ast.FunctionDef) and node.name == "intervals_client"
         )
-        self.assertIn(
-            "operation=self._intervals_operation", ast.unparse(client_factory)
-        )
+        self.assertIn("operation=intervals_operation", ast.unparse(client_factory))
 
     def test_sync_persistence_reads_go_through_their_helpers(
         self,
@@ -555,23 +553,11 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         assert isinstance(composed, ast.Call)
         self.assertEqual("build_canonical_read", ast.unparse(composed.func))
 
-        diagnostics = next(
-            node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "DIAGNOSTICS_ASSEMBLY"
-                for target in node.targets
-            )
+        diagnostics = (BACKEND_ROOT / "diagnostics" / "wiring.py").read_text(
+            encoding="utf-8"
         )
-        self.assertIn(
-            "canonical_coverage=lambda: CANONICAL_READ",
-            ast.unparse(diagnostics.value),
-        )
-        self.assertIn(
-            "canonical_read=lambda: CANONICAL_READ",
-            ast.unparse(diagnostics.value),
-        )
+        self.assertIn("canonical_coverage=ctx.canonical_read", diagnostics)
+        self.assertIn("canonical_read=ctx.canonical_read", diagnostics)
 
         read_selector = next(
             node
@@ -626,32 +612,22 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for node in weather_tree.body
             )
         )
-        assembly_tree = _parse(BACKEND_ROOT / "weather" / "assembly.py")
-        assembly = next(
+        wiring_tree = _parse(BACKEND_ROOT / "weather" / "wiring.py")
+        builder = next(
             node
-            for node in assembly_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "WeatherAssembly"
+            for node in wiring_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_weather"
         )
-        service_method = next(
-            node
-            for node in assembly.body
-            if isinstance(node, ast.FunctionDef) and node.name == "service"
-        )
-        self.assertIn(
-            "weather.WEATHER_SERVICE_CACHE.get",
-            ast.unparse(service_method),
-        )
+        self.assertIn("weather.WEATHER_SERVICE_CACHE.get", ast.unparse(builder))
         server_tree = _parse(SERVER_PATH)
-        weather_assembly = next(
+        weather = next(
             node
             for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "WEATHER_ASSEMBLY"
-                for target in node.targets
-            )
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "WEATHER"
         )
-        self.assertIn("WeatherAssembly", ast.unparse(weather_assembly.value))
+        self.assertIn("build_weather", ast.unparse(weather))
         self.assertFalse(
             any(
                 isinstance(node, ast.FunctionDef)

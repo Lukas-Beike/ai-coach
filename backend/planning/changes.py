@@ -22,6 +22,9 @@ from backend.planning.conflicts import calendar_item_window, calendar_items_conf
 from backend.planning.planned_units import plan_push_hash_matches
 from backend.planning.workouts import normalize_workout
 
+# The most training changes one request may carry; the Coach tool schemas cap on it too.
+TRAINING_CHANGE_LIMIT = 366
+
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
     "SELECT payload FROM planned_units WHERE local_id=?"
 )

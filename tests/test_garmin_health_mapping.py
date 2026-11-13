@@ -71,9 +71,8 @@ EXPECTED_FIXTURE_ROWS: list[tuple[str, float, str, str]] = [
     ("hrv_weekly_average", 58.0, "2026-10-10", "-"),
     ("resting_hr", 49.0, "2026-10-10", "-"),
     ("readiness", 75.0, "2026-10-10", "-"),
-    ("vo2max", 57.4, "2026-10-10", "-"),
+    ("vo2max", 57.8, "2026-10-10", "-"),
     ("vo2max", 59.0, "2026-10-10", "ride"),
-    ("vo2max", 57.8, "2026-10-10", "run"),
     ("threshold_pace", 3.6, "2026-10-11", "run"),
     ("threshold_hr", 168.0, "2026-10-11", "run"),
     ("threshold_hr", 160.0, "2026-10-11", "ride"),
@@ -482,6 +481,25 @@ class FixtureSnapshotTests(unittest.TestCase):
         self.assertEqual(_rows(result), sorted(EXPECTED_FIXTURE_ROWS))
         self.assertEqual(_issues(result), EXPECTED_FIXTURE_ISSUES)
 
+    def test_developer_fixture_maps_the_recorded_vo2max_shape(self) -> None:
+        # #2467: fixture mode serves garmin-fixture.example.json; its maxmet rows
+        # take the recorded daily shape, so VO2max is mapped again.
+        example = json.loads(
+            (FIXTURES.parents[3] / "garmin-fixture.example.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        result = _map({"max_metrics": example["max_metrics"]})
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("vo2max", 49.0, "2026-08-29", "-"),
+                ("vo2max", 52.0, "2026-08-29", "ride"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
     def test_fixture_observations_carry_no_timestamp(self) -> None:
         result = _map(_fixture_sections())
 
@@ -692,6 +710,23 @@ class AliasAndUnitTests(unittest.TestCase):
 
         self.assertEqual(_rows(result), [("vo2max", 57.4, DAY, "-")])
         self.assertEqual(_issues(result), [])
+
+    def test_a_running_object_maps_to_the_run_sport(self) -> None:
+        # The recorded maxmet rows carry no running object (#2391); the mapper
+        # still reads the documented one beside generic.
+        result = _map(
+            {
+                "max_metrics": {
+                    "calendarDate": DAY,
+                    "generic": {"vo2MaxPreciseValue": 57.4},
+                    "running": {"vo2MaxPreciseValue": 57.8},
+                }
+            }
+        )
+
+        self.assertEqual(
+            _rows(result), [("vo2max", 57.4, DAY, "-"), ("vo2max", 57.8, DAY, "run")]
+        )
 
     def test_maxmet_daily_rows_date_each_sport_object(self) -> None:
         # #2345: the daily range leaves the row undated; each object keeps its own day,
@@ -913,6 +948,8 @@ class AliasAndUnitTests(unittest.TestCase):
                 )
 
     def test_weight_daily_weight_summaries_nested_without_unit_maps_grams(self) -> None:
+        # The recorded range answer also holds the undated aggregate ``totalAverage``
+        # (#2467): it is no weigh-in, so it maps nothing and reports no issue.
         result = _map(
             {
                 "weight": {
@@ -923,10 +960,17 @@ class AliasAndUnitTests(unittest.TestCase):
                                 "weight": 72800,
                             },
                         }
-                    ]
+                    ],
+                    "totalAverage": {
+                        "from": 1788566400000,
+                        "until": 1788652799999,
+                        "weight": 72800.0,
+                        "bodyFat": 18.5,
+                    },
                 }
             }
         )
+        self.assertEqual(result.issues, ())
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0].kind, MetricKind.WEIGHT)
         self.assertEqual(result.records[0].value.value, 72.8)

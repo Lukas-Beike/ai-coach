@@ -208,7 +208,7 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         # providers that do not declare it. activity_details is the on-demand,
         # read-only Garmin detail fetch for one activity (see
         # backend/sync/garmin_activity_details.py); it is never scheduled.
-        # plan_push is the explicit strength-workout push to the watch
+        # plan_push is the explicit strength and run workout push to the watch
         # (backend/sync/garmin_strength_push.py); it is never scheduled either.
         # wellness_backfill is the one-off, insert-only wellness history walk
         # (backend/sync/garmin_wellness_history.py), queued once at startup;

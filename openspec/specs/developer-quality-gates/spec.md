@@ -26,7 +26,7 @@ The repository pre-push hook SHALL run the outgoing secret scan first and stop w
 Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHookTests.test_clean_push_runs_both_checks_in_order`, `tests/test_pre_push_hook.py::PrePushHookTests.test_secret_scan_failure_stops_before_quality`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_regression_blocks_the_push`, `tests/test_pre_push_hook.py::PrePushHookTests.test_quality_runs_on_committed_head_not_the_working_tree`.
 
 ### Requirement: Outgoing secret scan fails closed
-`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push.
+`scripts/check_push_secrets.py` SHALL scan only content the push would add: commit and tag messages, whole new or binary files, and the lines added by edited files, including intermediate commits and merge resolutions. Lines already on the remote base SHALL NOT be rescanned and scanner output SHALL NOT be printed. A finding, scanner error, timeout, missing `sonar` command or malformed object id SHALL refuse the push. The refusal SHALL name its cause.
 
 #### Scenario: Intermediate commit content
 - **WHEN** a secret appears in a middle commit and is removed in the tip
@@ -36,18 +36,22 @@ Evidence: `.githooks/pre-push`. Tests: `tests/test_pre_push_hook.py::PrePushHook
 - **WHEN** an edited file contains untouched lines or lines merged in from the remote base
 - **THEN** those lines are not rescanned, while merge-resolution lines are
 
-#### Scenario: Scanner unavailable or object id malformed
-- **WHEN** the `sonar` command is not installed, or a pushed id is not 40 or 64 hex characters
+#### Scenario: Refusal names its cause
+- **WHEN** the `sonar` command is missing, or the scanner flags added lines of one file
+- **THEN** the refusal says the CLI was not found, or names the flagged file, without printing the flagged value
+
+#### Scenario: Scanner failure or object id malformed
+- **WHEN** the scanner fails on every source, or a pushed id is not 40 or 64 hex characters
 - **THEN** the push is refused with one fixed message that carries no repository or scanner content
 
 #### Scenario: Deletion or no outgoing object
 - **WHEN** only deleted refs are pushed or nothing is outgoing
 - **THEN** the scan passes without a scanner
 
-Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks before Git pushes). Tests: `tests/test_push_secrets.py::PushSecretTests.test_intermediate_deleted_content_is_checked`, `tests/test_push_secrets.py::PushSecretTests.test_merged_base_lines_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_merge_resolution_content_is_scanned`, `tests/test_push_secrets.py::PushSecretTests.test_new_and_binary_files_are_scanned_whole`, `tests/test_push_secrets.py::PushSecretTests.test_untouched_lines_of_an_edited_file_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_missing_scanner_blocks_push`, `tests/test_push_secrets.py::PushSecretTests.test_malformed_object_ids_are_rejected_before_any_git_call`, `tests/test_push_secrets.py::PushSecretTests.test_deleted_ref_and_noop_do_not_require_scanner`.
+Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks before Git pushes). Tests: `tests/test_push_secrets.py::PushSecretTests.test_intermediate_deleted_content_is_checked`, `tests/test_push_secrets.py::PushSecretTests.test_merged_base_lines_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_merge_resolution_content_is_scanned`, `tests/test_push_secrets.py::PushSecretTests.test_new_and_binary_files_are_scanned_whole`, `tests/test_push_secrets.py::PushSecretTests.test_untouched_lines_of_an_edited_file_are_not_rescanned`, `tests/test_push_secrets.py::PushSecretTests.test_missing_scanner_blocks_push`, `tests/test_push_secrets.py::PushSecretTests.test_refusal_names_the_cause_and_flagged_source_without_its_value`, `tests/test_push_secrets.py::PushSecretTests.test_malformed_object_ids_are_rejected_before_any_git_call`, `tests/test_push_secrets.py::PushSecretTests.test_deleted_ref_and_noop_do_not_require_scanner`.
 
-### Requirement: Quality ratchet allows no new Ruff or mypy debt
-`tools/quality_baseline.py` SHALL run Ruff and mypy over every repository Python file and compare their findings with `tests/fixtures/quality_baseline.json`. A new finding SHALL fail; a baseline entry that no longer occurs SHALL also fail until removed. A tool crash or version mismatch SHALL be fatal and never recorded as debt.
+### Requirement: Quality ratchet allows no new Ruff, mypy, cognitive complexity or ESLint debt
+`tools/quality_baseline.py` SHALL run Ruff, mypy and a Python cognitive-complexity check (`python:S3776`, limit 15), plus Sonar's ESLint complexity and nested-ternary rules on `public/*.js` when installed, and compare the findings with `tests/fixtures/quality_baseline.json`. A new finding SHALL fail; a baseline entry that no longer occurs SHALL also fail until removed. A tool crash or version mismatch SHALL be fatal and never recorded as debt.
 
 #### Scenario: Finding identity
 - **WHEN** an unrelated edit moves a known finding to another line
@@ -61,11 +65,43 @@ Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks 
 - **WHEN** Ruff or mypy exits abnormally, produces no diagnostics on failure, or the installed versions differ from the recorded ones
 - **THEN** the command exits with status 2; `--align-versions` rewrites only the recorded versions from `requirements-dev.txt`
 
+#### Scenario: Cognitive complexity
+- **WHEN** a function scores 16 or more and is not a baseline entry
+- **THEN** the ratchet reports a NEW `cognitive` `S3776` finding named by the qualified function, not the score, while a function scoring exactly 15 passes
+
 #### Scenario: Scope
 - **WHEN** the ratchet collects findings
-- **THEN** only Ruff and mypy diagnostics are accepted, formatter diagnostics are rejected, and new files outside the excluded runtime directories are discovered
+- **THEN** only Ruff, mypy, cognitive complexity and ESLint diagnostics are accepted, formatter diagnostics are rejected, and new files outside the excluded runtime directories are discovered
 
-Evidence: `tools/quality_baseline.py`; `tests/fixtures/quality_baseline.json`; `pyproject.toml`. Tests: `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`, `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`, `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`, `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`, `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`, `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`, `tests/test_quality_baseline.py::QualityBaselineTests.test_alignment_records_only_the_pinned_tool_versions`, `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`, `tests/test_quality_baseline.py::QualityBaselineTests.test_all_source_boundaries_and_new_files_are_discovered`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
+#### Scenario: JavaScript complexity or nested ternary
+- **WHEN** a `public/*.js` function exceeds cognitive complexity 15 or contains a nested ternary
+- **THEN** the ratchet reports it as NEW with file, line and rule and exits 1; the score is not part of the finding identity and a `NOSONAR` comment on the reported line suppresses it, as in Sonar
+
+#### Scenario: ESLint not installed
+- **WHEN** `node_modules` has no ESLint, as in CI's `quality` job
+- **THEN** the JavaScript step prints that it was skipped and baseline entries of the ESLint tool are ignored, except under the pre-push hook (`PACECRAFT_NODE_MODULES` set), where it fails and asks for `npm ci`
+
+Evidence:
+- `pyproject.toml`
+- `tests/fixtures/quality_baseline.json`
+- `tests/test_quality_baseline.py::CognitiveComplexityTests.test_existing_over_limit_function_is_baseline_debt_and_new_ones_fail`
+- `tests/test_quality_baseline.py::CognitiveComplexityTests.test_limit_is_exclusive_at_fifteen`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_alignment_records_only_the_pinned_tool_versions`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_all_source_boundaries_and_new_files_are_discovered`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_complex_function_and_nested_ternary_in_public_js_are_found`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_complexity_score_is_not_part_of_the_identity_and_nosonar_suppresses`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_skipped_eslint_ignores_its_baseline_entries`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`
+- `tools/eslint.sonar.config.mjs`
+- `tools/quality_baseline.py`
+
+The pre-push hook points `PACECRAFT_NODE_MODULES` at the clone because its export of `HEAD` has no `node_modules`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
 
 ### Requirement: Merged branch coverage has a floor
 CI SHALL combine exactly one coverage file from every Python test shard and fail when the combined branch coverage of `server` and `backend` is below `fail_under` in `pyproject.toml`. The floor SHALL equal the coverage recorded in the quality baseline, rounded down to the configured precision.
@@ -106,14 +142,18 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 
 #### Scenario: Selection rule
 - **WHEN** a path changes
-- **THEN** a test module is selected if its own file changed, it transitively imports a changed module, or a string literal in it or in a test support module it imports names the changed path, a parent directory, the file name or the dotted module
+- **THEN** a test module is selected if its own file changed, it transitively imports a changed module, or a string literal in it or in a test support module it imports names the changed path, a parent directory, the file name or the dotted module; `test_line_endings` and `test_ai_docs_contract`, which check tracked files across the repository, are selected for every change (#2502)
 
 #### Scenario: Reach through the composition root
 - **WHEN** a module is reached only through `server.py`
 - **THEN** it selects tests only if `server.py`, `backend/http_api/` or `backend/runtime/` changed
 
+#### Scenario: Changed fixture
+- **WHEN** only files under `tests/fixtures/` changed
+- **THEN** the selection holds every test module whose sources or imported modules name `fixtures` as a path segment, plus the repository-wide checks, instead of the whole suite
+
 #### Scenario: Full-suite fallback
-- **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, `tests/fixtures/`, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
+- **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
 - **THEN** the whole suite runs and the reason is printed
 
 #### Scenario: Heavy tooling modules
@@ -121,10 +161,25 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 - **THEN** a local `--changed` run skips them and prints why; any other run executes them
 
 #### Scenario: Nothing affected or base unknown
-- **WHEN** no test module is affected, or the base ref cannot be diffed
+- **WHEN** no test module is affected (an empty change, or a suite filter that excludes the selected modules), or the base ref cannot be diffed
 - **THEN** the runner prints "No Python tests are affected." and exits 0, or exits non-zero with a message and no traceback
 
-Evidence: `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`), `tests/run_tests.py`, `tests/AGENTS.md`, `docs/testing.md` (Changed-Test Selection). Tests: `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`, `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`, `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`, `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`, `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`, `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`, `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`, `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`, `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`, `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`.
+Evidence:
+- `docs/testing.md` (Changed-Test Selection)
+- `tests/AGENTS.md`
+- `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FIXTURES`, `REPOSITORY_WIDE`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`)
+- `tests/run_tests.py`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`
+- `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`
+- `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_fixture_selects_modules_naming_the_fixtures_directory`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`
 
 ### Requirement: CI runs the complete sharded suite
 The CI Python test jobs SHALL run every test through `tests/run_tests.py --shard N --total T`, covering the whole suite across the shards, and SHALL NOT use `--changed`. Changed-test selection is a local convenience and never evidence of complete validation.

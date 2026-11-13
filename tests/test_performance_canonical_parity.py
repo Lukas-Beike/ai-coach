@@ -321,6 +321,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
+            zone_configurations=(),
         )
         self.assertEqual(manager.events, ["enter", "exit"])
         self.assertEqual(reader.calls, [])
@@ -339,6 +340,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
+            zone_configurations=(),
         )
 
     def test_activity_performance_inputs_share_the_snapshot_unit(self) -> None:
@@ -476,6 +478,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
+            zone_configurations=(),
         )
 
 

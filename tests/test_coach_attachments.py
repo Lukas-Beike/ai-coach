@@ -351,7 +351,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 side_effect=post,
             ),
         ):
-            server.NUTRITION_ASSEMBLY.meal_library_service().extract_packaging_photo(
+            server.NUTRITION_SERVICES.meal_library_service().extract_packaging_photo(
                 {"image_data_url": "data:image/jpeg;base64," + image}
             )
         return sent
@@ -601,7 +601,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             json.loads(history[0]["attachment_names"]), ["route.gpx", "chart.png"]
         )
-        archive_path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        archive_path = server.PRIVACY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(archive_path) as archive:
                 exported = [

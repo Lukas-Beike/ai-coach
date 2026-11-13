@@ -21,7 +21,18 @@ class ActivityRoutePostRoutes:
         return [Route("POST", _PATH, Access.SESSION_CSRF, self._rename)]
 
     def _rename(self, handler: Any, _request: RouteRequest) -> None:
-        """Rename a recognised route (`route_id`, `name`: 1 to 60 characters without control characters); answers `route_id` and `label` only."""
+        """Rename one recognised activity route; nothing is written remotely.
+
+        Request: JSON body `{"route_id": string, "name": string}`; `name` is trimmed
+        and must be 1 to 60 printable characters without control characters.
+
+        Response: 200 `{"status": "ok", "route_id", "label"}` with the trimmed name
+        as `label`.
+
+        Errors: 400 "Der Name muss aus 1 bis 60 Zeichen ohne Steuerzeichen
+        bestehen." for an invalid `name`; 404 "Nicht gefunden." when `route_id`
+        names no stored route.
+        """
         payload = handler.read_json()
         if not isinstance(payload, dict):
             raise AppError(400, "Die Anfrage muss ein Objekt sein.")

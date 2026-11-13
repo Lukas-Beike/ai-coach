@@ -75,9 +75,10 @@ PERMITTED_IMPORTS_BY_LAYER = {
     ),
     "canonical": frozenset({"backend.canonical"}),
     "http_api": DOMAIN_ROOTS | SHARED_ROOTS | {"backend.http_api", "backend.runtime"},
+    # Domain builders read the application context (backend/app, #2069).
     "domain": DOMAIN_ROOTS
     | SHARED_ROOTS
-    | {"backend.db", "backend.providers", "backend.runtime"},
+    | {"backend.app", "backend.db", "backend.providers", "backend.runtime"},
     "db": SHARED_ROOTS | {"backend.db", "backend.runtime"},
     "runtime": SHARED_ROOTS | {"backend.runtime"},
     "shared": DOMAIN_ROOTS

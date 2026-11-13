@@ -188,6 +188,7 @@ class PublicStateAssembly:
                 athlete.activity_feedback().for_activity_ids, sessions_only=True
             ),
             now=self._local_now(),
+            zone_configurations=athlete.zones().configurations,
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:

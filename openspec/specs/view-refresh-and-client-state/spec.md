@@ -59,7 +59,11 @@ The client SHALL show compatible stored reads promptly while authentication and 
 - **WHEN** one startup area is slow or fails while others load
 - **THEN** usable prior values remain for the pending/failed area while successful areas replace and save their own data; placeholders are not persisted as a successful full read.
 
-Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `e2e/update-start.spec.js::a start after an update whose fresh data fails shows the stored data @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`.
+#### Scenario: Start data contract
+- **WHEN** the client reads `GET /api/bootstrap`
+- **THEN** the fields, the area fields that stay empty as shape witnesses of the stored snapshot, and the inputs of each `state_versions` marker are those of `docs/bootstrap-contract.md`, whose field table is generated from the running build and checked by a test
+
+Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `e2e/update-start.spec.js::a start after an update whose fresh data fails shows the stored data @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`, `tests/test_server_database.py::ServerDatabaseTests.test_bootstrap_contract_is_current`.
 
 ### Requirement: Session and privacy transitions invalidate device state
 The client SHALL clear cached state, view reads, and recent messages when login becomes required or privacy data is deleted, and invalidate already-started loads so deleted or previous-session data cannot reappear.
@@ -93,7 +97,11 @@ The client SHALL start independent requested area reads alongside bootstrap, ren
 - **WHEN** a load sequence or session is replaced
 - **THEN** late old-area results neither render nor write caches and cannot claim versions that arrived after their request started.
 
-Evidence: `public/state-loader.js::loadState`, `public/state-loader.js::renderAreasAsTheyArrive`, `public/state-loader.js::load`, `public/sync-status.js::changedSyncAreas`; `tests/state-loader-startup.test.cjs::area reads start before the bootstrap response arrives`, `tests/state-loader-startup.test.cjs::each area is rendered and stored as soon as it arrives, without waiting for a slower one`, `tests/reload-coalescing.test.cjs::reloads requested during a load run as one follow-up`, `tests/reload-coalescing.test.cjs::a live load records the version it was started for, not one that arrived while it ran`.
+#### Scenario: Zone change on another device
+- **WHEN** a zone configuration is saved, removed or undone on one device
+- **THEN** the `performance` state version changes and another device's next sync status reloads its performance and plan views, so LT1/LT2 derived from the zones are current there too.
+
+Evidence: `public/state-loader.js::loadState`, `public/state-loader.js::renderAreasAsTheyArrive`, `public/state-loader.js::load`, `public/sync-status.js::changedSyncAreas`, `backend/http_api/state_versions.py::StateVersionService.versions`, `backend/db/repositories.py::StateVersionRepository.counters`; `tests/test_state_versions.py::StateVersionServiceTests.test_versions_preserve_exact_public_markers_and_read_scope`, `tests/reload-coalescing.test.cjs::a changed server version reloads the areas that show it`, `tests/state-loader-startup.test.cjs::area reads start before the bootstrap response arrives`, `tests/state-loader-startup.test.cjs::each area is rendered and stored as soon as it arrives, without waiting for a slower one`, `tests/reload-coalescing.test.cjs::reloads requested during a load run as one follow-up`, `tests/reload-coalescing.test.cjs::a live load records the version it was started for, not one that arrived while it ran`.
 
 ### Requirement: Explicit view refresh reports only its matching view
 The client SHALL issue one refresh at a time per refresh control, retain visible values during refresh, and report completion only after the matching view reload succeeds. Route, selected date/period, and view key SHALL guard delayed results.

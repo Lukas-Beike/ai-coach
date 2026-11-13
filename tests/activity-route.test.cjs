@@ -3,12 +3,12 @@ const { test } = require("node:test");
 const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
 function text(item) {
-  if (typeof item === "string") return item;
-  return [item.textContent, ...item.children.map(text)].join("");
+  return typeof item === "string" ? item : item.textContent;
 }
 
 function loadRenderRoute() {
-  return extractFunctions("activity-details.js", ["node", "renderRoute"], { document: fakeDocument() }).renderRoute;
+  const document = fakeDocument();
+  return extractFunctions("activity-details.js", ["renderRoute"], { document }).renderRoute;
 }
 
 const ROUTE = { label: "Hausrunde", repeat_index: 5, repeat_count: 6, route_id: "r3" };

@@ -2,8 +2,9 @@
 
     python scripts/ledger_line.py --issue N --pr M [--note-file F]
 
-Prints: <YYYY-MM-DD> #N closed via PR #M <sha> prod +a/-b tests +c/-d other
-+e/-f: <first line of the note, else the PR title>. The merge commit must be
+Prints: <YYYY-MM-DD> #N closed|part via PR #M <sha> prod +a/-b tests +c/-d other
++e/-f: <first line of the note, else the PR title>; "part" while the issue
+stays open (the PR delivered one part of it). The merge commit must be
 fetched locally. Exit 0 ok; 1 refused, the PR is not merged; 2 bad input or a
 failed gh/git call.
 """
@@ -25,13 +26,15 @@ def ledger_line(issue: int, pr: int, note: str | None = None) -> str | None:
     sha = (data.get("mergeCommit") or {}).get("oid")
     if data["state"] != "MERGED" or not data.get("mergedAt") or not sha:
         return None
+    issue_state = gh_json("issue", "view", str(issue), "--json", "state")["state"]
+    outcome = "closed" if issue_state == "CLOSED" else "part"
     counts = balance(commit=sha)
     parts = " ".join(
         f"{label} +{counts[name][0]}/-{counts[name][1]}" for label, name in LABELS
     )
     text = next((ln.strip() for ln in (note or "").splitlines() if ln.strip()), None)
     return (
-        f"{data['mergedAt'][:10]} #{issue} closed via PR #{pr} {sha[:8]} {parts}: "
+        f"{data['mergedAt'][:10]} #{issue} {outcome} via PR #{pr} {sha[:8]} {parts}: "
         f"{text or data['title']}"
     )
 

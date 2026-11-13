@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "5a0b4e39fbcb04ec9a9caa18eb918fb973e03ae2",
+  "base": "da54f63d76d44a2d958d475a1ca75543e5bb8945",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -83,6 +83,246 @@
       "path": "backend/planning/changes.py",
       "code": "ARG004",
       "message_sha256": "65500c398a77984b1b392abcf3776c894b2035811a4d00dfe7b8fe59b4a931e3"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/canonical_field_map_support.py",
+      "code": "S3776",
+      "message_sha256": "07bbda1e634497f716fc361c8d6a7e186f4eea81f729d40e5a170c3354dea51b"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/architecture_analysis.py",
+      "code": "S3776",
+      "message_sha256": "253dfafc7e57f0c3144fb813b42baadbc488b3d0a935c34058a24da8f62c11b2"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "34af40ac623d7c526e3cf19bf00cbd96fd72070fe3f9b872ab2d608fba144a55"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_data_safety_coverage.py",
+      "code": "S3776",
+      "message_sha256": "40c12ee778d67fa777fe9379c63f3c2334248b356defd53d1192652e83427331"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_sqlcipher_tests.py",
+      "code": "S3776",
+      "message_sha256": "442de02521b7494f22b71949236848311541c11dbf74e470a1923fc0a0e27c24"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_backend_layer_contracts.py",
+      "code": "S3776",
+      "message_sha256": "47e824b95f791fe099318f313571c34fa0e8d60a9585d58b6166fe70eaa4f2b1"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_local_test_execution.py",
+      "code": "S3776",
+      "message_sha256": "50526625605c74310c56d292792d1519796a3c665a444dddef05d216ec1ad0f9"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_log_contract.py",
+      "code": "S3776",
+      "message_sha256": "5623f7226b3dbf69a5d3b2f539cde0ef6554b122ba05d53042f4d33104e9a591"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/coach_live_eval.py",
+      "code": "S3776",
+      "message_sha256": "73cbeeb0316935f05eb23ecb021ee81ecb66e0fdcdede5b4876fd7643ce7805d"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_canonical_vocabulary_accountability.py",
+      "code": "S3776",
+      "message_sha256": "774a8d39107b028d5347a2801fc079c0ed15884c080998c31822c9d8a0453f19"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_wahoo_activity_details.py",
+      "code": "S3776",
+      "message_sha256": "7d0f5d3d13c0fe02098297a5311eb708a32f2d0a3914431622f0627f617dbdd5"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/provider_coupling.py",
+      "code": "S3776",
+      "message_sha256": "87b8fd804ed9d5600626c9f0fabe7fcb61862f347ee004daa320b10c538e935d"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/workout_export_parity_matrix.py",
+      "code": "S3776",
+      "message_sha256": "8c99ffaf79e548d4cf188b1b0d8d46ba6c0bd4de12240ded976729353f4325ed"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_fixture_standard_data.py",
+      "code": "S3776",
+      "message_sha256": "93792067496623fd4609e97cadccc3f5ee94c98c9a92ee43ac348e27dce55bc8"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_css_design_tokens.py",
+      "code": "S3776",
+      "message_sha256": "968bf8ee51c8a1189128210d1cf4dbc45699a769305f4c39a6409d797118bd6c"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/changed_tests.py",
+      "code": "S3776",
+      "message_sha256": "9b1be3a9be6f51fae31c5d7ea900b02bc86da216b1bd471b6dea08404c2d829d"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_server_http.py",
+      "code": "S3776",
+      "message_sha256": "9c5760c5b086b2765994516eaf82c415bb03aace5c9294021b6a0f4fd4911416"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/coach_live_eval.py",
+      "code": "S3776",
+      "message_sha256": "a3ddd741e6511747996a1973df8204728689184db4e27fd3f211f49d20274b2e"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "a70b6e09d46260b38cc1c6b59505972b2df7fa6c092404187a4019892f596d66"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/run_tests.py",
+      "code": "S3776",
+      "message_sha256": "a70b6e09d46260b38cc1c6b59505972b2df7fa6c092404187a4019892f596d66"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/architecture_analysis.py",
+      "code": "S3776",
+      "message_sha256": "a84a351c7ae0c50325c38c420b906b374be2eeefd292092f7fbcd0f1afe33ef0"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_local_test_execution.py",
+      "code": "S3776",
+      "message_sha256": "af80c698c6986b2e6d4f659a76b5a81a1cb8b34217db5dbe8f9988022529b5d1"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_coach_tool_coverage.py",
+      "code": "S3776",
+      "message_sha256": "b9647b22970df8d1d882566605398be5118ad6e3dda46c06e0dc2dfc1d1b82c1"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_browser_runner.py",
+      "code": "S3776",
+      "message_sha256": "bcfaac240dc542fb4c261ce8b7087e46505556fbc6a94c79cfd6b0cc7fb3c486"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "bef356eb2bc636f685b19fcc288ca3d8db5378e080b6ccdc6cb5613dc2f5a4a6"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_garmin_personal_transport.py",
+      "code": "S3776",
+      "message_sha256": "bfb21b6db052b83c3d571a0200113e78215d1577162d42b0473cd9b6060455c8"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "c580d4b38551bebade27f8d1a71fa9e5d9051b977e8d3f2c60911cf3931ac78f"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_coach_context_scenarios.py",
+      "code": "S3776",
+      "message_sha256": "c85a8327f17f69f66f9386ffb3b9dc3a08ca3b47e6e872faab3c64555bc88ad3"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_browser_runner.py",
+      "code": "S3776",
+      "message_sha256": "ca0287e07197faf72515baffa0676fa9c658d412fcb65bd55c3278297666be65"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_sqlcipher_tests.py",
+      "code": "S3776",
+      "message_sha256": "ca31143929e24bf6fdcda507df1274aad47ed53ba4eb29d1afa299e7541ce624"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_security_resource_limits.py",
+      "code": "S3776",
+      "message_sha256": "ce6a0986ef6235a01b4ddc1e99d57680c8836eb1cf5756cf01ec6ff2980db097"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/coach_live_eval.py",
+      "code": "S3776",
+      "message_sha256": "d209be5307427a84f6acec972bcacad71f9e30467903dc09fa6d06d37ee01e02"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "d85f525ac8131252b31eab5744f57249fae1b5e8867a78af08a28eb81ff3b67f"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/coach_live_eval.py",
+      "code": "S3776",
+      "message_sha256": "dce450cae724c1b3495c182cb5eb43e4097dcb7b5dff9a0f852dea0e9a401043"
+    },
+    {
+      "tool": "cognitive",
+      "path": "backend/coach/structured_tool_round.py",
+      "code": "S3776",
+      "message_sha256": "df2f39ccaaa5ef28bc5020da0ff0469a8c70a8774995e74cc56d662b87357536"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_coach_dialogue.py",
+      "code": "S3776",
+      "message_sha256": "e24c599a74b203c5c62a0b841192faa6a61be7f0749ebc1c7b26b2477490a797"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/test_coach_tool_coverage.py",
+      "code": "S3776",
+      "message_sha256": "e7c924f391f25509150f46cc95b5a1c3efe8d77a2916641f9ef29d06aea92b23"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/architecture_analysis.py",
+      "code": "S3776",
+      "message_sha256": "e9ce98729967ab807192d38478b6f187f05b3323fd2ace89c0131473b6417311"
+    },
+    {
+      "tool": "cognitive",
+      "path": "scripts/run_browser_tests.py",
+      "code": "S3776",
+      "message_sha256": "f20ad124fe3de8a52d2d09cf717d2681c1615e7e62496d63b2bae75f1b5aa849"
+    },
+    {
+      "tool": "cognitive",
+      "path": "tests/coach_live_eval.py",
+      "code": "S3776",
+      "message_sha256": "fde15da137ea09af0e0f3cc85c52d2c32a732c442f79dac17906343ea4a8fdb8"
     },
     {
       "tool": "mypy",
@@ -215,12 +455,6 @@
       "path": "tests/test_sync_garmin_service.py",
       "code": "arg-type",
       "message_sha256": "51deec515d87f4c4a08dd80c52b09425d53aaf34c13ab33b805610c8cc8151b0"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "arg-type",
-      "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
     },
     {
       "tool": "mypy",
@@ -724,37 +958,7 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "1a9ffa9a4832520d60f2629c97e6d1da1cfff1f7859e1420e7a40238871ed759"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "480057763c1b5347f5e8f0a61c7f20c6cec2d3a6e24f1e8563bd5b76f2138cc4"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "4b7e78aca8d7c14e4949c4d2c1e7b5dbe37f97501201f64a1fc21f632e11770d"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "743b0a5f8fa53d140838c45e76a8917ca3b252a48e3882d05cde8d6f0b24e492"
     },
     {
       "tool": "mypy",
@@ -778,31 +982,7 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
     },
     {
       "tool": "mypy",

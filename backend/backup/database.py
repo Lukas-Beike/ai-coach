@@ -16,6 +16,10 @@ from typing import Any
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
+MAX_BACKUP_BYTES = 1_000_000_000
+MIN_EXPORT_FREE_BYTES = 10_000_000
+EXPORT_TIME_LIMIT_SECONDS = 120
+
 
 @dataclass(frozen=True)
 class DatabaseBackupConfig:

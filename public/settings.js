@@ -211,11 +211,8 @@ async function downloadDatabaseBackup() {
       "Datenbank-Backup konnte nicht erstellt werden.",
       130_000,
     );
-    const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = `pacecraft-database-${todayIso()}.backup`;
-    link.click();
+    h("a", { href: url, download: `pacecraft-database-${todayIso()}.backup` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
   } finally { if (button) button.disabled = false; }
@@ -305,11 +302,8 @@ async function downloadPrivacyExport() {
       "Privacy-Export konnte nicht erstellt werden.",
       130_000,
     );
-    const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = `pacecraft-export-${todayIso()}.zip`;
-    link.click();
+    h("a", { href: url, download: `pacecraft-export-${todayIso()}.zip` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
   } catch (error) { toast(error.message, true); } finally {
@@ -328,17 +322,38 @@ function renderGpsTracks(gps) {
   button.textContent = `GPS-Spuren löschen (${gps.stored_tracks || 0})`;
 }
 
+// #2418: the switch takes clicks only once the latest load showed the stored
+// state and no save is pending; a save renders its own confirmed result.
+let gpsTracksLoad = 0;
+let gpsTracksSaving = false;
+
 async function loadGpsTracks() {
-  try { renderGpsTracks(await api("/api/privacy/gps")); } catch (error) { toast(error.message, true); }
+  if (gpsTracksSaving) return;
+  const load = ++gpsTracksLoad;
+  const toggle = $("#gpsTracksToggle");
+  toggle.disabled = true;
+  try {
+    const gps = await api("/api/privacy/gps");
+    if (load !== gpsTracksLoad) return;
+    renderGpsTracks(gps);
+    toggle.disabled = false;
+  } catch (error) {
+    if (load === gpsTracksLoad) toast(error.message, true);
+  }
 }
 
 async function saveGpsTracks(event) {
   const toggle = event.currentTarget;
+  gpsTracksSaving = true;
+  toggle.disabled = true;
   try {
     renderGpsTracks(await api("/api/privacy/gps", { method: "POST", body: JSON.stringify({ enabled: toggle.checked }) }));
   } catch (error) {
-    toggle.checked = !toggle.checked;
+    toggle.checked = Boolean(gpsTracksState.enabled);
     toast(error.message, true);
+  } finally {
+    gpsTracksSaving = false;
+    toggle.disabled = false;
   }
 }
 
@@ -439,7 +454,6 @@ let zoneConfigurations = [];
 let zoneEffective = [];
 let zoneToday = "";
 let zoneSport = "ride";
-let zoneDataLoad = null;
 
 function applyZoneData(result) {
   zoneConfigurations = result.configurations || [];
@@ -460,13 +474,6 @@ async function loadZones() {
     renderZoneWarnings(null);
     toast(error.message, true);
   }
-}
-
-// Analyse reads the zones once for its LT1 values; the profile page reloads them on opening.
-// A failed read stays failed until then, so a render never starts another one.
-function ensureZoneData() {
-  zoneDataLoad ||= api("/api/zones").then(applyZoneData, () => {});
-  return zoneDataLoad;
 }
 
 const SDK_FAILURE_TEXT = {
@@ -520,11 +527,8 @@ function renderZoneWarnings(warnings) {
     node.replaceChildren();
     return;
   }
-  const title = document.createElement("strong");
-  title.textContent = zoneWarningTitle(warnings);
   // Phrasing content only: <output> holds one line per threshold.
-  const lines = items.flatMap((item) => [document.createElement("br"), document.createTextNode(`• ${zoneWarningLine(item)}`)]);
-  node.replaceChildren(title, ...lines);
+  node.replaceChildren(h("strong", null, zoneWarningTitle(warnings)), ...items.flatMap((item) => [h("br"), `• ${zoneWarningLine(item)}`]));
 }
 
 // Pure: the configuration in effect today for one sport, metric and environment, Garmin's
@@ -605,30 +609,34 @@ function zoneSourceText(item) {
   return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
 }
 
-// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values; LT1 is the
-// stored share of the threshold heart rate and the power or pace at the top of zone 2.
-function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, profile = state.data?.profile || {}) {
+const THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung aus festem Anteil von LT2" };
+
+// Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values, LT1 from the
+// performance thresholds (#2427); `origins` names where each row's values come from.
+function thresholdRows(sport, metrics = state.data?.performance?.metrics || {}, thresholds = state.data?.performance?.thresholds || {}) {
   const spec = ZONE_SPORTS[sport];
   const metric = sport === "ride" ? "power" : "pace";
   const lt2 = { main: zoneMetricValue(spec.lt2[0], metrics), hr: zoneMetricValue(spec.lt2[1], metrics) };
-  const share = Number(profile.first_threshold_pct);
-  const zones = zoneConfigurationFor(sport, metric);
-  const zoneTwo = zones ? zoneLimitValue(zones, zoneLimitsOf(zones)[1], lt2.main) : null;
-  const lt1 = { main: zoneTwo, hr: lt2.hr && share > 0 ? lt2.hr * share / 100 : null };
+  const values = thresholds.first_thresholds?.[sport] || {};
+  const lt1 = { main: (metric === "power" ? values.watts : values.pace_seconds_per_km) ?? null, hr: values.hr_bpm ?? null };
   const sources = [metrics[spec.lt2[0]], metrics[spec.lt2[1]]].filter((item) => item?.value != null);
+  const lt1Origins = [["Puls", values.hr_origin], [metric === "power" ? "Leistung" : "Pace", metric === "power" ? values.power_origin : values.pace_origin]]
+    .filter(([, origin]) => THRESHOLD_ORIGINS[origin]).map(([name, origin]) => `${name} ${THRESHOLD_ORIGINS[origin]}`);
   return {
     metric,
     lt1,
     lt2,
-    lt1Source: share > 0 ? firstThresholdSource(profile) : null,
-    lt1Derived: zoneTwo != null,
-    lt2Source: sources[0]?.source || null,
+    origins: { lt1: lt1Origins.join(" · ") || null, lt2: lt2Origin(metric, metrics, spec) },
     validFrom: sources.map((item) => String(item.observed_at || "")).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) || null,
   };
 }
 
-function firstThresholdSource(profile) {
-  return profile.first_threshold_origin === "estimated" ? "LT1 aus der Herzfrequenzvariabilität (App)" : "LT1 gemessen";
+// One provider names the row; providers that differ per value are named per value.
+function lt2Origin(metric, metrics, spec) {
+  const named = [[metric === "power" ? "Leistung" : "Pace", metrics[spec.lt2[0]]], ["Puls", metrics[spec.lt2[1]]]].filter(([, item]) => item?.value != null && item.source);
+  if (!named.length) return null;
+  if (new Set(named.map(([, item]) => item.source)).size === 1) return `Von ${named[0][1].source}`;
+  return named.map(([name, item]) => `${name} von ${item.source}`).join(" · ");
 }
 
 function thresholdMainText(metric, value) {
@@ -636,63 +644,46 @@ function thresholdMainText(metric, value) {
 }
 
 function zoneEditButton(label, attributes) {
-  const button = reportNode("button", label, "zone-edit");
-  button.type = "button";
-  Object.assign(button.dataset, attributes);
-  return button;
+  return h("button", { type: "button", className: "zone-edit", dataset: attributes }, label);
+}
+
+// A small yellow "i" names the origin of a threshold row in a popover (athlete decision 2026-11-12, #2427).
+let thresholdInfoId = 0;
+function thresholdOriginInfo(label, text) {
+  const button = h("button", { type: "button", className: "threshold-info", "aria-label": `Herkunft ${label}` }, "i");
+  const info = h("div", { className: "analysis-info-tooltip", id: `threshold-info-${++thresholdInfoId}` }, text);
+  bindAnalysisPopover(button, info);
+  return [button, info];
 }
 
 function thresholdBox(sport) {
   const rows = thresholdRows(sport);
-  const box = reportNode("section", null, "zone-box");
-  box.dataset.zoneBox = "thresholds";
-  const heading = reportNode("h3", "Schwellen");
-  if (rows.validFrom) heading.append(reportNode("small", `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`));
-  const grid = reportNode("div", null, "zone-thresholds");
-  grid.append(reportNode("span"), reportNode("span", rows.metric === "power" ? "Leistung" : "Pace", "zone-muted"), reportNode("span", "Puls", "zone-muted"));
-  const lt2Label = sport === "ride" ? "LT2 / FTP" : "LT2";
-  const lines = [{ label: "LT1", values: rows.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, main: "lt2-main", hr: "lt2-hr" }];
-  for (const { label, values, ...names } of lines) {
-    const main = reportNode("b", thresholdMainText(rows.metric, values.main));
-    const hr = reportNode("b", values.hr == null ? "—" : `${Math.round(values.hr)} bpm`);
-    main.dataset.threshold = names.main;
-    hr.dataset.threshold = names.hr;
-    grid.append(reportNode("span", label, "zone-muted"), main, hr);
+  const heading = h("h3", null, "Schwellen", rows.validFrom ? h("small", null, `gilt seit ${dateLabel(String(rows.validFrom).slice(0, 10))}`) : null);
+  const grid = h("div", "zone-thresholds", h("span"), h("span", "zone-muted", rows.metric === "power" ? "Leistung" : "Pace"), h("span", "zone-muted", "Puls"));
+  const lt2Label = sport === "ride" ? "Anaerob (LT2) / FTP" : "Anaerob (LT2)";
+  const lines = [{ label: "Aerob (LT1)", values: rows.lt1, origin: rows.origins.lt1, main: "lt1-main", hr: "lt1-hr" }, { label: lt2Label, values: rows.lt2, origin: rows.origins.lt2, main: "lt2-main", hr: "lt2-hr" }];
+  for (const { label, values, origin, ...names } of lines) {
+    grid.append(h("span", "zone-muted", label, origin ? thresholdOriginInfo(label, origin) : null),
+      h("b", { dataset: { threshold: names.main } }, thresholdMainText(rows.metric, values.main)),
+      h("b", { dataset: { threshold: names.hr } }, values.hr == null ? "—" : `${Math.round(values.hr)} bpm`));
   }
-  let lt1Line = rows.lt1Source;
-  if (lt1Line && rows.lt1Derived) lt1Line += rows.metric === "power" ? ", Leistung aus Zone 2" : ", Pace aus Zone 2";
-  const source = [lt1Line, rows.lt2Source && `LT2 von ${rows.lt2Source}`].filter(Boolean).join(" · ");
-  const foot = reportNode("p", source || null, "zone-source");
-  foot.append(zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
-  box.append(heading, grid, foot);
-  return box;
+  const foot = h("p", "zone-source", zoneEditButton("Bearbeiten", { zoneEdit: "lt1" }));
+  return h("section", { className: "zone-box", dataset: { zoneBox: "thresholds" } }, heading, grid, foot);
 }
 
 function zoneKindBox(sport, metric, environment = null) {
   const item = zoneConfigurationFor(sport, metric, environment);
-  const box = reportNode("section", null, "zone-box");
-  box.dataset.zoneBox = environment ? `${metric}-${environment}` : metric;
-  const heading = reportNode("h3", environment ? `${ZONE_KIND_TITLES[metric]} · Indoor` : ZONE_KIND_TITLES[metric]);
   const basis = { power: sport === "run" ? "% der Schwellenleistung" : "% der FTP", heart_rate: "bpm", pace: "% der Schwellenpace" }[metric];
-  heading.append(reportNode("small", basis));
-  box.append(heading);
+  const heading = h("h3", null, environment ? `${ZONE_KIND_TITLES[metric]} · Indoor` : ZONE_KIND_TITLES[metric], h("small", null, basis));
+  const box = h("section", { className: "zone-box", dataset: { zoneBox: environment ? `${metric}-${environment}` : metric } }, heading);
   const attributes = { zoneEdit: metric, zoneEnvironment: environment || "" };
   if (!item) {
-    const empty = reportNode("p", "Noch keine Werte – ", "zone-source");
-    empty.append(zoneEditButton("Anlegen", attributes));
-    box.append(empty);
+    box.append(h("p", "zone-source", "Noch keine Werte – ", zoneEditButton("Anlegen", attributes)));
     return box;
   }
-  const list = reportNode("ul", null, "zone-list");
-  for (const row of zoneRows(item, metric === "pace" ? zoneMetricValue(ZONE_SPORTS[sport].lt2[0]) : null)) {
-    const line = reportNode("li");
-    line.dataset.zone = row.zone;
-    line.append(reportNode("i"), reportNode("span", row.name), reportNode("em", row.range));
-    list.append(line);
-  }
-  const foot = reportNode("p", zoneSourceText(item), "zone-source");
-  foot.append(zoneEditButton("Bearbeiten", attributes));
-  box.append(list, foot);
+  const rows = zoneRows(item, metric === "pace" ? zoneMetricValue(ZONE_SPORTS[sport].lt2[0]) : null);
+  box.append(h("ul", "zone-list", ...rows.map((row) => h("li", { dataset: { zone: row.zone } }, h("i"), h("span", null, row.name), h("em", null, row.range)))),
+    h("p", "zone-source", zoneSourceText(item), zoneEditButton("Bearbeiten", attributes)));
   return box;
 }
 
@@ -788,10 +779,8 @@ function renderZoneEditor() {
   $("#zoneRemoveButton").dataset.key = local?.key || "";
   const sources = $("#zoneSources");
   sources.replaceChildren(...selected.map((item) => {
-    const line = document.createElement("li");
     const threshold = item.threshold == null ? "" : ` · Schwelle ${item.threshold}`;
-    line.textContent = `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`;
-    return line;
+    return h("li", null, `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`);
   }));
 }
 
@@ -825,7 +814,7 @@ async function saveZones(event) {
       }),
     });
     showZoneReceipt("Lokale Zonen gespeichert", result.change);
-    await loadZones();
+    await reloadZonesAndThresholds();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
 }
@@ -838,27 +827,28 @@ async function removeZones() {
   try {
     const result = await api("/api/zones/remove", { method: "PUT", body: JSON.stringify({ key: button.dataset.key, confirmed: true }) });
     showZoneReceipt("Lokale Zonen entfernt", result.change);
-    await loadZones();
+    await reloadZonesAndThresholds();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
 }
 
+// A zone change moves LT1 and LT2, which the performance values carry; the zones draw after them.
+async function reloadZonesAndThresholds() {
+  await globalThis.load?.(undefined, ["performance"]);
+  await loadZones();
+}
+
 function showZoneReceipt(message, change) {
   const receipt = $("#zoneReceipt");
-  const text = document.createElement("span");
-  text.textContent = `${message}. `;
-  receipt.replaceChildren(text);
+  receipt.replaceChildren(h("span", null, `${message}. `));
   if (change?.id) {
-    const undo = document.createElement("button");
-    undo.type = "button";
-    undo.className = "message-undo";
-    undo.textContent = "Rückgängig";
+    const undo = h("button", { type: "button", className: "message-undo" }, "Rückgängig");
     undo.addEventListener("click", async () => {
       undo.disabled = true;
       try {
         await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
-        receipt.replaceChildren(document.createTextNode("Zurückgenommen."));
-        await loadZones();
+        receipt.replaceChildren("Zurückgenommen.");
+        await reloadZonesAndThresholds();
       } catch (error) {
         undo.disabled = false;
         toast(error.message, true);

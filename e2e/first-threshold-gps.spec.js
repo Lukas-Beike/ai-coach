@@ -51,39 +51,81 @@ async function openPrivacy(page) {
   const panel = page.locator("#privacySection");
   const loaded = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET");
   if (!(await panel.evaluate((element) => element.open))) await panel.locator("summary").click();
-  await loaded;
+  // #2390: start from the state the server reported, once the switch shows it.
+  const response = await loaded;
+  expect(response.ok()).toBe(true);
+  const enabled = Boolean((await response.json()).enabled);
+  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: enabled });
+  return enabled;
+}
+
+async function flipGpsTracks(page) {
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
+  await page.locator("#gpsTracksToggle").click();
+  expect((await saved).ok()).toBe(true);
 }
 
 test("the GPS-tracks switch persists across a reload", async ({ page }) => {
-  await openPrivacy(page);
-  const toggle = page.locator("#gpsTracksToggle");
-  const before = await toggle.isChecked();
-  const saved = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
-  await toggle.click();
-  expect((await saved).ok()).toBe(true);
-  await expect(toggle).toBeChecked({ checked: !before });
-
-  await page.reload();
-  await openPrivacy(page);
-  await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: !before });
-
-  // Restore the fixture state for later specs.
-  const restored = page.waitForResponse((response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "POST");
-  await page.locator("#gpsTracksToggle").click();
-  await restored;
+  const before = await openPrivacy(page);
+  try {
+    await flipGpsTracks(page);
+    await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: !before });
+    await page.reload();
+    expect(await openPrivacy(page)).toBe(!before);
+  } finally {
+    // Restore the fixture state for later specs, also after a failure.
+    await page.reload();
+    if ((await openPrivacy(page)) !== before) await flipGpsTracks(page);
+  }
   await expect(page.locator("#gpsTracksToggle")).toBeChecked({ checked: before });
 });
 
-test("a failed GPS-tracks save restores the previous switch state", async ({ page }) => {
-  await openPrivacy(page);
+test("the GPS-tracks switch takes clicks once loaded and a failed save restores the confirmed state", async ({ page }) => {
+  // #2418: no click before the stored state is shown.
+  const isGet = (response) => response.url().endsWith("/api/privacy/gps") && response.request().method() === "GET";
+  let releaseLoad;
+  let gets = 0;
+  const loadHeld = new Promise((resolve) => { releaseLoad = resolve; });
+  await page.route("**/api/privacy/gps", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    gets += 1;
+    await loadHeld;
+    return route.continue();
+  });
+  await openMore(page, "operations");
+  const summary = page.locator("#privacySection summary");
   const toggle = page.locator("#gpsTracksToggle");
-  const before = await toggle.isChecked();
-  await page.route("**/api/privacy/gps", (route) => (
-    route.request().method() === "POST"
-      ? route.fulfill({ status: 500, json: { error: "Synthetischer Fehler" } })
-      : route.continue()
-  ));
+  await expect(page.locator("#privacySection")).not.toHaveAttribute("open", "");
+  const loaded = page.waitForResponse(isGet);
+  await summary.click();
+  await expect(toggle).toBeDisabled();
+  releaseLoad();
+  const before = Boolean((await (await loaded).json()).enabled);
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeChecked({ checked: before });
+
+  // A pending save takes no click, and a failed one restores the server-confirmed state.
+  let failSave;
+  const saveHeld = new Promise((resolve) => { failSave = resolve; });
+  await page.route("**/api/privacy/gps", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await saveHeld;
+    return route.fulfill({ status: 500, json: { error: "Synthetischer Fehler" } });
+  });
   await toggle.click();
+  await expect(toggle).toBeChecked({ checked: !before });
+  await expect(toggle).toBeDisabled();
+  // Reopening during the save loads nothing that could overwrite the switch.
+  const getsBeforeReopen = gets;
+  await summary.click();
+  await summary.click();
+  await expect(page.locator("#privacySection")).toHaveAttribute("open", "");
+  // Give a load a moment to start; none may run, and the switch stays locked.
+  await page.waitForTimeout(500);
+  expect(gets).toBe(getsBeforeReopen);
+  await expect(toggle).toBeDisabled();
+  failSave();
   await expect(page.locator("#toast")).toBeVisible();
   await expect(toggle).toBeChecked({ checked: before });
+  await expect(toggle).toBeEnabled();
 });

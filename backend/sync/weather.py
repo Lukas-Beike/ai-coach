@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
+from backend.app.context import AppContext
 from backend.errors import AppError
 from backend.sync.observation import SyncOperationObserver
+from backend.weather.wiring import WeatherServices
 
 
 class WeatherSyncService:
@@ -83,3 +86,20 @@ class WeatherSyncService:
                 exc_info=True,
             )
             return self._adaptive_preview_service.status()
+
+
+def build_weather_sync(
+    ctx: AppContext, weather: WeatherServices
+) -> Callable[[], WeatherSyncService]:
+    """The weather sync workflow over the current weather and planning owners."""
+
+    def sync_service() -> WeatherSyncService:
+        return WeatherSyncService(
+            ctx.athlete.profile(),
+            weather.service(),
+            ctx.planning_workflows.adaptive_replan_preview_service(),
+            ctx.provider_sync.operation_observer(),
+            ctx.logger,
+        )
+
+    return sync_service

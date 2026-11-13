@@ -139,7 +139,7 @@ class AuditRemediationTests(unittest.TestCase):
 
         with patch.object(weather_provider.WeatherClient, "fetch", side_effect=fetch):
             self.assertEqual(
-                server.WEATHER_ASSEMBLY.service().state()["state"], "not_configured"
+                server.WEATHER.service().state()["state"], "not_configured"
             )
         self.assertFalse(server.key_value_service().get(weather_cache.CACHE_KEY))
         self.assertFalse(server.key_value_service().get(weather_cache.HISTORY_KEY))
@@ -171,7 +171,7 @@ class AuditRemediationTests(unittest.TestCase):
 
         def erase():
             try:
-                server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
+                server.PRIVACY.delete_service().delete("LOKALE DATEN LÖSCHEN")
                 deleted.set()
             except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 failures.append(type(error).__name__)
@@ -229,14 +229,14 @@ with patch.object(Path, 'read_text', deny):
             ),
         )
         self.assertEqual(
-            server.WEATHER_ASSEMBLY.service().state(refresh=False)["state"], "stale"
+            server.WEATHER.service().state(refresh=False)["state"], "stale"
         )
         with patch.object(
-            server.WEATHER_ASSEMBLY.service(),
+            server.WEATHER.service(),
             "state",
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
-            server.WEATHER_ASSEMBLY.sync_service().sync()
+            server.WEATHER_SYNC().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute(
@@ -322,7 +322,7 @@ with patch.object(Path, 'read_text', deny):
                     for i in range(1001)
                 ],
             )
-        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        temporary = server.PRIVACY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 self.assertEqual(
@@ -591,12 +591,12 @@ with patch.object(Path, 'read_text', deny):
                         "garmin", "refresh", {"days": 1}
                     )
                     server.SYNC_JOB_QUEUE.store().claim()
-                    backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
+                    backup = server.BACKUP.backup_service().read_bytes()
                     server.SYNC_JOB_QUEUE.outcome_service().update(
                         job["id"], "completed"
                     )
                     self.assertTrue(
-                        server.BACKUP_ASSEMBLY.restore_service().restore(backup)[
+                        server.BACKUP.restore_service().restore(backup)[
                             "restored"
                         ]
                     )

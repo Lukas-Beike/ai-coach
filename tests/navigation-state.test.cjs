@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { loadPublicScript } = require("./frontend-harness.cjs");
+const fs = require("node:fs");
+const path = require("node:path");
+const { loadPublicScript, extractFunctions } = require("./frontend-harness.cjs");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -176,3 +178,39 @@ test("leaving a panel with unsaved changes asks first and stays when the athlete
   assert.equal(context.AppState.state.route, "plan");
   assert.equal(calls[0], "discard");
 });
+
+// The view catalogue in docs/view-catalogue.md is generated from the router's own tables.
+// Regenerate it with: node tests/navigation-state.test.cjs --write
+const CATALOGUE = path.join(__dirname, "..", "docs", "view-catalogue.md");
+const BEGIN = "<!-- BEGIN GENERATED VIEWS -->\n";
+const END = "<!-- END GENERATED VIEWS -->\n";
+
+function viewCatalogue() {
+  const { routes, linkRoutes, defaultRoute, planSegments, moreSegments } = loadPublicScript("navigation.js").AppNavigation;
+  const { ROUTE_ALIASES } = extractFunctions("navigation.js", ["ROUTE_ALIASES"]);
+  const lines = [
+    `Default route: \`#${defaultRoute}\`. Navigation items: ${Object.values(linkRoutes).map((route) => `\`#${route}\``).join(", ")}.`,
+    "",
+    "| Route | Panel | Navigation item |",
+    "| --- | --- | --- |",
+    ...Object.keys(routes).sort().map((route) => `| \`#${route}\` | \`${routes[route]}\` | \`${linkRoutes[route.split("/")[0]] || route.split("/")[0]}\` |`),
+    "",
+    `Kalender segments: ${planSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
+    `Mehr segments: ${moreSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
+    "",
+    "Former routes that open another view:",
+    "",
+    ...Object.entries(ROUTE_ALIASES).sort().map(([from, to]) => `- \`#${from}\` opens \`#${to}\``),
+  ];
+  return lines.join("\n") + "\n";
+}
+
+test("the view catalogue lists every route of the router", () => {
+  const document = fs.readFileSync(CATALOGUE, "utf8").replaceAll("\r\n", "\n");
+  assert.equal(document.split(BEGIN)[1].split(END)[0], viewCatalogue(), "Regenerate with: node tests/navigation-state.test.cjs --write");
+});
+
+if (process.argv.includes("--write")) {
+  const [before, rest] = fs.readFileSync(CATALOGUE, "utf8").replaceAll("\r\n", "\n").split(BEGIN);
+  fs.writeFileSync(CATALOGUE, before + BEGIN + viewCatalogue() + END + rest.split(END)[1]);
+}

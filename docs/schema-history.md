@@ -1,5 +1,8 @@
 # Release and database compatibility
 
+The exact current schema, its digest and the acceptance rule are in the
+generated [schema reference](schema-reference.md).
+
 Releases preserve the athlete's existing encrypted database. The only
 supported baseline is the schema production runs: version 26, written by
 release 2.0.5. Startup and restore accept it in place, retaining existing

@@ -95,7 +95,9 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         diagnostics = evidence["diagnostics"]
         self.assertTrue(diagnostics)
-        self.assertLessEqual({item["tool"] for item in diagnostics}, {"ruff", "mypy"})
+        self.assertLessEqual(
+            {item["tool"] for item in diagnostics}, {"ruff", "mypy", "cognitive"}
+        )
         evidence = evidence["coverage_evidence"]
         totals = evidence["totals"]
         measured = (
@@ -837,12 +839,15 @@ class ContainerSuiteContractTests(unittest.TestCase):
         local = (root / "tests/run_sqlcipher_tests.ps1").read_text(encoding="utf-8")
         from scripts import run_sqlcipher_tests as supervisor
 
-        # The wrapper delegates to the full-suite owner, retaining the CI inputs.
+        # The wrapper delegates to the supervisor, retaining the CI inputs, and
+        # runs CI's container suite by default; `-Suite all` runs everything.
         self.assertIn("scripts/run_sqlcipher_tests.py", local)
         self.assertIn("& python @runnerArguments", local)
+        self.assertIn('[string]$Suite = "container"', local)
+        self.assertIn('"--suite", $Suite', local)
+        self.assertEqual(supervisor.parse_args([]).suite, "container")
         source = (root / "scripts/run_sqlcipher_tests.py").read_text(encoding="utf-8")
         self.assertIn('"/app/tests/run_tests.py"', source)
-        self.assertNotIn('"--suite"', source)
         mount_pattern = r':(/[^":\s]+):ro"'
         ci_targets = set(re.findall(mount_pattern, container))
         local_targets = {f"/review/{relative}" for relative in supervisor.INPUTS}

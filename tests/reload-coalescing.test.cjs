@@ -470,7 +470,9 @@ test("a changed server version reloads the areas that show it", () => {
   assert.deepEqual(areasOf({ activity_feedback: 1 }), ["feedback", "performance", "plan"]);
   assert.deepEqual(areasOf({ activities: 1 }), ["performance", "plan", "profile"]);
   assert.deepEqual(areasOf({ library: 1 }), ["library", "plan"]);
-  assert.deepEqual(areasOf({ chat: 1, profile: 1 }), ["chat", "profile"]);
+  // A zone save on another device moves the performance version (#2479).
+  assert.deepEqual(areasOf({ performance: 1 }), ["performance", "plan"]);
+  assert.deepEqual(areasOf({ chat: 1, profile: 1 }), ["chat", "performance", "profile"]);
   // A version the page already shows reloads nothing.
   app.state.data.state_versions = { checkins: 1 };
   assert.deepEqual(areasOf({ checkins: 1 }), []);

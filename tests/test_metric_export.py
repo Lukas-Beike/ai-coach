@@ -33,6 +33,7 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.undo_service import HistoryUndoService
 from backend.http_api import server as http_server_module
+from backend.providers import http as provider_http
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_metric_export import IntervalsMetricExport
 from backend.sync.metric_export import MetricExportService
@@ -801,11 +802,7 @@ class MetricExportHttpTests(ServerTestCase):
             patch.object(
                 server.app_config, "security_configuration_error", return_value=None
             ),
-            patch.object(
-                server.PROVIDER_TRANSPORT,
-                "json_http_client",
-                return_value=Mock(request=self.transport),
-            ),
+            patch.object(provider_http.JsonHttpClient, "request", self.transport),
         )
         for item in patches:
             item.start()

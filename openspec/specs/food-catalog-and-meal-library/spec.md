@@ -67,7 +67,27 @@ The system SHALL keep fetched external foods (Open Food Facts and Yazio) as cano
 - **WHEN** a stored food is read again
 - **THEN** it returns every field it was stored with, including fields the product columns do not hold and the absence of nutrient keys it never had.
 
-Evidence: `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`, `backend/nutrition/food_database.py::FoodDatabaseService._off_product`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`, `backend/nutrition/food_database.py::FoodDatabaseService.forget`, `backend/db/repositories.py::FoodDatabaseEntryRepository`, `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`; `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`, `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_entry_reads_back_as_the_food_it_stored`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_legacy_yazio_fallback_does_not_retry_each_scan`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Storage failures are suppressed so a successful lookup can still return its result.
+#### Scenario: Unusable stored entry
+- **WHEN** the only stored entry has no energy value or no basis unit
+- **THEN** it is never returned as a fallback.
+
+Detailed contract: mirrored foods are read by id, by barcode (the 5 newest of any source) and by words (every word of at least 2 characters in name or brand, optionally limited to one source). An entry is fresh when its age is strictly below 90 days. A new fetch replaces name, brand, payload and fetch time of an entry and keeps a known barcode when the new record has none. The list of stored foods returns 50 entries, newest first without a query. The retry memory of 900 seconds holds at most 256 barcodes in process memory.
+
+Evidence:
+- `backend/nutrition/food_mirror.py::FoodDatabaseMirror.is_fresh`
+- `backend/nutrition/food_database.py::FoodDatabaseService._off_product`
+- `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`
+- `backend/nutrition/food_database.py::FoodDatabaseService.forget`
+- `backend/db/repositories.py::FoodDatabaseEntryRepository`
+- `backend/http_api/nutrition.py::NutritionPostRoutes._forget_database_food`
+- `tests/test_food_database_mirror.py::FoodMirrorTests.test_entries_expire_after_ninety_days`
+- `tests/test_food_database_mirror.py::FoodMirrorTests.test_an_entry_reads_back_as_the_food_it_stored`
+- `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_legacy_yazio_fallback_does_not_retry_each_scan`
+- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_offline_lookup_falls_back_to_the_stale_entry_with_a_notice`
+- `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_database_entry_removal_requires_confirmation`. Storage failures are suppressed so a successful lookup can still return its result, `tests/test_food_lookup_chain.py::test_unusable_stored_barcode_entry_does_not_shadow_open_food_facts`
+- `tests/test_food_lookup_chain.py::test_search_hit_keeps_the_barcode_of_a_stored_detail`
+- `tests/test_food_lookup_chain.py::test_fresh_entry_of_another_source_beats_a_newer_stale_one`
+- `tests/test_food_database_mirror.py::test_stored_foods_and_forget_back_the_database_section`.
 
 ### Requirement: Confirmed product persistence and explicit archival
 The system SHALL require explicit confirmation at product HTTP save, update, archive, and mirror-removal boundaries. Products SHALL retain basis amount/unit, validated nutrient values, source, and provenance without retaining submitted image fields.
@@ -84,7 +104,32 @@ The system SHALL require explicit confirmation at product HTTP save, update, arc
 - **WHEN** the athlete confirms archival of an existing product
 - **THEN** it is excluded from normal active listings and cannot be consumed anew; historical meals keep their prior snapshots.
 
-Evidence: `backend/http_api/nutrition.py::NutritionPostRoutes._save_product`, `backend/http_api/nutrition.py::NutritionPutRoutes.routes`, `backend/nutrition/catalog.py::ProductCatalogService.save_product`, `backend/nutrition/catalog.py::ProductCatalogService.archive_product`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_confirmed_product_is_persistent_and_can_be_archived`, `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_unconfirmed_product_save_is_rejected_before_persistence`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_archived_products_cannot_be_calculated_or_logged`.
+#### Scenario: Edit keeps favorite and confidence
+- **WHEN** a product is saved again under its id, or edited without a confidence
+- **THEN** its favorite flag and its stored extraction confidence stay; only the favorite action changes the flag and needs a boolean.
+
+#### Scenario: Ambiguous number text
+- **WHEN** a nutrient arrives as text that could be grouped thousands, such as "1,200", or "1.200" for kcal
+- **THEN** it is stored as unknown instead of 1.2 or 1200.
+
+#### Scenario: EAN normalization
+- **WHEN** a product is saved with an EAN containing non-digits or a digit count other than 8, 12, 13 or 14
+- **THEN** non-digits are removed and a value of any other length is stored as no EAN.
+
+Detailed contract: the routes, request fields, bounds (name 200 characters, brand 120, basis amount above 0 up to 10000, nutrients 0 to 10000, confidence clamped to 0 to 1) and errors of the product API are in `docs/api-routes.md`; the columns are in `docs/schema-reference.md` (`nutrition_products`, origin `own`). The allowed sources are `packaging_label` (default), `manual`, `open_food_facts`, `yazio`, `bls` and `fddb_export`. Archiving is recorded as an update in change history. The Coach tool `save_nutrition_product` uses the same service without the `confirmed` flag.
+
+Evidence:
+- `backend/http_api/nutrition.py::NutritionPostRoutes._save_product`
+- `backend/http_api/nutrition.py::NutritionPutRoutes.routes`
+- `backend/nutrition/catalog.py::ProductCatalogService.archive_product`
+- `backend/nutrition/catalog.py::ProductCatalogService.save_product`
+- `tests/test_nutrition_photo_extraction.py::test_grouped_thousands_become_unknown_while_other_fields_extract`
+- `tests/test_nutrition_product_history.py::test_create_update_and_archive_each_record_one_change`
+- `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_unconfirmed_product_save_is_rejected_before_persistence`
+- `tests/test_nutrition_product_http_contract.py::test_favorite_and_add_to_meal_target_explicit_ids`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_confirmed_product_is_persistent_and_can_be_archived`
+- `tests/test_nutrition_products.py::test_product_edit_keeps_extraction_confidence`
+- `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_archived_products_cannot_be_calculated_or_logged`
 
 ### Requirement: Product portions freeze consumed definitions
 The system SHALL scale a product portion against its saved basis amount in the same unit and freeze the definition and consumed quantity with the meal. Later catalog edits SHALL not recalculate historical intake.
@@ -101,7 +146,11 @@ The system SHALL scale a product portion against its saved basis amount in the s
 - **WHEN** the saved product is edited after consumption
 - **THEN** the old entry's values and source snapshot remain unchanged.
 
-Evidence: `backend/nutrition/catalog.py::ProductCatalogService.calculate_product`, `backend/nutrition/diary.py::NutritionDiaryService.log_product`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_product_nutrients_are_snapshotted_when_consumed`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units`.
+#### Scenario: Portion values
+- **WHEN** an amount above 0 up to 10000 in the product's basis unit is calculated
+- **THEN** calories, carbohydrate, protein and fat are `value * amount / basis_amount` rounded to one decimal and an unknown value stays unknown; an archived product is refused with 409 `nutrition_product_archived`, another unit with 400 `food_unit_mismatch`.
+
+Evidence: `backend/nutrition/catalog.py::ProductCatalogService.calculate_product`, `backend/nutrition/diary.py::NutritionDiaryService.log_product`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_product_nutrients_are_snapshotted_when_consumed`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_product_calculation_preserves_unknown_nutrients_and_does_not_convert_units`, `tests/test_nutrition_products.py::test_product_amount_accepts_a_comma_decimal`.
 
 ### Requirement: Trusted mixed-origin meal components
 The system SHALL calculate composite meals from one through twenty validated local-product, database, manual, estimate, or packaging components. Authoritative references SHALL be resolved server-side and SHALL reject forged totals or provenance supplied alongside components.
@@ -181,7 +230,19 @@ The client SHALL present product and label candidates for review and explicit lo
 - **WHEN** the diary displays a composite meal
 - **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations, and a component from a database product is labelled as such.
 
-Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`.
+Evidence:
+- `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`
+- `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`
+- `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`
+- `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`
+- `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`
+- `public/nutrition.js::addNutritionProductToCoachDraft`
+- `public/nutrition.js::addNutritionProductToMeal`
+- `public/nutrition.js::nutritionComponentDetails`
+- `public/nutrition.js::saveNutritionProduct`
+- `public/nutrition.js::useNutritionProduct`
+- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`
+- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`
 
 ### Requirement: Coach food reads preserve explicit source and batch results
 The system SHALL support explicit database source selection and bounded batched ingredient lookup through the Coach read interface. Source selection SHALL retain separately labelled matching saved products rather than hiding them or silently replacing the chosen database.
@@ -198,7 +259,21 @@ The system SHALL support explicit database source selection and bounded batched 
 - **WHEN** no text source is named, or a batch is malformed, oversized, empty, or combined with a barcode
 - **THEN** ordinary lookup retains local-first behavior, with BLS next when Yazio is not configured and the Yazio, Open Food Facts, BLS chain when it is, and invalid batches fail before unbounded lookup work.
 
-Evidence: `backend/coach/read_tools.py::CoachReadToolService._lookup_food`, `backend/coach/read_tools.py::CoachReadToolService._lookup_one_food`; `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_batched_queries_return_each_term_and_isolate_failures`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_text_source_still_returns_matching_saved_products`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_source_outage_still_returns_saved_products`.
+#### Scenario: Source outage with saved matches
+- **WHEN** the named database fails and saved products match the term
+- **THEN** the result has no foods, the saved products, and the notice "Externe Suche nicht möglich: {error} Nur gespeicherte Produkte verfügbar."
+
+#### Scenario: Mixed calculation input
+- **WHEN** a calculation combines `components` with `ingredients` or `product_id`
+- **THEN** the call fails with 400.
+
+#### Scenario: Nutrition read range
+- **WHEN** a nutrition read names one date, a range of at most 31 days, or neither
+- **THEN** it answers that day, the range or today, always with the saved meals and products; a longer range fails with 400 `range_too_large`.
+
+Detailed contract: a batched lookup answers `{ok, results: [{query, ...}]}` with one entry per distinct term, a failed term as `{ok: false, error, reason}`; a lookup with an explicit source answers the database result plus `local_products` when saved products match. The tool parameters are listed in `openspec/COACH_TOOLS.md`.
+
+Evidence: `backend/coach/read_tools.py::CoachReadToolService._lookup_food`, `backend/coach/read_tools.py::CoachReadToolService._lookup_one_food`; `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_batched_queries_return_each_term_and_isolate_failures`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_text_source_still_returns_matching_saved_products`, `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_explicit_source_outage_still_returns_saved_products`, `tests/test_nutrition_review_regressions.py::test_explicit_source_outage_still_returns_saved_products`, `tests/test_coach_tool_coverage.py::test_food_database_read_tools_calculate_without_writing`, `tests/test_coach_read_tools.py::test_read_nutrition_day_and_range`, `tests/test_coach_read_tools.py::test_nutrition_range_is_validated_and_bounded`.
 
 ### Requirement: Online food lookup is bounded and privacy-conscious
 The system SHALL bound Open Food Facts transport and local request rates, separate search and barcode limits, cache successful responses, and return sanitized provider failures. Provider-estimated or modified aggregate nutrient values SHALL not be treated as authoritative label values.
@@ -215,7 +290,17 @@ The system SHALL bound Open Food Facts transport and local request rates, separa
 - **WHEN** food data uses the supported aggregate or legacy nutrient schema
 - **THEN** recognized valid label values and preparation/unit metadata are projected, unknowns stay null, and aggregate estimates/modifiers are excluded rather than promoted to known nutrients.
 
-Evidence: `backend/providers/open_food_facts.py::OpenFoodFactsClient._get`, `backend/providers/open_food_facts.py::OpenFoodFactsClient._request_response`, `backend/providers/open_food_facts.py::project_product`; `tests/test_food_database.py::OpenFoodFactsTests.test_cache_limits_and_privacy_safe_bounded_transport`, `tests/test_food_database.py::OpenFoodFactsTests.test_search_rate_limit_does_not_block_product_lookups`, `tests/test_food_database.py::OpenFoodFactsTests.test_provider_backoff_and_errors_do_not_expose_query_or_response`, `tests/test_food_database.py::FoodDatabaseTests.test_current_off_schema_uses_label_values_and_excludes_provider_estimates`.
+#### Scenario: Rate limit answer
+- **WHEN** the provider answers 429
+- **THEN** that category is blocked for the longer of 60 seconds and `Retry-After`, and the caller gets 429 `food_database_rate_limited`.
+
+#### Scenario: Overload
+- **WHEN** the provider answers 503
+- **THEN** the caller gets 502 `food_database_unavailable` and no pause starts.
+
+Detailed contract: the endpoints, limits (14 product and 9 search requests per 60 seconds, 24-hour cache of 256 answers, 10-second timeout, 500,000-byte response) and error messages are rows O1 and O2 of `docs/provider-endpoints.md`. Values are accepted within kcal 0 to 1000, kJ 0 to 4200 (converted by division by 4.184 when kcal is absent) and 0 to 100 g per 100 units for carbohydrate, protein, fat, sugar, fibre and salt. The basis unit comes from `100g` or `100ml`, else it is unknown. The name is `product_name_de`, else `product_name`, else "Produkt" (160 characters). A 404, or a product without a usable code, is 404 `food_not_found`; any other transport or shape error is 502.
+
+Evidence: `backend/providers/open_food_facts.py::OpenFoodFactsClient._get`, `backend/providers/open_food_facts.py::OpenFoodFactsClient._request_response`, `backend/providers/open_food_facts.py::project_product`; `tests/test_food_database.py::OpenFoodFactsTests.test_cache_limits_and_privacy_safe_bounded_transport`, `tests/test_food_database.py::OpenFoodFactsTests.test_search_rate_limit_does_not_block_product_lookups`, `tests/test_food_database.py::OpenFoodFactsTests.test_provider_backoff_and_errors_do_not_expose_query_or_response`, `tests/test_food_database.py::FoodDatabaseTests.test_current_off_schema_uses_label_values_and_excludes_provider_estimates`, `tests/test_food_database.py::test_overload_is_unavailable_without_backoff`, `tests/test_food_database.py::test_search_filters_germany_and_has_independent_limit`, `tests/test_food_database.py::test_truncated_provider_response_is_reported_as_unavailable`.
 
 ### Requirement: Yazio is an optional prioritized external food source
 When Yazio is configured and a text or barcode lookup names no source, the system SHALL search saved products first, then fresh mirrored foods, then Yazio, then Open Food Facts, then BLS for text queries and Yazio then Open Food Facts for barcodes. It SHALL advance to the next source when a source has no suitable match or is unavailable. A saved-product or fresh mirror match SHALL prevent every external request. Without Yazio configuration the previous default SHALL apply unchanged.
@@ -278,7 +363,7 @@ The system SHALL authenticate with the configured account email and password and
 - **WHEN** a search runs
 - **THEN** the region is the configured two-letter country code, else DE, and the locale is derived from it.
 
-Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient._token`, `backend/nutrition/assembly.py::NutritionAssembly`; `tests/test_yazio.py::YazioClientTests.test_search_sends_the_profile_sex_and_none_when_unset`, `tests/test_yazio.py::YazioClientTests.test_country_is_configurable_and_validated`, `tests/test_yazio.py::YazioClientTests.test_expired_token_is_refreshed_then_login_is_the_fallback`.
+Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient._token`, `backend/nutrition/wiring.py::build_nutrition`; `tests/test_yazio.py::YazioClientTests.test_search_sends_the_profile_sex_and_none_when_unset`, `tests/test_yazio.py::YazioClientTests.test_country_is_configurable_and_validated`, `tests/test_yazio.py::YazioClientTests.test_expired_token_is_refreshed_then_login_is_the_fallback`.
 
 ### Requirement: Yazio failures are sanitized and isolated
 The system SHALL cache successful Yazio responses, back off after rate limits and rejected logins, and map every failure to a sanitized error disclosing neither credentials, tokens, queries nor response bodies. A Yazio failure SHALL NOT fail saved-product search, BLS or Open Food Facts lookup.
@@ -451,7 +536,22 @@ The Coach SHALL list own products and stored database foods with empty core fiel
 - **WHEN** a named product does not exist, a field is not a core field, or a value is not a finite number in range
 - **THEN** that item is rejected without writing it.
 
-Evidence: `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`, `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`, `backend/nutrition/food_database.py::FoodDatabaseService.found_value`, `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`, `backend/db/repositories.py::fill_empty_nutrients`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/coach/change_receipts.py::change_summary`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`, `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`, `tests/test_nutrition_web_search.py::NutritionWebSearchCatalogTests.test_a_web_fill_needs_the_value_of_a_search_from_its_own_page`, `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`, `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
+Evidence:
+- `backend/coach/change_receipts.py::change_summary`
+- `backend/db/repositories.py::fill_empty_nutrients`
+- `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`
+- `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`
+- `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`
+- `backend/nutrition/food_database.py::FoodDatabaseService.found_value`
+- `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`
+- `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`
+- `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`
+- `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`
+- `tests/test_nutrition_web_search.py::NutritionWebSearchCatalogTests.test_a_web_fill_needs_the_value_of_a_search_from_its_own_page`
+- `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`
 
 ### Requirement: Coach web search for missing product values
 The Coach SHALL be able to search the web for the still-empty core values of up to five named products through one Responses API request with the `web_search` tool, sending only product name, brand, EAN, basis and missing field names. Only finite, plausible values whose source page the search read or cited SHALL be returned, with origin `web`, the source page and an untrusted-data notice.
@@ -501,7 +601,21 @@ The product API SHALL list own products and stored database foods together, sort
 - **WHEN** the athlete uses a stored database food for a meal
 - **THEN** it is recorded like an own product with its values at that time.
 
-Evidence: `backend/db/repositories.py::NutritionProductRepository.list_all`, `backend/nutrition/catalog.py::ProductCatalogService.update_product`, `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`, `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`, `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`, `backend/nutrition/components.py`, `backend/http_api/nutrition.py` (`scope=all`); `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`, `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`, `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite).
+Evidence:
+- `backend/db/repositories.py::NutritionProductRepository.list_all`
+- `backend/http_api/nutrition.py` (`scope=all`)
+- `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`
+- `backend/nutrition/catalog.py::ProductCatalogService.update_product`
+- `backend/nutrition/components.py`
+- `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`
+- `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`
+- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`
+- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`
+- `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite)
+- `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`
 
 ### Requirement: One product list with sections and incomplete markers
 The product page SHALL show "Favoriten (n)" and "Alle Produkte (n)" as collapsible sections, both collapsed when the page opens, each total followed by the number of incomplete entries. Every card SHALL show its origin and, when incomplete, the names of its missing fields, and SHALL offer Verwenden, Bearbeiten, Aktualisieren and Löschen.
@@ -527,3 +641,120 @@ The product page SHALL show "Favoriten (n)" and "Alle Produkte (n)" as collapsib
 - **THEN** the page says an EAN is needed and the editor allows entering one.
 
 Evidence: `public/nutrition.js::renderNutritionProducts`, `public/nutrition.js::nutritionProductSection`, `public/nutrition.js::nutritionProductCard`, `public/nutrition.js::appendNutritionProductActions`, `public/nutrition.js::refreshNutritionProduct`, `public/nutrition.js::deleteNutritionProduct`, `public/nutrition.js::lockNutritionDatabaseFields`; `tests/nutrition-lookup-status.test.cjs` (sections, counters, search, cards, actions, unit and date cases), `e2e/nutrition.spec.js` (product list on mobile, tablet-landscape and desktop).
+
+### Requirement: Saved-product text search rules
+The system SHALL match a saved product when every query word occurs in its name or brand, case-insensitively, with `%` and `_` taken literally. A word shorter than three characters SHALL match only at the start of a word. Separators around a word SHALL be ignored. Only when this finds nothing SHALL the 100 most recently changed products be re-checked with plural, umlaut and single-typo tolerance, still requiring every word.
+
+#### Scenario: Short word
+- **WHEN** the query is "Ei"
+- **THEN** "Eier" matches and "Reisnudeln" does not.
+
+#### Scenario: Blank or oversized query
+- **WHEN** the query is only whitespace or separators, or has more than 20 words
+- **THEN** nothing matches.
+
+Detailed contract: the stripped separators are `,.()/-!?:;+&`; a short word also matches after a space, `-`, `/`, `(`, `,`, `.`, `+` or `&`. The list limit is clamped to 1 to 100 (default 50); the order is favorites first when requested, then the latest change, then the name. The tolerant pass uses the rules of the BLS search (stems; one typo for words of at least 5 letters at similarity 0.85). The merged product list also matches a digit word against the EAN, sorts by name and applies the tolerant pass to all products.
+
+Evidence: `backend/db/repositories.py::_term_clauses`, `backend/db/repositories.py::NutritionProductRepository.list`, `backend/db/repositories.py::NutritionProductRepository.list_all`, `backend/nutrition/catalog.py::ProductCatalogService.list_products`, `backend/nutrition/food_database.py::matches_all_terms`; `tests/test_nutrition_products.py::test_short_search_words_must_start_a_word`, `tests/test_nutrition_products.py::test_search_ignores_separators_around_words`, `tests/test_nutrition_products.py::test_text_search_treats_wildcards_literally_and_blank_queries_match_nothing`.
+
+### Requirement: Bundled BLS dataset and ranking
+The system SHALL ship the BLS 4.0 derivative as a local data file with, per food, code, name, per-100-g kcal, carbohydrate, protein and fat and the origin of each value, and SHALL expose each as food id `bls:<code>` with basis 100 g. A text search SHALL return at most 8 foods ranked by how many query words match and how well, and SHALL say when only partial matches exist.
+
+#### Scenario: Whole word before inner match
+- **WHEN** the query is "Reis"
+- **THEN** foods naming rice as a word rank before "Erdbeereis".
+
+#### Scenario: Compound without a direct match
+- **WHEN** no food contains a query word but known words are parts of it, such as "Risottoreis"
+- **THEN** foods matching the parts are returned, one per combination of matched parts first, with the partial-match notice.
+
+Detailed contract: the file holds `source`, `url`, `license` and 7140 `foods`. Words are compared case-folded and without diacritics, `ß` as `ss` and "sosse" as "sauce". A word also matches without the endings `en`, `n`, `s` and `e` when at least 4 letters remain. The score per word is 4 for a whole word, 3 for a word end, 2 for a word start and 1 inside a word (never for variants shorter than 3 letters), plus 1 for a match above 1 that begins inside the first word. A word without a match is tried as one typo (words of at least 5 letters, similarity 0.85), then as a compound of known parts of at least 4 letters. The rank is more matched words, higher score sum, shorter name, then the name.
+
+Evidence: `backend/nutrition/bls_4_0.json`, `backend/nutrition/food_database.py::_bls_foods`, `backend/nutrition/food_database.py::_word_score`, `backend/nutrition/food_database.py::_term_variants`, `backend/nutrition/food_database.py::_bls_search`, `tools/extract_bls.py`; `tests/test_food_database.py::test_bls_search_tolerates_plurals_typos_and_compounds`.
+
+### Requirement: Food record, origin and lookup notice
+The system SHALL return every database food with `id`, `name`, `source`, `source_url`, `license`, `basis_amount` 100, `basis_unit` (`g`, `ml` or unknown), `per_100` values and `quality`, and SHALL mark each Open Food Facts and Yazio hit with `data_origin` `live`, `local_database` or `local_database_stale`, adding `stored_at` for mirrored hits. Every lookup SHALL carry a notice that hits are untrusted data.
+
+#### Scenario: Invalid lookup
+- **WHEN** a lookup names both a barcode and a text, a text outside 2 to 120 characters, or an unknown source
+- **THEN** it fails with 400 before any search.
+
+#### Scenario: Stale or skipped source
+- **WHEN** a mirrored hit is served because the provider failed, or an online source was skipped
+- **THEN** the notice says so, and names rejected Yazio credentials or a rejected app version when that was the cause.
+
+Detailed contract: the base notice is `DATABASE_NOTICE`; the appended parts are `STALE_NOTICE`, `FALLBACK_NOTICE`, `YAZIO_LOGIN_NOTICE`, `YAZIO_VERSION_NOTICE` and `PARTIAL_NOTICE` (texts in `backend/nutrition/food_database.py`). Food ids are `bls:<code>`, `off:<8 to 14 digits>` and `yazio:<uuid>`; any other id is 404 `food_not_found`, a non-text id 400.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.lookup`, `backend/nutrition/food_database.py::FoodDatabaseService._labelled`, `backend/nutrition/food_database.py::_chain_notice`, `backend/nutrition/food_database.py::FoodDatabaseService.resolve`; `tests/test_food_lookup_chain.py::test_version_block_is_reported_in_barcode_fallback`, `tests/test_food_lookup_chain.py::test_rejected_yazio_login_is_named_in_the_barcode_notice`, `tests/test_food_lookup_chain.py::test_unknown_yazio_id_is_not_found`.
+
+### Requirement: Yazio request and session details
+The system SHALL call the Yazio API at `https://yzapi.yazio.com/v22` with the configured User-Agent or the built-in default, use the first 8 search hits, and resolve a barcode by searching it and reading at most 3 product details, accepting a product only when one of its EANs equals the barcode. After a rejected login it SHALL make no login attempt for 900 seconds; changed credentials SHALL clear the tokens, the login pause, the last check result and the cached answers.
+
+#### Scenario: Token rejected by the API
+- **WHEN** a product request answers 401
+- **THEN** the token is renewed once and the request repeated; a second failure is reported as unavailable.
+
+#### Scenario: Refresh fails during an outage
+- **WHEN** the refresh grant fails for a reason other than a rejection
+- **THEN** no password login is attempted and the lookup reports the source unavailable.
+
+Detailed contract: the endpoints, limits and error messages are rows Y1 to Y4 of `docs/provider-endpoints.md`; a token is renewed 60 seconds before it expires. The error statuses are 409 `not_configured`, 429 `food_database_rate_limited`, 503 `food_database_auth_failed`, 502 `food_database_version_blocked` (only for a 403 body of at most 4096 bytes whose `error` is `version_blocked`), 502 `food_database_unavailable` or `food_database_invalid_response`, and 404 `food_not_found`. The nutrient keys read are `energy.energy`, `nutrient.carb`, `nutrient.protein`, `nutrient.fat`, `nutrient.sugar`, `nutrient.dietaryfiber` and `nutrient.salt`.
+
+Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient.barcode`, `backend/providers/yazio.py::YazioClient._authorized_get`, `backend/providers/yazio.py::YazioClient._token`, `backend/providers/yazio.py::YazioClient._follow_credentials`, `backend/providers/yazio.py::YazioClient._raise_http_error`; `tests/test_yazio.py::test_token_rejected_by_the_api_is_renewed_once`, `tests/test_yazio.py::test_failed_refresh_during_an_outage_keeps_the_token_and_does_not_log_in`, `tests/test_yazio.py::test_changed_credentials_drop_tokens_and_the_login_pause`, `tests/test_yazio.py::test_product_detail_keeps_servings_and_barcode_requires_a_matching_ean`, `tests/test_yazio.py::test_user_agent_can_be_overridden`.
+
+### Requirement: Component and ingredient numeric contract
+The system SHALL accept meal components only with exact key sets: `local_product` (`kind`, `product_id`, `amount`, `unit`), `database` (`kind`, `food_id`, `amount`, `unit`), and `manual`, `estimate` or `packaging_label` (`kind`, `name`, `amount`, `unit`, `kcal`, `carbs_g`, `protein_g`, `fat_g`). Amounts SHALL be above 0 up to 10000 in `g`, `ml` or `portion`; the older database ingredients SHALL be above 0 up to 5000.
+
+#### Scenario: Caps
+- **WHEN** a manual component states more than 10000 kcal or 1000 g of a macro, or the meal totals exceed these caps
+- **THEN** the request fails with 400 and nothing is written.
+
+#### Scenario: Forged fields beside components
+- **WHEN** a payload with `components` also carries `product_id`, `food_ingredients`, `nutrition_basis` or any nutrient total or alias
+- **THEN** it fails with 400.
+
+Detailed contract: manual kinds need a non-empty name (cut to 200 characters) and a kcal value; macros may be null. Totals are rounded to whole kcal and one decimal for macros. The stored basis is `{kind: "composite", version: 1, components: [...]}` with one snapshot per component (`kind`, `name`, `amount`, `unit`, the four nutrients and its `nutrition_basis`); the ingredient form yields `{kind: "database", ingredients: [...]}`. Missing energy is 400 `food_energy_missing` and a unit other than the basis unit 400 `food_unit_mismatch`. A `local_product` component may name a stored database food. Database foods are resolved before the database lock is taken.
+
+Evidence: `backend/nutrition/components.py::MealComponentCalculator`, `backend/nutrition/meal_library.py::validate_component_payload`, `backend/nutrition/food_database.py::FoodDatabaseService._resolve_ingredient`, `backend/nutrition/food_database.py::FoodDatabaseService.calculate`; `tests/test_nutrition_composition.py::test_rejects_per_component_limits_and_preserves_unknown_totals_atomically`, `tests/test_nutrition_composition.py::test_rejects_unhashable_types_and_non_string_references`, `tests/test_nutrition.py::test_database_component_resolution_happens_before_database_lock`.
+
+### Requirement: Saved meal record and access paths
+The system SHALL store a saved meal as one portion with `id`, `name`, `description`, `meal_type`, `meal_type_explicit`, kcal and macros, `source`, `nutrition_basis` and `updated_at`. Saved meals SHALL be read and written only through the Coach tools; no HTTP route and no client view exists for them.
+
+#### Scenario: Log portions
+- **WHEN** a saved meal is logged for `p` portions (above 0 up to 20)
+- **THEN** the entry description is `{name} · {p} Portion(en): {description}` and the nutrients and frozen ingredient amounts are multiplied by `p`.
+
+#### Scenario: Meal type on logging
+- **WHEN** the saved meal has an explicit meal type, or no time is given
+- **THEN** the saved type is used; otherwise the type follows the given time.
+
+#### Scenario: Calculation changed since preview
+- **WHEN** a save names an expected calculation that no longer equals the fresh one
+- **THEN** it fails with 409 `food_calculation_changed`.
+
+Detailed contract: deleting answers `{deleted_id, change}`; an unknown id is 404 "Gespeicherte Mahlzeit nicht gefunden.". Create, update and delete are recorded in change history as `nutrition_template`, and undoing a delete is refused when the name was taken meanwhile. The Coach tools are listed in `openspec/COACH_TOOLS.md`.
+
+Evidence: `backend/nutrition/meal_library.py::NutritionMealLibraryService.save_template`, `backend/nutrition/meal_library.py::NutritionMealLibraryService.delete_template`, `backend/nutrition/meal_library.py::NutritionMealLibraryService.restore_in_transaction`, `backend/nutrition/diary.py::NutritionDiaryService.log_template`; `tests/test_nutrition.py::test_template_meal_type_defaults_from_consumption_time_and_keeps_explicit_type`, `tests/test_nutrition.py::test_logging_saved_meal_on_past_date_defaults_timestamp_to_that_date`, `tests/test_nutrition_history.py::test_undo_of_a_delete_is_refused_when_the_name_was_taken`, `tests/test_nutrition_api_and_sync.py::test_removed_get_routes_are_not_handled`.
+
+### Requirement: Product editor and use dialog states
+The client SHALL open the product editor for a manual product with source `manual` and basis 100 g, warn when a label candidate's recognition confidence is below 0.65, and let "Verwenden" open a dialog with the amount, the meals of the selected day and the actions that prepare a Coach draft or add the product to a meal.
+
+#### Scenario: Manual product
+- **WHEN** the athlete starts a manual product
+- **THEN** the editor opens with source `manual` and basis 100 g.
+
+#### Scenario: Low recognition confidence
+- **WHEN** a label candidate has a confidence below 0.65
+- **THEN** the editor shows "Geringe Erkennungssicherheit. Werte besonders sorgfältig prüfen." and marks the fields whose own confidence is below 0.65.
+
+#### Scenario: Use dialog
+- **WHEN** "Verwenden" opens
+- **THEN** the amount defaults to the product's basis amount, the meals of the selected day are offered with "Neuer Snack" first, and the Coach draft reads `Erfasse {amount} {unit} als Mahlzeit (Produkt-ID: {id}).` or, appended to an existing draft, `Dazu {amount} {unit} (Produkt-ID: {id}).`
+
+#### Scenario: Background refresh
+- **WHEN** the product list reloads in the background while a barcode lookup result is shown
+- **THEN** the shown result is not replaced.
+
+Detailed contract: a card names its origin as "eigen · {source}" for an own product and "Datenbank · Stand {date}" for a stored database food.
+
+Evidence: `public/nutrition.js::setNutritionProductConfidence`, `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `public/nutrition.js::nutritionOriginText`; `tests/nutrition-lookup-status.test.cjs::a background state render does not clobber a fresh lookup result`, `e2e/nutrition.spec.js::@responsive Open Food Facts lookup can be explicitly saved into the local product library`.

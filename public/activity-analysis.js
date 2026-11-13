@@ -1,22 +1,9 @@
 /* One session's details in its calendar card (#2258). Charts follow the Garmin Connect app: one filled area per channel, average line and tap readout. */
 (() => {
-  const SVG_NS = "http://www.w3.org/2000/svg";
   const WIDTH = 340; const HEIGHT = 150; const LEFT = 40; const RIGHT = 8; const TOP = 10; const BOTTOM = 22;
   // The latest load of each panel; an older answer for the same panel is dropped.
   const panelLoads = new WeakMap();
-
-  function node(tag, text, className) {
-    const element = document.createElement(tag);
-    if (text != null) element.textContent = text;
-    if (className) element.className = className;
-    return element;
-  }
-
-  function svgNode(tag, attributes = {}) {
-    const element = document.createElementNS(SVG_NS, tag);
-    for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
-    return element;
-  }
+  const panelReads = new WeakMap();
 
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const numberText = (value, digits = 0) => AppFormat.number(value, { digits }) ?? "—";
@@ -125,14 +112,10 @@
     const ticks = [low + (high - low) * 0.1, (low + high) / 2, high - (high - low) * 0.1];
     for (const value of ticks) {
       svg.append(svgNode("line", { x1: LEFT, x2: WIDTH - RIGHT, y1: scale.y(value), y2: scale.y(value), class: "activity-analysis-grid" }));
-      const label = svgNode("text", { x: LEFT - 6, y: scale.y(value) + 4, "text-anchor": "end" });
-      label.textContent = channel.format(value);
-      svg.append(label);
+      svg.append(svgNode("text", { x: LEFT - 6, y: scale.y(value) + 4, "text-anchor": "end" }, channel.format(value)));
     }
     [0, 0.5, 1].forEach((fraction) => {
-      const label = svgNode("text", { x: scale.x(start + span * fraction), y: HEIGHT - 6, "text-anchor": ["start", "middle", "end"][fraction * 2] });
-      label.textContent = clock(span * fraction);
-      svg.append(label);
+      svg.append(svgNode("text", { x: scale.x(start + span * fraction), y: HEIGHT - 6, "text-anchor": ["start", "middle", "end"][fraction * 2] }, clock(span * fraction)));
     });
   }
 
@@ -177,14 +160,9 @@
       y: (value) => TOP + (channel.invert ? share(value) : 1 - share(value)) * (HEIGHT - TOP - BOTTOM),
     };
 
-    const section = node("section", null, `activity-analysis-chart is-${channel.color}`);
-    const header = node("div", null, "activity-analysis-chart-header");
-    header.append(node("h4", channel.label));
-    const stats = node("p", null, "activity-analysis-chart-stats");
-    const readout = node("span", null, "activity-analysis-readout");
+    const readout = h("span", "activity-analysis-readout");
     const summaryText = chartSummary(channel, sorted, valid);
-    stats.append(node("span", summaryText), readout);
-    header.append(stats);
+    const header = h("div", "activity-analysis-chart-header", h("h4", null, channel.label), h("p", "activity-analysis-chart-stats", h("span", null, summaryText), readout));
 
     const svg = svgNode("svg", { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: "img", "aria-label": `${channel.label}: ${summaryText}, über ${clock(span)}` });
     appendAxes(svg, channel, scale);
@@ -197,8 +175,7 @@
       svg.append(svgNode("line", { x1: LEFT, x2: WIDTH - RIGHT, y1: average, y2: average, class: "activity-analysis-average" }));
     }
     attachScrubber(svg, channel, scale, valid, readout);
-    section.append(header, svg);
-    return section;
+    return h("section", `activity-analysis-chart is-${channel.color}`, header, svg);
   }
 
   const measure = (value, unit) => {
@@ -260,13 +237,7 @@
       ...ActivityDetails.runningDynamics(metrics),
     ].filter(([, value]) => value);
     if (!values.length) return null;
-    const grid = node("dl", null, "activity-analysis-stats");
-    for (const [label, value] of values) {
-      const item = node("div");
-      item.append(node("dt", label), node("dd", value));
-      grid.append(item);
-    }
-    return grid;
+    return h("dl", "activity-analysis-stats", values.map(([label, value]) => h("div", null, h("dt", null, label), h("dd", null, value))));
   }
 
   function zones(title, zone) {
@@ -274,21 +245,15 @@
       .map((bucket) => ({ id: String(bucket.label || `Z${bucket.index}`), secs: bucket.seconds }));
     const total = items.reduce((sum, item) => sum + item.secs, 0);
     if (!total) return null;
-    const section = node("section", null, "activity-analysis-zones");
-    section.append(node("h4", title));
-    const rows = node("ol");
+    const rows = h("ol");
     for (const item of [...items].reverse()) {
       const share = item.secs / total;
-      const row = node("li");
-      row.dataset.zone = item.id.match(/^Z\d/)?.[0] || "";
-      const bar = node("span", null, "activity-analysis-zone-bar");
+      const bar = h("span", "activity-analysis-zone-bar");
       bar.style.setProperty("--zone-share", `${Math.round(share * 1000) / 10}%`);
-      row.append(node("span", item.id.slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
-      rows.append(row);
+      rows.append(h("li", { dataset: { zone: item.id.match(/^Z\d/)?.[0] || "" } }, h("span", "activity-analysis-zone-label", item.id.slice(0, 20)), bar, h("span", "activity-analysis-zone-value", `${clock(item.secs)} · ${Math.round(share * 100)} %`)));
     }
     // Derived zones use the zone settings of the session day, as the reports (#1743).
-    section.append(rows, node("p", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`, "muted"));
-    return section;
+    return h("section", "activity-analysis-zones", h("h4", null, title), rows, h("p", "muted", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`));
   }
 
   function laps(activity, lapSet) {
@@ -305,22 +270,10 @@
       ["Anstieg", (lap) => (finite(lap.elevation_gain_m) ? `${numberText(lap.elevation_gain_m)} m` : null)],
     ].filter(([, read]) => items.some((lap) => read(lap) != null));
     if (!columns.length) return null;
-    const section = node("section", null, "activity-analysis-laps");
-    section.append(node("h4", "Runden"));
-    const wrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), "Runden dieser Einheit");
-    const table = node("table");
-    const head = node("tr");
-    ["#", ...columns.map(([label]) => label)].forEach((label) => { const cell = node("th", label); cell.scope = "col"; head.append(cell); });
-    const thead = node("thead"); thead.append(head);
-    const body = node("tbody");
-    items.forEach((lap, index) => {
-      const row = node("tr");
-      const label = node("th", String(index + 1)); label.scope = "row";
-      row.append(label, ...columns.map(([, read]) => node("td", read(lap) ?? "—")));
-      body.append(row);
-    });
-    table.append(thead, body); wrap.append(table); section.append(wrap);
-    return section;
+    const wrap = makeScrollRegionFocusable(h("div", "analysis-chart-table"), "Runden dieser Einheit");
+    const rows = items.map((lap, index) => [h("th", { scope: "row" }, String(index + 1)), ...columns.map(([, read]) => read(lap) ?? "—")]);
+    wrap.append(table(["#", ...columns.map(([label]) => label)], rows));
+    return h("section", "activity-analysis-laps", h("h4", null, "Runden"), wrap);
   }
 
   function renderPanel(panel, summary, payload, token) {
@@ -333,50 +286,44 @@
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
     const driftLines = ActivityDetails.formDriftLines(payload?.analysis?.form_drift);
-    if (driftLines.length) {
-      const drift = node("div");
-      drift.append(...driftLines.map((line) => node("p", line)));
-      panel.append(drift);
-    }
+    if (driftLines.length) panel.append(h("div", null, driftLines.map((line) => h("p", null, line))));
     // The running dynamics share the time axis of the other channels.
     const streams = payload?.streams && { ...payload.streams, channels: { ...payload.streams.channels, ...payload.running_dynamics_streams } };
     const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
-    if (charts.length) {
-      const grid = node("div", null, "activity-analysis-charts");
-      grid.append(...charts);
-      panel.append(grid);
-    }
+    if (charts.length) panel.append(h("div", "activity-analysis-charts", charts));
     for (const section of [zones("Zeit in HF-Zonen", payload?.zones?.heart_rate), zones("Zeit in Leistungszonen", payload?.zones?.power), laps(activity, payload?.laps)]) {
       if (section) panel.append(section);
     }
     if (!payload) return;
-    if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
+    if (streams && !charts.length) panel.append(h("p", "muted", "Keine darstellbaren Messreihen"));
     panel.append(...ActivityDetails.providerNotes(payload));
     appendRefresh(panel, summary, payload, token);
   }
 
   // The newest activities are preloaded after each provider refresh; older ones load through these actions.
   function appendRefresh(panel, summary, payload, token) {
-    const status = node("p", "", "muted"); status.setAttribute("role", "status");
+    const status = h("p", "muted", ""); status.setAttribute("role", "status");
     const isCurrent = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.append(ActivityDetails.refreshActions(payload, {
-      api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary),
+      api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary, undefined, true),
     }), status);
   }
 
-  async function loadPanel(panel, summary) {
+  // `read(fresh)` is the calendar card's shared read of the same document; a retry or refresh reads it fresh.
+  async function loadPanel(panel, summary, read = panelReads.get(panel), fresh = false) {
+    if (read) panelReads.set(panel, read);
     const token = {};
     panelLoads.set(panel, token);
     const current = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.replaceChildren(createLoadingState("Details werden geladen …"));
     let payload;
     try {
-      payload = await api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
+      payload = await (read ? read(fresh) : api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }));
     } catch (error) {
       if (!current()) return;
       // The card's summary values still render when the detail document cannot be read.
       renderPanel(panel, summary, null, token);
-      panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary)));
+      panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary, read, true)));
       return;
     }
     if (current()) renderPanel(panel, summary, payload, token);

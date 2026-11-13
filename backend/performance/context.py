@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.activities.zone_settings import effective_zone_configuration, zone_two_top
 from backend.canonical.activity_summary import summary_local_date
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
     first_threshold_estimated,
+    first_threshold_origin,
     first_threshold_percent,
 )
+from backend.canonical.vocabulary import Sport, ZoneConfigurationMetric
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -135,6 +140,29 @@ def _unavailable_context(
     return unavailable
 
 
+def _zone_two_tops(
+    configurations: list[ZoneConfiguration],
+    metrics: dict[str, Any],
+    today: date,
+) -> dict[str, float]:
+    """The top of zone 2 of the heart-rate, run pace and ride power zones, where set."""
+    pace = performance_current_metrics.as_number(
+        metrics["run_threshold_pace_seconds_per_km"]["value"]
+    )
+    tops: dict[str, float] = {}
+    for key, metric, sport in (
+        ("run_pace", ZoneConfigurationMetric.PACE, Sport.RUN),
+        ("ride_power", ZoneConfigurationMetric.POWER, Sport.RIDE),
+        ("run_hr", ZoneConfigurationMetric.HEART_RATE, Sport.RUN),
+        ("ride_hr", ZoneConfigurationMetric.HEART_RATE, Sport.RIDE),
+    ):
+        chosen = effective_zone_configuration(configurations, metric, sport, day=today)
+        top = zone_two_top(chosen, pace) if chosen is not None else None
+        if top is not None and top > 0:
+            tops[key] = top
+    return tops
+
+
 def current_performance_context(
     garmin: GarminSyncStatus,
     profile: dict[str, Any],
@@ -142,8 +170,12 @@ def current_performance_context(
     *,
     canonical: CanonicalPerformanceInputs,
     session_feedback: FeedbackLookup | None = None,
+    zone_configurations: Iterable[ZoneConfiguration] = (),
 ) -> dict[str, Any]:
     """Compose the current performance projection from canonical inputs only.
+
+    ``zone_configurations`` give LT1 the top of zone 2 of the sport's heart-rate,
+    pace or power zones in effect.
 
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.
@@ -252,6 +284,12 @@ def current_performance_context(
                 first_threshold_estimated(profile),
             ),
             "weight": metrics["weight_kg"]["value"],
+            "first_thresholds": performance_current_metrics.first_thresholds(
+                metrics,
+                first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
+                first_threshold_origin(profile),
+                _zone_two_tops(list(zone_configurations), metrics, today),
+            ),
         },
         "current_load": load,
         "recovery": {

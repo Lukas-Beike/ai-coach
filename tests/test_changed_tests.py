@@ -37,7 +37,18 @@ FILES = {
     "tests/test_docs.py": "DOC = 'README.md'\n",
     "tests/test_tool.py": "from tools import helper\n",
     "tests/test_lazy.py": "def load():\n    from backend.app import old\n",
+    "tests/fixtures/providers/demo/day.json": "{}",
+    "tests/fixtures/other.json": "{}",
+    "tests/fixture_loader.py": "from pathlib import Path\n"
+    "ROOT = Path(__file__).parent / 'fixtures' / 'providers'\n",
+    "tests/test_fixture_reader.py": "import fixture_loader\n",
+    "tests/test_baseline.py": "BASELINE = 'tests/fixtures/other.json'\n",
+    "tests/test_prose.py": "NOTE = 'Shared fixtures for this test.'\n",
+    "tests/test_line_endings.py": "",
+    "tests/test_ai_docs_contract.py": "",
 }
+# Repository-wide checks every changed path selects (#2502).
+REPOSITORY_WIDE = {"test_line_endings", "test_ai_docs_contract"}
 
 
 def _write_tree(root: Path) -> None:
@@ -74,7 +85,7 @@ class SelectModulesTests(unittest.TestCase):
     def test_transitive_imports_and_support_modules_select_importers(self):
         self.assertEqual(
             set(self.select("backend/app/engine.py")),
-            {"test_engine", "test_via_support", "test_scan"},
+            {"test_engine", "test_via_support", "test_scan"} | REPOSITORY_WIDE,
         )
 
     def test_app_wide_tests_need_a_composition_root_change(self):
@@ -90,28 +101,37 @@ class SelectModulesTests(unittest.TestCase):
 
     def test_deleted_module_selects_its_lazy_importers(self):
         self.assertEqual(
-            set(self.select("backend/app/old.py")), {"test_lazy", "test_scan"}
+            set(self.select("backend/app/old.py")),
+            {"test_lazy", "test_scan"} | REPOSITORY_WIDE,
         )
 
     def test_root_documents_and_tool_modules_select_their_tests(self):
-        self.assertEqual(set(self.select("README.md")), {"test_docs"})
-        self.assertEqual(set(self.select("tools/helper.py")), {"test_tool"})
+        self.assertEqual(set(self.select("README.md")), {"test_docs"} | REPOSITORY_WIDE)
+        self.assertEqual(
+            set(self.select("tools/helper.py")), {"test_tool"} | REPOSITORY_WIDE
+        )
 
     def test_literals_select_patch_targets_and_named_paths(self):
         self.assertEqual(
             set(self.select("backend/other.py")),
-            {"test_other", "test_patch", "test_scan"},
+            {"test_other", "test_patch", "test_scan"} | REPOSITORY_WIDE,
         )
-        self.assertEqual(set(self.select("public/app.js")), {"test_frontend_text"})
+        self.assertEqual(
+            set(self.select("public/app.js")), {"test_frontend_text"} | REPOSITORY_WIDE
+        )
 
     def test_bare_directory_name_counts_only_in_a_scanning_module(self):
         selected = self.select("backend/app/engine.py")
         self.assertIn("test_scan", selected)
         self.assertNotIn("test_named_dir", selected)
 
-    def test_changed_test_selects_itself_and_unrelated_paths_select_nothing(self):
-        self.assertEqual(set(self.select("tests/test_other.py")), {"test_other"})
-        self.assertEqual(self.select("docs/notes.md"), {})
+    def test_changed_test_selects_itself_and_unrelated_paths_only_repo_checks(self):
+        self.assertEqual(
+            set(self.select("tests/test_other.py")), {"test_other"} | REPOSITORY_WIDE
+        )
+        # A CRLF line or a renamed link target can fail them from any path.
+        self.assertEqual(set(self.select("docs/notes.md")), REPOSITORY_WIDE)
+        self.assertEqual(self.select(), {})
 
     def test_heavy_tooling_modules_run_only_when_their_inputs_change(self):
         skips = changed_tests.heavy_skips(["backend/sync/garmin.py"])
@@ -126,6 +146,19 @@ class SelectModulesTests(unittest.TestCase):
             changed_tests.heavy_skips(["e2e/fixture_runtime.py"]),
         )
 
+    def test_fixture_selects_modules_naming_the_fixtures_directory(self):
+        # Loaders build fixture paths from parts, so the directory segment counts
+        # wherever it appears; prose does not, and the repository-wide check runs.
+        for fixture in (
+            "tests/fixtures/providers/demo/day.json",
+            "tests/fixtures/other.json",
+        ):
+            with self.subTest(fixture=fixture):
+                self.assertEqual(
+                    set(self.select(fixture)),
+                    {"test_fixture_reader", "test_baseline"} | REPOSITORY_WIDE,
+                )
+
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
         modules, reason = changed_tests.select_modules(
             ["backend/db/migrations.py"], self.root
@@ -137,6 +170,9 @@ class SelectModulesTests(unittest.TestCase):
 
     def test_full_suite_paths_name_existing_repository_paths(self):
         root = changed_tests.ROOT
+        for module in changed_tests.REPOSITORY_WIDE:
+            with self.subTest(module=module):
+                self.assertTrue((root / "tests" / f"{module}.py").is_file(), module)
         for prefix in changed_tests.FULL_SUITE_PATHS:
             with self.subTest(prefix=prefix):
                 self.assertTrue(

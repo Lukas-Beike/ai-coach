@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { extractFunctions } = require("./frontend-harness.cjs");
 
-const NAMES = ["zoneMetricValue", "ZONE_METRIC_LABELS", "ZONE_SPORTS", "POWER_ZONE_NAMES", "zoneConfigurationFor", "zoneLimitsOf", "zoneLimitsText", "zoneLimitValue", "zoneValueText", "zoneRows", "zoneRange", "zoneSourceText", "zoneEditorValues", "firstThresholdSource", "thresholdRows"];
+const NAMES = ["zoneMetricValue", "ZONE_METRIC_LABELS", "ZONE_SPORTS", "POWER_ZONE_NAMES", "zoneConfigurationFor", "zoneLimitsOf", "zoneLimitsText", "zoneLimitValue", "zoneValueText", "zoneRows", "zoneRange", "zoneSourceText", "zoneEditorValues", "THRESHOLD_ORIGINS", "lt2Origin", "thresholdRows"];
 
 // Garmin's heart-rate zones carry no sport: the server names their key for every sport (#2262).
 const GARMIN_HR = { key: "garmin|heart_rate|||2026-11-09", source: "garmin", label: "Garmin", sport: null, metric: "heart_rate", environment: null, threshold: 163, maximum: 186, limits: [130, 145, 155, 166, 186], percent_limits: null };
@@ -69,15 +69,18 @@ test("pace zones read the percent of the threshold speed as paces", () => {
   assert.deepEqual(plain(zoneRows(pace, null).map((row) => row.range)), ["langsamer als 80 %", "80 %–90 %", "90 %–100 %", "schneller als 100 %"]);
 });
 
-test("LT2 comes from the performance values, LT1 from the stored share and the top of zone 2", () => {
+test("LT2 comes from the performance values, LT1 from the thresholds", () => {
   const metrics = { cycling_ftp_watts: { value: 285, source: "Garmin Connect", observed_at: "2026-11-09T08:00:00Z" }, bike_threshold_hr_bpm: { value: 163, source: "Garmin Connect", observed_at: "2026-11-08" } };
   const { thresholdRows } = zones();
-  const rows = thresholdRows("ride", metrics, { first_threshold_pct: "87", first_threshold_origin: "estimated" });
-  assert.deepEqual([rows.lt2.main, rows.lt2.hr, Math.round(rows.lt1.hr), Math.round(rows.lt1.main)], [285, 163, 142, 214]);
-  assert.equal(rows.lt1Source, "LT1 aus der Herzfrequenzvariabilität (App)");
-  assert.equal(rows.lt1Derived, true);
-  assert.equal(rows.lt2Source, "Garmin Connect");
+  const ride = { hr_bpm: 142, hr_origin: "estimated", watts: 214, power_origin: "zone_2" };
+  const rows = thresholdRows("ride", metrics, { first_thresholds: { ride } });
+  assert.deepEqual([rows.lt2.main, rows.lt2.hr, rows.lt1.hr, rows.lt1.main], [285, 163, 142, 214]);
   assert.equal(rows.validFrom, "2026-11-09T08:00:00Z");
+  // The yellow "i" of each row names its origin.
+  assert.deepEqual(plain(rows.origins), { lt1: "Puls aus der Herzfrequenzvariabilität · Leistung Schätzung aus Zone 2", lt2: "Von Garmin Connect" });
+  // Providers that differ per value are named per value.
+  const mixed = thresholdRows("ride", { ...metrics, bike_threshold_hr_bpm: { value: 160, source: "Wahoo" } }, {});
+  assert.equal(mixed.origins.lt2, "Leistung von Garmin Connect · Puls von Wahoo");
   const empty = thresholdRows("run", {}, {});
-  assert.deepEqual([empty.lt1.main, empty.lt1.hr, empty.lt2.main, empty.lt2.hr, empty.lt1Source], [null, null, null, null, null]);
+  assert.deepEqual([empty.lt1.main, empty.lt1.hr, empty.lt2.main, empty.lt2.hr, empty.origins.lt1, empty.origins.lt2], [null, null, null, null, null, null]);
 });

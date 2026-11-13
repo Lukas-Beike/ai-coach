@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { extractFunctions, FakeElement, fakeDocument } = require("./frontend-harness.cjs");
+const { extractFunctions, FakeElement, fakeDocument, textOf } = require("./frontend-harness.cjs");
 
 test("analysis popovers stay inside the viewport on narrow screens and flip above when needed", () => {
   const { analysisPopoverPosition } = extractFunctions("analysis.js", ["analysisPopoverPosition"]);
@@ -114,7 +114,7 @@ test("an analysis chart without data is omitted and its title is collected once 
     "analysis.js",
     ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart"],
     {
-      reportNode: (tag, text, className) => ({ tag, text, className }),
+      h: (tag, className, text) => ({ tag, text, className }),
     },
   );
   const empty = [{ label: "Garmin", points: [{ date: "2026-10-10", value: null }] }];
@@ -147,24 +147,23 @@ test("an analysis segment is empty only when every content container reports no 
 });
 
 test("the analysis empty card offers one action that depends on the connected sources", () => {
-  const reportNode = (tag, text, className) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
   const state = { data: {} };
   const { analysisEmptyCard, analysisDataSourceConnected } = extractFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
-    state, reportNode, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
+    state, document: fakeDocument(), analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
     ANALYSIS_EMPTY_TITLES: { load: "Noch keine Belastungsdaten", recovery: "Noch keine Erholungsdaten" },
     createEmptyState: (title, cause, action) => ({ title, cause, action }),
   });
   const offline = analysisEmptyCard("load");
-  assert.deepEqual([offline.title, offline.cause, offline.action.tag, offline.action.text, offline.action.href], ["Noch keine Belastungsdaten", "Garmin oder Wahoo ist nicht verbunden.", "a", "Anbindung einrichten", "#more/connections"]);
+  assert.deepEqual([offline.title, offline.cause, offline.action.tag, textOf(offline.action), offline.action.href], ["Noch keine Belastungsdaten", "Garmin oder Wahoo ist nicht verbunden.", "a", "Anbindung einrichten", "#more/connections"]);
   state.data = { garmin: { configured: false }, wahoo: { connected: true } };
   assert.equal(analysisDataSourceConnected(state.data), true);
   const connected = analysisEmptyCard("load");
-  assert.deepEqual([connected.cause, connected.action.tag, connected.action.text, connected.action.listeners.length], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
+  assert.deepEqual([connected.cause, connected.action.tag, textOf(connected.action), Object.values(connected.action._listenerCounts).reduce((sum, count) => sum + count, 0)], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
   // An empty 14-day window may hide older data, so it offers the 12-week view instead of a sync.
   const shortWindow = analysisEmptyCard("recovery");
-  assert.deepEqual([shortWindow.title, shortWindow.cause, shortWindow.action.text], ["Noch keine Erholungsdaten", "Keine Daten in den letzten 14 Tagen.", "12 Wochen anzeigen"]);
+  assert.deepEqual([shortWindow.title, shortWindow.cause, textOf(shortWindow.action)], ["Noch keine Erholungsdaten", "Keine Daten in den letzten 14 Tagen.", "12 Wochen anzeigen"]);
   state.data = {};
-  assert.equal(analysisEmptyCard("recovery").action.text, "Anbindung einrichten", "without a source the period does not matter");
+  assert.equal(textOf(analysisEmptyCard("recovery").action), "Anbindung einrichten", "without a source the period does not matter");
   assert.equal(analysisDataSourceConnected({ garmin: { configured: true } }), true);
   assert.equal(analysisDataSourceConnected({ garmin: { configured: false }, wahoo: { connected: false } }), false);
 });
@@ -190,20 +189,19 @@ test("a filled analysis chart is kept and is not listed as missing", () => {
 });
 
 test("body overview uses profile body fat without creating a dated measurement", () => {
-  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
-  const root = makeNode("div");
+  const root = Object.assign(new FakeElement("div"), { querySelectorAll: () => [] });
   const state = { data: { profile: { body_fat_pct: "18.5" } } };
   const { bodyProfileFat, renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
-    state, document: { getElementById: () => root }, reportNode: makeNode,
+    state, document: { ...fakeDocument(), getElementById: () => root },
     isPreferredSource: () => true, analysisValidPoint: (p) => p.value != null,
     dateLabel: (v) => v, analysisValue: (v, unit) => `${v} ${unit}`,
-    analysisPeriodControls: () => makeNode("nav"), bodyHistoryPeriod: "twelveWeeks",
+    analysisPeriodControls: () => new FakeElement("nav"), bodyHistoryPeriod: "twelveWeeks",
   });
   const body = { windows: {} };
   renderBodyAnalysis(body);
   const rows = root.children[0].children[0].children[1].children;
-  assert.equal(rows[1].children[0].children[0].text, "Profil");
-  assert.equal(rows[1].children[1].text, "18.5 %");
+  assert.equal(textOf(rows[1].children[0].children[1]), "Profil");
+  assert.equal(textOf(rows[1].children[1]), "18.5 %");
   assert.equal(bodyProfileFat({ body_fat_pct: "" }), null);
   assert.equal(bodyProfileFat({ body_fat_pct: "18,5" }), 18.5);
   assert.equal(bodyProfileFat({ body_fat_pct: 71 }), null);
@@ -211,22 +209,21 @@ test("body overview uses profile body fat without creating a dated measurement",
 
 
 test("body overview falls back to Garmin when the profile fat is absent", () => {
-  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
-  const root = makeNode("div");
+  const root = Object.assign(new FakeElement("div"), { querySelectorAll: () => [] });
   const state = { data: { profile: { body_fat_pct: "" } } };
   const { renderBodyAnalysis } = extractFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
-    state, document: { getElementById: () => root }, reportNode: makeNode,
+    state, document: { ...fakeDocument(), getElementById: () => root },
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
-    analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => makeNode("nav"),
+    analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => new FakeElement("nav"),
     bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null,
   });
   const point = { date: "2026-10-10", value: 16 };
   const body = { preferred_providers: { body_fat_pct: "garmin" }, windows: { "12w": { start: "2026-10-01", end: "2026-10-15", metrics: { body_fat_pct: [{ source_provider: "garmin", points: [point] }] } } } };
   renderBodyAnalysis(body);
   const row = root.children[0].children[0].children[1].children[1];
-  assert.equal(row.children[0].children[0].text, "2026-10-10");
-  assert.equal(row.children[1].text, "16 %");
+  assert.equal(textOf(row.children[0].children[1]), "2026-10-10");
+  assert.equal(textOf(row.children[1]), "16 %");
   assert.deepEqual(point, { date: "2026-10-10", value: 16 });
 });
 
@@ -252,28 +249,36 @@ test("session-RPE charts name the provider that rated, never a fixed provider", 
 });
 
 test("current performance shows the status lines below its heading", () => {
-  const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
-  const reportNode = (tag, text, className) => ({ tag, text, className, dataset: {}, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
+  const root = new FakeElement("section");
   const { renderCurrentPerformance } = extractFunctions("performance-view.js", ["currentPerformanceValues", "currentPerformanceRows", "withFirstThresholds", "renderCurrentPerformance"], {
-    document: { getElementById: () => root },
-    reportNode,
+    document: { ...fakeDocument(), getElementById: () => root },
     rememberAnalysisSectionState() {},
     makeAnalysisSectionCollapsible() {},
     analysisValidPoint: () => true,
     isPreferredSource: () => false,
     ESTIMATED_METRICS: new Set(),
     analysisValue: (value, unit) => `${value} ${unit}`,
+    createEstimateChip: () => ({ tag: "chip", text: "Schätzung" }),
   });
   renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
-  assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Werte"], ["p", "Daten werden vorbereitet"]]);
+  assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, textOf(node)]), [["h3", "Aktuelle Werte"], ["p", "Daten werden vorbereitet"]]);
   assert.equal(root.dataset.analysisEmpty, "false", "a status line keeps the section visible");
   assert.deepEqual([root.dataset.analysisEmptyRunning, root.dataset.analysisEmptyCycling], ["false", "false"]);
   renderCurrentPerformance({}, undefined);
-  assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
+  assert.equal(root.children.filter((node) => textOf(node) === "Daten werden vorbereitet").length, 0);
   assert.equal(root.dataset.analysisEmpty, "true");
   // A sport with values keeps its own segment while the other one is empty (#2265).
   renderCurrentPerformance({ cycling_ftp_watts: { value: 260, unit: "W" } }, undefined);
   assert.deepEqual([root.dataset.analysisEmptyRunning, root.dataset.analysisEmptyCycling, root.dataset.analysisEmpty], ["true", "false", "false"]);
+  // LT1 rows come from the thresholds without any zones; zone 2 and a fixed share carry the estimate chip (#2427).
+  const thresholds = { first_thresholds: { run: { hr_bpm: 128, hr_origin: "zone_2", pace_seconds_per_km: 307, pace_origin: "fixed_share" }, ride: { hr_bpm: 138, hr_origin: "measured" } } };
+  renderCurrentPerformance({}, undefined, [], thresholds);
+  const rows = [];
+  const walk = (node) => { if (node?.dataset?.metric) rows.push(node); (node?.children || []).forEach(walk); };
+  root.children.forEach(walk);
+  const chipped = (key) => rows.find((row) => row.dataset.metric === key).children[0].children.some((node) => node.tag === "chip");
+  assert.deepEqual([chipped("run_lt1_pace_seconds_per_km"), chipped("run_lt1_hr_bpm"), chipped("cycling_lt1_hr_bpm")], [true, true, false]);
+  assert.equal(root.dataset.analysisEmptyRunning, "false");
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {
@@ -371,7 +376,7 @@ test("the coverage line counts the days or weeks that have a value", () => {
 test("the table behind a chart scrolls in a named region that the keyboard can reach", () => {
   const { makeScrollRegionFocusable } = extractFunctions("shared.js", ["makeScrollRegionFocusable"]);
   const document = fakeDocument();
-  const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "reportNode", "analysisValidPoint", "analysisAxisCaption"], {
+  const { appendAnalysisTable } = extractFunctions("analysis.js", ["appendAnalysisTable", "analysisValidPoint", "analysisAxisCaption"], {
     document,
     makeScrollRegionFocusable,
     dateLabel: (date) => date,
@@ -382,6 +387,23 @@ test("the table behind a chart scrolls in a named region that the keyboard can r
   appendAnalysisTable(section, "Ruhepuls", [{ label: "Garmin", points: [{ date: "2026-10-10", value: 48 }] }], "bpm");
   const region = section.children[0].children.find((child) => child.className === "analysis-chart-table");
   assert.deepEqual([region.tabIndex, region.attributes.role, region.attributes["aria-label"]], [0, "region", "Ruhepuls: Einzelwerte"]);
+});
+
+test("the element helpers keep values as text and map class, properties, attributes and data", () => {
+  const document = { ...fakeDocument(), createElementNS: (namespace, tag) => Object.assign(new FakeElement(tag), { namespace }) };
+  const { h, table, svgNode } = extractFunctions("components.js", ["h", "SVG_NS", "svgNode", "table"], { document });
+  const plain = h("p", "muted", "<b>", 0, null, false, ["a", h("i")]);
+  assert.deepEqual([plain.className, plain.children.length, plain.children[0], plain.children[1]], ["muted", 4, "<b>", "0"]);
+  const button = h("button", { type: "button", className: "x", "aria-expanded": "false", dataset: { zone: "z2" }, title: undefined }, "Mehr");
+  assert.deepEqual([button.type, button.className, button.attributes["aria-expanded"], button.dataset.zone, button.title], ["button", "x", "false", "z2", ""]);
+  const chip = h("span", "status-chip");
+  const grid = table(["Tag", "Wert"], [[h("th", { scope: "row" }, "Mo"), chip], ["Di", 0]], { caption: "Werte" });
+  const [caption, head, body] = grid.children;
+  assert.deepEqual([caption.tag, head.children[0].children.map((cell) => cell.scope), body.children[0].children.map((cell) => cell.tag)], ["caption", ["col", "col"], ["th", "td"]]);
+  assert.equal(body.children[0].children[1].children[0], chip, "a non-cell node is wrapped in a td");
+  assert.deepEqual(body.children[1].children.map((cell) => cell.children[0]), ["Di", "0"]);
+  const label = svgNode("text", { x: 4 }, 0);
+  assert.deepEqual([label.namespace, label.attributes.x, label.textContent], ["http://www.w3.org/2000/svg", "4", 0]);
 });
 
 // Runs the real weekly aggregations; results are copied out of the sandbox for literal comparison.

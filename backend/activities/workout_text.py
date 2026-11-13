@@ -273,10 +273,15 @@ def _repeat_header(
     return repeat, True, False
 
 
-def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
-    """Return expanded steps for comparison with the provider's parsed reply."""
-    result: list[dict] = []
-    block: list[dict] = []
+def structured_blocks(description: str, target: str = "AUTO") -> list[dict]:
+    """Return the step blocks as written: header text, repeat count and steps.
+
+    ``header`` is the last text line since the previous block's steps (the
+    repeat line such as "Main set 4x" or a section title), "" if none.
+    """
+    blocks: list[dict] = []
+    steps: list[dict] = []
+    header = ""
     repeat, repeat_pending, previous_step = 1, False, False
     for number, raw_line in enumerate(description.splitlines(), 1):
         line = raw_line.strip()
@@ -286,31 +291,44 @@ def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
                     "invalid_workout_repeat",
                     "Nach einer Wiederholung müssen direkt Trainingsschritte folgen.",
                 )
-            result.extend(block * repeat)
-            block, repeat, previous_step = [], 1, False
+            if steps:
+                blocks.append({"header": header, "repeat": repeat, "steps": steps})
+                header = ""
+            steps, repeat, previous_step = [], 1, False
         elif line.startswith("-"):
-            block.append(_parse_workout_step(line, number, target))
+            steps.append(_parse_workout_step(line, number, target))
             repeat_pending, previous_step = False, True
         else:
             repeat, repeat_pending, previous_step = _repeat_header(
                 line, repeat_pending, previous_step
             )
+            header = line
     if repeat_pending:
         raise WorkoutTextError(
             "invalid_workout_repeat", "Wiederholungsblock ohne Trainingsschritte."
         )
-    if not block and not result:
+    if steps:
+        blocks.append({"header": header, "repeat": repeat, "steps": steps})
+    if not blocks:
         raise WorkoutTextError(
             "missing_workout_steps",
             "Ausdauer-Einheit ohne auswertbare Trainingsschritte.",
         )
-    result.extend(block * repeat)
-    if len(result) > 5000:
+    if sum(len(block["steps"]) * block["repeat"] for block in blocks) > 5000:
         raise WorkoutTextError(
             "invalid_workout_repeat",
             "Zu viele Trainingsschritte; Einheit in kleinere Blöcke aufteilen.",
         )
-    return result
+    return blocks
+
+
+def structured_steps(description: str, target: str = "AUTO") -> list[dict]:
+    """Return expanded steps for comparison with the provider's parsed reply."""
+    return [
+        step
+        for block in structured_blocks(description, target)
+        for step in block["steps"] * block["repeat"]
+    ]
 
 
 def structured_duration(description: str, target: str = "AUTO") -> tuple[float, bool]:

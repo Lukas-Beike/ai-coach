@@ -81,6 +81,14 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 - **WHEN** a valid recording is transcribed
 - **THEN** the request uses the configured transcription model, German language hint, MIME-appropriate file suffix, multipart audio body, configured timeout, and server-side authorization.
 
+#### Scenario: Wire contract
+- **WHEN** audio of the type `audio/webm`, `audio/mp4`, `audio/ogg`, `audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/mpga` or `audio/m4a` (parameters after `;` ignored, case-insensitive) is transcribed (the HTTP errors are in `docs/api-routes.md`, generated)
+- **THEN** it is sent as multipart to `{base}/audio/transcriptions` with the model `gpt-transcribe` by default, the field `languages[]` set to `de`, a fixed German prompt of sport terms (`AudioTranscriptionClient.transcribe`) and the file name `voice` plus the type's suffix, with a 90-second timeout; an empty body fails with 400, one over 8,000,000 bytes with 413, another type with 415, a missing key with 503 `not_configured` and a reply without transcript with 502
+
+#### Scenario: Usage only
+- **WHEN** a transcription succeeds
+- **THEN** only the daily usage counters change (operation `transcription`); neither the audio nor the transcript is stored
+
 #### Scenario: Missing provider configuration
 - **WHEN** valid audio is supplied without the configured provider key
 - **THEN** the service returns a not-configured failure and performs no provider request; invalid local audio still fails local validation first.
@@ -89,7 +97,7 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 - **WHEN** provider output is missing text, nonobject, or contains only whitespace
 - **THEN** the service returns a transcription failure instead of claiming success; valid text is trimmed and returned as `transcript`.
 
-Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `server.py` (provider assembly with `AudioTranscriptionSettings`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`.
+Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `backend/providers/audio.py::VOICE_AUDIO_TYPES`, `backend/providers/model_wiring.py::build_model_transport`, `server.py` (`build_model_transport` with `max_audio_bytes`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`.
 
 ### Requirement: Notification permission is opt-in and capability-aware
 The client SHALL show whether browser notifications are granted, denied, unsupported, or not enabled, and SHALL request permission only after the athlete explicitly activates the enable control.
@@ -106,6 +114,10 @@ The client SHALL show whether browser notifications are granted, denied, unsuppo
 - **WHEN** state is rendered without an enable action
 - **THEN** no permission prompt is raised automatically.
 
+#### Scenario: Status line
+- **WHEN** the notification status is shown
+- **THEN** it reads "Aktiv", "Im Browser blockiert", "Von diesem Browser nicht unterstützt" or "Noch nicht aktiviert"; the button "Benachrichtigungen aktivieren" is hidden when permission is granted and disabled when unsupported
+
 Evidence: `public/notifications.js::notificationPermission`, `public/notifications.js::renderNotificationStatus`, `public/notifications.js::enableNotifications`, `public/notifications.js::showPwaNotification`; `tests/notifications-retry.test.cjs::a successful notification is marked delivered and is not sent again` covers granted delivery. Permission prompting/status projection has source evidence only; a dedicated denied/unsupported permission test is an explicit evidence gap.
 
 ### Requirement: State notifications contain minimal private information
@@ -113,11 +125,11 @@ The client SHALL derive notifications only from freshly loaded eligible applicat
 
 #### Scenario: Upcoming competition
 - **WHEN** fresh state contains a competition zero through three days away
-- **THEN** a generic countdown notification identifies today, tomorrow, or days remaining without exposing the competition name.
+- **THEN** a generic countdown notification identifies today, tomorrow, or days remaining without exposing the competition name: the title is "Wettkampf steht bevor", the body "Der Wettkampf ist heute.", "Der Wettkampf ist morgen." or "Der Wettkampf ist in N Tagen." and the tag `competition:<id>`
 
 #### Scenario: Sync failure
 - **WHEN** eligible state indicates a sync error
-- **THEN** a generic attention notification points to details in the app without copying raw provider error text.
+- **THEN** a generic attention notification points to details in the app without copying raw provider error text: the title is "Pacecraft benötigt Aufmerksamkeit", the body "Eine Synchronisierung ist fehlgeschlagen. Details stehen in der App." and the tag `sync-error`
 
 #### Scenario: Cached device snapshot
 - **WHEN** previously cached state is shown during startup
@@ -153,4 +165,4 @@ The system SHALL transcribe voice input with OpenAI whichever model provider ans
 - **WHEN** no OpenAI key is configured
 - **THEN** the microphone control is disabled while the chat itself stays usable with a configured Claude key.
 
-Evidence: `backend/providers/model_assembly.py:ModelTransportAssembly.audio_transcription_client`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).
+Evidence: `backend/providers/model_wiring.py:build_model_transport`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).

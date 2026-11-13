@@ -113,15 +113,17 @@ class RunnerEvidenceTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())["status"], "empty")
 
 
-def plan(shard, total):
+def plan(shard, total, suite="container"):
     all_ids = [f"synthetic.Class{i}.test_case" for i in range(1, total + 1)]
+    # The container suite leaves out a discovered module, as CI's selection does.
+    discovered = all_ids if suite == "all" else [*all_ids, "synthetic.Other.test_case"]
     return {
         "version": 1,
         "status": "selected",
-        "suite": "all",
+        "suite": suite,
         "shard": shard,
         "total": total,
-        "discovered_ids": all_ids,
+        "discovered_ids": discovered,
         "suite_ids": all_ids,
         "selected_ids": [all_ids[shard - 1]],
         "selected_classes": [f"synthetic.Class{shard}"],
@@ -153,6 +155,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_bounded_serial_default_and_invalid_workers(self):
         self.assertEqual(local.parse_args([]).workers, 1)
+        self.assertEqual(local.parse_args([]).suite, "container")
         for count in ("0", "5", "-1"):
             with (
                 contextlib.redirect_stderr(io.StringIO()),
@@ -165,12 +168,31 @@ class SupervisorTests(unittest.TestCase):
             local.parse_args(
                 ["--workers", "2", "--record-durations-directory", str(self.root)]
             )
+        # Durations and coverage describe the complete suite only; a real wheel
+        # path leaves the suite as the only reason to refuse.
+        wheel = self.root / "coverage-0-py3-none-any.whl"
+        wheel.write_bytes(b"")
+        for partial in (
+            ["--record-durations-directory", str(self.root)],
+            ["--coverage-wheel", str(wheel)],
+        ):
+            with (
+                self.subTest(partial=partial[0]),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                local.parse_args(partial)
+        recording = ["--suite", "all", "--record-durations-directory", str(self.root)]
+        self.assertEqual(local.parse_args(recording).suite, "all")
+        coverage = ["--suite", "all", "--coverage-wheel", str(wheel)]
+        self.assertEqual(local.parse_args(coverage).suite, "all")
 
     def test_initial_manifest_and_disjoint_invocations(self):
         manifest = json.loads((self.owner.output / "summary.json").read_text())
         self.assertEqual(manifest["version"], 1)
         self.assertEqual(manifest["status"], "preparing")
         self.assertEqual(manifest["cache_state"], "unknown")
+        self.assertEqual(manifest["selection_mode"], "container")
         with contextlib.redirect_stdout(io.StringIO()):
             another = local.Supervisor(self.args)
         self.assertNotEqual(self.owner.output, another.output)
@@ -260,13 +282,20 @@ class SupervisorTests(unittest.TestCase):
 
     def test_class_partition_validation_rejects_duplicate_missing_and_split(self):
         plans = [plan(1, 2), plan(2, 2)]
-        local.validate_selection(plans)
+        local.validate_selection(plans, "container")
         for changed in ("selected_ids", "selected_classes"):
             broken = [plans[0], {**plans[1], changed: plans[0][changed]}]
             with self.assertRaises(ValueError):
-                local.validate_selection(broken)
+                local.validate_selection(broken, "container")
         with self.assertRaises(ValueError):
-            local.validate_selection(plans[:1])
+            local.validate_selection(plans[:1], "container")
+        # A container selection cannot pass as the complete suite, nor the reverse.
+        with self.assertRaises(ValueError):
+            local.validate_selection(plans, "all")
+        complete = [plan(1, 2, "all"), plan(2, 2, "all")]
+        local.validate_selection(complete, "all")
+        with self.assertRaises(ValueError):
+            local.validate_selection(complete, "container")
 
     def test_result_rejects_suite_error_missing_or_changed_selection(self):
         selection = plan(1, 1)
@@ -370,7 +399,18 @@ class SupervisorTests(unittest.TestCase):
         self.check_real_owned_descendant(parent_exits=False)
 
     def test_cleanup_stops_descendants_after_the_parent_exits(self):
-        self.check_real_owned_descendant(parent_exits=True)
+        # The first read of the existing ready file meets a Windows sharing violation (#2387).
+        real_read, refused = Path.read_text, []
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "descendant.json" and not refused and path.exists():
+                refused.append(path)
+                raise PermissionError(13, "synthetic sharing violation")
+            return real_read(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", autospec=True, side_effect=read_text):
+            self.check_real_owned_descendant(parent_exits=True)
+        self.assertTrue(refused)
 
     def check_real_owned_descendant(self, parent_exits):
         ready = self.root / "descendant.json"
@@ -393,10 +433,14 @@ class SupervisorTests(unittest.TestCase):
         cleaned = False
         try:
             deadline = time.monotonic() + 10
-            while not ready.exists() and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertTrue(ready.exists(), "owned descendant reached readiness")
-            observed = json.loads(ready.read_text())
+            last_error = None
+            while observed is None and time.monotonic() < deadline:
+                try:
+                    observed = json.loads(ready.read_text())
+                except (FileNotFoundError, PermissionError) as error:
+                    last_error = error
+                    time.sleep(0.02)
+            self.assertIsNotNone(observed, f"owned descendant reached readiness: {last_error!r}")
             if os.name == "nt":
                 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                 kernel.OpenProcess.argtypes = [
@@ -552,6 +596,11 @@ class SupervisorTests(unittest.TestCase):
             (["docker", "image", "rm", tag], "remove-test-source-tag"), spawned
         )
         self.assertTrue(all("/app/tests/run_tests.py" in command for command in tests))
+        lists = [command for command, name in spawned if name.startswith("list-")]
+        self.assertEqual(
+            {command[command.index("--suite") + 1] for command in [*lists, *tests]},
+            {"container"},
+        )
         self.assertTrue(all("coverage" not in command for command in tests))
         self.assertEqual(
             [shard["status"] for shard in summary["shards"]], ["passed", "passed"]

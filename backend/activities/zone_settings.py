@@ -391,6 +391,57 @@ def effective_zone_configuration(
     return _later_stand_in(matching, day) if day is not None else None
 
 
+def zone_two_top(
+    configuration: ZoneConfiguration, threshold_pace: float | None = None
+) -> float | None:
+    """The upper limit of zone 2: bpm, watts, or seconds per km for pace.
+
+    Percent pace limits are percent of the threshold speed: the configuration's
+    own threshold (m/s), else ``threshold_pace`` (s/km). None when it cannot be
+    resolved.
+    """
+    percents = configuration.percent_limits or ()
+    limits = configuration.limits or ()
+    percent = percents[1] if len(percents) > 1 else None
+    absolute = limits[1] if len(limits) > 1 else None
+    if configuration.metric is ZoneConfigurationMetric.PACE:
+        return _pace_top(absolute, percent, configuration.threshold, threshold_pace)
+    if absolute is not None or not percent:
+        return absolute
+    return _percent_value(configuration, percent)
+
+
+def _pace_top(
+    speed: float | None,
+    percent: float | None,
+    threshold_speed: float | None,
+    threshold_pace: float | None,
+) -> float | None:
+    """A pace limit in s/km from a speed (m/s) or a percent of the threshold speed."""
+    if speed:
+        return 1000 / speed
+    if percent and threshold_speed:
+        return 1000 / (threshold_speed * percent / 100)
+    if percent and threshold_pace:
+        return threshold_pace * 100 / percent
+    return None
+
+
+def _percent_value(configuration: ZoneConfiguration, percent: float) -> float | None:
+    """A percent limit in the metric's unit; heart-rate reserve starts at rest."""
+    maximum, resting = configuration.maximum, configuration.resting
+    if configuration.percent_basis is ZonePercentBasis.RESERVE:
+        if maximum is None or resting is None:
+            return None
+        return resting + (maximum - resting) * percent / 100
+    base = (
+        maximum
+        if configuration.percent_basis is ZonePercentBasis.MAXIMUM
+        else configuration.threshold
+    )
+    return base * percent / 100 if base else None
+
+
 def _later_stand_in(
     matching: list[ZoneConfiguration], day: date
 ) -> ZoneConfiguration | None:

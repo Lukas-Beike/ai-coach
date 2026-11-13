@@ -62,6 +62,7 @@ from backend.canonical.vocabulary import (
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
+from backend.providers import http as provider_http
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
@@ -84,7 +85,7 @@ def blocked_provider(*args, **kwargs):
     )
 
 
-server.provider_http.JsonHttpClient.request = blocked_provider
+provider_http.JsonHttpClient.request = blocked_provider
 
 
 class FixtureConversationProvisionService:
@@ -205,7 +206,7 @@ def fixture_coach_response(payload, **kwargs):
         "E2E nutrition: confirm database meal",
         "E2E nutrition: mixed meal",
     }:
-        nutrition = server.NUTRITION_ASSEMBLY.meal_library_service()
+        nutrition = server.NUTRITION_SERVICES.meal_library_service()
         templates = nutrition.list_templates()
         scope = ["local_nutrition"]
         if current_message == "E2E nutrition: mixed meal":
@@ -1925,7 +1926,7 @@ def _fixture_completed_sports(today, by_id):
 
 def _fixture_nutrition_products():
     """Local manual products show gram/ml bases and archived catalog entries."""
-    service = server.NUTRITION_ASSEMBLY.meal_library_service()
+    service = server.NUTRITION_SERVICES.meal_library_service()
     existing = {
         item["id"]
         for item in service.product_catalog.list_products(include_archived=True)
@@ -2495,7 +2496,7 @@ def seed_preview_demo():
                 },
             }
         )
-    server.NUTRITION_ASSEMBLY.meal_library_service().save_template(
+    server.NUTRITION_SERVICES.meal_library_service().save_template(
         {
             "name": "Demo-Porridge",
             "description": "Haferflocken, Banane und Joghurt",
@@ -2512,7 +2513,7 @@ def seed_preview_demo():
             ("Reis mit Gemüse und Tofu", 720, 95, 32, 22),
             ("Pasta mit Tomatensauce", 650, 90, 25, 18),
         ]:
-            server.NUTRITION_ASSEMBLY.diary_service().log_meal(
+            server.NUTRITION_SERVICES.diary_service().log_meal(
                 {
                     "meal_date": (today - timedelta(days=offset)).isoformat(),
                     "description": description,

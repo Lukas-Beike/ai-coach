@@ -100,9 +100,9 @@ MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
 # A backfill batch starts no new raw record or session after this long: the
-# re-projection and the follow-up stages that decode streams in the writer, so a
-# waiting login, Coach turn or provider sync gets the writer within seconds
-# (#2287). Foreground writers wait up to 20 s.
+# re-projection and the follow-up stages that decode streams (in their prefetch,
+# #2311), so a waiting login, Coach turn or provider sync gets the writer within
+# seconds (#2287). Foreground writers wait up to 20 s.
 BATCH_SECONDS: Final = 2.0
 
 _LOGGER = logging.getLogger("intervals_coach")
@@ -132,6 +132,33 @@ def timed_batch[T](items: Sequence[T], size: int) -> Iterator[T]:
         if index and time.monotonic() >= deadline:
             return
         yield item
+
+
+def precomputed_batch[T, R](
+    items: Sequence[tuple[str, str, T]],
+    size: int,
+    prepared: Mapping[str, tuple[str, R]] | None,
+    compute: Callable[[T], R],
+) -> Iterator[tuple[T, R]]:
+    """Yield ``(item, result)`` for one writer batch of ``(key, fingerprint, item)``.
+
+    A result a stage's prefetch computed with a reader is used while the item's
+    fingerprint is unchanged, so the writer only writes (#2311): the leading
+    items with such a result, within ``BATCH_SECONDS``, so the batch stays a
+    prefix of ``items`` in order. Without a prefetch, or when the first item has
+    no valid result, the batch computes inline within ``BATCH_SECONDS``, as before.
+    """
+    valid: list[tuple[T, R]] = []
+    for key, fingerprint, item in items:
+        ready = (prepared or {}).get(key)
+        if ready is None or ready[0] != fingerprint:
+            break
+        valid.append((item, ready[1]))
+    if valid:
+        yield from timed_batch(valid, size)
+        return
+    for _key, _fingerprint, item in timed_batch(items, size):
+        yield item, compute(item)
 
 
 @dataclass(frozen=True, slots=True)

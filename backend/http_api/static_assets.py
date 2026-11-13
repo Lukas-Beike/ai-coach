@@ -17,16 +17,20 @@ ASSET_SERVICE_WORKER_JS = "service-worker.js"
 ASSET_MANIFEST = "manifest.webmanifest"
 # Every non-hidden file of public/ with one of these suffixes is served; other
 # files there (AGENTS.md, notes) are not.
-STATIC_SUFFIXES = frozenset({".html", ".js", ".css", ".svg", ".png", ".webmanifest"})
+STATIC_SUFFIXES = frozenset(
+    {".html", ".js", ".css", ".svg", ".png", ".webmanifest", ".woff2"}
+)
 STATIC_REVALIDATE_ASSETS = frozenset(
     {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS, ASSET_MANIFEST}
 )
 # Every other served file is stamped with "?v=<content hash>". The manifest
-# names its icons without versions, so those stay plain.
+# names its icons and the stylesheet its font without versions, so those stay
+# plain.
 UNVERSIONED_STATIC_ASSETS = STATIC_REVALIDATE_ASSETS | {
     "icon-192.png",
     "icon-512.png",
     "icon-maskable-512.png",
+    "InterVariable.woff2",
 }
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 OCTET_STREAM_MIME = "application/octet-stream"

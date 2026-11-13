@@ -57,7 +57,7 @@ def thread(resolved, path="backend/a.py", line=4, body="Please fix", author="git
 
 
 class PrStateTests(unittest.TestCase):
-    def run_script(self, pr, threads=()):
+    def run_script(self, pr, threads=(), out=None):
         graphql = {
             "data": {
                 "repository": {
@@ -81,14 +81,24 @@ class PrStateTests(unittest.TestCase):
             }[argv[1]]
             return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
 
-        out, err = io.StringIO(), io.StringIO()
+        out, err = out or io.StringIO(), io.StringIO()
         with (
             mock.patch.object(gh_cli.subprocess, "run", fake),
             redirect_stdout(out),
             redirect_stderr(err),
         ):
             code = pr_state.main(["2280"])
+        if isinstance(out, io.TextIOWrapper):
+            out.flush()
+            return code, out.buffer.getvalue().decode("utf-8"), err.getvalue(), calls
         return code, out.getvalue(), err.getvalue(), calls
+
+    def test_emoji_in_review_text_survives_a_cp1252_console(self):
+        console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        _, out, _, _ = self.run_script(
+            pull(), [thread(False, body="⚠️ Bug")], out=console
+        )
+        self.assertIn("@gitar: ⚠️ Bug", out)
 
     def test_open_pr_with_passing_checks_is_pending_exit_3(self):
         code, out, _, calls = self.run_script(pull(auto={"enabledBy": "x"}))

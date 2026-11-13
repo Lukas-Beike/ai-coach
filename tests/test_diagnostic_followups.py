@@ -16,6 +16,7 @@ from backend.activities.feedback import ActivityFeedbackService
 from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_provider
 from backend.providers import garmin_morning
+from backend.providers import http as provider_http
 from backend.runtime import clock as runtime_clock
 from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_payload_metrics
@@ -38,7 +39,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(result["status"], "waiting")
         self.assertFalse(result["current_for_today"])
         self.assertEqual(
-            server.DIAGNOSTICS_ASSEMBLY.report_service().report()["morning_checkin"],
+            server.DIAGNOSTICS.report_service().report()["morning_checkin"],
             result,
         )
 
@@ -218,7 +219,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 garmin_morning, "fetch_morning_body_battery", side_effect=fetch
             ),
             patch.object(
-                server.provider_http, "external_call", return_value=None
+                provider_http, "external_call", return_value=None
             ) as external_call,
         ):
             token = sync_observation.OPERATION_CONTEXT.set(context)
@@ -301,9 +302,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 ],
             )
         self.assertEqual(result["status"], "failed")
-        history = server.DIAGNOSTICS_ASSEMBLY.report_service().report()[
-            "coach_commands"
-        ]
+        history = server.DIAGNOSTICS.report_service().report()["coach_commands"]
         self.assertEqual(history[0]["error"]["type"], "RuntimeError")
         self.assertTrue(history[0]["error"]["frames"])
         self.assertNotIn(private, json.dumps(history))
@@ -323,7 +322,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             ],
         )
         self.assertEqual(result["status"], "partial")
-        history = server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+        history = server.DIAGNOSTICS.coach_history_service().history()
         self.assertEqual(history[0]["response_status"], "incomplete")
         self.assertEqual(history[0]["steps"][0]["error"]["status"], 404)
         self.assertEqual(history[0]["steps"][0]["tool"], "save_activity_feedback")

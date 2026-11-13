@@ -55,7 +55,7 @@ The system SHALL request packaging-label recognition through the selected model 
 - **WHEN** the provider response cannot be read as candidate JSON
 - **THEN** the service returns a bounded invalid-response error without echoing the provider's raw response.
 
-Evidence: `backend/nutrition/photo.py::NutritionPhotoExtractionService.extract`, `backend/nutrition/photo.py::NutritionPhotoExtractionService._request_text`, `backend/nutrition/assembly.py::NutritionAssembly._photo_extractor`, `backend/providers/model_assembly.py::ModelTransportAssembly.complete`, `backend/providers/claude_messages_adapter.py::request_payload`; `tests/test_nutrition_photo_extraction.py::NutritionPhotoExtractionTests.test_openai_request_uses_selected_model_transient_image_and_json_candidate`, `tests/test_nutrition_photo_extraction.py::NutritionPhotoExtractionTests.test_invalid_provider_response_fails_without_returning_provider_text_or_image`, `tests/test_claude_provider.py::ClaudeRequestPayloadTests.test_images_and_attachments_become_image_and_document_blocks`.
+Evidence: `backend/nutrition/photo.py::NutritionPhotoExtractionService.extract`, `backend/nutrition/photo.py::NutritionPhotoExtractionService._request_text`, `backend/nutrition/wiring.py::build_nutrition`, `backend/providers/model_wiring.py::build_model_transport`, `backend/providers/claude_messages_adapter.py::request_payload`; `tests/test_nutrition_photo_extraction.py::NutritionPhotoExtractionTests.test_openai_request_uses_selected_model_transient_image_and_json_candidate`, `tests/test_nutrition_photo_extraction.py::NutritionPhotoExtractionTests.test_invalid_provider_response_fails_without_returning_provider_text_or_image`, `tests/test_claude_provider.py::ClaudeRequestPayloadTests.test_images_and_attachments_become_image_and_document_blocks`.
 
 ### Requirement: Candidate validation preserves uncertainty and label provenance
 The system SHALL normalize label candidate fields, retain unreadable nutrient/basis values as null, validate finite nonnegative numbers and supported units, and return label provenance plus a requirement for confirmation.
@@ -106,4 +106,31 @@ The client SHALL request barcode camera access only after an explicit scan actio
 - **WHEN** the camera promise resolves after the scan dialog closed or its session was superseded
 - **THEN** the newly returned stream is stopped and cannot restart the closed scanner.
 
-Evidence: `public/nutrition.js::scanNutritionBarcode`, `public/nutrition.js::stopNutritionBarcode`, `public/nutrition.js::resetNutritionView`; `tests/nutrition-camera.test.cjs::closing the barcode dialog stops the camera tracks and releases the video`, `e2e/nutrition.spec.js::@responsive closing the barcode dialog stops a late Android Chromium camera stream`.
+#### Scenario: Invalid typed code
+- **WHEN** the typed code has fewer than 8 or more than 14 digits after its non-digits are removed
+- **THEN** no request is sent and the dialog shows "Bitte eine gültige EAN mit 8 bis 14 Ziffern eingeben."
+
+#### Scenario: Lookup result
+- **WHEN** a lookup returns
+- **THEN** the dialog closes; a saved product is shown as "Lokales Produkt gefunden.", an online hit with "Online-Treffer gefunden. Prüfe ihn und speichere ihn lokal." and the product editor opened.
+
+Detailed contract: the scanner reads the formats `ean_13`, `ean_8`, `upc_a` and `upc_e` with the rear camera; a code is looked up only with 8 to 14 digits.
+
+Evidence: `public/nutrition.js::lookupNutritionProduct`, `public/nutrition.js::scanNutritionBarcode`, `public/nutrition.js::stopNutritionBarcode`, `public/nutrition.js::resetNutritionView`; `tests/nutrition-camera.test.cjs::closing the barcode dialog stops the camera tracks and releases the video`, `e2e/nutrition.spec.js::@responsive closing the barcode dialog stops a late Android Chromium camera stream`, `tests/nutrition-lookup-status.test.cjs::a background state render does not clobber a fresh lookup result`, `e2e/nutrition.spec.js::@responsive Open Food Facts lookup can be explicitly saved into the local product library`.
+
+### Requirement: Extract route validates a posted candidate without the provider
+`POST /api/nutrition/products/extract` SHALL accept either `image_data_url` or a candidate object and answer `{ok, candidate, extraction, provenance: "packaging_label", requires_confirmation: true}` (contract and error codes in `docs/api-routes.md`). A posted candidate SHALL be validated by the extraction rules without any provider call. The route SHALL accept a body of at most the base64 size of 5 MiB plus 64 KiB; every other JSON route SHALL keep the global body cap.
+
+#### Scenario: Candidate without image
+- **WHEN** the body has no `image_data_url`
+- **THEN** it is validated as a candidate, a name is required, and no model request is made.
+
+#### Scenario: Photo without a product name
+- **WHEN** a label photo shows only the nutrition table
+- **THEN** the extraction may lack the name, and saving the product still requires one.
+
+#### Scenario: Oversized body
+- **WHEN** the body exceeds the route's cap
+- **THEN** it is rejected before extraction.
+
+Evidence: `backend/nutrition/photo.py::PHOTO_REQUEST_MAX_BYTES`, `backend/nutrition/meal_library.py::NutritionMealLibraryService.extract_packaging_photo`, `backend/nutrition/photo.py::validate_packaging_extraction`, `backend/http_api/nutrition.py::NutritionPostRoutes._extract_product`; `tests/test_nutrition_photo_extraction.py::test_body_above_the_photo_cap_is_rejected_before_extraction`, `tests/test_nutrition_photo_extraction.py::test_compressed_and_largest_valid_photos_are_extracted_once`, `tests/test_nutrition_api_and_sync.py::test_non_photo_json_routes_keep_the_global_body_cap`, `tests/test_nutrition_use_case_services.py::test_photo_extraction_validates_local_candidate_without_provider`.

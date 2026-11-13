@@ -6,7 +6,7 @@ description: Base skill. Rebase the current feature branch onto origin/develop, 
 # Sync a feature branch
 
 ```powershell
-python scripts/branch_sync.py [--onto origin/develop] [--push]
+python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <file>]
 ```
 
 - Refuses on `develop`, `main`, a detached HEAD and uncommitted tracked changes.
@@ -15,7 +15,9 @@ python scripts/branch_sync.py [--onto origin/develop] [--push]
 - Exit 0: in sync (and pushed with `--push`); prints the new HEAD and the
   ahead/behind counts. Exit 1: refused, a rebase conflict (left in progress:
   resolve it and `git rebase --continue`, or `git rebase --abort`) or invalid
-  subjects (reword them, then rerun). Exit 2: bad input, a failed git call, or
+  subjects (reword them, then rerun), or with `--push` a new file at the
+  repository root (listed): remove it, or pass `--allow-root <file>` for each
+  one the PR names. Exit 2: bad input, a failed git call, or
   no SonarQube CLI for `--push`.
 - `--push` runs `git push --force-with-lease -u origin <branch>` with
   `core.hooksPath=.githooks`; never bypass the hooks. The pre-push hook needs

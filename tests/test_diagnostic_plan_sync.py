@@ -6,7 +6,7 @@ import json
 import sqlite3
 import unittest
 
-from backend.diagnostics.plan_sync import summarize_plan_sync
+from backend.diagnostics.plan_sync import summarize_garmin_removal, summarize_plan_sync
 
 
 class PlanSyncDiagnosticsTests(unittest.TestCase):
@@ -87,6 +87,65 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(report["unsynced_total"], 1)
         self.assertIsNone(report["unsynced_units"][0]["date"])
+
+
+class GarminRemovalDiagnosticsTests(unittest.TestCase):
+    """#2408: the past-workout removal's state is visible as counts only."""
+
+    def database(self, state: dict | None = None) -> sqlite3.Connection:
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.execute("CREATE TABLE kv (key, value, updated_at)")
+        if state is not None:
+            db.execute(
+                "INSERT INTO kv VALUES ('garmin_app_workout_cleanup', ?, 't')",
+                (json.dumps(state),),
+            )
+        return db
+
+    def test_reports_counts_outcome_and_last_run_without_ids(self):
+        db = self.database(
+            {
+                "done": True,
+                "checked": ["701", "702"],
+                "removed": 3,
+                "last_run_at": "2026-11-12T16:23:00+00:00",
+                "last_outcome": "failed",
+                "pending": 1,
+            }
+        )
+
+        report = summarize_garmin_removal(db)
+
+        self.assertEqual(
+            {
+                "one_time_done": True,
+                "checked": 2,
+                "removed": 3,
+                "last_run_at": "2026-11-12T16:23:00+00:00",
+                "last_outcome": "failed",
+                "past_links_pending": 1,
+            },
+            report,
+        )
+        self.assertNotIn("701", json.dumps(report))
+
+    def test_a_removal_that_never_ran_or_unknown_values_report_nothing(self):
+        for db in (
+            self.database(),
+            self.database({"removed": True, "last_outcome": "Garmin text"}),
+        ):
+            self.assertEqual(
+                {
+                    "one_time_done": False,
+                    "checked": 0,
+                    "removed": 0,
+                    "last_run_at": None,
+                    "last_outcome": None,
+                    "past_links_pending": 0,
+                },
+                summarize_garmin_removal(db),
+            )
 
 
 if __name__ == "__main__":

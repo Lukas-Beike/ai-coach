@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#0b0b0d">
+  <meta name="theme-color" content="#0c0d0f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -189,7 +189,7 @@
           </section>
         </div>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
-          <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label>Tag <input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
+          <div class="nutrition-toolbar"><button class="secondary-button" type="button" id="nutritionPrevious" aria-label="Vorheriger Tag">←</button><label><span class="sr-only">Tag</span><input type="date" id="nutritionDate"></label><button class="secondary-button" type="button" id="nutritionNext" aria-label="Nächster Tag">→</button><button class="secondary-button" type="button" id="nutritionToday">Heute</button></div>
           <div id="nutritionTotals" class="nutrition-totals"></div>
           <div id="nutritionEntries" class="nutrition-list"></div>
         </section>
@@ -314,13 +314,7 @@
         </section>
         <section class="settings-section appearance-settings" data-more-segment-panel="appearance" aria-labelledby="appearanceTitle">
           <div><h3 id="appearanceTitle">Darstellung</h3></div>
-          <label for="appearanceSelect">Farbschema
-            <select id="appearanceSelect">
-              <option value="system">System</option>
-              <option value="light">Hell</option>
-              <option value="dark">Dunkel</option>
-            </select>
-          </label>
+          <fieldset id="appearanceSelect" class="appearance-control"><legend>Farbschema</legend><div class="segmented-control"><label><input type="radio" name="appearance" value="system" checked>System</label><label><input type="radio" name="appearance" value="light">Hell</label><label><input type="radio" name="appearance" value="dark">Dunkel</label></div></fieldset>
         </section>
         <section class="settings-section" data-more-segment-panel="connections" aria-label="Anbindungen">
           <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
@@ -479,7 +473,7 @@
                   <p id="cred-error-openai" class="credential-error" role="alert" hidden></p>
                   <button id="cred-submit-openai" class="secondary-button" type="submit">Speichern</button>
                 </form>
-                <div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div>
+                <div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button></div>
               </div>
             </details>
             <details id="connection-anthropic" class="connection-card">
@@ -582,6 +576,7 @@
             <div class="model-selector">
               <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
             </div>
+            <button id="coachChatResetButton" class="secondary-button danger-button" type="button">Chat zurücksetzen</button>
           </div>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="coach">

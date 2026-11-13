@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.activities.zone_settings import (
+    DEFAULT_ZONE_SOURCE,
     ZoneSettings,
 )
 
@@ -148,8 +149,103 @@ def _planned_segment(
         "zone": color,
         "label": target,
     }
-
+    if target_range := _target_range(step["kind"], target, zone, (low, high), settings):
+        segment["range"] = target_range
     return segment, unit, estimated
+
+
+# The unit of each step kind's range, and its zone limits and reference on a day.
+_RANGE_UNITS = {"hr": "bpm", "power": "W", "pace": "s/km"}
+
+
+def _target_range(
+    kind: str,
+    target: str,
+    zone: re.Match[str] | None,
+    numbers: tuple[float, float],
+    settings: ZoneSettings,
+) -> dict[str, Any] | None:
+    """The step's target as ``{"unit", "min", "max"}`` in bpm, W or s/km (#2447).
+
+    A zone target spans its zones' limits in effect on the unit's day and needs
+    the athlete's own zones of that signal; ``min`` is missing for the lowest
+    zone and ``max`` for the open top zone. A percent target is that share of
+    the threshold; an absolute bpm or watt target is itself. Pace is seconds per
+    km, ``min`` the slower end. None without the needed zones or threshold.
+    """
+    unit = _RANGE_UNITS.get(kind)
+    reference = _reference(kind, target, settings)
+    if unit is None or not reference:
+        return None
+    if zone:
+        percents = _zone_percents(kind, zone, settings)
+    elif "%" in target:
+        percents = numbers
+    elif unit != "s/km" and ("BPM" in target or "W" in target):
+        return {"unit": unit, "min": round(numbers[0]), "max": round(numbers[1])}
+    else:
+        percents = None
+    return None if percents is None else _scaled(unit, reference, percents, bool(zone))
+
+
+def _zone_percents(
+    kind: str, zone: re.Match[str], settings: ZoneSettings
+) -> tuple[float | None, float | None] | None:
+    """The lower and upper limit (percent) of the zones; None without own zones."""
+    limits, source = _signal_limits(kind, settings)
+    if source == DEFAULT_ZONE_SOURCE:
+        return None
+    first, last = int(zone[1]), int(zone[2] or zone[1])
+    # A zone the athlete's set does not have gets no range.
+    if not 1 <= first <= last <= len(limits) + 1:
+        return None
+    return (
+        limits[first - 2] if first > 1 else None,
+        limits[last - 1] if last - 1 < len(limits) else None,
+    )
+
+
+def _scaled(
+    unit: str,
+    reference: float,
+    percents: tuple[float | None, float | None],
+    zone_start: bool,
+) -> dict[str, Any]:
+    low, high = (None if p is None else reference * p / 100 for p in percents)
+    if unit == "s/km":
+        # Faster is more intense: the slower end comes first.
+        return _range(unit, *(None if v is None else 1000 / v for v in (low, high)))
+    if not zone_start:
+        return _range(unit, low, high)
+    # Whole bpm or watts: a zone ends at the last whole unit below its limit and
+    # starts one above the zone below ("110–128 bpm"); Garmin's limits lie half a
+    # unit above the zone's last bpm, a local limit on it.
+    low, high = (None if v is None else math.floor(v + 1e-6) for v in (low, high))
+    return _range(unit, None if low is None else low + 1, high)
+
+
+def _range(unit: str, low: float | None, high: float | None) -> dict[str, Any]:
+    values = {"min": low, "max": high}
+    return {"unit": unit, **{k: round(v) for k, v in values.items() if v is not None}}
+
+
+def _reference(kind: str, target: str, settings: ZoneSettings) -> float | None:
+    """The bpm, W or m/s that the step's percent and zone limits are relative to."""
+    if kind == "power":
+        return settings.ftp
+    if kind == "pace":
+        return settings.threshold_pace
+    if "%" in target and "LTHR" not in target:
+        return settings.max_hr
+    return settings.hr_zone_reference
+
+
+def _signal_limits(kind: str, settings: ZoneSettings) -> tuple[tuple[float, ...], str]:
+    if kind == "power":
+        return settings.power_limits, settings.power_source
+    if kind == "pace":
+        return settings.pace_limits, settings.pace_source
+    return settings.hr_limits, settings.hr_source
 
 
 def _percent_target_zone(

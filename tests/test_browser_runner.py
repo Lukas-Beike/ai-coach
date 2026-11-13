@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 from collections import Counter
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -156,6 +157,36 @@ class BrowserRunnerTests(unittest.TestCase):
                     path.write_text(json.dumps(value))
                     with self.assertRaises(runner.RunnerError):
                         runner.read_weights(path)
+
+    def test_bare_spec_name_resolves_to_its_single_listed_path(self):
+        listing = runner.parse_listing(report())
+        timing = runner.read_weights(None)
+        (child,) = runner.select(listing, "desktop", ["b.spec.js"], 1, 1, timing)
+        self.assertEqual(child["file"], "e2e/b.spec.js")
+        with self.assertRaisesRegex(runner.RunnerError, "e2e/<name>.spec.js"):
+            runner.select(listing, "desktop", ["absent.spec.js"], 1, 1, timing)
+
+    def test_spec_a_project_does_not_list_is_skipped_with_a_note(self):
+        data = report()
+        data["suites"][0]["specs"][0]["tests"].append(
+            {"projectName": "mobile", "projectId": "mobile"}
+        )
+        listing = runner.parse_listing(data)
+        timing = runner.read_weights(None)
+        specs = ["e2e/a.spec.js", "e2e/b.spec.js"]
+        with redirect_stderr(io.StringIO()) as err:
+            children = runner.select(listing, "all", specs, 1, 1, timing)
+        self.assertEqual(
+            sorted((c["project"], c["file"]) for c in children),
+            [
+                ("desktop", "e2e/a.spec.js"),
+                ("desktop", "e2e/b.spec.js"),
+                ("mobile", "e2e/a.spec.js"),
+            ],
+        )
+        self.assertEqual(
+            err.getvalue(), "Skipped e2e/b.spec.js on mobile: not listed\n"
+        )
 
     def test_invalid_and_zero_selection_fail(self):
         listing = runner.parse_listing(report())

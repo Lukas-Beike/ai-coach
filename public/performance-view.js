@@ -127,78 +127,68 @@ const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_m
 
 // One row per metric with a value, in the given order.
 function currentPerformanceRows(metrics, items) {
-  const body = reportNode("tbody");
+  const body = h("tbody");
   for (const [key, label] of items) {
     const metric = metrics?.[key];
     if (metric?.value == null) continue;
-    const row = reportNode("tr"); row.dataset.metric = key;
-    const heading = reportNode("th", label); heading.scope = "row";
-    if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
-    row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
-    body.append(row);
+    const estimated = ESTIMATED_METRICS.has(key) || metric.estimated;
+    body.append(h("tr", { dataset: { metric: key } }, h("th", { scope: "row" }, label, estimated && [" ", createEstimateChip()]), h("td", null, analysisValue(metric.value, metric.unit || ""))));
   }
   return body;
 }
 
-// LT1 as on the zones page (#2262): the stored share of the threshold heart rate and the
-// power or pace at the top of zone 2. The zones are read once; their arrival redraws the table.
-function withFirstThresholds(metrics, status) {
-  if (typeof thresholdRows !== "function") return metrics;
-  // Only Analyse lists LT1, so only there the zones are read.
-  if (!zoneDataLoad && ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) void ensureZoneData().then(() => renderCurrentPerformance(state.data?.performance?.metrics || {}, state.data?.performance?.history, status));
-  const run = thresholdRows("run", metrics);
-  const ride = thresholdRows("ride", metrics);
-  const value = (number, unit) => (number == null ? undefined : { value: unit === "s/km" ? number : Math.round(number), unit });
+// LT1 per sport from the performance values (#2427): measured, the adopted HRV estimate,
+// the top of zone 2 or a fixed share of LT2; both stand-ins carry the estimate chip.
+function withFirstThresholds(metrics, thresholds) {
+  const lt1 = thresholds?.first_thresholds || {};
+  const value = (number, unit, origin) => (number == null ? undefined : { value: number, unit, estimated: origin === "zone_2" || origin === "fixed_share" });
   return {
     ...metrics,
-    run_lt1_pace_seconds_per_km: value(run.lt1.main, "s/km"),
-    run_lt1_hr_bpm: value(run.lt1.hr, "bpm"),
-    cycling_lt1_watts: value(ride.lt1.main, "W"),
-    cycling_lt1_hr_bpm: value(ride.lt1.hr, "bpm"),
+    run_lt1_pace_seconds_per_km: value(lt1.run?.pace_seconds_per_km, "s/km", lt1.run?.pace_origin),
+    run_lt1_hr_bpm: value(lt1.run?.hr_bpm, "bpm", lt1.run?.hr_origin),
+    cycling_lt1_watts: value(lt1.ride?.watts, "W", lt1.ride?.power_origin),
+    cycling_lt1_hr_bpm: value(lt1.ride?.hr_bpm, "bpm", lt1.ride?.hr_origin),
   };
 }
 
-function renderCurrentPerformance(metrics, history, status = []) {
-  metrics = withFirstThresholds(currentPerformanceValues(metrics, history), status);
+// LT1 comes from the thresholds of the same performance values as the metrics.
+function renderCurrentPerformance(metrics, history, status = [], thresholds = null) {
+  metrics = withFirstThresholds(currentPerformanceValues(metrics, history), thresholds);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
-  root.replaceChildren(reportNode("h3", "Aktuelle Werte"));
-  for (const text of status) root.append(reportNode("p", text, "empty"));
+  root.replaceChildren(h("h3", null, "Aktuelle Werte"));
+  for (const text of status) root.append(h("p", "empty", text));
   const groups = [
     ["Laufen", "run", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
-      ["run_lt1_pace_seconds_per_km", "LT1 · Pace"],
-      ["run_lt1_hr_bpm", "LT1 · Puls"],
+      ["run_lt1_pace_seconds_per_km", "Aerobe Schwelle (LT1) · Pace"],
+      ["run_lt1_hr_bpm", "Aerobe Schwelle (LT1) · Puls"],
       ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
     ["Radfahren", "ride", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
-      ["cycling_lt1_watts", "LT1 · Leistung"],
-      ["cycling_lt1_hr_bpm", "LT1 · Puls"],
+      ["cycling_lt1_watts", "Aerobe Schwelle (LT1) · Leistung"],
+      ["cycling_lt1_hr_bpm", "Aerobe Schwelle (LT1) · Puls"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
   ];
-  const grid = reportNode("div", null, "current-performance-groups");
+  const grid = h("div", "current-performance-groups");
   // Laufen and Radfahren each show their own table (#2265); the caption names it for screen readers.
   for (const [sport, analysisSport, items] of groups) {
-    const table = reportNode("table", null, "current-performance-table");
-    table.dataset.analysisSport = analysisSport;
-    table.append(reportNode("caption", sport, "sr-only"));
     const body = currentPerformanceRows(metrics, items);
     // A status message (e.g. a failed read) keeps the section visible.
     root.dataset[analysisSport === "run" ? "analysisEmptyRunning" : "analysisEmptyCycling"] = String(!body.childElementCount && !status.length);
     if (!body.childElementCount) {
-      const none = reportNode("p", "Noch keine aktuellen Werte.", "muted");
+      const none = h("p", "muted", "Noch keine aktuellen Werte.");
       none.dataset.analysisSport = analysisSport;
       grid.append(none);
       continue;
     }
-    table.append(body);
-    grid.append(table);
+    grid.append(h("table", { className: "current-performance-table", dataset: { analysisSport } }, h("caption", "sr-only", sport), body));
   }
   root.dataset.analysisEmpty = String(root.dataset.analysisEmptyRunning === "true" && root.dataset.analysisEmptyCycling === "true");
   root.append(grid);
@@ -216,34 +206,18 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
-  renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
+  renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance), performance?.thresholds);
   refreshThresholdBox();
   const predictions = racePredictionRows(values);
   root.hidden = false;
-  const predictionHeading = reportNode("h4", "Laufprognosen");
-  predictionHeading.append(" ", createEstimateChip());
-  root.append(predictionHeading);
+  root.append(h("h4", null, "Laufprognosen", " ", createEstimateChip()));
   root.dataset.analysisEmpty = String(!predictions.length);
   if (!predictions.length) {
-    root.append(reportNode("p", racePredictionEmptyReason(values), "muted"));
+    root.append(h("p", "muted", racePredictionEmptyReason(values)));
   } else {
-    const table = reportNode("table", null, "race-predictions-table");
-    const head = reportNode("thead");
-    const header = reportNode("tr");
-    for (const label of ["Distanz", "Gesch\u00e4tzte Zeit"]) {
-      const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
-    }
-    head.append(header); table.append(head);
-    const body = reportNode("tbody");
-    for (const { label, metric, withSeconds } of predictions) {
-      const row = reportNode("tr");
-      const distance = reportNode("th", label); distance.scope = "row";
-      row.append(distance, reportNode("td", predictionTime(metric.value, withSeconds)));
-      body.append(row);
-    }
-    table.append(body);
-    const scroll = makeScrollRegionFocusable(reportNode("div", null, "table-scroll"), "Geschätzte Zeiten nach Distanz");
-    scroll.append(table); root.append(scroll);
+    const rows = predictions.map(({ label, metric, withSeconds }) => [h("th", { scope: "row" }, label), predictionTime(metric.value, withSeconds)]);
+    const scroll = makeScrollRegionFocusable(h("div", "table-scroll"), "Geschätzte Zeiten nach Distanz");
+    scroll.append(table(["Distanz", "Gesch\u00e4tzte Zeit"], rows, { className: "race-predictions-table" })); root.append(scroll);
   }
   renderAnalysisSegments(state.route);
 }

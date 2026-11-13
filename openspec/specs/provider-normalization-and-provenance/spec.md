@@ -21,6 +21,13 @@ Detailed contract: Unknown provider fields SHALL not automatically enter public 
 
 Evidence: `backend/canonical/records.py:Provenance`, `backend/canonical/records.py:Observation`, `backend/canonical/mapping.py:MappingIssue`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_garmin_health_mapping.py:test_issues_never_echo_raw_values`.
 
+### Requirement: Normative field map and mapper versions
+The system SHALL keep `docs/canonical-field-map.md` as the normative field map of every provider mapper: provider keys, alias order, unit conversions, bounds, zero rules and the orders that decide a result. A change to what a mapper emits SHALL change the map in the same change and raise the `MAPPER_VERSION` that replays the mapper, so stored raw records are re-projected.
+
+#### Scenario: Mapper output changes
+- **WHEN** a mapper change alters the canonical records it emits for a stored payload
+- **THEN** the field map states the new rule and the replaying `MAPPER_VERSION` is raised; `tests/test_mapper_version_guard.py` fingerprints the mapping code and every `backend/providers` or `backend/canonical` module a replayed mapper imports, directly or through another (#2501), not their output, and fails when that code changes without a bump of every version that replays it.
+
 ### Requirement: Provider-aware time and sport normalization
 The system SHALL preserve explicit instants, date each activity on the day it was lived using the UTC offset the provider reports for it and otherwise the active athlete timezone, normalize supported sports and indoor/outdoor/virtual environments, and apply the implemented wall-time DST rules to local timestamps.
 
@@ -46,7 +53,26 @@ The system SHALL preserve explicit instants, date each activity on the day it wa
 
 Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC. The offset is stored as `local_offset_minutes` in the activity record's details; a session uses its primary record's offset, else that of the first record reporting one. A summary carrying an offset keeps its own `started_at_local` date even when a reader converts to the athlete zone.
 
-Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/canonical/local_time.py:wall_time`, `backend/canonical/local_time.py:wall_clock_offset_minutes`, `backend/canonical/local_time.py:zone_offset_minutes`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/activities/detail_contract.py:session_local_start`, `backend/canonical/activity_summary.py:summary_local_date`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_activity_local_offset.py`, `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_a_trail_terrain_marks_a_trail_run_for_every_provider`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`, `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`.
+Evidence:
+- `backend/activities/detail_contract.py:session_local_start`
+- `backend/canonical/activity_summary.py:summary_local_date`
+- `backend/canonical/local_time.py:localize_wall_time`
+- `backend/canonical/local_time.py:wall_clock_offset_minutes`
+- `backend/canonical/local_time.py:wall_time`
+- `backend/canonical/local_time.py:zone_offset_minutes`
+- `backend/performance/analysis_input.py:analysis_sport`
+- `backend/performance/pace_at_hr.py:pace_at_heart_rate`
+- `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`
+- `backend/providers/garmin_activity_mapping.py:map_garmin_activities`
+- `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`
+- `tests/test_activity_local_offset.py`
+- `tests/test_analysis_input.py:test_a_trail_terrain_marks_a_trail_run_for_every_provider`
+- `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`
+- `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`
+- `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`
+- `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`
+- `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`
+- `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`
 
 ### Requirement: Activity terrain, motor assistance and native type
 The system SHALL map the terrain and motor assistance a provider activity type names into provider-neutral qualifiers, keep the provider's native type, and filter analyses by these qualifiers, never by provider identity.
@@ -309,6 +335,10 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 - **WHEN** Garmin reports heart-rate zone sets (`DEFAULT`, `RUNNING`, `CYCLING`) on any calculation basis, such as percent of the lactate threshold HR, heart-rate reserve or maximum HR
 - **THEN** each set becomes a canonical heart-rate zone configuration valid from the local day it was first fetched, with Garmin's absolute bpm floors taken as they are (zone N ends one bpm below the floor of zone N + 1, the top zone at the maximum HR) and the basis kept as its model; a changed set of one sport is a new configuration (an unchanged set is not stored again) and the earlier ones stay valid for their days; Garmin leads Wahoo, a confirmed local configuration still wins, a sport's own set precedes Garmin's default set, a day before the first fetch takes the earliest later set within 90 days, and the standard limits apply only without any configuration.
 
+#### Scenario: Target range of planned steps
+- **WHEN** a planned unit's step targets a zone, a percent of a threshold, or absolute bpm or watts
+- **THEN** its profile segment carries the range in bpm, W or s/km from the zones and thresholds in effect on the unit's day (a zone starts one above the zone below it, the lowest zone has no lower end, the open top zone no upper end); whole bpm and watts end at the last whole unit below the limit, so Garmin zones read as on the watch; a zone step without the athlete's own zones of that signal or outside their zone count, or any step without its threshold, carries no range.
+
 #### Scenario: Thresholds without a zone configuration
 - **WHEN** a planned workout's sport has no configuration for a metric
 - **THEN** its FTP, threshold HR and maximum HR come from the source-policy provider winners (Garmin, Wahoo) with the default limits, never from Intervals.icu or the stored snapshot, and nothing is served before the first completed backfill.
@@ -317,7 +347,7 @@ Detailed contract (#1851): the watch zones are projected by `garmin_zone_mapping
 
 Detailed contract (#1416): indoor and virtual workouts use the INDOOR power configuration's threshold, else the sport's FTP (no provider indoor FTP is read); the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
 
-Evidence: `backend/performance/canonical_current.py:read_zone_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`; `backend/providers/garmin_zone_mapping.py:map_garmin_heart_rate_zones`, `backend/activities/zone_settings.py:effective_zone_configuration`; `tests/test_garmin_zone_mapping.py`.
+Evidence: `backend/performance/canonical_current.py:read_zone_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`, `backend/activities/workout_profile.py:planned_profile`; `tests/test_workout_profile.py:test_planned_steps_carry_their_target_range_from_the_zones_of_the_day`, `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`; `backend/providers/garmin_zone_mapping.py:map_garmin_heart_rate_zones`, `backend/activities/zone_settings.py:effective_zone_configuration`; `tests/test_garmin_zone_mapping.py`.
 
 ### Requirement: Retained provider domains and equipment links
 Training status and load balance, running tolerance, readiness history, endurance score details/history, performance history, Body Battery, stress, resting energy, subjective provider wellness and equipment SHALL have canonical representations. Their affected consumers SHALL read canonical values with provider labels. Proprietary scores SHALL not be rebuilt locally; equipment links SHALL resolve to canonical sessions.

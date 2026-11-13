@@ -20,7 +20,9 @@ exceptions, so you run the Docker runbook commands that pass `.env` or mount
 as a commit message; pass that text through a file.
 `.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
-subagents.
+subagents. `scripts/hooks/thread_model_rule.py` blocks a T3 thread launch whose
+model or effort the rule in `scripts/hooks/thread-model-rule.json` does not
+allow; an effort above `high` is refused whatever the file says.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
@@ -74,7 +76,15 @@ and commit/tag messages, including intermediate commits, in temporary storage an
 A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
 no scan. After a clean scan the hook runs CI's repository quality ratchet
 (`python tools/quality_baseline.py`: mypy and Ruff, about 35 seconds
-on Windows) on a clean export of HEAD; new findings block the push. Do not use `--no-verify`.
+on Windows) on a clean export of HEAD; new findings block the push. The same
+ratchet reports a function above Sonar's cognitive complexity 15 (rule
+`python:S3776`) as a `cognitive` finding named by function, not score. It
+also checks `public/*.js` for Sonar's cognitive complexity above 15
+(S3776) and nested ternaries (S3358) through `eslint-plugin-sonarjs`, using the
+clone's `node_modules` (`npm ci`). In the pre-push hook a clone without
+ESLint blocks the push (run `npm ci`); elsewhere, as in CI's `quality` job, it
+prints that it skipped the check. A `NOSONAR` comment on the reported line
+suppresses a finding as it does in Sonar. Do not use `--no-verify`.
 
 Enable the hook in each clone (the relative path also works in its worktrees):
 

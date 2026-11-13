@@ -175,3 +175,22 @@ The system SHALL keep illness-pause forecasts explicitly proposed rather than di
 - **THEN** the local result remains and the error is reported safely; an already-applied preview does not silently repeat the remote sync.
 
 Evidence: `backend/planning/adaptive.py:illness_pause_forecast`, `backend/planning/adaptive.py:AdaptiveReplanApplyService._fill_illness_checkin`, `backend/planning/adaptive.py:illness_calendar_events`; `backend/sync/adaptive.py:IllnessPauseSyncService.apply`, `backend/sync/adaptive.py:IllnessPauseSyncService.sync`; `tests/test_adaptive_replan_apply_service.py:test_applies_replacement_audit_revision_and_illness_checkins_atomically`; `tests/test_sync_adaptive.py:test_apply_keeps_local_result_and_status_without_explicit_remote_approval`, `tests/test_sync_adaptive.py:test_apply_writes_remote_pause_only_when_explicitly_requested`, `tests/test_sync_adaptive.py:test_apply_redacts_remote_failure_and_keeps_local_apply_result`, `tests/test_sync_adaptive.py:test_apply_returns_already_applied_status_without_remote_sync`.
+
+### Requirement: TP12 Calendar markers constrain planned workouts
+The system SHALL check every planned-workout change against the external events of its day: a NO_TRAINING event SHALL block everything but a rest entry, a NO_INTENSITY event SHALL block a hard unit and any strength unit that is not explicitly easy, and a SHORT_ONLY event SHALL block a workout longer than 60 minutes. A blocked change SHALL carry the reason `no_training`, `no_intensity` or `short_only`.
+
+#### Scenario: Exactly 60 minutes
+- **WHEN** a 60-minute workout meets a SHORT_ONLY event
+- **THEN** it is allowed; 61 minutes are blocked with reason `short_only`.
+
+#### Scenario: Unknown duration
+- **WHEN** a workout has no usable duration and meets a SHORT_ONLY event
+- **THEN** it is not blocked by that marker.
+
+#### Scenario: No-intensity day
+- **WHEN** a NO_INTENSITY event meets an endurance unit of easy or zone-two effort, a hard unit, a light strength unit or a heavy strength unit
+- **THEN** only the hard unit and the heavy strength unit are blocked.
+
+Detailed contract: the duration is `duration_minutes`, else `planned_duration_s / 60`. An event carries a constraint through its stored flag or through the marker in its title or description. Markers and their detection belong to `external-calendars`.
+
+Evidence: `backend/planning/calendar.py::calendar_constraint_decision`, `backend/planning/calendar.py::breaks_no_intensity`, `backend/planning/calendar.py::workout_is_explicitly_easy`, `backend/planning/calendar.py::calendar_event_has_constraint`; `tests/test_planning_calendar.py::test_set_easy_focus_is_explicitly_easy_despite_zone_two_text`, `tests/test_planning_calendar.py::test_light_or_mobility_strength_is_explicitly_easy`, `tests/test_adaptive_preview_service.py::test_short_only_day_caps_every_proposed_duration_at_the_marker_limit`, `tests/test_server_weather_calendar.py::test_ical_no_intensity_marker_requires_easy_replacement`, `tests/test_server_weather_calendar.py::test_ical_no_training_marker_is_excluded_from_adaptive_constraints`.

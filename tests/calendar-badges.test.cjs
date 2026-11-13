@@ -103,12 +103,12 @@ test("each calendar marker is named in German on the day note", () => {
 
 test("a badge shows its text as text and hides its glyph from screen readers", () => {
   const { calendarBadge, calendarBadgeRow } = extractFunctions("plan-views.js", ["calendarBadge", "calendarBadgeRow"], {
-    document: { createElement: (tag) => new FakeElement(tag), createTextNode: (text) => ({ text }) },
+    document: { createElement: (tag) => new FakeElement(tag) },
   });
   const badge = calendarBadge({ kind: "calendar", icon: "*", text: "<img src=x onerror=alert(1)>" });
   assert.equal(badge.className, "planned-badge is-calendar");
   assert.equal(badge.children[0].attributes["aria-hidden"], "true");
-  assert.deepEqual(badge.children[1], { text: "<img src=x onerror=alert(1)>" });
+  assert.equal(badge.children[1], "<img src=x onerror=alert(1)>");
   const row = calendarBadgeRow([{ kind: "calendar", text: "A" }, { kind: "day-status", text: "B" }]);
   assert.equal(row.className, "planned-badges");
   assert.deepEqual(row.children.map((child) => child.className), ["planned-badge is-calendar", "planned-badge is-day-status"]);

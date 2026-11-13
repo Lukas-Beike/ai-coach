@@ -988,7 +988,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "push_strength_to_garmin",
-            "Send dated strength planned units with a strength_structure to the athlete's Garmin watch as structured strength workouts, scheduled on their date; only when the athlete's own message asks to send them to Garmin or the watch. Use target garmin, remote_write=true, sync_scope selected and the garmin_sync scope. Endurance units go through start_intervals_plan_sync instead. remove=true deletes only a workout this app sent and needs an explicit athlete request to remove it. The send also removes the Garmin workouts this app sent for units that were since deleted, replaced or archived; do not add them yourself. A named send runs without a card; only an explicit removal waits for the athlete's card approval. Exercises without a Garmin match block that unit.",
+            "Send dated planned units to the athlete's Garmin watch as structured workouts, scheduled on their date: strength units with a strength_structure and run units with structured step text; only when the athlete's own message asks to send them to Garmin or the watch. Use target garmin, remote_write=true, sync_scope selected and the garmin_sync scope. Rides go through start_intervals_plan_sync instead. remove=true deletes only a workout this app sent and needs an explicit athlete request to remove it. The send also removes the Garmin workouts this app sent for units that were since deleted, replaced or archived; do not add them yourself. A named send runs without a card; only an explicit removal waits for the athlete's card approval. Exercises without a Garmin match block that unit.",
             {
                 "entries": {
                     "type": "array",
@@ -1002,7 +1002,7 @@ def build_structured_tool_schemas(
                             "local_id": {
                                 "type": "string",
                                 "format": "uuid",
-                                "description": "Exact local_id of a strength planned unit from read_training_state.",
+                                "description": "Exact local_id of a strength or run planned unit from read_training_state.",
                             },
                             "remove": {"type": "boolean"},
                         },

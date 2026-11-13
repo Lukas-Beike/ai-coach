@@ -6,7 +6,7 @@ import json
 import threading
 import unittest
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from support import temp_database
 
@@ -14,6 +14,7 @@ from backend import change_history
 from backend.db import row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.history import wiring as history_wiring
 from backend.history.undo_service import HistoryUndoService
 
 _CHANGE_ID = "12345678-1234-1234-1234-123456789abc"
@@ -556,6 +557,50 @@ class HistoryUndoServiceTests(unittest.TestCase):
             )
         self.assertEqual(undone[0]["status"], "undone")
         self.assertEqual(len(self.services["profile"].calls), 1)
+
+
+class HistoryBuilderTests(unittest.TestCase):
+    """build_history hands each owner to its parameter (#2098)."""
+
+    def test_undo_service_receives_each_owner_in_its_position(self) -> None:
+        ctx = Mock()
+        ctx.athlete.equipment_history.return_value = {"equipment": "records"}
+        with (
+            patch.object(history_wiring, "ChangeHistoryService") as history,
+            patch.object(history_wiring, "HistoryUndoService") as undo,
+        ):
+            history_wiring.build_history(ctx).undo_service()
+
+        planning = ctx.planning
+        args = undo.call_args.args
+        self.assertEqual(
+            [
+                ctx.database.return_value,
+                history.return_value,
+                ctx.athlete.profile.return_value,
+                planning.workout_library.return_value,
+                planning.competition.return_value,
+                planning.planned_unit.return_value,
+                planning.training_plan.return_value,
+                ctx.planning_revision,
+            ],
+            list(args),
+        )
+        self.assertEqual(
+            [
+                "nutrition_entry",
+                "checkin",
+                "nutrition_template",
+                "nutrition_product",
+                "food_database_entry",
+                "equipment",
+            ],
+            list(undo.call_args.kwargs["record_services"]),
+        )
+        self.assertIs(
+            ctx.athlete.profile.return_value.mutation_coordinator,
+            undo.call_args.kwargs["profile_mutation_coordinator"],
+        )
 
 
 if __name__ == "__main__":

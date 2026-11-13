@@ -41,7 +41,48 @@ class CoachChatStreamTransport:
         return [Route("POST", "/api/chat/stream", Access.SESSION_CSRF, self._stream)]
 
     def _stream(self, handler: Any, request: RouteRequest) -> None:
-        """Stream one Coach turn as server-sent events."""
+        """Stream one Coach turn as server-sent events.
+
+        Request: JSON body `{"message": string, "client_turn_id": string,
+        "request_kind": string, "attachments": array}`; body limit 28 000 000 bytes.
+        `client_turn_id` is required, at most 120 characters; sending the id of a
+        turn this session already queued returns that turn instead of a new one.
+        `message` is trimmed, 1 to 12 000 characters; it may be empty only with
+        `attachments`, then it becomes "Bitte analysiere die angehängten Dateien.".
+        `request_kind` is optional: `morning_checkin`, `session_analysis`,
+        `progress_review`, `block_review`, `plan_week`, `plan_block` or
+        `adjust_week`. `attachments` is optional, up to 4 objects
+        `{"name": string, "data": base64 string}` (name 1 to 160 characters without
+        `/` or a backslash, at most 5 MB each) of GPX, FIT, PNG, JPEG or WebP files.
+
+        Response: 200 `text/event-stream`; the response ends after the final event.
+        Events: `started` `{operation_id}`; `delta` `{text}` (a chunk of reply text);
+        `heartbeat` `{operation_id}` every 15 s while the turn is queued or running;
+        `completed` the turn receipt (as `GET /api/chat/receipt`); `background`
+        `{operation_id, ...}` when the turn goes on without this stream (already
+        queued, or maintenance is pending); `error` `{reason, message}`. A closed
+        connection does not cancel the turn.
+
+        Errors: before the stream opens, as JSON: 400 `invalid_client_turn`
+        "client_turn_id ist für Coach-Nachrichten erforderlich." and 409
+        `chat_already_running` "Für diese Sitzung läuft bereits eine
+        Coach-Anfrage." when a stream of this session is attached. Once open, a
+        failure is an `error` event: `invalid_request_kind` "Unbekannte
+        Coach-Schnellaktion."; `invalid_attachment` "Ungültiger Anhang. Erlaubt: bis
+        zu 4 GPX-, FIT-, PNG-, JPEG- oder WebP-Dateien mit je höchstens 5 MB.";
+        `attachment_request_too_large` "Die Anhänge sind zusammen zu groß für eine
+        Coach-Anfrage. Bitte sende weniger oder kleinere Dateien.";
+        `invalid_chat_message` "Die Coach-Nachricht ist leer oder zu lang.";
+        `invalid_client_turn`
+        "client_turn_id muss eine begrenzte, nicht leere Kennung sein.";
+        `chat_already_running` "Für diese Sitzung läuft bereits eine Coach-Anfrage."
+        when another turn of the session is queued or running;
+        `client_turn_in_progress` "Diese Coach-Nachricht wird bereits verarbeitet.";
+        `command_scope_denied` "Dieser Coach-Auftrag gehört zu einer anderen
+        Sitzung."; `attachment_storage_quota` "Der lokale Speicher für Chat-Anhänge
+        ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder
+        sendest."; `internal_error` "Interner Serverfehler.".
+        """
         self.handle(handler, request.session)
 
     def handle(self, handler: Any, session: dict[str, Any]) -> None:

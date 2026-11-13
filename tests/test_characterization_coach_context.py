@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
+from canonical_domain_support import local_zone_configuration
 from canonical_recovery_support import NoActivityRows, recovery_only_inputs
 from intervals_compaction import compact_snapshot
 from performance_day_support import (
@@ -25,6 +26,7 @@ from performance_day_support import (
     garmin_metrics_from_payload,
 )
 
+from backend.canonical.vocabulary import Sport, ZoneConfigurationMetric
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
     CoachIntervalsContextService,
@@ -134,6 +136,7 @@ def _context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
+    zone_configurations: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     """Current performance with recovery observations mapped from the fixtures."""
     canonical = canonical_from_snapshot(snapshot, today) if snapshot else None
@@ -148,6 +151,7 @@ def _context(
         )
         if canonical is not None
         else _recovery(garmin, snapshot),
+        zone_configurations=zone_configurations,
     )
 
 
@@ -349,6 +353,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "run_lthr",
                 "run_hr_caps",
                 "weight",
+                "first_thresholds",
             },
         )
 
@@ -374,6 +379,38 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(result["thresholds"]["ftp_source"], GARMIN_SOURCE)
         self.assertNotIn("ftp_alternatives", result["thresholds"])
         self.assertNotIsInstance(result["thresholds"]["ftp_w"], dict)
+
+    def test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp(
+        self,
+    ) -> None:
+        # 75 % of the Garmin FTP of 265 W; a local power zone 2 ends at 200 W.
+        shared = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
+        zoned = _context(
+            _intervals_snapshot(),
+            _garmin_payload(),
+            {},
+            TODAY,
+            (
+                local_zone_configuration(
+                    metric=ZoneConfigurationMetric.POWER,
+                    sport=Sport.RIDE,
+                    threshold=265.0,
+                    maximum=None,
+                    resting=None,
+                    limits=(150.0, 200.0, 240.0),
+                ),
+            ),
+        )
+        self.assertEqual(
+            (199, "fixed_share"),
+            tuple(shared["thresholds"]["first_thresholds"]["ride"][key]
+                  for key in ("watts", "power_origin")),
+        )  # fmt: skip
+        self.assertEqual(
+            (200, "zone_2"),
+            tuple(zoned["thresholds"]["first_thresholds"]["ride"][key]
+                  for key in ("watts", "power_origin")),
+        )  # fmt: skip
 
     def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(
         self,

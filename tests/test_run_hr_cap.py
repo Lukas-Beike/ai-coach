@@ -12,6 +12,7 @@ import math
 import unittest
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -67,6 +68,7 @@ from backend.planning import plan_checks, run_hr_cap
 from backend.planning.calendar_read_model import _resolved_hr_cap
 from backend.planning.plan_guard_service import PlanCheckError, PlanGuardService
 from backend.planning.planned_unit_load import estimate_planned_unit
+from backend.planning.run_lthr import RunLthr
 from backend.planning.session_focus import normalize_session_focus
 from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 
@@ -604,6 +606,39 @@ class AnalysisTests(unittest.TestCase):
         unknown = heart_rate_cap_execution(cap, None, self.streams([120.0] * 60))
         self.assertEqual("not_covered", unknown["status"])
         self.assertNotIn("cap_bpm", unknown)
+
+
+class RunLthrTests(unittest.TestCase):
+    """One snapshot of the run thresholds answers per unit date, as zones or as LTHR."""
+
+    def lookup(self, thresholds: Any) -> RunLthr:
+        return RunLthr(lambda: thresholds, lambda: date(2026, 11, 9), None)
+
+    def test_zones_resolver_gives_the_run_zones_of_the_units_day(self) -> None:
+        days: list[Any] = []
+        zones = ZoneSettings(lthr=170.0, max_hr=190.0)
+
+        def for_sport(sport: Any, environment: Any, day: date) -> Any:
+            days.append((sport, day))
+            return SimpleNamespace(zones=zones)
+
+        run_lthr = self.lookup(SimpleNamespace(unavailable=False, for_sport=for_sport))
+        zones_for = run_lthr.zones_resolver()
+
+        self.assertIs(zones, zones_for({"sport": "Run", "date": "2026-11-12"}))
+        self.assertIs(zones, zones_for({"sport": "Run"}))
+        self.assertEqual(
+            [(Sport.RUN, date(2026, 11, 12)), (Sport.RUN, date(2026, 11, 9))], days
+        )
+        self.assertEqual(170.0, run_lthr.resolver()({"date": "2026-11-12"}))
+
+    def test_unavailable_thresholds_give_no_zones(self) -> None:
+        for thresholds in (None, SimpleNamespace(unavailable=True)):
+            with self.subTest(thresholds=thresholds):
+                run_lthr = self.lookup(thresholds)
+
+                self.assertIsNone(run_lthr.zones_resolver()({"sport": "Run"}))
+                self.assertIsNone(run_lthr.resolver()({"sport": "Run"}))
 
 
 if __name__ == "__main__":

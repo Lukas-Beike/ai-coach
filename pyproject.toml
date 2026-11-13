@@ -8,7 +8,8 @@ target-version = "py314"
 extend-select = ["DTZ", "ARG001", "ARG002", "ARG003", "ARG004"]
 
 [tool.ruff.lint.per-file-ignores]
-# SonarCloud excludes tests/** and e2e/** from its sources (sonar-project.properties).
+# Tests keep these ignores locally; SonarCloud's automatic analysis does check
+# tests/** and e2e/** as main code (.sonarcloud.properties, #2475).
 "tests/**" = ["ARG001", "ARG002", "ARG003", "ARG004"]
 "e2e/**" = ["ARG001", "ARG002", "ARG003", "ARG004"]
 

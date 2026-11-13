@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { loadPublicScript } = require("./frontend-harness.cjs");
+const { babelParse, loadPublicScript } = require("./frontend-harness.cjs");
 
 const publicDir = path.join(__dirname, "../public");
 const read = (name) => fs.readFileSync(path.join(publicDir, name), "utf8").replace(/\r\n/g, "\n");
@@ -16,8 +16,9 @@ function workerAssets() {
   return JSON.parse(match[1]);
 }
 
-test("every service-worker asset exists in public/ and is referenced from index.html", () => {
+test("every service-worker asset exists in public/ and is referenced from index.html or the stylesheet", () => {
   const assets = workerAssets().filter((asset) => asset !== "/");
+  const styles = read("styles.css");
   assert.ok(assets.length > 0);
   // Icons only the manifest names are cached for the offline install.
   const manifestIcons = new Set(JSON.parse(read("manifest.webmanifest")).icons.map((icon) => icon.src).filter((src) => !index.includes(`"${src}`)));
@@ -26,7 +27,7 @@ test("every service-worker asset exists in public/ and is referenced from index.
     assert.ok(fs.existsSync(path.join(publicDir, file)), `${asset} is cached but missing from public/`);
     if (manifestIcons.has(asset)) continue;
     if (file === "manifest.webmanifest") assert.ok(index.includes(`href="/${file}"`), `${file} is not linked from index.html`);
-    else assert.ok(index.includes(`"${asset}"`), `${asset} is not referenced from index.html with the same version`);
+    else assert.ok(index.includes(`"${asset}"`) || styles.includes(`url("${asset}")`), `${asset} is not referenced from index.html or styles.css`);
   }
 });
 
@@ -112,4 +113,20 @@ test("a Coach link names its host when the label does not, and escapes it", () =
   assert.ok(differing.includes('<a href="https://www.example.invalid/path?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">Mehr dazu</a><span class="link-host"> (example.invalid)</span>'));
   assert.ok(!context.inlineMarkdown("[example.invalid/path](https://example.invalid/path)").includes("link-host"));
   assert.ok(context.inlineMarkdown("[Quelle](https://example.invalid/x)").includes("(example.invalid)</span>"));
+});
+
+// The page loads classic scripts that share one global scope: a name declared twice at top level
+// stops the later script (let/const) or silently replaces the earlier function.
+test("top-level names are unique across the scripts index.html loads", () => {
+  const owners = new Map();
+  for (const [, file] of index.matchAll(/<script src="\/([\w-]+\.js)"/g)) {
+    for (const node of babelParse(read(file), file, false).program.body) {
+      const ids = node.type === "VariableDeclaration" ? node.declarations.map((item) => item.id) : [node.id];
+      for (const name of ids.flatMap((id) => (id?.type === "ObjectPattern" ? id.properties.map((item) => item.value.name) : [id?.name])).filter(Boolean)) {
+        assert.equal(owners.get(name), undefined, `${name} is declared in ${owners.get(name)} and ${file}`);
+        owners.set(name, file);
+      }
+    }
+  }
+  assert.ok(owners.has("renderPlanned") && owners.has("h"));
 });

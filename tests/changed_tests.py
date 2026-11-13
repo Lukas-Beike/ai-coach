@@ -8,7 +8,8 @@ name, or its dotted module name. The literal rule catches source-scanning
 contract tests and ``mock.patch("backend...")`` targets that imports miss.
 A bare top-level directory name only counts in a module that iterates
 directories. A module whose literals name a changed data file under backend/
-counts as changed. Imports reached only through ``server.py`` count only when
+counts as changed. Every change selects the REPOSITORY_WIDE checks of tracked
+files. Imports reached only through ``server.py`` count only when
 ``server.py`` or a module under SERVER_WIRED_PATHS changed: app-wide tests then
 stay in CI unless they import the changed module another way. Changes under
 FULL_SUITE_PATHS, a source that cannot be parsed, or a selection of at least
@@ -36,7 +37,6 @@ FULL_SUITE_PATHS = (
     "tests/changed_tests.py",
     "tests/support.py",
     "tests/server_test_support.py",
-    "tests/fixtures/",
     "requirements",
     "Dockerfile",
     "pyproject.toml",
@@ -71,6 +71,14 @@ HEAVY_MODULES = {
         "tests/test_ci_contracts.py",
     ),
 }
+# A changed fixture selects every test whose sources, or the modules it
+# imports, name the fixtures directory as a path segment: loaders build fixture
+# paths from parts, so the file name alone would miss them.
+FIXTURES = "tests/fixtures/"
+# Tests that check tracked files across the repository (line endings, guidance
+# links to files such as tests/fixtures/providers/README.md), so any changed
+# path can break them: every change selects them (#2502).
+REPOSITORY_WIDE = ("test_line_endings", "test_ai_docs_contract")
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
 # Too generic to identify one file by name alone.
@@ -211,6 +219,13 @@ def _names(source: _Source, literal: str, exact: set[str], dotted: set[str]) -> 
     )
 
 
+def _names_fixtures(source: _Source) -> bool:
+    return any(
+        " " not in literal and "fixtures" in literal.split("/")
+        for literal in source.literals
+    )
+
+
 def full_suite_reason(paths: list[str]) -> str | None:
     for path in paths:
         for prefix in FULL_SUITE_PATHS:
@@ -265,6 +280,10 @@ def select_modules(
         if source.path in paths:
             selected[module] = f"changed {source.path}"
             continue
+        # Any changed path can break a repository-wide check (#2502).
+        if module in REPOSITORY_WIDE and paths:
+            selected[module] = "checks every tracked file"
+            continue
         reach = _closure(module, sources, through_server)
         hit = next(
             (changed_modules[m] for m in sorted(reach) if m in changed_modules), None
@@ -297,6 +316,18 @@ def select_modules(
             if owner:
                 selected[module] = f"{owner.path} names {path}"
                 break
+        if module in selected or not any(p.startswith(FIXTURES) for p in paths):
+            continue
+        owner = next(
+            (
+                s
+                for s in [source, *(sources[m] for m in sorted(reach))]
+                if _names_fixtures(s)
+            ),
+            None,
+        )
+        if owner:
+            selected[module] = f"{owner.path} names {FIXTURES.rstrip('/')}"
     total = sum(
         1
         for module, source in sources.items()

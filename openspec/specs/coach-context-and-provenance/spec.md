@@ -38,7 +38,23 @@ The system SHALL select context sections, date horizon and recent-activity limit
 - **WHEN** a short continuation depends on an active request or referenced dialogue
 - **THEN** necessary original messages are retained without granting write authority from context selection.
 
-Evidence: `backend/coach/context_selection.py:select_coach_context`, `backend/coach/context_selection.py:compact_coach_dialogue`; `tests/test_coach_context_selection.py:test_explicit_dates_without_planning_keywords_use_full_context`, `tests/test_coach_context_selection.py:test_long_range_planning_uses_complete_context`, `tests/test_coach_context_selection.py:test_dialogue_compaction_does_not_mutate_authorization_context`; `tests/test_coach_context_reduction.py:test_scoped_assembly_skips_unnecessary_reads`.
+#### Scenario: Sections and base set
+- **WHEN** a selection is made
+- **THEN** it chooses among the sections named in `CONTEXT_SECTIONS` (`backend/coach/context_selection.py`, normative): the base set is durable_profile, target_competitions, local_feedback, activity_feedback, local_planned_workouts, activities, current_performance and source_policy; the full set is every section except nutrition_products and planning_brief; the quick-action kinds use the fixed sets of CC9a
+
+#### Scenario: Routine topic
+- **WHEN** a message matches one topic without explicit dates, history words, a past week, an active pending request or a provider refresh
+- **THEN** the base set is sent, plus planning and training_plans for planning topics, the day view (`daily_planning_context`) for planning, today-training and weekday messages, recovery for recovery words, weather for weather words, the external calendar for full-calendar words and saved products for food, with a window of 2 past and 3 future days (14 future days for planning topics, at least 7 for a weather question that names a day) and the newest activity of each sport (5 per sport for planning and activity analysis)
+
+#### Scenario: Full or fallback context
+- **WHEN** the message names an explicit date, history or a past week without a planning verb, plans over months or several weeks, or asks for a provider refresh or sync without planning
+- **THEN** the full set is sent without a day window; an active pending request, or a continuation or pronoun reference that is ambiguous (no topic, at most three words or several topics), gets the fallback set (base, day view, planning, training_plans) and every other section stays loadable through `read_coach_context`
+
+#### Scenario: Dialogue window
+- **WHEN** a turn is built
+- **THEN** the last 24 messages (each cut to 4,000 characters, plus the athlete messages a pending request cites) and the last 12 completed results are loaded and the current message is sent once, separately; a routine turn carries only the last 8 loaded messages and 3 results, while a continuation, a pronoun reference, a resumed turn and a full-context turn keep all loaded entries
+
+Evidence: `backend/coach/context_selection.py:select_coach_context`, `backend/coach/context_selection.py:compact_coach_dialogue`; `tests/test_coach_context_selection.py:test_explicit_dates_without_planning_keywords_use_full_context`, `tests/test_coach_context_selection.py:test_long_range_planning_uses_complete_context`, `tests/test_coach_context_selection.py:test_dialogue_compaction_does_not_mutate_authorization_context`; `tests/test_coach_context_reduction.py:test_scoped_assembly_skips_unnecessary_reads`; `backend/coach/context_selection.py:CONTEXT_SECTIONS`, `backend/coach/context_selection.py:CoachContextSelection`, `backend/coach/dialogue.py:CoachDialogueReadService.context`; `tests/test_coach_context_selection.py`, `tests/test_coach_context_scenarios.py` (scenario catalogue `tests/fixtures/coach_context_scenarios.json`), `tests/test_coach_dialogue_read.py:test_context_limits_messages_and_projects_only_bounded_fields`.
 
 ### Requirement: CP3 Bounded context with visible coverage
 The system SHALL bound per-section and total Coach context, retain valid structured data after clipping, and expose projection metadata describing omitted or truncated sections and item limits.
@@ -63,7 +79,28 @@ The system SHALL bound per-section and total Coach context, retain valid structu
 - **WHEN** the first canonical backfill is pending or failed and a scoped Coach context is built
 - **THEN** the context marks the unavailable canonical activity and provider data, preserves that marker through selection, and identifies local plans as still available.
 
-Evidence: `backend/coach/context.py:bounded_coach_context_sections`, `backend/coach/context.py:coach_context_projection_meta`, `backend/coach/context.py:CoachTrainingContextService.build`; `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`; `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`, `tests/test_coach_context_reduction.py:test_pending_data_marker_survives_scoped_planning_projection`; `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`; `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_sections_and_budget_per_kind`, `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_size_diagnostics_name_the_selection_and_sections_for_every_kind`.
+#### Scenario: Section and item limits
+- **WHEN** a section is larger than its limit, measured as the length of its compact JSON text
+- **THEN** it is cut to activities 32,000, current_performance 24,000, daily_planning_context 24,000, external_calendar 20,000, planning_brief 20,000, recovery 16,000, planning 16,000, weather 16,000, nutrition_products 16,000, local_feedback 12,000 or activity_feedback 12,000 characters; the items are limited to 5 recent activities per sport, 50 planned events, 50 local planned units, 12 library templates (descriptions at most 1,500 characters) and 80 saved products
+
+#### Scenario: Total budget and priority
+- **WHEN** the context exceeds 120,000 characters
+- **THEN** the sections are fitted in this order and what no longer fits is truncated or omitted: projection, source_policy, canonical_data_status, recovery, current_performance, daily_planning_context, durable_profile, target_competitions, local_planned_workouts, planning, planning_brief, local_feedback, activity_feedback, training_plans, activities, weather, nutrition_products, calendar, external_calendar; losing one of the first six is logged as a warning, any other loss at info level
+
+Evidence:
+- `backend/coach/context.py:bounded_coach_context_sections_by_priority`
+- `backend/coach/context.py:bounded_coach_context_sections`
+- `backend/coach/context.py:coach_context_projection_meta`
+- `backend/coach/context.py:COACH_CONTEXT_SECTION_LIMITS`
+- `backend/coach/context.py:COACH_CONTEXT_SECTION_PRIORITY`
+- `backend/coach/context.py:COACH_CONTEXT_TOTAL_CHAR_LIMIT`
+- `backend/coach/context.py:CoachTrainingContextService.build`
+- `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_sections_and_budget_per_kind`
+- `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_size_diagnostics_name_the_selection_and_sections_for_every_kind`
+- `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`
+- `tests/test_coach_context_reduction.py:test_pending_data_marker_survives_scoped_planning_projection`
+- `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`
+- `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`
 
 ### Requirement: CP4 On-demand omitted context
 The system SHALL support read-only loading of named local Coach context sections, report whether the bounded result is complete, and reject invalid section requests.
@@ -105,7 +142,14 @@ The system SHALL build ordinary Coach context from saved Garmin, Wahoo and local
 - **WHEN** the context includes the activities section and canonical coverage stores a current Garmin or Wahoo activity fetch time
 - **THEN** the section's `synced_at` and `source.synced_at` equal that time regardless of the stored snapshot's `synced_at` or of a duplicate deletion, and are null when no coverage is stored.
 
-Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. The activity sync time is the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count; `backend/activities/sync_time.py:activities_synced_at`); `source.providers` lists the providers of the sessions' primary and per-value sources (`tests/test_coach_domain_sections.py:test_activities_source_block_comes_first_and_names_the_session_sources`, `tests/test_activity_sync_time.py`).
+Evidence:
+- `backend/coach/context.py:CoachStructuredContextService.build`
+- `backend/coach/context.py:CoachPlanningContextReader.calendar`
+- `backend/coach/context.py:CoachPlanningContextReader.external_calendar`
+- `backend/coach/context.py:CoachPerformanceContextReader.current_performance`
+- `backend/coach/context.py:CoachIntervalsContextService.project`
+- `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. The activity sync time is the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count; `backend/activities/sync_time.py:activities_synced_at`)
+- `source.providers` lists the providers of the sessions' primary and per-value sources (`tests/test_coach_domain_sections.py:test_activities_source_block_comes_first_and_names_the_session_sources`, `tests/test_activity_sync_time.py`).
 
 ### Requirement: CP6 Explicit provider refresh and current results
 The system SHALL route a requested provider update through the existing provider refresh owners, distinguish queued work from completed refreshed data, and use refreshed local context before the subsequent model response where the provider contract waits for completion.
@@ -126,7 +170,11 @@ The system SHALL route a requested provider update through the existing provider
 - **WHEN** a refresh fails or its job remains pending
 - **THEN** that tool result remains distinguishable from a successful refresh, and saved context remains saved evidence rather than a new provider measurement.
 
-Evidence: `backend/coach/sync_tools.py:CoachSyncToolService.execute`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._waits_for_completion`; `tests/test_coach_dialogue.py:test_current_refresh_runs_before_next_model_response_without_trigger_gate`, `tests/test_coach_dialogue.py:test_garmin_refresh_waits_for_completion_without_queueing`, `tests/test_coach_dialogue.py:test_queued_refresh_and_job_read_use_current_tool_results`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`; `tests/test_coach_tool_preparation.py:StructuredToolPreparationTests.test_get_sync_job_receives_object_scope_without_reclassification`; `tests/test_coach_tool_coverage.py:test_provider_reads_and_job_status_use_correct_provider`.
+#### Scenario: Refresh parameters
+- **WHEN** the Coach calls `start_provider_refresh` (parameters in `openspec/COACH_TOOLS.md`)
+- **THEN** the provider is the `_request.target` among the Coach refresh targets with the scope `<target>_refresh`, the optional `days` is -1 or 1 to 365, and no sync wording is needed because no athlete-authored record changes; the Coach rules (`COACH_PROMPT`, CC9c) allow it only after an explicit request to update a provider and ask for `days` 30 on a Garmin catch-up
+
+Evidence: `backend/coach/sync_tools.py:CoachSyncToolService.execute`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._waits_for_completion`; `tests/test_coach_dialogue.py:test_current_refresh_runs_before_next_model_response_without_trigger_gate`, `tests/test_coach_dialogue.py:test_garmin_refresh_waits_for_completion_without_queueing`, `tests/test_coach_dialogue.py:test_queued_refresh_and_job_read_use_current_tool_results`; `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`; `tests/test_coach_tool_preparation.py:StructuredToolPreparationTests.test_get_sync_job_receives_object_scope_without_reclassification`; `tests/test_coach_tool_coverage.py:test_provider_reads_and_job_status_use_correct_provider`; `backend/coach/tool_specs.py:UNGATED_TOOLS`, `backend/sync/provider_registry.py:ProviderRegistry.coach_refresh_targets`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_coach_refresh_targets.py`.
 
 ### Requirement: CP7 Bounded local reads and analysis parity
 The system SHALL provide read-only tools for exact local records and deterministic analysis without treating tool reads as permission to write.
@@ -163,7 +211,27 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** `get_training_report` requests the `block_review` section alone (default: the last 4 whole weeks; `start` and `days` 28, 42, 56 or 84 choose another period; `since_last_test` starts on the Monday of the last completed local test unit's week with the shortest of 28, 56 or 84 days reaching today, else 56 days, and `last_test` names that day or null)
 - **THEN** it receives a read-only, descriptive comparison of planned and completed volume and compliance per sport, the completed intensity distribution against `training_model`, key sessions by session focus (threshold, vo2max, long, leg strength; derived focus counted), the CTL/mean-max trend, pace at a fixed 10 bpm heart-rate band (steady runs after a 10-minute warm-up, flat samples within 3 % slope, grade-adjusted where a slope or altitude stream exists, earlier versus later half per environment; hilly, trail, no-heart-rate or terrain-unknown runs and fewer than two usable sessions in the block or a half without one stay `not_covered`, never zero), session-RPE per week, check-in score shifts, bounded athlete feedback notes as untrusted text and at most four deterministic `lessons` with evidence strength; unknown data adds no lesson and `planning_brief.lessons` carries the same lessons for plan requests.
 
-Evidence: `backend/planning/block_review.py:block_review`; `tests/test_block_review.py`; `backend/performance/comparable_sessions.py:equal_effort_trend`, `tests/test_comparable_sessions.py:EqualEffortTrendTests`; `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`; `tests/test_pace_at_hr.py`; `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`; `backend/coach/tool_schemas.py` (`get_training_report`); `backend/coach/context.py:coach_performance_projection`; `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`, `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`; `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`; `tests/test_coach_activity_read_tools.py:test_detail_returns_the_v1_document_with_its_envelope`, `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`, `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`; `backend/performance/progress_report.py:weekly_progress`; `tests/test_weekly_progress.py`; `tests/test_personal_recovery_coach_cases.py`, `tests/test_performance_coach_ui_parity.py`.
+Evidence:
+- `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`
+- `backend/coach/context.py:coach_performance_projection`
+- `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`
+- `backend/coach/tool_schemas.py` (`get_training_report`)
+- `backend/performance/comparable_sessions.py:equal_effort_trend`
+- `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`
+- `backend/performance/progress_report.py:weekly_progress`
+- `backend/planning/block_review.py:block_review`
+- `tests/test_block_review.py`
+- `tests/test_coach_activity_read_tools.py:test_detail_returns_the_v1_document_with_its_envelope`
+- `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`
+- `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`
+- `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`
+- `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`
+- `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`
+- `tests/test_comparable_sessions.py:EqualEffortTrendTests`
+- `tests/test_pace_at_hr.py`
+- `tests/test_performance_coach_ui_parity.py`
+- `tests/test_personal_recovery_coach_cases.py`
+- `tests/test_weekly_progress.py`
 
 ### Requirement: CP8 External text is evidence only
 The system SHALL isolate provider, calendar, attachment and stored product text as untrusted context data, prevent it from reproducing context fence delimiters, and keep credentials and raw transport payloads out of the Coach projection.
@@ -263,3 +331,60 @@ The system SHALL give every subjective rating that reaches the Coach (activity R
 Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or a provider scale) and keep their values. The Intervals.icu wellness scale table in `backend/canonical/rating_scales.py` remains for retired rows.
 
 Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.
+
+### Requirement: CP10 Context content, fitting and layout
+The system SHALL build each context section from allowlisted fields, measure sizes as the length of the compact JSON text, fit oversized values deterministically and lay the context out between fixed fence lines, so that the same stored data always yields the same context text.
+
+#### Scenario: Allowlists and source policy
+- **WHEN** the activities, library and source-policy parts are built
+- **THEN** an activity keeps only the fields of `COACH_ACTIVITY_FIELDS` (text values cut: id and name to 200, sport to 80 characters), a German `purpose_label` for a known purpose and `sources` only for values whose source differs from the session's primary source; the `activities` section holds the source block `{provider, providers, label, synced_at}`, `recent_activities_by_sport`, `activity_rollups_by_sport` and the local planned workouts labelled "Lokale Planung"; a library template keeps the fields of `COACH_LIBRARY_FIELDS` with name 200, description 1,500 and 10 tags of 80 characters; `source_policy` holds one fixed text per source, normative in `CoachStructuredContextService._selected_sections`, and for a selected context the omitted sections
+
+#### Scenario: Library and products
+- **WHEN** the library selection and the saved products are built
+- **THEN** the library takes the undated templates in turn from each workout type (types sorted by name) up to 12; the products are `{id, name, brand, basis_amount, basis_unit, source}`, newest change first, at most 80, and stop before the section limit with `truncated` set when anything was left out
+
+#### Scenario: Fitting
+- **WHEN** a value exceeds its limit
+- **THEN** a string keeps its longest prefix that fits, a list its longest prefix of fitted items, and an object its keys in their order, each fitted to the remaining budget and skipped when it does not fit, so valid JSON stays valid; for the total budget the top-level sections are fitted in the priority order of CP3
+
+#### Scenario: Text layout
+- **WHEN** the context text is assembled
+- **THEN** it is the coaching rules (`COACH_PROMPT`), the line "BEGIN UNTRUSTED EXTERNAL DATA", the headings "STRUCTURED ATHLETE CONTEXT (authoritative for this turn):" and "LOCAL PLANNED WORKOUTS (compact projection, included once below):", the structured context as compact JSON, the heading "LOCAL TRAINING LIBRARY (bounded selection of local templates; templates available to the coach):" with the library JSON, for a selected context the note that omitted sections load through `read_coach_context` and that selection never authorizes writes, and "END UNTRUSTED EXTERNAL DATA"; the words "untrusted external data" inside the JSON are rewritten to "untrusted-external-data"
+
+Evidence: `backend/coach/context.py:COACH_ACTIVITY_FIELDS`, `backend/coach/context.py:COACH_LIBRARY_FIELDS`, `backend/coach/context.py:coach_workout_library`, `backend/coach/context.py:CoachStructuredContextService._selected_sections`, `backend/coach/context.py:CoachStructuredContextService._compact_nutrition_products`, `backend/coach/context.py:CoachTrainingContextService.build`, `backend/coach/context.py:bounded_coach_context_value`, `backend/coach/context.py:_defanged`; `tests/test_coach_structured_context.py:test_weather_place_is_named_without_coordinates`, `tests/test_coach_library_context.py:test_sorts_types_for_round_robin_and_preserves_order_within_each_type`, `tests/test_coach_context_reduction.py:test_priority_budget_skips_and_continues_past_large_sections`, `tests/test_coach_training_context.py:test_external_text_cannot_reproduce_the_untrusted_data_fence`.
+
+### Requirement: CP11 Limits, defaults and errors of the local read tools
+The system SHALL offer the local read tools in every turn, also an advisory one, without request envelope or write gate, and SHALL bound their results, clamp list limits to their range and state an incomplete result or an uncovered comparison with a reason, never with zero. Parameters are in `openspec/COACH_TOOLS.md`.
+
+#### Scenario: Clamped list limits
+- **WHEN** a list tool is called with a limit of 0 or above its maximum
+- **THEN** the limit moves to the nearest bound and the call succeeds: `list_workout_library` 1 to 100 (default 100), `list_planned_workouts` 1 to 366 (default 100), `list_change_history` 1 to 500 (default 100), `list_recent_activities` `days` 1 to 3,660 (default 30) and `limit` 1 to 500 (default 100); a value that is no integer fails with 400 `invalid_list_request` ("Bibliothekslimit ist ungültig.", "Planungslimit ist ungültig.", "Historienlimit ist ungültig." or "Aktivitätszeitraum oder Limit ist ungültig."); `list_training_plans` returns at most 100 plans and `list_recent_activities` leaves out the per-field sources and zone-time arrays of each session
+
+#### Scenario: Reports and records
+- **WHEN** `get_training_report` or `read_training_records` is called
+- **THEN** `get_training_report` defaults to the section `report`, or to `progress` for a window of 42, 56 or 84 days, accepts 1 to 10 of its ten sections, allows `progress`, `block_review` and the long windows only alone (400 "progress, block_review und 42, 56 oder 84 Tage nur allein abrufbar."), rejects an unknown section (400 "Unbekannter Analysebereich.") and returns each requested section with `projection {requested_sections, complete}` cut to 30,000 characters; `read_training_records` is cut to 30,000 characters; unwired report services fail with 503 "Trainingsberichte sind nicht verfügbar." or "Trainingsprotokolle sind nicht verfügbar."
+
+#### Scenario: Planned units beside a session
+- **WHEN** `get_activity_details` returns a session
+- **THEN** `planned_units` holds at most 10 local planned units dated within one day of the session (at most 4,000 characters, null when planned units are unavailable), and `focus` is `{status: matched, ...}` when exactly one planned unit has the session's day and sport, else `{status: unknown, reason}` with "Geplante Einheiten nicht verfügbar.", "Keine geplante Einheit dieses Tages und Sports.", "Mehrere geplante Einheiten dieses Tages und Sports." or "Die geplante Einheit hat kein Ziel."; a comparison that is not covered is `{status: not_covered, reason}`, for example "E-Bike-Einheiten werden nicht verglichen (Motorunterstützung)." or "Pendeln, Einfahren und Ausfahren werden nicht verglichen."
+
+#### Scenario: Nutrition reads
+- **WHEN** `read_nutrition`, `lookup_food` or `calculate_food_nutrition` is called
+- **THEN** `read_nutrition` returns the day's summary for `date`, the summaries of a range of at most 31 days for `start` and `end` (400 `range_too_large` beyond that) or today's summary, always with the meal templates and saved products, and `{ok: false, error}` when the nutrition service is not wired; `lookup_food` takes `query` and `queries` together (1 to 20 distinct terms, no `barcode` beside `queries`) and returns one result per term, failing as a whole only when every term fails; with an explicit source whose external lookup fails it still returns saved matching products with a notice; `calculate_food_nutrition` refuses `components` combined with `ingredients` or `product_id` (400); a missing food database fails with 503 "Lebensmitteldatenbank ist nicht verfügbar."; none of them saves anything, and the two food-database tools run outside the local transaction
+
+Evidence:
+- `backend/coach/activity_read_tools.py:_report_sections`
+- `backend/coach/activity_read_tools.py:CoachActivityReadToolService._with_session_context`
+- `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`
+- `backend/coach/read_tools.py:CoachReadToolService._calculate_food`
+- `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`
+- `backend/coach/read_tools.py:CoachReadToolService._lookup_food`
+- `backend/coach/read_tools.py:CoachReadToolService._read_nutrition`
+- `backend/coach/session_checks.py:matched_focus`
+- `tests/test_coach_activity_read_tools.py:test_recent_activities_keep_scalars_and_drop_per_field_detail`
+- `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`
+- `tests/test_coach_read_tools.py:test_limit_bounds_saturate_and_optional_filters_are_forwarded`
+- `tests/test_coach_read_tools.py:test_nutrition_range_is_validated_and_bounded`
+- `tests/test_coach_session_checks.py:test_an_e_bike_session_says_it_is_not_compared`
+- `tests/test_coach_tool_coverage.py:test_food_database_read_tools_calculate_without_writing`
+- `tests/test_coach_tool_schemas.py:test_read_limits_declare_server_clamp_bounds`

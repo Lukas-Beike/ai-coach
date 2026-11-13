@@ -109,13 +109,15 @@ function changedSyncAreas(nextVersions) {
   const areaMap = {
     // Race results of past competitions come with the profile read.
     activities: ["plan", "performance", "profile"],
+    // Also moved by a zone save, removal or undo: LT1/LT2 derive from the zones (#2479).
     performance: ["performance", "plan"],
     ...(providerIds().garmin ? { [providerIds().garmin]: ["performance", "plan"] } : {}),
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback", "plan"],
     activity_feedback: ["feedback", "plan", "performance"],
-    profile: ["profile"],
+    // LT1 in the performance values derives from the profile's first threshold (#2427).
+    profile: ["profile", "performance"],
     plan: ["plan"],
   };
   const areas = new Set();

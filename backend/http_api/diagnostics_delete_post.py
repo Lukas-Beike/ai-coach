@@ -34,7 +34,17 @@ class DiagnosticsDeletePostRoutes:
         ]
 
     def _delete_logs(self, handler: Any, _request: RouteRequest) -> None:
-        """Clear the server log."""
+        """Clear the server log.
+
+        Request: no body.
+
+        Response: 200 with `ok` (`true`) and `cleared` (whether a log file
+        existed): the rotated log files are removed and the active one is
+        emptied.
+
+        Errors: 500 "Logs konnten nicht gelöscht werden." when a log file cannot
+        be removed or emptied.
+        """
         try:
             result = self._recent_log_entries_service().clear()
         except OSError as exc:
@@ -42,7 +52,15 @@ class DiagnosticsDeletePostRoutes:
         handler.send_json(200, result)
 
     def _delete_diagnostics(self, handler: Any, _request: RouteRequest) -> None:
-        """Clear the stored diagnostics."""
+        """Clear the stored diagnostics.
+
+        Request: no body.
+
+        Response: 200 with `ok` (`true`) and `entries` (`0`): the captured
+        technical diagnostic entries are emptied.
+
+        Errors: 500 "Diagnose konnte nicht gelöscht werden." when clearing fails.
+        """
         try:
             result = self._diagnostic_report_service().clear()
         except Exception as exc:

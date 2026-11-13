@@ -41,13 +41,13 @@ function contextValueNodeFor() {
 }
 
 function descendants(node) {
-  return node.children.flatMap((child) => [child, ...descendants(child)]);
+  return node.children.filter((child) => typeof child !== "string").flatMap((child) => [child, ...descendants(child)]);
 }
 
 test("the context preview shows readable values and keeps deeply nested provider data as compact text", () => {
   const contextValueNode = contextValueNodeFor();
   const readable = contextValueNode({ unlabelled_key: "ok", flag: true, empty: [], missing: null });
-  const text = descendants(readable).map((node) => node.textContent).filter(Boolean);
+  const text = readable.children.map((node) => node.textContent);
   assert.deepEqual(text, ["unlabelled key", "ok", "flag", "Ja", "empty", "Keine Angaben", "missing", "–"]);
   const nested = descendants(contextValueNode({ a: { b: { c: { d: 1 } } } }));
   assert.deepEqual(nested.filter((node) => node.tag === "pre").map((node) => node.textContent), ['{\n  "d": 1\n}']);

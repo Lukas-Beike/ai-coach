@@ -2,13 +2,13 @@
 
 import unittest
 from copy import deepcopy
-from datetime import datetime, timedelta
-from datetime import datetime as _local_datetime
+from datetime import timedelta
 from unittest.mock import patch
 
 from server_test_support import ServerTestCase, server
 from support import parsed_workout_fixture
 
+from backend.activities.workout_text import structured_blocks, structured_steps
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 
@@ -18,15 +18,13 @@ class WorkoutTextTests(ServerTestCase):
         super().setUp()
         self.enterContext(
             patch.object(
-                server.ATHLETE_CLOCK, "now", return_value=datetime.now().astimezone()
+                server.ATHLETE_CLOCK, "now", return_value=server.ATHLETE_CLOCK.now()
             )
         )
 
     def workout(self, description, minutes=61, **extra):
         return {
-            "date": (
-                _local_datetime.now().astimezone().date() + timedelta(days=1)
-            ).isoformat(),
+            "date": (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
             "sport": "Ride",
             "name": "Synthetic workout",
             "description": description,
@@ -396,6 +394,17 @@ class WorkoutTextTests(ServerTestCase):
         reply["workout_doc"]["steps"][0]["steps"] = list(reversed(steps))
         with self.assertRaises(AppError):
             planning_workouts.validate_intervals_workout_result(workout, reply)
+
+    def test_structured_steps_flatten_the_repeated_blocks(self):
+        text = "Warmup\n- 10m 60%\n\nMain set 2x\n- 4m 90%\n- 1m 50%"
+        blocks = structured_blocks(text)
+
+        self.assertEqual([1, 2], [block["repeat"] for block in blocks])
+        self.assertEqual(
+            [step for block in blocks for step in block["steps"] * block["repeat"]],
+            structured_steps(text),
+        )
+        self.assertEqual(5, len(structured_steps(text)))
 
 
 if __name__ == "__main__":

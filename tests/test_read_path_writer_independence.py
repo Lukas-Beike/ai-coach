@@ -86,11 +86,11 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
     def read_calls(self) -> dict[str, Callable[[], object]]:
         """Every other moved GET read, as zero-argument callables."""
         public = server.PUBLIC_STATE
-        diary = server.NUTRITION_ASSEMBLY.diary_service
-        library = server.NUTRITION_ASSEMBLY.meal_library_service
+        diary = server.NUTRITION_SERVICES.diary_service
+        library = server.NUTRITION_SERVICES.meal_library_service
         day = "2026-01-05"
         today = date(2026, 1, 5)
-        reports = server.HTTP_API.training_reports()
+        reports = server.PERFORMANCE.training_reports()
 
         def outcome(call: Callable[[], object]) -> object:
             # A missing record is a normal answer for these reads; a hidden write
@@ -110,7 +110,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
 
         def archive_files(*names: str) -> dict[str, bytes]:
             # The archive stamps its own generation time; its collections are stable.
-            path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+            path = server.PRIVACY.archive_export_service().create_file()
             try:
                 with zipfile.ZipFile(path) as archive:
                     return {name: archive.read(name) for name in names}
@@ -189,16 +189,16 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "derived_impact": lambda: reports.derived.impact("UTC"),
             "readiness": lambda: server.HTTP_API.readiness_service().state(),
             "privacy_preview": lambda: (
-                server.PRIVACY_ASSEMBLY.delete_service().preview()
+                server.PRIVACY.delete_service().preview()
             ),
             "privacy_export": lambda: archive_files(
                 "profile.json", "athlete_checkins.jsonl"
             ),
             "diagnostic_report": lambda: without_process_measurements(
-                server.DIAGNOSTICS_ASSEMBLY.report_service().report()
+                server.DIAGNOSTICS.report_service().report()
             ),
             "coach_history_diagnostics": lambda: (
-                server.DIAGNOSTICS_ASSEMBLY.coach_history_service().history()
+                server.DIAGNOSTICS.coach_history_service().history()
             ),
             "wahoo_status": lambda: server.WAHOO_CONNECTION.service().status(),
         }

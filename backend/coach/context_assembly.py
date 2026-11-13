@@ -133,6 +133,7 @@ class CoachContextAssembly:
                 self._canonical,
                 self._activity_rows,
                 session_feedback=self._session_feedback_lookup,
+                zone_configurations=self._zone_configurations,
             ),
             nutrition_meal_library=self._nutrition_meal_library,
             zone_configurations=self._zone_configurations,

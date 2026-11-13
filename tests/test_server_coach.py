@@ -6,7 +6,6 @@ import unittest
 import uuid
 from dataclasses import replace
 from datetime import date, timedelta
-from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -379,7 +378,7 @@ class ServerCoachTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Easy run",
@@ -462,7 +461,7 @@ class ServerCoachTests(ServerTestCase):
         planned = server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (
-                    _local_datetime.now().astimezone().date() + timedelta(days=1)
+                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
                 "sport": "Run",
                 "name": "Planned",
@@ -1303,7 +1302,7 @@ class ServerCoachTests(ServerTestCase):
             [
                 {
                     "date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=1)
+                        server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                     ).isoformat(),
                     "sport": "Run",
                     "name": "Locker Lauf",
@@ -1323,7 +1322,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(planned["source"], "library")
         self.assertEqual(
             planned["date"],
-            (_local_datetime.now().astimezone().date() + timedelta(days=1)).isoformat(),
+            (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat(),
         )
         self.assertIsNone(planned["external_id"])
 
@@ -1345,7 +1344,7 @@ class ServerCoachTests(ServerTestCase):
     ):
         server.ATHLETE_DATA.profile().save({"name": "Ada", "goals": "Long course"})
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=60)
         ).isoformat()
         arguments = {
             "competition_id": "",
@@ -1399,7 +1398,7 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_competition_update_is_pushed_to_existing_remote_event(self):
         event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
+            server.ATHLETE_CLOCK.now().date() + timedelta(days=60)
         ).isoformat()
         saved = server.PLANNING_DATA.competition().save(
             {"name": "Old Race", "event_date": event_date, "sport": "Cycling"}
@@ -1450,7 +1449,11 @@ class ServerCoachTests(ServerTestCase):
 
         with (
             patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
+                server,
+                "PROVIDER_TRANSPORT",
+                replace(
+                    server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
+                ),
             ),
             patch.object(
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")

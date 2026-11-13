@@ -476,7 +476,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             patch.object(
                 checkins, "context", return_value={"today": {"available_minutes": 30}}
             ),
-            patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}),
+            patch.object(server.WEATHER.service(), "state", return_value={}),
             patch.object(calendar_external, "list_events", return_value=[]),
         ):
             preview = (
@@ -627,7 +627,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 "context",
                 return_value={"today": {"illness": "Synthetic illness"}},
             ),
-            patch.object(server.WEATHER_ASSEMBLY.service(), "state", return_value={}),
+            patch.object(server.WEATHER.service(), "state", return_value={}),
             patch.object(calendar_external, "list_events", return_value=[]),
         ):
             preview = (

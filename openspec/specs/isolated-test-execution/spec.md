@@ -18,11 +18,15 @@ The test entry points SHALL expose explicit focused and complete selections. Com
 - **WHEN** a developer selects a project, spec, or Python module
 - **THEN** the runner reports that selection and its result without omitting any case inside the selected scope or claiming complete-suite success.
 
+#### Scenario: Spec a selected project does not list
+- **WHEN** a requested spec is listed by some project but not by a selected one
+- **THEN** that (spec, project) pair is skipped with a note and the other selected pairs run; a spec no project lists fails clearly
+
 #### Scenario: Invalid or empty selection
 - **WHEN** an unknown project, invalid shard, or selection matching no tests is requested
 - **THEN** execution fails clearly rather than returning a successful empty run.
 
-Evidence: `scripts/run_browser_tests.py`, `tests/run_tests.py`, `playwright.config.cjs`; `tests/browser-selection.test.cjs`, `tests/test_browser_runner.py::BrowserRunnerTests.test_invalid_and_zero_selection_fail`, `tests/test_browser_runner.py::BrowserRunnerTests.test_expected_identities_survive_spec_and_shard_filters`, `tests/test_browser_runner.py::BrowserRunnerTests.test_synthetic_identity_parity_across_all_projects_and_shards`, `tests/test_browser_runner.py::BrowserRunnerTests.test_list_does_not_start_containers_and_never_reports_passed`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_focused_or_wrong_matrix_cannot_claim_complete_validation`.
+Evidence: `scripts/run_browser_tests.py`, `tests/run_tests.py`, `playwright.config.cjs`; `tests/browser-selection.test.cjs`, `tests/test_browser_runner.py::BrowserRunnerTests.test_invalid_and_zero_selection_fail`, `tests/test_browser_runner.py::BrowserRunnerTests.test_spec_a_project_does_not_list_is_skipped_with_a_note`, `tests/test_browser_runner.py::BrowserRunnerTests.test_expected_identities_survive_spec_and_shard_filters`, `tests/test_browser_runner.py::BrowserRunnerTests.test_synthetic_identity_parity_across_all_projects_and_shards`, `tests/test_browser_runner.py::BrowserRunnerTests.test_list_does_not_start_containers_and_never_reports_passed`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_focused_or_wrong_matrix_cannot_claim_complete_validation`.
 
 ### Requirement: Prepared browser execution matches the locked toolchain
 Regular CI browser jobs SHALL use a prepared, immutable browser environment containing the browser and required system packages for the locked test-tool version. Preparation SHALL be distinct from ordinary test execution, and missing or incompatible tooling SHALL fail explicitly.
@@ -103,11 +107,15 @@ Local Python execution SHALL reuse the existing class-preserving shard assignmen
 - **WHEN** container validation is requested after application, dependency, or startup inputs changed
 - **THEN** the test application image is rebuilt from those inputs before being used as current validation evidence.
 
+#### Scenario: Local container run matches CI
+- **WHEN** a developer runs `tests/run_sqlcipher_tests.ps1` without `-Suite`
+- **THEN** it runs the `--suite container` selection of CI's `container_tests` job and partitions exactly that selection; every module runs only with `-Suite all`, which duration recording and coverage require.
+
 #### Scenario: Complete coverage evidence is requested
 - **WHEN** all Python shards finish
 - **THEN** their coverage outputs can be combined without overwriting one another and missing or failed shards cannot produce complete successful evidence.
 
-Evidence: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, `scripts/run_sqlcipher_tests.py`; `tests/test_local_test_execution.py::SupervisorTests.test_bounded_serial_default_and_invalid_workers`, `tests/test_local_test_execution.py::SupervisorTests.test_class_partition_validation_rejects_duplicate_missing_and_split`, `tests/test_local_test_execution.py::SupervisorTests.test_build_once_current_image_disjoint_shards_and_incremental_results`, `tests/test_local_test_execution.py::SupervisorTests.test_coverage_requires_exactly_one_nonempty_file_for_every_shard`, `tests/test_local_test_execution.py::SupervisorTests.test_nonzero_missing_and_suite_error_cannot_pass`, `tests/test_ci_contracts.py`.
+Evidence: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, `scripts/run_sqlcipher_tests.py`; `tests/test_local_test_execution.py::SupervisorTests.test_bounded_serial_default_and_invalid_workers`, `tests/test_local_test_execution.py::SupervisorTests.test_recording_rejects_shards_before_any_process`, `tests/test_local_test_execution.py::SupervisorTests.test_class_partition_validation_rejects_duplicate_missing_and_split`, `tests/test_local_test_execution.py::SupervisorTests.test_build_once_current_image_disjoint_shards_and_incremental_results`, `tests/test_local_test_execution.py::SupervisorTests.test_coverage_requires_exactly_one_nonempty_file_for_every_shard`, `tests/test_local_test_execution.py::SupervisorTests.test_nonzero_missing_and_suite_error_cannot_pass`, `tests/test_ci_contracts.py`.
 
 ### Requirement: Smaller fixtures retain the tested domain behavior
 Fixture optimization SHALL preserve each existing scenario's relevant records, expected results, and state isolation. Specialized cases SHALL retain their upgrade, restart, idempotence, and weekday coverage; complete-demo checks SHALL continue to exercise complete synthetic demo construction.

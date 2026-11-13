@@ -79,7 +79,7 @@ async function showCalendarEntry(page, match) {
   const wanted = typeof match === "string" ? { name: match } : match;
   const dateKey = await page.evaluate((criteria) => {
     const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
-    const entry = (state.data?.training_calendar || []).find((item) => item && plannedEventDate(item)
+    const entry = (state.data?.training_calendar || state.data?.planned || []).find((item) => item && plannedEventDate(item)
       && (!criteria.name || String(item.name || "").includes(criteria.name))
       && (!criteria.profile || (criteria.profile === "planned" ? Boolean(item.workout_profile) && !item.is_completed_activity : JSON.stringify(item).includes('"source":"recorded"')))
       && (!criteria.pending || (item.push_pending?.[criteria.pending] && plannedEventDate(item) > today)));

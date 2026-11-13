@@ -166,7 +166,7 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
 
 REMOTE_WRITE_LABELS = {
     "start_intervals_plan_sync": "Trainingseinheiten mit Intervals.icu synchronisieren",
-    "push_strength_to_garmin": "Krafteinheiten an die Garmin-Uhr senden",
+    "push_strength_to_garmin": "Einheiten an die Garmin-Uhr senden",
     "sync_competitions": "Bestätigte Wettkämpfe mit Intervals.icu synchronisieren",
     "sync_nutrition": "Ernährungsdaten mit Intervals.icu synchronisieren",
     "resolve_training_sync_conflict": "Fehlgeschlagenen Intervals.icu-Sync wiederholen",

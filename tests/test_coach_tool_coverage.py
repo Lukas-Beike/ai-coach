@@ -27,6 +27,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
+from backend.providers import openai_requests
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.sync.adaptive import IllnessPauseSyncService
 
@@ -195,18 +196,209 @@ def tool_map_table() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _generated(path: Path) -> str:
-    return path.read_text(encoding="utf-8").split(BEGIN, 1)[1].split(END, 1)[0]
+CONTRACTS_BEGIN = "<!-- BEGIN GENERATED TOOL CONTRACTS -->\n"
+CONTRACTS_END = "<!-- END GENERATED TOOL CONTRACTS -->\n"
+_BOUNDS = (
+    ("minLength", "≥{} chars"),
+    ("maxLength", "≤{} chars"),
+    ("minimum", "≥{}"),
+    ("exclusiveMinimum", ">{}"),
+    ("exclusiveMaximum", "<{}"),
+    ("maximum", "≤{}"),
+    ("minItems", "≥{} items"),
+    ("minProperties", "≥{} properties"),
+    ("maxItems", "≤{} items"),
+    ("pattern", "pattern `{}`"),
+    ("format", "{}"),
+)
+
+
+def _terms(item: dict, each: str = "") -> list[str]:
+    terms = [f"{each}{text.format(item[key])}" for key, text in _BOUNDS if key in item]
+    if item.get("uniqueItems"):
+        terms.append(f"{each}unique items")
+    if "enum" in item:
+        values = ", ".join(f"`{json.dumps(value)}`" for value in item["enum"])
+        terms.append(f"{each}one of {values}")
+    return terms
+
+
+def _names(fields) -> str:
+    return ", ".join(f"`{field}`" for field in fields)
+
+
+def _clause(option: dict) -> str:
+    """A ``oneOf`` branch made of ``required`` and ``not`` conditions."""
+    parts = [f"with {_names(option['required'])}"] if "required" in option else []
+    excluded = option.get("not", {})
+    fields = excluded.get("required", []) + [
+        field for branch in excluded.get("anyOf", ()) for field in branch["required"]
+    ]
+    if fields:
+        parts.append(f"without {_names(fields)}")
+    return " ".join(parts)
+
+
+# Every schema keyword the catalogue renders or deliberately leaves out.
+RENDERED_KEYWORDS = frozenset(
+    {key for key, _ in _BOUNDS}
+    | {"type", "properties", "items", "required", "enum", "anyOf", "oneOf", "not"}
+    | {"uniqueItems", "additionalProperties", "description"}
+)
+
+
+def schema_keywords(schema) -> set[str]:
+    """The JSON-schema keywords used anywhere in ``schema``."""
+    if isinstance(schema, list):
+        return set().union(*map(schema_keywords, schema)) if schema else set()
+    if not isinstance(schema, dict):
+        return set()
+    found = set(schema)
+    for key, value in schema.items():
+        if key == "properties":
+            found |= schema_keywords(list(value.values()))
+        elif key != "enum":
+            found |= schema_keywords(value)
+    return found
+
+
+def _parameters(schema: dict, prefix: str = "") -> list[str]:
+    """One line per parameter: path, required mark, type and bounds."""
+    lines = []
+    required = set(schema.get("required", ()))
+    for name, item in schema.get("properties", {}).items():
+        path = f"{prefix}{name}"
+        kind = item.get("type", "any")
+        kind = "/".join(kind) if isinstance(kind, list) else kind
+        if "oneOf" in item:
+            kind += "; exactly one of: " + " | ".join(map(_clause, item["oneOf"]))
+        options = item.get("anyOf", ())
+        if options and all(set(option) == {"required"} for option in options):
+            kind += "; needs one of " + ", ".join(
+                f"`{option['required'][0]}`" for option in options
+            )
+        elif options:
+            kind = " or ".join(
+                " ".join([option.get("type", "any"), *_terms(option)])
+                for option in item["anyOf"]
+            )
+        items = item.get("items", {})
+        scalar_items = "type" in items and "properties" not in items
+        if scalar_items:
+            item_kind = items["type"]
+            kind += " of " + (
+                "/".join(item_kind) if isinstance(item_kind, list) else item_kind
+            )
+        terms = [kind, *_terms(item), *(_terms(items, "each ") if scalar_items else ())]
+        mark = "*" if name in required else ""
+        lines.append(f"`{path}`{mark} ({'; '.join(terms)})")
+        lines += _parameters(item, f"{path}.")
+        lines += _parameters(items, f"{path}[].")
+        lines += _variants(items, f"{path}[]")
+    return lines
+
+
+def _variants(schema: dict, path: str) -> list[str]:
+    """The fields of each object variant, tagged by its first enum field."""
+    lines = []
+    for number, option in enumerate(schema.get("anyOf", ()), 1):
+        if "properties" not in option:
+            continue
+        tag = next(
+            (
+                f"{key}=" + "|".join(map(str, value["enum"]))
+                for key, value in option["properties"].items()
+                if "enum" in value
+            ),
+            f"variant {number}",
+        )
+        lines += _parameters(option, f"{path}({tag}).")
+    return lines
+
+
+def _gate_facts(spec) -> str:
+    from backend.coach.change_receipts import _FULLY_TRACKED_TOOLS
+
+    facts = [f"effect `{spec.effect}`"]
+    if spec.domain:
+        facts.append(f"gate domain `{spec.domain}`")
+    for flag, text in (
+        (spec.deletes, "needs a confirmed delete request"),
+        (spec.whole_plan, "whole-plan change"),
+        (spec.no_record, "counts no records toward the bulk check"),
+        (spec.needs_approval, "applies only an approved preview"),
+        (spec.plan_checked, "plan checked"),
+        (spec.self_guarded, "plan check inside the tool"),
+        (spec.external_food_lookup, "may call the food database"),
+    ):
+        if flag:
+            facts.append(text)
+    if spec.bulk_from:
+        facts.append(f"bulk from {spec.bulk_from} records")
+    if spec.record_lists:
+        facts.append(
+            "records counted from " + ", ".join(f"`{n}`" for n in spec.record_lists)
+        )
+    if spec.done:
+        facts.append(f"receipt „{spec.done}“")
+    if spec.action:
+        facts.append(f"proposal card „{spec.action}“")
+    if spec.effect != "read":
+        facts.append(
+            "fully tracked by change history"
+            if spec.name in _FULLY_TRACKED_TOOLS
+            else "not fully tracked (no turn undo)"
+        )
+    return "; ".join(facts)
+
+
+def tool_contracts() -> str:
+    """Parameters and gate facts per tool, from the schemas and the tool specs."""
+    from backend.coach.authorization import request_schema
+    from backend.coach.tool_specs import TOOL_SPECS
+
+    schemas = {tool["name"]: tool for tool in server.COACH_STRUCTURED_TOOLS}
+    schemas.update({tool["name"]: tool for tool in server.COACH_DIALOGUE_TOOLS})
+    lines = [
+        "### `_request` envelope",
+        "",
+        "Every dialogue tool marked `_request`* below requires this object:",
+        "",
+        *(f"- {line}" for line in _parameters(request_schema())),
+    ]
+    for spec in sorted(TOOL_SPECS, key=lambda item: item.name):
+        parameters = dict(schemas[spec.name]["parameters"])
+        properties = dict(parameters.get("properties", {}))
+        envelope = properties.pop("_request", None)
+        rendered = _parameters({**parameters, "properties": properties})
+        if envelope is not None:
+            rendered.append("`_request`* (the envelope above)")
+        lines += [
+            "",
+            f"### `{spec.name}`",
+            "",
+            _gate_facts(spec) + ".",
+            "",
+            *(f"- {line}" for line in rendered or ["no parameters"]),
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def _generated(path: Path, begin: str = BEGIN, end: str = END) -> str:
+    return path.read_text(encoding="utf-8").split(begin, 1)[1].split(end, 1)[0]
 
 
 def write_generated_tables() -> None:
-    for path, table in (
-        (COVERAGE_DOC, coverage_table()),
-        (TOOL_MAP_DOC, tool_map_table()),
+    for path, begin, end, table in (
+        (COVERAGE_DOC, BEGIN, END, coverage_table()),
+        (TOOL_MAP_DOC, BEGIN, END, tool_map_table()),
+        (TOOL_MAP_DOC, CONTRACTS_BEGIN, CONTRACTS_END, tool_contracts()),
     ):
-        before, rest = path.read_text(encoding="utf-8").split(BEGIN, 1)
+        before, rest = path.read_text(encoding="utf-8").split(begin, 1)
         path.write_text(
-            before + BEGIN + table + END + rest.split(END, 1)[1], encoding="utf-8"
+            before + begin + table + end + rest.split(end, 1)[1],
+            encoding="utf-8",
+            newline="\n",
         )
 
 
@@ -1556,6 +1748,16 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             tool_map_table(),
             "Regenerate with: python tests/test_coach_tool_coverage.py --write",
         )
+        used = schema_keywords(
+            [tool["parameters"] for tool in server.COACH_DIALOGUE_TOOLS]
+            + [tool["parameters"] for tool in server.COACH_STRUCTURED_TOOLS]
+        )
+        self.assertEqual(sorted(used - RENDERED_KEYWORDS), [])
+        self.assertEqual(
+            _generated(TOOL_MAP_DOC, CONTRACTS_BEGIN, CONTRACTS_END),
+            tool_contracts(),
+            "Regenerate with: python tests/test_coach_tool_coverage.py --write",
+        )
 
     def test_tool_specs_describe_every_catalog_tool_with_a_real_owner(self):
         # backend/coach/tool_specs.py is the one source of the tool tables
@@ -1632,7 +1834,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["kcal"], 174)
         self.assertEqual(result["nutrition_basis"]["kind"], "database")
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -1664,7 +1866,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(mixed["nutrition_basis"]["kind"], "composite")
         self.assertEqual(len(mixed["nutrition_basis"]["components"]), 2)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -1828,7 +2030,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             message="Lösche diese Mahlzeitvorlage.",
         )
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_meal(entry["id"])["kcal"], 200
+            server.NUTRITION_SERVICES.diary_service().get_meal(entry["id"])["kcal"], 200
         )
 
     @covers("save_nutrition_product:success")
@@ -1886,13 +2088,13 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
         self.assertEqual(updated["kcal"], 380)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog.get_product(
+            server.NUTRITION_SERVICES.meal_library_service().product_catalog.get_product(
                 saved["id"]
             ),
             updated,
         )
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_today_summary()[
+            server.NUTRITION_SERVICES.diary_service().get_today_summary()[
                 "entry_count"
             ],
             0,
@@ -1900,7 +2102,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("search_web_for_product_values:success")
     def test_web_search_returns_cited_values_and_degrades_to_unavailable(self):
-        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        catalog = server.NUTRITION_SERVICES.meal_library_service().product_catalog
         own = catalog.save_product(
             {
                 "name": "Synthetic skyr",
@@ -1955,7 +2157,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
         client.complete.side_effect = complete
         with patch.object(
-            server.MODEL_TRANSPORT, "openai_responses_client", return_value=client
+            openai_requests, "OpenAIResponsesClient", return_value=client
         ):
             result = self.run_tool(
                 "search_web_for_product_values", {"products": [own["id"]]}
@@ -1988,7 +2190,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "fill_nutrition_product_gaps:success",
     )
     def test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn(self):
-        catalog = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog
+        catalog = server.NUTRITION_SERVICES.meal_library_service().product_catalog
         own = catalog.save_product(
             {
                 "name": "Synthetic skyr",
@@ -2006,7 +2208,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "basis_unit": "g",
             "per_100": {"kcal": 500},
         }
-        server.NUTRITION_ASSEMBLY.food_mirror().refresh([food])
+        server.NUTRITION_SERVICES.food_mirror().refresh([food])
 
         listed = self.run_tool("list_incomplete_nutrition_products")
         self.assertEqual(
@@ -2116,7 +2318,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().sync_status.get_day_summary(
+            server.NUTRITION_SERVICES.diary_service().sync_status.get_day_summary(
                 "2026-09-07"
             )["entry_count"],
             0,

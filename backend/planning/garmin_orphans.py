@@ -2,9 +2,9 @@
 
 Read-only projection over ``remote_links`` (provider ``garmin``, entity
 ``planned_unit``) joined to the stored units. A link is an orphan when its unit is
-missing, tombstoned, archived, deleted, no longer a strength unit or a strength
-unit that cannot be pushed any more (no valid structure, or an exercise without
-a Garmin match; a unit with an unreadable payload is damaged, not an orphan), so
+missing, tombstoned, archived, deleted, neither a strength nor a run unit any more, or a
+unit that cannot be pushed any more (no valid strength structure, an exercise
+without a Garmin match, or run text without steps; a unit with an unreadable payload is damaged, not an orphan), so
 the workout and schedule it names would stay in Garmin Connect for good. Only
 linked ids are ever listed; a Garmin workout without a link is never a
 candidate. The explicit Garmin sync removes the listed orphans.
@@ -50,10 +50,11 @@ def _is_orphan(
     if payload.get("local_deleted") or payload.get("archived"):
         return True
     sport, _environment = planned_sport_environment(payload)
-    if sport is not Sport.STRENGTH:
+    if sport not in (Sport.STRENGTH, Sport.RUN):
         return True
-    # A live strength unit that is blocked (empty or unmappable structure) can no
-    # longer replace its pushed workout, which would stay on the watch.
+    # A live unit that is blocked (empty or unmappable structure, run text
+    # without steps) can no longer replace its pushed workout, which would stay
+    # on the watch.
     return pushable_fingerprint(payload, remembered)[0] is None
 
 

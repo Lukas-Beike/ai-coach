@@ -29,7 +29,25 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 - **WHEN** a stored profile, or a database restored from an older backup, still carries the retired `weekly_plan` field
 - **THEN** profile reads and saves ignore it, and a one-time versioned stage of the canonical backfill worker deletes that one key from the stored profile (status only in diagnostics); a restored older backup runs the stage again.
 
-Evidence: `backend/athlete/profile.py:normalize_profile`, `backend/athlete/profile.py:timezone_name`, `backend/athlete/profile.py:_normalize_sex`, `backend/athlete/profile.py:_normalize_preferred_sources`, `backend/performance/local_tss.py:trimp_sex`, `backend/athlete/profile.py:ProfileService.get_from_db`; `backend/sync/profile_weekly_plan_removal.py`; `tests/test_profile_weekly_plan_removal.py`; `backend/athlete/clock.py:AthleteLocalClock`; `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`, `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`, `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`, `tests/test_athlete_profile.py:test_training_model_defaults_and_rejects_unknown_only_when_strict`, `tests/test_athlete_profile.py:test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_local_tss.py:test_unknown_sex_takes_the_assumed_male_constants`; `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`; `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`.
+Evidence:
+- `backend/athlete/clock.py:AthleteLocalClock`
+- `backend/athlete/profile.py:_normalize_preferred_sources`
+- `backend/athlete/profile.py:_normalize_sex`
+- `backend/athlete/profile.py:normalize_profile`
+- `backend/athlete/profile.py:ProfileService.get_from_db`
+- `backend/athlete/profile.py:timezone_name`
+- `backend/performance/local_tss.py:trimp_sex`
+- `backend/sync/profile_weekly_plan_removal.py`
+- `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`
+- `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`
+- `tests/test_athlete_profile.py:test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict`
+- `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`
+- `tests/test_athlete_profile.py:test_training_model_defaults_and_rejects_unknown_only_when_strict`
+- `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`
+- `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`
+- `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`
+- `tests/test_local_tss.py:test_unknown_sex_takes_the_assumed_male_constants`
+- `tests/test_profile_weekly_plan_removal.py`
 
 ### Requirement: AP2 Partial profile edits and optimistic Coach conflicts
 The system SHALL preserve unsubmitted profile fields on the profile patch API and require exact expected field values for a Coach batch, with atomic rejection of stale or invalid batches.
@@ -187,7 +205,22 @@ The system SHALL assign only resolved canonical completed activities to compatib
 - **WHEN** a Garmin- or Wahoo-only session is assigned or linked by a Garmin gear item, and a session bundled from several providers is assigned
 - **THEN** each counts once in usage, hours, distance and maintenance; a new assignment is stored under the session it was made for, and an earlier assignment stored under a provider record id or an alias session id still applies (the session-id assignment wins over it, else the newest).
 
-Evidence: `backend/athlete/equipment.py:EquipmentService.assign`, `backend/athlete/equipment.py:EquipmentService.read`, `backend/athlete/equipment.py:_effective_assignments`, `backend/athlete/equipment.py:_assignment_list`; `tests/test_training_record_features.py:test_equipment_assignment_is_explicit_and_unassignable`, `tests/test_training_record_features.py:test_explicit_assignment_and_unassignment_beat_the_garmin_link`, `tests/test_training_record_features.py:test_assignment_list_limit_keeps_activities_whole`, `tests/test_training_record_features.py:test_assignment_list_is_bounded_but_usage_counts_every_link`; `tests/test_equipment_canonical_sessions.py:test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance`, `tests/test_equipment_canonical_sessions.py:test_garmin_gear_links_the_garmin_only_session_and_the_bundled_one`, `tests/test_equipment_canonical_sessions.py:test_bundled_session_counts_once_under_its_session_id`, `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_an_intervals_id_still_applies`, `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_the_session_id_wins_over_a_legacy_one`, `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`; `backend/athlete/equipment.py:_session_assignments`.
+Evidence:
+- `backend/athlete/equipment.py:_assignment_list`
+- `backend/athlete/equipment.py:_effective_assignments`
+- `backend/athlete/equipment.py:_session_assignments`
+- `backend/athlete/equipment.py:EquipmentService.assign`
+- `backend/athlete/equipment.py:EquipmentService.read`
+- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`
+- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_the_session_id_wins_over_a_legacy_one`
+- `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_an_intervals_id_still_applies`
+- `tests/test_equipment_canonical_sessions.py:test_bundled_session_counts_once_under_its_session_id`
+- `tests/test_equipment_canonical_sessions.py:test_garmin_gear_links_the_garmin_only_session_and_the_bundled_one`
+- `tests/test_equipment_canonical_sessions.py:test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance`
+- `tests/test_training_record_features.py:test_assignment_list_is_bounded_but_usage_counts_every_link`
+- `tests/test_training_record_features.py:test_assignment_list_limit_keeps_activities_whole`
+- `tests/test_training_record_features.py:test_equipment_assignment_is_explicit_and_unassignable`
+- `tests/test_training_record_features.py:test_explicit_assignment_and_unassignment_beat_the_garmin_link`
 
 ### Requirement: AP10 Maintenance events without invented material diagnosis
 The system SHALL record explicitly completed equipment maintenance within the item's valid date range, preserve lifetime usage/history, and report personal interval progress with unknown or partial measurements honestly.
@@ -229,14 +262,39 @@ The athlete SHALL be able to read and explicitly edit local zones and thresholds
 - **WHEN** a saved local zone edit is undone after a provider refresh
 - **THEN** the previous local state is restored and effective selection follows local authority or the applicable provider alternative when no local configuration remains.
 
-Evidence: `backend/athlete/zones.py:ZoneConfigurationService.save`, `backend/athlete/zones.py:ZoneConfigurationService.remove`, `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`, `backend/athlete/zones.py:local_configuration`, `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`, `backend/activities/zone_settings.py`, `backend/performance/threshold_staleness.py`, `public/settings.js::saveZones`, `public/settings.js::removeZones`, `public/settings.js::zoneWarningLine`; `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`, `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`, `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`, `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`, `tests/zone-warnings.test.cjs`, `tests/test_zone_settings.py`. Backup/restore of local zones has no dedicated test.
+Evidence:
+- `backend/activities/zone_settings.py`
+- `backend/athlete/zones.py:local_configuration`
+- `backend/athlete/zones.py:ZoneConfigurationService.remove`
+- `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`
+- `backend/athlete/zones.py:ZoneConfigurationService.save`
+- `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`
+- `backend/performance/threshold_staleness.py`
+- `public/settings.js::removeZones`
+- `public/settings.js::saveZones`
+- `public/settings.js::zoneWarningLine`
+- `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`
+- `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`
+- `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`
+- `tests/test_zone_settings.py`
+- `tests/zone-warnings.test.cjs`
+
+Backup/restore of local zones has no dedicated test.
 
 ### Requirement: Zones and thresholds on one page per sport
 Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen, Training, Quellen & Coach. Zonen & Schwellen SHALL show one page per sport with LT1 and LT2 on top and every zone kind of the sport below, each with its source and a "Bearbeiten" that opens the editor prefilled with the values in effect today; saving stores local values only.
 
 #### Scenario: Thresholds
 - **WHEN** the athlete opens a sport's page
-- **THEN** LT2 shows the current threshold power (FTP) or threshold pace and the threshold heart rate with their source and date; LT1 shows the heart rate from the stored share of that threshold heart rate (measured or estimated from heart-rate variability) and the power or pace at the upper limit of zone 2 of the zones in effect, labelled as derived from the zones; a missing value shows "—".
+- **THEN** the rows "Aerob (LT1)" and "Anaerob (LT2)" ("Anaerob (LT2) / FTP" for cycling) show the power or pace and the heart rate, LT2 from the current performance values with the date they apply from, LT1 from the performance thresholds; a small yellow "i" on each row opens its origin (LT2's provider, per value when they differ; LT1's "gemessen", "aus der Herzfrequenzvariabilität", "Schätzung aus Zone 2" or "Schätzung aus festem Anteil von LT2" per value), and the box offers "Bearbeiten"; a missing value shows "—".
+
+#### Scenario: LT1 without a measured value or zones
+- **WHEN** no first threshold is stored and the sport has no heart-rate, pace or power zones
+- **THEN** "Aerob (LT1)" shows the fixed shares of LT2, and Analyse lists the same values as "Aerobe Schwelle (LT1)" with the "Schätzung" chip, as it does for a value from zone 2; saving or removing zones reloads the thresholds.
 
 #### Scenario: Zone kinds
 - **WHEN** a sport has power, pace or heart-rate zones in effect, including Garmin's zones for all sports
@@ -254,4 +312,4 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 - **WHEN** the athlete opens Profil, also with a stale-threshold warning
 - **THEN** every section starts closed.
 
-Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `e2e/zones-thresholds.spec.js`.
+Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `tests/analysis-presentation.test.cjs`, `e2e/zones-thresholds.spec.js`.

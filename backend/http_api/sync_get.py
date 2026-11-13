@@ -48,7 +48,18 @@ class SyncGetRoutes:
         if (full_resync := self._full_resync) is not None:
 
             def progress(handler: Any, request: RouteRequest) -> None:
-                """State and outcome of the full resync started in the background."""
+                """State and outcome of the full resync started in the background.
+
+                Request: no body; registered for `/api/garmin/full-resync` and
+                `/api/wahoo/full-resync`, the path names the provider.
+
+                Response: 200 with `running`, `status` (progress text while
+                running, else null), `last_resync_at`, `last_error` and `outcome`
+                (null until a run of this process ends, then `operation_id`,
+                `status` and, after a failure, `reason`).
+
+                Errors: none beyond the common ones.
+                """
                 provider = self._full_resync_providers[request.path]
                 handler.send_json(200, full_resync().progress(provider))
 
@@ -59,7 +70,23 @@ class SyncGetRoutes:
         return routes
 
     def _activity(self, handler: Any, request: RouteRequest) -> None:
-        """The `activity_detail.v1` document of one session (local or provider id)."""
+        """The `activity_detail.v1` document of one session (local or provider id).
+
+        Request: path `id`, URL-decoded: the local session id (`act_...`) or the
+        provider activity id of one of the session's records, as long as it
+        names one session; no body.
+
+        Response: 200 with `ok`, the document (`contract`, `session`, `metrics`,
+        `streams`, `laps`, `zones`, `strength_sets`, `analysis`, `detail_data`
+        and more, plus `weather` and `route` when stored, and `data_scope`),
+        and `session_bundle` (the session's provider copies and merge
+        candidates; null when the session is not live).
+
+        Errors: 400 `invalid_activity_request` "Die Aktivität konnte nicht
+        eindeutig zugeordnet werden." when the id is empty or longer than 200
+        characters; 404 `activity_details_not_found` "Diese Aktivität ist lokal
+        nicht vorhanden." when the id is unknown, ambiguous or has no records.
+        """
         payload = self._activity_read_service().detail(
             unquote(request.params["id"]),
             garmin_status=NO_GARMIN_SYNC_STATUS,
@@ -76,17 +103,54 @@ class SyncGetRoutes:
         handler.send_json(200, payload)
 
     def _job(self, handler: Any, request: RouteRequest) -> None:
-        """Result of one sync job."""
+        """Result of one sync job.
+
+        Request: path `id`, the job id (lowercase hexadecimal and `-`); no body.
+
+        Response: 200 with `id`, `provider`, `type`, `status`, `payload`,
+        `requested_by`, `attempts`, `progress` (`completed`, `total`),
+        `available_at`, `started_at`, `finished_at`, `error_class`,
+        `error_detail`, `items` (per item `id`, `item_key`, `operation`,
+        `remote_id`, `status`, `attempts`, `error_class`, `error_detail`,
+        `created_at`, `updated_at`), `created_at` and `updated_at`.
+
+        Errors: 404 `sync_job_not_found` "Synchronisationsjob nicht gefunden."
+        when no such job exists (an id with other characters matches no route).
+        """
         handler.send_json(
             200, self._sync_job_queue_service().state(request.params["id"])
         )
 
     def _status(self, handler: Any, _request: RouteRequest) -> None:
-        """Synchronization status."""
+        """Synchronization status.
+
+        Request: no body.
+
+        Response: 200 with `status`, `phase`, `progress` (0 to 100),
+        `operation_id`, `running`, `message`, `started_at`, `finished_at`,
+        `last_error`, `state_versions`, `provider_freshness`, `maintenance`
+        (`active`, `running_operations`) and `jobs` (the recent sync jobs).
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(200, self._sync_public_state_service().state())
 
     def _activities(self, handler: Any, request: RouteRequest) -> None:
-        """Activity list page; items carry the local session `id` and `record_ids`."""
+        """Activity list page; items carry the local session `id` and `record_ids`.
+
+        Request: query `cursor` (opaque `next_cursor` of the previous page,
+        base64url JSON `{"v": 3, "after": [started_at, id], "day": "YYYY-MM-DD"}`;
+        any other version or an unrecognized cursor returns the first page),
+        `limit` (1 to 250, default 100; unparsable gives 100) and `days` (-1 for
+        all, else clamped to 1 to 3650; default and unparsable value -1).
+
+        Response: 200 with `snapshot_synced_at`, `activities` (newest session
+        first; per item the local session `id`, `record_ids` mapping each provider
+        to its activity id, and the attached feedback), `next_cursor` (null on the
+        last page), `limit` and `days`.
+
+        Errors: none beyond the common ones.
+        """
         query = request.query
         handler.send_json(
             200,

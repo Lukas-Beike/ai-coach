@@ -1,11 +1,14 @@
-"""Explicit push of selected strength planned units to Garmin Connect.
+"""Explicit push of selected strength and run planned units to Garmin Connect.
 
 Runs only from a ``plan_push`` job that names Garmin as its provider, which the
 athlete starts explicitly. Every selected unit is validated and mapped locally
 before the first remote write, so an unresolved exercise, a stale preview or a
-past date writes nothing for that unit. A unit becomes one Garmin strength
-workout scheduled on its planned date; the workout id and the schedule id live
-in ``remote_links`` (provider ``garmin``, entity ``planned_unit``), so a second
+past date writes nothing for that unit. A strength unit becomes one Garmin
+strength workout; a run unit becomes one running workout whose percent and zone
+targets are resolved into absolute watts, bpm or m/s from the athlete's run
+zones, one snapshot per run (``planning.run_lthr``), and whose heart-rate cap is
+sent as bpm; rides and other sports are refused. Either is scheduled on its
+planned date; the workout id and the schedule id live in ``remote_links`` (provider ``garmin``, entity ``planned_unit``), so a second
 push updates the same workout and moves its own schedule instead of creating a
 duplicate. An entry with ``remove`` deletes only that linked workout and its own
 schedule; the calendar and the Coach card add such entries for the links of
@@ -18,7 +21,7 @@ units of the run, so a Garmin outage never turns into a burst of requests.
 The one write without a request (athlete decision 2026-11-11, #2185): after each
 Garmin refresh, ``remove_past`` unschedules and deletes the linked workouts whose
 planned day has passed, so they do not fill the watch's workout list. It touches
-only linked ids, never a recorded activity. Once (athlete decision 2026-11-12,
+only linked ids of any sport, never a recorded activity. Once (athlete decision 2026-11-12,
 #2373) it also removes the app's own older strength workouts that lost their
 unit: only those whose description starts with ``WORKOUT_MARKER``, that no unit
 of today or later links and that no day from today on schedules.
@@ -35,6 +38,10 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from backend.activities.hr_cap import stored_cap
+from backend.activities.hr_cap_export import capped_description
+from backend.activities.workout_text import structured_blocks
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import (
     ProviderId,
     RemoteEntityKind,
@@ -51,6 +58,12 @@ from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
+from backend.providers.garmin_run_workout import (
+    GarminRunMappingError,
+    GarminRunTargets,
+    comparable_steps,
+    run_workout,
+)
 from backend.providers.garmin_strength_workout import (
     NO_STRUCTURE_MESSAGE,
     GarminExercise,
@@ -85,6 +98,8 @@ _CLEANUP_PAGE = 100
 _CLEANUP_MAX_PAGES = 10
 _CLEANUP_READS = 40
 _CLEANUP_SCHEDULE_DAYS = 90
+
+_ZonesFor = Callable[[Mapping[str, Any]], ZoneSettings | None]
 
 
 class _StopRun(Exception):
@@ -127,7 +142,7 @@ def _remote_failure(error: BaseException) -> AppError | _StopRun:
 
 
 class GarminStrengthPushService:
-    """Upload, update, schedule or remove Garmin strength workouts on request."""
+    """Upload, update, schedule or remove Garmin strength and run workouts on request."""
 
     def __init__(
         self,
@@ -140,6 +155,7 @@ class GarminStrengthPushService:
         redactor: Callable[[str], str],
         gate: ProviderResyncGate | None = None,
         write_ready: Callable[[], bool] = lambda: True,
+        run_zones: Callable[[], _ZonesFor] | None = None,
     ) -> None:
         self._configured = configured
         # False while the latest refresh could not log the SDK in (login, MFA).
@@ -150,6 +166,8 @@ class GarminStrengthPushService:
         self._now = now
         self._redact = redactor
         self._gate = gate
+        # One snapshot of the run zones per push run resolves relative run targets.
+        self._run_zones = run_zones
         self._lock = threading.Lock()
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -188,37 +206,85 @@ class GarminStrengthPushService:
 
         Runs after a Garmin refresh. Nothing happens while the latest refresh
         could not log the SDK in, so no extra login is tried. A failure is logged
-        and never fails the refresh: the links stay for the next refresh.
+        and never fails the refresh: the links stay for the next refresh. Every
+        run logs its count, zero included, and stores its time, outcome,
+        removals and the links still waiting for the diagnostics (#2408); a skip
+        logs its reason.
         """
-        removed = [0]
         try:
-            if not self._configured() or not self._write_ready():
+            if not self._configured():
                 return 0
-            cleanup = self._cleanup_state()
-            if not self._past_links() and cleanup["done"]:
-                return 0
-            operation = (
-                self._gate.operation() if self._gate is not None else nullcontext()
-            )
-            with operation, self._lock, self._sdk_session() as client:
-                # Read again under the lock: a push may have moved a unit meanwhile.
-                self._remove_links(client, self._past_links(), removed)
-                if not cleanup["done"]:
-                    self._remove_unlinked(client, cleanup, removed)
+            ready = self._write_ready()
         except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
             _LOGGER.warning(
                 "Garmin past workout removal failed",
                 extra={"event": "garmin_past_workout_removal_failed"},
             )
-        if removed[0]:
+            return 0
+        if not ready:
+            # Counts only: the removal waits for a refresh that logs the SDK in.
             _LOGGER.info(
-                "Garmin past workouts removed",
+                "Garmin past workout removal skipped",
                 extra={
-                    "event": "garmin_past_workouts_removed",
-                    "context": {"count": removed[0]},
+                    "event": "garmin_past_workout_removal_skipped",
+                    "context": {"reason": "sdk_skipped"},
                 },
             )
+            self._record_run(0, "skipped")
+            return 0
+        removed = [0]
+        cleanup: dict[str, Any] | None = None
+        failed = False
+        try:
+            cleanup = self._cleanup_state()
+            if self._past_links() or not cleanup["done"]:
+                operation = (
+                    self._gate.operation() if self._gate is not None else nullcontext()
+                )
+                with operation, self._lock, self._sdk_session() as client:
+                    # Read again under the lock: a push may have moved a unit meanwhile.
+                    self._remove_links(client, self._past_links(), removed)
+                    if not cleanup["done"]:
+                        self._remove_unlinked(client, cleanup, removed)
+        except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
+            failed = True
+            _LOGGER.warning(
+                "Garmin past workout removal failed",
+                extra={"event": "garmin_past_workout_removal_failed"},
+            )
+        if cleanup is not None:
+            self._record_run(removed[0], "failed" if failed else "ok")
+        if failed and not removed[0]:
+            return 0
+        # Logged on every run, zero included, so a quiet run is visible (#2408).
+        _LOGGER.info(
+            "Garmin past workouts removed",
+            extra={
+                "event": "garmin_past_workouts_removed",
+                "context": {"count": removed[0]},
+            },
+        )
         return removed[0]
+
+    def _record_run(self, removed: int, outcome: str) -> None:
+        """Store the run's time, outcome and removals, and the links still waiting."""
+        try:
+            state = self._cleanup_state()
+            self._save_cleanup(
+                {
+                    **state,
+                    "removed": state["removed"] + removed,
+                    "last_run_at": self._now().astimezone(UTC).isoformat(),
+                    "last_outcome": outcome,
+                    # Athlete-local cutoff, the one the removal itself uses.
+                    "pending": len(self._past_links()),
+                }
+            )
+        except Exception:  # noqa: BLE001 - a status write never fails the refresh
+            _LOGGER.warning(
+                "Garmin past workout removal state not stored",
+                extra={"event": "garmin_past_workout_state_failed"},
+            )
 
     def _past_links(self) -> list[tuple[str, str | None, str | None]]:
         """(unit id, workout id, schedule id) of linked units before today, oldest first."""
@@ -252,15 +318,13 @@ class GarminStrengthPushService:
 
         A refused workout keeps its link and uses an attempt but no removal slot,
         so a few refusals never block the later workouts and many never turn into
-        a burst of requests.
+        a burst of requests. An outage stops the run and is logged by the caller.
         """
         for attempt, (local_id, workout_id, schedule_id) in enumerate(links):
             if removed[0] >= _PAST_REMOVAL_BATCH or attempt >= _PAST_REMOVAL_ATTEMPTS:
                 return
             try:
                 self._discard(client, workout_id, schedule_id)
-            except _StopRun:
-                return
             except AppError:
                 continue  # Garmin refused this one; the next refresh tries again
             with self._database_manager().unit_of_work() as db:
@@ -298,7 +362,7 @@ class GarminStrengthPushService:
                 finished = True
         finally:
             # A Garmin outage keeps what this pass already read.
-            self._save_cleanup({"done": finished, "checked": sorted(checked)})
+            self._save_cleanup({**state, "done": finished, "checked": sorted(checked)})
 
     def _remove_if_own(self, client: Any, workout_id: str) -> bool:
         """Delete one workout if the app sent it; False for another's or a refused one.
@@ -344,11 +408,17 @@ class GarminStrengthPushService:
         if not isinstance(value, dict):
             value = {}
         checked = value.get("checked")
+        removed = value.get("removed")
+        last_run = value.get("last_run_at")
         return {
             "done": value.get("done") is True,
             "checked": [str(item) for item in checked]
             if isinstance(checked, list)
             else [],
+            "removed": removed
+            if isinstance(removed, int) and not isinstance(removed, bool)
+            else 0,
+            "last_run_at": last_run if isinstance(last_run, str) else None,
         }
 
     def _save_cleanup(self, state: dict[str, Any]) -> None:
@@ -358,8 +428,9 @@ class GarminStrengthPushService:
     def _run(self, requested: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
         prepared: list[_Prepared] = []
+        zones_for = self._run_zones() if self._run_zones else _no_zones
         for item in requested:
-            outcome = self._prepare(item)
+            outcome = self._prepare(item, zones_for)
             if isinstance(outcome, _Prepared):
                 prepared.append(outcome)
             else:
@@ -397,7 +468,9 @@ class GarminStrengthPushService:
                     _removal_context(unit, self._redact(str(exc))[:500]),
                 )
 
-    def _prepare(self, item: dict[str, Any]) -> _Prepared | dict[str, Any]:
+    def _prepare(
+        self, item: dict[str, Any], zones_for: _ZonesFor
+    ) -> _Prepared | dict[str, Any]:
         local_id = item["library_workout_id"]
         if item.get("remove"):
             if self._link(local_id) is None:
@@ -417,7 +490,7 @@ class GarminStrengthPushService:
             return _error_result(local_id, "Seit der Vorschau geändert", "conflict")
         try:
             unit = json.loads(row["payload"] or "{}")
-            plan_date, document = self._document(unit, remembered)
+            plan_date, document = self._document(unit, remembered, zones_for)
         except (AppError, GarminStrengthMappingError, TypeError, ValueError) as exc:
             return _error_result(local_id, self._redact(str(exc))[:500])
         return _Prepared(
@@ -430,7 +503,7 @@ class GarminStrengthPushService:
         )
 
     def _document(
-        self, unit: Any, remembered: Mapping[str, GarminExercise]
+        self, unit: Any, remembered: Mapping[str, GarminExercise], zones_for: _ZonesFor
     ) -> tuple[str, dict[str, Any]]:
         if (
             not isinstance(unit, dict)
@@ -439,8 +512,10 @@ class GarminStrengthPushService:
         ):
             raise ValueError("Die Einheit ist gelöscht oder archiviert.")
         sport, _environment = planned_sport_environment(unit)
-        if sport is not Sport.STRENGTH:
-            raise ValueError("Nur Krafteinheiten können an Garmin gesendet werden.")
+        if sport not in (Sport.STRENGTH, Sport.RUN):
+            raise ValueError(
+                "Nur Kraft- und Laufeinheiten können an Garmin gesendet werden."
+            )
         plan_date = str(unit.get("date") or "")[:10]
         try:
             day = date.fromisoformat(plan_date)
@@ -448,6 +523,8 @@ class GarminStrengthPushService:
             raise ValueError("Die Einheit hat kein gültiges Datum.") from None
         if day < self._today():
             raise ValueError("Vergangene Einheiten werden nicht an Garmin gesendet.")
+        if sport is Sport.RUN:
+            return plan_date, _run_document(unit, zones_for(unit))
         exercises = strength_structure.normalize_structure(
             unit.get("strength_structure"), stored=True
         )
@@ -553,11 +630,11 @@ class GarminStrengthPushService:
 
     @staticmethod
     def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
-        """Whether the saved workout kept every sent exercise step."""
+        """Whether the saved workout kept every sent exercise or run step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        return isinstance(saved, dict) and workout_exercise_steps(
-            saved
-        ) == workout_exercise_steps(document)
+        running = (document.get("sportType") or {}).get("sportTypeKey") == "running"
+        steps = comparable_steps if running else workout_exercise_steps
+        return isinstance(saved, dict) and steps(saved) == steps(document)
 
     def _drop_broken(
         self,
@@ -592,7 +669,7 @@ class GarminStrengthPushService:
             )
         raise AppError(
             502,
-            "Garmin hat nicht alle Übungen übernommen; nichts terminiert.",
+            "Garmin hat das Workout nicht vollständig übernommen; nichts terminiert.",
             reason="garmin_workout_verification_failed",
         )
 
@@ -626,6 +703,41 @@ def _call(method: Callable[..., Any], *args: Any) -> Any:
         if _not_found(exc):
             raise _Missing() from exc
         raise _remote_failure(exc) from exc
+
+
+def _no_zones(_unit: Mapping[str, Any]) -> ZoneSettings | None:
+    return None
+
+
+def _run_document(
+    unit: Mapping[str, Any], zones: ZoneSettings | None
+) -> dict[str, Any]:
+    """The Garmin running workout of a run unit; relative targets need ``zones``."""
+    description = str(unit.get("description") or "")
+    lthr = zones.lthr if zones else None
+    if stored_cap(unit) is not None and not lthr:
+        # The cap is percent of the threshold HR; without it the cap would be lost.
+        raise GarminRunMappingError(
+            "Die Pulsobergrenze braucht den Schwellenpuls, der nicht vorliegt."
+        )
+    capped = capped_description(description, unit, lthr=lthr)
+    return run_workout(
+        name=str(unit.get("name") or ""),
+        description=f"{WORKOUT_MARKER}\n{description}",
+        blocks=structured_blocks(capped, str(unit.get("target") or "AUTO")),
+        targets=None
+        if zones is None
+        else GarminRunTargets(
+            ftp=zones.ftp,
+            threshold_hr=zones.lthr,
+            max_hr=zones.max_hr,
+            threshold_speed=zones.threshold_pace,
+            hr_zone_basis=zones.hr_zone_reference,
+            power_limits=zones.power_limits,
+            hr_limits=zones.hr_limits,
+            pace_limits=zones.pace_limits,
+        ),
+    )
 
 
 def _workout_id(saved: Any) -> str:

@@ -11,14 +11,13 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
-from datetime import UTC, datetime, timedelta
-from functools import partial
+from datetime import UTC, datetime
 from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
 from backend.activities.route_store import ActivityRouteService
+from backend.app.context import AppContext
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -26,13 +25,11 @@ from backend.athlete.checkins import (
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
-from backend.backup.assembly import (
-    BackupAssembly,
-    BackupStorageDependencies,
-    RestoreLifecycleDependencies,
-    RestoreValidationDependencies,
+from backend.backup.database import (
+    MAX_BACKUP_BYTES,
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
+from backend.backup.wiring import build_backup
 from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
@@ -96,7 +93,6 @@ from backend.coach.read_tools_assembly import (
     CoachReadToolPolicy,
     CoachReadToolsAssembly,
 )
-from backend.coach.service import command_receipt
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
 )
@@ -132,7 +128,6 @@ from backend.config import (
 from backend.db import manager as database_manager_runtime
 from backend.db import row_factory as database_row_factory
 from backend.db.bootstrap import (
-    apply_startup_invariants,
     initialize_application_database,
 )
 from backend.db.key_value import KeyValueService
@@ -147,30 +142,17 @@ from backend.db.repositories import (
     ActivityFeedbackRepository,
     ChatRepository,
     CheckinRepository,
-    CompetitionRepository,
     KeyValueRepository,
     PlanAdjustmentRepository,
     PlanningStateRepository,
     ProfileRepository,
     TrainingPlanRepository,
 )
-from backend.db.schema import configure_cipher, database_schema_is_current
-from backend.diagnostics.assembly import (
-    DiagnosticGarminServices,
-    DiagnosticLocalProjections,
-    DiagnosticProviderHealth,
-    DiagnosticReportSettings,
-    DiagnosticRuntimeDependencies,
-    DiagnosticsAssembly,
-)
+from backend.db.schema import configure_cipher
 from backend.diagnostics.logs import RecentLogEntriesService
+from backend.diagnostics.wiring import build_diagnostics
 from backend.errors import INTERNAL_SERVER_ERROR
-from backend.history.assembly import (
-    HistoryAssembly,
-    HistoryAthleteServices,
-    HistoryPersistence,
-    HistoryPlanningServices,
-)
+from backend.history.wiring import build_history
 from backend.http_api import server as http_server
 from backend.http_api.activity_assembly import (
     ActivityReadAssembly,
@@ -221,13 +203,7 @@ from backend.http_api.public_state_assembly import (
     PublicStateProjectionOwners,
 )
 from backend.http_api.response_transport import HttpResponseTransport
-from backend.nutrition.assembly import (
-    NutritionAssembly,
-    NutritionPersistence,
-    NutritionRuntime,
-)
-from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.nutrition.web_search import NutritionWebSearchService
+from backend.nutrition.wiring import NutritionServices, build_nutrition
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
@@ -241,53 +217,24 @@ from backend.performance.morning_battery_service import (
 )
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
-from backend.planning import adaptive as planning_adaptive
+from backend.performance.wiring import build_performance
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
-from backend.planning.assembly import (
-    PlanningDataAssembly,
-    PlanningMutations,
-)
-from backend.planning.assembly import (
-    PlanningRepositories as PlanningDataRepositories,
-)
-from backend.planning.assembly import (
-    PlanningRuntime as PlanningDataRuntime,
-)
+from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.compact_activities import ActivitySummarySource
-from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
-    LAST_TEST_DAYS,
-    BriefHistory,
-    PlanGuardService,
-    read_completed,
-    read_lessons,
     read_load_thresholds,
-    read_progress,
-    recent_illness,
 )
-from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
-from backend.planning.run_hr_cap import profile_run_caps
 from backend.planning.run_lthr import RunLthr
-from backend.planning.workflows_assembly import (
-    DailyPlanningSources,
-    PlanningChangeLimits,
-    PlanningRepositories,
-    PlanningRuntime,
-    PlanningServiceOwners,
-    PlanningWorkflowAssembly,
+from backend.planning.season_preparation import season_preparation
+from backend.planning.wiring import (
+    build_plan_guard,
+    build_planning_data,
+    build_planning_workflows,
 )
-from backend.privacy import (
-    PrivacyArchiveSettings,
-    PrivacyAssembly,
-    PrivacyAthleteSources,
-    PrivacyClock,
-    PrivacyContextSources,
-    PrivacyPlanningSources,
-    PrivacyStateDependencies,
-)
+from backend.privacy import build_privacy
 from backend.provider_credentials import (
     GARMIN_SOURCE_DB,
     GARMIN_TOKENS_KEY,
@@ -297,34 +244,21 @@ from backend.provider_credentials import (
     ProviderCredentialService,
 )
 from backend.providers import activity_weather as activity_weather_provider
-from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
-from backend.providers import dwd_pollen as dwd_pollen_provider
-from backend.providers import http as provider_http
 from backend.providers import state as provider_state
-from backend.providers import weather as weather_provider
 from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
-from backend.providers.model_assembly import (
-    AudioTranscriptionSettings,
-    ModelEndpointSettings,
-    ModelProviderDiagnostics,
-    ModelProviderOwners,
-    ModelResponseLimits,
-    ModelTransportAssembly,
-    ModelTransportClock,
+from backend.providers.model_wiring import (
+    JSON_MEDIA_TYPE,
+    OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    ModelTransportServices,
+    build_model_transport,
 )
 from backend.providers.observed_opener import Opener, observed_opener
-from backend.providers.openai_error_classifier import OpenAIErrorClassifier
-from backend.providers.transport_assembly import (
-    IntervalsTransportSettings,
-    ProviderHttpSettings,
-    ProviderOperationContext,
-    ProviderTransportAssembly,
-)
+from backend.providers.transport_wiring import build_provider_transport
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -459,17 +393,12 @@ from backend.sync.wahoo_connection_assembly import (
     WahooConnectionInputs,
 )
 from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
-from backend.sync.weather import WeatherSyncService
+from backend.sync.weather import build_weather_sync
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
 from backend.weather.activity_weather_store import home_coordinates
-from backend.weather.assembly import (
-    WeatherAssembly,
-    WeatherProviderRuntime,
-    WeatherStateOwners,
-    WeatherSyncRuntime,
-)
 from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
+from backend.weather.wiring import WeatherServices, build_weather
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -485,22 +414,10 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
-JSON_MEDIA_TYPE = "application/json"
-OPENAI_RESPONSES_PATH = "/responses"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
-MAX_BACKUP_BYTES = 1_000_000_000
-MAX_PRIVACY_EXPORT_BYTES = 100_000_000
-MIN_EXPORT_FREE_BYTES = 10_000_000
-EXPORT_TIME_LIMIT_SECONDS = 120
-# The longest silence allowed between two parts of a streamed model response.
-# Long reasoning on a large plan may send nothing for minutes (athlete
-# decision 2026-11-11, #2073: 10 minutes instead of 3).
-OPENAI_RESPONSE_TIMEOUT_SECONDS = 600
-# Plain OpenAI requests (impact classifier, remote conversation create/delete).
-OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -518,9 +435,9 @@ WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
 
 
 def _nutrition_secret_values() -> tuple[str, ...]:
-    # Logging starts before NUTRITION_ASSEMBLY exists.
-    assembly = globals().get("NUTRITION_ASSEMBLY")
-    return () if assembly is None else assembly.secret_values()
+    # Logging starts before NUTRITION_SERVICES exists.
+    nutrition = globals().get("NUTRITION_SERVICES")
+    return () if nutrition is None else nutrition.secret_values()
 
 
 # Environment secrets stay redacted while a stored credential overrides them.
@@ -538,7 +455,6 @@ REDACTOR = observability.Redactor(
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
 ATHLETE_SESSION_SERVICE = AthleteSessionService()
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
-COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 PLANNING_STATE_REPOSITORY = PlanningStateRepository()
 PLANNING_REVISION_SERVICE = PlanningRevisionService(
@@ -728,211 +644,86 @@ ACTIVITY_READS = ActivityReadAssembly(
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
-PLANNING_DATA = PlanningDataAssembly(
-    dependencies=PlanningDataAssembly.Inputs(
-        database_manager=database_manager,
-        repositories=PlanningDataRepositories(
-            competition=COMPETITION_REPOSITORY,
-            training_plans=TRAINING_PLAN_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            plan_adjustments=PLAN_ADJUSTMENT_REPOSITORY,
-        ),
-        runtime=PlanningDataRuntime(
-            revision=PLANNING_REVISION_SERVICE,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            utc_now=runtime_clock.utc_now,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            uuid_factory=uuid.uuid4,
-            redact=REDACTOR.redact_text,
-            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
-        ),
-        mutations=PlanningMutations(
-            calendar_conflict_service=lambda: (
-                PLANNING_WORKFLOWS.calendar_conflict_service()
-            ),
-            publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
-                "coach", {"status": "changed"}
-            ),
-        ),
-    ),
+# The application context the domain builders read (#2069). Owners whose
+# builder step has not run yet are set as they are created.
+APP = AppContext(
+    config=lambda: CONFIG,
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    clock=ATHLETE_CLOCK,
+    ids=lambda: uuid.uuid4().hex,
+    logger=LOGGER,
+    maintenance=runtime_maintenance.MAINTENANCE_GATE,
+    redactor=REDACTOR,
+    operation_context=sync_observation.OPERATION_CONTEXT,
+    database_lock=DB_LOCK,
+    data_dir=lambda: DATA_DIR,
+    database_path=lambda: DB_PATH,
+    sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
+    sqlite_backend=sqlite_backend,
+    profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
+    # Defined below; looked up when a provider client is built or on use.
+    refresh_config=lambda: refresh_runtime_config(),
+    observed_opener=lambda service: observed_provider_opener(service),
+    log_path=lambda: LOG_PATH,
+    app_name=APP_NAME,
+    app_version=APP_VERSION,
+    provider_state=provider_state_service,
+    athlete=ATHLETE_DATA,
+    athlete_profile=ATHLETE_PROFILE_SERVICE,
+    planning_revision=PLANNING_REVISION_SERVICE,
+    provider_sync=PROVIDER_SYNC,
+    morning_body_battery_service=morning_body_battery_service,
 )
-PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
-    dependencies=PlanningWorkflowAssembly.Inputs(
-        owners=PlanningServiceOwners(
-            database_manager=database_manager,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            workout_library_service=PLANNING_DATA.workout_library,
-            competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
-            checkin_service=lambda: ATHLETE_DATA.checkin(),
-        ),
-        repositories=PlanningRepositories(
-            state_repository=PLANNING_STATE_REPOSITORY,
-            training_plan_repository=TRAINING_PLAN_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            revision_service=PLANNING_REVISION_SERVICE,
-            plan_adjustment_repository=PLAN_ADJUSTMENT_REPOSITORY,
-        ),
-        daily_sources=DailyPlanningSources(
-            activity_feedback_service=ATHLETE_DATA.activity_feedback,
-            external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
-            weather_service=lambda: WEATHER_ASSEMBLY.service(),
-            morning_body_battery_service=morning_body_battery_service,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-            checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
-            observation_reader=lambda: CANONICAL_READ,
-            source_preferences=lambda db: preferences_from_profile(
-                ATHLETE_DATA.profile().get_from_db(db)
-            ),
-            timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
-            run_caps=lambda: profile_run_caps(ATHLETE_DATA.profile().get()),
-        ),
-        runtime=PlanningRuntime(
-            sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
-            coach_artifact_refs=lambda: (
-                COACH_CONVERSATION.dialogue_read_service().artifact_refs
-            ),
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=uuid.uuid4,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            logger=LOGGER,
-        ),
-        limits=PlanningChangeLimits(
-            training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-            default_illness_pause_days=planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
-            weather_adaptive_max_minutes=planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
-        ),
-    )
+PLANNING_DATA = build_planning_data(APP)
+APP.planning = PLANNING_DATA
+PLANNING_WORKFLOWS = build_planning_workflows(APP)
+APP.planning_workflows = PLANNING_WORKFLOWS
+PERFORMANCE = build_performance(
+    APP,
+    session_activities=CanonicalTableReader().session_activities,
+    # Defined below; the HTTP public-state projections the reports read.
+    plan_state=lambda: PUBLIC_STATE.plan_state_service(),
+    performance_state=lambda: PUBLIC_STATE.performance_state_service(),
+    canonical_performance_source=lambda: PUBLIC_STATE.canonical_performance_source(),
+    season_source=lambda: PUBLIC_STATE.season_source(),
+    block_review=block_review,
+    last_completed_test=last_completed_test,
+    season_preparation=season_preparation,
 )
-
-HISTORY = HistoryAssembly(
-    dependencies=HistoryAssembly.Inputs(
-        persistence=HistoryPersistence(database_manager, PROFILE_REPOSITORY),
-        athlete=HistoryAthleteServices(
-            profile_service=ATHLETE_DATA.profile,
-            competition_service=PLANNING_DATA.competition,
-            zone_service=ATHLETE_DATA.zones,
-            feedback_service=ATHLETE_DATA.activity_feedback,
-            session_corrections=ATHLETE_DATA.session_corrections,
-            # Defined further down; resolved only when a history service is built.
-            nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
-            checkin_service=ATHLETE_DATA.checkin,
-            meal_library=lambda: NUTRITION_ASSEMBLY.meal_library_service(),
-            product_catalog=lambda: NUTRITION_ASSEMBLY.product_catalog_service(),
-            food_database_entries=lambda: NUTRITION_ASSEMBLY.food_mirror(),
-            equipment_history=ATHLETE_DATA.equipment_history,
-        ),
-        planning=HistoryPlanningServices(
-            workout_library_service=PLANNING_DATA.workout_library,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            training_plan_service=PLANNING_DATA.training_plan,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-        ),
-    )
-)
-
-
-def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
-    return DIAGNOSTIC_CAPTURE.suspended()
+APP.performance = PERFORMANCE
+PLAN_GUARD = build_plan_guard(APP)
+HISTORY = build_history(APP)
 
 
 def start_canonical_backfill() -> None:
     return CANONICAL_BACKFILL.worker.start()
 
 
-def cancel_running_coach_turns() -> None:
-    return COACH_CONVERSATION.reset_service().cancel_running_turns()
-
-
 def server_log_files() -> RecentLogEntriesService:
-    return DIAGNOSTICS_ASSEMBLY.recent_log_entries_service()
+    return DIAGNOSTICS.recent_log_entries_service()
 
 
-PRIVACY_ASSEMBLY = PrivacyAssembly(
-    dependencies=PrivacyAssembly.Inputs(
-        athlete=PrivacyAthleteSources(
-            profile_service=ATHLETE_DATA.profile,
-        ),
-        planning=PrivacyPlanningSources(
-            competition_service=PLANNING_DATA.competition,
-        ),
-        context=PrivacyContextSources(
-            adaptive_preview_service=lambda: (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service()
-            ),
-        ),
-        clock=PrivacyClock(
-            local_now=lambda: ATHLETE_CLOCK.now(),
-            utc_now=runtime_clock.utc_now,
-        ),
-        state=PrivacyStateDependencies(
-            database_manager=database_manager,
-            database_lock=lambda: DB_LOCK,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-            openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
-            logger=LOGGER,
-            diagnostics_suspended=suspend_diagnostic_flushes,
-            refresh_credentials=lambda: refresh_runtime_config(),
-            cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
-            disconnect_wahoo=lambda: disconnect_wahoo_grant(),
-            cancel_coach_turns=cancel_running_coach_turns,
-            log_files=server_log_files,
-        ),
-        archive=PrivacyArchiveSettings(
-            data_dir=lambda: DATA_DIR,
-            database_path=lambda: DB_PATH,
-            maximum_export_bytes=MAX_PRIVACY_EXPORT_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-        ),
-    )
+PRIVACY = build_privacy(
+    database_manager=database_manager,
+    profile_service=ATHLETE_DATA.profile,
+    competition_service=PLANNING_DATA.competition,
+    adaptive_preview_service=lambda: (
+        PLANNING_WORKFLOWS.adaptive_replan_preview_service()
+    ),
+    planning_revision_service=PLANNING_REVISION_SERVICE,
+    openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
+    local_now=lambda: ATHLETE_CLOCK.now(),
+    diagnostics_suspended=lambda: APP.diagnostic_capture.suspended(),
+    refresh_credentials=lambda: refresh_runtime_config(),
+    cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
+    disconnect_wahoo=lambda: disconnect_wahoo_grant(),
+    cancel_coach_turns=lambda: (
+        APP.coach_conversation.reset_service().cancel_running_turns()
+    ),
+    log_files=server_log_files,
 )
-BACKUP_ASSEMBLY = BackupAssembly(
-    dependencies=BackupAssembly.Inputs(
-        storage=BackupStorageDependencies(
-            database_manager=database_manager,
-            database_path=lambda: DB_PATH,
-            data_dir=lambda: DATA_DIR,
-            database_lock=lambda: DB_LOCK,
-            maximum_bytes=MAX_BACKUP_BYTES,
-            minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
-            time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
-            logger=LOGGER,
-        ),
-        validation=RestoreValidationDependencies(
-            app_password=lambda: CONFIG.app_password,
-            sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
-            sqlite_backend=sqlite_backend,
-            configure_cipher=configure_cipher,
-            row_factory=database_row_factory,
-            schema_is_current=database_schema_is_current,
-            startup_invariants=lambda db: apply_startup_invariants(
-                db,
-                key_values=KEY_VALUE_REPOSITORY,
-                now=runtime_clock.utc_now(),
-                default_profile_json=json.dumps(DEFAULT_PROFILE),
-                provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
-            ),
-        ),
-        lifecycle=RestoreLifecycleDependencies(
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
-            sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
-            coach_jobs=lambda: COACH_BACKGROUND_JOBS.job_store(),
-            coach_failures=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
-            sync_wake_event=shared_sync_job_wake_event,
-            coach_wake_event=COACH_JOB_WORKER.wake_event,
-            redact=REDACTOR.redact_text,
-            diagnostics_suspended=suspend_diagnostic_flushes,
-            canonical_backfill_start=start_canonical_backfill,
-            refresh_credentials=lambda: refresh_runtime_config(),
-            cancel_coach_turns=cancel_running_coach_turns,
-        ),
-    )
-)
+BACKUP = build_backup(APP)
 
 
 def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
@@ -1009,6 +800,7 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     flush_delay_seconds=DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS,
     timer_context=background_writer,
 )
+APP.diagnostic_capture = DIAGNOSTIC_CAPTURE
 
 SYNC_PERSISTENCE = SyncPersistenceAssembly(
     database_manager=database_manager,
@@ -1090,8 +882,10 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             activity_summaries=lambda: CANONICAL_READ,
         ),
         tokens=GARMIN_TOKENS,
+        run_zones=lambda: RUN_LTHR.zones_resolver(),
     )
 )
+APP.garmin = GARMIN_ASSEMBLY
 
 
 def _coach_foreground_busy() -> bool:
@@ -1123,6 +917,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
         ),
     )
 )
+APP.sync_job_queue = SYNC_JOB_QUEUE
 
 EXTERNAL_CALENDAR = ExternalCalendarAssembly(
     dependencies=ExternalCalendarAssembly.Inputs(
@@ -1150,34 +945,21 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
         ),
     )
 )
+APP.external_calendar = EXTERNAL_CALENDAR
 
 
-PROVIDER_TRANSPORT = ProviderTransportAssembly(
-    dependencies=ProviderTransportAssembly.Inputs(
-        http=ProviderHttpSettings(
-            app_version=APP_VERSION,
-            max_response_bytes=provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-            logger=LOGGER,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            redact_text=REDACTOR.redact_text,
-            safe_response_headers=partial(
-                observability.safe_response_headers, redact=REDACTOR.redact_text
-            ),
-            opener=lambda: provider_http.urlopen,
-            provider_error_details=OpenAIErrorClassifier(
-                provider_state_service, runtime_clock.utc_now
-            ),
-        ),
-        operation=ProviderOperationContext(
-            operation_context=sync_observation.operation_context,
-        ),
-        intervals=IntervalsTransportSettings(
-            config=lambda: CONFIG,
-            athlete_now=ATHLETE_CLOCK.now,
-            operation=INTERVALS_RESYNC_GATE.operation,
-        ),
-    ),
+PROVIDER_TRANSPORT = build_provider_transport(
+    app_version=APP_VERSION,
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    redact_text=REDACTOR.redact_text,
+    provider_state=provider_state_service,
+    operation_context=sync_observation.operation_context,
+    current_config=lambda: CONFIG,
+    athlete_now=ATHLETE_CLOCK.now,
+    intervals_operation=INTERVALS_RESYNC_GATE.operation,
 )
+APP.provider_transport = PROVIDER_TRANSPORT
 WAHOO_CONNECTION = WahooConnectionAssembly(
     WahooConnectionInputs(
         config=lambda: CONFIG,
@@ -1239,61 +1021,23 @@ WAHOO_SYNC = WahooSyncAssembly(
         fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
-NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
-    dependencies=NutritionAssembly.Inputs(
-        persistence=NutritionPersistence(
-            database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ
-        ),
-        runtime=NutritionRuntime(
-            config=lambda: CONFIG,
-            utc_now=runtime_clock.utc_now,
-            local_now=ATHLETE_CLOCK.now,
-            intervals_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-            photo_extractor=lambda: NutritionPhotoExtractionService(
-                selected_model=SETTINGS.selected_model,
-                complete=lambda request: MODEL_TRANSPORT.complete(request),
-            ),
-            web_searcher=lambda: NutritionWebSearchService(
-                selected_model=SETTINGS.selected_model,
-                complete=lambda request: MODEL_TRANSPORT.complete(request),
-            ),
-            athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
-            observed_opener=observed_provider_opener,
-        ),
-    )
+APP.settings = SETTINGS
+NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)
+APP.nutrition = NUTRITION_SERVICES
+MODEL_TRANSPORT: ModelTransportServices = build_model_transport(
+    config=lambda: CONFIG,
+    selected_thinking_level=SETTINGS.selected_thinking_level,
+    service_tier=SETTINGS.service_tier,
+    http_client=PROVIDER_TRANSPORT.json_http_client,
+    provider_state=provider_state_service,
+    read_value=lambda key: key_value_service().get(key),
+    write_value=lambda key, value: key_value_service().set(key, value),
+    logger=LOGGER,
+    diagnostic_capture=DIAGNOSTIC_CAPTURE,
+    app_version=APP_VERSION,
+    max_audio_bytes=MAX_AUDIO_BODY_BYTES,
 )
-MODEL_TRANSPORT: ModelTransportAssembly = ModelTransportAssembly(
-    dependencies=ModelTransportAssembly.Inputs(
-        providers=ModelProviderOwners(
-            config=lambda: CONFIG,
-            selected_thinking_level=SETTINGS.selected_thinking_level,
-            service_tier=SETTINGS.service_tier,
-            http_client=PROVIDER_TRANSPORT.json_http_client,
-            state_service=provider_state_service,
-            read_value=lambda key: key_value_service().get(key),
-            write_value=lambda key, value: key_value_service().set(key, value),
-        ),
-        endpoints=ModelEndpointSettings(
-            default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
-            openai_responses_path=OPENAI_RESPONSES_PATH,
-            json_media_type=JSON_MEDIA_TYPE,
-            response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-            request_timeout_seconds=OPENAI_REQUEST_TIMEOUT_SECONDS,
-        ),
-        audio=AudioTranscriptionSettings(max_audio_bytes=MAX_AUDIO_BODY_BYTES),
-        diagnostics=ModelProviderDiagnostics(
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            logger=LOGGER,
-            app_version=APP_VERSION,
-        ),
-        limits=ModelResponseLimits(
-            max_response_bytes=lambda: provider_http.MAX_EXTERNAL_RESPONSE_BYTES,
-        ),
-        clock=ModelTransportClock(
-            utc_now=runtime_clock.utc_now,
-        ),
-    )
-)
+APP.model_transport = MODEL_TRANSPORT
 COACH_CONVERSATION = CoachConversationAssembly(
     persistence=ConversationPersistence(
         database_manager=database_manager,
@@ -1320,6 +1064,7 @@ COACH_CONVERSATION = CoachConversationAssembly(
         json_media_type=JSON_MEDIA_TYPE,
     ),
 )
+APP.coach_conversation = COACH_CONVERSATION
 COACH_LOCAL = CoachLocalAssembly(
     dependencies=CoachLocalAssembly.Inputs(
         state=CoachLocalState(
@@ -1342,6 +1087,7 @@ COACH_LOCAL = CoachLocalAssembly(
         ),
     )
 )
+APP.coach_local = COACH_LOCAL
 PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
     dependencies=PlannedUnitSyncAssembly.Inputs(
         owners=PlannedUnitOwners(
@@ -1394,6 +1140,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
         uuid_factory=uuid.uuid4,
     )
 )
+APP.workout_library_sync = WORKOUT_LIBRARY_SYNC
 SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
     dependencies=SelectedWorkoutSyncAssembly.Inputs(
         providers=SelectedWorkoutProviders(
@@ -1409,46 +1156,14 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
         ),
     )
 )
-WEATHER_ASSEMBLY = WeatherAssembly(
-    dependencies=WeatherAssembly.Inputs(
-        state=WeatherStateOwners(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            profile_service=ATHLETE_DATA.profile,
-        ),
-        provider=WeatherProviderRuntime(
-            client_factory=lambda forecast_days: weather_provider.WeatherClient(
-                PROVIDER_TRANSPORT.json_http_client().request,
-                runtime_clock.utc_now,
-                LOGGER,
-                forecast_days=forecast_days,
-                air_quality_client=air_quality_provider.AirQualityClient(
-                    PROVIDER_TRANSPORT.json_http_client().request
-                ),
-                pollen_client=dwd_pollen_provider.DwdPollenClient(
-                    PROVIDER_TRANSPORT.json_http_client().request
-                ),
-            ),
-            refresh_tracker=PROVIDER_SYNC.refresh_tracker,
-            operation_context=sync_observation.OPERATION_CONTEXT,
-            operation_id_factory=lambda: uuid.uuid4().hex,
-        ),
-        sync=WeatherSyncRuntime(
-            service_factory=WeatherSyncService,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            now=lambda: datetime.now(UTC),
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            adaptive_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-            observer=PROVIDER_SYNC.operation_observer,
-            logger=LOGGER,
-        ),
-    ),
-)
+WEATHER: WeatherServices = build_weather(APP)
+APP.weather = WEATHER
+WEATHER_SYNC = build_weather_sync(APP, WEATHER)
 
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            weather_service=WEATHER_ASSEMBLY.service,
+            weather_service=WEATHER.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
             activity_feedback_service=ATHLETE_DATA.activity_feedback,
@@ -1485,8 +1200,8 @@ COACH_CONTEXT = CoachContextAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             workout_library_service=PLANNING_DATA.workout_library,
-            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
-            planning_brief=lambda: _plan_guard_service().brief(),
+            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
+            planning_brief=lambda: PLAN_GUARD.plan_guard_service().brief(),
         ),
         dialogue=CoachContextDialogueSources(
             profile_service=ATHLETE_DATA.profile,
@@ -1514,29 +1229,21 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
-            report_services=lambda: HTTP_API.training_reports(),
+            report_services=PERFORMANCE.training_reports,
             session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
             workout_library_service=PLANNING_DATA.workout_library,
             planned_unit_service=PLANNING_DATA.planned_unit,
-            unit_thresholds=lambda: PlannedUnitEstimator(
-                database_manager=database_manager,
-                observation_reader=lambda: CANONICAL_READ,
-                zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
-                today=lambda: ATHLETE_CLOCK.now().date(),
-                source_preferences=lambda db: preferences_from_profile(
-                    ATHLETE_DATA.profile().get_from_db(db)
-                ),
-            ),
+            unit_thresholds=PLAN_GUARD.planned_unit_estimator,
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
             training_plan_service=PLANNING_DATA.training_plan,
         ),
         policy=CoachReadToolPolicy(
-            nutrition_diary=NUTRITION_ASSEMBLY.diary_service,
-            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
+            nutrition_diary=NUTRITION_SERVICES.diary_service,
+            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
             training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
             context_service=COACH_CONTEXT.structured_context_service,
         ),
@@ -1546,7 +1253,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
+            nutrition_diary_service=NUTRITION_SERVICES.diary_service,
         ),
         execution=ProposalExecutionOwners(
             history_undo_service=HISTORY.undo_service,
@@ -1619,7 +1326,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     intervals=IntervalsJobDependencies(
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
-        nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
+        nutrition_sync_service=NUTRITION_SERVICES.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
     ),
@@ -1635,7 +1342,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-        weather_sync_service=WEATHER_ASSEMBLY.sync_service,
+        weather_sync_service=WEATHER_SYNC,
     ),
     wahoo=WahooJobDependencies(
         sync_service=WAHOO_SYNC.sync_service,
@@ -1710,7 +1417,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
         ),
         providers=SyncScheduleProviders(
             garmin_resync_gate=GARMIN_RESYNC_GATE,
-            weather_refresh_due=lambda: WEATHER_ASSEMBLY.sync_service().refresh_due(),
+            weather_refresh_due=lambda: WEATHER_SYNC().refresh_due(),
             wahoo=SYNC_JOB_DEPENDENCIES.wahoo,
             sync_period_defaults=SYNC_PERIOD_DEFAULTS,
             all_sync_days=ALL_SYNC_DAYS,
@@ -1762,27 +1469,7 @@ CHAT_PAGE_MAX = 100
     training_plan_statuses=planning_training_plans.TRAINING_PLAN_STATUSES,
     dialogue_tools=dialogue_tools,
 )
-
-
-def _block_lessons() -> list[dict[str, object]]:
-    """Lessons of the last 4 whole weeks for the planning brief."""
-    reports = HTTP_API.training_reports()
-    return reports.report.block_review({}, reports.timezone(), with_curves=False).get(
-        "lessons", []
-    )
-
-
-def _planned_unit_estimator() -> PlannedUnitEstimator:
-    """Estimator of planned units with the current local thresholds."""
-    return PlannedUnitEstimator(
-        database_manager=database_manager,
-        observation_reader=lambda: CANONICAL_READ,
-        zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
-        today=lambda: ATHLETE_CLOCK.now().date(),
-        source_preferences=lambda db: preferences_from_profile(
-            ATHLETE_DATA.profile().get_from_db(db)
-        ),
-    )
+APP.coach_dialogue_tools = COACH_DIALOGUE_TOOLS
 
 
 RUN_LTHR = RunLthr(
@@ -1796,73 +1483,7 @@ RUN_LTHR = RunLthr(
     today=lambda: ATHLETE_CLOCK.now().date(),
     key_values=KEY_VALUE_REPOSITORY,
 )
-
-
-def _plan_guard_service() -> PlanGuardService:
-    """Plan checks and planning brief over the current local state."""
-    guard = PlanGuardService(
-        estimate_unit=_planned_unit_estimator(),
-        planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
-        completed_activities=lambda: read_completed(
-            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
-        ),
-        competitions=lambda: PLANNING_DATA.competition().list(),
-        illness=lambda: recent_illness(
-            ATHLETE_DATA.checkin().list(10),
-            ATHLETE_CLOCK.now().date(),
-            (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_illness_pause()
-                or (None, None)
-            )[1],
-        ),
-        progress=lambda: read_progress(HTTP_API.training_reports()),
-        training_model=lambda: str(
-            ATHLETE_DATA.profile().get().get("training_model") or ""
-        ),
-        profile=lambda: ATHLETE_DATA.profile().get(),
-        today=lambda: ATHLETE_CLOCK.now().date(),
-        thresholds=lambda: read_load_thresholds(
-            database_manager(),
-            CANONICAL_READ,
-            ATHLETE_CLOCK.now().date(),
-            ATHLETE_DATA.zones().configurations(),
-            lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
-        ),
-        expects_strength=lambda: strength_expected(
-            str(
-                ATHLETE_DATA.profile().get().get("training_preferences_strength") or ""
-            ),
-            PLANNING_DATA.competition().list(),
-            ATHLETE_CLOCK.now().date(),
-        ),
-        calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
-        history=BriefHistory(
-            lessons=lambda: read_lessons(_block_lessons),
-            recent_units=lambda: PLANNING_DATA.planned_unit().list(
-                1000,
-                future_only=True,
-                since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
-            ),
-            recent_completed=lambda: read_completed(
-                database_manager(),
-                CANONICAL_READ,
-                ATHLETE_CLOCK.now().date(),
-                days=LAST_TEST_DAYS,
-            ),
-        ),
-    ).with_return_stage(
-        lambda: (
-            PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
-        )
-    )
-    # Units come only from the athlete's library templates (#2379).
-    return guard.with_templates(
-        lambda: {
-            str(item["id"]): item
-            for item in PLANNING_DATA.workout_library().list(1000)
-            if not item.get("date")
-        }
-    )
+APP.run_lthr = RUN_LTHR
 
 
 COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
@@ -1889,7 +1510,7 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             illness_pause_sync_service=SYNC_COMMANDS.illness_pause,
-            plan_guard=_plan_guard_service,
+            plan_guard=PLAN_GUARD.plan_guard_service,
         ),
     )
 )
@@ -1914,8 +1535,8 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         checkin_service=lambda: ATHLETE_DATA.checkin(),
         activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
         competition_service=lambda: PLANNING_DATA.competition(),
-        nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
-        nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
+        nutrition_diary_service=NUTRITION_SERVICES.diary_service,
+        nutrition_meal_library_service=NUTRITION_SERVICES.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
         session_corrections_service=ATHLETE_DATA.session_corrections,
     ),
@@ -1986,7 +1607,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
             dialogue_action_service=COACH_LOCAL.dialogue_action_service,
             planning_authority_service=SYNC_COMMANDS.authority,
-            plan_guard_service=_plan_guard_service,
+            plan_guard_service=PLAN_GUARD.plan_guard_service,
         ),
         state=StructuredToolRoundState(
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
@@ -2037,6 +1658,7 @@ COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
         ),
     )
 )
+APP.coach_background_jobs = COACH_BACKGROUND_JOBS
 
 
 COACH_TURNS = CoachTurnAssembly(
@@ -2080,7 +1702,7 @@ COACH_TURNS = CoachTurnAssembly(
 )
 
 
-PUBLIC_STATE = PublicStateAssembly(
+PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
     dependencies=PublicStateAssembly.Inputs(
         core=PublicStateCoreInputs(
             database_manager=lambda: database_manager(),
@@ -2107,7 +1729,7 @@ PUBLIC_STATE = PublicStateAssembly(
             sync_job_queue=lambda: SYNC_JOB_QUEUE,
         ),
         projections=PublicStateProjectionOwners(
-            weather=lambda: WEATHER_ASSEMBLY,
+            weather=lambda: WEATHER,
             workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
             provider_resync=lambda: PROVIDER_RESYNC,
             coach_conversation=lambda: COACH_CONVERSATION,
@@ -2146,6 +1768,7 @@ CANONICAL_READ = build_canonical_read(
     key_values=KEY_VALUE_REPOSITORY,
     profile=ATHLETE_PROFILE_SERVICE,
 )
+APP.canonical_read = CANONICAL_READ
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,
     lambda: CANONICAL_READ,
@@ -2184,7 +1807,7 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     future_units=lambda limit: PLANNING_DATA.planned_unit().list(
         limit, future_only=True
     ),
-    estimator=_planned_unit_estimator,
+    estimator=PLAN_GUARD.planned_unit_estimator,
     update_unit=lambda *args, **kwargs: PLANNING_DATA.planned_unit().update(
         *args, **kwargs
     ),
@@ -2246,48 +1869,9 @@ CANONICAL_BACKFILL = build_canonical_backfill(
         ATHLETE_DATA.profile().get_from_db(db).get("weather_location", ""),
     ),
 )
+APP.canonical_backfill = CANONICAL_BACKFILL
 
-DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
-    dependencies=DiagnosticsAssembly.Inputs(
-        runtime=DiagnosticRuntimeDependencies(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            config=lambda: CONFIG,
-            settings=SETTINGS,
-            app_name=APP_NAME,
-            app_version=APP_VERSION,
-        ),
-        provider_health=DiagnosticProviderHealth(
-            provider_state=provider_state_service,
-            provider_freshness=PROVIDER_SYNC.freshness_service,
-            redactor=REDACTOR,
-        ),
-        garmin=DiagnosticGarminServices(
-            projection=GARMIN_ASSEMBLY.projection_service,
-            client_factory=GARMIN_ASSEMBLY.client_factory,
-            fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-            sync_state=GARMIN_ASSEMBLY.sync_state_service,
-            change_check=lambda: GARMIN_ASSEMBLY.change_check().status(),
-        ),
-        local_projections=DiagnosticLocalProjections(
-            profile=ATHLETE_DATA.profile,
-            external_calendar_sync=EXTERNAL_CALENDAR.sync_service,
-            external_calendar_reader=EXTERNAL_CALENDAR.reader,
-            morning_checkin=COACH_LOCAL.morning_checkin_state_service,
-            workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
-            canonical_coverage=lambda: CANONICAL_READ,
-            canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
-            canonical_read=lambda: CANONICAL_READ,
-        ),
-        report=DiagnosticReportSettings(
-            utc_now=runtime_clock.utc_now,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            log_path=lambda: LOG_PATH,
-            receipt_parser=command_receipt,
-            allowed_tools=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
-        ),
-    )
-)
+DIAGNOSTICS = build_diagnostics(APP)
 
 
 PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
@@ -2381,8 +1965,6 @@ HTTP_API = HttpApiAssembly(
                 performance_state=PUBLIC_STATE.performance_state_service,
                 feedback_state=PUBLIC_STATE.feedback_state_service,
                 sync_state=PUBLIC_STATE.sync_public_state_service,
-                canonical_performance_source=PUBLIC_STATE.canonical_performance_source,
-                season_source=PUBLIC_STATE.season_source,
             ),
             athlete=HttpAthleteServices(
                 profile=ATHLETE_DATA.profile,
@@ -2399,28 +1981,28 @@ HTTP_API = HttpApiAssembly(
                         profile, revision, deadline
                     )
                 ),
-                checkin=ATHLETE_DATA.checkin,
                 clock=ATHLETE_CLOCK,
                 local_today=lambda: ATHLETE_CLOCK.now().date(),
                 state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
             ),
             diagnostics=HttpDiagnosticsServices(
-                recent_logs=DIAGNOSTICS_ASSEMBLY.recent_log_entries_service,
-                report=DIAGNOSTICS_ASSEMBLY.report_service,
+                recent_logs=DIAGNOSTICS.recent_log_entries_service,
+                report=DIAGNOSTICS.report_service,
             ),
             history=HttpHistoryServices(
                 undo=HISTORY.undo_service,
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,
+            training_reports=PERFORMANCE.training_reports,
             wahoo_library_state=WAHOO_SYNC.library_state,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(
-                backup=BACKUP_ASSEMBLY.backup_service,
-                export=PRIVACY_ASSEMBLY.archive_export_service,
-                delete=PRIVACY_ASSEMBLY.delete_service,
-                restore=BACKUP_ASSEMBLY.restore_service,
+                backup=BACKUP.backup_service,
+                export=PRIVACY.archive_export_service,
+                delete=PRIVACY.delete_service,
+                restore=BACKUP.restore_service,
                 max_backup_bytes=MAX_BACKUP_BYTES,
             ),
             sync=HttpSyncServices(
@@ -2437,9 +2019,9 @@ HTTP_API = HttpApiAssembly(
                 uuid_factory=lambda: uuid.uuid4().hex,
             ),
             nutrition=HttpNutritionServices(
-                diary=NUTRITION_ASSEMBLY.diary_service,
-                meal_library=NUTRITION_ASSEMBLY.meal_library_service,
-                intervals_sync=NUTRITION_ASSEMBLY.intervals_sync_service,
+                diary=NUTRITION_SERVICES.diary_service,
+                meal_library=NUTRITION_SERVICES.meal_library_service,
+                intervals_sync=NUTRITION_SERVICES.intervals_sync_service,
                 audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
                 refresh=GARMIN_ASSEMBLY.nutrition_refresh_service,
             ),

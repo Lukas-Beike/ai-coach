@@ -11,9 +11,10 @@ Follow-up stages run one after another once the canonical backfill is complete. 
 keeps its own state, so a failed follow-up is recorded on its own and leaves the
 canonical backfill complete.
 
-A stage that reads external data defines ``prefetch(database)``: it runs inside the
-maintenance gate but before the writer transaction, so no request is made while
-the writer is held.
+A stage that reads external data or decodes stored streams defines
+``prefetch(database)``: it runs inside the maintenance gate but before the writer
+transaction, so no request is made and no stream decoded while the writer is held
+(#2311).
 
 A start() while the thread runs a pass requests one more pass instead of a second
 thread, so a restore that lands mid-pass is backfilled from the restored state.

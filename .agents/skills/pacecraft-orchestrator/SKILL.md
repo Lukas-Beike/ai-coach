@@ -16,7 +16,8 @@ One lane per independent area, so two lanes never edit the same files. The
 brief is self-contained: the issues in order, the athlete rules (German with the
 athlete, English in the repository, every question through AskUserQuestion,
 UI questions only with rendered mockups), the hard limits from `AGENTS.md`, how
-to reach you, and the closing sentence. A lane that cannot message your thread
+to reach you (your thread id and its `environmentId` when the lane runs on
+another machine), and the closing sentence. A lane that cannot message your thread
 writes its reports in its own thread, prefixed `ORCHESTRATOR:`; read those
 threads on every periodic check.
 

@@ -35,7 +35,7 @@ FIXTURE_OBSERVATION_COUNTS = {
     "hrv_weekly_average": 1,
     "sleep_duration": 5,
     "sleep_score": 5,
-    "vo2max": 3,
+    "vo2max": 2,
     "threshold_pace": 2,
     "readiness": 4,
     "ctl": 3,

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import GARMIN_ID
 from backend.config import Config
 from backend.errors import AppError
@@ -116,10 +117,15 @@ class GarminAssembly:
         canonical: GarminCanonicalSources | None = None
         # Database-backed Garmin token store; None keeps the legacy file rules.
         tokens: Any | None = None
+        # Snapshot of the run zones per unit, for the Garmin run push.
+        run_zones: (
+            Callable[[], Callable[[Mapping[str, Any]], ZoneSettings | None]] | None
+        ) = None
 
     def __init__(self, *, dependencies: GarminAssembly.Inputs) -> None:
         self._canonical = dependencies.canonical
         self._garmin_tokens = dependencies.tokens
+        self._run_zones = dependencies.run_zones
         provider = dependencies.provider
         persistence = dependencies.persistence
         telemetry = dependencies.telemetry
@@ -194,7 +200,7 @@ class GarminAssembly:
         )
 
     def strength_push_service(self) -> Any:
-        """Compose the explicit strength-workout push; it opens no connection yet."""
+        """Compose the explicit strength and run workout push; it opens no connection yet."""
         from backend.sync.garmin_strength_push import (
             GarminSdkWriteSession,
             GarminStrengthPushService,
@@ -211,6 +217,7 @@ class GarminAssembly:
             redactor=self._redactor.redact_text,
             gate=self._resync_gate,
             write_ready=lambda: self.sync_state_service().sdk_skipped() is None,
+            run_zones=self._run_zones,
         )
 
     def body_export(self, profile: Any) -> Any:

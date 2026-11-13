@@ -1,11 +1,12 @@
 """Rebase the current feature branch onto the target and optionally push it.
 
-    python scripts/branch_sync.py [--onto origin/develop] [--push]
+    python scripts/branch_sync.py [--onto origin/develop] [--push] [--allow-root <file>]
 
 Refuses on develop, main, a detached HEAD and a dirty working tree. Fetches
 origin, rebases, checks every commit subject against the Conventional Commit
 types, and with --push pushes with --force-with-lease through the repository
-hooks (never --no-verify). The hooks need the SonarQube CLI on PATH.
+hooks (never --no-verify). The hooks need the SonarQube CLI on PATH. A push
+that adds a file at the repository root is refused unless --allow-root names it.
 
 Exit 0: in sync (and pushed); 1: refused, rebase conflict (left in progress:
 resolve it or run `git rebase --abort`) or invalid subjects; 2: bad input,
@@ -72,7 +73,33 @@ def rebased(onto: str) -> bool:
     return True
 
 
-def sync(onto: str, push: bool) -> int:
+def outgoing_problems(onto: str, push: bool, allowed: frozenset[str]) -> bool:
+    """Print invalid subjects and, for a push, new root files; True if any."""
+    problems = [
+        ("invalid commit subjects (need <type>(<scope>): <description>):", s)
+        for s in invalid_subjects(onto)
+    ]
+    if push:
+        added = git(
+            *("-c", "core.quotePath=false", "diff", "--name-only", "--no-renames"),
+            *("--diff-filter=A", f"{onto}...HEAD"),
+        )
+        # A stray root file is usually a session artefact (a mistyped redirect).
+        problems += [
+            ("refused: new root files; remove them or pass --allow-root <file>:", n)
+            for n in added.splitlines()
+            if n and "/" not in n and n not in allowed
+        ]
+    heading = None
+    for title, item in problems:
+        if title != heading:
+            print(title)
+            heading = title
+        print(f"  {item}")
+    return bool(problems)
+
+
+def sync(onto: str, push: bool, allowed: frozenset[str] = frozenset()) -> int:
     branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch == "HEAD" or branch in PROTECTED:
         print(
@@ -92,11 +119,7 @@ def sync(onto: str, push: bool) -> int:
     git("fetch", "origin")
     if not rebased(onto):
         return 1
-    bad = invalid_subjects(onto)
-    if bad:
-        print("invalid commit subjects (need <type>(<scope>): <description>):")
-        for subject in bad:
-            print(f"  {subject}")
+    if outgoing_problems(onto, push, allowed):
         return 1
     if push:
         git(
@@ -115,9 +138,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--onto", default="origin/develop")
     parser.add_argument("--push", action="store_true")
+    parser.add_argument("--allow-root", action="append", default=[])
     args = parser.parse_args(argv)
     try:
-        return sync(args.onto, args.push)
+        return sync(args.onto, args.push, frozenset(args.allow_root))
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

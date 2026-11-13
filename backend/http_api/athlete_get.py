@@ -82,13 +82,34 @@ class AthleteGetRoutes:
         return routes
 
     def _performance(self, handler: Any, _request: RouteRequest) -> None:
-        """Performance projection."""
+        """Performance projection.
+
+        Request: no query, no body.
+
+        Response: 200 with `performance` (the current performance context, with
+        `history` and `training_focus_periods` added; built by
+        `PublicPerformanceStateService.performance_state`) and `garmin` (the public
+        Garmin projection).
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(
             200, self._public_performance_state_service().performance_state()
         )
 
     def _profile(self, handler: Any, _request: RouteRequest) -> None:
-        """Profile and competitions; also `first_threshold_estimate` (percent of the run threshold HR, bpm, session count, quality, date range) or null."""
+        """Profile, competitions and the first threshold estimate.
+
+        Request: no query, no body.
+
+        Response: 200 with `profile` (every profile field as a string),
+        `competitions` (up to 100; a past competition carries `result` when a
+        session is linked to it) and `first_threshold_estimate`: `percent_lthr`,
+        `bpm`, `sessions`, `quality`, `from`, `to`, `spread_pct`, `source`, or null
+        without an estimate or when computing it fails.
+
+        Errors: none beyond the common ones.
+        """
         payload: dict[str, Any] = {
             "profile": self._profile_service().get(),
             "competitions": self._competitions(),
@@ -100,14 +121,47 @@ class AthleteGetRoutes:
         handler.send_json(200, payload)
 
     def _feedback(self, handler: Any, _request: RouteRequest) -> None:
-        """Activity feedback projection."""
+        """Activity feedback projection.
+
+        Request: no query, no body.
+
+        Response: 200 with `checkins` (the latest 30 check-ins), `local_feedback`
+        (the check-in context) and `activity_feedback` (the activity feedback
+        context).
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(200, self._public_feedback_state_service().feedback_state())
 
     def _zones(self, handler: Any, _request: RouteRequest) -> None:
-        """Local and provider zone configurations."""
+        """Local and provider zone configurations.
+
+        Request: no query, no body.
+
+        Response: 200 with `sports` (`ride`, `run`, `swim`), `today` (athlete-local
+        date), `configurations` (each with `key`, `source` `local` or the provider,
+        `label`, `sport`, `metric`, `environment`, `valid_from`, `valid_until`,
+        `threshold`, `maximum`, `limits`, `percent_limits`, `percent_basis`),
+        `effective` (per sport, metric and environment the configuration in effect
+        today: `sport`, `metric`, `environment`, `key`) and, only when there is one,
+        `threshold_warnings`.
+
+        Errors: none beyond the common ones.
+        """
         if self._zone_service is not None:
             handler.send_json(200, self._zone_service().read())
 
     def _preview(self, handler: Any, _request: RouteRequest) -> None:
-        """Preview of the context the Coach receives."""
+        """Preview of the context the Coach receives.
+
+        Request: no query, no body.
+
+        Response: 200 with `generated_at`, `snapshot_truncated`,
+        `snapshot_compacted`, `assembly`, `conversation`, `chat_prompt`,
+        `structured_athlete_context`, `latest_activities`, `projection`,
+        `context_text` and `local_training_library` (built by
+        `CoachContextPreviewService.preview`). It changes no state.
+
+        Errors: none beyond the common ones.
+        """
         handler.send_json(200, self._coach_context_preview_service().preview())

@@ -92,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("pr", type=positive_int)
     parser.add_argument("--comments", type=int, default=5)
     args = parser.parse_args(argv)
+    # Review text and check output carry emoji; a Windows console is cp1252.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     number = args.pr
     try:
         pr = gh_json("pr", "view", str(number), "--json", FIELDS)

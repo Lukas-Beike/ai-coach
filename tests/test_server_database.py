@@ -1,10 +1,12 @@
 """Server integration tests for database."""
 
+import ast
 import dataclasses
 import http.client
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -18,6 +20,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+# The repository root, for running this file as a script with --write.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import remote_reconcilers
 import snapshot_seed
 from garmin_support import save_garmin
@@ -27,6 +32,7 @@ from support import canonical_backfill_stopped
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
+from backend.db.repositories import CompetitionRepository
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
@@ -36,6 +42,7 @@ from backend.db.schema import (
     database_table_names,
 )
 from backend.errors import AppError
+from backend.http_api import bootstrap_state as bootstrap_state_module
 from backend.http_api import server as http_server_module
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -54,7 +61,89 @@ from backend.weather import cache as weather_cache
 SERVER_PHRASE = "synthetic server phrase"
 
 
+BOOTSTRAP_CONTRACT = (
+    Path(__file__).resolve().parents[1] / "docs" / "bootstrap-contract.md"
+)
+CONTRACT_BEGIN = "<!-- BEGIN GENERATED BOOTSTRAP -->\n"
+CONTRACT_END = "<!-- END GENERATED BOOTSTRAP -->\n"
+WRITE_DOCS = "--write" in sys.argv
+
+
+def _bootstrap_placeholders() -> set[str]:
+    """Keys that ``PublicBootstrapService.read`` always fills with an empty literal."""
+    # The module as imported: in the container image it is not under the tests mount.
+    source = Path(bootstrap_state_module.__file__)
+    return {
+        str(key.value)
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant)
+        and isinstance(value, ast.List | ast.Dict)
+        and not (value.elts if isinstance(value, ast.List) else value.keys)
+    }
+
+
+def _json_type(value) -> str:
+    return {
+        type(None): "null",
+        bool: "boolean",
+        int: "number",
+        float: "number",
+        str: "string",
+        list: "list",
+        dict: "object",
+    }[type(value)]
+
+
+def bootstrap_contract(state: dict) -> str:
+    """The top-level shape of ``GET /api/bootstrap`` on an empty database."""
+    placeholders = _bootstrap_placeholders()
+    lines = ["| Field | Type | Fields or note |", "| --- | --- | --- |"]
+    for key in sorted(state):
+        value = state[key]
+        if key in placeholders and value in ([], {}):
+            note = "always empty here; its area route loads it"
+        elif isinstance(value, dict):
+            note = ", ".join(f"`{name}`" for name in sorted(value))
+        else:
+            note = ""
+        lines.append(f"| `{key}` | {_json_type(value)} | {note} |")
+    lines += [
+        "",
+        "`state_versions` markers: "
+        + ", ".join(f"`{name}`" for name in sorted(state["state_versions"]))
+        + ".",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 class ServerDatabaseTests(ServerTestCase):
+    def test_bootstrap_contract_is_current(self):
+        # A Personal API key adds fields to the Garmin state; render without one.
+        with patch.object(
+            server, "CONFIG", replace(server.CONFIG, garmin_personal_api_key="")
+        ):
+            state = server.PUBLIC_STATE.bootstrap_service().read()
+        rendered = bootstrap_contract(state)
+        document = BOOTSTRAP_CONTRACT.read_text(encoding="utf-8")
+        before, rest = document.split(CONTRACT_BEGIN, 1)
+        if WRITE_DOCS:
+            document = (
+                before
+                + CONTRACT_BEGIN
+                + rendered
+                + CONTRACT_END
+                + rest.split(CONTRACT_END, 1)[1]
+            )
+            BOOTSTRAP_CONTRACT.write_text(document, encoding="utf-8", newline="\n")
+        self.assertEqual(
+            document.split(CONTRACT_BEGIN, 1)[1].split(CONTRACT_END, 1)[0],
+            rendered,
+            "Regenerate with: python tests/test_server_database.py --write "
+            "ServerDatabaseTests.test_bootstrap_contract_is_current",
+        )
+
     def test_shared_database_resources_have_one_backend_owner(self):
         self.assertIs(server.DB_LOCK, DATABASE_LOCK)
         self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
@@ -93,8 +182,8 @@ class ServerDatabaseTests(ServerTestCase):
         first_http_client = server.PROVIDER_TRANSPORT.json_http_client()
         self.assertIs(server.PROVIDER_TRANSPORT.json_http_client(), first_http_client)
         first_refresh_tracker = server.PROVIDER_SYNC.refresh_tracker()
-        first_weather_service = server.WEATHER_ASSEMBLY.service()
-        self.assertIs(server.WEATHER_ASSEMBLY.service(), first_weather_service)
+        first_weather_service = server.WEATHER.service()
+        self.assertIs(server.WEATHER.service(), first_weather_service)
         first_morning_service = server.morning_body_battery_service()
         self.assertIs(server.morning_body_battery_service(), first_morning_service)
         DATABASE_MANAGER_CACHE.reset()
@@ -102,7 +191,7 @@ class ServerDatabaseTests(ServerTestCase):
         second = server.provider_state_service()
         second_http_client = server.PROVIDER_TRANSPORT.json_http_client()
         second_refresh_tracker = server.PROVIDER_SYNC.refresh_tracker()
-        second_weather_service = server.WEATHER_ASSEMBLY.service()
+        second_weather_service = server.WEATHER.service()
         second_morning_service = server.morning_body_battery_service()
 
         self.assertIsNot(second, first)
@@ -240,7 +329,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "distance": "10 km",
             }
         )
-        repository = server.CompetitionRepository()
+        repository = CompetitionRepository()
         with server.database_manager().unit_of_work() as db:
             rows = repository.list(db)
             row = repository.get(db, saved["competition"]["id"])
@@ -508,7 +597,7 @@ class ServerDatabaseTests(ServerTestCase):
             httpd.server_close()
 
     def privacy_archive(self):
-        path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        path = server.PRIVACY.archive_export_service().create_file()
         self.addCleanup(path.unlink, missing_ok=True)
         return zipfile.ZipFile(path)
 
@@ -644,7 +733,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "('event-2', 'external-2', ?, 'intervals')",
                 (runtime_clock.utc_now(),),
             )
-        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        temporary = server.PRIVACY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
@@ -717,7 +806,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_compression_does_not_block_a_consistent_snapshot_writer(
         self,
     ):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         profile_service = server.ATHLETE_DATA.profile()
         before = {**profile_service.get(), "name": "Before export"}
         profile_service.save(before)
@@ -796,7 +885,7 @@ class ServerDatabaseTests(ServerTestCase):
                 transport_factory.assert_called_once_with()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             no_space_config = replace(
@@ -858,7 +947,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertFalse(lock_probe.is_alive())
 
     def privacy_export_in(self, data_dir):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         config = replace(
             service._config,
             data_dir=data_dir,
@@ -946,7 +1035,7 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             side_effect=AppError(503, "upstream"),
         ):
-            result = server.PRIVACY_ASSEMBLY.delete_service().delete(
+            result = server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertTrue(result["remote_delete_attempted"])
@@ -963,7 +1052,7 @@ class ServerDatabaseTests(ServerTestCase):
         }
         self.assertEqual(scoped_tables, expected_tables)
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        preview = server.PRIVACY_ASSEMBLY.delete_service().preview()
+        preview = server.PRIVACY.delete_service().preview()
         self.assertEqual(
             {item["id"] for item in preview["categories"]},
             {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
@@ -979,7 +1068,7 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            result = server.PRIVACY_ASSEMBLY.delete_service().delete(
+            result = server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertTrue(result["local_data_deleted"])
@@ -1020,7 +1109,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
         try:
             with self.assertRaises(sqlite3.DatabaseError):
-                server.PRIVACY_ASSEMBLY.delete_service().delete(
+                server.PRIVACY.delete_service().delete(
                     privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
                 )
         finally:
@@ -1127,7 +1216,7 @@ class ServerDatabaseTests(ServerTestCase):
         server_source = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn("def _privacy_export_file", server_source)
         self.assertIn(
-            "class PrivacyAssembly",
+            "def build_privacy",
             Path(privacy_module.__file__).read_text(encoding="utf-8"),
         )
 
@@ -1387,10 +1476,8 @@ class ServerDatabaseTests(ServerTestCase):
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
-                valid_backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()
-                restored = server.BACKUP_ASSEMBLY.restore_service().restore(
-                    valid_backup
-                )
+                valid_backup = server.BACKUP.backup_service().read_bytes()
+                restored = server.BACKUP.restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(
                     server.key_value_service().get("restore-marker"), "preserved"
@@ -1413,7 +1500,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(AppError) as error:
-                    server.BACKUP_ASSEMBLY.restore_service().restore(
+                    server.BACKUP.restore_service().restore(
                         incomplete_path.read_bytes()
                     )
                 self.assertEqual(error.exception.status, 400)
@@ -1436,7 +1523,7 @@ class ServerDatabaseTests(ServerTestCase):
                 finally:
                     connection.close()
                 with self.assertRaises(AppError) as error:
-                    server.BACKUP_ASSEMBLY.restore_service().restore(
+                    server.BACKUP.restore_service().restore(
                         unexpected_path.read_bytes()
                     )
                 self.assertEqual(error.exception.status, 400)
@@ -1483,11 +1570,13 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            server.PRIVACY_ASSEMBLY.delete_service().delete(
+            server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertEqual(server.HISTORY.change_history_service().list(), [])
 
 
 if __name__ == "__main__":
+    if WRITE_DOCS:
+        sys.argv.remove("--write")
     unittest.main()
