@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from collections.abc import Callable
 from typing import Any
 
 from backend.coach.change_receipts import turn_changes
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.history.undo_service import HistoryUndoService
@@ -41,10 +41,7 @@ class CoachTurnUndoService:
             self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
-            row = db.execute(
-                "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
-                (turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, turn_id, "status, receipt")
             if row is None or row["status"] != "completed":
                 raise AppError(404, "Coach-Antwort nicht gefunden.")
             receipt = command_receipt(row["receipt"])
@@ -64,10 +61,8 @@ class CoachTurnUndoService:
             history_undo.apply_many(db, changes)
             now = self._now()
             summary = {**summary, "undone_at": now}
-            db.execute(
-                "UPDATE coach_commands SET receipt=json_set(receipt, '$.change_summary', json(?)), "
-                "updated_at=? WHERE client_turn_id=?",
-                (json.dumps(summary, ensure_ascii=False), now, turn_id),
+            coach_store.merge_command_receipt(
+                db, turn_id, {"change_summary": summary}, now, only=(), repair=False
             )
         return {
             "status": "undone",

@@ -11,6 +11,7 @@ from backend.coach.authorization import (
     require_coach_scope,
     scope_values,
 )
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.planning import plan_checks
@@ -78,19 +79,12 @@ class CoachAdaptiveApplyService:
                 409, "Bitte zuerst die aktuelle adaptive Planungsvorschau erstellen."
             )
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            current_user = db.execute(
-                "SELECT id FROM messages WHERE client_turn_id=? AND role='user'",
-                (client_turn_id,),
-            ).fetchone()
-            publication = db.execute(
-                "SELECT id FROM messages WHERE id=? AND role='assistant'",
-                (latest.get("published_message_id"),),
-            ).fetchone()
+            current_user = coach_store.user_message_for_turn(db, client_turn_id)
+            publication = coach_store.message_by_id(
+                db, latest.get("published_message_id"), "id", "assistant"
+            )
             first_reply = (
-                db.execute(
-                    "SELECT MIN(id) AS id FROM messages WHERE role='user' AND id>?",
-                    (publication["id"],),
-                ).fetchone()
+                coach_store.first_user_message_after(db, publication["id"])
                 if publication
                 else None
             )

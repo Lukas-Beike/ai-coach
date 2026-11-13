@@ -14,6 +14,7 @@ from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.service import command_receipt
 from backend.coach.structured_turn import CoachStructuredTurnService
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -97,17 +98,13 @@ class CoachChatTurnService:
                 "error": "Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben.",
             }
         )
-        db.execute(
-            "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
-            (
-                json.dumps(
-                    compact_receipt(recovered),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-                self._utc_now(),
-                client_turn_id,
-            ),
+        coach_store.write_command(
+            db,
+            client_turn_id,
+            compact_receipt(recovered),
+            self._utc_now(),
+            status="completed",
+            only=("running",),
         )
         return {"status": "completed", "receipt": json.dumps(recovered)}
 
@@ -118,10 +115,11 @@ class CoachChatTurnService:
         background_job: bool,
     ) -> tuple[dict[str, Any] | None, dict[str, Any], bool]:
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            existing_command = db.execute(
-                "SELECT conversation_id, intent, receipt, status, updated_at FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            existing_command = coach_store.command_row(
+                db,
+                client_turn_id,
+                "conversation_id, intent, receipt, status, updated_at",
+            )
             background_receipt = command_receipt(
                 (existing_command or {}).get("receipt")
             )
@@ -166,10 +164,9 @@ class CoachChatTurnService:
         if type(origin_id) is not int:
             return False
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            origin = db.execute(
-                "SELECT 1 FROM messages WHERE id=? AND role='user' AND client_turn_id=?",
-                (origin_id, client_turn_id),
-            ).fetchone()
+            origin = coach_store.message_by_id(
+                db, origin_id, "1", client_turn_id=client_turn_id
+            )
         return origin is not None
 
     def _resume_background_command(
@@ -182,14 +179,8 @@ class CoachChatTurnService:
         if not background_owned:
             return
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            db.execute(
-                "UPDATE coach_commands SET conversation_id=?, intent=?, status='running', updated_at=? WHERE client_turn_id=?",
-                (
-                    conversation_id,
-                    json.dumps(structured_intent),
-                    self._utc_now(),
-                    client_turn_id,
-                ),
+            coach_store.resume_command(
+                db, client_turn_id, conversation_id, structured_intent, self._utc_now()
             )
 
     def run(

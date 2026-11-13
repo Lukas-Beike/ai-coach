@@ -18,6 +18,7 @@ from backend.coach.constants import turn_ai_provider
 from backend.coach.playbooks import REQUEST_KINDS
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository
 from backend.errors import AppError
@@ -82,10 +83,9 @@ class CoachJobSubmissionService:
 
     @staticmethod
     def _active_rows(db: Any) -> list[dict[str, Any]]:
-        return db.execute(
-            "SELECT client_turn_id, status, receipt, updated_at FROM coach_commands "
-            "WHERE status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 50"
-        ).fetchall()
+        return coach_store.command_rows(
+            db, "client_turn_id, status, receipt, updated_at", order="newest", limit=50
+        )
 
     @staticmethod
     def _find_active(
@@ -173,11 +173,12 @@ class CoachJobSubmissionService:
 
     def _persist_early_cancel(self, client_turn_id: str) -> None:
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            db.execute(
-                "UPDATE coach_commands SET receipt=json_set(receipt, "
-                "'$.cancel_requested', json('true'), '$.phase', 'cancelling'), "
-                "updated_at=? WHERE client_turn_id=? AND status IN ('queued', 'running')",
-                (self._utc_now(), client_turn_id),
+            coach_store.merge_command_receipt(
+                db,
+                client_turn_id,
+                {"cancel_requested": True, "phase": "cancelling"},
+                self._utc_now(),
+                repair=False,
             )
 
     def _validate_submission(
@@ -255,10 +256,9 @@ class CoachJobSubmissionService:
         with self._database_lock:
             database_manager = self._database_manager()
             with database_manager.unit_of_work() as db:
-                existing = db.execute(
-                    "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
-                    (client_turn_id,),
-                ).fetchone()
+                existing = coach_store.command_row(
+                    db, client_turn_id, "status, receipt"
+                )
                 if existing:
                     receipt = command_receipt(existing.get("receipt"))
                     if receipt.get("session_key") != coach_session_key(
@@ -297,11 +297,8 @@ class CoachJobSubmissionService:
                 attachment_json = json.dumps(
                     attachments, ensure_ascii=False, separators=(",", ":")
                 )
-                stored_attachment_bytes = db.execute(
-                    "SELECT COALESCE(SUM(length(attachments)), 0) AS total FROM messages"
-                ).fetchone()["total"]
                 if (
-                    int(stored_attachment_bytes or 0)
+                    coach_store.stored_attachment_bytes(db)
                     + len(attachment_json.encode("utf-8"))
                     > self._max_attachment_storage_bytes
                 ):
@@ -310,9 +307,8 @@ class CoachJobSubmissionService:
                         "Der lokale Speicher für Chat-Anhänge ist ausgeschöpft. Entferne alte Chat-Daten, bevor du weitere Bilder sendest.",
                         reason="attachment_storage_quota",
                     )
-                db.execute(
-                    "UPDATE messages SET attachments=? WHERE id=?",
-                    (attachment_json, user_message["id"]),
+                coach_store.set_message_attachments(
+                    db, user_message["id"], attachment_json
                 )
                 receipt = {
                     "status": "queued",
@@ -328,18 +324,18 @@ class CoachJobSubmissionService:
                     "thinking_level": thinking_level,
                     "request_kind": request_kind,
                 }
-                db.execute(
-                    "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) "
-                    "VALUES (?, ?, NULL, ?, 'local', 'queued', ?, ?, ?)",
-                    (
-                        uuid.uuid4().hex,
-                        client_turn_id,
-                        # The stored athlete message started this turn, so it may
-                        # write locally; a resume reads this instead of assuming it.
-                        json.dumps({"allow_mutations": True}),
-                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                        now,
-                        now,
-                    ),
+                coach_store.insert_command(
+                    db,
+                    uuid.uuid4().hex,
+                    client_turn_id,
+                    None,
+                    # The stored athlete message started this turn, so it may
+                    # write locally; a resume reads this instead of assuming it.
+                    {"allow_mutations": True},
+                    target_system="local",
+                    status="queued",
+                    receipt=receipt,
+                    created_at=now,
+                    updated_at=now,
                 )
         return None, user_message["id"]

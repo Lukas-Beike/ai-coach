@@ -7,13 +7,9 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.coach.authorization import require_coach_scope
-from backend.db import planning_store
+from backend.db import coach_store, planning_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-
-SELECT_USER_MESSAGE_SQL = (
-    "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
-)
 
 
 class CoachDialoguePlanScopeService:
@@ -74,9 +70,7 @@ class CoachDialoguePlanScopeService:
             (action.get("artifact_id"),),
         ).fetchone()
         origin = (
-            db.execute(
-                SELECT_USER_MESSAGE_SQL, (artifact["client_turn_id"],)
-            ).fetchone()
+            coach_store.user_message_for_turn(db, artifact["client_turn_id"])
             if artifact
             else None
         )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -11,6 +10,7 @@ from backend.coach.authorization import coach_session_key
 from backend.coach.constants import turn_ai_provider
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository
 from backend.errors import AppError
@@ -46,10 +46,7 @@ class CoachTurnOpeningService:
         model: str | None,
     ) -> dict[str, Any]:
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            existing = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            existing = coach_store.command_row(db, client_turn_id)
             receipt = command_receipt(existing["receipt"]) if existing else {}
             if existing:
                 self._receipt_service.require_owner(receipt, session_csrf_hash)
@@ -67,27 +64,24 @@ class CoachTurnOpeningService:
                     "ai_provider": turn_ai_provider(model),
                     "model": model,
                 }
-                db.execute(
-                    "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, target_system, status, receipt, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', 'running', ?, ?, ?)",
-                    (
-                        self._uuid_factory().hex,
-                        client_turn_id,
-                        conversation_id,
-                        json.dumps(intent),
-                        json.dumps(receipt),
-                        self._utc_now(),
-                        self._utc_now(),
-                    ),
+                coach_store.insert_command(
+                    db,
+                    self._uuid_factory().hex,
+                    client_turn_id,
+                    conversation_id,
+                    intent,
+                    target_system="none",
+                    status="running",
+                    receipt=receipt,
+                    created_at=self._utc_now(),
+                    updated_at=self._utc_now(),
                 )
         return receipt
 
     @staticmethod
     def _require_same_message(db: Any, client_turn_id: str, message: str) -> None:
         """Refuse to run new text under a turn id that stored different text."""
-        stored = db.execute(
-            "SELECT content FROM messages WHERE client_turn_id=? AND role='user'",
-            (client_turn_id,),
-        ).fetchone()
+        stored = coach_store.user_message_for_turn(db, client_turn_id, "content")
         if stored is not None and stored["content"] != message.strip():
             raise AppError(
                 409,

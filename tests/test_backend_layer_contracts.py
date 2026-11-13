@@ -682,18 +682,32 @@ class BackendLayerContractTests(unittest.TestCase):
         )
         self.assertEqual([], _http_sql_literals(REPOSITORY_ROOT))
 
-    def test_planning_tables_are_queried_only_in_their_store(self) -> None:
-        # #2118: one column change touches one file; the schema keeps its DDL.
-        statement = re.compile(
-            r"\b(FROM|INTO|UPDATE|JOIN)\s+(planned_units|workout_library)\b",
-            re.IGNORECASE,
+    def test_tables_are_queried_only_in_their_store(self) -> None:
+        # #2118 and #2119: one column change touches the persistence owner only.
+        self._assert_only_in(
+            r"(?i:planned_units|workout_library)",
+            {"backend/db/planning_store.py", "backend/db/schema.py"},
         )
-        owners = {"backend/db/planning_store.py", "backend/db/schema.py"}
+        # ChatRepository and StateVersionRepository keep their message reads and
+        # writes; the retention purge stays with the startup invariants.
+        self._assert_only_in(
+            r"(?i:coach_commands)|messages",
+            {
+                "backend/db/coach_store.py",
+                "backend/db/repositories.py",
+                "backend/db/bootstrap.py",
+                "backend/db/schema.py",
+            },
+        )
+
+    def _assert_only_in(self, tables: str, owners: set[str]) -> None:
+        # ``messages`` matches in lower case only, which keeps prose such as
+        # "from Messages SSE events" out.
+        statement = re.compile(rf"\b(?i:FROM|INTO|UPDATE|JOIN)\s+({tables})\b")
         outside = [
             relative
             for path in sorted((REPOSITORY_ROOT / "backend").rglob("*.py"))
-            if (relative := path.relative_to(REPOSITORY_ROOT).as_posix())
-            not in owners
+            if (relative := path.relative_to(REPOSITORY_ROOT).as_posix()) not in owners
             and statement.search(path.read_text(encoding="utf-8"))
         ]
         self.assertEqual([], outside)

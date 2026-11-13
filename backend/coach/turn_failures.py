@@ -21,6 +21,7 @@ from backend.coach.outcomes import (
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.coach.tool_specs import ACTION_LABELS
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
@@ -96,10 +97,7 @@ class CoachTurnFailureService:
             else "Die Coach-Verarbeitung wurde unterbrochen."
         )
         with deps.database_lock, deps.database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT receipt, status FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id, "receipt, status")
             if not row:
                 return {}
             receipt = command_receipt(row["receipt"])
@@ -148,14 +146,12 @@ class CoachTurnFailureService:
                 receipt["message"]["coach_failed"] = True
                 if receipt.get("request_kind"):
                     receipt["message"]["coach_request_kind"] = receipt["request_kind"]
-            db.execute(
-                "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? "
-                "WHERE client_turn_id=?",
-                (
-                    json.dumps(compact_receipt(receipt), ensure_ascii=False),
-                    deps.utc_now(),
-                    client_turn_id,
-                ),
+            coach_store.write_command(
+                db,
+                client_turn_id,
+                compact_receipt(receipt),
+                deps.utc_now(),
+                status="completed",
             )
         deps.event_buffer.publish(
             "coach",
@@ -332,10 +328,7 @@ class CoachTurnFailureService:
         if cancelled:
             self._deps.key_values.set(db, "coach_pending_request", "null")
         elif receipt.get("user_message_id") and not question:
-            user = db.execute(
-                "SELECT content FROM messages WHERE id=? AND role='user'",
-                (receipt["user_message_id"],),
-            ).fetchone()
+            user = coach_store.message_by_id(db, receipt["user_message_id"], "content")
             if user:
                 tool_name = receipt.get("tool")
                 tools = [tool_name] if tool_name else []

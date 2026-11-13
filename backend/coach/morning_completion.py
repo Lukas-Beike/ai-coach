@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 
@@ -34,32 +34,22 @@ class MorningCoachJobCompletionService:
 
     def complete(self, client_turn_id: str) -> dict[str, Any] | None:
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id)
             self._key_values.set(db, "morning_checkin_date", self._checkin_date(row))
             self._key_values.set(db, "morning_checkin_status", "ready")
 
         quick_actions = self._quick_actions_service().state()
 
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id)
             completed_receipt = command_receipt(row["receipt"] if row else None)
             completed_receipt["coach_quick_actions"] = quick_actions
-            db.execute(
-                "UPDATE coach_commands SET receipt=?, updated_at=? "
-                "WHERE client_turn_id=? AND status='completed'",
-                (
-                    json.dumps(
-                        completed_receipt, ensure_ascii=False, separators=(",", ":")
-                    ),
-                    self._utc_now(),
-                    client_turn_id,
-                ),
+            coach_store.write_command(
+                db,
+                client_turn_id,
+                completed_receipt,
+                self._utc_now(),
+                only=("completed",),
             )
         return completed_receipt
 
