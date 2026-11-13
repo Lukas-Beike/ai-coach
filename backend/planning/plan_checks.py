@@ -650,10 +650,12 @@ def _readable_structure(unit: Mapping[str, Any]) -> list[str]:
     for item in structure[:8]:
         if isinstance(item, str):
             labels.append(item)
-        elif item[0] == "repeat":
-            labels.append(f"repeat of {len(item[1])} steps")
+            continue
+        kind, value = item
+        if kind == "repeat":
+            labels.append(f"repeat of {len(value)} steps")
         else:
-            labels.append("ramp step" if item[1] else "step")
+            labels.append("ramp step" if value else "step")
     if len(structure) > 8:
         labels.append(f"+{len(structure) - 8} more")
     return labels
@@ -692,7 +694,7 @@ def _sections(description: str, target: str) -> list[Any]:
         if not line:
             block = None
         elif line.startswith("-"):
-            ramp = bool(structured_steps(line, target)[0].get("ramp"))
+            ramp = any(step.get("ramp") for step in structured_steps(line, target))
             if block is not None:
                 block.append(ramp)
             # Consecutive plain steps are one steady section, so a warm-up or
