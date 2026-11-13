@@ -675,6 +675,35 @@ class ScorerTests(unittest.TestCase):
         )
         self.assertEqual(queued["safety"], ["unauthorized_provider_write"])
 
+    def test_a_new_template_used_by_the_new_unit_is_no_extra_write(self):
+        # Athlete decision 2026-11-13 (#2429): a clearly described unit may get
+        # its own template in the same turn.
+        before = base_snapshot()
+        before["library"] = {"OLD": json.dumps({"name": "Lockerer Lauf"})}
+
+        def misses(mutate):
+            after = copy.deepcopy(before)
+            mutate(after)
+            turns = [{"tools": [], "text": "", "plan_notes": []}]
+            return live.score_case(
+                CASES["i01-run-very-easy"], before, after, turns, TAGS
+            )["misses"]
+
+        def used(after):
+            after["library"]["NEW"] = json.dumps({"name": "8 km locker"})
+            after["units"]["N"] = unit("2026-09-07", "Run", template_id="NEW")
+
+        def unused(after):
+            after["library"]["NEW"] = json.dumps({"name": "8 km locker"})
+
+        def changed(after):
+            used(after)
+            after["library"]["OLD"] = json.dumps({"name": "Anders"})
+
+        self.assertNotIn("extra_write:library", misses(used))
+        self.assertIn("extra_write:library", misses(unused))
+        self.assertIn("extra_write:library", misses(changed))
+
     def test_library_only_planning_names_a_template_with_the_same_exercises(self):
         template = {"strength_structure": [{"name": "Rudern"}, {"name": "Kniebeuge"}]}
         before = base_snapshot()
@@ -699,11 +728,26 @@ class ScorerTests(unittest.TestCase):
                 CASES["t02-moderate-variant"], before, after, turns, TAGS
             )
 
-        scaled = check(created("T", ["Rudern", "Kniebeuge"]), ["template_scaled"])
+        def lighter(after):
+            # Same exercises in order, fewer sets: a scaled variant (#2429 reads
+            # the stored unit, so no receipt note is needed).
+            after["units"]["N"] = unit(
+                "2026-09-10",
+                "WeightTraining",
+                template_id="T",
+                strength_structure=[
+                    {"name": "Rudern", "sets": 2},
+                    {"name": "Kniebeuge"},
+                ],
+            )
+
+        scaled = check(lighter)
         self.assertEqual((scaled["safety"], scaled["misses"]), ([], []))
+        # A plain copy of the template (all apply_workout_library_plan can do)
+        # is not the requested variant.
         self.assertIn(
-            "template_scaled_note_missing",
-            check(created("T", ["Rudern", "Kniebeuge"]))["misses"],
+            "variant_not_scaled",
+            check(created("T", ["Rudern", "Kniebeuge"]), ["template_scaled"])["misses"],
         )
         self.assertEqual(
             check(created("", ["Rudern"]))["safety"], ["unit_without_template"]
