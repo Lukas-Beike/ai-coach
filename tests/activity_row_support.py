@@ -176,6 +176,20 @@ class StoredCoverage:
         )
 
 
+class ServedActivityReads(SnapshotActivityRows, NoObservations, StoredCoverage):
+    """The canonical read of a stored snapshot: rows, no observations, coverage."""
+
+    def __init__(self, snapshot_reader: Any, fetched_at: str | None = None) -> None:
+        SnapshotActivityRows.__init__(self, snapshot_reader)
+        StoredCoverage.__init__(self, fetched_at)
+
+    def serves_tables(self, db: Any) -> bool:
+        return True
+
+    def backfill_failed(self, db: Any) -> bool:
+        return False
+
+
 def canonical_source(
     rows: Any,
     database_manager: Callable[[], Any],

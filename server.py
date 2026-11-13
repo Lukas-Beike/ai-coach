@@ -73,11 +73,9 @@ from backend.db.manager import (
 from backend.db.repositories import (
     ActivityFeedbackRepository,
     ChatRepository,
-    CheckinRepository,
     KeyValueRepository,
     PlanAdjustmentRepository,
     PlanningStateRepository,
-    ProfileRepository,
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher
@@ -86,10 +84,6 @@ from backend.diagnostics.wiring import build_diagnostics
 from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.wiring import build_history
 from backend.http_api import server as http_server
-from backend.http_api.activity_assembly import (
-    ActivityReadAssembly,
-    ActivityReadSources,
-)
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -117,11 +111,6 @@ from backend.http_api.assembly import (
     HttpResponseServices,
     HttpSyncServices,
 )
-from backend.http_api.athlete_assembly import (
-    AthleteDataAssembly,
-    AthleteRepositories,
-    AthleteRuntime,
-)
 from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
@@ -148,7 +137,11 @@ from backend.performance.morning_battery_service import (
 )
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
-from backend.performance.wiring import build_performance
+from backend.performance.wiring import (
+    build_activity_reads,
+    build_athlete_data,
+    build_performance,
+)
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
@@ -316,7 +309,6 @@ REDACTOR = observability.Redactor(
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
 ATHLETE_SESSION_SERVICE = AthleteSessionService()
-PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 PLANNING_STATE_REPOSITORY = PlanningStateRepository()
 PLANNING_REVISION_SERVICE = PlanningRevisionService(
@@ -324,7 +316,6 @@ PLANNING_REVISION_SERVICE = PlanningRevisionService(
 )
 PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
 CHAT_REPOSITORY = ChatRepository(runtime_clock.utc_now)
-CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
 
 
@@ -426,30 +417,20 @@ RUN_LTHR: RunLthr
 METRIC_EXPORT_RUNNER: MetricExportRunner
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
 THRESHOLD_WARNINGS: ThresholdStalenessService
-ATHLETE_DATA = AthleteDataAssembly(
-    dependencies=AthleteDataAssembly.Inputs(
-        database_manager=database_manager,
-        profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
-        repositories=AthleteRepositories(
-            activity_feedback=ACTIVITY_FEEDBACK_REPOSITORY,
-            checkin=CHECKIN_REPOSITORY,
-            profile=PROFILE_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            activity_rows=lambda: CANONICAL_READ,
-            table_serving=lambda: CANONICAL_READ,
-        ),
-        runtime=AthleteRuntime(
-            utc_now=runtime_clock.utc_now,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
-            load_inputs_changed=lambda: start_canonical_backfill(),
-            thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
-            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
-            run_lthr_on=lambda day: RUN_LTHR.on(day),
-            run_lthr_resolver=lambda: RUN_LTHR.day_resolver(),
-        ),
-    )
+ATHLETE_DATA = build_athlete_data(
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    activity_feedback_repository=ACTIVITY_FEEDBACK_REPOSITORY,
+    profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
+    utc_now=runtime_clock.utc_now,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    activity_rows=lambda: CANONICAL_READ,
+    table_reader=CanonicalTableReader,
+    run_lthr=lambda: RUN_LTHR,
+    load_inputs_changed=lambda: start_canonical_backfill(),
+    thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
+    threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
 )
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
@@ -460,23 +441,6 @@ CANONICAL_READ: CanonicalReadSelector
 # Renames a recognised route of outdoor sessions (#1868); only the label is exposed.
 ACTIVITY_ROUTES = ActivityRouteService(database_manager, DB_LOCK, KEY_VALUE_REPOSITORY)
 
-ACTIVITY_READS = ActivityReadAssembly(
-    database_manager,
-    ActivityReadSources(
-        lambda: CANONICAL_READ,
-        observation_reader=lambda: CANONICAL_READ,
-        coverage=lambda: CANONICAL_READ,
-        serving=lambda: CANONICAL_READ,
-        source_preferences=lambda db: preferences_from_profile(
-            ATHLETE_DATA.profile().get_from_db(db)
-        ),
-    ),
-    ATHLETE_DATA.activity_feedback,
-    lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
-    refreshable_providers=lambda: configured_for_job(
-        PROVIDER_CONFIGURED, "activity_details"
-    ),
-)
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
 # The application context the domain builders read (#2069). Owners whose
@@ -528,6 +492,13 @@ PERFORMANCE = build_performance(
     season_preparation=season_preparation,
 )
 APP.performance = PERFORMANCE
+ACTIVITY_READS = build_activity_reads(
+    APP,
+    session_activities=CanonicalTableReader().session_activities,
+    refreshable_providers=lambda: configured_for_job(
+        PROVIDER_CONFIGURED, "activity_details"
+    ),
+)
 PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
 

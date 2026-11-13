@@ -32,7 +32,11 @@ from support import canonical_backfill_stopped
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
-from backend.db.repositories import CompetitionRepository
+from backend.db.repositories import (
+    CheckinRepository,
+    CompetitionRepository,
+    ProfileRepository,
+)
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
@@ -281,7 +285,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
 
     def test_checkin_repository_preserves_upsert_and_date_order_contract(self):
-        repository = server.CheckinRepository(lambda: "2026-09-01T00:00:00+00:00")
+        repository = CheckinRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {
             "checkin_date": "2026-08-30",
             "soreness": 2,
@@ -308,7 +312,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(rows[0]["created_at"], "2026-09-01T00:00:00+00:00")
 
     def test_profile_repository_preserves_serialized_profile_contract(self):
-        repository = server.ProfileRepository(
+        repository = ProfileRepository(
             server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00")
         )
         payload = json.dumps(

@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from support import parsed_workout_fixture
+from support import athlete_checkin, parsed_workout_fixture
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.activities.hr_cap import effective_caps, resolved_range
@@ -470,7 +470,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         )
         checkins = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=checkins),
+            athlete_checkin(server, checkins),
             patch.object(
                 checkins, "context", return_value={"today": {"available_minutes": 30}}
             ),
@@ -612,7 +612,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     def approve_illness_pause(self):
         checkins = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=checkins),
+            athlete_checkin(server, checkins),
             patch.object(
                 checkins,
                 "context",
