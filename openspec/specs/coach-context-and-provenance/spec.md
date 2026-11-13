@@ -211,6 +211,10 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** `get_training_report` requests the `block_review` section alone (default: the last 4 whole weeks; `start` and `days` 28, 42, 56 or 84 choose another period; `since_last_test` starts on the Monday of the last completed local test unit's week with the shortest of 28, 56 or 84 days reaching today, else 56 days, and `last_test` names that day or null)
 - **THEN** it receives a read-only, descriptive comparison of planned and completed volume and compliance per sport, the completed intensity distribution against `training_model`, key sessions by session focus (threshold, vo2max, long, leg strength; derived focus counted), the CTL/mean-max trend, pace at a fixed 10 bpm heart-rate band (steady runs after a 10-minute warm-up, flat samples within 3 % slope, grade-adjusted where a slope or altitude stream exists, earlier versus later half per environment; hilly, trail, no-heart-rate or terrain-unknown runs and fewer than two usable sessions in the block or a half without one stay `not_covered`, never zero), session-RPE per week, check-in score shifts, bounded athlete feedback notes as untrusted text and at most four deterministic `lessons` with evidence strength; unknown data adds no lesson and `planning_brief.lessons` carries the same lessons for plan requests.
 
+#### Scenario: Block review lessons
+- **WHEN** the block review derives its lessons
+- **THEN** each lesson has `code`, `text`, `evidence_strength: limited` and `basis`, at most four are kept in this order, and the codes are: `low_compliance` (at least 4 planned units and under 50 % completed), `long_weekday_missed` (at least 2 planned units with the focus `long` on Monday to Friday and under 50 % completed), `distribution_off_model` (a completed intensity band outside the model range), `rpe_rising` (a session-RPE load per rated session that rises over at least 3 consecutive weeks of at least 2 rated sessions each) and `soreness_rising`, `stress_rising` or `motivation_falling` (at least 3 check-ins in each half of the block and a mean shift of at least 2.0 in the concerning direction); the feedback notes are the last 10, cut to 200 characters, under the method `block-review-v1`.
+
 Evidence:
 - `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`
 - `backend/coach/context.py:coach_performance_projection`
@@ -219,8 +223,12 @@ Evidence:
 - `backend/performance/comparable_sessions.py:equal_effort_trend`
 - `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`
 - `backend/performance/progress_report.py:weekly_progress`
+- `backend/planning/block_review.py:block_lessons`
 - `backend/planning/block_review.py:block_review`
 - `tests/test_block_review.py`
+- `tests/test_block_review.py:test_falling_motivation_is_the_concern_and_empty_start_is_ignored`
+- `tests/test_block_review.py:test_partly_missed_block_yields_lessons`
+- `tests/test_block_review.py:test_rising_session_rpe_lesson`
 - `tests/test_coach_activity_read_tools.py:test_detail_returns_the_v1_document_with_its_envelope`
 - `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`
 - `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`

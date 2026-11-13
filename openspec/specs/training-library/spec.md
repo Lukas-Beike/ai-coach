@@ -303,8 +303,8 @@ The system SHALL bind explicit plan pushes to concrete local IDs/current hashes,
 - **THEN** no dependent push is queued and the caller must repair/reread the actual local state rather than sync partially created data.
 
 #### Scenario: Conflict recovery and job retry
-- **WHEN** an explicit conflict choice reaches the authorized conflict service or a failed/partial sync job is retried
-- **THEN** the recorded strategy is applied locally or the original job is retried with its original provider and required read/push authority; a mismatched provider or remote-write declaration is rejected.
+- **WHEN** a failed/partial sync job is retried, or an explicit conflict choice names a competition (a planned unit has no conflict state to resolve any more)
+- **THEN** the original job is retried with its original provider and required read/push authority, or the recorded competition strategy is applied locally; a mismatched provider or remote-write declaration is rejected.
 
 #### Scenario: Repair manifest errors
 - **WHEN** the repair period is missing, not two ISO dates in order or combined with an all-pending selection
@@ -346,8 +346,8 @@ The system SHALL use stable Intervals planned-event identity for explicit dated-
 - **THEN** the initial external_id is derived from its local UUID as `intervals-coach-<local_id>`; a stored remote external_id is reused and a known remote_event_id is included on subsequent upserts.
 
 #### Scenario: Event of another category
-- **WHEN** a unit's stored event has another category than the unit gets now, such as a strength unit sent as a WORKOUT event before strength became a note (an event sent before the category was recorded counts as WORKOUT)
-- **THEN** the unit is pending again, and its push deletes that eligible event and creates the event anew under the same external_id, so Intervals.icu no longer forwards it to Garmin; the returned or sent category is stored with the event ids.
+- **WHEN** the stored event of an indoor or virtual ride has another category than the ride gets now (an event sent before the category was recorded counts as WORKOUT)
+- **THEN** the unit is pending again, and its push deletes that eligible event and creates the event anew under the same external_id; the returned or sent category is stored with the event ids. Since #2419 no strength, run or outdoor ride unit is selected for such a push, so an event they already hold (a strength unit once sent as a WORKOUT event, before strength became a note) stays untouched.
 
 #### Scenario: Returned event fails validation
 - **WHEN** an upsert returns a concrete event identity but its sport or applicable parsed endurance content fails readback validation
