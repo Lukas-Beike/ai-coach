@@ -1237,7 +1237,7 @@ class RunPushTests(PushHarness):
         """Whether the calendar offers the pushed run to Garmin with today's zones."""
         thresholds: Any = SimpleNamespace(
             unavailable=False,
-            for_sport=lambda *_args: SimpleNamespace(zones=self.zones),
+            for_sport=lambda *_args: self.zones,
         )
         run_lthr = RunLthr(
             lambda: thresholds, lambda: TODAY, KeyValueRepository(lambda: "")
