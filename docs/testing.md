@@ -248,6 +248,21 @@ not the gain over the old runner:
 | Python `-Suite all`, 9,358 tests | `-Workers 1`: 278.1 s | `-Workers 2`: 164.6 s, summed test time +6.8% | -40.8%, unverified |
 | GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min | | missed; queue and runner-minute split in #2536 |
 
+GitHub split (#2536): five natural successful PR runs of `publish-container.yml`
+on 2026-11-13 (43407572797, 43407637046, 43408243035, 43408548488,
+43410126789), from workflow creation to completion, median 17.1 min (14.6 to
+20.4). Queue time per job was 0.1 to 4.8 min; execution decided the critical
+path. The last job before the aggregate was the single `mobile` browser job in
+four runs and `tablet-landscape` in one: `mobile` ran 8.1 to 11.8 min and
+`tablet-landscape` 8.6 to 10.7 min of tests, against 4.7 to 7.0 min per
+`desktop` shard. The native chain (`test` aggregate, then incremental quality
+checks) ended at 5.8 to 12.9 min, driven by up to 4 min of queue before the
+aggregate. Browser jobs start 1.6 to 5.1 min after creation (source and image).
+The mobile and tablet-landscape projects therefore run as two shards each, like
+desktop; the required check names stay unchanged. Six minutes stays out of
+reach while the image, the queue and the native chain together take about that
+long; the result on five later natural runs is recorded in #2536.
+
 The Python goal stays unverified: both runs end with the same 18 checkout/Git
 environment failures that `-Suite all` documents above, and an earlier same-host
 sample on 26 October 2026 (7,289 tests, 728.71 s against 525.62 s) gave 27.87%.
