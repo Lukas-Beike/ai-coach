@@ -274,19 +274,22 @@ def coverage_wheel(path, root):
     return digest
 
 
-def validate_selection(plans):
+def validate_selection(plans, suite="all"):
     if not plans:
         raise ValueError("missing selection evidence")
     discovered = plans[0]["discovered_ids"]
+    expected = plans[0]["suite_ids"]
     all_ids, classes = [], set()
     for index, plan in enumerate(plans, 1):
         if (
             plan["status"] != "selected"
             or plan["shard"] != index
             or plan["total"] != len(plans)
-            or plan["suite"] != "all"
+            or plan["suite"] != suite
             or plan["discovered_ids"] != discovered
-            or plan["suite_ids"] != discovered
+            or plan["suite_ids"] != expected
+            or (suite == "all" and expected != discovered)
+            or not set(expected) <= set(discovered)
             or not plan["selected_ids"]
         ):
             raise ValueError("inconsistent shard selection")
@@ -295,7 +298,7 @@ def validate_selection(plans):
             raise ValueError("a test class was split across shards")
         classes.update(selected_classes)
         all_ids.extend(plan["selected_ids"])
-    if len(all_ids) != len(set(all_ids)) or sorted(all_ids) != sorted(discovered):
+    if len(all_ids) != len(set(all_ids)) or sorted(all_ids) != sorted(expected):
         raise ValueError(
             "shards do not partition the discovered selection exactly once"
         )
@@ -340,7 +343,7 @@ class Supervisor:
             "version": 1,
             "run_id": self.run_id,
             "status": "preparing",
-            "selection_mode": "complete",
+            "selection_mode": "complete" if args.suite == "all" else args.suite,
             "workers": args.workers,
             "selection_status": "pending_discovery",
             "cache_state": args.cache_state,
@@ -634,6 +637,8 @@ class Supervisor:
                     str(index),
                     "--total",
                     str(self.args.workers),
+                    "--suite",
+                    self.args.suite,
                     "--list",
                     "--result-json",
                     "/output/selection.json",
@@ -647,7 +652,7 @@ class Supervisor:
                     {"selection": plans[-1], "status": "pending"}
                 )
                 self.save()
-            validate_selection(plans)
+            validate_selection(plans, self.args.suite)
             self.summary["shards"] = [
                 {"selection": plan, "status": "pending"} for plan in plans
             ]
@@ -663,6 +668,8 @@ class Supervisor:
                     str(index),
                     "--total",
                     str(self.args.workers),
+                    "--suite",
+                    self.args.suite,
                     "--result-json",
                     "/output/result.json",
                 ]
@@ -784,6 +791,8 @@ def parse_args(argv=None):
         default=1,
         help="bounded processes: 1 default, 2 first benchmark, at most 4",
     )
+    # CI's container job runs the container suite; "all" adds every module.
+    parser.add_argument("--suite", choices=("container", "all"), default="container")
     parser.add_argument("--results-dir", type=Path)
     parser.add_argument("--record-durations-directory", type=Path)
     parser.add_argument(
@@ -796,11 +805,16 @@ def parse_args(argv=None):
     )
     args = parser.parse_args(argv)
     if args.record_durations_directory and (
-        args.workers != 1 or not args.record_durations_directory.is_dir()
+        args.workers != 1
+        or args.suite != "all"
+        or not args.record_durations_directory.is_dir()
     ):
         parser.error(
-            "duration recording requires one worker and an existing destination directory"
+            "duration recording requires --suite all, one worker and an existing "
+            "destination directory"
         )
+    if args.coverage_wheel and args.suite != "all":
+        parser.error("complete coverage requires --suite all")
     if args.coverage_wheel and (
         not args.coverage_wheel.is_file() or args.coverage_wheel.suffix != ".whl"
     ):

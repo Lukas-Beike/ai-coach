@@ -2,6 +2,7 @@ param(
     [string]$ImageTag = "pacecraft:local",
     [string]$RecordDurationsDirectory = "",
     [ValidateRange(1, 4)][int]$Workers = 1,
+    [ValidateSet("container", "all")][string]$Suite = "container",
     [string]$ResultsDirectory = "",
     [string]$CoverageWheel = "",
     [ValidateSet("cold", "warm", "unknown")][string]$CacheState = "unknown"
@@ -10,7 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $supervisor = Join-Path $repositoryRoot "scripts/run_sqlcipher_tests.py"
-$runnerArguments = @($supervisor, "--image", $ImageTag, "--workers", "$Workers", "--cache-state", $CacheState)
+$runnerArguments = @($supervisor, "--image", $ImageTag, "--workers", "$Workers", "--suite", $Suite, "--cache-state", $CacheState)
 if ($RecordDurationsDirectory) {
     $runnerArguments += @("--record-durations-directory", (Resolve-Path -LiteralPath $RecordDurationsDirectory).Path)
 }

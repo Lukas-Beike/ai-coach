@@ -55,7 +55,7 @@ the image. The Windows runner uses the same read-only mounts and writes the file
 into the given directory, which then replaces `tests/test_durations.json`:
 ```powershell
 New-Item -ItemType Directory -Force $env:TEMP\durations | Out-Null
-.\tests\run_sqlcipher_tests.ps1 -RecordDurationsDirectory $env:TEMP\durations
+.\tests\run_sqlcipher_tests.ps1 -Suite all -RecordDurationsDirectory $env:TEMP\durations
 Copy-Item $env:TEMP\durations\test_durations.json tests\test_durations.json
 ```
 
@@ -77,10 +77,14 @@ preparation may use the network, but tests run as the app user in read-only,
 networkless containers with temporary data, one CPU and 512 MiB per worker.
 Explicit read-only test inputs exclude the checkout root, `.git`, `.env` and live
 data. Application server/backend/public files come from the current image.
+By default it runs CI's `container_tests` selection (`--suite container`), which
+includes the SQLCipher migration, upgrade and restore modules. `-Suite all` runs
+every module; duration recording and coverage require it, and there the tests
+that need the repository checkout, Git or the Sonar CLI report environment failures.
 
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
-./tests/run_sqlcipher_tests.ps1 -Workers 2 -CacheState warm
+./tests/run_sqlcipher_tests.ps1 -Suite all -Workers 2 -CacheState warm
 ./tests/run_sqlcipher_tests.ps1 -Workers 1 -ResultsDirectory $env:TEMP\coach-test-results
 ```
 
@@ -89,7 +93,7 @@ benchmark candidate. Each run owns a unique directory below
 `$env:TEMP/ai-coach-tests` (or the supplied parent), with `summary.json`, per-shard
 selection/results and logs. Failed, missing, inconsistent or interrupted shards
 cannot report complete success. Every class remains in one shard; all selected
-IDs must form the complete discovery set exactly once. Compare complete one- and
+IDs must form the complete selected suite exactly once. Compare complete one- and
 two-worker runs on the same host, including the additional CPU/memory and summed
 runner time, before increasing concurrency.
 
@@ -100,7 +104,7 @@ the image's Python/Linux architecture separately; for the default amd64 image:
 $coverageVersion = (Select-String -Path requirements-dev.txt -Pattern '^coverage==([^ \\]+)').Matches.Groups[1].Value
 python -m pip download --only-binary=:all: --no-deps --platform manylinux_2_17_x86_64 --python-version 314 --implementation cp --abi cp314 --dest $env:TEMP\coverage-wheels "coverage==$coverageVersion"
 # Pass the downloaded .whl path explicitly:
-./tests/run_sqlcipher_tests.ps1 -Workers 2 -CoverageWheel $env:TEMP\coverage-wheels\coverage-<version>-<wheel-tags>.whl
+./tests/run_sqlcipher_tests.ps1 -Suite all -Workers 2 -CoverageWheel $env:TEMP\coverage-wheels\coverage-<version>-<wheel-tags>.whl
 ```
 
 The supervisor verifies the wheel hash against `requirements-dev.txt`, installs
