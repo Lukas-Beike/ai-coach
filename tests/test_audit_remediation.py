@@ -171,7 +171,7 @@ class AuditRemediationTests(unittest.TestCase):
 
         def erase():
             try:
-                server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
+                server.PRIVACY.delete_service().delete("LOKALE DATEN LÖSCHEN")
                 deleted.set()
             except Exception as error:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 failures.append(type(error).__name__)
@@ -322,7 +322,7 @@ with patch.object(Path, 'read_text', deny):
                     for i in range(1001)
                 ],
             )
-        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        temporary = server.PRIVACY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 self.assertEqual(

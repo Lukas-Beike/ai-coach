@@ -110,7 +110,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
 
         def archive_files(*names: str) -> dict[str, bytes]:
             # The archive stamps its own generation time; its collections are stable.
-            path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+            path = server.PRIVACY.archive_export_service().create_file()
             try:
                 with zipfile.ZipFile(path) as archive:
                     return {name: archive.read(name) for name in names}
@@ -189,7 +189,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "derived_impact": lambda: reports.derived.impact("UTC"),
             "readiness": lambda: server.HTTP_API.readiness_service().state(),
             "privacy_preview": lambda: (
-                server.PRIVACY_ASSEMBLY.delete_service().preview()
+                server.PRIVACY.delete_service().preview()
             ),
             "privacy_export": lambda: archive_files(
                 "profile.json", "athlete_checkins.jsonl"

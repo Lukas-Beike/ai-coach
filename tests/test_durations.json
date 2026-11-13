@@ -609,7 +609,7 @@
  "test_planning_workouts.PlanningWorkoutTests": 0.004,
  "test_power_profile.PowerProfileTests": 0.875,
  "test_privacy_backup_assemblies.BackupBuilderTests": 0.002,
- "test_privacy_backup_assemblies.PrivacyAssemblyTests": 0.002,
+ "test_privacy_backup_assemblies.PrivacyBuilderTests": 0.002,
  "test_privacy_data_export.PrivacyDataExportServiceTests": 0.001,
  "test_privacy_delete_confirmation.PrivacyDeleteConfirmationTests": 0.072,
  "test_privacy_delete_confirmation.PrivacyDeleteDialogTextContractTests": 0.022,

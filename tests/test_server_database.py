@@ -508,7 +508,7 @@ class ServerDatabaseTests(ServerTestCase):
             httpd.server_close()
 
     def privacy_archive(self):
-        path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        path = server.PRIVACY.archive_export_service().create_file()
         self.addCleanup(path.unlink, missing_ok=True)
         return zipfile.ZipFile(path)
 
@@ -644,7 +644,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "('event-2', 'external-2', ?, 'intervals')",
                 (runtime_clock.utc_now(),),
             )
-        temporary = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        temporary = server.PRIVACY.archive_export_service().create_file()
         try:
             with zipfile.ZipFile(temporary) as archive:
                 names = set(archive.namelist())
@@ -717,7 +717,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_compression_does_not_block_a_consistent_snapshot_writer(
         self,
     ):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         profile_service = server.ATHLETE_DATA.profile()
         before = {**profile_service.get(), "name": "Before export"}
         profile_service.save(before)
@@ -796,7 +796,7 @@ class ServerDatabaseTests(ServerTestCase):
                 transport_factory.assert_called_once_with()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             no_space_config = replace(
@@ -858,7 +858,7 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertFalse(lock_probe.is_alive())
 
     def privacy_export_in(self, data_dir):
-        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        service = server.PRIVACY.archive_export_service()
         config = replace(
             service._config,
             data_dir=data_dir,
@@ -946,7 +946,7 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             side_effect=AppError(503, "upstream"),
         ):
-            result = server.PRIVACY_ASSEMBLY.delete_service().delete(
+            result = server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertTrue(result["remote_delete_attempted"])
@@ -963,7 +963,7 @@ class ServerDatabaseTests(ServerTestCase):
         }
         self.assertEqual(scoped_tables, expected_tables)
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        preview = server.PRIVACY_ASSEMBLY.delete_service().preview()
+        preview = server.PRIVACY.delete_service().preview()
         self.assertEqual(
             {item["id"] for item in preview["categories"]},
             {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
@@ -979,7 +979,7 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            result = server.PRIVACY_ASSEMBLY.delete_service().delete(
+            result = server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertTrue(result["local_data_deleted"])
@@ -1020,7 +1020,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
         try:
             with self.assertRaises(sqlite3.DatabaseError):
-                server.PRIVACY_ASSEMBLY.delete_service().delete(
+                server.PRIVACY.delete_service().delete(
                     privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
                 )
         finally:
@@ -1127,7 +1127,7 @@ class ServerDatabaseTests(ServerTestCase):
         server_source = Path(server.__file__).read_text(encoding="utf-8")
         self.assertNotIn("def _privacy_export_file", server_source)
         self.assertIn(
-            "class PrivacyAssembly",
+            "def build_privacy",
             Path(privacy_module.__file__).read_text(encoding="utf-8"),
         )
 
@@ -1483,7 +1483,7 @@ class ServerDatabaseTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            server.PRIVACY_ASSEMBLY.delete_service().delete(
+            server.PRIVACY.delete_service().delete(
                 privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
             )
         self.assertEqual(server.HISTORY.change_history_service().list(), [])

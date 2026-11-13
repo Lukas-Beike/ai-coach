@@ -16,6 +16,7 @@ from unittest.mock import patch
 from server_test_support import ServerTestCase, server
 
 from backend.backup.database import DatabaseBackupService
+from backend.backup.export import PrivacyArchiveExportService
 from backend.backup.restore import DatabaseRestoreService
 from backend.backup.restore_validation import DatabaseRestoreValidationService
 from backend.coach.job_store import CoachJobStore
@@ -29,6 +30,7 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.privacy import PrivacyDeleteService
 from backend.providers import audio as audio_provider
 from backend.providers.claude_models import ClaudeModelResolver
 from backend.providers.claude_requests import ClaudeMessagesClient
@@ -83,6 +85,33 @@ class CompositionRootTests(ServerTestCase):
         self.assertIsInstance(
             restore._dependencies.coach_failures, CoachTurnFailureService
         )
+
+    def test_privacy_services_resolve_without_exporting_or_purging(self) -> None:
+        privacy = server.PRIVACY
+
+        export = privacy.archive_export_service()
+        self.assertIsInstance(export, PrivacyArchiveExportService)
+        self.assertEqual(export._config.data_dir, server.DATA_DIR)
+        self.assertEqual(export._config.database_path, server.DB_PATH)
+        purge = privacy.delete_service()
+        self.assertIsInstance(purge, PrivacyDeleteService)
+        dependencies = purge._dependencies
+        self.assertIs(dependencies.database_lock, server.DB_LOCK)
+        self.assertIs(
+            dependencies.maintenance_gate, server.runtime_maintenance.MAINTENANCE_GATE
+        )
+        self.assertIsInstance(dependencies.log_files, RecentLogEntriesService)
+        assert dependencies.recovery_copies is not None
+        self.assertEqual(dependencies.recovery_copies._data_dir, server.DATA_DIR)
+        for late in (
+            dependencies.refresh_credentials,
+            dependencies.cancel_garmin_login,
+            dependencies.disconnect_wahoo,
+            dependencies.cancel_coach_turns,
+        ):
+            self.assertTrue(callable(late))
+        with dependencies.diagnostics_suspended():
+            pass
 
     def test_diagnostics_services_resolve_over_the_live_owners(self) -> None:
         diagnostics = server.DIAGNOSTICS
