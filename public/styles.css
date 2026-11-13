@@ -903,7 +903,7 @@ h2 {
 .plan-segment-heading { margin-bottom: 12px; }
 .plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
 .planned-calendar { display: grid; gap: 20px; }
-.planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .planned-week-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); }
 .planned-week-heading h4 { margin: 0; color: var(--ink); font-size: 1.05rem; font-weight: 750; font-variant-numeric: tabular-nums; }
 .planned-week-number { margin-right: auto; color: var(--muted); font-size: .75rem; }
@@ -931,7 +931,7 @@ h2 {
 .planned-day-calendar, .planned-day-competition, .planned-day-day-status { color: var(--muted); }
 .planned-day-health { padding: 10px 12px; border: 1px solid var(--orange); border-radius: 10px; color: var(--ink); background: var(--surface); text-align: center; font-weight: 650; }
 .planned-day-empty { margin: 0; padding-top: 6px; color: var(--subtle); font-size: .78rem; line-height: 1.5; }
-.planned-entry, .planned-group { --session-color: var(--planned-session-default); --session-on-color: var(--planned-session-default-on); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
+.planned-entry, .planned-group { --session-color: var(--planned-session-default); --session-on-color: var(--planned-session-default-on); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
 .planned-entry > summary, .planned-group > summary { position: relative; display: grid; gap: 4px; min-height: 48px; padding: 6px 10px; cursor: pointer; list-style: none; }
 .planned-entry > summary::-webkit-details-marker, .planned-group > summary::-webkit-details-marker { display: none; }
 .planned-entry > summary:focus-visible, .planned-group > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 8px; }
@@ -939,8 +939,8 @@ h2 {
 .planned-entry[data-sport="Laufen"], .planned-group[data-sport="Laufen"], .planned-month-mark[data-sport="Laufen"] { --session-color: var(--planned-session-run); --session-on-color: var(--planned-session-run-on); }
 .planned-entry[data-sport="Schwimmen"], .planned-group[data-sport="Schwimmen"], .planned-month-mark[data-sport="Schwimmen"] { --session-color: var(--planned-session-swim); --session-on-color: var(--planned-session-swim-on); }
 .planned-entry[data-sport="Kraft"], .planned-group[data-sport="Kraft"], .planned-month-mark[data-sport="Kraft"] { --session-color: var(--planned-session-strength); --session-on-color: var(--planned-session-strength-on); }
-.planned-session-header { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; color: var(--ink); background: var(--surface-raised); }
-.planned-session-icon { display: grid; width: 30px; height: 30px; grid-row: 1 / 3; place-items: center; border-radius: 8px; color: var(--session-on-color); background: var(--session-color); font-size: .9rem; line-height: 1; }
+.planned-session-header { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; color: var(--ink); background: var(--surface); }
+.planned-session-icon { display: grid; width: 30px; height: 30px; grid-row: 1 / 3; place-items: center; border-radius: 50%; color: var(--session-on-color); background: var(--session-color); font-size: .9rem; line-height: 1; }
 .planned-session-title { min-width: 0; color: var(--ink); font-size: .88rem; line-height: 1.35; font-weight: 650; overflow-wrap: break-word; hyphens: auto; }
 .planned-session-line { grid-column: 2; color: var(--muted); font-size: .72rem; line-height: 1.4; }
 .planned-session-value { display: grid; grid-column: 3; grid-row: 1 / 3; justify-items: end; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
@@ -983,7 +983,7 @@ h2 {
 .planned-week-column { color: var(--subtle); font-size: .72rem; }
 .planned-entry:is(.is-planned, .is-today, .is-skipped) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
 .planned-entry.is-missed { border: 1.5px solid var(--danger); background: var(--transparent); }
-.planned-entry.is-completed { border-color: var(--session-color); }
+.planned-entry.is-completed { border-color: var(--line); border-left: 4px solid var(--session-color); }
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
 .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 16px; margin: 2px 0 0; }
 /* Month view (#2189): one row per week; dots on narrow screens, duration chips and the ISO week on wide ones. */
@@ -1032,7 +1032,7 @@ h2 {
   .planned-calendar { --planned-week-width: 460px; position: relative; grid-template-columns: minmax(0, var(--planned-week-width)); align-content: start; }
   .planned-entry[open] { border: 2px solid var(--accent-bright); background: var(--accent-soft); }
   .planned-entry[open] .planned-session-header { background: var(--transparent); }
-  .planned-entry[open] > .planned-entry-details { position: absolute; top: 0; right: 0; left: calc(var(--planned-week-width) + 24px); gap: 16px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+  .planned-entry[open] > .planned-entry-details { position: absolute; top: 0; right: 0; left: calc(var(--planned-week-width) + 24px); gap: 16px; padding: 24px 28px; border: 1px solid var(--line); border-top: 4px solid var(--session-color); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
   .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 10px; }
   .planned-detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
   .planned-detail-title { color: var(--ink); font-size: 1.2rem; font-weight: 750; line-height: 1.3; }
