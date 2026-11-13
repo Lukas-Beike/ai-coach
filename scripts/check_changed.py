@@ -120,14 +120,15 @@ def build_steps(base: str, js: bool) -> list[tuple[str, list[str]]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Step output can hold characters a cp1252 console cannot encode (#2637);
+    # like spec_validate.py and pr_state.py, write UTF-8 and never crash on it.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base", default="origin/develop")
     parser.add_argument("--js", action="store_true", help="always run the Node tests")
     args = parser.parse_args(argv)
-    # A cp1252 console cannot show every character of a step's output (#2637).
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(errors="replace")
     try:
         js = args.js or touches_js(args.base)
     except CliError as exc:

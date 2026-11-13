@@ -102,18 +102,22 @@ class CheckChangedTests(unittest.TestCase):
         self.assertIn("ok quality", out)
         self.assertNotIn("full output:", out)
         # A cp1252 console cannot encode the Node reporter's mark (#2637): the
-        # report replaces it instead of ending in a traceback.
+        # report writes UTF-8 instead of ending in a traceback.
         console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        errors = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
         runner = FakeRun(failing=("compileall",), extra="\n✖ node �")
         with (
             mock.patch.object(check_changed.subprocess, "run", runner),
             mock.patch.object(check_changed, "git", fake_git(["backend/x.py"])),
+            mock.patch.object(check_changed.tempfile, "tempdir", logs.name),
             redirect_stdout(console),
+            redirect_stderr(errors),
         ):
             code = check_changed.main([])
         console.flush()
         self.assertEqual(code, 1)
-        self.assertIn("? node ?", console.buffer.getvalue().decode("cp1252"))
+        self.assertIn("✖ node �", console.buffer.getvalue().decode("utf-8"))
+        self.assertEqual(errors.encoding, "utf-8")
 
     def test_node_tests_run_with_the_flag_or_when_the_diff_has_js(self):
         cases = [
