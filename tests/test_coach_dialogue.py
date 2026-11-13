@@ -88,13 +88,11 @@ class DialogueHarness:
             service._local_clock = lambda _timezone: server.ATHLETE_CLOCK.now()
             return service
 
-        dialogue_clock = patch.object(
-            server.COACH_CONVERSATION,
-            "dialogue_read_service",
-            side_effect=fixed_dialogue_service,
+        self.enterContext(
+            fixtures.patch_coach_conversation(
+                "dialogue_read_service", side_effect=fixed_dialogue_service
+            )
         )
-        dialogue_clock.start()
-        self.addCleanup(dialogue_clock.stop)
         self.counter = 0
         # What the write gate's delete/bulk classifier confirms; nothing by
         # default, so destructive calls must be confirmed explicitly.
@@ -201,8 +199,7 @@ class DialogueHarness:
             return step(payload) if callable(step) else step
 
         with (
-            patch.object(
-                server.COACH_CONVERSATION,
+            fixtures.patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(
                     binding=Mock(return_value="synthetic-conversation"),
@@ -214,8 +211,8 @@ class DialogueHarness:
                 "backend.coach.context.CoachTrainingContextService.build",
                 return_value="Synthetic local data",
             ),
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
+            fixtures.patch_coach_conversation(
+                "response_transport"
             ) as transport_factory,
         ):
             transport = transport_factory.return_value

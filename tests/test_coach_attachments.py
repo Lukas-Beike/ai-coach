@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from server_test_support import patch_coach_conversation
 from support import wire_step
 from test_coach_dialogue import DialogueHarness, server
 
@@ -286,9 +287,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         with (
             patch.object(openai_stream.OpenAIStreamClient, "stream", stream),
             patch.object(openai_requests.OpenAIResponsesClient, "responses", classify),
-            patch.object(
-                server.COACH_CONVERSATION, "provision_service", return_value=provision
-            ),
+            patch_coach_conversation("provision_service", return_value=provision),
             patch(
                 "backend.coach.context.CoachTrainingContextService.build",
                 return_value="Synthetic local data",
@@ -723,11 +722,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             }
 
         with (
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
-            ) as transport_factory,
-            patch.object(
-                server.COACH_CONVERSATION,
+            patch_coach_conversation("response_transport") as transport_factory,
+            patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(
                     binding=Mock(return_value="synthetic-conversation"),
@@ -776,11 +772,14 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
 
         with (
             patch.object(
-                server.COACH_CONVERSATION, "_openai_client", Mock(return_value=endpoint)
+                server.APP,
+                "model_transport",
+                replace(
+                    server.MODEL_TRANSPORT,
+                    openai_responses_client=Mock(return_value=endpoint),
+                ),
             ),
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
-            ) as transport_factory,
+            patch_coach_conversation("response_transport") as transport_factory,
         ):
             transport_factory.return_value.stream_request.side_effect = wire_step(
                 respond
@@ -844,11 +843,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             }
 
         with (
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport"
-            ) as transport_factory,
-            patch.object(
-                server.COACH_CONVERSATION,
+            patch_coach_conversation("response_transport") as transport_factory,
+            patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(
                     binding=Mock(return_value="synthetic-conversation"),

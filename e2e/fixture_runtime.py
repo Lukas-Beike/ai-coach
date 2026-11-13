@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
@@ -102,7 +103,9 @@ class FixtureConversationProvisionService:
         return "fixture-conversation"
 
 
-server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionService
+server.APP.coach_conversation = replace(
+    server.APP.coach_conversation, provision_service=FixtureConversationProvisionService
+)
 # Browser scenarios deliberately poll and reload the single disposable fixture
 # far more aggressively than one athlete does. Rate limiting has dedicated unit
 # coverage; disable it here to keep unrelated UI scenarios order-independent.
@@ -399,7 +402,9 @@ class FixtureResponseTransport:
         )
 
 
-server.COACH_CONVERSATION.response_transport = FixtureResponseTransport
+server.APP.coach_conversation = replace(
+    server.APP.coach_conversation, response_transport=FixtureResponseTransport
+)
 initialise = server.initialise_database
 artifact = {}
 

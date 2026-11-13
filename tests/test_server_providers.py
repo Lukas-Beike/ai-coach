@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 
-from server_test_support import ServerTestCase, server
+from server_test_support import ServerTestCase, patch_coach_conversation, server
 
 from backend.coach import streams as coach_streams
 from backend.errors import AppError, ClientDisconnected
@@ -248,9 +248,7 @@ class ServerProvidersTests(ServerTestCase):
             on_delta("Heute locker.")
             return ModelTurn(text="Heute locker.", stop_reason="completed")
 
-        with patch.object(
-            server.COACH_CONVERSATION, "response_transport"
-        ) as transport_factory:
+        with patch_coach_conversation("response_transport") as transport_factory:
             transport_factory.return_value.stream_request.side_effect = (
                 streamed_response
             )

@@ -1017,16 +1017,13 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
             return service
 
         stack.enter_context(
-            patch.object(
-                server.COACH_CONVERSATION,
-                "dialogue_read_service",
-                side_effect=dated_dialogue_service,
+            fixtures.patch_coach_conversation(
+                "dialogue_read_service", side_effect=dated_dialogue_service
             )
         )
         # No remote conversation: ordinary turns need none.
         stack.enter_context(
-            patch.object(
-                server.COACH_CONVERSATION,
+            fixtures.patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(
                     binding=Mock(return_value="synthetic-conversation"),
@@ -1101,6 +1098,8 @@ def run_case(
     """Run one case; raises CapReached when the cap stops it half way."""
     from unittest.mock import patch
 
+    import server_test_support as fixtures
+
     from backend.nutrition.web_search import NutritionWebSearchService
 
     with case_server(
@@ -1118,8 +1117,8 @@ def run_case(
         )
         turns = []
         with (
-            patch.object(
-                server.COACH_CONVERSATION, "response_transport", return_value=transport
+            fixtures.patch_coach_conversation(
+                "response_transport", return_value=transport
             ),
             patch.object(
                 NutritionWebSearchService,

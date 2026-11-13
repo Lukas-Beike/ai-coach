@@ -47,8 +47,7 @@ from backend.sync.garmin_payload_metrics import garmin_payload_performance_metri
 # setUp re-apply the replacements for this module's tests only.
 _SERVER_HOOKS = (
     (provider_http.JsonHttpClient, "request"),
-    (server.COACH_CONVERSATION, "provision_service"),
-    (server.COACH_CONVERSATION, "response_transport"),
+    (server.APP, "coach_conversation"),
     (server, "initialise_database"),
     (server.HTTP_API, "request_handler_class"),
     (http_auth.RATE_LIMITER, "allow"),

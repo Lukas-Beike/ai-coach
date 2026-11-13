@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from server_test_support import patch_coach_conversation
 
 from backend.errors import AppError
 from backend.providers import openai_stream
@@ -56,8 +57,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             }
 
         with (
-            patch.object(
-                server.COACH_CONVERSATION,
+            patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(binding=Mock(return_value="synthetic-conversation")),
             ),
@@ -142,8 +142,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             },
         }
         with (
-            patch.object(
-                server.COACH_CONVERSATION,
+            patch_coach_conversation(
                 "provision_service",
                 return_value=Mock(binding=Mock(return_value="synthetic-conversation")),
             ),

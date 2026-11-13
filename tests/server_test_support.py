@@ -7,9 +7,11 @@ import shutil
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import DEFAULT, Mock, patch
 
 from support import (
     create_test_session,  # noqa: F401 - compatibility export for tests
@@ -122,6 +124,19 @@ def _current_performance_context(snapshot=None, today=None):
             snapshot=effective_snapshot,
         ),
     )
+
+
+@contextmanager
+def patch_coach_conversation(name, new=DEFAULT, **kwargs) -> Iterator[Mock]:
+    """Replace one service of the Coach conversation owner, like patch.object.
+
+    ``server.APP`` is the one patch point: every Coach builder reads the
+    conversation owner from it when it builds a service.
+    """
+    replacement = Mock(**kwargs) if new is DEFAULT else new
+    owner = replace(server.APP.coach_conversation, **{name: replacement})
+    with patch.object(server.APP, "coach_conversation", owner):
+        yield replacement
 
 
 class ServerTestCase(unittest.TestCase):
