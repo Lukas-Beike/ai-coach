@@ -590,6 +590,73 @@ class PublicCopyMatchTests(unittest.TestCase):
 
 
 class SessionStructureTests(unittest.TestCase):
+    def test_garmin_and_wahoo_records_bundle_as_recorded(self) -> None:
+        # Recorded before #2148 removed the Intervals.icu pairing: without such
+        # copies, every Garmin and Wahoo session stays exactly as it was.
+        def at(hour: int, minute: int) -> datetime:
+            return datetime(2026, 6, 1, hour, minute, tzinfo=BERLIN)
+
+        wahoo: dict[str, Any] = {
+            "provider": ProviderId.WAHOO,
+            "recorded_by": RecordingOrigin.WAHOO,
+        }
+        watch: dict[str, Any] = {
+            "provider": ProviderId.GARMIN,
+            "recorded_by": RecordingOrigin.GARMIN,
+        }
+        relay: dict[str, Any] = {
+            "provider": ProviderId.GARMIN,
+            "recorded_by": RecordingOrigin.WAHOO,
+        }
+        walk: dict[str, Any] = {"sport": Sport.WALK, "distance_m": None}
+        records = [
+            _ride("w-ride", started_at=at(7, 0), **wahoo),
+            _ride(
+                "g-watch",
+                started_at=at(7, 1),
+                duration_s=3590.0,
+                distance_m=30100.0,
+                **watch,
+            ),
+            _ride("g-relay", started_at=at(7, 0), **relay),
+            _ride(
+                "g-run",
+                started_at=at(9, 0),
+                sport=Sport.RUN,
+                distance_m=10000.0,
+                duration_s=3000.0,
+                **watch,
+            ),
+            _ride("w-walk", started_at=at(12, 5), duration_s=1800.0, **walk, **wahoo),
+            _ride("g-walk", started_at=at(12, 0), duration_s=1850.0, **walk, **watch),
+            _ride("w-a", started_at=at(18, 0), **wahoo),
+            _ride("w-b", started_at=at(18, 20), **wahoo),
+            _ride("g-a", started_at=at(18, 1), **watch),
+            _ride("g-b", started_at=at(18, 21), **watch),
+            _ride("g-late", started_at=at(20, 0), **watch),
+            _ride("w-late", started_at=at(20, 45), **wahoo),
+        ]
+        heuristic = ActivityLinkKind.HEURISTIC
+        self.assertEqual(
+            [
+                ("w-ride", ("g-relay", "g-watch"), (heuristic, heuristic)),
+                ("g-run", (), ()),
+                ("w-walk", ("g-walk",), (heuristic,)),
+                ("w-a", ("g-a",), (heuristic,)),
+                ("w-b", ("g-b",), (heuristic,)),
+                ("g-late", (), ()),
+                ("w-late", (), ()),
+            ],
+            [
+                (
+                    session.primary.activity_id,
+                    tuple(record.activity_id for record in session.duplicates),
+                    session.link_kinds,
+                )
+                for session in bundle_sessions(records, zone=BERLIN)
+            ],
+        )
+
     def test_empty_input_yields_no_sessions(self) -> None:
         self.assertEqual((), bundle_sessions([], zone=BERLIN))
 
