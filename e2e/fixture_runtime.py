@@ -62,9 +62,11 @@ from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.http_api import auth as http_auth
 from backend.providers import http as provider_http
-from backend.providers.canonical_plans import wahoo_ingest_plan
+from backend.providers.canonical_plans import garmin_ingest_plan, wahoo_ingest_plan
+from backend.providers.garmin_activity_mapping import GARMIN_ACTIVITY_TYPES
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.providers.snapshot_projection import stored_retrieved_at
+from backend.providers.wahoo_activity_mapping import WAHOO_WORKOUT_TYPES
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -527,25 +529,21 @@ def demo_performance_history(today):
 # workout that goes through the real ``wahoo_ingest_plan``; the Garmin copies of
 # ``_save_garmin_copy`` stay the stream source of the detailed sessions. The records
 # carry no zone times, like a Wahoo workout. Wahoo has no strength type, so a
-# strength session is a generic fitness-equipment workout.
+# strength session goes through the Garmin ingest plan as a Garmin
+# strength_training activity instead (#2649).
 FIXTURE_ACTIVITY_MAPPER_VERSION = 1
 FIXTURE_ACTIVITY_PROVIDER = ProviderId.WAHOO
 FIXTURE_ACTIVITY_LABEL = "Wahoo"
 FIXTURE_CASE_ACTIVITY_ID = "9000001"
-_FIXTURE_SPORTS = {
-    "Ride": (Sport.RIDE, Environment.UNKNOWN),
-    "VirtualRide": (Sport.RIDE, Environment.VIRTUAL),
-    "Run": (Sport.RUN, Environment.UNKNOWN),
-    "Swim": (Sport.SWIM, Environment.UNKNOWN),
-    "WeightTraining": (Sport.STRENGTH, Environment.UNKNOWN),
-}
+# Ride 14 is a Wahoo cycling type that names no environment, like the
+# Intervals.icu "Ride" the rows are written as.
 _FIXTURE_WAHOO_TYPES = {
-    "Ride": 0,
+    "Ride": 14,
     "VirtualRide": 68,
     "Run": 1,
     "Swim": 25,
-    "WeightTraining": 20,
 }
+_FIXTURE_GARMIN_TYPES = {"WeightTraining": "strength_training"}
 _FIXTURE_STREAM_CHANNELS = {
     "time": StreamChannel.TIME_S,
     "distance": StreamChannel.DISTANCE_M,
@@ -562,9 +560,14 @@ _FIXTURE_STREAM_CHANNELS = {
 
 def fixture_analysis_sport(row):
     """The canonical sport, environment and trail flag of a fixture activity row."""
-    sport, environment = _FIXTURE_SPORTS.get(
-        str(row.get("type")), (Sport.OTHER, Environment.UNKNOWN)
-    )
+    # The same type tables the ingest route maps, so analysis and record agree.
+    type_name = str(row.get("type"))
+    if type_name in _FIXTURE_GARMIN_TYPES:
+        sport, environment = GARMIN_ACTIVITY_TYPES[_FIXTURE_GARMIN_TYPES[type_name]]
+    else:
+        sport, environment = WAHOO_WORKOUT_TYPES.get(
+            _FIXTURE_WAHOO_TYPES.get(type_name, 255), (Sport.OTHER, Environment.UNKNOWN)
+        )
     return {"sport": sport.value, "environment": environment.value, "trail": False}
 
 
@@ -606,6 +609,21 @@ def _fixture_wahoo_workout(row):
     }
 
 
+def _fixture_garmin_activity(row):
+    """The Garmin Connect list row of a fixture strength session."""
+    activity = {
+        "activityId": row.get("id"),
+        "activityName": row.get("name"),
+        "startTimeLocal": row.get("start_date_local"),
+        "activityType": {"typeKey": _FIXTURE_GARMIN_TYPES[row.get("type")]},
+        "duration": row.get("moving_time"),
+        "movingDuration": row.get("moving_time"),
+        "elapsedDuration": row.get("elapsed_time"),
+        "distance": row.get("distance"),
+    }
+    return {key: value for key, value in activity.items() if value is not None}
+
+
 def _store_snapshot(db, snapshot):
     """Insert one fixture snapshot row and keep the newest 12."""
     recent = snapshot.get("recent_activities")
@@ -644,14 +662,31 @@ def _save_activity_snapshot(db, snapshot):
     retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
     if retrieved_at is not None:
         rows = (snapshot.get("raw_provider_data") or {}).get("activities") or []
-        plan = wahoo_ingest_plan(
-            {
-                "synced_at": snapshot["synced_at"],
-                "workouts": [_fixture_wahoo_workout(row) for row in rows],
-            },
-            zone=UTC,
-        )
-        ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
+        strength = [row for row in rows if row.get("type") in _FIXTURE_GARMIN_TYPES]
+        synced = snapshot["synced_at"]
+        for plan in (
+            wahoo_ingest_plan(
+                {
+                    "synced_at": synced,
+                    "workouts": [
+                        _fixture_wahoo_workout(row)
+                        for row in rows
+                        if row.get("type") not in _FIXTURE_GARMIN_TYPES
+                    ],
+                },
+                zone=UTC,
+            ),
+            garmin_ingest_plan(
+                {
+                    "synced_at": synced,
+                    "activities": [_fixture_garmin_activity(row) for row in strength],
+                },
+                zone=UTC,
+            ),
+        ):
+            ingest_plan(
+                db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC
+            )
     if retrieved_at is None or server.CANONICAL_READ.serves_tables(db):
         return
     backfill = server.CANONICAL_BACKFILL.status_reader

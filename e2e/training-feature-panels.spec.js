@@ -115,7 +115,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(report.locator(".training-focus-share")).toBeVisible();
   const focusInfo = report.locator(".analysis-legend-info").first();
   await focusInfo.click();
-  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("3 erfasste Garmin-Einheiten");
+  // The completed strength session of yesterday is a Garmin record since #2649: Wahoo has no strength type.
+  await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("4 erfasste Garmin-Einheiten");
   await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("erfasste Daten");
   await page.keyboard.press("Escape");
   const zones = page.locator("#trainingZoneCharts");
