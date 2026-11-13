@@ -52,8 +52,6 @@ class WahooHttpTests(ServerTestCase):
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
-        server.WAHOO_CONNECTION._service = None
-        self.addCleanup(setattr, server.WAHOO_CONNECTION, "_service", None)
         handler_class = server.HTTP_API.request_handler_class()
         handler_class.protocol_version = "HTTP/1.1"
         self.httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)

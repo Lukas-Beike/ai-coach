@@ -11,7 +11,7 @@ from support import garmin_services
 
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
-from backend.sync import freshness, garmin, garmin_wiring, wiring
+from backend.sync import freshness, garmin, garmin_wiring, wahoo_wiring, wiring
 from backend.sync.gates import resetting_providers
 from backend.sync.worker import shared_sync_job_wake_event
 
@@ -416,6 +416,110 @@ class GarminBuilderTests(unittest.TestCase):
         self.assertIs(sources.observations(), ctx.canonical_read)
         self.assertIs(sources.activity_summaries(), ctx.canonical_read)
         self.assertIs(projection.call_args.args[4], ctx.morning_body_battery_service())
+
+
+class WahooBuilderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ctx = Mock(name="context")
+        self.registry = Mock(name="secret registry")
+        self.connected = Mock(name="on connected")
+        self.connection = wahoo_wiring.build_wahoo_connection(
+            self.ctx, secret_registry=self.registry, on_connected=self.connected
+        )
+        self.opener = Mock(name="opener")
+        self.gate = Mock(name="gate")
+        self.markers = Mock(name="markers")
+        self.services = wahoo_wiring.build_wahoo_sync(
+            self.ctx,
+            connection=self.connection.service,
+            daily_markers=self.markers,
+            resync_gate=self.gate,
+            export_thresholds=Mock(name="thresholds"),
+            history_earliest_date=date(2020, 1, 1),
+            fit_opener=lambda: self.opener,
+        )
+
+    def test_building_resolves_no_owner(self) -> None:
+        self.ctx.config.assert_not_called()
+        self.ctx.database.assert_not_called()
+        self.ctx.provider_transport.json_http_client.assert_not_called()
+
+    def test_one_connection_service_reads_the_live_owners(self) -> None:
+        ctx = self.ctx
+        with (
+            patch.object(wahoo_wiring, "WahooConnectionService") as service,
+            patch.object(wahoo_wiring, "WahooOAuthClient") as oauth,
+        ):
+            self.assertIs(self.connection.service(), service.return_value)
+            self.assertIs(self.connection.service(), service.return_value)
+            service.assert_called_once()
+            kwargs = service.call_args.kwargs
+            self.assertIs(kwargs["secret_registry"], self.registry)
+            self.assertIs(kwargs["on_connected"], self.connected)
+            self.assertIs(kwargs["config"], ctx.config)
+            self.assertIs(kwargs["database_lock"](), ctx.database_lock)
+            self.assertIs(kwargs["oauth"](), oauth.return_value)
+
+        oauth.assert_called_once_with(
+            ctx.config, ctx.provider_transport.json_http_client.return_value.request
+        )
+
+    def test_the_client_resolves_the_connection_on_each_call(self) -> None:
+        ctx = self.ctx
+        with patch.object(wahoo_wiring, "WahooClient") as client_factory:
+            self.assertIs(self.services.client(), client_factory.return_value)
+            self.services.client()
+
+        # Each call resolves the transport and the connection again.
+        self.assertEqual(2, client_factory.call_count)
+        self.assertEqual(2, ctx.provider_transport.json_http_client.call_count)
+        current = self.connection.service()
+        client_factory.assert_called_with(
+            request=ctx.provider_transport.json_http_client.return_value.request,
+            access_token=current.access_token,
+            refresh_access_token=current.refresh_access_token,
+            invalidate_access_token=current.invalidate_access_token,
+        )
+
+    def test_the_sync_service_details_and_plan_push_are_shared(self) -> None:
+        with (
+            patch.object(wahoo_wiring, "WahooSyncService") as sync,
+            patch.object(wahoo_wiring, "WahooActivityDetailImport") as details,
+            patch.object(wahoo_wiring, "WahooPlanPushService") as push,
+        ):
+            self.assertIs(self.services.sync_service(), sync.return_value)
+            self.assertIs(self.services.sync_service(), sync.return_value)
+            self.assertIs(self.services.activity_detail_import(), details.return_value)
+            self.assertIs(self.services.activity_detail_import(), details.return_value)
+            self.assertIs(self.services.plan_push_service(), push.return_value)
+            self.assertIs(self.services.plan_push_service(), push.return_value)
+
+        for factory in (sync, details, push):
+            factory.assert_called_once()
+        kwargs = sync.call_args.kwargs
+        self.assertIs(kwargs["connection"], self.connection.service)
+        self.assertIs(kwargs["daily_markers"], self.markers)
+        self.assertIs(kwargs["gate"], self.gate)
+        self.assertEqual(kwargs["details"](), details.return_value)
+        self.assertIs(push.call_args.kwargs["gate"], self.gate)
+        self.assertIs(push.call_args.kwargs["configured"], sync.return_value.configured)
+
+    def test_the_fit_download_asks_the_opener_per_request(self) -> None:
+        with patch.object(wahoo_wiring, "download_wahoo_fit") as download:
+            result = self.services.fit_download()("https://example.invalid/a.fit")
+
+        self.assertIs(result, download.return_value)
+        download.assert_called_once_with(
+            "https://example.invalid/a.fit", opener=self.opener
+        )
+
+    def test_services_are_fresh_per_call(self) -> None:
+        self.assertIsNot(self.services.workout_export(), self.services.workout_export())
+        self.assertIsNot(self.services.library_state(), self.services.library_state())
+        self.assertIsNot(
+            self.services.stream_backfill_service(),
+            self.services.stream_backfill_service(),
+        )
 
 
 if __name__ == "__main__":
