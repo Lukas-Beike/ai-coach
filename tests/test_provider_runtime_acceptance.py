@@ -572,6 +572,7 @@ class CoachRefreshTests(OrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
 
+UNREAD_VALUE = "fake-unread-status"
 SYNC_STATE = {
     "sync_operation_id": "op-fake-1",
     "sync_operation_status": "completed",
@@ -604,6 +605,10 @@ SYNC_STATE = {
     "wahoo_full_resync_status": "Fake Wahoo resync running",
     "wahoo_full_resync_at": "2026-09-18T08:00:00+00:00",
     "wahoo_full_resync_error": "fake-resync-error",
+    # Written by earlier releases, read by nothing (#2080).
+    "competition_sync_running": "1",
+    "competition_sync_status": UNREAD_VALUE,
+    "external_calendar_sync_status": UNREAD_VALUE,
 }
 # Wahoo activities: an earlier success, then a newer failed attempt.
 HISTORY_ROWS = (
@@ -726,6 +731,7 @@ class SyncStateReaderTests(OrchestrationCase):
         idle_state = service.state(freshness=[], jobs=[])
 
         self.assertEqual({key: state[key] for key in expected}, expected)
+        self.assertNotIn(UNREAD_VALUE, json.dumps(state, default=str))
         self.assertTrue(state["running"], "only a probe sets running")
         self.assertEqual({key: idle_state[key] for key in expected}, expected)
         self.assertFalse(idle_state["running"], "a stored status does not")
@@ -792,6 +798,7 @@ class SyncStateReaderTests(OrchestrationCase):
         ).read()
 
         self.assertEqual(bootstrap["provider_resync"], RESYNC_STATES)
+        self.assertNotIn(UNREAD_VALUE, json.dumps(bootstrap, default=str))
         self.assertEqual(
             bootstrap["garmin_sync"], {"running": False, "status": "Fake Garmin status"}
         )
@@ -815,6 +822,7 @@ class SyncStateReaderTests(OrchestrationCase):
         ).report()
 
         self.assertEqual(report["sync"]["last_error"], "fake-last-sync-error")
+        self.assertNotIn(UNREAD_VALUE, json.dumps(report, default=str))
         self.assertEqual(
             report["sync"]["providers"],
             {

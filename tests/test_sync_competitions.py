@@ -814,7 +814,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertIsNone(self.stored_kv("competition_sync_status"))
         self.assertEqual(publisher.events, [("coach", {"status": "changed"})])
 
-    def test_provider_failure_redacts_error_and_releases_lock_after_cleanup(self):
+    def test_provider_failure_redacts_error_and_releases_lock(self):
         error = RuntimeError("provider failed with secret-token" + "x" * 1200)
         client = FakeCompetitionClient(fetch_error=error)
         lock = FakeLock()

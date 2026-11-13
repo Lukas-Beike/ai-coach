@@ -216,9 +216,8 @@ class ExternalCalendarSyncService:
             )
             return self._adaptive_replan_preview_service.status()
 
-    def _set_value(self, key: str, value: str) -> None:
-        with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(db, key, value)
-
     def _record_error(self, message: str) -> None:
-        self._set_value("last_external_calendar_sync_error", message)
+        with self._database_manager.unit_of_work() as db:
+            self._key_value_repository.set(
+                db, "last_external_calendar_sync_error", message
+            )

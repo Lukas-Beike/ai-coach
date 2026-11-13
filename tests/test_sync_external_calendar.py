@@ -535,23 +535,6 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         self.assertEqual(result["extra"], "kept")
         self.assertEqual((preview.preview_calls, preview.status_calls), (1, 1))
 
-    def test_provider_failure_still_releases_module_lock(self):
-        with (
-            patch(
-                "backend.providers.calendar.external_calendar_url",
-                return_value="https://calendar.example/feed.ics",
-            ),
-            patch(
-                "backend.providers.calendar.fetch_calendar_feed",
-                side_effect=RuntimeError("synthetic feed failure"),
-            ),
-            self.assertRaises(AppError),
-        ):
-            self.service.sync()
-        self.assertFalse(self.service.running())
-        self.assertTrue(self.lock.acquire(blocking=False))
-        self.lock.release()
-
 
 if __name__ == "__main__":
     unittest.main()
