@@ -190,7 +190,7 @@ Evidence:
 - `tests/test_provider_usage.py:test_recorded_usage_is_non_mutating_and_returns_only_safe_delta`
 - `tests/test_provider_usage.py:test_usage_counts_supports_openai_wire_shape_and_safe_fallbacks`
 
-This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes.
+This is a daily aggregate, not a per-model cost ledger or global exactly-once billing guarantee across process crashes; MU16 keeps the per-turn usage per model.
 
 ### Requirement: MU8 Safe provider status, error classification and bounded retries
 The system SHALL persist safe provider availability/rate-limit state, distinguish actionable protocol/authentication/quota/billing/timeout failures and keep raw provider error text out of user-facing failures and diagnostic markers.
@@ -339,3 +339,16 @@ The system SHALL read a streamed Responses answer as server-sent events up to th
 - **THEN** the operation is `responses_stream` for a stream that ended completed or incomplete, `responses_stream_failed` for one that ended with a failed body, `responses_stream_cancelled` for a cancelled or disconnected stream (one request with zero tokens when no body arrived), `responses` for a plain request such as the impact classifier, and `transcription` for a voice note
 
 Evidence: `backend/providers/openai_events.py:consume_sse_event`, `backend/providers/openai_events.py:_decode_sse_event`, `backend/providers/openai_stream.py:OpenAIStreamClient`, `backend/providers/openai_stream.py:OpenAIStreamTelemetry`, `backend/providers/openai_requests.py:OpenAIResponsesClient`, `backend/providers/usage.py`; `tests/test_provider_openai.py:test_consume_sse_event_returns_all_final_response_states`, `tests/test_provider_openai.py:test_stream_client_timeout_network_and_client_disconnect_contracts`, `tests/test_provider_openai.py:test_read_stream_response_rejects_oversized_stream`, `tests/test_provider_openai.py:test_stream_client_requires_final_response_and_records_usage_once_on_success`.
+
+### Requirement: MU16 Usage per Coach turn and monthly view
+The system SHALL sum the usage of every provider request recorded during a Coach turn (tool rounds, the impact classifier, the product web search, failed and cancelled requests included) into the turn's receipt next to its model, and show the current month's answers and tokens per model.
+
+#### Scenario: Turn usage
+- **WHEN** a Coach turn completes, fails or is cancelled
+- **THEN** its receipt keeps `usage` with `requests`, `input_tokens` (Claude cache reads and writes included), `cached_input_tokens` and `output_tokens`; a resumed background turn continues the usage its receipt kept, and no text or provider payload is copied
+
+#### Scenario: Monthly view
+- **WHEN** the bootstrap is read
+- **THEN** `usage_month` holds the athlete's local month and, per model, the finished turns started in it that carry usage, with summed tokens and the answers among them (failed and cancelled turns add tokens, no answer); older turns without usage are left out, and Mehr › Coach › Verbrauch shows them as a table below today's counters
+
+Evidence: `backend/providers/state.py:metered_turn`, `backend/providers/state.py:ProviderStateService.record_usage`, `backend/coach/final_receipt.py:CoachFinalReceiptService.build`, `backend/coach/turn_failures.py`, `backend/coach/receipt_reads.py:monthly_turn_usage`, `public/views.js:renderUsageMonth`; `tests/test_provider_state.py:test_metered_turn_adds_every_recorded_call_of_both_providers`, `tests/test_coach_final_receipt.py:test_month_sums_turns_with_usage_per_model_in_local_time`, `tests/test_coach_turn_failures.py:test_failed_and_cancelled_turns_keep_the_usage_they_spent`.

@@ -18,6 +18,7 @@ from backend.coach.response_transport import (
 )
 from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.state import turn_usage
 
 
 def _discard_delta(_delta: str) -> None:
@@ -117,6 +118,10 @@ class CoachStructuredResponseService:
                     )
                 attempt += 1
                 continue
+            usage = turn_usage()
+            if background_owned and usage is not None:
+                # A restart resumes the turn with the usage spent so far.
+                self._jobs.merge_receipt(client_turn_id, {"usage": usage})
             if not self._spent_on_reasoning(turn, request, state):
                 return turn
             # Reasoning used the whole budget before any text or tool call, so

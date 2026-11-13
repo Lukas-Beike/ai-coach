@@ -390,6 +390,28 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.screenshot({ path: testInfo.outputPath("settings-core.png"), fullPage: true });
   });
 
+  test("the usage section shows this month's answers and tokens per model", async ({ page }) => {
+    await page.route("**/api/bootstrap*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.usage_month = {
+        month: "2026-11",
+        models: [{ model: "synthetic-model", answers: 14, input_tokens: 900000, cached_input_tokens: 500000, output_tokens: 41000 }],
+      };
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto("/#more/coach");
+    await page.locator("#usageSummary").click();
+    const month = page.locator("#usageMonth");
+    await expect(month.getByRole("heading", { name: "November 2026" })).toBeVisible();
+    const row = month.getByRole("row", { name: /synthetic-model/ });
+    await expect(row.getByRole("rowheader")).toHaveText("synthetic-model");
+    await expect(row.getByRole("cell")).toHaveText(["14", "900.000", "500.000", "41.000"]);
+    const overflow = await month.evaluate((node) => node.scrollWidth - node.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await page.unrouteAll({ behavior: "wait" });
+  });
+
   test("inactive panels stay hidden and compact labels remain readable", async ({ page }) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);

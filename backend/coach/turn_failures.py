@@ -27,6 +27,7 @@ from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.providers.claude_messages_adapter import REFUSED_MESSAGE
 from backend.providers.claude_requests import ANTHROPIC_API_KEY_ERROR
+from backend.providers.state import turn_usage
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -130,6 +131,8 @@ class CoachTurnFailureService:
                     ],
                 }
             )
+            if (usage := turn_usage()) is not None:
+                receipt["usage"] = usage
             # Keep applied local writes undoable, as a successful turn does.
             summary = change_summary(commands)
             if summary:

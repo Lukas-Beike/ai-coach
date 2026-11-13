@@ -14,6 +14,7 @@ from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.providers.model_seam import ModelTurn
+from backend.providers.state import turn_usage
 from backend.runtime.events import StateEventBuffer
 
 
@@ -72,6 +73,8 @@ class CoachFinalReceiptService:
             "change_summary": change_summary(command_receipts),
         }
         final_receipt.pop("pending_tool_calls", None)
+        if (usage := turn_usage()) is not None:
+            final_receipt["usage"] = usage
         return final_receipt
 
     def persist(

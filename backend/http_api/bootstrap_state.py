@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.canonical.public_metrics import neutral_calendar_state
 from backend.canonical.vocabulary import ProviderId
+from backend.coach.receipt_reads import monthly_turn_usage
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
@@ -56,6 +57,8 @@ class PublicBootstrapDependencies:
     provider_credentials: Callable[[], Any] | None = None
     # Stale-threshold warning for the status strip; null in the bootstrap when none.
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
+    # Answers and tokens per model of a month's Coach turns, read in the transaction.
+    coach_usage_reader: Callable[[Any, Any, str], dict[str, Any]] = monthly_turn_usage
 
 
 class PublicBootstrapService:
@@ -227,6 +230,9 @@ class PublicBootstrapService:
                     else None
                 ),
                 "usage": summaries[provider],
+                "usage_month": deps.coach_usage_reader(
+                    db, deps.local_date(), profile.get("timezone")
+                ),
                 "provider_status": {
                     name: summary.get("status") or {}
                     for name, summary in summaries.items()

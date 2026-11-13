@@ -901,6 +901,7 @@ class ServerHttpTests(ServerTestCase):
                 "wahoo",
                 "credentials",
                 "usage",
+                "usage_month",
                 "provider_status",
                 "threshold_warnings",
             ],

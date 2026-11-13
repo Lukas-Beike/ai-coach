@@ -6,7 +6,9 @@ import json
 import math
 import re
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime
 from typing import Any
 
@@ -25,6 +27,33 @@ _STATUS_KEYS = {provider: f"{provider}_status" for provider in _PROVIDERS}
 _USAGE_KEYS = {provider: f"{provider}_usage" for provider in _PROVIDERS}
 _OPENAI_RATE_LIMITS_KEY = "openai_rate_limits"
 _SAFE_CODE = re.compile(r"(?a)^[a-z0-9][a-z0-9_.:/-]{0,79}$")
+TURN_USAGE_FIELDS = ("requests", "input_tokens", "cached_input_tokens", "output_tokens")
+# The usage of the Coach turn running in this thread; None outside a turn.
+_TURN_USAGE: ContextVar[dict[str, int] | None] = ContextVar(
+    "coach_turn_usage", default=None
+)
+
+
+@contextmanager
+def metered_turn(stored: Any = None) -> Iterator[None]:
+    """Add every usage recorded in this thread to one Coach turn.
+
+    A resumed turn continues the usage its receipt kept.
+    """
+    seed = stored if isinstance(stored, Mapping) else {}
+    token = _TURN_USAGE.set(
+        {key: provider_usage.count(seed.get(key)) for key in TURN_USAGE_FIELDS}
+    )
+    try:
+        yield
+    finally:
+        _TURN_USAGE.reset(token)
+
+
+def turn_usage() -> dict[str, int] | None:
+    """The running turn's usage so far, or None outside a metered turn."""
+    usage = _TURN_USAGE.get()
+    return dict(usage) if usage is not None else None
 
 
 def _provider(value: Any) -> str:
@@ -234,6 +263,12 @@ class ProviderStateService:
                 recorded_at=_timestamp(self._now()),
             )
             self._repository.set(db, _USAGE_KEYS[provider], _json(updated))
+        cached_tokens = provider_usage.openai_cached_input_tokens(response)
+        if (turn := _TURN_USAGE.get()) is not None:
+            turn["requests"] += 1
+            turn["input_tokens"] += counts["input_tokens"]
+            turn["cached_input_tokens"] += cached_tokens
+            turn["output_tokens"] += counts["output_tokens"]
         if self._logger is not None:
             self._logger.info(
                 "OpenAI usage recorded"
@@ -244,9 +279,7 @@ class ProviderStateService:
                     "context": {
                         "operation": safe_operation,
                         **counts,
-                        "cached_tokens": provider_usage.openai_cached_input_tokens(
-                            response
-                        ),
+                        "cached_tokens": cached_tokens,
                     },
                 },
             )

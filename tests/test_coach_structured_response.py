@@ -10,6 +10,7 @@ from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.state import metered_turn
 
 
 class CoachStructuredResponseTests(unittest.TestCase):
@@ -70,6 +71,25 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.jobs.merge_receipt.assert_called_once_with(
             "turn-synthetic",
             {"status": "running", "phase": "waiting_openai", "openai_reached": True},
+        )
+
+    def test_background_job_keeps_the_usage_so_far_for_a_restart(self) -> None:
+        self.transport.stream_request.return_value = ModelTurn()
+        self.options["background_owned"] = True
+
+        with metered_turn({"requests": 1, "output_tokens": 7}):
+            self.service.respond(self.payload, **self.options)
+
+        self.jobs.merge_receipt.assert_called_once_with(
+            "turn-synthetic",
+            {
+                "usage": {
+                    "requests": 1,
+                    "input_tokens": 0,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 7,
+                }
+            },
         )
 
     def test_rate_limit_retries_without_stream_delta(self) -> None:
