@@ -91,7 +91,6 @@
   --training-zone-3: #f2c53a;
   --training-zone-6: #a47cf5;
   --calendar-profile-ink: #8c9895;
-  --metric-border: rgba(255, 255, 255, .06);
   --card-hover-surface: rgba(255, 255, 255, .035);
   --metric-hover-surface: rgba(255, 255, 255, .08);
   --metric-edit-surface: rgba(52, 207, 161, .08);
@@ -245,7 +244,8 @@ button { cursor: pointer; }
 
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .nav-icon { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+/* One surface-card family (#2434); view rules add only layout. */
+.card, .analysis-chart-card, .settings-section, .connection-card, .nutrition-total, .nutrition-card, .nutrition-tools, .planned-week, .planned-month { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .status-chip { display: inline-flex; min-height: 24px; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; color: var(--muted); background: var(--surface-raised); font-size: 12px; font-weight: 700; }
 .status-chip[data-status="ready"], .status-chip.success { color: var(--ink); background: var(--success-surface); }
 .status-chip[data-status="loading"], .status-chip.warning { color: var(--ink); background: var(--warning-surface); }
@@ -350,7 +350,7 @@ h2 {
 /* Five segments no longer fit one row on the smallest phones. */
 @media (max-width: 360px) { .plan-segment-nav:has(> a:nth-child(5)) { flex-wrap: wrap; } .plan-segment-nav:has(> a:nth-child(5)) a { flex-basis: 30%; } }
 .analysis-history-charts { display: grid; gap: 16px; margin-bottom: 24px; }
-.analysis-chart-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.analysis-chart-card { min-width: 0; padding: 16px; }
 .analysis-chart-card h3 { margin: 0; color: var(--ink); font-size: 1rem; }
 .analysis-chart-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .analysis-subchart { min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -379,7 +379,7 @@ h2 {
 .analysis-line-key { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--muted); font-size: .72rem; }
 .analysis-line-key-swatch { flex: none; width: 24px; height: 0; border-top: 2px dashed currentColor; }
 .analysis-chart-legend li[data-line="dashed"]::before { mask: repeating-linear-gradient(90deg, var(--ink) 0 6px, var(--transparent) 6px 9px); }
-.estimate-chip { margin-left: 4px; vertical-align: middle; font-weight: 700; }
+.estimate-chip { margin-left: 4px; vertical-align: middle; border: 1px dashed var(--muted); color: var(--muted); background: var(--transparent); font-weight: 700; }
 .analysis-info-tooltip { position: fixed; inset: auto; margin: 0; width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); font-size: .8rem; line-height: 1.5; }
 .analysis-chart-legend li::before { content: ""; display: inline-block; width: 16px; height: 3px; margin: 0 8px 3px 0; background: var(--accent-bright); }
 .analysis-chart-legend [data-color="1"]::before { background: var(--chart-series-1); }
@@ -830,7 +830,7 @@ h2 {
 .view-refresh output:empty { display: none; }
 .view-refresh output:not(:empty) { position: absolute; top: 47px; right: 0; z-index: 2; padding: 4px 7px; border-radius: 7px; background: var(--surface-raised); }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.metric-grid > div { padding: 10px; border: 1px solid var(--metric-border); border-radius: 12px; background: var(--card-hover-surface); }
+.metric-grid > div { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-raised); }
 .metric-grid .metric-editable { position: relative; }
 .metric-edit-button { position: absolute; top: 4px; right: 4px; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--transparent); border-radius: 10px; color: var(--subtle); background: var(--transparent); font-size: .8rem; line-height: 1; }
 .metric-edit-button:hover { border-color: var(--line); color: var(--ink); background: var(--metric-hover-surface); }
@@ -903,7 +903,7 @@ h2 {
 .plan-segment-heading { margin-bottom: 12px; }
 .plan-segment-heading h3 { margin: 2px 0 0; font-size: 1rem; }
 .planned-calendar { display: grid; gap: 20px; }
-.planned-week { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.planned-week { overflow: hidden; }
 .planned-week-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); }
 .planned-week-heading h4 { margin: 0; color: var(--ink); font-size: 1.05rem; font-weight: 750; font-variant-numeric: tabular-nums; }
 .planned-week-number { margin-right: auto; color: var(--muted); font-size: .75rem; }
@@ -987,7 +987,6 @@ h2 {
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
 .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 16px; margin: 2px 0 0; }
 /* Month view (#2189): one row per week; dots on narrow screens, duration chips and the ISO week on wide ones. */
-.planned-month { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .planned-month h4 { margin-right: auto; }
 .planned-view-switch { display: flex; flex-basis: 100%; padding: 3px; border-radius: 10px; background: var(--surface-raised); }
 .planned-view-switch button { flex: 1; min-height: 44px; border: 0; border-radius: 8px; color: var(--muted); background: none; font: inherit; font-size: .8rem; font-weight: 650; cursor: pointer; }
@@ -1153,7 +1152,7 @@ h2 {
 .context-preview-values .context-preview-values { padding-left: 10px; border-left: 1px solid var(--line); }
 .context-preview-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .context-preview-text { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
-.settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 17px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.settings-section { display: grid; gap: 12px; margin-bottom: 18px; padding: 17px; }
 #privacySection .settings-inline-action ~ .settings-inline-action { padding-top: 12px; border-top: 1px solid var(--line); }
 #privacySection .chip span { gap: 12px; padding: 0; border: 0; color: var(--ink); background: none; }
 #privacySection .chip span::before { content: ""; flex: none; width: 44px; height: 26px; border-radius: 999px; background: var(--muted) radial-gradient(circle at 13px 50%, var(--surface) 10px, var(--transparent) 10.5px); }
@@ -1180,7 +1179,6 @@ h2 {
 .settings-section > p, .settings-section-heading p { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .connection-cards { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .settings-section[data-more-segment-panel="connections"] { padding: 0; border: 0; background: none; box-shadow: none; }
-.connection-card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .connection-card > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 16px; border-radius: var(--radius-lg); cursor: pointer; list-style: none; }
 .connection-card > summary::-webkit-details-marker { display: none; }
 .connection-card > summary:hover, .connection-card[open] > summary { background: var(--card-hover-surface); }
@@ -1558,7 +1556,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 :root[data-theme="light"] :is(
   .library-card, .competition-card,
-  .metric-grid > div, .metric-grid small,
+  .metric-grid small,
   .more-segment-nav, .segmented-control, .plan-segment-nav,
   .planned-comparison, .context-preview-content details,
   .library-sport,
@@ -1592,7 +1590,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-toolbar input { width: 100%; text-align: center; font-weight: 650; }
 @media (max-width: 360px) { .nutrition-toolbar { flex-wrap: wrap; } .nutrition-toolbar label { flex: 1 1 100%; order: -1; } }
 .nutrition-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 12px; margin: 18px 0; }
-.nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.nutrition-total, .nutrition-card { padding: 16px; }
 .nutrition-total { min-width: 0; overflow-wrap: break-word; hyphens: auto; }
 .nutrition-total.nutrition-below-range { box-shadow: inset 0 -3px 0 var(--orange), var(--shadow-soft); }
 .nutrition-total.nutrition-above-range { box-shadow: inset 0 -3px 0 var(--blue), var(--shadow-soft); }
@@ -1625,7 +1623,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-component-list li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .nutrition-component-list li > span { white-space: normal; }
 .nutrition-component-list small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
-.nutrition-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.nutrition-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 20px 0; padding: 16px; }
 .nutrition-tools[hidden] { display: none; }
 .nutrition-tools h3, .nutrition-tools p { margin: 0; }
 .nutrition-tools .nutrition-week-period { color: var(--ink); font-size: 1.1rem; font-weight: 700; }
