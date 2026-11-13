@@ -120,7 +120,13 @@ def _workout_minutes(workout: dict[str, Any]) -> float | None:
 
 
 def calendar_event_has_constraint(event: dict[str, Any], reason: str) -> bool:
-    """Return whether an event sets one constraint flag or names its marker."""
+    """Return whether an event sets one constraint flag or names its marker.
+
+    The athlete's decision on a stored event replaces its markers, so only the
+    decided flags count then.
+    """
+    if event.get("decision_scope"):
+        return bool(event.get(reason))
     marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
     return bool(event.get(reason)) or has_marker(marker_text, _MARKER_BY_REASON[reason])
 

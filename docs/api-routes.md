@@ -56,6 +56,7 @@ handler's docstring. Regenerate it with
 | GET | `/api/diagnostics` | Session | no | Diagnostic report. |
 | POST | `/api/diagnostics/delete` | Session + CSRF | after access | Clear the stored diagnostics. |
 | POST | `/api/equipment/maintenance` | Session + CSRF | after access | Record one maintenance entry for a piece of equipment, stored locally. |
+| POST | `/api/external-calendar/decisions` | Session + CSRF | after access | Set or remove how one calendar event affects training; nothing remote. |
 | POST | `/api/external-calendar/sync` | Session + CSRF | after access | Queue a provider synchronization, or a targeted refresh of the external calendars or the weather. |
 | GET | `/api/feedback` | Session | no | Activity feedback projection. |
 | POST | `/api/garmin/disconnect` | Session + CSRF | after access | Connect Garmin with credentials or an MFA code, or disconnect it. |
@@ -535,6 +536,22 @@ Errors: 400 "Ungültige Wartung." for an unknown body key; 400
 "Wartungsgegenstand oder Datum ungültig." for an empty or unmatched
 `equipment_id` or a date outside the item's range; 404 "Ausrüstung nicht
 gefunden." for a non-empty unknown `equipment_id`.
+
+### `POST /api/external-calendar/decisions`
+
+Request: JSON body `{"uid": string, "occurrence_start": string|null,
+"impact": "block"|"short"|"easy"|"none"|null}`. `occurrence_start` is the
+event's `start_local` for one occurrence, or `null` for every occurrence
+of the UID (which replaces their single decisions). `impact` `null`
+removes the decision.
+
+Response: 200 `{"uid", "occurrence_start", "impact", "undecided_upcoming",
+"needs_replan", "replan_changes"}` after the adaptive preview was
+recalculated; `undecided_upcoming` counts the events still without a
+decision from today through 14 days ahead.
+
+Errors: 400 "Ungültiger Termin." or "Ungültige Einordnung."; 404 "Termin
+nicht gefunden." when no stored event has that UID and start.
 
 ### `POST /api/external-calendar/sync`, `POST /api/garmin/sync`, `POST /api/wahoo/sync`, `POST /api/weather/sync`
 

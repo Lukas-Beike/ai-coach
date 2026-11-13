@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.app.context import AppContext
+from backend.calendar.decisions import ExternalCalendarDecisionService
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
@@ -25,6 +26,7 @@ from backend.performance.source_policy import preferences_from_profile
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.sync import external_calendar as external_calendar_runtime
+from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.gates import ProviderResyncGate
@@ -82,6 +84,7 @@ class SelectedWorkoutSyncServices:
 class ExternalCalendarServices:
     reader: Callable[[], ExternalCalendarReader]
     sync_service: Callable[[], ExternalCalendarSyncService]
+    decisions: Callable[[], ExternalCalendarDecisionService]
 
 
 def _intervals_client(ctx: AppContext) -> Callable[[], Any]:
@@ -233,7 +236,18 @@ def build_external_calendar(ctx: AppContext) -> ExternalCalendarServices:
             lock=external_calendar_runtime.shared_external_calendar_sync_lock(),
         )
 
-    return ExternalCalendarServices(reader, sync_service)
+    def decisions() -> ExternalCalendarDecisionService:
+        return ExternalCalendarDecisionService(
+            ctx.database(),
+            AdaptivePreviewFollowupService(
+                ctx.planning_workflows.adaptive_replan_preview_service(), ctx.logger
+            ),
+            runtime_events.STATE_EVENT_BUFFER,
+            runtime_clock.utc_now,
+            lambda: ctx.clock.now().date(),
+        )
+
+    return ExternalCalendarServices(reader, sync_service, decisions)
 
 
 def build_export_thresholds(

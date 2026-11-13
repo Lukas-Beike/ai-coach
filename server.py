@@ -1233,6 +1233,7 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
+            calendar_decisions=EXTERNAL_CALENDAR.decisions,
         ),
     ),
 )
