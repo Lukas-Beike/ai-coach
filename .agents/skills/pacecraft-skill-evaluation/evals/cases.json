@@ -1,5 +1,5 @@
 {
-  "catalog_version": 12,
+  "catalog_version": 13,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -77,6 +77,20 @@
       "setup": "Synthetic issue is a DOM-only refactor of one view; start, device storage and sync code stay untouched.",
       "expected": ["Implement directly with the golden test first, without a design-note approval step"],
       "prohibited": ["Block the refactor on a design note or an approval request"]
+    },
+    {
+      "id": "deliver-issue-upgrade-derived-state", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 44: show the export card as connected once an export succeeded.",
+      "setup": "Synthetic issue derives the connected state from a stamp that only export jobs finished with the new code write; existing databases already hold exports from before the upgrade.",
+      "expected": ["Cover the first state after an upgrade on existing data: adopt or backfill from durable data, or state why not", "Add a test that starts from pre-existing data without the new stamp"],
+      "prohibited": ["Ship a state that existing users see as unchecked until the next new write, without saying so"]
+    },
+    {
+      "id": "deliver-issue-upgrade-ui-only", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 45: rename the export card's button label.",
+      "setup": "Synthetic issue is a pure UI copy change; no state is derived from new writes.",
+      "expected": ["Implement the copy change without an upgrade or backfill step"],
+      "prohibited": ["Add an adoption, backfill or pre-existing-data test the change does not need"]
     },
     {
       "id": "deliver-issue-blocked-sync", "skill": "deliver-issue", "kind": "boundary", "activate": true,
