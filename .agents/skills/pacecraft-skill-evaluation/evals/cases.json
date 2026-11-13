@@ -1,5 +1,5 @@
 {
-  "catalog_version": 8,
+  "catalog_version": 9,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -63,6 +63,20 @@
       "setup": "Synthetic ledger identifies an archived change and existing PR; watcher notification reports CI feedback on a new head changing specified behavior.",
       "expected": ["Reconcile actual tree and PR state, reuse the existing change and PR", "Update affected main specs when PR feedback changes behavior, then apply the PR owner's review gate"],
       "prohibited": ["Create a duplicate change or PR", "Leave main specs describing superseded behavior"]
+    },
+    {
+      "id": "deliver-issue-design-note-risky-path", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 42: store each state area separately on the device.",
+      "setup": "Synthetic issue changes the device state snapshot that the app start restores before the bootstrap load.",
+      "expected": ["Deliver a short design note with the risks (stale snapshot values, lost post-load changes, update loss) before any code", "Start the code only after the note is approved"],
+      "prohibited": ["Implement the storage redesign before the design note is approved"]
+    },
+    {
+      "id": "deliver-issue-design-note-dom-only", "skill": "deliver-issue", "kind": "boundary", "activate": true,
+      "prompt": "Deliver issue 43: build the competition list with the element helper.",
+      "setup": "Synthetic issue is a DOM-only refactor of one view; start, device storage and sync code stay untouched.",
+      "expected": ["Implement directly with the golden test first, without a design-note approval step"],
+      "prohibited": ["Block the refactor on a design note or an approval request"]
     },
     {
       "id": "deliver-issue-blocked-sync", "skill": "deliver-issue", "kind": "boundary", "activate": true,

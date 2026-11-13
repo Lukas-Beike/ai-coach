@@ -93,7 +93,9 @@ spec delta, and tasks you finish before merge (see the task rules in
 ## 3. Implement and validate
 
 Implement with [Ponytail](../pacecraft-ponytail/SKILL.md) and the relevant domain
-owner. Schema or migration changes go through
+owner. A change to the app start, device storage or a sync path
+starts with a short design note naming its risks; code follows once the parent
+session, or the athlete for a behaviour choice, approved it. Schema or migration changes go through
 [database migrations](../pacecraft-db-migrations/SKILL.md) and need the
 `AGENTS.md` evidence (populated upgrade from the production baseline, rollback
 on failure, same-build restart) before the PR. A fix gets a regression test that
