@@ -3,10 +3,12 @@
 Stored provider records are re-projected only when the version of their mapper
 changes. Sub-mappers have no version of their own: they ride on the version of
 the mapper that calls them. This guard pins a fingerprint of every mapping
-module's code, and of every provider helper module a replayed mapper imports
-(directly or through another helper), together with the versions that replay
-it. Changing the code without bumping one of those versions fails here.
-Modules outside backend/providers, such as backend/canonical, are not covered.
+module's code, and of every backend/providers or backend/canonical module a
+replayed mapper imports (directly or through another such module, #2501),
+together with the versions that replay it. Changing the code without bumping
+one of those versions fails here. Widely shared canonical modules such as
+vocabulary are pinned too: a change that maps nothing differently (a new enum
+member) only updates the fingerprint.
 
 The fingerprint ignores comments, docstrings and layout, so documentation edits
 pass. When a code change does not alter any mapped output (a pure refactor),
@@ -27,6 +29,7 @@ from typing import Final
 
 ROOT = Path(__file__).resolve().parents[1]
 PROVIDERS = ROOT / "backend" / "providers"
+CANONICAL = "canonical."
 
 # Mapping module -> the modules whose MAPPER_VERSION replays its output.
 REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
@@ -60,6 +63,50 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 }
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
+    "canonical.activity_detail": (
+        (9, 10),
+        "4bbe2f0504dbb54e038e81fe8f323245fab24f45b6f7d61d55bbdc5bd64bc5e2",
+    ),
+    "canonical.decimal_text": (
+        (9, 10, 21, 23, 8, 2),
+        "fe45d029fb3c059900543f140a5715de91421a68f6226ddfb1f9d4a093edaaa6",
+    ),
+    "canonical.dfa_alpha1": (
+        (9, 10),
+        "3057e5bd8fb86e99bd00be2b17914438dc2c7af18559d983ec1909a753439cdf",
+    ),
+    "canonical.domain_records": (
+        (23,),
+        "aa1376a854a6b040e304d690004ce1b779bf5c234071748603764f3a77f25271",
+    ),
+    "canonical.local_time": (
+        (9, 10, 21, 23, 8, 2),
+        "bb8d2cace6846fc1f0f57aa0cc04ee9561fb8603105cb65f337204eece611886",
+    ),
+    "canonical.mapping": (
+        (9, 10, 21, 23, 8, 2),
+        "ce31fc467c34d7276223455adccf24557ed633520a1c849051216c23d0549359",
+    ),
+    "canonical.records": (
+        (9, 10, 21, 23, 8, 2),
+        "ca06ef248ed891b0643a14c08469268a974fd84a313389e6faa48fbc59a9e26d",
+    ),
+    "canonical.sleep_bounds": (
+        (23,),
+        "a18b7a440cdfb7ba0d03909e5d28cc843a99fc962d73383d8f4905084022884c",
+    ),
+    "canonical.sports": (
+        (10, 21),
+        "223eb5ca42399100cccd4093e4ec74e042986f3cd34c71022651e794bba0df66",
+    ),
+    "canonical.validation": (
+        (9, 10, 21, 23, 8, 2),
+        "f26499153b11db946989256391373cf1bbee3b3299a53330faf6e3cf24478772",
+    ),
+    "canonical.vocabulary": (
+        (9, 10, 21, 23, 8, 2),
+        "c6f09bb6b368bb15d04b923dfdd7f83e05ce0d48ac5aad5e733e9759d13824b5",
+    ),
     "fit_activity_detail_mapping": (
         (9, 10),
         "f7fc2667529631b41c1146091f8e7566a0d287c73baecd5267f6fff7d09dba26",
@@ -158,26 +205,36 @@ def fingerprint(source: str) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def provider_imports(module: str) -> set[str]:
-    """The backend.providers modules that ``module`` imports."""
-    names: set[str] = set()
-    tree = ast.parse((PROVIDERS / f"{module}.py").read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
+def module_path(module: str) -> Path:
+    """Source of a provider module, or of a ``canonical.<name>`` module."""
+    if module.startswith(CANONICAL):
+        return ROOT / "backend" / "canonical" / f"{module.removeprefix(CANONICAL)}.py"
+    return PROVIDERS / f"{module}.py"
+
+
+def backend_imports(module: str) -> set[str]:
+    """The backend.providers and ``canonical.<name>`` modules ``module`` imports."""
+    package = (
+        "backend.canonical" if module.startswith(CANONICAL) else "backend.providers"
+    )
+    dotted: list[str] = []
+    for node in ast.walk(ast.parse(module_path(module).read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            if node.level == 1 and base:
-                names.add(base.split(".")[0])
-            elif node.level == 1 or base == "backend.providers":
-                names.update(alias.name for alias in node.names)
-            elif base.startswith("backend.providers."):
-                names.add(base.split(".")[2])
+            # A relative import stays in the package of the importing module.
+            base = f"{package}.{node.module or ''}" if node.level else node.module
+            dotted += [
+                f"{base}.{alias.name}".replace("..", ".") for alias in node.names
+            ]
         elif isinstance(node, ast.Import):
-            names.update(
-                alias.name.split(".")[2]
-                for alias in node.names
-                if alias.name.startswith("backend.providers.")
-            )
-    return {name for name in names if (PROVIDERS / f"{name}.py").is_file()}
+            dotted += [alias.name for alias in node.names]
+    names = {
+        (CANONICAL if parts[1] == "canonical" else "") + parts[2]
+        for parts in (name.split(".") for name in dotted)
+        if len(parts) > 2
+        and parts[0] == "backend"
+        and parts[1] in ("canonical", "providers")
+    }
+    return {name for name in names if module_path(name).is_file()}
 
 
 def helper_replayed_by() -> dict[str, tuple[str, ...]]:
@@ -187,7 +244,7 @@ def helper_replayed_by() -> dict[str, tuple[str, ...]]:
     for mapping, replaying in REPLAYED_BY.items():
         pending, seen = [mapping], {mapping}
         while pending:
-            for name in provider_imports(pending.pop()) - seen:
+            for name in backend_imports(pending.pop()) - seen:
                 seen.add(name)
                 pending.append(name)
         for helper in seen:
@@ -207,7 +264,7 @@ def current_table() -> dict[str, tuple[tuple[int, ...], str]]:
             int(importlib.import_module(f"backend.providers.{owner}").MAPPER_VERSION)
             for owner in owners
         )
-        source = (PROVIDERS / f"{module}.py").read_text(encoding="utf-8")
+        source = module_path(module).read_text(encoding="utf-8")
         table[module] = (versions, fingerprint(source))
     return table
 
@@ -216,11 +273,18 @@ class MapperVersionGuardTests(unittest.TestCase):
     def test_every_mapping_module_is_registered(self) -> None:
         modules = {path.stem for path in PROVIDERS.glob("*_mapping.py")}
         self.assertEqual(modules, set(REPLAYED_BY) | set(NOT_REPLAYED))
-        # Every mapper and every provider helper it reaches is pinned (#2484).
+        # Every mapper and every provider or canonical module it reaches,
+        # also through another one, is pinned (#2484, #2501).
         self.assertEqual(set(PINNED), set(replayed_by()))
-        self.assertEqual(
-            helper_replayed_by()["garmin_weight_walk"], ("garmin_health_mapping",)
-        )
+        helpers = helper_replayed_by()
+        for module, owner in (
+            ("garmin_weight_walk", "garmin_health_mapping"),
+            ("canonical.sleep_bounds", "garmin_health_mapping"),
+            ("canonical.dfa_alpha1", "fit_activity_detail_mapping"),
+            ("canonical.decimal_text", "garmin_health_mapping"),
+        ):
+            with self.subTest(module=module):
+                self.assertIn(owner, helpers[module])
 
     def test_code_changes_come_with_a_replaying_version_bump(self) -> None:
         for module, (versions, digest) in current_table().items():
