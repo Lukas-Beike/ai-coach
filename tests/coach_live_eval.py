@@ -342,19 +342,7 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
             template.get("strength_structure")
         ):
             safety.append("template_structure_mismatch")
-    # apply_workout_library_plan can only copy a template, so the scaling is read
-    # from the stored unit, not from a receipt note (#2429).
-    if (
-        spec.get("scaled_note")
-        and created
-        and not any(
-            _scaled_from(
-                unit["payload"],
-                library.get(str(unit["payload"].get("template_id") or "")),
-            )
-            for unit in created
-        )
-    ):
+    if spec.get("scaled_note") and created and not _any_scaled(created, library):
         misses.append("variant_not_scaled")
     if spec.get("unit_or_question"):
         asked = any(
@@ -377,6 +365,20 @@ def _scaled_from(payload: dict[str, Any], template: dict[str, Any] | None) -> bo
     """Whether a unit changes its template's sets, reps, loads, steps or duration."""
     return template is not None and any(
         payload.get(field) != template.get(field) for field in _SCALED_FIELDS
+    )
+
+
+def _any_scaled(created: list[dict], library: dict[str, dict]) -> bool:
+    """Whether a new unit scales its template.
+
+    apply_workout_library_plan can only copy a template, so the scaling is read
+    from the stored unit, not from a receipt note (#2429).
+    """
+    return any(
+        _scaled_from(
+            unit["payload"], library.get(str(unit["payload"].get("template_id") or ""))
+        )
+        for unit in created
     )
 
 
