@@ -47,6 +47,7 @@ INPUTS = (
     "pyproject.toml",
     "README.md",
     "docs",
+    "openspec",
     "public",
     "server.py",
     "playwright.config.cjs",
@@ -343,7 +344,11 @@ class Supervisor:
             "version": 1,
             "run_id": self.run_id,
             "status": "preparing",
-            "selection_mode": "complete" if args.suite == "all" else args.suite,
+            "selection_mode": "modules"
+            if args.module
+            else ("complete" if args.suite == "all" else args.suite),
+            "suite": args.suite,
+            "modules": args.module,
             "workers": args.workers,
             "selection_status": "pending_discovery",
             "cache_state": args.cache_state,
@@ -639,6 +644,7 @@ class Supervisor:
                     str(self.args.workers),
                     "--suite",
                     self.args.suite,
+                    *self.module_arguments(),
                     "--list",
                     "--result-json",
                     "/output/selection.json",
@@ -670,6 +676,7 @@ class Supervisor:
                     str(self.args.workers),
                     "--suite",
                     self.args.suite,
+                    *self.module_arguments(),
                     "--result-json",
                     "/output/result.json",
                 ]
@@ -760,6 +767,9 @@ class Supervisor:
             self.save()
         return code
 
+    def module_arguments(self):
+        return [part for name in self.args.module for part in ("--module", name)]
+
     def combine_coverage(self, image):
         files = []
         for index in range(1, self.args.workers + 1):
@@ -792,7 +802,10 @@ def parse_args(argv=None):
         help="bounded processes: 1 default, 2 first benchmark, at most 4",
     )
     # CI's container job runs the container suite; "all" adds every module.
-    parser.add_argument("--suite", choices=("container", "all"), default="container")
+    # Default: the container suite, or every module when --module narrows it.
+    parser.add_argument("--suite", choices=("container", "all"))
+    # Focused runs: only these modules of the suite, with the same mounts (#2545).
+    parser.add_argument("--module", action="append", default=[], metavar="NAME")
     parser.add_argument("--results-dir", type=Path)
     parser.add_argument("--record-durations-directory", type=Path)
     parser.add_argument(
@@ -804,6 +817,18 @@ def parse_args(argv=None):
         "--cache-state", choices=("cold", "warm", "unknown"), default="unknown"
     )
     args = parser.parse_args(argv)
+    args.suite = args.suite or ("all" if args.module else "container")
+    unknown = [
+        name
+        for name in args.module
+        if not re.fullmatch(r"\w+(\.\w+)*", name)
+        or name.endswith(".py")
+        or not (ROOT / "tests" / f"{name.split('.')[0]}.py").is_file()
+    ]
+    if unknown:
+        parser.error(
+            f"--module needs test module names such as test_db_manager: {unknown}"
+        )
     if args.record_durations_directory and (
         args.workers != 1
         or args.suite != "all"
@@ -815,6 +840,8 @@ def parse_args(argv=None):
         )
     if args.coverage_wheel and args.suite != "all":
         parser.error("complete coverage requires --suite all")
+    if args.module and (args.record_durations_directory or args.coverage_wheel):
+        parser.error("durations and coverage describe the complete suite, not --module")
     if args.coverage_wheel and (
         not args.coverage_wheel.is_file() or args.coverage_wheel.suffix != ".whl"
     ):

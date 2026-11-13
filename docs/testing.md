@@ -103,6 +103,11 @@ IDs must form the complete selected suite exactly once. Compare complete one- an
 two-worker runs on the same host, including the additional CPU/memory and summed
 runner time, before increasing concurrency.
 
+For modules that need the image's dependencies (`garminconnect`, SQLCipher),
+`python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) runs
+only those modules in the same container with the same mounts, including `docs/`
+and `openspec/`; without `--suite` it selects from every module.
+
 Coverage is optional. Prepare an offline wheel matching the locked dev pin and
 the image's Python/Linux architecture separately; for the default amd64 image:
 
