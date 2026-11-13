@@ -291,6 +291,8 @@ class ContainerRuntimeTests(unittest.TestCase):
         self.assertIn("\nUSER app\n", dockerfile)
         self.assertIn("EXPOSE 8090", dockerfile)
         self.assertIn('CMD ["python", "/app/server.py"]', dockerfile)
+        # Two malloc arenas keep thread-per-request RSS from growing (#2526).
+        self.assertIn("    DATA_DIR=/data \\\n    MALLOC_ARENA_MAX=2\n", dockerfile)
 
     def test_app_user_ids_match_the_documented_bind_mount_owner(self):
         dockerfile = _read("Dockerfile")

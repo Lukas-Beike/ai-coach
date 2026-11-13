@@ -45,7 +45,11 @@ stop, report it, and do not try to repair production.
    log covers only the latest window: use it (`--log-file`, then delete it) for
    startup errors, and say which window the counts cover.
 5. **Server health (Unraid MCP, read-only):** container memory, appdata disk use
-   and database file size, compared with the previous release; the automatic
+   and database file size, compared with the previous release. Note the
+   diagnostics `runtime.process_memory` RSS with the uptime since the last
+   restart, and compare it with the earlier readings at a similar uptime in
+   #2526 and with the ceiling in `docs/operations.md`; RSS still climbing past
+   it is a finding. The automatic
    database recovery copy exists and is recent - report only its age and size,
    never open or copy it.
 6. **UI walk:** [ui-walk](../pacecraft-ui-walk/SKILL.md) with `--compare

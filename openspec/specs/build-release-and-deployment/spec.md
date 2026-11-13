@@ -32,7 +32,7 @@ The image SHALL run `python /app/server.py` as user `app` (UID 100, GID 101) on 
 
 #### Scenario: Image defaults
 - **WHEN** the image starts without overrides
-- **THEN** `PORT=8090`, `DATA_DIR=/data`, `PYTHONUNBUFFERED=1` and `PYTHONDONTWRITEBYTECODE=1` are set, port 8090 is exposed, `/data` is a declared volume owned by `app`, and `/app` is not writable
+- **THEN** `PORT=8090`, `DATA_DIR=/data`, `PYTHONUNBUFFERED=1`, `PYTHONDONTWRITEBYTECODE=1` and `MALLOC_ARENA_MAX=2` (bounded malloc arenas for the thread-per-request server, #2526) are set, port 8090 is exposed, `/data` is a declared volume owned by `app`, and `/app` is not writable
 
 #### Scenario: Health check
 - **WHEN** the container runtime probes the container

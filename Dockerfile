@@ -3,7 +3,8 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8090 \
-    DATA_DIR=/data
+    DATA_DIR=/data \
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 COPY server.py /app/server.py
