@@ -49,7 +49,7 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await expect(ftp.locator(".analysis-chart-legend .analysis-legend-info")).toHaveCount(1);
   await expect(page.locator('#cyclingPowerProfile [data-power-duration="5"]')).toContainText("700 W");
   await expect(page.locator('#cyclingPowerProfile [data-power-duration="60"]')).toContainText("420 W");
-  await expect(page.locator("#cyclingPowerProfile thead th")).toHaveText(["Dauer", "Leistung"]);
+  await expect(page.locator("#cyclingPowerProfile thead th")).toHaveText(["Dauer", "Leistung", "Datum"]);
   await expect(page.locator("#cyclingPowerProfile [data-power-profile-gap]")).toHaveText("Für 3 von 14 Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.");
   await expect(page.locator("#cyclingPowerProfile [data-critical-power]")).toHaveText("Schätzung Experimentell · CP (28 Tage): Rad outdoor CP 250 W · W′ 18 kJ (unsicher) · 1× Wettkampf · Rad indoor —");
   // The running critical speed sits under the running best efforts (#2265).
