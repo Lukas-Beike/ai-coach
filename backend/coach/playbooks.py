@@ -55,7 +55,7 @@ _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; science de
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
 
-_PLAN_CHECK = "- planning_brief: recent weeks per sport; planned_distribution, strength: planned weeks. The server checks every plan. Blocking: illness_hard (accept_plan_findings on explicit athlete wish); strength_incomplete, focus_missing, hr_cap_invalid (write the fields); template_missing, template_mismatch (library template_id, scale load only; else propose one). Justify each plan_check_notes finding or adjust; a run_spike or load_spike warning (over 30 %) needs a reason; load_unknown means unknown load: say so."
+_PLAN_CHECK = "- planning_brief: recent weeks per sport; planned_distribution, strength: planned weeks. The server checks every plan. Blocking: illness_hard (accept_plan_findings on explicit athlete wish); strength_incomplete, focus_missing, hr_cap_invalid (write the fields); template_missing, template_mismatch (library template_id, scale load only; else create one). Justify each plan_check_notes finding or adjust; a run_spike or load_spike warning (over 30 %) needs a reason; load_unknown means unknown load: say so."
 
 _ANSWER = """Answer:
 - One sentence verdict, then the findings with concrete numbers (pace, heart rate, power, cadence, duration), most notable first; for one session 2 to 4. Keep the coverage and unknowns the task asks for short. End with the consequence or lessons the task names.

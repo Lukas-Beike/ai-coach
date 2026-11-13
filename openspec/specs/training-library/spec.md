@@ -595,7 +595,7 @@ A planned unit that a Coach plan tool creates or whose structure it changes SHAL
 
 #### Scenario: Ad-hoc unit
 - **WHEN** a Coach plan write creates a unit without `template_id`, or with an id that names no undated library template
-- **THEN** the write is rolled back with a `template_missing` finding that tells the model to plan from `list_workout_library`, or to propose a new template to the athlete and create it with `manage_training_templates` before planning; no unit is created without a template.
+- **THEN** the write is rolled back with a `template_missing` finding that tells the model to plan from `list_workout_library`, or, when no template fits, to create one with `manage_training_templates` before planning: in the same turn for a clearly described unit (athlete decision 2026-11-13, #2512), after asking only when the request leaves the unit unclear; no unit is created without a template.
 
 #### Scenario: Scaled variant
 - **WHEN** a unit keeps its template's exercises or steps in order and changes only sets, reps, kg, %1RM, RPE, RIR, rest, warm-up, step durations or targets, or the unit duration
