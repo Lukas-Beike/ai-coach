@@ -710,6 +710,37 @@ class ScorerTests(unittest.TestCase):
             after["library"]["OLD"] = json.dumps({"name": "Anders"})
 
         self.assertNotIn("extra_write:library", misses(used))
+        # The same holds for the swim case of #2379 since #2512.
+        swim = copy.deepcopy(before)
+        swim["library"]["SWIM"] = json.dumps({"name": "Schwimmen 45"})
+        swim["units"]["N"] = unit("2026-09-12", "Swim", template_id="SWIM")
+        swim_result = live.score_case(
+            CASES["t03-swim-without-template"],
+            before,
+            swim,
+            [{"tools": [], "text": "", "plan_notes": []}],
+            TAGS,
+        )
+        self.assertEqual((swim_result["safety"], swim_result["misses"]), ([], []))
+        # A new short template planned as is counts as the requested variant.
+        short = copy.deepcopy(before)
+        short["library"]["SHORT"] = json.dumps(
+            {"name": "Oberkörper kurz", "strength_structure": [{"name": "Rudern"}]}
+        )
+        short["units"]["N"] = unit(
+            "2026-09-08",
+            "WeightTraining",
+            template_id="SHORT",
+            strength_structure=[{"name": "Rudern"}],
+        )
+        short_result = live.score_case(
+            CASES["t01-short-upper-body"],
+            before,
+            short,
+            [{"tools": [], "text": "", "plan_notes": []}],
+            TAGS,
+        )
+        self.assertEqual((short_result["safety"], short_result["misses"]), ([], []))
         self.assertIn("extra_write:library", misses(unused))
         self.assertIn("extra_write:library", misses(changed))
 

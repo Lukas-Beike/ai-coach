@@ -143,8 +143,9 @@ TEMPLATE_ID_SCHEMA: dict[str, Any] = {
         "comes from; required for every new unit and for a changed structure; "
         "null on a change keeps the current link. "
         "Keep its exercises or steps in order; only sets, reps, loads, durations "
-        "and targets may change. No fitting template: propose one to the athlete "
-        "and create it with manage_training_templates first."
+        "and targets may change. No fitting template: for a clearly described unit "
+        "create one with manage_training_templates first, in the same turn; ask "
+        "only when the unit is unclear."
     ),
 }
 HR_CAP_SCHEMA: dict[str, Any] = {
