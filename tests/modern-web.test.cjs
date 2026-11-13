@@ -1,8 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+// Loading the harness checks the install first, so a stale one names npm ci, not an ENOENT.
+const { staleInstall } = require("./frontend-harness.cjs");
 
 const ROOT = path.join(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
@@ -34,4 +37,20 @@ test("modern-web-guidance runs pinned, with telemetry off, and only read-only co
     const refused = spawnSync(process.execPath, [path.join(ROOT, "scripts", "modern_web.mjs"), ...args], { cwd: ROOT, encoding: "utf8" });
     assert.equal(refused.status, 2, args.join(" "));
   }
+});
+
+test("a node_modules older than package-lock.json is named with its fix before any test runs (#2690)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pacecraft-install-"));
+  const write = (relative, data) => {
+    fs.mkdirSync(path.dirname(path.join(root, relative)), { recursive: true });
+    fs.writeFileSync(path.join(root, relative), JSON.stringify(data));
+  };
+  write("package-lock.json", { packages: { "": { devDependencies: { a: "2.0.0", b: "1.0.0" } }, "node_modules/a": { version: "2.0.0" }, "node_modules/b": { version: "1.0.0" } } });
+  write("node_modules/a/package.json", { version: "1.0.0" });
+  assert.deepEqual(staleInstall(root), ["a", "b"]);
+  write("node_modules/a/package.json", { version: "2.0.0" });
+  write("node_modules/b/package.json", { version: "1.0.0" });
+  assert.deepEqual(staleInstall(root), []);
+  assert.deepEqual(staleInstall(), []);
+  fs.rmSync(root, { recursive: true });
 });

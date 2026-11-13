@@ -3,6 +3,17 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+// A node_modules installed before package-lock.json changed (a rebase onto a new dependency)
+// stops here with the fix, not later with an ENOENT inside a test (#2690).
+function staleInstall(root = path.join(__dirname, "..")) {
+  const locked = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8")).packages;
+  return Object.keys(locked[""].devDependencies).filter((name) => {
+    const installed = path.join(root, "node_modules", name, "package.json");
+    return !fs.existsSync(installed) || JSON.parse(fs.readFileSync(installed, "utf8")).version !== locked[`node_modules/${name}`].version;
+  });
+}
+const stale = staleInstall();
+if (stale.length) throw new Error(`node_modules does not match package-lock.json (${stale.join(", ")}): run npm ci`);
 const { babelParse, traverse } = require("../node_modules/playwright/lib/transform/babelBundle.js"); // NOSONAR: issue #2090 asks for the Babel parser Playwright bundles; no other parser is installed.
 
 function readPublic(file) {
@@ -125,4 +136,4 @@ const textOf = (node) => {
   return node instanceof FakeElement ? node.children.map(textOf).join("") : `${node.textContent || ""}${node.children.map(textOf).join("")}`;
 };
 
-module.exports = { babelParse, traverse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
+module.exports = { staleInstall, babelParse, traverse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
