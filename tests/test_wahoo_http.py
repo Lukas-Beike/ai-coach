@@ -52,10 +52,6 @@ class WahooHttpTests(ServerTestCase):
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
-        # The process-wide connection service keeps its disconnect counter.
-        connection = server.WAHOO_CONNECTION.service()
-        connection._generation = 0
-        self.addCleanup(setattr, connection, "_generation", 0)
         handler_class = server.HTTP_API.request_handler_class()
         handler_class.protocol_version = "HTTP/1.1"
         self.httpd = http_server_module.CoachHTTPServer(("127.0.0.1", 0), handler_class)

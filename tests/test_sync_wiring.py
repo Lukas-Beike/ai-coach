@@ -468,9 +468,13 @@ class WahooBuilderTests(unittest.TestCase):
         ctx = self.ctx
         with patch.object(wahoo_wiring, "WahooClient") as client_factory:
             self.assertIs(self.services.client(), client_factory.return_value)
+            self.services.client()
 
+        # Each call resolves the transport and the connection again.
+        self.assertEqual(2, client_factory.call_count)
+        self.assertEqual(2, ctx.provider_transport.json_http_client.call_count)
         current = self.connection.service()
-        client_factory.assert_called_once_with(
+        client_factory.assert_called_with(
             request=ctx.provider_transport.json_http_client.return_value.request,
             access_token=current.access_token,
             refresh_access_token=current.refresh_access_token,
