@@ -168,10 +168,13 @@ class SupervisorTests(unittest.TestCase):
             local.parse_args(
                 ["--workers", "2", "--record-durations-directory", str(self.root)]
             )
-        # Durations and coverage describe the complete suite only.
+        # Durations and coverage describe the complete suite only; a real wheel
+        # path leaves the suite as the only reason to refuse.
+        wheel = self.root / "coverage-0-py3-none-any.whl"
+        wheel.write_bytes(b"")
         for partial in (
             ["--record-durations-directory", str(self.root)],
-            ["--coverage-wheel", __file__],
+            ["--coverage-wheel", str(wheel)],
         ):
             with (
                 self.subTest(partial=partial[0]),
@@ -181,6 +184,8 @@ class SupervisorTests(unittest.TestCase):
                 local.parse_args(partial)
         recording = ["--suite", "all", "--record-durations-directory", str(self.root)]
         self.assertEqual(local.parse_args(recording).suite, "all")
+        coverage = ["--suite", "all", "--coverage-wheel", str(wheel)]
+        self.assertEqual(local.parse_args(coverage).suite, "all")
 
     def test_initial_manifest_and_disjoint_invocations(self):
         manifest = json.loads((self.owner.output / "summary.json").read_text())
