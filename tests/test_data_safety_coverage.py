@@ -643,6 +643,17 @@ class CoverageGuardTests(DataKindFixture):
 
     def test_explicit_export_columns_cover_every_column_but_the_listed_ones(self):
         source = Path(export_module.__file__).read_text(encoding="utf-8")
+        # The persistence owners hold the column lists of some exported tables.
+        for store in (
+            Path(export_module.__file__).parents[1].joinpath("db").glob("*.py")
+        ):
+            text = store.read_text(encoding="utf-8")
+            source += "".join(
+                ast.get_source_segment(text, node) or ""
+                for node in ast.walk(ast.parse(text))
+                if isinstance(node, ast.FunctionDef)
+                and node.name.endswith("export_rows")
+            )
         joined = re.sub(r'"\s*\n\s*"', "", source)
         checked = set()
         for match in re.finditer(r'"SELECT (.*?) FROM (\w+)', joined):
@@ -663,8 +674,18 @@ class CoverageGuardTests(DataKindFixture):
         for table, columns in EXPORT_COLUMNS_NOT_EXPORTED.items():
             if table in checked:
                 self.assertLessEqual(set(columns), CURRENT_DATABASE_SCHEMA[table])
+        # #2710: column lists that moved into the persistence owners stay checked.
         self.assertLessEqual(
-            {"observations", "activity_records", "provider_sync_cursors"}, checked
+            {
+                "observations",
+                "activity_records",
+                "provider_sync_cursors",
+                "messages",
+                "coach_commands",
+                "planned_units",
+                "workout_library",
+            },
+            checked,
         )
 
     def test_delete_scope_lists_every_table_exactly_as_the_schema_does(self):
