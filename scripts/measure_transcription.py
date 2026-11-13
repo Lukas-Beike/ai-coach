@@ -2,12 +2,12 @@
 
 Run from a LAN machine against an OpenAI-compatible server such as Speaches:
 
-    python scripts/measure_transcription.py --base-url http://<server>:8000/v1 \
+    python scripts/measure_transcription.py --base-url http://<LAN IP>:8000 \
         --model Systran/faster-whisper-small \
         --model deepdml/faster-whisper-large-v3-turbo-ct2
 
 The samples are public German read speech from Google FLEURS (dev split,
-CC BY 4.0), streamed until enough clips are cached; never the athlete's
+CC BY 4.0), streamed until enough clips sit in the temp directory; never the athlete's
 recordings. An optional server key comes from TRANSCRIPTION_API_KEY. The
 request matches the app's: multipart `file`, `model`, `language=de`, `prompt`. Prints a
 Markdown table for the issue.
@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import ipaddress
 import json
 import os
 import re
@@ -26,6 +27,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -33,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.providers.audio import TRANSCRIPTION_PROMPT
 from backend.providers.http import multipart_form_data
 
+CACHE = Path(tempfile.gettempdir()) / "pacecraft-fleurs-de"
 FLEURS = "https://huggingface.co/datasets/google/fleurs/resolve/main/data/de_de/"
 
 
@@ -58,8 +61,20 @@ def word_errors(reference: list[str], hypothesis: list[str]) -> int:
     return previous[-1]
 
 
-def fetch_samples(cache: Path, count: int) -> list[tuple[Path, str]]:
+def lan_base_url(value: str) -> str:
+    """Rebuild `http(s)://<private or loopback IP>:<port>/v1`; LAN servers only."""
+    parsed = urllib.parse.urlsplit(value)
+    address = ipaddress.ip_address(parsed.hostname or "")
+    if not (address.is_private or address.is_loopback):
+        raise ValueError("the server must be a private LAN or loopback IP address")
+    scheme = "https" if parsed.scheme == "https" else "http"
+    host = f"[{address}]" if address.version == 6 else str(address)
+    return f"{scheme}://{host}:{int(parsed.port or 8000)}/v1"
+
+
+def fetch_samples(count: int) -> list[tuple[Path, str]]:
     """Cache `count` clips with distinct sentences; returns (wav, reference)."""
+    cache = CACHE
     cache.mkdir(parents=True, exist_ok=True)
     index = cache / "samples.json"
     if index.exists():
@@ -106,7 +121,7 @@ def transcribe(base_url: str, key: str, model: str, audio: Path) -> str:
         audio.read_bytes(),
     )
     request = urllib.request.Request(
-        base_url.rstrip("/") + "/audio/transcriptions",
+        base_url + "/audio/transcriptions",
         data=body,
         headers={
             "Content-Type": content_type,
@@ -162,19 +177,17 @@ def measure(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--base-url", required=True, help="e.g. http://<server>:8000/v1"
+        "--base-url",
+        required=True,
+        type=lan_base_url,
+        help="http://<LAN IP>:<port>; the path is always /v1",
     )
     parser.add_argument("--model", action="append", required=True, help="repeatable")
     parser.add_argument("--samples", type=int, default=20)
-    parser.add_argument(
-        "--cache",
-        type=Path,
-        default=Path(tempfile.gettempdir()) / "pacecraft-fleurs-de",
-    )
     args = parser.parse_args()
     if args.samples < 1:
         parser.error("--samples must be at least 1")
-    samples = fetch_samples(args.cache, args.samples)
+    samples = fetch_samples(args.samples)
     if not samples:
         parser.error("no FLEURS samples could be fetched")
     key = os.environ.get("TRANSCRIPTION_API_KEY", "")
