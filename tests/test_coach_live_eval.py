@@ -1307,6 +1307,33 @@ class ScriptedLoopTests(unittest.TestCase):
                 self.assertEqual((result["safety"], result["misses"]), ([], []), result)
                 self.assertIn("template_scaled", result["turns"][0]["plan_notes"])
 
+        # A plain copy through apply_workout_library_plan, the stored payload as
+        # the app writes it, is not the requested variant (#2429).
+        def copy_template():
+            return call_turn(
+                "apply_workout_library_plan",
+                {
+                    "entries": [
+                        {
+                            "library_workout_id": live.template_id(
+                                server, "WeightTraining"
+                            ),
+                            "date": "2026-09-10",
+                        }
+                    ]
+                },
+                [
+                    "library_workout:" + live.template_id(server, "WeightTraining"),
+                    "local_plan",
+                ],
+                period={"start": "2026-09-10", "end": "2026-09-10"},
+            )
+
+        result, _ = self.run_scripted(
+            "t02-moderate-variant", [copy_template, "Eingeplant."]
+        )
+        self.assertIn("variant_not_scaled", result["misses"], result)
+
         result, _ = self.run_scripted(
             "t03-swim-without-template", ["Soll ich eine Schwimmvorlage anlegen?"]
         )
