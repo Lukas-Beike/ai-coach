@@ -98,7 +98,7 @@ Browser scheduling SHALL keep each spec file intact, retain one worker within ea
 - **WHEN** a local concurrency limit is configured
 - **THEN** the number of active invocations never exceeds that limit and independent processes retain separate fixtures and reports.
 
-Evidence: `e2e/browser_durations.json`, `scripts/run_browser_tests.py`, the `e2e` job matrix of `.github/workflows/publish-container.yml` (mobile and tablet-landscape in two shards, desktop in three); `tests/test_browser_runner.py::BrowserRunnerTests.test_lpt_frozen_median_new_files_and_ties`, `tests/test_browser_runner.py::BrowserRunnerTests.test_malformed_weights_rejected`, `tests/test_browser_runner.py::BrowserRunnerTests.test_serial_and_two_lane_bounded_fresh_fixture_resources`.
+Evidence: `e2e/browser_durations.json`, `scripts/run_browser_tests.py`, the `e2e` job matrix of `.github/workflows/publish-container.yml` (every project in two shards); `tests/test_browser_runner.py::BrowserRunnerTests.test_lpt_frozen_median_new_files_and_ties`, `tests/test_browser_runner.py::BrowserRunnerTests.test_malformed_weights_rejected`, `tests/test_browser_runner.py::BrowserRunnerTests.test_serial_and_two_lane_bounded_fresh_fixture_resources`.
 
 ### Requirement: Local Python execution preserves class and coverage ownership
 Local Python execution SHALL reuse the existing class-preserving shard assignment with an explicit bounded process count. Complete container validation SHALL use the current application build, isolated temporary data, and the existing SQLCipher path; each coverage shard SHALL have an independent output.
