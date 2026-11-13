@@ -4,7 +4,8 @@
 direct requirements. Their matching `.txt` files are pip-tools outputs with
 hashes. Docker and CI install only the app/development locks with `--require-hashes`;
 the Graphify lock is used only by its separate shared development environment.
-Dependabot recognizes this `.in`/`.txt` pairing and updates both files. When
+Dependabot recognizes this `.in`/`.txt` pairing and updates both files for the
+app and development pairs. When
 regenerating locally, use Python 3.14 on Linux (the SQLCipher wheel is not
 available on native Windows):
 
@@ -16,9 +17,12 @@ pip-compile --allow-unsafe --generate-hashes --strip-extras --output-file=requir
 
 Compile the Graphify pair on Windows/Python 3.14 instead: a Linux resolution
 drops the Windows-only `pywin32` pin that `mcp` needs, and a hash-only Windows
-setup then fails. Dependabot therefore ignores `graphifyy` (#2554): when
-`python scripts/prepare_worktree.py` reports a newer version, raise the pin in
-`requirements-graphify.in` and run the Graphify command above on Windows. The
+setup then fails. Dependabot therefore ignores the direct Graphify requirements
+`graphifyy` and `pywin32` (#2554): when `python scripts/prepare_worktree.py`
+reports a newer version, or a Dependabot alert names one of them, raise the pin
+in `requirements-graphify.in` and run the Graphify command above on Windows. A
+Dependabot update of a package the Graphify lock shares or pulls in transitively
+can still touch that lock; regenerate it on Windows the same way. The
 lock contract test accepts the options in any order, as pip-tools releases
 differ, but requires exactly the options shown.
 

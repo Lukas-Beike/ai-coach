@@ -53,16 +53,21 @@ class WorkflowSourceTests(unittest.TestCase):
             {update.splitlines()[0] for update in updates},
             {"pip", "npm", "docker", "github-actions"},
         )
-        # The one ignore is graphifyy, whose Linux lock drops Windows-only pins
-        # (athlete decision, #2554); any other ignore still fails.
-        graphifyy = "    ignore:\n      - dependency-name: graphifyy\n"
+        # The only ignores are the direct Graphify requirements, whose Linux lock
+        # drops Windows-only pins (athlete decision, #2554); any other fails.
+        graphify = (
+            "    ignore:\n"
+            "      - dependency-name: graphifyy\n"
+            "      - dependency-name: pywin32\n"
+        )
         for update in updates:
             self.assertIn("target-branch: develop", update)
             self.assertIn("commit-message:", update)
             if update.startswith("pip\n"):
-                self.assertEqual(update.count(graphifyy), 1)
-                update = update.replace(graphifyy, "")
+                self.assertEqual(update.count(graphify), 1)
+                update = update.replace(graphify, "")
             self.assertNotIn("ignore:", update)
+            self.assertNotIn("dependency-name:", update)
 
     def test_workflow_actions_are_immutable_and_ci_does_not_persist_credentials(self):
         root = Path(__file__).resolve().parents[1]
@@ -162,12 +167,16 @@ class WorkflowSourceTests(unittest.TestCase):
                 )
             }
 
-        def compile_command(lock_content):
+        def compile_command(lock, lock_content):
             line = next(
-                line
-                for line in lock_content.splitlines()[:8]
-                if line.lstrip("# ").startswith("pip-compile ")
+                (
+                    line
+                    for line in lock_content.splitlines()[:8]
+                    if line.lstrip("# ").startswith("pip-compile ")
+                ),
+                None,
             )
+            self.assertIsNotNone(line, f"{lock} has no pip-compile header")
             return line.lstrip("# ").split()
 
         # pip-tools releases order the options differently; the set must hold.
@@ -182,11 +191,12 @@ class WorkflowSourceTests(unittest.TestCase):
             ),
         ):
             lock_content = (root / lock).read_text(encoding="utf-8")
-            command = compile_command(lock_content)
+            command = compile_command(lock, lock_content)
             self.assertEqual(command[0], "pip-compile")
             self.assertEqual(command[-1], manifest)
             self.assertEqual(
-                set(command[1:-1]), options | extra | {f"--output-file={lock}"}
+                sorted(command[1:-1]),
+                sorted(options | extra | {f"--output-file={lock}"}),
             )
             lock_pins = pinned_requirements(lock)
             manifests = pinned_requirements(manifest)

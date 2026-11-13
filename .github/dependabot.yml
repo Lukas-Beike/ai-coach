@@ -19,10 +19,12 @@ updates:
     schedule:
       interval: daily
     open-pull-requests-limit: 10
-    # A Linux lock drops graphifyy's Windows-only pins; bump it by hand on
-    # Windows when prepare_worktree.py reports a newer version (#2554).
+    # A Linux lock drops the Graphify lock's Windows-only pins; bump its direct
+    # requirements by hand on Windows when prepare_worktree.py reports a newer
+    # version (#2554).
     ignore:
       - dependency-name: graphifyy
+      - dependency-name: pywin32
   - package-ecosystem: docker
     directory: "/"
     target-branch: develop
