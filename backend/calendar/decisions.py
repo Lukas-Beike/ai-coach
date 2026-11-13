@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
+from backend.calendar.external import undecided_upcoming
 from backend.errors import AppError
 
 IMPACTS = frozenset({"block", "short", "easy", "none"})
@@ -21,11 +23,13 @@ class ExternalCalendarDecisionService:
         preview_followup: Any,
         state_event_buffer: Any,
         utc_now: Callable[[], str],
+        today: Callable[[], date],
     ) -> None:
         self._database_manager = database_manager
         self._preview_followup = preview_followup
         self._state_event_buffer = state_event_buffer
         self._utc_now = utc_now
+        self._today = today
 
     def decide(self, uid: Any, occurrence_start: Any, impact: Any) -> dict[str, Any]:
         """Set the impact of one occurrence, or of every occurrence when no start is given.
@@ -68,10 +72,12 @@ class ExternalCalendarDecisionService:
                     "impact = excluded.impact, decided_at = excluded.decided_at",
                     (uid, start, impact, self._utc_now()),
                 )
+            undecided = undecided_upcoming(db, today=self._today())
         self._state_event_buffer.publish("coach", {"status": "changed"})
         return {
             "uid": uid,
             "occurrence_start": start or None,
             "impact": impact,
+            "undecided_upcoming": undecided,
             **self._preview_followup.check("external calendar decision"),
         }

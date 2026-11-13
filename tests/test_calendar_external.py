@@ -452,7 +452,11 @@ class ExternalCalendarTests(unittest.TestCase):
         followup.check.return_value = {"needs_replan": False, "replan_changes": 0}
         events = mock.Mock()
         service = ExternalCalendarDecisionService(
-            FakeManager(self.db), followup, events, lambda: "2026-09-20T08:00:00Z"
+            FakeManager(self.db),
+            followup,
+            events,
+            lambda: "2026-09-20T08:00:00Z",
+            lambda: self.today,
         )
         return service, followup, events
 
@@ -479,6 +483,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "uid": "team",
                 "occurrence_start": "2026-09-21T09:00:00",
                 "impact": "short",
+                "undecided_upcoming": 1,
                 "needs_replan": False,
                 "replan_changes": 0,
             },

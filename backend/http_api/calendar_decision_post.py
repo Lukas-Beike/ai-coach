@@ -34,8 +34,10 @@ class CalendarDecisionPostRoutes:
         of the UID (which replaces their single decisions). `impact` `null`
         removes the decision.
 
-        Response: 200 `{"uid", "occurrence_start", "impact", "needs_replan",
-        "replan_changes"}` after the adaptive preview was recalculated.
+        Response: 200 `{"uid", "occurrence_start", "impact", "undecided_upcoming",
+        "needs_replan", "replan_changes"}` after the adaptive preview was
+        recalculated; `undecided_upcoming` counts the events still without a
+        decision from today through 14 days ahead.
 
         Errors: 400 "Ungültiger Termin." or "Ungültige Einordnung."; 404 "Termin
         nicht gefunden." when no stored event has that UID and start.

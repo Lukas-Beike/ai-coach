@@ -244,6 +244,7 @@ def build_external_calendar(ctx: AppContext) -> ExternalCalendarServices:
             ),
             runtime_events.STATE_EVENT_BUFFER,
             runtime_clock.utc_now,
+            lambda: ctx.clock.now().date(),
         )
 
     return ExternalCalendarServices(reader, sync_service, decisions)
