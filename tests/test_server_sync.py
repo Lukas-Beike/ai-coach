@@ -666,8 +666,8 @@ class ServerSyncTests(ServerTestCase):
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
             ),
             patch.object(
-                server,
-                "PROVIDER_TRANSPORT",
+                server.APP,
+                "provider_transport",
                 replace(
                     server.PROVIDER_TRANSPORT,
                     intervals_client=Mock(return_value=FakeIntervalsClient()),
@@ -1340,8 +1340,8 @@ class ServerSyncTests(ServerTestCase):
                 server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
             ),
             patch.object(
-                server,
-                "PROVIDER_TRANSPORT",
+                server.APP,
+                "provider_transport",
                 replace(
                     server.PROVIDER_TRANSPORT,
                     intervals_client=Mock(return_value=client),
@@ -1472,8 +1472,8 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server,
-                "PROVIDER_TRANSPORT",
+                server.APP,
+                "provider_transport",
                 replace(
                     server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
                 ),
@@ -1522,8 +1522,8 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server,
-                "PROVIDER_TRANSPORT",
+                server.APP,
+                "provider_transport",
                 replace(
                     server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
                 ),

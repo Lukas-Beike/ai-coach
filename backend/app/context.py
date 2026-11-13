@@ -79,6 +79,8 @@ class AppContext:
     coach_conversation: Any = None
     canonical_backfill: Any = None
     garmin: Any = None
+    wahoo: Any = None
+    sync_persistence: Any = None
     external_calendar: Any = None
     coach_local: Any = None
     workout_library_sync: Any = None
