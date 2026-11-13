@@ -16,14 +16,21 @@ BODY = """## Required changes
   * [ ] nested follow-up
 - [ ]missing space is not a box
 Text with [ ] inside a sentence.
+### Acceptance criteria
+- [ ] closing summary covers this
+## Parts
+- [ ] Part two
 """
 
 
 class IssueStatusTests(unittest.TestCase):
     def test_lists_only_open_checkboxes(self):
         self.assertEqual(
-            issue_status.open_checkboxes(BODY), ["Add the hook", "nested follow-up"]
+            issue_status.open_checkboxes(BODY),
+            ["Add the hook", "nested follow-up", "Part two"],
         )
+        criteria = issue_status.open_criteria(BODY)
+        self.assertEqual([m[1] for m in criteria], ["closing summary covers this"])
 
     def test_empty_body_has_no_checkboxes(self):
         self.assertEqual(issue_status.open_checkboxes(None), [])

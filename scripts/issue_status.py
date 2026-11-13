@@ -1,7 +1,8 @@
 """Print an issue's open checkboxes and the state of PRs that link it.
 
 Run before reporting an issue as done: `python scripts/issue_status.py 1906`.
-Exit code 1 means the issue is not done yet (open checkboxes or open PRs).
+Exit code 1 means the issue is not done yet (open checkboxes or open PRs);
+open boxes under an acceptance-criteria heading do not count.
 """
 
 import json
@@ -12,8 +13,25 @@ import sys
 CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 
 
+HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
+
+
+def is_criterion(body, at):
+    """A box under an acceptance-criteria heading; the closing summary covers it."""
+    headings = HEADING.findall(body, 0, at)
+    return bool(headings) and "acceptance" in headings[-1].lower()
+
+
 def open_checkboxes(body):
-    return [item.strip() for item in CHECKBOX.findall(body or "")]
+    """Open boxes outside acceptance criteria: the parts that keep an issue open."""
+    body = body or ""
+    found = CHECKBOX.finditer(body)
+    return [m[1].strip() for m in found if not is_criterion(body, m.start())]
+
+
+def open_criteria(body):
+    body = body or ""
+    return [m for m in CHECKBOX.finditer(body) if is_criterion(body, m.start())]
 
 
 def gh_json(*args):
@@ -48,6 +66,8 @@ def main(argv):
     print(f"Issue #{number}: {issue['state']}")
     for item in boxes:
         print(f"  open checkbox: {item}")
+    for item in open_criteria(issue["body"]):
+        print(f"  open criterion (issue_update close ticks it): {item[1].strip()}")
     for pull in pulls:
         print(f"  PR #{pull['number']} {pull['state']}: {pull['title']}")
     unfinished = boxes or any(pull["state"] == "OPEN" for pull in pulls)
