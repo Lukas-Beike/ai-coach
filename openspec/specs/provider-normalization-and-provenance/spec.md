@@ -125,13 +125,13 @@ The system SHALL fill the activity duration by one rule for every provider: movi
 
 #### Scenario: Garmin moving time beside its timer time
 - **WHEN** a Garmin activity has `movingDuration` and a longer timer `duration`
-- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Wahoo, and session bundling compares the Garmin elapsed time with the elapsed time of a stored Intervals.icu copy in its elapsed pass.
+- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Wahoo, and session bundling also compares the two elapsed times of a Garmin and a Wahoo record.
 
 #### Scenario: Strength session from any provider
 - **WHEN** a Wahoo or Garmin strength session has a moving or timer time shorter than its elapsed time
 - **THEN** the activity duration is the elapsed time, so rest between sets counts.
 
-Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
+Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_duration_gap`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_wahoo_sessions.py:test_moving_and_elapsed_durations_are_candidates`.
 
 ### Requirement: Garmin activity summary values
 The system SHALL map the Garmin activity list's zone times, training-effect values, altitude extremes, elevation loss, temperature range, estimated sweat loss, lap count and average cadence onto the canonical activity record, so Garmin-only sessions carry them with the Garmin Connect source label.

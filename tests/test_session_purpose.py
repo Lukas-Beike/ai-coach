@@ -261,10 +261,12 @@ class SelectorCompetitionTests(CanonicalReadFixture):
         )
 
         summaries = self.read(make_selector(self).activity_summaries)
+        # The Garmin sessions; a stored Intervals.icu copy joins none (#2148).
         by_sport = {
             row["sport"]: row
             for row in summaries
             if row["started_at_local"][:10] in {"2026-10-08", "2026-10-09"}
+            and "garmin" in row["record_ids"]
         }
 
         self.assertEqual(by_sport["ride"]["purpose"], "race")
@@ -446,10 +448,12 @@ class SelectorMarkedPurposeTests(CanonicalReadFixture):
         )
 
     def sessions(self) -> dict[str, dict[str, Any]]:
+        # The Garmin sessions; a stored Intervals.icu copy joins none (#2148).
         return {
             row["sport"]: row
             for row in self.read(make_selector(self).activity_summaries)
             if row["started_at_local"][:10] in {"2026-10-08", "2026-10-09"}
+            and "garmin" in row["record_ids"]
         }
 
     def test_training_overrides_the_hint_and_the_garmin_event_type(self) -> None:

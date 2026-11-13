@@ -50,22 +50,15 @@ class GarminCanonicalSources:
     activity_summaries: Callable[[], ActivitySummaryReader]
 
 
-def _garmin_sessions(summaries: tuple[ActivitySummary, ...]) -> tuple[int, int]:
-    """Count the Garmin sessions: kept ones, and those an Intervals.icu record shares.
-
-    As before the canonical sessions, a Garmin activity is skipped as a duplicate
-    only of an Intervals.icu recording; a Garmin copy beside Wahoo alone stays.
-    """
+def _garmin_sessions(summaries: tuple[ActivitySummary, ...]) -> int:
+    """Count the sessions with a Garmin record; a Wahoo copy beside it is one session."""
     garmin = ProviderId.GARMIN.value
-    intervals = ProviderId.INTERVALS.value
-    sessions = [
-        record_ids
+    return sum(
+        1
         for summary in summaries
         if isinstance(record_ids := summary.get("record_ids"), dict)
         and garmin in record_ids
-    ]
-    shared = sum(1 for record_ids in sessions if intervals in record_ids)
-    return len(sessions) - shared, shared
+    )
 
 
 class GarminProjectionService:
@@ -145,7 +138,7 @@ class GarminProjectionService:
         performance_metrics = performance_garmin_metrics.garmin_performance_metrics(
             status, today, state.metrics
         )
-        activities, skipped = _garmin_sessions(summaries)
+        activities = _garmin_sessions(summaries)
         parsed_error = self._garmin_sync_state_service.core_error_entries() or None
         parsed_error = self._redactor.sanitize_log_value(parsed_error)
         with self._database_manager.reader() as db:
@@ -196,7 +189,6 @@ class GarminProjectionService:
                 status, today
             ),
             "activities": activities,
-            "duplicate_activities_skipped": skipped,
             "has_sleep": state.has_sleep,
             "has_hrv": state.has_hrv,
             "has_resting_hr": state.has_resting_hr,

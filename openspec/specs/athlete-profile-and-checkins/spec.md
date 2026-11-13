@@ -279,7 +279,7 @@ Evidence:
 - `backend/athlete/equipment.py:EquipmentService.read`
 - `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`
 - `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_the_session_id_wins_over_a_legacy_one`
-- `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_an_intervals_id_still_applies`
+- `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_a_provider_id_still_applies`
 - `tests/test_equipment_canonical_sessions.py:test_bundled_session_counts_once_under_its_session_id`
 - `tests/test_equipment_canonical_sessions.py:test_garmin_gear_links_the_garmin_only_session_and_the_bundled_one`
 - `tests/test_equipment_canonical_sessions.py:test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance`

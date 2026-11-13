@@ -228,7 +228,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
     def test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors(self):
         # Canonical reads (#1416): sessions replace the raw Garmin activity rows.
         summaries = [
-            {"id": "s1", "record_ids": {"intervals": "intervals-1", "garmin": "1"}},
+            {"id": "s1", "record_ids": {"wahoo": "wahoo-1", "garmin": "1"}},
             {"id": "s2", "record_ids": {"garmin": "2"}},
         ]
         snapshot = {
@@ -288,8 +288,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertNotIn("synthetic-garmin-password", str(result["last_error"]))
         self.assertEqual(result["pagination"], snapshot["provider_sync"]["pagination"])
         self.assertEqual(result["source_freshness"]["sleep"]["freshness"], "partial")
-        self.assertEqual(result["activities"], 1)
-        self.assertEqual(result["duplicate_activities_skipped"], 1)
+        self.assertEqual(result["activities"], 2)
         for key in (
             "has_sleep",
             "has_hrv",
@@ -332,20 +331,17 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertFalse(result["has_vo2max"])
         self.assertFalse(result["has_estimated_run_times"])
 
-    def test_duplicates_are_counted_against_the_canonical_sessions_only(self):
-        # Canonical reads (#1416): a Garmin record bundled with another provider's
-        # record in one session is the duplicate; the raw view is not read.
+    def test_activities_count_the_canonical_sessions_with_a_garmin_record(self):
+        # Canonical reads (#1416): the count reads the sessions, never the raw
+        # view; a Garmin record bundled with its Wahoo recording is one session.
         snapshot = {"activities": [{"activityId": 1}]}
         alone = {"id": "s1", "record_ids": {"garmin": "1"}}
-        shared = {"id": "s1", "record_ids": {"intervals": "i1", "garmin": "1"}}
-        intervals_only = {"id": "s2", "record_ids": {"intervals": "i2"}}
-        # Only an Intervals.icu record makes the Garmin copy a skipped duplicate.
+        wahoo_only = {"id": "s2", "record_ids": {"wahoo": "w2"}}
         with_wahoo = {"id": "s3", "record_ids": {"wahoo": "w1", "garmin": "3"}}
         for summaries, expected in (
-            ([], (0, 0)),
-            ([alone, intervals_only], (1, 0)),
-            ([shared], (0, 1)),
-            ([with_wahoo], (1, 0)),
+            ([], 0),
+            ([alone, wahoo_only], 1),
+            ([alone, with_wahoo], 2),
         ):
             with self.subTest(summaries=len(summaries)):
                 service, _ = self._service(snapshot=snapshot, summaries=summaries)
@@ -355,10 +351,8 @@ class GarminProjectionServiceTests(unittest.TestCase):
                     return_value=_metrics(),
                 ):
                     result = service.public_state()
-                self.assertEqual(
-                    (result["activities"], result["duplicate_activities_skipped"]),
-                    expected,
-                )
+                self.assertEqual(result["activities"], expected)
+                self.assertNotIn("duplicate_activities_skipped", result)
 
     def test_the_projection_requires_the_canonical_sources(self):
         with self.assertRaises(TypeError):

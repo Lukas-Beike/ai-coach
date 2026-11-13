@@ -299,13 +299,14 @@ class GarminServiceEqualityTests(GarminReadFixture):
     ) -> None:
         self._store_snapshot()
         pending = self._projection_service().public_state()
-        # No Intervals.icu activity is served yet, so no Garmin copy is a duplicate.
-        self.assertEqual(pending["duplicate_activities_skipped"], 0)
+        # No table serves yet, so no Garmin session is counted.
+        self.assertEqual(pending["activities"], 0)
 
         populate(self)
         state = self._projection_service().public_state()
 
-        self.assertEqual(state["duplicate_activities_skipped"], 1)
+        # The fixture's two Garmin rides, each its own session.
+        self.assertEqual(state["activities"], 2)
         for key in ("has_sleep", "has_hrv", "has_resting_hr", "has_readiness"):
             self.assertTrue(state[key], key)
 
