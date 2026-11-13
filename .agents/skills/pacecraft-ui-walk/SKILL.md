@@ -35,6 +35,14 @@ the repository.
 Look at every screenshot yourself; a view can render an error state without a
 console error. Screenshots stay in the scratchpad and are never committed.
 
+To check a change to the walk before a release, walk a disposable demo app
+instead (#2689): start it with
+`powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1 -Name fixture-walk -Port 8092`,
+write the fixture password from the script header to a scratchpad file, walk
+`http://127.0.0.1:8092`, and remove it with the same command plus `-Stop`. It
+uses only synthetic data, never the real data directory, `.env` or the token
+store.
+
 It presses no control that saves, synchronizes, deletes or sends. Exit 0 no
 error, 1 a view logged errors or logout failed, 2 bad input or the walk
 stopped.
