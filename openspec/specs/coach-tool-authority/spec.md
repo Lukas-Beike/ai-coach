@@ -421,7 +421,7 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Reference ranges of the training models
 - **WHEN** the planned time of a week is compared with the `training_model`
-- **THEN** the shares of covered time (low, moderate, high) are judged against pyramidal 65-90 %, 8-30 %, 0-12 %; polarized 65-90 %, 0-12 %, 8-30 %; threshold 40-70 %, 25-55 %, 0-15 %; sweet_spot 40-70 %, 30-60 %, 0-12 %; a week with moderate plus high time below 10 % is not judged, and a unit without steps but with a planned intensity counts as low up to 0.75, moderate up to 1.05 and high above.
+- **THEN** the shares of covered time (low, moderate, high) are judged against pyramidal 65-90 %, 8-30 %, 0-12 %; polarized 65-90 %, 0-12 %, 8-30 %; threshold 40-70 %, 25-55 %, 0-15 %; sweet_spot 40-70 %, 30-60 %, 0-12 %; a band counts as deviating only when it lies more than 5 percentage points outside its range, and only a complete week with at least 2 hours of known time, at least 60 % coverage and moderate plus high time of at least 10 % is judged; a unit without steps but with a planned intensity counts as low up to 0.75, moderate up to 1.05 and high above.
 
 #### Scenario: Key sessions and expected strength
 - **WHEN** the leg strength notes look for key sessions

@@ -810,16 +810,17 @@ Every push outcome of a planned unit SHALL be written through one state writer t
 - **WHEN** a removal is recorded
 - **THEN** `remote_event_id`, `remote_event_external_id` and the event category are dropped, so a later restore creates a new event.
 
-Detailed contract: after a successful upsert of a capped run unit the sent bpm range is stored as `hr_cap_sent:<local_id>` (`<low>-<high>`, or `none` when no threshold HR was known), and a synced unit whose resolved range differs from it is offered again.
+Detailed contract: a run unit linked at Garmin whose workout steps now resolve differently from the steps recorded at its push (for example after a threshold change) is offered to Garmin again; a unit pushed before the step digest was recorded, or whose document cannot be built now, is not flagged, and this never offers anything to Intervals.icu.
 
 Evidence:
-- `backend/planning/hr_cap_sync.py:record_sent`
-- `backend/planning/hr_cap_sync.py:resync_ids`
+- `backend/planning/run_lthr.py:RunLthr.resync`
+- `backend/planning/push_state.py:attach_push_state`
 - `backend/sync/reconcile.py:PlannedUnitSyncStateWriter._state_values`
 - `backend/sync/reconcile.py:PlannedUnitSyncStateWriter._update_row`
 - `backend/sync/reconcile.py:PlannedUnitSyncStateWriter.persist`
 - `backend/sync/reconcile.py:_drop_remote_event_ids`
-- `tests/test_hr_cap_export.py:test_a_capped_unit_sent_without_a_threshold_remembers_none`
+- `tests/test_planning_push_state.py:test_a_resync_id_offers_a_pushed_run_to_garmin_only`
+- `tests/test_planning_push_state.py:test_the_run_fingerprint_follows_the_cap_the_push_applies`
 - `tests/test_sync_planned_calendar.py:test_removed_unit_restored_sends_no_stale_event_id`
 
 ### Requirement: Push state of a planned unit and its leftovers
