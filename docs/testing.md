@@ -229,17 +229,29 @@ comparable selections and environments before claiming an improved median;
 report failed and cold-cache runs separately. Do not dispatch extra workflows
 just to populate a benchmark.
 
-The provisional goals of the archived `accelerate-test-execution` change (open measurements: #2149) are a GitHub validation
-median below six minutes and at least 30% less local wall time for each complete
-Python and browser selection against its own newly captured baseline. Report
-each goal as met, missed, or unverified. Timing goals do not change correctness
-results, required checks, assertions, retries, or timeouts.
+The provisional goals of the archived `accelerate-test-execution` change are a
+GitHub validation median below six minutes and at least 30% less local wall time
+for each complete Python and browser selection against its own newly captured
+baseline. Report each goal as met, missed, or unverified. Timing goals do not
+change correctness results, required checks, assertions, retries, or timeouts.
 
-A same-host complete SQLCipher comparison on 26 October 2026 ran all 7,289
-tests exactly once with one and two workers (14 platform skips in each). Warm
-whole-run time was 728.71 seconds versus 525.62 seconds, a 27.87% reduction in
-one sample. This compares worker counts on the new runner, not a successful
-pre-change baseline; browser and hosted improvement goals remain unverified.
+Results (#2149, one warm sample each on one Windows host, source `a821c26c`,
+serial runner as the baseline; the pre-change runner had a different selection):
+
+| Measurement | Baseline | Comparison | Result |
+| --- | --- | --- | --- |
+| Browser, 3 projects, 187 specs, native Chromium | `--jobs 1`: 1425.8 s | `--jobs 2`: 909.4 s (summed child time +21%) | -36.2%, met |
+| Python `-Suite all`, 9,358 tests | `-Workers 1`: 278.1 s | `-Workers 2`: 164.6 s | -40.8%, met |
+| GitHub PR validation, five natural runs | median 18.9 min, mostly queueing | | missed, #2536 |
+
+Both Python runs report the same 18 checkout/Git environment failures that
+`-Suite all` documents above. Browser fixture readiness is hidden by prewarming:
+6.9 s of readiness wait in 1425.8 s, median per spec 0.03 s, fixture start 0.32 s,
+authentication 0.49 s, test 4.28 s. Setup cost: application image without layer
+cache 9.8 s (warm 0.6 s), Chromium download 16.8 s (warm 0.4 s), `npm ci` 10.1 s
+with an empty cache (warm 10.6 s), prepared browser image pull 34.9 s (warm 0.3 s).
+On Windows, `--browser-image` fails explicitly (Linux host networking); CI runs
+the prepared image on every PR.
 
 ## Standard synthetic preview data
 

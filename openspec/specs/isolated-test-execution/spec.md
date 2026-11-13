@@ -3,7 +3,7 @@
 ## Purpose
 Provide developers and CI with reproducible, isolated test execution that reduces avoidable setup and fixture work while retaining the selected functional, responsive, security, and persistence checks and their failure signals.
 
-Implemented by `scripts/run_browser_tests.py`, `scripts/run_sqlcipher_tests.py` (via `tests/run_sqlcipher_tests.ps1`), `scripts/browser_environment.json`, `e2e/browser_durations.json` and the `e2e` jobs of `.github/workflows/publish-container.yml`. Measured wall-time and hosted-runner goals are not yet verified; open measurement tasks are tracked in issue #2149.
+Implemented by `scripts/run_browser_tests.py`, `scripts/run_sqlcipher_tests.py` (via `tests/run_sqlcipher_tests.ps1`), `scripts/browser_environment.json`, `e2e/browser_durations.json` and the `e2e` jobs of `.github/workflows/publish-container.yml`. The local wall-time goals are met and the hosted-runner goal is missed (#2149); the hosted follow-up is #2536.
 
 ## Requirements
 
@@ -166,4 +166,4 @@ Performance comparisons SHALL distinguish setup, fixture, authentication, test e
 - **WHEN** a benchmark lacks Docker, a browser, SQLCipher support, or a recoverable terminal result
 - **THEN** that evidence is reported as blocked, not run, or unverified rather than successful.
 
-Evidence: the `Measuring validation performance` section of `docs/testing.md`, the phase timings in each run `manifest.json`, `tests/test_durations.json`. No comparable local browser baseline or five hosted runs have been recorded, so the goals are unverified (tasks 1.2, 7.2, 7.3).
+Evidence: the `Measuring validation performance` section of `docs/testing.md`, the phase timings in each run `manifest.json`, `tests/test_durations.json`. Recorded results (#2149): complete local browser and Python selections ran 36.2% and 40.8% faster with two jobs/workers than serially on the same source; the hosted median of five natural runs was 18.9 minutes, so the six-minute goal is missed (#2536).
