@@ -56,7 +56,7 @@ when its marker changes. Each marker is built from local durable state
 | `daily_planning_context` | list | always empty here; its area route loads it |
 | `diagnostic_capture` | object | `active`, `bytes`, `entries`, `maximum_age_days`, `maximum_bytes`, `maximum_entries`, `maximum_entry_bytes` |
 | `external_calendar` | object | `configured`, `events`, `last_error`, `last_sync_at`, `provider`, `read_only`, `running`, `skipped_events`, `window_days` |
-| `garmin` | object | `activities`, `available`, `can_write_workouts`, `configured`, `duplicate_activities_skipped`, `has_estimated_run_times`, `has_hrv`, `has_max_hr`, `has_race_predictions`, `has_readiness`, `has_resting_hr`, `has_sleep`, `has_thresholds`, `has_vo2max`, `has_weight`, `last_error`, `last_sync_at`, `metric_export_enabled`, `morning_body_battery`, `pagination`, `source`, `source_freshness` |
+| `garmin` | object | `activities`, `available`, `can_write_workouts`, `configured`, `has_estimated_run_times`, `has_hrv`, `has_max_hr`, `has_race_predictions`, `has_readiness`, `has_resting_hr`, `has_sleep`, `has_thresholds`, `has_vo2max`, `has_weight`, `last_error`, `last_sync_at`, `metric_export_enabled`, `morning_body_battery`, `pagination`, `source`, `source_freshness` |
 | `garmin_sync` | object | `running`, `status` |
 | `intervals` | object | `configured`, `last_error`, `library_sync`, `running`, `state` |
 | `library` | list | always empty here; its area route loads it |

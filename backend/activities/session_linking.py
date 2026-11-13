@@ -10,8 +10,8 @@ their primary provider, and nothing is re-pointed, so provider deletes still fin
 their own session. Sessions the athlete confirmed, hidden or deleted sessions and
 sessions that are already aliases are never merged or reopened by linking;
 ``split_unmatched_sessions`` runs first and splits a copy off an unconfirmed session
-the rules no longer bundle it with. An exact link between records already in one session upgrades its
-link kind; a contradicting earlier merge is left for the diagnostics to report.
+the rules no longer bundle it with. A contradicting earlier merge is left for the
+diagnostics to report.
 Two sessions never merge when together they would hold two active
 records of one provider and recording origin: bundling assigns one to one, but a
 merge persisted earlier may pair a record differently from today's bundling. The function runs inside the caller's unit of work and is idempotent.
@@ -74,9 +74,6 @@ def link_activity_sessions(
     records = _linkable_records(rows)
     if not records:
         return 0
-    upstream_rows = _upstream_rows(db, records, rows)
-    rows = [*rows, *upstream_rows]
-    records.extend(_linkable_records(upstream_rows))
     session_of = {
         (str(row["provider"]), str(row["provider_activity_id"])): str(row["session_id"])
         for row in rows
@@ -189,48 +186,13 @@ def _still_bundled(db: Any, survivor_id: str) -> bool:
     )
 
 
-def _upstream_rows(
-    db: Any, records: Sequence[ActivityRecord], rows: Sequence[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Return the stored upstream records the copies name but the window missed.
-
-    They join bundling whatever their date or session state, so a copy whose
-    upstream sits in a confirmed or hidden session is not left to the heuristics;
-    the merge itself still refuses protected sessions.
-    """
-    loaded = {(str(row["provider"]), str(row["provider_activity_id"])) for row in rows}
-    wanted: dict[str, list[str]] = {}
-    for record in records:
-        ref = record.external_ref
-        if ref is not None and (ref.upstream.value, ref.upstream_id) not in loaded:
-            wanted.setdefault(ref.upstream.value, []).append(ref.upstream_id)
-    return [
-        row
-        for provider, ids in sorted(wanted.items())
-        for row in canonical_store.provider_activity_record_rows(db, provider, ids)
-    ]
-
-
 def _pairs(
     bundle: ActivitySession, session_of: dict[tuple[str, str], str]
 ) -> Iterable[tuple[str, str, ActivityLinkKind]]:
-    """Yield (session, duplicate session, kind); an exact duplicate joins its copy."""
+    """Yield (session, duplicate session, kind) for every duplicate of the bundle."""
     primary_id = session_of[_key(bundle.primary)]
-    members = (bundle.primary, *bundle.duplicates)
     for duplicate, kind in zip(bundle.duplicates, bundle.link_kinds, strict=True):
-        target = primary_id
-        if kind is ActivityLinkKind.EXACT:
-            target = next(
-                (
-                    session_of[_key(copy)]
-                    for copy in members
-                    if copy.external_ref is not None
-                    and copy.external_ref.upstream is duplicate.provenance.provider
-                    and copy.external_ref.upstream_id == duplicate.activity_id
-                ),
-                primary_id,
-            )
-        yield target, session_of[_key(duplicate)], kind
+        yield primary_id, session_of[_key(duplicate)], kind
 
 
 def _linkable_records(rows: Iterable[dict[str, Any]]) -> list[ActivityRecord]:
@@ -238,9 +200,13 @@ def _linkable_records(rows: Iterable[dict[str, Any]]) -> list[ActivityRecord]:
 
     A row from a provider or with a value this build does not know (for example a
     row written by a newer build) is never linked, and it never fails the ingest.
+    A stored Intervals.icu copy is never linked either: it stays stored and in the
+    export but joins no session (#2148).
     """
     records = []
     for row in rows:
+        if row["provider"] == ProviderId.INTERVALS.value:
+            continue
         try:
             records.append(_record(row))
         except TypeError, ValueError:
@@ -284,7 +250,6 @@ def _record(row: dict[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
-        external_ref=canonical_store.activity_external_ref(row["details"]),
     )
 
 
@@ -309,7 +274,7 @@ class _Sessions:
         """Merge the younger of two sessions into the older one when both may merge.
 
         Two records already in one session only strengthen its link kind, so an
-        exact link confirms an earlier heuristic merge.
+        link confirms an earlier merge.
         """
         first = self.survivor(primary_id)
         second = self.survivor(duplicate_id)
@@ -345,9 +310,8 @@ class _Sessions:
         """Delete a new copy of an activity the athlete deleted, as that activity.
 
         The records of athlete-deleted sessions take part in bundling
-        (``canonical_store.linkable_activity_rows``), and an exact link reaches
-        any deleted session (``_upstream_rows``), so a provider's copy of a deleted
-        recording does not bring the activity back (#2137, B-011).
+        (``canonical_store.linkable_activity_rows``), so a provider's copy of a
+        deleted recording does not bring the activity back (#2137, B-011).
         """
         for gone, other in ((first, second), (second, first)):
             if (
