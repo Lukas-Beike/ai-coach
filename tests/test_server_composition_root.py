@@ -72,6 +72,11 @@ from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.report import DiagnosticReportService
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
+from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.export_streams import ExportStreamTransport
+from backend.http_api.library_page import LibraryPageService
+from backend.http_api.readiness import ReadinessService
+from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
@@ -601,6 +606,19 @@ class CompositionRootTests(ServerTestCase):
         dispatch = server.COACH_TOOL_DISPATCH.service()
         self.assertIsInstance(dispatch, CoachToolDispatchService)
         self.assertIs(dispatch, server.COACH_TOOL_DISPATCH.service())
+
+    def test_http_api_services_resolve_through_the_root(self) -> None:
+        api = server.HTTP_API
+
+        self.assertIsInstance(api.readiness_service(), ReadinessService)
+        self.assertIsInstance(api.export_stream_transport(), ExportStreamTransport)
+        self.assertIsInstance(api.library_page_service(), LibraryPageService)
+        self.assertIsInstance(api.chat_history_page_service(), ChatHistoryPageService)
+        self.assertIsInstance(api.sync_command_endpoint(), SyncCommandEndpoint)
+        self.assertEqual(
+            f"Pacecraft/{server.APP_VERSION}",
+            api.request_handler_class().server_version,
+        )
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.
