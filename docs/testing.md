@@ -193,8 +193,8 @@ fails explicitly. Measure complete cold and warm preparation costs; a warm cache
 is not a cold-pull result. To roll back prepared execution locally, omit
 `--browser-image` after preparing the locked native browser. CI rollback requires
 restoring native browser/system preparation together with that invocation.
-Keep the smaller matrix/serial path until measured concurrency gains justify
-additional runner-minutes. The full isolated selection can take substantial time
+Add CI shards or local lanes only when measured critical-path gains justify the
+additional runner-minutes (#2536 split mobile and tablet-landscape). The full isolated selection can take substantial time
 on Docker Desktop; retain its manifest and wait for the terminal result.
 
 Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md)
@@ -258,10 +258,13 @@ four runs and `tablet-landscape` in one: `mobile` ran 8.1 to 11.8 min and
 `desktop` shard. The native chain (`test` aggregate, then incremental quality
 checks) ended at 5.8 to 12.9 min, driven by up to 4 min of queue before the
 aggregate. Browser jobs start 1.6 to 5.1 min after creation (source and image).
+The 16 jobs of a run summed 41.2 to 45.3 runner-minutes of execution and 11.4
+to 39.0 min of queue; each extra browser shard repeats about 0.7 min of setup.
 The mobile and tablet-landscape projects therefore run as two shards each, like
 desktop; the required check names stay unchanged. Six minutes stays out of
 reach while the image, the queue and the native chain together take about that
-long; the result on five later natural runs is recorded in #2536.
+long. The result on five later natural runs, including queue with the larger
+matrix and the per-shard balance, is still to be recorded in #2536.
 
 The Python goal stays unverified: both runs end with the same 18 checkout/Git
 environment failures that `-Suite all` documents above, and an earlier same-host

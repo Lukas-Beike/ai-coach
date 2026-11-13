@@ -305,8 +305,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two shards per project: the single mobile job was the critical path of
-        # every measured PR run (#2536).
+        # Two shards per project: the single mobile or tablet-landscape job was
+        # the last one before the aggregate in every measured PR run (#2536).
         include:
           - { project: mobile, shard: 1, shards: 2 }
           - { project: mobile, shard: 2, shards: 2 }
