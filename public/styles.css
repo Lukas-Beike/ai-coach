@@ -608,6 +608,8 @@ h2 {
   min-width: 0;
   max-height: 150px;
   max-height: 40dvh;
+  field-sizing: content;
+  overflow-y: auto;
   resize: none;
   border: 0;
   outline: 0;
