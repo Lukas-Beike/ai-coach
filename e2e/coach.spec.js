@@ -577,6 +577,10 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.goto("/#coach");
     await expect(page.locator("#appShell")).toBeVisible();
     await expect.poll(() => page.evaluate(() => state.initialStateLoaded)).toBe(true);
+    // Justified internal probe: the app ignores events until the stream's "ready" frame baselines it,
+    // and that frame is neither a DOM change nor a distinct network response. Waiting before the
+    // history gains the reply leaves the coach event as its only way in.
+    await expect.poll(() => page.evaluate(() => state.stateEventBaselined)).toBe(true);
     await page.evaluate(() => window.scrollTo({ top: 240, behavior: "auto" }));
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     messages = [...messages, {
