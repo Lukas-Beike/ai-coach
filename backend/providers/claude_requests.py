@@ -31,6 +31,7 @@ from backend.providers.claude_messages_adapter import (
     request_betas,
     request_payload,
 )
+from backend.providers.claude_models import family_setting
 from backend.providers.http import endpoint, urlopen
 from backend.providers.model_seam import ModelRequest, ModelTurn
 
@@ -344,7 +345,10 @@ class ClaudeMessagesClient:
         message = assembler.message or {}
         usage = neutral_usage(message.get("usage"))
         self.provider_state.record_usage(
-            "anthropic", {"usage": usage}, operation, str(context.get("model") or "")
+            "anthropic",
+            {"usage": usage},
+            operation,
+            family_setting(str(context.get("model") or "")),
         )
         details = {
             **context,

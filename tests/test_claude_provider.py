@@ -73,11 +73,13 @@ class FakeOpener:
 class FakeProviderState:
     def __init__(self):
         self.usage = []
+        self.usage_models = []
 
         self.status = []
 
     def record_usage(self, provider, response, operation, model=""):
         self.usage.append((provider, response, operation))
+        self.usage_models.append(model)
 
     def record_success(self, provider):
         self.status.append((provider, "ok", None))
@@ -484,8 +486,10 @@ class ClaudeStreamClientTests(unittest.TestCase):
             raised.exception.message, "Claude hat diese Anfrage abgelehnt."
         )
         self.assertNotIn("Synthetic explanation", raised.exception.message)
-        # The refused message was billed and names the model that answered.
+        # The refused message was billed and names the model that answered;
+        # the turn counts it under the family setting its receipt names (#2638).
         self.assertEqual(state.usage[0][2], "messages_stream")
+        self.assertEqual(state.usage_models, ["claude-opus"])
         capture = Mock()
         client, _, _, _ = make_client(sse_body(FIXTURES["refusal"]))
         client.diagnostic_capture = capture
