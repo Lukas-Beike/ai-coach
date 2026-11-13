@@ -44,6 +44,8 @@ test("each task names its rejected model and a keyless planning model locks only
   await expect(page.locator("#modelNotice")).toBeHidden();
   await expect(page.locator("#nutritionModelNotice")).toBeHidden();
   await expect(page.locator("#quickAnalysisButton")).toBeDisabled();
+  // The copies in the composer's "+" menu are locked as well.
+  await expect(page.locator('#composerPlusMenu [data-request-kind="plan_week"]')).toBeDisabled();
   await expect(page.locator("#quickMorningCheckinButton")).toBeEnabled();
   await page.locator("#messageInput").fill("Wie war mein Schlaf?");
   await expect(page.locator("#sendButton")).toBeEnabled();

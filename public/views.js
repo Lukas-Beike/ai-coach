@@ -514,8 +514,12 @@ function renderModel(model) {
     }
   }
   // A task whose provider has no key disables only its own entry points.
+  // Every quick-action kind but the morning check-in runs on the planning model,
+  // in the "Analyse & Plan" menu and its copies in the composer's "+" menu.
+  const planningOff = model?.tasks?.planning?.ready === false;
   const planning = $("#quickAnalysisButton");
-  if (planning) planning.disabled = model?.tasks?.planning?.ready === false;
+  if (planning) planning.disabled = planningOff;
+  document.querySelectorAll("[data-request-kind]:not([data-request-kind=morning_checkin])").forEach((button) => { button.disabled = planningOff; });
   const label = $("#nutritionLabelButton");
   if (label) label.disabled = model?.tasks?.nutrition?.ready === false;
   // Speed modes exist only at OpenAI.
