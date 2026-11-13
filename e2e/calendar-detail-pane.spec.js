@@ -68,6 +68,17 @@ test("@responsive an opened completed session shows its time in zones as one bar
     await expect.poll(() => reads.includes(name === "Vergangene Ausfahrt" ? "past-ride" : "past-run")).toBe(true);
     await expect(card.locator(".planned-zone-time")).toHaveCount(0);
   }
+  // "Details" reuses the bar's read of the same session (#2478); a failed read is not shared.
+  const failed = page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`).filter({ hasText: "Vergangener Lauf" });
+  await failed.locator(".planned-activity-more > summary").click();
+  await expect.poll(() => reads.filter((id) => id === "past-run").length).toBe(2);
+  await showCalendarDay(page, days.today);
+  if (!await ride.evaluate((element) => element.open)) await ride.locator(":scope > summary").click();
+  await ride.locator(".planned-activity-more > summary").click();
+  const panel = ride.locator(".activity-analysis-panel");
+  await expect(panel.locator(":scope > *").first()).toBeAttached();
+  await expect(panel).not.toContainText("Details werden geladen");
+  expect(reads.filter((id) => id === "today-ride")).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
 
