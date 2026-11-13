@@ -21,27 +21,21 @@ function leftoverEntry(provider, item, ids) {
   return provider !== ids.intervals ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
-// What a week's sync delivered per provider: Garmin gets structured workouts, Intervals.icu gets
-// strength only as a calendar note, so a note is never mistaken for a workout on the watch.
+// What a week's sync delivered per provider: Garmin gets structured workouts.
 function plannedWeekSyncSummary(done, ids, providerLabel) {
   const totals = new Map();
   for (const job of done) {
-    const item = totals.get(job.provider) || { send: 0, notes: 0, remove: 0 };
-    if (job.kind === "remove") item.remove += job.entries.length;
-    else {
-      item.send += job.entries.length;
-      item.notes += job.units.filter((entry) => focusSport(entry) === "strength").length;
-    }
+    const item = totals.get(job.provider) || { send: 0, remove: 0 };
+    item[job.kind === "remove" ? "remove" : "send"] += job.entries.length;
     totals.set(job.provider, item);
   }
   const reached = [...totals].map(([provider, item]) => {
     const verb = provider === ids.garmin ? "strukturiert" : "gesendet";
     const sent = item.send ? `${item.send} ${verb}` : "";
-    const notes = provider === ids.intervals && item.notes ? `davon ${item.notes} als Notiz` : "";
     const removed = item.remove ? `${item.remove} alte entfernt` : "";
-    return `${providerLabel(provider)}: ${[sent, notes, removed].filter(Boolean).join(", ")}`;
+    return `${providerLabel(provider)}: ${[sent, removed].filter(Boolean).join(", ")}`;
   });
-  // A strength unit that reached Intervals.icu only as a note says why the watch did not get it.
+  // A strength unit without a Garmin workout says why the watch did not get it.
   const blocked = new Set(done.flatMap((job) => job.units).map(plannedGarminBlockedText).filter(Boolean));
   return [...reached, ...blocked].join(" · ");
 }
@@ -138,6 +132,11 @@ function plannedGarminBlockedText(entry) {
   if (reason === "no_structure") return "Keine Kraftstruktur – nicht an Garmin gesendet";
   if (reason === "unmapped") return "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet";
   return "";
+}
+
+// The Personal API key alone cannot write workouts: a unit Garmin would wait for needs the SDK login.
+function plannedGarminSdkRequired(entry, garmin) {
+  return garmin?.configured === true && garmin.can_write_workouts === false && entry?.push_pending?.[providerIds().garmin] === true;
 }
 
 // Providers this planned unit still needs an explicit push to. Past, done,
@@ -1160,7 +1159,7 @@ function plannedLeftoverItems(trainingCalendar) {
 
 function plannedProviderConfiguration() {
   const ids = providerIds();
-  return { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured), [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
+  return { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) && state.data.garmin.can_write_workouts !== false, [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
 }
 
 // The week's sync jobs from its calendar entries and leftovers; none when nothing waits. Each job
@@ -1214,14 +1213,18 @@ function plannedConflict(entry, dateKey) {
   return h("span", "planned-conflict", h("span", null, `⚠ Konflikt: ${labels.join(" · ")}`), button);
 }
 
-// Why a strength unit cannot reach the watch, with the action that fixes it:
+// Why a strength or run unit cannot reach the watch, with the action that fixes it:
 // the Coach structures a free-text unit; an unmatched exercise takes one of
 // the catalogue suggestions or goes to the Coach.
 function plannedGarminBlocked(entry, dateKey, todayKey, actual) {
-  const reason = entry.push_blocked?.[providerIds().garmin];
+  const reason = entry.push_blocked?.[providerIds().garmin] || (plannedGarminSdkRequired(entry, state.data?.garmin) ? "sdk_required" : "");
   if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity) return null;
   const block = h("span", "planned-conflict planned-garmin-blocked");
   const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
+  if (reason === "sdk_required") {
+    block.append(h("span", null, "Garmin-Anmeldung nötig"));
+    return block;
+  }
   if (reason !== "unmapped") {
     block.append(h("span", null, plannedGarminBlockedText(entry)), plannedCoachButton("Mit Coach strukturieren", `Strukturiere die Krafteinheit ${unit} für die Uhr: Übungen in Reihenfolge mit Sätzen, Wiederholungen, Last und Garmin-Übung. Frag nach, was fehlt.`));
     return block;

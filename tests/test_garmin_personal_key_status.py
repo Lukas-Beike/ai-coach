@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import unittest
+from collections.abc import Callable
 from datetime import date
 from typing import Any, cast
 from unittest.mock import Mock, patch
@@ -15,6 +16,9 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.provider_credentials import (
+    GARMIN_TOKENS_KEY,
+    GARMIN_TOKENSTORE_DISCONNECTED,
+    GARMIN_TOKENSTORE_STATE_KEY,
     PROVIDER_CREDENTIALS_KEY,
     credential_status,
     effective_config,
@@ -32,6 +36,7 @@ from backend.sync.garmin_personal_status import (
     PERSONAL_KEY_WARNING_DAYS,
     personal_key_state,
     sdk_skipped_view,
+    sdk_write_ready,
 )
 from backend.sync.garmin_service import GarminRemoteReader
 from tests.support import make_config
@@ -437,6 +442,35 @@ class GarminProbeTests(unittest.TestCase):
         )
         unconfigured = self._checks(_config(garmin_personal_api_key=""), Mock())
         self.assertEqual(unconfigured.status("garmin")["status"], "not_configured")
+
+
+class SdkWriteReadyTests(unittest.TestCase):
+    @staticmethod
+    def _db(**stored: str) -> Callable[[str], str | None]:
+        return stored.get
+
+    def test_the_personal_key_alone_cannot_write_workouts(self) -> None:
+        self.assertFalse(sdk_write_ready(_config(), self._db()))
+
+    def test_an_sdk_login_can_until_a_refresh_skips_it(self) -> None:
+        skipped = json.dumps({"reason": "mfa_required", "at": "2026-11-06T08:00:00Z"})
+        login = _config(garmin_email="synthetic@example.test")
+        self.assertTrue(sdk_write_ready(login, self._db()))
+        self.assertTrue(
+            sdk_write_ready(_config(), self._db(**{GARMIN_TOKENS_KEY: "x"}))
+        )
+        self.assertFalse(sdk_write_ready(login, self._db(garmin_sdk_skipped=skipped)))
+        self.assertFalse(
+            sdk_write_ready(
+                login,
+                self._db(
+                    **{GARMIN_TOKENSTORE_STATE_KEY: GARMIN_TOKENSTORE_DISCONNECTED}
+                ),
+            )
+        )
+        self.assertFalse(
+            sdk_write_ready(_config(garmin_fixture_path="fixture.json"), self._db())
+        )
 
 
 class RedactionTests(unittest.TestCase):

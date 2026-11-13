@@ -1656,7 +1656,8 @@ def _fixture_demo_workouts(today):
             (
                 3,
                 "Radintervalle",
-                "Ride",
+                # Indoor, so the demo week has a unit Intervals.icu receives (#2419).
+                "VirtualRide",
                 60,
                 "- 15m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 15m 50%",
             ),

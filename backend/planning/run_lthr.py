@@ -4,7 +4,8 @@ Local zones first, then the dated Garmin watch zone set, then the other resolved
 thresholds, as the resolved ``LoadThresholds`` of the run sport give it. Never
 estimated: ``None`` when no threshold HR is known. Dependencies are explicit; the
 owner reads the thresholds, this class only looks one date up; ``zones_resolver``
-gives the whole run ``ZoneSettings`` of that date, for the Garmin run push.
+gives the whole run ``ZoneSettings`` of that date, for the Garmin run push, and
+``resync`` names the pushed run units that resolve differently since (#2546).
 """
 
 from __future__ import annotations
@@ -16,8 +17,14 @@ from typing import Any
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import Sport
-from backend.planning.hr_cap_sync import resync_ids
+from backend.errors import AppError
 from backend.planning.load_checks import LoadThresholds
+from backend.planning.push_state import (
+    garmin_baselines,
+    run_document,
+    run_document_digest,
+    run_sent_key,
+)
 from backend.planning.sport import planned_sport_environment
 
 
@@ -44,7 +51,7 @@ class RunLthr:
                 return None
             day = _unit_day(unit) or today
             environment = planned_sport_environment(unit)[1]
-            return thresholds.for_sport(Sport.RUN, environment, day).zones
+            return thresholds.for_sport(Sport.RUN, environment, day)
 
         return zones_for
 
@@ -69,10 +76,31 @@ class RunLthr:
         return self.day_resolver()(day)
 
     def resync(self, db: Any, payloads: list[dict[str, Any]]) -> set[str]:
-        """Synced capped run units whose bpm range moved only with the threshold HR."""
-        if not any(payload.get("hr_cap") for payload in payloads):
-            return set()
-        return resync_ids(self._key_values, db, payloads, self.resolver())
+        """Run units linked at Garmin whose steps resolve differently than when pushed.
+
+        A unit pushed before the digest was recorded, or whose document cannot be
+        built now (the push reports that), is never flagged.
+        """
+        linked = garmin_baselines(db)
+        zones_for = self.zones_resolver()
+        moved: set[str] = set()
+        for payload in payloads:
+            local_id = str(payload.get("local_id") or "")
+            if (
+                local_id not in linked
+                or planned_sport_environment(payload)[0] is not Sport.RUN
+            ):
+                continue
+            sent = self._key_values.get(db, run_sent_key(local_id))
+            if not sent:
+                continue
+            try:
+                document = run_document(payload, zones_for(payload))
+            except AppError, ValueError:
+                continue
+            if run_document_digest(document) != sent:
+                moved.add(local_id)
+        return moved
 
 
 def _unit_day(unit: Mapping[str, Any]) -> date | None:

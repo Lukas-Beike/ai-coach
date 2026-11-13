@@ -13,7 +13,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import snapshot_seed
@@ -27,6 +27,7 @@ from backend.errors import AppError
 from backend.http_api.route_table import RouteRequest, RouteTable
 from backend.providers.openai_responses_adapter import model_turn, request_payload
 from backend.runtime import clock as runtime_clock
+from backend.sync.garmin_wiring import GarminServices, build_garmin
 from backend.sync.metric_export_runner import MetricExportRunner
 
 PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
@@ -45,6 +46,26 @@ GARMIN_FIXTURE_SECTIONS = (
     "daily_training_status",
     "training_load_balance",
 )
+
+
+def garmin_services(ctx: Any = None, **overrides: Any) -> GarminServices:
+    """The Garmin builder over a mock context with inert composition arguments."""
+    arguments: dict[str, Any] = {
+        "root": Path("."),
+        "earliest_date": date(2000, 1, 1),
+        "sync_chunk_days": 90,
+        "all_sync_days": -1,
+        "sync_state_repository": Mock(name="sync_state_repository"),
+        "daily_sync_markers": Mock(name="daily_sync_markers"),
+        "resync_gate": None,
+        "lock_wait_seconds": 0,
+        "metric_export": Mock(name="metric_export"),
+        "tokens": None,
+        "run_zones": Mock(name="run_zones"),
+    }
+    return build_garmin(
+        Mock(name="context") if ctx is None else ctx, **{**arguments, **overrides}
+    )
 
 
 def connect(path: str | Path = ":memory:") -> sqlite3.Connection:

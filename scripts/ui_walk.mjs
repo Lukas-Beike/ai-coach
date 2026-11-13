@@ -30,6 +30,37 @@ export function scratchPath(target) {
   return resolved;
 }
 
+// The password file is only read: the temp directory or the folder where a T3
+// secret request delivers files, never the repository (#2527).
+export const T3_SECRETS = path.join(os.homedir(), ".t3", "userdata", "secrets");
+// Links are followed and Windows paths compare without case, as in prod_client.py.
+const realPath = (target) => {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return path.resolve(target);
+  }
+};
+const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
+export function secretPath(target, secrets = T3_SECRETS) {
+  if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
+  const refused = new Error("the password file must be in the system temp directory or the T3 secret folder");
+  // The path as given, checked like scratchPath; this is the one opened.
+  const scratch = path.resolve(os.tmpdir()) + path.sep;
+  const delivered = path.resolve(secrets) + path.sep;
+  const resolved = path.resolve(scratch, String(target));
+  if (!(resolved.startsWith(scratch) || resolved.startsWith(delivered)) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
+    throw refused;
+  }
+  // The file a link leads to must pass the same rule (links followed, Windows without case).
+  const linked = folded(realPath(resolved));
+  const roots = [os.tmpdir(), secrets].map((root) => folded(realPath(root)));
+  if (linked.startsWith(folded(realPath(ROOT))) || !roots.some((root) => linked.startsWith(root))) {
+    throw refused;
+  }
+  return resolved;
+}
+
 export function baseUrl(text) {
   const url = new URL(text);
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("the app address must be an http(s) URL");
@@ -173,10 +204,11 @@ async function main() {
     if (!values.url || !values["password-file"] || !values["out-dir"]) throw new Error("--url, --password-file and --out-dir are required");
     url = baseUrl(values.url);
     outDir = scratchPath(values["out-dir"]);
-    password = fs.readFileSync(scratchPath(values["password-file"]), "utf8").trim();
+    password = fs.readFileSync(secretPath(values["password-file"]), "utf8").trim();
     if (!password) throw new Error("the secret file is empty");
   } catch (error) {
-    console.log(`FAIL ${error.code === "ENOENT" ? "cannot read the secret file" : error.message}`);
+    // A file-system error names the secret file's path; never print it.
+    console.log(`FAIL ${error.syscall ? "cannot read the secret file" : error.message}`);
     return 2;
   }
   fs.mkdirSync(outDir, { recursive: true });

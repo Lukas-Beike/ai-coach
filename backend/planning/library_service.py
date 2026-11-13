@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import builtins
-import json
 from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind, Sport
+from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
+from backend.planning.repository import parse_payload
 from backend.planning.sport import with_activity_type
 from backend.providers.intervals_workouts import (
     INTERVALS_DEFAULT_WORKOUT_TYPE,
@@ -22,15 +23,6 @@ from backend.providers.intervals_workouts import (
 
 _REMOTE_LINKS = RemoteLinkRepository()
 _CANONICAL_SPORT_VALUES = frozenset(item.value for item in Sport)
-INSERT_LIBRARY_SQL = (
-    "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, "
-    "sync_state, sync_error, last_synced_at, updated_at) "
-    "VALUES (?, ?, NULL, ?, 1, 'local', NULL, NULL, ?)"
-)
-UPDATE_LIBRARY_SQL = (
-    "UPDATE workout_library SET payload=?, sync_dirty=1, sync_state='local', "
-    "sync_error=NULL, updated_at=? WHERE local_id=?"
-)
 
 
 class WorkoutLibraryService:
@@ -57,7 +49,7 @@ class WorkoutLibraryService:
     ) -> dict[str, Any] | None:
         """Restore a history snapshot using the caller's transaction."""
         if target is None:
-            db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
+            planning_store.delete_library_workout(db, entity_id)
             # A Wahoo plan stays removable by its link.
             _REMOTE_LINKS.delete_for_entity(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id, keep=(WAHOO_ID,)
@@ -71,28 +63,17 @@ class WorkoutLibraryService:
                 external_id=None,
                 sync_status="local",
             )
-            db.execute(
-                INSERT_LIBRARY_SQL,
-                (
-                    entity_id,
-                    entity_id,
-                    json.dumps(restored, ensure_ascii=False),
-                    self._now(),
-                ),
-            )
+            planning_store.insert_library_workout(db, entity_id, restored, self._now())
             _REMOTE_LINKS.refresh_from_slots(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
             )
             return restored
 
-        try:
-            current_payload = json.loads(current["payload"])
-            if not isinstance(current_payload, dict):
-                raise TypeError("Current workout payload is not an object")
-        except (TypeError, ValueError) as exc:
+        current_payload = parse_payload(current["payload"])
+        if current_payload is None:
             raise AppError(
                 409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden."
-            ) from exc
+            )
 
         restored = library.normalize_library_workout(
             {**current_payload, **target},
@@ -100,9 +81,8 @@ class WorkoutLibraryService:
             external_id=current.get("external_id"),
             sync_status="local",
         )
-        db.execute(
-            UPDATE_LIBRARY_SQL,
-            (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
+        planning_store.set_library_sync_state(
+            db, entity_id, restored, self._now(), state="local", dirty=1
         )
         _REMOTE_LINKS.refresh_from_slots(
             db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
@@ -131,13 +111,8 @@ class WorkoutLibraryService:
                 normalized = library.updated_workout_library_entry(
                     current, row, normalized_id, action, values
                 )
-                db.execute(
-                    UPDATE_LIBRARY_SQL,
-                    (
-                        json.dumps(normalized, ensure_ascii=False),
-                        self._now(),
-                        normalized_id,
-                    ),
+                planning_store.set_library_sync_state(
+                    db, normalized_id, normalized, self._now(), state="local", dirty=1
                 )
                 _REMOTE_LINKS.refresh_from_slots(
                     db, RemoteEntityKind.LIBRARY_WORKOUT, normalized_id
@@ -162,17 +137,11 @@ class WorkoutLibraryService:
     def _stored_workout_library_entry(
         db: Any, local_id: str
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        row = db.execute(
-            "SELECT payload, external_id, sync_state FROM workout_library WHERE local_id=?",
-            (local_id,),
-        ).fetchone()
+        row = planning_store.library_row(db, local_id)
         if not row:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
-        try:
-            current = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-        if not isinstance(current, dict):
+        current = parse_payload(row["payload"])
+        if current is None:
             raise AppError(500, CORRUPT_LIBRARY_ERROR)
         if current.get("date"):
             raise AppError(
@@ -192,7 +161,7 @@ class WorkoutLibraryService:
                 409,
                 "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.",
             )
-        db.execute("DELETE FROM workout_library WHERE local_id=?", (local_id,))
+        planning_store.delete_library_workout(db, local_id)
         # A Wahoo plan stays removable by its link until the athlete's Wahoo sync.
         _REMOTE_LINKS.delete_for_entity(
             db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, keep=(WAHOO_ID,)
@@ -232,10 +201,7 @@ class WorkoutLibraryService:
     def _insert_local_entry(
         db: Any, entry: dict[str, Any], local_id: str, updated_at: str
     ) -> None:
-        db.execute(
-            INSERT_LIBRARY_SQL,
-            (local_id, local_id, json.dumps(entry, ensure_ascii=False), updated_at),
-        )
+        planning_store.insert_library_workout(db, local_id, entry, updated_at)
         _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
         change_history.record_change(
             db, "workout_library", local_id, "create", None, entry
@@ -295,43 +261,19 @@ class WorkoutLibraryService:
     def page_in_transaction(
         db: Any, cursor: builtins.list[str] | None, limit: int
     ) -> builtins.list[Any]:
-        after_clause = ""
-        params: builtins.list[Any] = []
-        if cursor is not None:
-            after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
-            params.extend(cursor)
-        return db.execute(
-            "WITH templates AS ("
-            "SELECT id, local_id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
-            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
-            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
-            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            f"SELECT id, local_id, payload, sport_key, name_key FROM templates {after_clause} "
-            "ORDER BY sport_key, name_key, id LIMIT ?",
-            (*params, limit),
-        ).fetchall()
+        return planning_store.library_template_page(db, cursor, limit)
 
     @staticmethod
     def _list_in_db(
         db: Any, limit: int, include_archived: bool
     ) -> builtins.list[dict[str, Any]]:
-        rows = db.execute(
-            "SELECT payload FROM workout_library WHERE json_type(payload)='object' "
-            "AND json_extract(payload, '$.date') IS NULL "
-            "AND (? OR COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            "ORDER BY lower(json_extract(payload, '$.sport')), "
-            "lower(json_extract(payload, '$.name')), id LIMIT ?",
-            (
-                int(include_archived),
-                max(1, min(int(limit) * (2 if include_archived else 1), 1000)),
-            ),
-        ).fetchall()
-        result = []
-        for row in rows:
-            try:
-                payload = json.loads(row["payload"])
-                if isinstance(payload, dict):
-                    result.append(with_activity_type(payload))
-            except TypeError, ValueError:
-                continue
-        return result
+        rows = planning_store.library_templates(
+            db,
+            include_archived,
+            max(1, min(int(limit) * (2 if include_archived else 1), 1000)),
+        )
+        return [
+            with_activity_type(payload)
+            for row in rows
+            if (payload := parse_payload(row["payload"])) is not None
+        ]

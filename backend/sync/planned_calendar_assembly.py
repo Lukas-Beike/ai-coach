@@ -31,9 +31,10 @@ class PlannedCalendarLocalState:
     utc_now: Callable[[], str]
     today: Callable[[], date]
     # The run threshold HR in effect on a unit's date, which resolves a stored
-    # heart-rate cap (percent) to the bpm range Garmin needs; and the key/value
-    # store that remembers the range sent per unit.
+    # heart-rate cap (percent) to the bpm range of the exported text.
     run_lthr_for: Callable[[Mapping[str, Any]], float | None] = lambda _unit: None
+    # Unused since #2546, which moved the threshold-move check to the Garmin push
+    # state; server.py still passes it.
     key_values: Any = None
 
 
@@ -60,7 +61,6 @@ class PlannedCalendarSyncAssembly:
         self._utc_now = local.utc_now
         self._today = local.today
         self._run_lthr_for = local.run_lthr_for
-        self._key_values = local.key_values
         self._future_days = dependencies.future_days
 
     def sync_service(self) -> PlannedCalendarSyncService:
@@ -73,7 +73,6 @@ class PlannedCalendarSyncAssembly:
             self._utc_now,
             self._today,
             run_lthr_for=self._run_lthr_for,
-            key_values=self._key_values,
         )
 
     def repair_service(self) -> PlannedCalendarRepairService:
@@ -86,7 +85,6 @@ class PlannedCalendarSyncAssembly:
             self._today,
             self._future_days,
             run_lthr_for=self._run_lthr_for,
-            key_values=self._key_values,
         )
 
     def _export_port(self) -> WorkoutExportPort:

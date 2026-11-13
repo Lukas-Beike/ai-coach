@@ -108,9 +108,24 @@ LT1_HR_SHARE: Final = 0.85
 LT1_POWER_SHARE: Final = 0.75
 LT1_RUN_SPEED_SHARE: Final = 0.88
 # Where an LT1 value comes from: the profile value (measured, or the adopted
-# DFA-a1 estimate), the top of the zone 2 in effect, or a fixed share of LT2.
+# DFA-a1 estimate), the athlete's own steady sessions at the LT1 heart rate
+# (pace and power only), the top of the zone 2 in effect, or a fixed share of LT2.
+LT1_OWN_SESSIONS: Final = "own_sessions"
 LT1_ZONE_TWO: Final = "zone_2"
 LT1_FIXED_SHARE: Final = "fixed_share"
+
+type OutputAtHeartRate = Callable[[str, float], float | None]
+
+
+def _first_candidate(
+    candidates: Iterable[tuple[float | None, float | None, str]],
+) -> tuple[float, str] | None:
+    """The first candidate with a positive base and a factor: (value, origin)."""
+    return next(
+        ((base * factor, name) for base, factor, name in candidates
+         if base and factor and base > 0),
+        None,
+    )  # fmt: skip
 
 
 def first_thresholds(
@@ -118,15 +133,17 @@ def first_thresholds(
     first_threshold_pct: float | None,
     origin: str,
     zone_two_tops: Mapping[str, float] | None = None,
+    at_heart_rate: OutputAtHeartRate | None = None,
 ) -> dict[str, dict[str, Any]]:
     """LT1 of running and cycling with the origin of each value.
 
     Heart rate: the stored share of the threshold HR (``origin``, measured or
     estimated), else the top of the heart-rate zone 2, else ``LT1_HR_SHARE``.
-    Pace and power: the top of zone 2, else the fixed share of the threshold pace
-    or the FTP. ``zone_two_tops`` holds the tops in effect by ``<sport>_hr``
-    (bpm) and ``run_pace`` (s/km) or ``ride_power`` (W). A value with neither is
-    left out, and a sport without any LT2 value has no LT1.
+    Pace and power: ``at_heart_rate(sport, LT1 bpm)`` from the athlete's own
+    steady sessions, else the top of zone 2, else the fixed share of the
+    threshold pace or the FTP. ``zone_two_tops`` holds the tops in effect by
+    ``<sport>_hr`` (bpm) and ``run_pace`` (s/km) or ``ride_power`` (W). A value
+    with none of these is left out, and a sport without any LT2 value has no LT1.
     """
     tops = zone_two_tops or {}
     hr_share = first_threshold_pct / 100 if first_threshold_pct else None
@@ -142,21 +159,23 @@ def first_thresholds(
         if not (lthr and lthr > 0) and not (lt2 and lt2 > 0):
             continue
         values: dict[str, Any] = {}
-        for value_key, origin_key, candidates in (
-            ("hr_bpm", "hr_origin", ((lthr, hr_share, origin),
-                                     (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO),
-                                     (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE))),
-            (main_key, main_origin_key, ((tops.get(top_key), 1, LT1_ZONE_TWO),
-                                         (lt2, share, LT1_FIXED_SHARE))),
-        ):  # fmt: skip
-            # The first candidate with a positive base and a factor wins.
-            chosen = next(
-                ((base * factor, name) for base, factor, name in candidates
-                 if base and factor and base > 0),
-                None,
-            )  # fmt: skip
-            if chosen:
-                values[value_key], values[origin_key] = round(chosen[0]), chosen[1]
+        heart_rate = _first_candidate(
+            ((lthr, hr_share, origin), (tops.get(f"{sport}_hr"), 1, LT1_ZONE_TWO),
+             (lthr, LT1_HR_SHARE, LT1_FIXED_SHARE))
+        )  # fmt: skip
+        if heart_rate:
+            values["hr_bpm"], values["hr_origin"] = round(heart_rate[0]), heart_rate[1]
+        own = (
+            at_heart_rate(sport, values["hr_bpm"])
+            if heart_rate and at_heart_rate
+            else None
+        )
+        main = _first_candidate(
+            ((own, 1, LT1_OWN_SESSIONS), (tops.get(top_key), 1, LT1_ZONE_TWO),
+             (lt2, share, LT1_FIXED_SHARE))
+        )  # fmt: skip
+        if main:
+            values[main_key], values[main_origin_key] = round(main[0]), main[1]
         result[sport] = values
     return result
 

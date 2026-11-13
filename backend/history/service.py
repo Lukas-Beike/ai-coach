@@ -9,6 +9,7 @@ from typing import Any
 
 from backend import change_history
 from backend.athlete.profile import DEFAULT_PROFILE, normalize_profile
+from backend.db import planning_store
 from backend.errors import AppError
 
 
@@ -72,9 +73,13 @@ class ChangeHistoryService:
     def _current_record(
         db: Any, entity_type: str, entity_id: str
     ) -> dict[str, Any] | None:
+        if entity_type == "workout_library":
+            row = planning_store.library_row(db, entity_id)
+            return dict(row) if row else None
+        if entity_type == "planned_unit":
+            row = planning_store.planned_unit_row(db, entity_id)
+            return dict(row) if row else None
         queries = {
-            "workout_library": "SELECT * FROM workout_library WHERE local_id=?",
-            "planned_unit": "SELECT * FROM planned_units WHERE local_id=?",
             "competition": "SELECT * FROM competitions WHERE id=?",
             "training_plan": "SELECT * FROM training_plans WHERE id=?",
         }

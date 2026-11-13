@@ -370,6 +370,14 @@ class PlanCheckRuleTests(unittest.TestCase):
                 self.assertEqual(codes(found), [expected] if expected else [])
                 if expected in plan_checks.REQUIRED_CODES:
                     self.assertTrue(found[0]["blocking"])
+        # Athlete decision 2026-11-13 (#2512): a clearly described unit gets its
+        # template in the same turn; asking is only for an unclear request.
+        missing = plan_checks.template_conformance(
+            [unit("1", "2026-11-04", "strength", 45, strength_structure=[press])],
+            templates,
+        )[0]["message"]
+        self.assertIn("in the same turn", missing)
+        self.assertIn("only when the request leaves the unit unclear", missing)
         # A mismatch shows the Coach what the template keeps and what it wrote.
         dropped = plan_checks.template_conformance(
             [strength(strength_structure=[press])], templates

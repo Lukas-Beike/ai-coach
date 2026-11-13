@@ -1184,7 +1184,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 lambda _: self.call(
                     "apply_training_patch",
                     {
-                        "workouts": [self.workout()],
+                        "workouts": [self.workout(sport="VirtualRide")],
                         "expected_revision": self.state()["planning_revision"],
                     },
                     ["local_plan"],
@@ -1204,7 +1204,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         local_id = self.state()["planned_units"][0]["local_id"]
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-13", "Synthetic preserved Sunday")]
+            [
+                self.workout(
+                    "2026-09-13", "Synthetic preserved Sunday", sport="VirtualRide"
+                )
+            ]
         )
         entry = next(
             e
@@ -2394,6 +2398,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     @covers("push_strength_to_garmin:push", "push_strength_to_garmin:remove")
     def test_garmin_strength_push_is_bound_to_the_stored_units(self):
+        # The queued push needs an SDK login; the test configures none.
+        self.enterContext(
+            patch("backend.sync.wiring.sdk_write_ready", return_value=True)
+        )
         unit = {
             **self.workout("2026-09-10", "Synthetic strength"),
             "description": "",
@@ -2593,7 +2601,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             self.assertEqual(self.athlete_state(), before)
 
     def test_model_misreading_negated_sync_cannot_queue_or_propose(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(sport="VirtualRide")]
+        )
         before_jobs = server.SYNC_JOB_QUEUE.service().list()
         self.auto_approve_remote_proposals = False
 
@@ -2625,7 +2635,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         # A named sync queues without a card (#2342); it binds the units pending
         # when the athlete asked, as the card did when it was created.
         first = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout()]
+            [self.workout(sport="VirtualRide")]
         )[0]
         self.auto_approve_remote_proposals = False
         receipt, _ = self.turn(
@@ -2645,7 +2655,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(receipt["proposed_actions"], [])
         self.assertEqual(receipt["command_receipts"][0]["result"]["status"], "queued")
         later = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-11", "Added after the request")]
+            [self.workout("2026-09-11", "Added after the request", sport="VirtualRide")]
         )[0]
         jobs = server.SYNC_JOB_QUEUE.service().list()
         self.assertEqual(len(jobs), 1)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.db import planning_store
 from backend.db.repositories import KeyValueRepository
+from backend.planning.push_state import skips_intervals
 from backend.sync.garmin_strength_push import APP_WORKOUT_CLEANUP_KEY
 from backend.sync.jobs import job_dto, read_job
 
@@ -18,8 +20,9 @@ _UNIT_LIMIT = 50
 def summarize_plan_sync(db: Any) -> dict[str, Any]:
     """Report plan_push outcomes by status and error class, never provider error text.
 
-    The unsynced units are the local planned calendar, which only Intervals.icu
-    receives; the last plan sync of each provider is in ``sync.providers``.
+    The unsynced units are the local planned calendar units Intervals.icu takes,
+    its indoor and virtual rides (#2419); the last plan sync of each provider is
+    in ``sync.providers``.
     """
 
     job_rows = db.execute(
@@ -28,17 +31,11 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
         (_JOB_LIMIT,),
     ).fetchall()
     jobs = [job_dto(*read_job(db, row["id"])) for row in job_rows]
-    unsynced = "FROM planned_units WHERE tombstone=0 AND sync_state<>'synced'"
-    total = db.execute(f"SELECT COUNT(*) AS count {unsynced}").fetchone()["count"]
-    # Upcoming units first: past units must not hide the ones still to be pushed.
-    units = db.execute(
-        "SELECT local_id, sync_state, sync_error, "
-        # A payload that is not valid JSON has no date instead of failing the report.
-        "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.date') "
-        f"END AS date {unsynced} "
-        "ORDER BY date < date('now'), date LIMIT ?",
-        (_UNIT_LIMIT,),
-    ).fetchall()
+    unsynced = [
+        row
+        for row in planning_store.unsynced_planned_units(db)
+        if not _skipped_by_intervals(row["payload"])
+    ]
     return {
         "recent_jobs": [
             {
@@ -63,7 +60,7 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
             }
             for job in jobs
         ],
-        "unsynced_total": total,
+        "unsynced_total": len(unsynced),
         "unsynced_units": [
             {
                 "local_id": unit["local_id"],
@@ -71,9 +68,17 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
                 "sync_state": unit["sync_state"],
                 "has_error": bool(unit["sync_error"]),
             }
-            for unit in units
+            for unit in unsynced[:_UNIT_LIMIT]
         ],
     }
+
+
+def _skipped_by_intervals(raw_payload: Any) -> bool:
+    try:
+        payload = json.loads(raw_payload or "{}")
+    except TypeError, ValueError:
+        return False
+    return isinstance(payload, dict) and skips_intervals(payload)
 
 
 def summarize_garmin_removal(db: Any) -> dict[str, Any]:

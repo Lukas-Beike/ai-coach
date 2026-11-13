@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.db import planning_store
 from backend.errors import AppError
 from backend.pagination import (
     api_page_limit,
@@ -15,6 +15,7 @@ from backend.pagination import (
     encode_page_cursor,
 )
 from backend.planning.planned_units import plan_push_payload_hash
+from backend.planning.repository import parse_payload
 from backend.providers.intervals_workouts import intervals_record_type
 
 
@@ -80,11 +81,8 @@ class StructuredTrainingStateService:
 
     @staticmethod
     def _target_ref(row: Any, *, planned: bool) -> dict[str, Any] | None:
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except TypeError, ValueError:
-            return None
-        if not isinstance(payload, dict):
+        payload = parse_payload(row.get("payload"))
+        if payload is None:
             return None
         return {
             "local_id": str(row.get("local_id") or ""),
@@ -152,21 +150,10 @@ class StructuredTrainingStateService:
             after = self._after_key(
                 decoded, cursor, revision_number, include_inactive, today
             )
-            planned_rows = db.execute(
-                "SELECT local_id, sync_state, payload, COALESCE(json_extract(payload, '$.date'), '') AS plan_date, "
-                "lower(COALESCE(json_extract(payload, '$.name'), '')) AS sort_name FROM planned_units "
-                "WHERE (? OR (COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0)) "
-                "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) >= ? "
-                "AND (COALESCE(json_extract(payload, '$.date'), ''), lower(COALESCE(json_extract(payload, '$.name'), '')), local_id) > (?, ?, ?) "
-                "ORDER BY plan_date, sort_name, local_id LIMIT ?",
-                (int(include_inactive), today, *after, page_size + 1),
-            ).fetchall()
-            template_rows = db.execute(
-                "SELECT local_id, sync_state, payload FROM workout_library "
-                "WHERE json_extract(payload, '$.date') IS NULL "
-                "ORDER BY updated_at DESC LIMIT 100"
-            ).fetchall()
+            planned_rows = planning_store.planned_unit_page(
+                db, include_inactive, today, after, page_size + 1
+            )
+            template_rows = planning_store.recent_library_templates(db)
 
         page_rows, page = self._page(
             planned_rows,

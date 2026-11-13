@@ -13,7 +13,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from canonical_detail_support import NOW, ZONE, open_manager
-from support import make_config
+from support import garmin_services, make_config
 
 from backend.canonical.vocabulary import (
     GARMIN_ID,
@@ -27,11 +27,12 @@ from backend.errors import AppError
 from backend.providers import canonical_plans as plans
 from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync import garmin, garmin_wiring
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.executor import GarminSyncJobOwner
 from backend.sync.garmin_activity_details import COOLDOWN, GarminActivityDetailService
-from backend.sync.garmin_assembly import GarminAssembly, _non_blocking_garmin_guard
 from backend.sync.garmin_service import GarminRemoteReader, GarminSyncCoordination
+from backend.sync.garmin_wiring import _non_blocking_garmin_guard
 from backend.sync.jobs import normalize_sync_job_request
 from backend.sync.queue import SyncJobQueueService
 
@@ -515,25 +516,15 @@ class GarminActivityDetailReaderTests(unittest.TestCase):
 
 class GarminActivityDetailAssemblyTests(unittest.TestCase):
     def _configured(self, *, fixture_path: Any, remote_configured: bool) -> bool:
-        control: Any = Mock(name="control")
-        control.resync_gate = None
-        assembly = GarminAssembly(
-            dependencies=GarminAssembly.Inputs(
-                provider=Mock(name="provider"),
-                persistence=Mock(name="persistence"),
-                telemetry=Mock(name="telemetry"),
-                control=control,
-            )
-        )
         fixture_loader = Mock()
         fixture_loader.path.return_value = fixture_path
         reader = Mock()
         reader.configured.return_value = remote_configured
         with (
-            patch.object(assembly, "fixture_loader", return_value=fixture_loader),
-            patch.object(assembly, "remote_reader", return_value=reader),
+            patch.object(garmin, "GarminFixtureLoader", return_value=fixture_loader),
+            patch.object(garmin_wiring, "GarminRemoteReader", return_value=reader),
         ):
-            service = assembly.activity_detail_service()
+            service = garmin_services().activity_detail_service()
         return service._configured()
 
     def test_fixture_mode_counts_as_not_configured(self) -> None:

@@ -9,7 +9,6 @@ from typing import Any
 from backend.activities import calendar_projection, grouping
 from backend.activities.hr_cap import resolved_range, stored_cap
 from backend.activities.workout_profile import planned_profile
-from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
 from backend.canonical.domain_records import ZoneConfiguration
@@ -93,30 +92,6 @@ def planned_unit_conflicts(
     return [{"code": code, "label": labels[code]} for code in dict.fromkeys(codes)]
 
 
-def _row_day(row: dict[str, Any]) -> date | None:
-    try:
-        return date.fromisoformat(
-            iso_date_prefix(str(row.get("date") or row.get("starts_at_local") or ""))
-        )
-    except ValueError:
-        return None
-
-
-def _zone_settings(
-    row: dict[str, Any],
-    sport_thresholds: Sequence[Observation],
-    zone_configurations: Sequence[ZoneConfiguration],
-) -> ZoneSettings:
-    sport, environment = planned_sport_environment(row)
-    return ZoneSettings.from_configurations(
-        zone_configurations,
-        sport,
-        environment,
-        _row_day(row),
-        fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
-    )
-
-
 def _with_session_focus(
     row: dict[str, Any],
     sport_thresholds: Sequence[Observation],
@@ -152,7 +127,7 @@ def _resolved_hr_cap(
     cap = stored_cap(row)
     if cap is None:
         return {}
-    lthr = _zone_settings(row, sport_thresholds, zone_configurations).lthr
+    lthr = unit_thresholds(row, sport_thresholds, zone_configurations).lthr
     resolved = resolved_range(cap, lthr)
     if resolved is None:
         return {}
@@ -169,7 +144,7 @@ def _with_planned_profiles(
         {**row, "workout_profile": profile}
         if (
             profile := planned_profile(
-                row, _zone_settings(row, sport_thresholds, zone_configurations)
+                row, unit_thresholds(row, sport_thresholds, zone_configurations)
             )
         )
         else row

@@ -97,18 +97,34 @@ The client SHALL keep the application behind the required login dialog until suc
 - **WHEN** a wrong password, rate limit, transient server failure, persistent configuration error, timeout, or missing connection occurs
 - **THEN** the UI displays the corresponding message, using the returned retry delay where supplied, and restores the login control for retry.
 
+#### Scenario: Start session check
+- **WHEN** the client starts
+- **THEN** it reads `/api/auth/status` with a 10-second deadline; an authenticated answer loads the state, an unauthenticated one clears the device data and shows the login, and no answer keeps shown device data and retries after 15 seconds or when the browser reports `online`, or shows the login with "Server nicht erreichbar." when none is shown
+
+#### Scenario: Login message texts
+- **WHEN** a login fails with HTTP 429
+- **THEN** it reads "Zu viele Anmeldeversuche. Bitte in etwa N Minuten erneut versuchen." (N seconds below one minute, no time without a hint); a 5xx with a retry hint, a 502, a 504 or a non-JSON answer reads "Der Server startet gerade oder ist ausgelastet. Bitte in wenigen Sekunden erneut versuchen.", and every other failure shows the server or transport message
+
+#### Scenario: Loading texts and logout
+- **WHEN** the shell is not yet shown, or the athlete chooses "Abmelden"
+- **THEN** it reads "Trainingsbereich wird geladen…" or, after an asset update, "Update wird verarbeitet…"; unsaved changes are confirmed first, then "Abmelden?" is confirmed, and a failure other than 401 shows "Abmelden fehlgeschlagen. Bitte erneut versuchen." and keeps the app open
+
 #### Scenario: Logout or maintenance
 - **WHEN** confirmed logout succeeds, a current-session 401 arrives, or restore maintenance is active
 - **THEN** the client clears/locks according to the session contract or shows the maintenance pause; a failed logout leaves the session available for retry.
 
-Evidence: `public/auth.js::installLoginDialogGuards`, `public/auth.js::loginErrorMessage`, `public/auth.js::logout`, `public/auth.js::showLogin`, `public/sync-status.js::renderMaintenanceStatus`; `e2e/login-dialog.spec.js::Escape keeps the login dialog open and logout shows it again @responsive`, `tests/login-errors.test.cjs::a rate-limited login names the wait from Retry-After`, `tests/login-errors.test.cjs::a lasting server error keeps its own message instead of asking to retry`.
+Evidence: `public/auth.js::installLoginDialogGuards`, `public/auth.js::loginErrorMessage`, `public/auth.js::logout`, `public/auth.js::showLogin`, `public/sync-status.js::renderMaintenanceStatus`; `e2e/login-dialog.spec.js::Escape keeps the login dialog open and logout shows it again @responsive`, `public/auth.js::bootstrapAuth`, `public/auth.js::retryBootstrapAuth`, `public/auth.js::showAppShellLoading`, `tests/frontend-failure-paths.test.cjs::a failed logout request keeps the app open, reports the error and allows a retry`, `e2e/update-start.spec.js::a start after an update without a reachable server shows the stored data @responsive`, `tests/login-errors.test.cjs::a rate-limited login names the wait from Retry-After`, `tests/login-errors.test.cjs::a lasting server error keeps its own message instead of asking to retry`.
 
 ### Requirement: One status strip ranks the notices above every screen
 The client SHALL show at most one status strip above every screen: the most severe notice as text, the others behind a count button. Severity SHALL rank the start loading notice, which shows alone, then maintenance, offline, OpenAI key, Coach error, data load failure, provider attention, Garmin hint, thresholds, and last the dismissible Intervals.icu key hint, which appears only when nothing else does.
 
 #### Scenario: Age of device data
 - **WHEN** the offline or load-failure notice shows data from the device
-- **THEN** it states the age of that data, for example "Stand vor 12 min".
+- **THEN** it states the age of that data: "Stand gerade eben" below one minute, "Stand vor N min" below one hour, "Stand vor N h" below 48 hours, else "Stand vor N Tagen"; the label is refreshed every 60 seconds.
+
+#### Scenario: Announcement and dismissal
+- **WHEN** the strip changes or the athlete dismisses the Intervals.icu key hint
+- **THEN** only a critical notice is announced as `alert`, others as `status`, and an unchanged strip is not rendered again; the dismissed hint stays hidden for the browser session and focus moves to the main region.
 
 #### Scenario: Several notices at once
 - **WHEN** the browser is offline, the Coach reports an error and an optional provider key is missing
@@ -229,11 +245,15 @@ The client SHALL accept bounded GPX, FIT, JPEG, PNG, and WebP attachments, expos
 - **WHEN** separate messages with separate files are queued during a turn
 - **THEN** each outgoing message retains its own files rather than inheriting the current composer's file list.
 
+#### Scenario: Picker bounds and image reduction
+- **WHEN** a selection holds a file other than `.gpx`, `.fit`, `.png`, `.jpg`, `.jpeg` or `.webp`, an empty file, a GPX or FIT file above 5 000 000 bytes or an image above 15 000 000 bytes
+- **THEN** the whole selection is refused with "Bis zu 4 Dateien auswählen. GPX/FIT dürfen höchstens 5 MB, Bilder höchstens 15 MB groß sein."; an accepted image is reduced like a nutrition photo (1600 px, 1 200 000 bytes) and renamed to `.jpg` when its type changed, and a failed reduction keeps the original only up to 5 000 000 bytes
+
 #### Scenario: Invalid selection or rejected upload
 - **WHEN** selection exceeds four files or file bounds, or server validation rejects the upload
 - **THEN** invalid additions do not partially mutate the draft, and the rejected message/files remain recoverable for correction.
 
-Evidence: `public/coach.js::validateChatAttachmentFiles`, `public/coach.js::prepareChatAttachment`, `public/coach.js::renderChatAttachments`, `backend/coach/attachments.py::validate_attachments`; `e2e/attachments.spec.js::attachments can be removed, rejected and sent with an empty text draft`, `e2e/attachments.spec.js::attachments stay with their own queued message`, `tests/test_coach_attachments.py::AttachmentTests.test_invalid_upload_does_not_create_a_command`. Packaging-image preparation uses `nutrition-photo-analysis`; general Coach attachment storage/retention is governed by the Coach domain, and is not promised transient like label extraction.
+Evidence: `public/coach.js::validateChatAttachmentFiles`, `public/coach.js::prepareChatAttachment`, `public/coach.js::renderChatAttachments`, `backend/coach/attachments.py::validate_attachments`; `e2e/attachments.spec.js::attachments can be removed, rejected and sent with an empty text draft`, `e2e/attachments.spec.js::attachments stay with their own queued message`, `e2e/nutrition.spec.js::a small undecodable image falls back to attachment and allows a valid image afterwards`, `tests/test_coach_attachments.py::AttachmentTests.test_invalid_upload_does_not_create_a_command`. Packaging-image preparation uses `nutrition-photo-analysis`; general Coach attachment storage/retention is governed by the Coach domain, and is not promised transient like label extraction.
 
 ### Requirement: Connection UI protects secrets and exposes explicit provider actions
 The client SHALL show safe configured/connected/source/freshness states, accept credential input only for explicit saves, and never prefill secret credential values. Provider connection, disconnection, resync, and automatic metric-export consent SHALL remain explicit actions.
@@ -314,7 +334,7 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 
 #### Scenario: Provider send state of plan entries
 - **WHEN** the athlete views a pending planned unit, a strength unit Garmin cannot receive, or a changed Wahoo library workout
-- **THEN** a pending unit offers a "Synchronisieren" action that queues only that unit's push; a blocked strength unit names the reason (no strength structure or an unmapped exercise) with a "Mit Coach strukturieren" action or exercise suggestions; a changed library workout shows "Wahoo: geändert" with an explicit send, and opening a view sends nothing.
+- **THEN** a week with pending units or leftovers at a provider offers one "Woche synchronisieren" button in its heading (unit cards carry none; `garmin-strength-workout-push` and `training-library` define what it sends and removes); a blocked strength unit names the reason (no strength structure or an unmapped exercise) with a "Mit Coach strukturieren" action or exercise suggestions; a changed library workout shows "Wahoo: geändert" with an explicit send, and opening a view sends nothing.
 
 #### Scenario: Loading, empty, missing and failed reads
 - **WHEN** an analysis or session read is pending, has no data yet, lacks a single value, or fails
@@ -456,6 +476,10 @@ The calendar card of a completed session SHALL carry its single-session analysis
 - **WHEN** the athlete opens a completed session's card
 - **THEN** below its values one slim bar shows the session's time per zone (power zones for a ride that has them, else heart-rate zones) with the minutes per zone below and the zone kind and source ("HF-Zonen · Garmin Connect"), read from the same session read as "Details" (one request per session and calendar data while both are open; a failed read is read again); a session without zones or with a failed read shows no bar.
 
+#### Scenario: Session chart scale
+- **WHEN** a session channel is charted
+- **THEN** its scale runs from the 1st to the 99th percentile (elevation: minimum to maximum) plus 8 % padding and never below zero for a non-negative channel; speed of a run, walk, hike or swim is drawn as pace in min/km or min/100 m with faster on top, and speeds below 0.3 m/s are gaps
+
 #### Scenario: Running dynamics per second
 - **WHEN** a run has stored running dynamics streams
 - **THEN** each available one is charted per second with the same name as its average in the value list and named in the data coverage, and the Coach's activity details carry only the averages.
@@ -526,3 +550,255 @@ The system SHALL store how many weeks the training calendar shows back and ahead
 - **THEN** the default is used for the first, and the value is clamped to 0 to 52 for the second.
 
 Evidence: `backend/settings.py::SettingsService._calendar_display_settings`, `backend/settings.py::SettingsService.save_calendar_display_settings`, `backend/http_api/settings_put.py`, `public/settings.js`; `tests/test_server_weather_calendar.py::test_calendar_display_settings_are_persisted_and_validated`, `tests/test_http_settings_put_routes.py::test_calendar_display_route_passes_whole_payload`, `tests/test_settings.py::test_calendar_defaults_clamping_and_write_keys`, `tests/test_settings.py::test_calendar_invalid_values_have_exact_errors_and_no_partial_write`.
+
+### Requirement: Stamping inputs and refusal
+
+The asset version SHALL be the first 10 hex characters of the SHA-256 of the file content. The service-worker cache name SHALL be computed from the worker source and from every precached path with its content hash, so a file outside the precache list does not change it. Stamping SHALL fail when the worker lacks its `ASSETS` list or the `__ASSET_HASH__` token, or lists a path that is not a static target.
+
+#### Scenario: Unlisted file changes
+- **WHEN** a static file that is not precached changes
+- **THEN** the cache name stays the same
+
+#### Scenario: Worker lists an unknown file
+- **WHEN** `ASSETS` names a path without a static target
+- **THEN** stamping raises an error instead of serving a partly stamped shell or worker
+
+Evidence: `backend/http_api/static_assets.py::StaticAssetService._build_stamped`. Tests: `tests/test_server_frontend.py::test_cache_name_follows_cached_assets_and_ignores_the_rest`; `tests/test_server_frontend.py::test_stamping_refuses_a_worker_without_its_cache_token_or_asset_files`; `tests/test_server_frontend.py::test_source_files_carry_no_version_numbers`.
+
+### Requirement: Route table and defaults
+
+The client SHALL recognise exactly the hashes of the router table in `docs/view-catalogue.md` (case-insensitive) and resolve a former route to the one that replaced it. The main links SHALL lead to `#plan/overview`, `#analysis/running`, `#nutrition/diary` and `#more`; `#plan` without a segment opens Übersicht and `#more` opens Anbindungen.
+
+#### Scenario: Unknown hash
+- **WHEN** the hash is not in the table
+- **THEN** the Coach view opens and the address is replaced by `#coach` without a new history entry
+
+#### Scenario: Modified click
+- **WHEN** a navigation or segment link is clicked with Ctrl, Cmd, Shift, Alt or a non-primary button
+- **THEN** the browser handles the link itself
+
+#### Scenario: Leaving the page with unsaved input
+- **WHEN** the page is unloaded while a profile edit, a chat draft, a queued message or a rejected message exists
+- **THEN** the browser's leave confirmation is requested
+
+Evidence: `public/navigation.js::AppRouter.routeFromHash`; `public/navigation.js::AppRouter.syncFromHash`; `public/navigation.js::AppNavigation`; `public/app.js` (link click and `beforeunload` listeners); `public/shared.js::hasUnsavedChanges`. Tests: `e2e/navigation.spec.js::@responsive each hash navigation renders its target once`; `tests/navigation-state.test.cjs::a hash names a known route in any case, and a removed route falls back to the Coach`; `tests/navigation-state.test.cjs::the route parts fall back to the first plan segment and the connections section`.
+
+### Requirement: Layout breakpoints and input adaptations
+
+The shell SHALL use the bottom navigation below 768 px width, a 72 px rail with icons from 768 px and a 216 px labelled rail from 1100 px. On coarse pointers form controls SHALL be at least 16 px. Under reduced motion animations and transitions SHALL be cut to 0.01 ms, except the Coach working indicator, which keeps a slow fade.
+
+#### Scenario: On-screen keyboard
+- **WHEN** the chat input is focused on a touch-first device and the visible viewport is at least 100 px lower than its baseline for the current orientation
+- **THEN** the bottom navigation is hidden and the composer is scrolled into the visible viewport
+
+Evidence: `public/styles.css` (width media queries, `hover: none` and `pointer: coarse` rules, `prefers-reduced-motion` rule); `public/shared.js::updateMobileViewportLayout`. Tests: `e2e/css-cascade.spec.js::visibility, chart variants and reduced motion override component styles`; `e2e/light-theme-controls.spec.js::@responsive inputs are at least 16px under coarse pointer and dialog actions share a font size`.
+
+### Requirement: Service-worker fetch rules
+
+The worker SHALL answer a navigation from the network and keep the one shell copy under the key `/`. It SHALL answer with the cached shell when the network takes longer than 2500 ms, fails or returns status 500 or more. Versioned assets SHALL be cache-first; other GET requests SHALL be network-first and stored only when their path is precached. The manifest SHALL declare `id`, `start_url` and `scope` `/`, display `standalone`, language `de` and the four precached icons, one maskable.
+
+#### Scenario: Proxy error page
+- **WHEN** a navigation returns HTTP 502 and a cached shell exists
+- **THEN** the cached shell is shown; without one the error response is shown
+
+#### Scenario: Unknown path or OAuth return URL
+- **WHEN** a navigation to `/?wahoo=connected` or an unknown path succeeds
+- **THEN** no additional cache entry is created
+
+#### Scenario: Unlisted file
+- **WHEN** a same-origin GET for a file outside the precache list succeeds
+- **THEN** it is not stored
+
+Evidence: `public/service-worker.js` (`fetch` listener, `NAVIGATION_TIMEOUT_MS`, `CACHED_PATHS`, `VERSIONED_ASSETS`); `public/manifest.webmanifest`. Tests: `tests/service-worker-update.test.cjs::a server error on a navigation shows the cached app shell`; `tests/service-worker-update.test.cjs::navigations are cached under the app shell key only`; `tests/service-worker-update.test.cjs::only precached files are stored for other requests`; `e2e/service-worker-navigation.spec.js::@responsive unknown paths and OAuth return URLs add no navigation copies to the cache`; `tests/test_server_frontend.py::test_manifest_declares_any_and_maskable_icons_that_are_precached`.
+
+### Requirement: Markdown subset
+
+The Markdown renderer SHALL support only headings of level 1 to 3, unordered (`-`, `*`, `+`) and ordered (`1.`, `1)`) lists, fenced code, block quotes, horizontal rules, paragraphs with line breaks, pipe tables, strong, emphasis, code spans and links. Everything else SHALL stay escaped text.
+
+#### Scenario: Link label hides the host
+- **WHEN** a link label does not contain the host of its URL
+- **THEN** the escaped host is shown in parentheses after the link
+
+#### Scenario: Rejected link
+- **WHEN** a URL does not start with `http://` or `https://`, has an empty label, contains parentheses or has surrounding spaces
+- **THEN** the text stays literal and no anchor is created
+
+#### Scenario: Table rows
+- **WHEN** a table row has fewer cells than the header, or more
+- **THEN** missing cells are padded and extra cells are dropped
+
+Evidence: `public/views.js::replaceMarkdownLinks`; `public/views.js::linkHostNote`; `public/views.js::headingFromMarkdownLine`; `public/views.js::listItemFromMarkdownLine`. Tests: `tests/frontend-cleanup.test.cjs::a Coach link names its host when the label does not, and escapes it`; `tests/markdown-table.test.cjs::short rows are padded and extra cells beyond the header count are dropped`.
+
+### Requirement: Shared confirmation dialog
+
+Destructive or discarding actions SHALL use one modal confirmation with a title (default "Aktion bestätigen"), a message, "Abbrechen" and an accept button (default "Bestätigen"); `docs/view-catalogue.md` lists the texts per action. Closing the dialog in any way SHALL count as declined, and a newer confirmation SHALL decline a pending one.
+
+#### Scenario: Typed confirmation
+- **WHEN** an action requires a confirmation text
+- **THEN** the dialog shows "Tippe „<text>“ zur Bestätigung.", focuses the text field and keeps the accept button disabled until the input equals the text exactly
+
+#### Scenario: Secondary action
+- **WHEN** the dialog offers a secondary action such as a backup download
+- **THEN** the accept button stays disabled while it runs, its failure is shown inside the dialog and the dialog stays open
+
+#### Scenario: Default focus
+- **WHEN** no text is required
+- **THEN** the cancel button receives the initial focus
+
+Evidence: `public/auth.js::requestConfirmation`; `public/auth.js::runConfirmationSecondaryAction`; `public/auth.js::settleConfirmation`. Tests: `e2e/privacy-delete.spec.js::local data deletion requires the exact confirmation text`; `tests/test_server_frontend.py::test_frontend_uses_accessible_confirmation_dialogs`.
+
+### Requirement: Toast timing and roles
+
+A status toast SHALL be a polite `status` shown for 3 seconds. An error toast SHALL be an assertive `alert` shown for 8 seconds with a close button named "Meldung schließen". The session-ended message SHALL never be shown as a toast, because the login dialog already states it.
+
+#### Scenario: Session ends during a request
+- **WHEN** a request is aborted because the session ended
+- **THEN** no toast appears
+
+Evidence: `public/shared.js::toast`; `public/shared.js::sessionEndedError`. Tests: `tests/frontend-failure-paths.test.cjs::the session-ended abort is German, marked, and never toasted`; `e2e/status-strip.spec.js::@responsive a toast never covers the navigation`.
+
+### Requirement: Quick message templates after a pause
+
+The composer SHALL show the quick message templates only when the last recorded activity on this device is at least 6 hours old, and SHALL hide them while the Coach is busy. Activity SHALL be recorded on login, on return to the tab, on pointer input and when the page is hidden or left.
+
+#### Scenario: First use on a device
+- **WHEN** no activity time is stored
+- **THEN** the templates are not shown
+
+Evidence: `public/shared.js::notePwaActivity`; `public/shared.js::updatePwaActivity`; `public/shared.js::renderQuickMessageTemplates`. Tests: `e2e/coach-layout.spec.js::empty coach chat does not promise quick actions and keeps the composer gap @responsive`.
+
+### Requirement: Composer control states
+
+The composer SHALL never disable the draft field. The send control SHALL read "Senden", "Einreihen" while a turn runs, "Coach antwortet…" while a turn is recovered and "Antwort wird geladen…" while a completed answer is taken over, and SHALL be disabled without a draft, while the chat loads, attachments load, a recording or transcription runs, and in the last two states.
+
+#### Scenario: Placeholder
+- **WHEN** the chat is ready, busy, loading, or the selected Coach has no API key
+- **THEN** the placeholder reads "Frage deinen Coach…", "Folgefrage – wird danach gesendet", "Coach-Chat wird geladen…" or "API-Schlüssel unter Mehr › Anbindungen hinterlegen…"
+
+#### Scenario: Waiting messages
+- **WHEN** messages wait behind a running turn
+- **THEN** each is a bubble labelled "Als Nächstes" (the first) or "Wird nach der aktuellen Antwort gesendet", with "Bearbeiten" and "Entfernen"
+
+#### Scenario: Cached chat
+- **WHEN** the chat shows messages from the device before the server answered
+- **THEN** the note "Nachrichten werden synchronisiert…" replaces the jump button until the fresh messages arrive or their load fails
+
+Evidence: `public/coach.js::chatSendLabel`; `public/coach.js::updateChatSendButton`; `public/coach.js::chatInputPlaceholder`; `public/coach.js::createPendingMessage`; `public/coach.js::setChatCacheSyncing`. Tests: `e2e/coach-queue.spec.js::queued coach follow-ups keep order, can be edited or removed without browser persistence`; `e2e/coach-message-cache.spec.js::a failed fresh chat load ends the sync note and keeps the cached messages`.
+
+### Requirement: Reply annotations and receipts
+
+Under a Coach reply the client SHALL show its change labels joined by " · ", then one line per plan note as "Warnung|Hinweis: <label> · <dates> · <evidence>" using a fixed label and evidence phrase per note code; unknown codes are skipped. A user message with files SHALL show "Anhänge: <names>" and offer no edit action.
+
+#### Scenario: Receipt toast
+- **WHEN** a turn reports command receipts
+- **THEN** one toast joins the distinct titles with " · ", failures first and the toast red when one failed; each tool has a fixed German title (for example `save_checkin` is "Tages-Check-in gespeichert"), read-only refresh and sync tools are left out unless they failed, a staged plan is left out when the turn also commits, and only the final plan commit counts
+
+Evidence: `public/coach.js::appendMessageChanges`; `public/coach.js::appendPlanNotes`; `public/coach.js::messageAttachmentLabel`; `public/coach.js::receiptIsVisible`; `public/coach.js::toastCoachReceipts`; `public/coach.js` (`COACH_RECEIPT_LABELS`, `HIDDEN_CHAT_RECEIPT_TOOLS`). Tests: `tests/coach-turn-undo.test.cjs::plan notes render safe labels, dates, evidence and warning emphasis`; `tests/coach-receipts.test.cjs::a Coach action announces itself in one toast with its failures first`; `tests/coach-receipts.test.cjs::synchronization progress does not create chat cards`; `e2e/coach-plan-notes.spec.js`; `e2e/coach-tool-receipts.spec.js`.
+
+### Requirement: Follow-latest and history paging rules
+
+The chat SHALL follow new content only while the reader is within 48 px of the end. Following SHALL stop on a wheel-up, a downward finger move, PageUp, ArrowUp or Home outside an input, or an upward scroll of more than 4 px away from the end, and resume when the end is reached again or the jump control is used.
+
+#### Scenario: Jump control
+- **WHEN** content arrived while the reader was away
+- **THEN** the control is named "Zur neuesten Antwort springen" and shows "Neue Antwort"; otherwise it is named "Zu den neuesten Nachrichten springen"
+
+#### Scenario: Older messages
+- **WHEN** "Weitere Nachrichten laden" is pressed, or comes within 200 px above the viewport after the first jump has settled
+- **THEN** the next 100 messages are merged by id (else by turn id and role), the first visible message keeps its position, and "N ältere Nachrichten geladen" is announced
+
+#### Scenario: New reply
+- **WHEN** a reply starts while following
+- **THEN** its start is placed 16 px below the top and later text keeps the newest line 12 px above the composer
+
+Evidence: `public/coach.js::chatIsNearBottom`; `public/coach.js::chatScrollMovedUp`; `public/coach.js::updateChatJumpLabel`; `public/coach.js::appendHistoryPageButton`; `public/coach.js::mergeChatMessages`; `public/coach.js::scrollChatToResponseStart`. Tests: `e2e/coach-follow-latest.spec.js::a scrollbar drag upward during a stream stops following without a wheel gesture`; `e2e/coach-history-anchor.spec.js::automatic older chat loading keeps focus on the focused message action`.
+
+### Requirement: Proposal card contract
+
+A proposal card SHALL exist for the action types `undo_change`, `local_coach_write` and `remote_coach_write` and offer its actions only while the status is `preview` or `ready` and `expires_at` is in the future. Approval SHALL post `/api/coach/actions/confirm {proposal_id}` and then `/api/coach/actions/execute {action_token, payload_hash}` with the values of the confirm answer.
+
+#### Scenario: Buttons
+- **WHEN** a card is confirmable
+- **THEN** it offers "Remote-Änderung freigeben", "Produkt speichern", "Mahlzeitvorlage speichern" or "Änderung zurücknehmen", and "Nicht freigeben" (cancels on the server) or, for an undo, "Später prüfen" (local dismissal)
+
+#### Scenario: Known refusal
+- **WHEN** confirm fails or execute answers 4xx
+- **THEN** reasons `proposal_expired` and `proposal_payload_changed` retire the card as expired; `proposal_invalid`, `proposal_used`, `proposal_unavailable` and a 409 at confirm retire it as used
+
+#### Scenario: Unknown type
+- **WHEN** the action type is none of the three
+- **THEN** the card is an alert "Unbekannte Aktion" without buttons
+
+#### Scenario: After success
+- **WHEN** execution succeeds
+- **THEN** the client reloads plan, library, profile and feedback, and opens Produkte (saved product), Tagebuch (meal template) or the calendar (other local actions) unless the route changed meanwhile; an undo or remote action stays where it is
+
+Evidence: `public/coach.js::coachActionCard`; `public/coach.js::coachActionButtons`; `public/coach.js::coachActionExpired`; `public/coach.js::executeCoachActionProposal`; `public/coach.js::rejectCoachActionProposal`; `public/coach.js::showCoachReceiptArea`. Tests: `tests/coach-action-confirm.test.cjs::a confirm 409 without a reason retires the card instead of re-enabling it`; `tests/coach-action-unknown.test.cjs::an unknown proposal action type renders a neutral error card without buttons`; `tests/coach-receipts.test.cjs::action destination precedes a slow refresh and preserves newer navigation`.
+
+### Requirement: Calendar day notes and week figures
+
+A calendar day SHALL show plain note lines for a competition ("<priority>-Wettkampf: <name>"), a day status ("Ruhetag", "Trainingspause") and one calendar line with the appointment names without marker tokens, each with " · ganztägig" or its start time, followed by the markers "Kein Training", "Keine Intensität" and "Nur kurze Einheiten". An empty day SHALL read "Keine Aktivität" (past) or "Keine Einheit geplant" (today and later), an empty week "Keine Einheiten".
+
+#### Scenario: Week figures with missing values
+- **WHEN** a completed ride, run, walk, hike, swim, nordic ski or row has no distance, or a session has no load
+- **THEN** the week figure adds "N Aktivität(en) ohne Distanz" or "N Einheit(en) ohne Belastung"; other sports without a distance are not counted as missing
+
+#### Scenario: Start time
+- **WHEN** a planned unit is stored at midnight
+- **THEN** no start time is shown, while a recorded activity keeps a midnight start
+
+#### Scenario: Workout profile strip
+- **WHEN** a session carries a workout profile of at most 1000 segments
+- **THEN** a strip scaled to 110 % of its highest value is drawn; a profile with more segments or no value draws none
+
+#### Scenario: Replan notice
+- **WHEN** the plan needs a replan or an illness pause awaits a forecast or approval
+- **THEN** the Coach view shows "Deine Planung braucht eine Anpassung" with the cause and "Coach fragen"
+
+Evidence: `public/plan-views.js::plannedDayNoteSpecs`; `public/plan-views.js::renderPlannedDay`; `public/plan-views.js::calendarWeekDistance`; `public/plan-views.js::calendarWeekLoad`; `public/plan-views.js::plannedUnitStartTime`; `public/plan-views.js::calendarWorkoutProfile`; `public/plan-views.js::renderAdaptivePlanning`. Tests: `tests/calendar-badges.test.cjs::day notes show competition, confirmed rest status and one calendar line with deduplicated markers`; `tests/plan-views-week-distance.test.cjs::week distance reports distance sports without distance as missing`; `tests/plan-views-week-distance.test.cjs::week load sums known values and names the sessions without one`; `tests/plan-views-times.test.cjs::date-only planned units at midnight show no start time`; `tests/plan-views-times.test.cjs::completed activities keep their recorded midnight start time`; `tests/plan-views-adaptive-forecast.test.cjs`.
+
+### Requirement: Analysis chart reading aids
+
+Every analysis chart SHALL pad its value axis by 12 % of the span (at least a unit-specific minimum), label only the latest, highest, lowest and first reading, and offer "Werte ansehen" with a table of the plotted values. Each day with a value SHALL be one inspectable marker; the chart is one tab stop on the latest day and arrow keys, Home and End move between days.
+
+#### Scenario: Weekly values
+- **WHEN** the 12-week period is shown
+- **THEN** each chart plots one value per week: the last value for acute and smoothed load, fitness and threshold pace, the sum for training time and session-RPE load, the mean for steps and floors, the median for VO2max, and every dated value for FTP
+
+#### Scenario: Info popover
+- **WHEN** the info control of a series is opened
+- **THEN** it states "Daten für N von M Tagen|Wochen vorhanden." and, below three readings, "Wenige Messungen · kein belastbarer Trend."; the popover stays inside the viewport
+
+#### Scenario: One reading
+- **WHEN** a series has a single reading
+- **THEN** no curve is drawn and "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich." is shown with the table
+
+Evidence: `public/analysis.js::analysisChart`; `public/analysis.js::analysisPlotScales`; `public/analysis.js::analysisLabelledPoints`; `public/analysis.js::appendAnalysisPointInspectors`; `public/analysis.js::analysisWeeklyLastPoints`; `public/analysis.js::analysisWeeklySumPoints`; `public/analysis.js::analysisWeeklyMeanPoints`; `public/analysis.js::analysisWeeklyPerformancePoints`; `public/activity-analysis.js::chartRange`; `public/activity-analysis.js::speedChannel`. Tests: `e2e/analysis-info.spec.js::@responsive a history chart is one tab stop with arrow-key navigation inside a named region`; `tests/analysis-presentation.test.cjs::analysis popovers stay inside the viewport on narrow screens and flip above when needed`; `tests/analysis-presentation.test.cjs::weekly daily-activity mean averages known days and keeps empty weeks as gaps`.
+
+### Requirement: Display formats
+
+The client SHALL format numbers, dates and times for `de-DE`: numbers with at most one fraction digit unless a view states otherwise, distances in km with exactly one decimal, durations as "N min" below one hour and "h:mm h" from one hour, pace and lap times as "m:ss" or "h:mm:ss", a calendar day key without shifting the day, and relative days as "Heute", "Morgen", "Gestern", "in N Tagen" and "vor N Tagen".
+
+#### Scenario: Sport label
+- **WHEN** a session carries the neutral sport
+- **THEN** it reads "Radfahren", "Rad indoor" (a ride indoors or virtual), "Laufen", "Schwimmen", "Kraft" or "Andere"
+
+#### Scenario: Today
+- **WHEN** a view needs today's date
+- **THEN** it is the calendar day of the profile time zone, else of the browser
+
+Evidence: `public/format.js` (`number`, `distance`, `duration`, `clock`, `relativeDay`); `public/performance-view.js::activitySportLabel`; `public/views.js::timezoneDateKey`. Tests: `tests/format.test.cjs::duration uses minutes under one hour and h:mm h from one hour`; `tests/plan-views-sport-label.test.cjs::completed activities are labelled from the canonical sport and environment`.
+
+### Requirement: Operations area details
+
+Betrieb & Diagnose SHALL read the newest 250 log entries and show each as "[time] LEVEL event: message {context}". Downloads SHALL use a 130-second deadline and the names `pacecraft-server-logs-<date>.jsonl`, `pacecraft-diagnostics-<date>.json`, `pacecraft-export-<date>.zip` and `pacecraft-database-<date>.backup`. The area SHALL offer no change-history view; undo is offered on receipts only.
+
+#### Scenario: GPS tracks
+- **WHEN** "GPS-Spuren speichern" is switched
+- **THEN** the setting is saved at once and reverted on failure; "GPS-Spuren löschen (N)" appears only while storage is off and asks for the confirmation text the server supplies
+
+#### Scenario: Privacy deletion result
+- **WHEN** the deletion succeeded
+- **THEN** a failed remote OpenAI conversation delete or Wahoo revocation is named, and so are recovery copies and server log files that could not be removed
+
+Evidence: `public/diagnostics.js::loadLogs`; `public/diagnostics.js::formatLogEntry`; `public/diagnostics.js::downloadServerLogs`; `public/settings.js::downloadDatabaseBackup`; `public/settings.js::saveGpsTracks`; `public/settings.js::deleteGpsTracks`; `public/settings.js::deletePrivacyData`. Tests: `e2e/downloads.spec.js::settings and diagnostics downloads carry the Pacecraft name`; `e2e/first-threshold-gps.spec.js::the GPS-tracks switch takes clicks once loaded and a failed save restores the confirmed state`; `e2e/history-undo.spec.js::history panel is absent while diagnosis and logs remain available`.

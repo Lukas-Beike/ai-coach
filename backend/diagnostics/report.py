@@ -15,6 +15,7 @@ from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
 from backend.config import DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, Config
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.canonical_backfill import (
@@ -113,17 +114,18 @@ class DiagnosticReportService:
         return self._deps.key_values.get(db, key)
 
     def _database_counts(self, db: Any) -> dict[str, int]:
-        queries = {
-            "messages": "SELECT COUNT(*) AS count FROM messages",
-            "workout_library": "SELECT COUNT(*) AS count FROM workout_library",
-            "competitions": "SELECT COUNT(*) AS count FROM competitions",
-            "athlete_checkins": "SELECT COUNT(*) AS count FROM athlete_checkins",
-            "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
-            "change_history": "SELECT COUNT(*) AS count FROM change_history",
-        }
-        counts = {
-            name: db.execute(query).fetchone()["count"]
-            for name, query in queries.items()
+        def count(table: str) -> int:
+            return db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
+                "count"
+            ]
+
+        counts: dict[str, Any] = {
+            "messages": count("messages"),
+            "workout_library": planning_store.library_count(db),
+            "competitions": count("competitions"),
+            "athlete_checkins": count("athlete_checkins"),
+            "activity_feedback": count("activity_feedback"),
+            "change_history": count("change_history"),
         }
         counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
         return counts

@@ -13,6 +13,7 @@ from backend.coach.authorization import (
     require_coach_scope,
     scope_values,
 )
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -27,7 +28,6 @@ from backend.planning.local_plan_creation_service import (
 )
 from backend.runtime.events import StateEventBuffer
 
-SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 SELECT_PLANNING_REVISION_SQL = "SELECT revision FROM planning_state WHERE id=1"
 
 
@@ -176,7 +176,7 @@ class CoachTrainingPatchService:
     ) -> None:
         plan_ids = {str(item.get("plan_id") or "") for item in created}
         for local_id in ids:
-            row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+            row = planning_store.planned_unit_row(db, local_id)
             unit_plan_id = str(json.loads(row["payload"]).get("plan_id") or "")
             # A named plan never receives constraints under another unit's plan.
             if not authorized_plan_id or unit_plan_id == authorized_plan_id:

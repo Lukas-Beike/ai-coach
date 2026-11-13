@@ -42,7 +42,6 @@ from backend.activities.hr_cap import (
     resolved_range,
     stored_cap,
 )
-from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import (
     COACH_READ_ONLY_FIELDS,
@@ -515,7 +514,7 @@ class GuardTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
-            estimate_unit=lambda item: estimate_planned_unit(item, AthleteThresholds()),
+            estimate_unit=lambda item: estimate_planned_unit(item, ZoneSettings()),
             profile=lambda: (
                 {} if first is None else {FIRST_THRESHOLD_FIELD: str(first)}
             ),
@@ -620,7 +619,7 @@ class RunLthrTests(unittest.TestCase):
 
         def for_sport(sport: Any, environment: Any, day: date) -> Any:
             days.append((sport, day))
-            return SimpleNamespace(zones=zones)
+            return zones
 
         run_lthr = self.lookup(SimpleNamespace(unavailable=False, for_sport=for_sport))
         zones_for = run_lthr.zones_resolver()

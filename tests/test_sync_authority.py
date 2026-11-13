@@ -179,59 +179,17 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
         )
         preview.assert_called_once_with()
 
-    def test_units_whose_bpm_range_moved_with_the_threshold_are_pending(self) -> None:
-        cap = {"percent_lthr": 87.0, "low_percent_lthr": 65.0, "source": "default"}
-        capped = {"name": "u", "session_focus": "easy", "hr_cap": cap}
-        self.add_planned("moved", state="synced", dirty=0, payload=capped)
-        self.add_planned("steady", state="synced", dirty=0, payload=capped)
-        self.add_planned("plain", state="synced", dirty=0)
-        self.add_planned(
-            "archived", state="synced", dirty=0, payload={**capped, "archived": True}
-        )
-        self.add_planned(
-            "deleted",
-            state="synced",
-            dirty=0,
-            payload={**capped, "local_deleted": True},
-        )
-        self.add_planned("open", state="local")
-        seen: list[dict[str, object]] = []
-
-        def resync(_db: object, payloads: list[dict[str, object]]) -> set[str]:
-            seen.extend(payloads)
-            # A moved range on an archived or deleted unit must not be offered.
-            return {"moved", "archived", "deleted"}
-
-        state_service = WorkoutLibrarySyncStateService(
-            self.database_manager,
-            self.workout_library_sync_state_service._redactor,
-            KeyValueRepository(lambda: NOW),
-            lambda: NOW,
-            resync,
-        )
-        service = PlanningAuthorityService(
-            self.database_manager,
-            state_service,
-            self.planning_revision_service,
-            lambda: NOW,
-        )
-
-        entries = service.pending_plan_push_entries()
+    def test_only_live_units_intervals_icu_takes_no_part_in_are_skipped(self) -> None:
+        self.add_planned("run", payload={"sport": "Run"})
+        self.add_planned("ride", payload={"sport": "Ride"})
+        self.add_planned("indoor", payload={"sport": "VirtualRide"})
+        self.add_planned("gone", payload={"sport": "Run", "local_deleted": True})
 
         self.assertEqual(
-            {"moved", "open"}, {entry["library_workout_id"] for entry in entries}
-        )
-        self.assertEqual(
-            {"moved", "steady"}, {str(payload["local_id"]) for payload in seen}
-        )
-        self.assertEqual({"synced"}, {payload["sync_status"] for payload in seen})
-        # Without the threshold move the synced unit is not pending.
-        self.assertEqual(
-            ["open"],
-            [
-                entry["library_workout_id"]
-                for entry in self.service.pending_plan_push_entries()
-            ],
+            {"run", "ride"},
+            self.service.intervals_skipped(
+                ["run", "ride", "indoor", "gone", "unknown"]
+            ),
         )
 
     def test_missing_or_empty_ids_select_only_open_planning_states(self) -> None:

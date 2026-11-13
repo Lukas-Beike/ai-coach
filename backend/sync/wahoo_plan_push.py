@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind, RemoteLinkState
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
@@ -129,9 +129,7 @@ class WahooPlanPushService:
             link = _REMOTE_LINKS.get(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, WAHOO_ID
             )
-            exists = db.execute(
-                "SELECT 1 FROM workout_library WHERE local_id=?", (local_id,)
-            ).fetchone()
+            exists = planning_store.library_row(db, local_id)
         if link is None:
             return {"library_workout_id": local_id, "status": "already_synced"}
         if exists:
@@ -162,9 +160,7 @@ class WahooPlanPushService:
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         local_id = item["library_workout_id"]
         with self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload FROM workout_library WHERE local_id=?", (local_id,)
-            ).fetchone()
+            row = planning_store.library_row(db, local_id)
         if not row:
             return {
                 "library_workout_id": local_id,

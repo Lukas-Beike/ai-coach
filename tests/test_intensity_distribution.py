@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
+from backend.activities.workout_load import WorkoutEstimate
 from backend.activities.zone_settings import ZoneSettings
 from backend.planning import intensity_distribution as dist
 from backend.planning import plan_checks
@@ -18,7 +18,7 @@ from backend.planning.planned_unit_load import (
     estimate_planned_unit,
 )
 
-THRESHOLDS = AthleteThresholds(ZoneSettings(ftp=250, lthr=170, max_hr=190))
+THRESHOLDS = ZoneSettings(ftp=250, lthr=170, max_hr=190)
 TODAY = date(2026, 11, 2)
 
 

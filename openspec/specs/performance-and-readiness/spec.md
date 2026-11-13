@@ -28,7 +28,7 @@ The system SHALL compose current body, cycling/running thresholds, VO2max, maxim
 Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/canonical_current.py:read_current_inputs`; `tests/test_performance_current_metrics.py:test_garmin_priority_and_metric_shape`, `tests/test_performance_current_metrics.py:test_invalid_values_and_inputs_are_not_mutated`. The eFTP scenario is verified by `tests/test_performance_current_metrics.py:test_stored_eftp_is_not_a_current_metric` and `tests/test_performance_canonical_load_metrics.py:EftpTests`. The Intervals.icu scenario is verified by `tests/test_performance_canonical_current_metrics.py:IntervalsValuesAreNotCurrentTests`.
 
 ### Requirement: LT1 per sport with the origin of each value
-The current performance thresholds SHALL carry `first_thresholds`: LT1 of running and cycling, each value with its origin (`measured`, `estimated` for the adopted DFA-α1 value, `zone_2`, `fixed_share`), the same in the public state and for the Coach. A measured or adopted share and the top of zone 2 SHALL win over the fixed shares, which are product defaults the athlete decided (2026-11-12, #2427).
+The current performance thresholds SHALL carry `first_thresholds`: LT1 of running and cycling, each value with its origin (`measured`, `estimated` for the adopted DFA-α1 value, `own_sessions`, `zone_2`, `fixed_share`), the same in the public state and for the Coach. A measured or adopted share, then own sessions (pace and power only, M9), then the top of zone 2 SHALL win over the fixed shares the athlete decided (2026-11-12, #2427).
 
 #### Scenario: No measured or adopted value and no zones
 - **WHEN** the profile holds no first threshold and the sport has no pace or power zones
@@ -38,7 +38,11 @@ The current performance thresholds SHALL carry `first_thresholds`: LT1 of runnin
 - **WHEN** a measured or adopted share is stored, or heart-rate, pace or power zones are in effect
 - **THEN** the heart rate uses that share with its origin, else the top of the heart-rate zone 2, and the pace or power the top of their zone 2 (`zone_2`); the other values keep the fixed share.
 
-Evidence: `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`, `tests/test_coach_domain_sections.py:test_source_policy_texts_are_built_from_labels`.
+#### Scenario: Own steady sessions at the LT1 heart rate
+- **WHEN** at least three ride or run sessions of the last 60 days hold at least 10 steady minutes (coefficient of variation at most 0.15) in the 10 bpm band of 5 bpm bins nearest to the sport's LT1 heart rate
+- **THEN** LT1 run pace is 1000 s divided by the median of their speeds in the band (outdoor sessions before indoor ones for both sports), and LT1 ride power the median of their power, each paired with the mean power of the minute before the heart rate; the origin is `own_sessions`, shown as an estimate; with fewer sessions the zone 2 top or the fixed share applies.
+
+Evidence: `backend/performance/pace_at_hr.py:output_at_heart_rate`, `backend/performance/pace_at_hr.py:power_at_heart_rate`, `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_pace_at_hr.py:OutputAtHeartRateTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`, `tests/test_coach_domain_sections.py:test_source_policy_texts_are_built_from_labels`.
 
 ### Requirement: Load rollups and the local current load
 The system SHALL calculate current/previous 7- and 30-day completed-activity rollups from known completed loads. The current load block (`current_load` `ctl`, `atl`, `tsb`) SHALL be the latest valued day of the local fitness, fatigue and form (M7); stored Intervals.icu CTL, ATL and form SHALL NOT be shown. Activity-derived load SHALL not be presented as Garmin's device-reported acute load.
@@ -328,7 +332,7 @@ Every local performance or recovery method with a planned or offered physiologic
 - **WHEN** a method family is recorded as deferred in the register (passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance, HRV-based recommendations)
 - **THEN** it has no card and produces no output until its own work package adds one.
 
-Evidence: `docs/performance-methods/README.md` and the eight method cards M1 to M8; `tests/test_performance_method_cards.py`.
+Evidence: `docs/performance-methods/README.md` and the nine method cards M1 to M9; `tests/test_performance_method_cards.py`.
 
 ### Requirement: Claim lists bound physiological statements
 API, UI and Coach output SHALL NOT make statements that the method's card forbids. A physiological interpretation SHALL stay blocked until the independent review recorded on its card releases it; descriptive statements that the card allows MAY be shown before that review.
@@ -720,6 +724,7 @@ Detailed contract:
 | Session load and intensity factor (TSS scale) | `local-tss-load` v7 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
 | Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v4 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
+| LT1 pace and power from own steady sessions | `pace-at-heart-rate-v2`, `power-at-heart-rate-v1` | LT1 origin `own_sessions`; none with fewer than 3 steady sessions in the band | read at the LT1 heart rate in effect, never an LT1 heart rate; estimate, not a laboratory LT1; no zone change | M9, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 

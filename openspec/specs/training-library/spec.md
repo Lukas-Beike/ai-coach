@@ -248,9 +248,9 @@ Intervals planned-calendar execution and recovery are specified in TL11-TL15; no
 ### Requirement: TL11 Planned-calendar upsert identity and in-flight local changes
 The system SHALL use stable Intervals planned-event identity for explicit dated-unit pushes, validate the returned event before marking the unchanged local unit synced, and preserve newer local content and recoverable remote identity when the upload races with local changes or result validation fails.
 
-#### Scenario: Strength units go as notes
-- **WHEN** a strength unit is pushed to the Intervals.icu calendar
-- **THEN** it is sent as a `NOTE` event (Intervals.icu forwards a workout event to Garmin as one unnamed step); only a note this app sent (external id `intervals-coach-<local_id>`) counts as a planned event, other notes never do. The structured strength workout reaches the watch only through the direct Garmin push.
+#### Scenario: Only indoor rides go to the calendar
+- **WHEN** a planned unit is selected for the Intervals.icu calendar
+- **THEN** only an indoor or virtual ride is written; a run, strength or outdoor ride unit is skipped without a remote write, and its earlier event, if any, stays untouched (#2419). Runs and strength reach the watch through the direct Garmin push, outdoor rides the head unit through the Wahoo plan push.
 
 #### Scenario: Create and later update
 - **WHEN** an explicit normal push exports an active planned unit and a later push retries or updates it
@@ -492,6 +492,10 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **WHEN** a unit or template sets a focus allowed for its sport (run and ride: recovery, easy, endurance, long, tempo, threshold, vo2max, anaerobic, race, test; ride also sweet_spot; strength: legs, upper, full_body, core, plyometrics, mobility with an optional light, moderate or heavy strength intensity)
 - **THEN** it is stored in the unit payload, shown as a chip, editable per unit and recorded in change history and backups.
 
+#### Scenario: Focus control in the calendar
+- **WHEN** the athlete opens a local planned run, ride or strength unit
+- **THEN** the card offers "Art der Einheit" (and "Intensität" for strength) and saves a change at once with `POST /api/planned-units/{id}/focus {session_focus, strength_intensity}`, showing "Gespeichert" and the new chip, or restoring the previous selection with the error; a derived value is prefixed "≈" and a button "≈ <label> übernehmen" sets it
+
 #### Scenario: Invalid focus
 - **WHEN** a focus or strength intensity does not exist for the unit's sport
 - **THEN** the write fails with `invalid_session_focus`; changing a unit's sport drops its previous focus unless the request sets one.
@@ -513,7 +517,7 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
 - **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics); a second run changes nothing.
 
-Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
+Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`, `public/plan-views.js:plannedFocusForm`, `public/plan-views.js:focusChipSpec`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js:@responsive session focus chip and select on a planned unit`.
 
 ### Requirement: Heart-rate caps of easy run units
 A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap.py`) SHALL carry a local `hr_cap` of percentages only (cap, exported lower bound, source). Bpm SHALL be resolved from the threshold HR on the unit's date wherever it is read, checked or exported, and never stored. A Coach write with a wrong cap SHALL be blocked by the plan check `hr_cap_invalid`; planned units are never rewritten.
@@ -543,18 +547,14 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
 
 #### Scenario: Export to Garmin
-- **WHEN** a run unit with a cap is sent through the Intervals.icu calendar
-- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-highbpm` range resolved at export time (no zone number, no narrow band, no percent: a Garmin workout step cannot hold a percent of the lactate threshold HR, and Intervals.icu would resolve a percent with its own, possibly stale, threshold); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the text is sent unchanged.
-
-#### Scenario: Changed flag
-- **WHEN** only the threshold HR moved after a unit was synced
-- **THEN** the unit counts as changed (its resolved range differs from the one sent) and the calendar sync button offers it again; nothing is sent without that explicit sync.
+- **WHEN** a run unit with a cap is pushed to Garmin
+- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-high` bpm range resolved at push time (a Garmin workout step cannot hold a percent of the lactate threshold HR); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the push is refused before any write.
 
 #### Scenario: Card and analysis
 - **WHEN** a unit has a cap
 - **THEN** its card shows the percent first, then the currently resolved bpm and the source (the form "≤ <percent> % LSHF · <bpm> bpm · <source>"), and the post-session analysis judges the run's heart rate against the stored cap resolved for the unit's date (`planned_targets.heart_rate_cap`: mean, time above the cap, verdict within_target, upper_edge or above_cap), not against the zones.
 
-Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/hr_cap_sync.py`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
+Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/run_lthr.py:RunLthr.resync`, `backend/planning/push_state.py:run_document_digest`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
 
 ### Requirement: Structured strength units
 Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.
@@ -599,7 +599,7 @@ A planned unit that a Coach plan tool creates or whose structure it changes SHAL
 
 #### Scenario: Ad-hoc unit
 - **WHEN** a Coach plan write creates a unit without `template_id`, or with an id that names no undated library template
-- **THEN** the write is rolled back with a `template_missing` finding that tells the model to plan from `list_workout_library`, or to propose a new template to the athlete and create it with `manage_training_templates` before planning; no unit is created without a template.
+- **THEN** the write is rolled back with a `template_missing` finding that tells the model to plan from `list_workout_library`, or, when no template fits, to create one with `manage_training_templates` before planning: in the same turn for a clearly described unit (athlete decision 2026-11-13, #2512), after asking only when the request leaves the unit unclear; no unit is created without a template.
 
 #### Scenario: Scaled variant
 - **WHEN** a unit keeps its template's exercises or steps in order and changes only sets, reps, kg, %1RM, RPE, RIR, rest, warm-up, step durations or targets, or the unit duration
@@ -622,3 +622,13 @@ A planned unit that a Coach plan tool creates or whose structure it changes SHAL
 - **THEN** one line "Vorlage: <template name>" appears under its title; the calendar tile is unchanged.
 
 Evidence: `backend/planning/plan_checks.py:template_conformance`, `backend/planning/plan_guard_service.py:PlanGuardService.findings`, `backend/planning/library_plan_service.py`, `backend/planning/adaptive.py:adaptive_recovery_replacement`, `public/plan-views.js`; `tests/test_plan_checks.py`, `tests/test_plan_guard_service.py`, `tests/test_coach_tool_coverage.py`, `tests/test_adaptive_replan_apply_service.py`.
+
+### Requirement: Library view
+
+The Bibliothek SHALL list the undated, non-archived workouts grouped by sport in closed groups with their count, 100 per page with "Weitere Bibliothekseinheiten laden", and SHALL offer no create, edit, move or delete control; such changes go through the Coach. Without a workout it SHALL read "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst."
+
+#### Scenario: Paging
+- **WHEN** "Weitere Bibliothekseinheiten laden" is pressed
+- **THEN** the next page is appended to the list without duplicates by id
+
+Evidence: `public/plan-views.js:renderLibrary`; `public/coach.js:appendHistoryPageButton`; `e2e/ux-polish.spec.js:the calendar has a refresh button and the library rows show a count and a chevron @responsive`.

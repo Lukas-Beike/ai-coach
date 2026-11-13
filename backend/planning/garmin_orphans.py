@@ -12,15 +12,16 @@ candidate. The explicit Garmin sync removes the listed orphans.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from datetime import date
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
+from backend.db import planning_store
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.leftovers import MAX_CLEANUP, GarminOrphan, cap, nearest_first
 from backend.planning.push_state import pushable_fingerprint
+from backend.planning.repository import parse_payload
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import GarminExercise
 
@@ -64,16 +65,10 @@ def find_orphans(
     """Return up to ``limit`` orphans, nearest day first, and the total count."""
     orphans: list[GarminOrphan] = []
     remembered = remembered_exercises(db)
-    for row in db.execute(
-        "SELECT l.local_id AS link_id, p.local_id AS unit_id, p.payload, p.tombstone "
-        "FROM remote_links l LEFT JOIN planned_units p ON p.local_id = l.local_id "
-        "WHERE l.provider=? AND l.entity_kind=?",
-        (ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value),
-    ).fetchall():
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError:
-            payload = None
+    for row in planning_store.garmin_link_rows(
+        db, ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value
+    ):
+        payload = parse_payload(row["payload"])
         if _is_orphan(row, payload, remembered):
             name, day = _label(payload)
             orphans.append(GarminOrphan(row["link_id"], name, day))

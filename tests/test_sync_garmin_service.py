@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
-from support import make_config
+from support import garmin_services, make_config
 
 from backend.config import Config
 from backend.errors import AppError
+from backend.sync import garmin
 from backend.sync.executor import GarminSyncJobOwner
 from backend.sync.garmin_service import (
     GarminMorningRemoteReader,
@@ -937,14 +938,13 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
 
 class GarminCheckFixtureTests(unittest.TestCase):
     def test_fixture_mode_never_reaches_the_sdk(self):
-        from backend.sync.garmin_assembly import GarminAssembly
-
-        assembly = object.__new__(GarminAssembly)
         loader = Mock()
         loader.path.return_value = "/synthetic/fixture.json"
-        assembly.fixture_loader = lambda: loader
-        with self.assertRaises(AppError) as context:
-            assembly.check_stored_login()
+        with (
+            patch.object(garmin, "GarminFixtureLoader", return_value=loader),
+            self.assertRaises(AppError) as context,
+        ):
+            garmin_services().check_stored_login()
         self.assertEqual(context.exception.reason, "check_unsupported")
 
 

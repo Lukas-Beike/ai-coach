@@ -216,7 +216,11 @@ class PlanningRowsTests(unittest.TestCase):
             ):
                 db.execute(
                     "INSERT INTO planned_units VALUES (?, NULL, ?, 1, ?, NULL, '', 'old')",
-                    (local_id, _raw({**UNIT, "date": day}), state),
+                    (
+                        local_id,
+                        _raw({**UNIT, "type": "VirtualRide", "date": day}),
+                        state,
+                    ),
                 )
         self.state = WorkoutLibrarySyncStateService(
             self.manager, Mock(), KeyValueRepository(lambda: NOW), lambda: NOW

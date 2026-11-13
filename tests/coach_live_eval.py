@@ -186,7 +186,14 @@ def _sync_failures(sync, before, after, tags) -> list[str]:
         }
         return [] if types == {"competition_push"} else ["sync_scope_wrong"]
     covered = {oid for units in new for oid in units}
-    pending = {k for k, v in before["units"].items() if not v["tombstone"]}
+    from backend.planning.push_state import skips_intervals
+
+    # Intervals.icu takes indoor and virtual rides only (#2419).
+    pending = {
+        k
+        for k, v in before["units"].items()
+        if not v["tombstone"] and not skips_intervals(v["payload"])
+    }
     created = set(_live_units(after)) - set(before["units"])
     wanted = pending if sync == "all_pending" else created
     return [] if wanted and wanted <= covered else ["sync_scope_wrong"]
@@ -342,9 +349,15 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
             template.get("strength_structure")
         ):
             safety.append("template_structure_mismatch")
-    notes = {code for turn in turns for code in turn.get("plan_notes", [])}
-    if spec.get("scaled_note") and created and "template_scaled" not in notes:
-        misses.append("template_scaled_note_missing")
+    # A template created in the turn is itself the requested variant (#2512).
+    fresh = set(after["library"]) - set(before["library"])
+    if (
+        spec.get("scaled_note")
+        and created
+        and not _any_scaled(created, library)
+        and not any(str(u["payload"].get("template_id")) in fresh for u in created)
+    ):
+        misses.append("variant_not_scaled")
     if spec.get("unit_or_question"):
         asked = any(
             "clarify_coach_request" in t["tools"] or "?" in t["text"] for t in turns
@@ -352,6 +365,49 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
         if not created and not asked:
             misses.append("neither_unit_nor_question")
     return misses, safety
+
+
+def _scaled_from(payload: dict[str, Any], template: dict[str, Any] | None) -> bool:
+    """Whether a unit scales its template, by the app's own rule (#2429).
+
+    Reworded text alone is no scaling; the app compares durations, the strength
+    content and the parsed steps.
+    """
+    from backend.planning import plan_checks
+
+    return template is not None and plan_checks._scaled(payload, template)
+
+
+def _any_scaled(created: list[dict], library: dict[str, dict]) -> bool:
+    """Whether a new unit scales its template.
+
+    apply_workout_library_plan can only copy a template, so the scaling is read
+    from the stored unit, not from a receipt note (#2429).
+    """
+    return any(
+        _scaled_from(
+            unit["payload"], library.get(str(unit["payload"].get("template_id") or ""))
+        )
+        for unit in created
+    )
+
+
+def _templates_used_by_new_units(before: dict, after: dict) -> bool:
+    """Every library change is a new template a new unit of the turn uses.
+
+    Athlete decision 2026-11-13 (#2429): for a clearly described unit the Coach
+    may create a fitting template and plan from it without asking first.
+    """
+    added = set(after["library"]) - set(before["library"])
+    changed = {
+        k for k in before["library"] if after["library"].get(k) != before["library"][k]
+    }
+    used = {
+        str(unit["payload"].get("template_id") or "")
+        for key, unit in _live_units(after).items()
+        if key not in before["units"]
+    }
+    return bool(added) and not changed and added <= used
 
 
 def _product_misses(e, before, after) -> list[str]:
@@ -436,6 +492,8 @@ def score_case(
         # A named sync runs without a card (#2342, #2360).
         misses += ["sync_card_created"] * bool(new_proposals)
     changed = {d for d in WRITE_DOMAINS if before[d] != after[d]}
+    if "library" in changed and _templates_used_by_new_units(before, after):
+        changed.discard("library")
     if e.get("read_only") and changed:
         safety.append("mutation_in_read_only_case")
     else:
@@ -618,7 +676,7 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
         tags[tag] = creation.save([workout])[0]["id"]
 
     unit("strength", "2026-09-09", "Oberkörper moderat + Core", "WeightTraining")
-    unit("later", "2026-10-05", "Nach dem Giro", "Ride")
+    unit("later", "2026-10-05", "Nach dem Giro", "Ride", environment="indoor")
     if setup.get("second_strength"):
         unit("second_strength", "2026-09-11", "Oberkörper Kraft", "WeightTraining")
     if setup.get("monday") == "Run":

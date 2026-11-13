@@ -3,21 +3,16 @@
 import sqlite3
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from support import temp_database
 
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync import wiring
 from backend.sync.jobs import JobValidationError, SyncJobStore, validate_job_request
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.queue_assembly import (
-    SyncJobQueueAssembly,
-    SyncQueuePersistence,
-    SyncQueuePolicy,
-    SyncQueueWorker,
-)
 
 
 class SyncQueueFixtureMixin:
@@ -186,35 +181,29 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         return caught.exception
 
 
-class SyncQueueAssemblyTests(SyncQueueFixtureMixin, unittest.TestCase):
-    def _assembly(self):
-        return SyncJobQueueAssembly(
-            dependencies=SyncJobQueueAssembly.Inputs(
-                persistence=SyncQueuePersistence(
-                    database_manager=lambda: self.manager,
-                    now=lambda: self.now,
-                    current_time=lambda: None,
-                    uuid_factory=lambda: "unused",
-                ),
-                worker=SyncQueueWorker(
-                    event_buffer=self.publisher,
-                    maintenance_gate=self.maintenance_gate,
-                    wake_event=lambda: self.wake_event,
-                    daily_sync_marker_service=lambda: self.daily_sync_markers,
-                ),
-                policy=SyncQueuePolicy(
-                    all_sync_days=-1,
-                    redact_text=str,
-                    logger=Mock(),
-                    retry_base_seconds=1,
-                    retry_max_seconds=2,
-                ),
+class SyncQueueBuilderTests(SyncQueueFixtureMixin, unittest.TestCase):
+    def test_builder_builds_a_service_over_the_shared_store(self):
+        ctx = Mock(name="context")
+        ctx.database.return_value = self.manager
+        ctx.ids = lambda: "unused"
+        ctx.maintenance = self.maintenance_gate
+        with (
+            patch.object(wiring.runtime_events, "STATE_EVENT_BUFFER", self.publisher),
+            patch.object(
+                wiring.sync_worker,
+                "shared_sync_job_wake_event",
+                return_value=self.wake_event,
+            ),
+        ):
+            services = wiring.build_sync_job_queue(
+                ctx,
+                all_sync_days=-1,
+                daily_sync_markers=lambda: self.daily_sync_markers,
             )
-        )
 
-    def test_assembly_builds_a_service_over_the_shared_store(self):
-        job = self._assembly().service().enqueue("garmin", "refresh", {})
+        job = services.service().enqueue("garmin", "refresh", {})
 
+        self.assertTrue(self.wake_event.is_set())
         self.assertEqual(job["provider"], "garmin")
         self.assertEqual(job["status"], "queued")
 

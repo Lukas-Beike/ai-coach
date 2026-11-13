@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-from backend.canonical.vocabulary import INTERVALS_ID
+from backend.canonical.vocabulary import INTERVALS_ID, ProviderId
+from backend.errors import AppError
+from backend.sync.garmin_personal_status import SDK_REQUIRED_MESSAGE
 from backend.sync.queue import SyncJobQueueService
 
 _NOTHING_QUEUED = (
@@ -16,8 +19,14 @@ _NOTHING_QUEUED = (
 class PlanPushCommandService:
     """Chunk authorized plan pushes and enqueue their provider jobs."""
 
-    def __init__(self, queue_service: SyncJobQueueService) -> None:
+    def __init__(
+        self,
+        queue_service: SyncJobQueueService,
+        garmin_writable: Callable[[], bool] = lambda: True,
+    ) -> None:
         self._queue_service = queue_service
+        # False without an SDK login: the Personal API key cannot write.
+        self._garmin_writable = garmin_writable
 
     def enqueue(
         self,
@@ -28,6 +37,8 @@ class PlanPushCommandService:
         repair: bool = False,
         provider: str = INTERVALS_ID,
     ) -> dict[str, Any]:
+        if provider == ProviderId.GARMIN.value and not self._garmin_writable():
+            raise AppError(409, SDK_REQUIRED_MESSAGE, reason="garmin_sdk_required")
         jobs: list[dict[str, Any]] = []
         for offset in range(0, len(entries), 28):
             chunk = entries[offset : offset + 28]

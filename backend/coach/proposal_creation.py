@@ -26,6 +26,7 @@ from backend.coach.proposal_validation import (
     validated_coach_action_preview_input,
 )
 from backend.coach.write_gate import garmin_effects
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import CompetitionRepository, PlanAdjustmentRepository
 from backend.errors import AppError
@@ -33,6 +34,7 @@ from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
+from backend.planning.repository import parse_payload
 from backend.planning.workout_export import past_export_horizon
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
@@ -366,18 +368,13 @@ def _card_authorized_intent(
             entries, require_hash=True
         )
     )
-    placeholders = ",".join("?" for _ in identifiers)
     tokens: set[str] = set()
     with database_manager.reader() as db:
-        for kind, table in (
-            ("planned_unit", "planned_units"),
-            ("library_workout", "workout_library"),
-        ):
-            rows = db.execute(
-                f"SELECT local_id FROM {table} WHERE local_id IN ({placeholders})",
-                tuple(identifiers),
-            ).fetchall()
-            tokens.update(f"{kind}:{row['local_id']}" for row in rows)
+        for local_id in identifiers:
+            if planning_store.planned_unit_row(db, local_id):
+                tokens.add(f"planned_unit:{local_id}")
+            if planning_store.library_row(db, local_id):
+                tokens.add(f"library_workout:{local_id}")
     found = {token.partition(":")[2] for token in tokens}
     if found != set(identifiers):
         raise AppError(
@@ -403,7 +400,8 @@ def _approved_plan_sync_arguments(
     approved = dict(arguments)
     if approved.get("repair") is True:
         return approved
-    if approved.get("entries"):
+    # A turn whose units Intervals.icu all skipped still removes their leftovers.
+    if approved.get("entries") or intent.get("_skipped_sync_entry_ids"):
         return _with_intervals_leftovers(approved, intent, database_manager, today)
     identifiers = [
         str(value)
@@ -416,27 +414,10 @@ def _approved_plan_sync_arguments(
     )
     if not all_pending and not identifiers:
         return approved
-    if all_pending:
-        query = (
-            "SELECT local_id, payload FROM workout_library "
-            "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
-            "UNION ALL SELECT local_id, payload FROM planned_units "
-            "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
-            f"ORDER BY local_id LIMIT {_MAX_REMOTE_APPROVAL_DETAILS + 1}"
-        )
-        values: tuple[str, ...] = ()
-    else:
-        placeholders = ",".join("?" for _ in identifiers)
-        query = (
-            "SELECT local_id, payload FROM workout_library WHERE local_id IN ("
-            + placeholders
-            + ") UNION ALL SELECT local_id, payload FROM planned_units WHERE local_id IN ("
-            + placeholders
-            + f") ORDER BY local_id LIMIT {_MAX_REMOTE_APPROVAL_DETAILS + 1}"
-        )
-        values = (*identifiers, *identifiers)
     with database_manager.reader() as db:
-        rows = db.execute(query, values).fetchall()
+        rows = planning_store.push_candidate_rows(
+            db, None if all_pending else identifiers, _MAX_REMOTE_APPROVAL_DETAILS + 1
+        )
     _check_approval_row_limit(rows)
     approved["entries"] = [
         {
@@ -453,11 +434,7 @@ def _approved_plan_sync_arguments(
 
 
 def _payload_date(row: Any) -> str:
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except TypeError, ValueError:
-        return ""
-    return str(payload.get("date") or "") if isinstance(payload, dict) else ""
+    return str((parse_payload(row["payload"]) or {}).get("date") or "")
 
 
 # The Coach sync scopes that also remove the leftovers of hidden units.
@@ -482,16 +459,17 @@ def _with_intervals_leftovers(
         intent.get("_sync_all_pending")
     ):
         return approved
-    entries = [entry for entry in approved["entries"] if isinstance(entry, dict)]
+    given = approved.get("entries") or []
+    entries = [entry for entry in given if isinstance(entry, dict)]
     chosen = {
         str(entry.get("library_workout_id") or entry.get("local_id") or "")
         for entry in entries
     }
     with database_manager.reader() as db:
         orphans, _total = find_intervals_orphans(db, today)
-    room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(approved["entries"])
+    room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(given)
     extra = [item for item in orphans if item.local_id not in chosen][: max(room, 0)]
-    return {**approved, "entries": [*approved["entries"], *sync_entries(extra)]}
+    return {**approved, "entries": [*given, *sync_entries(extra)]}
 
 
 def _remote_write_approval_details(
@@ -569,14 +547,8 @@ def _approved_garmin_arguments(
 def _planned_rows(
     identifiers: list[str], database_manager: DatabaseManager
 ) -> list[Any]:
-    placeholders = ",".join("?" for _ in identifiers)
     with database_manager.reader() as db:
-        return db.execute(
-            "SELECT local_id, payload FROM planned_units WHERE local_id IN ("
-            + placeholders
-            + ") ORDER BY local_id",
-            tuple(identifiers),
-        ).fetchall()
+        return planning_store.planned_unit_rows_by_ids(db, identifiers)
 
 
 def _garmin_approval_details(
@@ -626,16 +598,13 @@ def _plan_sync_approval_details(
     repair_period = intent.get("_repair_period")
     if arguments.get("repair") is True and isinstance(repair_period, dict):
         with database_manager.reader() as db:
-            rows = db.execute(
-                "SELECT local_id, payload FROM planned_units "
-                "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ? "
-                f"ORDER BY local_id LIMIT {_MAX_REMOTE_APPROVAL_DETAILS + 1}",
-                (repair_period.get("start"), repair_period.get("end")),
-            ).fetchall()
+            rows = planning_store.planned_unit_rows_in_period(
+                db, repair_period.get("start"), repair_period.get("end")
+            )[: _MAX_REMOTE_APPROVAL_DETAILS + 1]
         _check_approval_row_limit(rows)
         return _plan_workout_details(rows)
     entries = arguments.get("entries") or []
-    identifiers = [
+    identifiers: list[str] | None = [
         str(item.get("local_id") or item.get("library_workout_id") or "")
         for item in entries
         if isinstance(item, dict)
@@ -644,34 +613,19 @@ def _plan_sync_approval_details(
         intent.get("_sync_all_pending")
         or (intent.get("request") or {}).get("sync_scope") == "all_pending"
     ):
-        query = (
-            "SELECT local_id, payload FROM workout_library "
-            "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
-            "UNION ALL SELECT local_id, payload FROM planned_units "
-            "WHERE sync_state IN ('local', 'sync_error', 'remote_missing', 'conflict') "
-            f"ORDER BY local_id LIMIT {_MAX_REMOTE_APPROVAL_DETAILS + 1}"
-        )
-        with database_manager.reader() as db:
-            rows = db.execute(query).fetchall()
-    else:
-        if not identifiers:
-            identifiers = [
-                str(value)
-                for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
-                for value in intent.get(key) or []
-            ]
+        identifiers = None
+    elif not identifiers:
+        identifiers = [
+            str(value)
+            for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
+            for value in intent.get(key) or []
+        ]
         if not identifiers:
             return []
-        placeholders = ",".join("?" for _ in identifiers)
-        query = (
-            "SELECT local_id, payload FROM workout_library WHERE local_id IN ("
-            + placeholders
-            + ") UNION ALL SELECT local_id, payload FROM planned_units WHERE local_id IN ("
-            + placeholders
-            + f") ORDER BY local_id LIMIT {_MAX_REMOTE_APPROVAL_DETAILS + 1}"
+    with database_manager.reader() as db:
+        rows = planning_store.push_candidate_rows(
+            db, identifiers, _MAX_REMOTE_APPROVAL_DETAILS + 1
         )
-        with database_manager.reader() as db:
-            rows = db.execute(query, (*identifiers, *identifiers)).fetchall()
     _check_approval_row_limit(rows)
     return _label_intervals_removals(
         _plan_workout_details(rows), database_manager, today

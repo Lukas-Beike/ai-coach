@@ -6,6 +6,7 @@ import json
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -33,9 +34,12 @@ from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.push_state import (
     attach_push_state,
+    garmin_baselines,
     garmin_fingerprint,
     pushable_fingerprint,
+    run_sent_key,
 )
+from backend.planning.run_lthr import RunLthr
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import (
@@ -183,9 +187,23 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(list(range(1, 9)), orders)
         self.assertEqual(
             [
-                ("warmup", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
-                ("interval", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
-                ("interval", "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP"),
+                (
+                    "warmup",
+                    "BENCH_PRESS",
+                    "INCLINE_BARBELL_BENCH_PRESS",
+                    12.0,
+                    1.0,
+                    20.0,
+                ),
+                (
+                    "interval",
+                    "BENCH_PRESS",
+                    "INCLINE_BARBELL_BENCH_PRESS",
+                    8.0,
+                    3.0,
+                    40.0,
+                ),
+                ("interval", "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP", 10.0, 4.0, None),
             ],
             mapping.workout_exercise_steps(document),
         )
@@ -254,11 +272,61 @@ class MappingTests(unittest.TestCase):
         self.assertNotIn("weightValue", plank["workoutSteps"][0])
         self.assertEqual(
             [
-                ("interval", "SQUAT", "BARBELL_BACK_SQUAT"),
-                ("interval", "PLANK", "SIDE_PLANK"),
+                ("interval", "SQUAT", "BARBELL_BACK_SQUAT", 5.0, 4.0, 80.0),
+                ("interval", "PLANK", "SIDE_PLANK", 1.0, 2.0, None),
             ],
             mapping.workout_exercise_steps(document),
         )
+
+    def test_the_read_back_compares_reps_sets_and_weight_in_kilograms(self) -> None:
+        sent = mapping.strength_workout(name="Kraft", description="", exercises=[SQUAT])
+
+        def read_back(change: Any) -> dict[str, Any]:
+            saved = json.loads(json.dumps(sent))
+            group = saved["workoutSegments"][0]["workoutSteps"][0]
+            change(group, group["workoutSteps"][0])
+            return saved
+
+        def unit(key: str, value: float) -> Any:
+            def change(_group: Any, step: Any) -> None:
+                step["weightValue"] = value
+                step["weightUnit"] = {"unitKey": key}
+
+            return change
+
+        def drop_weight(_group: Any, step: Any) -> None:
+            del step["weightValue"]
+
+        same = [
+            lambda g, s: None,
+            unit("pound", 176.4),
+            unit("kilogram", 80.04),
+            unit("stone", 12.6),
+            lambda g, s: s.pop("weightUnit"),
+        ]
+        different = [
+            lambda g, s: g.update(numberOfIterations=3),
+            lambda g, s: s.update(endConditionValue=6),
+            unit("kilogram", 60),
+            unit("kilogram", 80000),
+            unit("pound", 80),
+            drop_weight,
+        ]
+        for change in same:
+            self.assertTrue(mapping.exercise_steps_match(read_back(change), sent))
+        for change in different:
+            self.assertFalse(mapping.exercise_steps_match(read_back(change), sent))
+
+    def test_a_pound_read_back_of_a_half_step_weight_still_matches(self) -> None:
+        # 2.25 kg read back as 4.9604 lb lies on the other side of a 0.1 kg rounding.
+        sent = mapping.strength_workout(
+            name="Kraft", description="", exercises=[{**SQUAT, "kg": 2.25}]
+        )
+        saved = json.loads(json.dumps(sent))
+        step = saved["workoutSegments"][0]["workoutSteps"][0]["workoutSteps"][0]
+        step.update(weightValue=4.9604, weightUnit={"unitKey": "pound"})
+
+        self.assertTrue(mapping.exercise_steps_match(saved, sent))
 
     def test_an_unresolved_exercise_blocks_the_whole_workout(self) -> None:
         with self.assertRaises(mapping.GarminStrengthMappingError) as raised:
@@ -671,6 +739,76 @@ class PushTests(PushHarness):
         self.assertEqual("error", result["status"])
         self.assertIn("Termin-ID", result["results"][0]["error"])
         self.assertIsNone(self.link(U1).baseline_hash)
+
+    def test_a_schedule_without_id_is_reused_by_the_retry(self) -> None:
+        digest = self.insert(U1, UNIT)
+        original = self.garmin.schedule_workout
+        lookup = self.garmin.get_scheduled_workouts_by_period
+
+        def no_id(workout_id, day):
+            original(workout_id, day)
+            return {}
+
+        self.garmin.schedule_workout = no_id  # type: ignore[method-assign]
+        self.garmin.get_scheduled_workouts_by_period = lambda start, end: []  # type: ignore[method-assign]
+        self.assertEqual("error", self.push((U1, digest))["status"])
+        self.assertIsNone(self.link(U1).remote_external_id)
+
+        self.garmin.get_scheduled_workouts_by_period = lookup  # type: ignore[method-assign]
+        self.assertEqual("ok", self.push((U1, digest))["status"])
+
+        # The retry found the earlier schedule instead of adding a second one.
+        self.assertEqual({"502": ("501", "2026-11-09")}, self.garmin.schedules)
+        self.assertEqual("502", self.link(U1).remote_external_id)
+
+    def test_a_changed_read_back_is_never_scheduled(self) -> None:
+        def altered(change):
+            plain = FakeGarmin.upload_workout
+
+            def upload(document):
+                saved = plain(self.garmin, document)
+                stored = self.garmin.workouts[str(saved["workoutId"])]
+                group = stored["workoutSegments"][0]["workoutSteps"][0]
+                change(group, group["workoutSteps"][0])
+                return saved
+
+            return upload
+
+        def drop_weight(_group, step):
+            del step["weightValue"]
+
+        digest = self.insert(U1, UNIT)
+        for name, change in (
+            ("reps", lambda g, s: s.update(endConditionValue=6.0)),
+            ("sets", lambda g, s: g.update(numberOfIterations=3)),
+            ("weight", lambda g, s: s.update(weightValue=60.0)),
+            ("dropped weight", drop_weight),
+        ):
+            with self.subTest(name):
+                self.garmin.upload_workout = altered(change)  # type: ignore[method-assign]
+                result = self.push((U1, digest))
+                self.assertEqual("error", result["status"])
+                self.assertIn(
+                    "nicht vollständig übernommen", result["results"][0]["error"]
+                )
+                self.assertEqual({}, self.garmin.schedules)
+
+        # A weight in a unit this code does not know is not a mismatch.
+        self.garmin.upload_workout = altered(  # type: ignore[method-assign]
+            lambda g, s: s.update(weightValue=12.6, weightUnit={"unitKey": "stone"})
+        )
+        self.assertEqual("ok", self.push((U1, digest))["status"])
+
+    def test_without_an_sdk_login_nothing_is_started(self) -> None:
+        digest = self.insert(U1, UNIT)
+        self.service._write_ready = lambda: False
+
+        with self.assertRaises(AppError) as raised:
+            self.push((U1, digest))
+
+        self.assertEqual("garmin_sdk_required", raised.exception.reason)
+        self.assertEqual(0, self.sessions)
+        self.assertIsNone(self.link(U1))
 
     def test_blanked_exercise_names_are_deleted_and_never_scheduled(self) -> None:
         self.garmin.blank_names = True
@@ -1094,6 +1232,71 @@ class RunPushTests(PushHarness):
             ("501", "502", garmin_fingerprint(RUN)),
             (link.remote_id, link.remote_external_id, link.baseline_hash),
         )
+
+    def garmin_pending(self, unit: dict, *, local_id: str = U1) -> bool:
+        """Whether the calendar offers the pushed run to Garmin with today's zones."""
+        thresholds: Any = SimpleNamespace(
+            unavailable=False,
+            for_sport=lambda *_args: self.zones,
+        )
+        run_lthr = RunLthr(
+            lambda: thresholds, lambda: TODAY, KeyValueRepository(lambda: "")
+        )
+        payload: dict[str, Any] = {**unit, "local_id": local_id}
+        row = {"local_id": local_id, "payload": json.dumps(unit), "sync_state": "local"}
+        with self.database_manager.reader() as db:
+            resync = run_lthr.resync(db, [payload])
+            attach_push_state([(row, payload)], garmin_baselines(db), {}, resync)
+        return payload["push_pending"]["garmin"]
+
+    def test_a_threshold_move_marks_a_pushed_relative_run_pending_until_resent(
+        self,
+    ) -> None:
+        digest = self.insert(U1, RUN)
+        self.push((U1, digest))
+        self.assertFalse(self.garmin_pending(RUN))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+        self.assertTrue(self.garmin_pending(RUN))
+
+        self.push((U1, digest))
+        self.assertFalse(self.garmin_pending(RUN))
+
+    def test_a_threshold_move_marks_a_pushed_capped_run_pending(self) -> None:
+        unit = {
+            **RUN,
+            "description": "- 10m Z1 HR",
+            "session_focus": next(iter(HR_CAP_PERCENT)),
+            "hr_cap": CAP,
+        }
+        self.push((U1, self.insert(U1, unit)))
+        self.assertFalse(self.garmin_pending(unit))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+        self.assertTrue(self.garmin_pending(unit))
+
+    def test_a_threshold_move_leaves_an_absolute_only_run_alone(self) -> None:
+        self.push((U1, self.insert(U1, RUN_ABSOLUTE)))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+
+        self.assertFalse(self.garmin_pending(RUN_ABSOLUTE))
+
+    def test_a_run_pushed_without_a_recorded_digest_is_never_flagged(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+        with self.database_manager.unit_of_work() as db:
+            KeyValueRepository(lambda: "").delete(db, run_sent_key(U1))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+
+        self.assertFalse(self.garmin_pending(RUN))
+
+    def test_a_run_that_cannot_be_built_now_is_not_flagged_here(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+
+        self.zones = None
+
+        self.assertFalse(self.garmin_pending(RUN))
 
     def test_the_heart_rate_cap_is_sent_as_bpm(self) -> None:
         unit = {

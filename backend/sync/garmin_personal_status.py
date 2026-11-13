@@ -9,13 +9,25 @@ Garmin login. No projection here carries the key, a token or an error text.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from datetime import date
 from typing import Any, Final
+
+from backend.provider_credentials import (
+    GARMIN_TOKENSTORE_DISCONNECTED,
+    GARMIN_TOKENSTORE_STATE_KEY,
+    garmin_tokens_connected,
+)
 
 # Days before the entered expiry date from which the card warns.
 PERSONAL_KEY_WARNING_DAYS: Final = 14
 SDK_SKIPPED_KEY: Final = "garmin_sdk_skipped"
 SDK_SKIP_REASONS: Final = frozenset({"login_failed", "mfa_required"})
+SDK_REQUIRED_MESSAGE: Final = (
+    "Garmin-Workouts brauchen die Garmin-Anmeldung (SDK); "
+    "die Personal API kann nicht schreiben."
+)
 
 KEY_VALID: Final = "valid"
 KEY_EXPIRING: Final = "expiring"
@@ -72,3 +84,23 @@ def sdk_skipped_view(raw: object) -> dict[str, str] | None:
     if reason not in SDK_SKIP_REASONS or not isinstance(at, str):
         return None
     return {"reason": str(reason), "at": at}
+
+
+def sdk_write_ready(config: Any, read_value: Callable[[str], str | None]) -> bool:
+    """Whether the SDK login can write Garmin workouts; the Personal API key cannot.
+
+    True with stored tokens or credentials (not after a disconnect) while the
+    latest refresh recorded no SDK skip. A Garmin test file never writes.
+    """
+    if config.garmin_fixture_path:
+        return False
+
+    login = garmin_tokens_connected(read_value, config.garmin_tokenstore) or (
+        bool(config.garmin_email)
+        and read_value(GARMIN_TOKENSTORE_STATE_KEY) != GARMIN_TOKENSTORE_DISCONNECTED
+    )
+    try:
+        skipped = sdk_skipped_view(json.loads(read_value(SDK_SKIPPED_KEY) or "null"))
+    except TypeError, ValueError:
+        skipped = None
+    return login and skipped is None

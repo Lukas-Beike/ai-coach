@@ -89,7 +89,7 @@ class ServerPlanningTests(ServerTestCase):
                 "date": (
                     server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
-                "sport": "Run",
+                "sport": "VirtualRide",
                 "name": "Synthetic selected run",
                 "description": "- 30m 60% Synthetic easy session",
                 "duration_minutes": 30,

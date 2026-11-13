@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -11,15 +10,15 @@ from typing import Any
 from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.planning_fields import TEMPLATE_ID
+from backend.db import planning_store
 from backend.errors import (
     CORRUPT_LIBRARY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
     INVALID_PLANNING_DATE_ERROR,
     AppError,
 )
+from backend.planning.repository import parse_payload
 from backend.planning.sport import planned_stored_sport
-
-SELECT_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id = ?"
 
 
 class WorkoutLibraryPlanService:
@@ -77,14 +76,11 @@ class WorkoutLibraryPlanService:
         except (TypeError, ValueError) as exc:
             raise AppError(400, INVALID_PLANNING_DATE_ERROR) from exc
 
-        row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
+        row = planning_store.library_row(db, workout_id)
         if not row:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
-        try:
-            workout = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-        if not isinstance(workout, dict):
+        workout = parse_payload(row["payload"])
+        if workout is None:
             raise AppError(500, CORRUPT_LIBRARY_ERROR)
         return {"library_workout_id": workout_id, "date": plan_date, "workout": workout}
 

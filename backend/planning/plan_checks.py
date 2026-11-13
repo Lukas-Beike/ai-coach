@@ -609,8 +609,10 @@ _TEMPLATE_CONTENT = (
 _TEMPLATE_HINT = (
     "Plan only from the training library: set template_id to a template from "
     "list_workout_library and keep its exercises or steps in order; only sets, "
-    "reps, loads, durations and targets may change. If no template fits, propose "
-    "a new one to the athlete and create it with manage_training_templates first."
+    "reps, loads, durations and targets may change. If no template fits and the "
+    "request describes the unit clearly, create one with manage_training_templates "
+    "in the same turn and plan from it; ask the athlete first only when the "
+    "request leaves the unit unclear."
 )
 
 

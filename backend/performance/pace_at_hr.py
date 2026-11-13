@@ -148,10 +148,149 @@ def pace_at_heart_rate(
     }
 
 
+POWER_METHOD: Final = "power-at-heart-rate-v1"
+# The heart rate trails power by up to a minute: each heart-rate sample is
+# paired with the mean power of the minute before it.
+POWER_SMOOTH_S: Final = 60
+_SPEED_KEYS: Final = ("distance_m", "speed_sq")
+_POWER_KEYS: Final = ("work_j", "watts_sq")
+
+
+def _smoothed_power(
+    samples: Sequence[tuple[float, float, float]],
+) -> dict[float, tuple[float, float]]:
+    """(mean power of the last minute, own power) per sample start time.
+
+    The mean is zero (not counted) until the minute is covered, so the first
+    minute after a pause or a gap never pairs a restart surge with heart rate.
+    """
+    smoothed: dict[float, tuple[float, float]] = {}
+    total = weight = 0.0
+    first = 0
+    for time, width, watts in samples:
+        total += width * watts
+        weight += width
+        while samples[first][0] < time - POWER_SMOOTH_S:
+            total -= samples[first][1] * samples[first][2]
+            weight -= samples[first][1]
+            first += 1
+        full = weight >= POWER_SMOOTH_S * 0.9
+        smoothed[time] = (total / weight if full else 0.0, watts)
+    return smoothed
+
+
+def power_at_heart_rate(
+    activity: Mapping[str, Any], *, source_label: str = SESSION_SOURCES_LABEL
+) -> dict[str, Any]:
+    """Seconds, work and squared power per heart-rate bin of one ride.
+
+    After a 10-minute warm-up, moving gap-free samples with pedalling (own power
+    above zero) count; power is the mean of the minute before each heart-rate
+    sample. Unknown stays unknown, never zero.
+    """
+    base = {
+        "method": POWER_METHOD,
+        "source": f"{source_label} original watts/heart-rate streams",
+    }
+    streams = activity.get("streams") or {}
+    times = streams.get("time") or []
+    if activity.get("sport") != "ride":
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Keine Radfahrt.",
+            "bins": {},
+        }
+    if (
+        len(times) < 2
+        or times[-1] - times[0] < MIN_DURATION_S
+        or any(
+            len(streams.get(key) or []) != len(times) for key in ("watts", "heartrate")
+        )
+    ):
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Zu kurz, oder Leistung oder Puls fehlt.",
+            "bins": {},
+        }
+    start, end = float(times[0]) + WARMUP_S, float(times[-1])
+    power = _smoothed_power(
+        [
+            s
+            for s in _samples(dict(activity), "watts", start - POWER_SMOOTH_S, end)
+            if s[2] >= 0
+        ]
+    )
+    bins: dict[int, dict[str, float]] = defaultdict(
+        lambda: {"seconds": 0.0, "work_j": 0.0, "watts_sq": 0.0}
+    )
+    for time, weight, pulse in _samples(dict(activity), "heartrate", start, end):
+        mean, own = power.get(time, (0.0, 0.0))
+        if own <= 0 or mean <= 0 or not 30 <= pulse <= 240:
+            continue
+        entry = bins[int(pulse // BIN_BPM) * BIN_BPM]
+        entry["seconds"] += weight
+        entry["work_j"] += mean * weight
+        entry["watts_sq"] += mean * mean * weight
+    if not bins:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Keine Abschnitte mit Leistung und Puls.",
+            "bins": {},
+        }
+    return {
+        **base,
+        "status": "ok",
+        "bins": {str(low): values for low, values in sorted(bins.items())},
+    }
+
+
+LT1_DAYS: Final = 60
+LT1_MIN_SESSIONS: Final = 3
+
+
+def output_at_heart_rate(
+    records: Sequence[Mapping[str, Any]], sport: str, heart_rate: float, today: date
+) -> float | None:
+    """Run pace (s/km) or ride power (W) at a heart rate from own steady sessions.
+
+    The band is the 10 bpm band of the 5 bpm bins whose centre is nearest to
+    ``heart_rate``. Each session of the last ``LT1_DAYS`` days with at least 10
+    steady minutes in it gives its time-weighted pace or power; the value is the
+    median over at least ``LT1_MIN_SESSIONS`` sessions, outdoor sessions before
+    indoor ones. None without enough sessions (athlete decision 2026-11-12, #2427).
+    """
+    low = BIN_BPM * round((heart_rate - (BAND_BINS * BIN_BPM - 1) / 2) / BIN_BPM)
+    first = (today - timedelta(days=LT1_DAYS - 1)).isoformat()
+    profile_key, keys = (
+        ("pace_at_hr_profile", _SPEED_KEYS)
+        if sport == "run"
+        else ("power_at_hr_profile", _POWER_KEYS)
+    )
+    for environment in ("outdoor", "indoor"):
+        values = [
+            totals[1] / totals[0]
+            for row in records
+            if row.get("sport") == sport
+            and row.get("environment") == environment
+            and first <= str(row.get("date") or "") <= today.isoformat()
+            and (row.get(profile_key) or {}).get("status") == "ok"
+            and (totals := _band_totals(row[profile_key], low, keys))
+        ]
+        if len(values) >= LT1_MIN_SESSIONS:
+            median = statistics.median(values)
+            return 1000 / median if sport == "run" else median
+    return None
+
+
 def _band_totals(
-    profile: Mapping[str, Any], low: int
+    profile: Mapping[str, Any],
+    low: int,
+    keys: tuple[str, str] = _SPEED_KEYS,
 ) -> tuple[float, float, float] | None:
-    """Seconds, distance and squared speed of a steady session in the band."""
+    """Seconds, output total and squared output of a steady session in the band."""
     bins: Mapping[str, Any] = profile.get("bins") or {}
     parts = [
         part
@@ -161,8 +300,8 @@ def _band_totals(
     seconds = sum(part["seconds"] for part in parts)
     if seconds < MIN_BAND_S:
         return None
-    distance = sum(part["distance_m"] for part in parts)
-    squares = sum(part["speed_sq"] for part in parts)
+    distance = sum(part[keys[0]] for part in parts)
+    squares = sum(part[keys[1]] for part in parts)
     mean = distance / seconds
     spread = math.sqrt(max(squares / seconds - mean * mean, 0.0))
     if mean <= 0 or spread / mean > MAX_SPEED_CV:

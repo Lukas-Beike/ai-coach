@@ -40,6 +40,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
             profile_service,
             garmin_projection_service,
             lambda: today,
+            lt1_session_records=list,
         )
 
         with patch(
@@ -104,6 +105,8 @@ class PublicPerformanceStateTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
             zone_configurations=(),
+            # LT1 pace and power read the session records (#2427).
+            lt1_session_records=list,
         )
         garmin_payload_service.sync_status.assert_called_once_with()
         garmin_payload_service.view.assert_not_called()

@@ -609,7 +609,7 @@ function zoneSourceText(item) {
   return item.sport == null ? `${provider}, gilt für alle Sportarten` : provider;
 }
 
-const THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung aus festem Anteil von LT2" };
+const THRESHOLD_ORIGINS = { measured: "gemessen", estimated: "aus der Herzfrequenzvariabilität", own_sessions: "Schätzung aus eigenen Einheiten", zone_2: "Schätzung aus Zone 2", fixed_share: "Schätzung aus festem Anteil von LT2" };
 
 // Pure: LT1 and LT2 of a sport (#2262). LT2 comes from the performance values, LT1 from the
 // performance thresholds (#2427); `origins` names where each row's values come from.

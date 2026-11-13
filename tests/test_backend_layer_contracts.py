@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 import unittest
 from collections import Counter
@@ -680,6 +681,22 @@ class BackendLayerContractTests(unittest.TestCase):
             "HTTP handlers must delegate database calls to repositories.",
         )
         self.assertEqual([], _http_sql_literals(REPOSITORY_ROOT))
+
+    def test_planning_tables_are_queried_only_in_their_store(self) -> None:
+        # #2118: one column change touches one file; the schema keeps its DDL.
+        statement = re.compile(
+            r"\b(FROM|INTO|UPDATE|JOIN)\s+(planned_units|workout_library)\b",
+            re.IGNORECASE,
+        )
+        owners = {"backend/db/planning_store.py", "backend/db/schema.py"}
+        outside = [
+            relative
+            for path in sorted((REPOSITORY_ROOT / "backend").rglob("*.py"))
+            if (relative := path.relative_to(REPOSITORY_ROOT).as_posix())
+            not in owners
+            and statement.search(path.read_text(encoding="utf-8"))
+        ]
+        self.assertEqual([], outside)
 
 
 if __name__ == "__main__":

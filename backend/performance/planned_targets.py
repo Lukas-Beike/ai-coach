@@ -25,8 +25,8 @@ from backend.activities.hr_cap import (
     resolve_bpm,
 )
 from backend.activities.workout_load import (
-    AthleteThresholds,
     TargetRange,
+    ZoneSettings,
     hr_reference,
     step_target_range,
 )
@@ -60,7 +60,7 @@ _STREAM_KEYS: Final = {
 def planned_target_execution(
     execution: Mapping[str, Any],
     steps: Sequence[Mapping[str, Any]],
-    thresholds: AthleteThresholds,
+    thresholds: ZoneSettings,
     sport: str,
     *,
     planned_unit_id: str | None = None,
@@ -178,7 +178,7 @@ def heart_rate_cap_execution(
 
 
 def _levels(
-    ranges: Sequence[TargetRange], thresholds: AthleteThresholds
+    ranges: Sequence[TargetRange], thresholds: ZoneSettings
 ) -> list[tuple[int, float]]:
     """Each resolved step's target level as a fraction of its threshold.
 
@@ -187,9 +187,9 @@ def _levels(
     """
     speeds = [r.low for r in ranges if r.metric == "speed" and r.low]
     references = {
-        "speed": thresholds.threshold_speed_mps or (max(speeds) if speeds else None),
-        "watts": thresholds.zones.ftp,
-        "heartrate": hr_reference(thresholds.zones),
+        "speed": thresholds.threshold_pace or (max(speeds) if speeds else None),
+        "watts": thresholds.ftp,
+        "heartrate": hr_reference(thresholds),
     }
     levels = []
     for index, target in enumerate(ranges):

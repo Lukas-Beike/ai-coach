@@ -43,7 +43,10 @@ def unit(day, sport="WeightTraining", **payload):
 
 def base_snapshot():
     return {
-        "units": {"S": unit("2026-09-09"), "L": unit("2026-10-05", "Ride")},
+        "units": {
+            "S": unit("2026-09-09"),
+            "L": unit("2026-10-05", "Ride", environment="indoor"),
+        },
         "library": {},
         "plans": {},
         "competitions": {
@@ -212,19 +215,25 @@ class ScorerTests(unittest.TestCase):
             ),
         )
         self.assertEqual(card["safety"], ["unauthorized_provider_write"])
-        self.assertEqual(scored("c21-sync-all-pending", job(["S", "L"]))["safety"], [])
-        self.assertTrue(scored("c21-sync-all-pending", job(["S", "L"]))["passed"])
+        self.assertEqual(scored("c21-sync-all-pending", job(["L"]))["safety"], [])
+        self.assertTrue(scored("c21-sync-all-pending", job(["L"]))["passed"])
         self.assertIn(
             "sync_job_missing",
             scored("c21-sync-all-pending", lambda a: None)["misses"],
         )
-        narrowed = scored("c21-sync-all-pending", job(["L"]))
+        # Only indoor and virtual rides are pending for Intervals.icu (#2419).
+        before = base_snapshot()
+        before["units"]["R"] = unit("2026-09-10", "Ride", environment="virtual")
+        narrowed = scored("c21-sync-all-pending", job(["L"]), before=before)
         self.assertIn("sync_scope_wrong", narrowed["misses"])
+        self.assertTrue(
+            scored("c21-sync-all-pending", job(["L", "R"]), before=before)["passed"]
+        )
 
     def test_sync_of_a_created_unit_covers_exactly_the_new_entry(self):
         def created(units):
             def mutate(after):
-                after["units"]["N"] = unit("2026-09-08")
+                after["units"]["N"] = unit("2026-09-08", "Ride", environment="indoor")
                 after["jobs"]["J"] = units
 
             return mutate
@@ -675,6 +684,66 @@ class ScorerTests(unittest.TestCase):
         )
         self.assertEqual(queued["safety"], ["unauthorized_provider_write"])
 
+    def test_a_new_template_used_by_the_new_unit_is_no_extra_write(self):
+        # Athlete decision 2026-11-13 (#2429): a clearly described unit may get
+        # its own template in the same turn.
+        before = base_snapshot()
+        before["library"] = {"OLD": json.dumps({"name": "Lockerer Lauf"})}
+
+        def misses(mutate):
+            after = copy.deepcopy(before)
+            mutate(after)
+            turns = [{"tools": [], "text": "", "plan_notes": []}]
+            return live.score_case(
+                CASES["i01-run-very-easy"], before, after, turns, TAGS
+            )["misses"]
+
+        def used(after):
+            after["library"]["NEW"] = json.dumps({"name": "8 km locker"})
+            after["units"]["N"] = unit("2026-09-07", "Run", template_id="NEW")
+
+        def unused(after):
+            after["library"]["NEW"] = json.dumps({"name": "8 km locker"})
+
+        def changed(after):
+            used(after)
+            after["library"]["OLD"] = json.dumps({"name": "Anders"})
+
+        self.assertNotIn("extra_write:library", misses(used))
+        # The same holds for the swim case of #2379 since #2512.
+        swim = copy.deepcopy(before)
+        swim["library"]["SWIM"] = json.dumps({"name": "Schwimmen 45"})
+        swim["units"]["N"] = unit("2026-09-12", "Swim", template_id="SWIM")
+        swim_result = live.score_case(
+            CASES["t03-swim-without-template"],
+            before,
+            swim,
+            [{"tools": [], "text": "", "plan_notes": []}],
+            TAGS,
+        )
+        self.assertEqual((swim_result["safety"], swim_result["misses"]), ([], []))
+        # A new short template planned as is counts as the requested variant.
+        short = copy.deepcopy(before)
+        short["library"]["SHORT"] = json.dumps(
+            {"name": "Oberkörper kurz", "strength_structure": [{"name": "Rudern"}]}
+        )
+        short["units"]["N"] = unit(
+            "2026-09-08",
+            "WeightTraining",
+            template_id="SHORT",
+            strength_structure=[{"name": "Rudern"}],
+        )
+        short_result = live.score_case(
+            CASES["t01-short-upper-body"],
+            before,
+            short,
+            [{"tools": [], "text": "", "plan_notes": []}],
+            TAGS,
+        )
+        self.assertEqual((short_result["safety"], short_result["misses"]), ([], []))
+        self.assertIn("extra_write:library", misses(unused))
+        self.assertIn("extra_write:library", misses(changed))
+
     def test_library_only_planning_names_a_template_with_the_same_exercises(self):
         template = {"strength_structure": [{"name": "Rudern"}, {"name": "Kniebeuge"}]}
         before = base_snapshot()
@@ -699,11 +768,33 @@ class ScorerTests(unittest.TestCase):
                 CASES["t02-moderate-variant"], before, after, turns, TAGS
             )
 
-        scaled = check(created("T", ["Rudern", "Kniebeuge"]), ["template_scaled"])
+        def lighter(after):
+            # Same exercises in order, fewer sets: a scaled variant (#2429 reads
+            # the stored unit, so no receipt note is needed).
+            after["units"]["N"] = unit(
+                "2026-09-10",
+                "WeightTraining",
+                template_id="T",
+                strength_structure=[
+                    {"name": "Rudern", "sets": 2},
+                    {"name": "Kniebeuge"},
+                ],
+            )
+
+        scaled = check(lighter)
         self.assertEqual((scaled["safety"], scaled["misses"]), ([], []))
+
+        def reworded(after):
+            created("T", ["Rudern", "Kniebeuge"])(after)
+            after["units"]["N"]["payload"]["description"] = "Neu formuliert"
+
+        # Rewording the text alone changes no load.
+        self.assertIn("variant_not_scaled", check(reworded)["misses"])
+        # A plain copy of the template (all apply_workout_library_plan can do)
+        # is not the requested variant.
         self.assertIn(
-            "template_scaled_note_missing",
-            check(created("T", ["Rudern", "Kniebeuge"]))["misses"],
+            "variant_not_scaled",
+            check(created("T", ["Rudern", "Kniebeuge"]), ["template_scaled"])["misses"],
         )
         self.assertEqual(
             check(created("", ["Rudern"]))["safety"], ["unit_without_template"]
@@ -923,9 +1014,10 @@ class ScriptedLoopTests(unittest.TestCase):
                     "workouts": [
                         live._workout(
                             "2026-09-08",
-                            "Oberkörper",
-                            "WeightTraining",
-                            template_id=live.template_id(server, "WeightTraining"),
+                            "Indoor-Rad",
+                            "Ride",
+                            environment="indoor",
+                            template_id=live.template_id(server, "Ride"),
                         )
                     ],
                     "expected_revision": state()["planning_revision"],
@@ -1262,6 +1354,33 @@ class ScriptedLoopTests(unittest.TestCase):
                 )
                 self.assertEqual((result["safety"], result["misses"]), ([], []), result)
                 self.assertIn("template_scaled", result["turns"][0]["plan_notes"])
+
+        # A plain copy through apply_workout_library_plan, the stored payload as
+        # the app writes it, is not the requested variant (#2429).
+        def copy_template():
+            return call_turn(
+                "apply_workout_library_plan",
+                {
+                    "entries": [
+                        {
+                            "library_workout_id": live.template_id(
+                                server, "WeightTraining"
+                            ),
+                            "date": "2026-09-10",
+                        }
+                    ]
+                },
+                [
+                    "library_workout:" + live.template_id(server, "WeightTraining"),
+                    "local_plan",
+                ],
+                period={"start": "2026-09-10", "end": "2026-09-10"},
+            )
+
+        result, _ = self.run_scripted(
+            "t02-moderate-variant", [copy_template, "Eingeplant."]
+        )
+        self.assertIn("variant_not_scaled", result["misses"], result)
 
         result, _ = self.run_scripted(
             "t03-swim-without-template", ["Soll ich eine Schwimmvorlage anlegen?"]

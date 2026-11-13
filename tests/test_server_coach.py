@@ -463,7 +463,7 @@ class ServerCoachTests(ServerTestCase):
                 "date": (
                     server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
                 ).isoformat(),
-                "sport": "Run",
+                "sport": "VirtualRide",
                 "name": "Planned",
                 "description": "- 30m 60% easy",
             }

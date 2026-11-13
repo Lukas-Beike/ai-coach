@@ -495,6 +495,14 @@ The client SHALL show the working state of a turn, offer a retry on a failed ans
 - **WHEN** a turn runs
 - **THEN** the indicator reads "Coach arbeitet an deiner Antwort…", "Der Coach arbeitet · du kannst die Seite neu laden…" for a background job, "Verbindung unterbrochen · die Antwort wird im Hintergrund fertiggestellt…" after a lost stream and "Antwort wird sicher übernommen…" while the receipt is read; a stream silent for 45 seconds is aborted and the client polls the status, and while a job is active it polls at least every 15 seconds
 
+#### Scenario: Recovery by turn identity
+- **WHEN** the outcome of an accepted turn is unknown, also after a reload
+- **THEN** the client reads `/api/chat/receipt?client_turn_id=…` until the status is neither `queued` nor `running`; a 403 or 404 parks the message with "Die Nachricht wurde nicht angenommen. Bitte erneut senden."; only the opaque turn id is kept, in `sessionStorage["coachPendingTurn"]`
+
+#### Scenario: Chat reset in another tab
+- **WHEN** the history generation changes while an own message is not in the new history
+- **THEN** that message is parked with "Der Chat wurde zurückgesetzt. Prüfe den Verlauf, bevor du diese Nachricht erneut sendest."
+
 #### Scenario: Failed answer
 - **WHEN** the newest answer belongs to a failed turn whose request had text and no attachments
 - **THEN** it offers "Erneut senden", which sends the text with its quick-action kind as a new turn
@@ -503,4 +511,22 @@ The client SHALL show the working state of a turn, offer a retry on a failed ans
 - **WHEN** queued follow-ups would hold more than 16,000,000 characters of encoded attachment data, or the athlete resets the chat while messages are queued
 - **THEN** the message is refused with "Die Warteschlange enthält bereits zu viele Bilddaten. Warte auf die laufende Coach-Antwort." or the reset with "Bitte warte, bis die wartenden Nachrichten gesendet sind. Danach kannst du den Chat zurücksetzen."
 
-Evidence: `public/coach.js:CHAT_STREAM_SILENCE_MS`, `public/coach.js:CHAT_STATUS_SAFETY_POLL_MS`, `public/coach.js:MAX_QUEUED_ATTACHMENT_BYTES`, `public/coach.js:queueChatMessage`, `public/coach.js:appendFailedTurnRetry`, `public/coach.js:resetCoachChat`; `tests/coach-recovery-queue.test.cjs:a message sent while a chat recovers is queued with its attachments`, `tests/coach-stream-silence.test.cjs:the silence window is three missed heartbeats`, `tests/test_coach_turn_failures.py:test_failed_quick_action_keeps_its_kind_for_the_retry`, `e2e/coach-queue.spec.js`.
+Evidence: `public/coach.js:CHAT_STREAM_SILENCE_MS`, `public/coach.js:CHAT_STATUS_SAFETY_POLL_MS`, `public/coach.js:MAX_QUEUED_ATTACHMENT_BYTES`, `public/coach.js:queueChatMessage`, `public/coach.js:appendFailedTurnRetry`, `public/coach.js:resetCoachChat`; `tests/coach-recovery-queue.test.cjs:a message sent while a chat recovers is queued with its attachments`, `tests/coach-stream-silence.test.cjs:the silence window is three missed heartbeats`, `public/coach.js:pollPendingChatReceipt`, `public/coach.js:resetChatAfterGenerationChange`, `e2e/audit-remediation.spec.js:a missing acceptance receipt leaves a recoverable failed message`, `e2e/audit-remediation.spec.js:cross-tab reset retains a new turn already accepted in the new history`, `tests/test_coach_turn_failures.py:test_failed_quick_action_keeps_its_kind_for_the_retry`, `e2e/coach-queue.spec.js`.
+
+### Requirement: CC15 Quick-action controls and context preview
+
+The composer SHALL offer "Morgen-Check-in" and the menu "Analyse & Plan" (session analysis; progress over 4, 8, 12 weeks or since the last test; next week; a block of 2, 3 or 4 weeks; adjust the week), each sending a fixed German message with its request kind at once; the "+" menu repeats them after "Datei anhängen". A typed edit SHALL drop the kind. "Kontext laden" under Coach & Modell SHALL show `/api/context-preview`.
+
+#### Scenario: Menu keys
+- **WHEN** a quick-action menu is open
+- **THEN** arrow keys move with wrap-around and Home and End jump to the first and last item
+
+#### Scenario: Busy Coach
+- **WHEN** a quick action is chosen while a turn runs
+- **THEN** nothing is sent and the draft stays
+
+#### Scenario: Context preview
+- **WHEN** the preview is loaded
+- **THEN** it shows nine titled sections (the first four open), nested data below depth 3 as JSON text and lists cut at 25 entries; every turn and profile save marks it "Kontext aktualisieren"
+
+Evidence: `public/index.html` (`quickMessageTemplates`, `quickAnalysisMenu`, `composerPlusMenu`); `public/coach.js:setupQuickActionMenu`; `public/coach.js:buildComposerPlusMenu`; `public/coach.js:quickMenuTarget`; `public/coach.js:renderContextPreview`; `public/coach.js:invalidateContextPreview`; `tests/coach-quick-menu.test.cjs:menu items carry a request kind and a German message with the period`; `tests/coach-quick-menu.test.cjs:composer plus menu is cloned from the quick bar and still opens the file picker`. The chat reset control and its guard are CC14 and `model-selection-and-usage`.

@@ -6,9 +6,11 @@ from datetime import date
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from support import garmin_services
+
 from backend.errors import AppError
 from backend.providers.garmin import targeted_analysis_sources
-from backend.sync.garmin_assembly import GarminAssembly
+from backend.sync import garmin, garmin_wiring
 from backend.sync.garmin_service import GarminAnalysisRefreshService, GarminRemoteReader
 
 
@@ -277,29 +279,20 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
     def test_assembly_factory_wires_targeted_service_and_disables_fixtures(
         self,
     ) -> None:
-        control = Mock()
-        control.resync_gate = None
-        control.lock_wait_seconds = 0
         fixture_loader = Mock()
         fixture_loader.path.return_value = "fixture.json"
         reader = Mock()
         reader.configured.return_value = True
         payloads = Mock()
         database = Mock()
-        assembly = GarminAssembly(
-            dependencies=GarminAssembly.Inputs(
-                provider=Mock(),
-                persistence=Mock(database_manager=lambda: database),
-                telemetry=Mock(),
-                control=control,
-            )
-        )
+        context = Mock()
+        context.database.return_value = database
         with (
-            patch.object(assembly, "fixture_loader", return_value=fixture_loader),
-            patch.object(assembly, "remote_reader", return_value=reader),
-            patch.object(assembly, "payload_service", return_value=payloads),
+            patch.object(garmin, "GarminFixtureLoader", return_value=fixture_loader),
+            patch.object(garmin_wiring, "GarminRemoteReader", return_value=reader),
+            patch.object(garmin, "GarminPayloadService", return_value=payloads),
         ):
-            service = assembly.analysis_refresh_service()
+            service = garmin_services(context).analysis_refresh_service()
 
         self.assertIsInstance(service, GarminAnalysisRefreshService)
         self.assertIs(service._database_manager, database)

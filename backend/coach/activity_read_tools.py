@@ -333,7 +333,7 @@ class CoachActivityReadToolService:
         cap = None if unit is None else stored_cap(unit)
         if unit is None or cap is None:
             return None
-        lthr = self._unit_thresholds.thresholds(unit).zones.lthr
+        lthr = self._unit_thresholds.thresholds(unit).lthr
         return heart_rate_cap_execution(cap, lthr, detail.get("streams"))
 
     def _planned_targets(

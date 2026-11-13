@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS, TEMPLATE_ID
+from backend.db import planning_store
 from backend.db.repositories import PlanningStateRepository
 from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
@@ -24,10 +25,6 @@ from backend.planning.workouts import normalize_workout
 
 # The most training changes one request may carry; the Coach tool schemas cap on it too.
 TRAINING_CHANGE_LIMIT = 366
-
-_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
-    "SELECT payload FROM planned_units WHERE local_id=?"
-)
 
 
 def _stored_local_id(local_id: str) -> str:
@@ -203,7 +200,7 @@ class StructuredTrainingChangeValidator:
         if action == "restore":
             restore_identities.add(change_identity)
         local_id = str(change.get("local_id") or "").strip()
-        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
+        row = planning_store.planned_unit_row(db, local_id)
         if not row:
             return
         try:
@@ -442,10 +439,7 @@ class StructuredTrainingChangeValidator:
                 reason="payload_hash_required",
             )
         if expected_hash:
-            row = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                (str(change["local_id"]),),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, str(change["local_id"]))
             if not row or not plan_push_hash_matches(row["payload"], expected_hash):
                 raise AppError(
                     409,
@@ -527,9 +521,7 @@ class StructuredTrainingPlanResolver:
         local_id = str(change.get("local_id") or "").strip()
         if action == "create" or not local_id:
             return None, None
-        row = db.execute(
-            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (_stored_local_id(local_id),)
-        ).fetchone()
+        row = planning_store.planned_unit_row(db, _stored_local_id(local_id))
         if not row:
             return None, None
         try:

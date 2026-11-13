@@ -12,9 +12,12 @@ restart. Report one short line per step: `ok` or the finding.
 **Inputs at run time only:** the app address (the athlete's private notes) and
 the app password as a secret file delivered to the session (`request_secret`
 with file delivery). Never write either into the repository, a tracked file,
-a command line, a tool argument, or output. The secret file, result files,
-saved logs and screenshots stay in the session scratchpad (the system temp
-directory; the scripts refuse other paths) and are never committed. The
+a command line, a tool argument, or output. T3 stores the delivered secret
+file under `~/.t3/userdata/secrets`; pass that path as `--password-file` and
+never copy the file. The scripts read the password file only from there or
+the system temp directory. Result files, saved logs and screenshots stay in
+the session scratchpad (the system temp directory; the scripts refuse other
+paths) and are never committed. The
 previous release's results come from the session notes.
 
 **Stop rule:** on an unexpected effect (a dropped record count, a failed
@@ -42,7 +45,13 @@ stop, report it, and do not try to repair production.
    log covers only the latest window: use it (`--log-file`, then delete it) for
    startup errors, and say which window the counts cover.
 5. **Server health (Unraid MCP, read-only):** container memory, appdata disk use
-   and database file size, compared with the previous release; the automatic
+   and database file size, compared with the previous release. Confirm the
+   container environment still has `MALLOC_ARENA_MAX=2`. Report the
+   diagnostics `runtime.process_memory` RSS with the uptime since the last
+   restart, and compare it with the readings at a similar uptime in #2526
+   (about 790 MB at 5 h, 1.02 GB at 14 h before the setting) and with the
+   ceiling in `docs/operations.md`; RSS still climbing with uptime is a
+   finding. The automatic
    database recovery copy exists and is recent - report only its age and size,
    never open or copy it.
 6. **UI walk:** [ui-walk](../pacecraft-ui-walk/SKILL.md) with `--compare

@@ -34,6 +34,7 @@ from backend.planning.wahoo_orphans import WahooOrphan
 from backend.providers import garmin_run_workout
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
+    GarminExercise,
     catalogue_available,
 )
 
@@ -42,7 +43,7 @@ STRENGTH = {
     "date": "2026-11-09",
     "strength_structure": [{"name": "Kniebeuge", "sets": 3, "reps": 5}],
 }
-RIDE = {"sport": "Ride", "date": "2026-11-09", "description": "- 30m 60%"}
+RIDE = {"sport": "VirtualRide", "date": "2026-11-09", "description": "- 30m 60%"}
 RUN = {
     "sport": "Run",
     "name": "Tempo",
@@ -177,37 +178,50 @@ class PushStateTests(unittest.TestCase):
         )
         self.assertEqual(STRENGTH_PAYLOAD_HASH, projected[0]["payload_hash"])
         self.assertEqual(
-            {"intervals": True, "garmin": True}, projected[0]["push_pending"]
+            {"intervals": False, "garmin": True}, projected[0]["push_pending"]
         )
         # Endurance units never offer Garmin; a synced unit needs no Intervals push.
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
-    def test_a_strength_event_not_sent_as_a_note_is_pending_again(self) -> None:
-        # A strength unit sent before #1807 is a WORKOUT event that Intervals.icu
-        # forwards to Garmin; no category was recorded then (#2185).
-        sent = {**STRENGTH, "remote_event_id": "e1"}
-        cases = [
-            (sent, True),
-            ({**sent, "remote_event_category": "WORKOUT"}, True),
-            ({**sent, "remote_event_category": "NOTE"}, False),
-            ({**RIDE, "remote_event_id": "e2"}, False),
-            ({**RIDE, "remote_event_id": "e2", "remote_event_category": "NOTE"}, True),
+    def test_only_indoor_and_virtual_rides_wait_for_intervals(self) -> None:
+        # Intervals.icu serves Zwift (#2419): whatever the sync state or an
+        # existing event, other units never wait for it; a synced ride only
+        # when its event has another category than it gets now.
+        cases: list[tuple[dict[str, Any], bool]] = [
+            (RIDE, True),
+            ({**RIDE, "sport": "Ride", "environment": "indoor"}, True),
+            ({**RIDE, "sport": "Ride"}, False),
+            ({**RIDE, "sport": "Ride", "environment": "outdoor"}, False),
+            (RUN, False),
+            ({**RUN, "sport": "VirtualRun"}, False),
             (STRENGTH, False),
+            ({**STRENGTH, "remote_event_id": "e1"}, False),
+            ({**RUN, "remote_event_id": "e2", "remote_event_category": "NOTE"}, False),
+            # A ride event with another category than it gets now is replaced.
+            ({**RIDE, "remote_event_id": "e3", "remote_event_category": "NOTE"}, True),
         ]
-        projected = self.project(
-            [
-                {
-                    "local_id": f"u{index}",
-                    "payload": json.dumps(payload),
-                    "sync_state": "synced",
-                }
-                for index, (payload, _pending) in enumerate(cases)
+        for state in ("local", "sync_error", "remote_missing", "synced"):
+            pairs = [
+                (
+                    {
+                        "local_id": f"u{index}",
+                        "payload": json.dumps(payload),
+                        "sync_state": state,
+                    },
+                    dict(payload),
+                )
+                for index, (payload, _waits) in enumerate(cases)
             ]
-        )
-        self.assertEqual(
-            [pending for _payload, pending in cases],
-            [unit["push_pending"]["intervals"] for unit in projected],
-        )
+            attach_push_state(pairs, {})
+            open_state = state in {"local", "sync_error"}
+            self.assertEqual(
+                [
+                    waits and (open_state or "remote_event_category" in payload)
+                    for payload, waits in cases
+                ],
+                [payload["push_pending"]["intervals"] for _row, payload in pairs],
+                state,
+            )
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
@@ -357,6 +371,26 @@ class PushStateTests(unittest.TestCase):
         attach_push_state(pairs, {})
         self.assertEqual({"garmin": "unmapped"}, pairs[0][1]["push_blocked"])
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
+    def test_a_changed_remembered_exercise_marks_the_pushed_unit_changed(self) -> None:
+        unit = {
+            **STRENGTH,
+            "strength_structure": [{"name": "Rudern eng", "sets": 3, "reps": 10}],
+        }
+        v_grip = GarminExercise("V-grip Cable Row", "ROW", "V_GRIP_CABLE_ROW")
+        seated = GarminExercise("Seated Cable Row", "ROW", "SEATED_CABLE_ROW")
+        self.link("r1", garmin_fingerprint(unit, {"ruderneng": v_grip}) or "")
+        rows = [{"local_id": "r1", "payload": json.dumps(unit), "sync_state": "synced"}]
+
+        def pending(remembered: dict[str, GarminExercise]) -> bool:
+            pairs = [(row, json.loads(row["payload"])) for row in rows]
+            with self.manager.reader() as db:
+                attach_push_state(pairs, garmin_baselines(db), remembered)
+            return pairs[0][1]["push_pending"]["garmin"]
+
+        self.assertFalse(pending({"ruderneng": v_grip}))
+        self.assertTrue(pending({"ruderneng": seated}))
+
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
         projected = self.project(
@@ -379,7 +413,7 @@ class PushStateTests(unittest.TestCase):
                 {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "local"},
             ]
         )
-        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
         self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
         self.assertEqual({}, projected[1]["push_blocked"])
 
@@ -414,6 +448,17 @@ class PushStateTests(unittest.TestCase):
                     pending({**RUN, field: value})["push_pending"]["garmin"]
                 )
 
+    def test_a_resync_id_offers_a_pushed_run_to_garmin_only(self) -> None:
+        row = {"local_id": "r1", "payload": json.dumps(RUN), "sync_state": "synced"}
+        baselines = {"r1": garmin_fingerprint(RUN)}
+        for resync, expected in (({"r1"}, True), (set(), False)):
+            with self.subTest(resync=resync):
+                payload = {**RUN}
+                attach_push_state([(row, payload)], baselines, {}, resync)
+                self.assertEqual(
+                    {"intervals": False, "garmin": expected}, payload["push_pending"]
+                )
+
     def test_the_run_fingerprint_follows_the_cap_the_push_applies(self) -> None:
         # A focus change switches the effective cap on or off: Garmin is pending.
         cap = {PERCENT_KEY: 80.0, LOW_PERCENT_KEY: 65.0, SOURCE_KEY: SOURCE_DEFAULT}
@@ -443,7 +488,7 @@ class PushStateTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
         self.assertEqual({}, projected[0]["push_blocked"])
         self.assertEqual({"intervals": True}, projected[1]["push_pending"])
         self.assertEqual({}, projected[1]["push_blocked"])
@@ -464,20 +509,37 @@ class PushStateTests(unittest.TestCase):
 
         self.assertEqual(expected, garmin_fingerprint(RUN))
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_the_strength_fingerprint_keeps_its_formula(self) -> None:
+        unit = {
+            **STRENGTH,
+            "strength_structure": [
+                {
+                    "name": "Kniebeuge",
+                    "sets": 3,
+                    "reps": 5,
+                    "garmin_exercise": "Barbell Back Squat",
+                    "garmin_pair": {
+                        "category": "SQUAT",
+                        "exercise": "BARBELL_BACK_SQUAT",
+                    },
+                }
+            ],
+        }
         content = {
             "name": "",
             "date": STRENGTH["date"],
             "exercises": strength_structure.normalize_structure(
-                STRENGTH["strength_structure"]
+                unit["strength_structure"], stored=True
             ),
             "payload_version": PAYLOAD_VERSION,
+            "pairs": [["SQUAT", "BARBELL_BACK_SQUAT"]],
         }
         expected = hashlib.sha256(
             json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
 
-        self.assertEqual(expected, garmin_fingerprint(STRENGTH))
+        self.assertEqual(expected, garmin_fingerprint(unit))
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

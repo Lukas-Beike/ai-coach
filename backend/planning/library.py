@@ -2,11 +2,11 @@
 
 import difflib
 import hashlib
-import math
 import re
 import uuid
 from typing import Any
 
+from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import (
     PLANNED_INTENSITY,
@@ -20,6 +20,7 @@ from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.session_focus import normalize_session_focus
 from backend.planning.sport import apply_sport_update
+from backend.planning.workout_validation import as_number
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
     intervals_record_type,
@@ -424,21 +425,21 @@ def workout_library_update_candidate(
     return candidate
 
 
-def _library_workout_as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
-
-
-def _reconcile_updated_library_workout_content(
-    normalized: dict[str, Any], values: dict[str, Any]
+def reconcile_updated_workout_content(
+    normalized: dict[str, Any], values: dict[str, Any], *, canonical_zones: bool
 ) -> None:
+    """Validate edited content, derive the moving time, drop stale derived keys.
+
+    Only planned units canonicalise the zone names of an edited description.
+    """
+    if canonical_zones and "description" in values:
+        normalized["description"] = canonical_workout_zones(
+            normalized["description"],
+            endurance=intervals_record_type(normalized)
+            in planning_workouts.INTERVALS_ENDURANCE_WORKOUT_TYPES,
+        )
     seconds = planning_workouts.validate_workout_description(normalized)
-    minutes = _library_workout_as_number(normalized.get("duration_minutes"))
+    minutes = as_number(normalized.get("duration_minutes"))
     if seconds is not None or minutes is not None:
         normalized["planned_duration_s"] = round(
             seconds if seconds is not None else minutes * 60
@@ -458,16 +459,11 @@ def _reconcile_updated_library_workout_content(
             normalized.pop(key, None)
 
 
-def _preserve_library_workout_metadata(
-    normalized: dict[str, Any], current: dict[str, Any]
+def preserve_metadata(
+    normalized: dict[str, Any], current: dict[str, Any], keys: tuple[str, ...]
 ) -> None:
-    for key in (
-        "source",
-        "rationale",
-        "plan_id",
-        "plan_name",
-        "private_calendar_adjustment",
-    ):
+    """Keep the stored value of each key an edit must not change."""
+    for key in keys:
         if current.get(key) is not None:
             normalized[key] = current[key]
 
@@ -486,6 +482,10 @@ def updated_workout_library_entry(
         sync_status="local",
     )
     if action == "update":
-        _reconcile_updated_library_workout_content(normalized, values)
-    _preserve_library_workout_metadata(normalized, current)
+        reconcile_updated_workout_content(normalized, values, canonical_zones=False)
+    preserve_metadata(
+        normalized,
+        current,
+        ("source", "rationale", "plan_id", "plan_name", "private_calendar_adjustment"),
+    )
     return normalized

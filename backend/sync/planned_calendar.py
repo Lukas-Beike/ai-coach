@@ -12,9 +12,9 @@ from datetime import date, timedelta
 from typing import Any
 from urllib.error import HTTPError
 
-from backend.activities.hr_cap import resolved_range, stored_cap
+from backend.activities.hr_cap import stored_cap
 from backend.config import Config
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INTERVALS_API_KEY_ERROR,
@@ -24,17 +24,14 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning import planned_units
-from backend.planning.hr_cap_sync import record_sent
 from backend.planning.push_state import intervals_event_outdated
+from backend.planning.repository import parse_payload
 from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.workout_export import WorkoutExportPort
 
 _PLANNED_UNIT_SYNCS: set[str] = set()
 _PLANNED_UNIT_SYNC_LOCK = threading.Lock()
-_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
-    "SELECT payload FROM planned_units WHERE local_id=?"
-)
 
 
 @contextmanager
@@ -68,7 +65,6 @@ class PlannedCalendarSyncService:
         today: Callable[[], date],
         *,
         run_lthr_for: Callable[[Mapping[str, Any]], float | None] = lambda _unit: None,
-        key_values: Any = None,
     ) -> None:
         self._config = config
         self._database_manager = database_manager
@@ -77,7 +73,6 @@ class PlannedCalendarSyncService:
         self._now = now
         self._today = today
         self._run_lthr_for = run_lthr_for
-        self._key_values = key_values
 
     def sync_entry(self, local_id: str) -> dict[str, Any] | None:
         with planned_unit_sync_guard(local_id):
@@ -89,25 +84,17 @@ class PlannedCalendarSyncService:
         except (ValueError, AttributeError) as exc:
             raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
         with self._database_manager.reader() as db:
-            row = db.execute(
-                "SELECT payload, sync_state FROM planned_units WHERE local_id=?",
-                (normalized_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, normalized_id)
         if not row:
             raise AppError(404, "Lokale Planung nicht gefunden.")
-        try:
-            workout = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
-        if not isinstance(workout, dict):
+        workout = parse_payload(row["payload"])
+        if workout is None:
             raise AppError(500, CORRUPT_PLANNING_ERROR)
         return normalized_id, row, workout
 
     def _recheck(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.reader() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, normalized_id)
         self._require_unchanged(current, original_payload)
 
     @staticmethod
@@ -175,9 +162,7 @@ class PlannedCalendarSyncService:
 
     def _mark_removed(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.unit_of_work() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, normalized_id)
             self._require_unchanged(current, original_payload)
             self._state_writer.persist(
                 db,
@@ -345,31 +330,7 @@ class PlannedCalendarSyncService:
             },
             expected_payload=row["payload"],
         )
-        self._remember_sent_range(normalized_id, workout, run_lthr)
         return event
-
-    def _remember_sent_range(
-        self, normalized_id: str, workout: dict[str, Any], run_lthr: float | None
-    ) -> None:
-        """Remember the bpm range sent for a capped unit, to see later threshold moves."""
-        record_sent_range(
-            self._database_manager, self._key_values, normalized_id, workout, run_lthr
-        )
-
-
-def record_sent_range(
-    database_manager: DatabaseManager,
-    key_values: Any,
-    local_id: str,
-    workout: Mapping[str, Any],
-    run_lthr: float | None,
-) -> None:
-    """Remember the bpm range sent for a capped unit, to see later threshold moves."""
-    cap = stored_cap(workout)
-    if cap is None or key_values is None:
-        return
-    with database_manager.unit_of_work() as db:
-        record_sent(key_values, db, local_id, resolved_range(cap, run_lthr))
 
 
 @dataclass
@@ -411,14 +372,8 @@ class PlannedCalendarRepairBatch:
         local_ids = [str(item["library_workout_id"]) for item in requested]
         newest = ""
         if local_ids:
-            placeholders = ",".join("?" for _ in local_ids)
             with database_manager.reader() as db:
-                row = db.execute(
-                    "SELECT MAX(json_extract(payload, '$.date')) AS newest "
-                    f"FROM planned_units WHERE local_id IN ({placeholders})",
-                    local_ids,
-                ).fetchone()
-            newest = str((row or {}).get("newest") or "")
+                newest = planning_store.newest_planned_date(db, local_ids)
         self.oldest = today.isoformat()
         self.newest = max(newest, (today + timedelta(days=future_days)).isoformat())
         self.events: dict[str, dict[str, Any]] | None = None
@@ -482,7 +437,6 @@ class PlannedCalendarRepairService:
         future_days: int,
         *,
         run_lthr_for: Callable[[Mapping[str, Any]], float | None] = lambda _unit: None,
-        key_values: Any = None,
     ) -> None:
         self._database_manager = database_manager
         self._export = export
@@ -491,7 +445,6 @@ class PlannedCalendarRepairService:
         self._today = today
         self._future_days = int(future_days)
         self._run_lthr_for = run_lthr_for
-        self._key_values = key_values
 
     def create_batch(
         self, requested: list[dict[str, Any]]
@@ -550,15 +503,8 @@ class PlannedCalendarRepairService:
         batch: PlannedCalendarRepairBatch | None,
     ) -> _PlannedCalendarRepairContext:
         with self._database_manager.reader() as db:
-            row = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-            ).fetchone()
-            others = db.execute(
-                "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
-                "json_extract(payload, '$.remote_event_external_id') AS remote_external_id "
-                "FROM planned_units WHERE local_id<>?",
-                (local_id,),
-            ).fetchall()
+            row = planning_store.planned_unit_row(db, local_id)
+            others = planning_store.other_planned_event_ids(db, local_id)
         if not row or not planned_units.plan_push_hash_matches(
             row["payload"], expected_hash
         ):
@@ -622,10 +568,7 @@ class PlannedCalendarRepairService:
 
     def _recheck(self, context: _PlannedCalendarRepairContext, message: str) -> None:
         with self._database_manager.reader() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                (context.local_id,),
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, context.local_id)
         if not current or not planned_units.plan_push_hash_matches(
             current["payload"], context.expected_hash
         ):
@@ -769,13 +712,6 @@ class PlannedCalendarRepairService:
                 reason="intervals_workout_verification_failed",
             )
         context.remote_id = context.export.event_identity(result)
-        record_sent_range(
-            self._database_manager,
-            self._key_values,
-            context.local_id,
-            context.workout,
-            run_lthr,
-        )
         saved_event = {
             **result,
             "external_id": payload["external_id"],
@@ -784,10 +720,7 @@ class PlannedCalendarRepairService:
             context.batch.remember(saved_event)
         conflict = None
         with self._database_manager.unit_of_work() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                (context.local_id,),
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, context.local_id)
             if not current or not planned_units.plan_push_hash_matches(
                 current["payload"], context.expected_hash
             ):
@@ -813,10 +746,7 @@ class PlannedCalendarRepairService:
                     saved_event,
                     now=self._now(),
                 )
-                current = db.execute(
-                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                    (context.local_id,),
-                ).fetchone()
+                current = planning_store.planned_unit_row(db, context.local_id)
                 context.expected_hash = planned_units.plan_push_payload_hash(
                     current["payload"]
                 )
@@ -890,10 +820,7 @@ class PlannedCalendarRepairService:
                 context.export.verify_readback(context.readback_workout, event)
                 verified = event
             with self._database_manager.unit_of_work() as db:
-                current = db.execute(
-                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                    (context.local_id,),
-                ).fetchone()
+                current = planning_store.planned_unit_row(db, context.local_id)
                 if not current or not planned_units.plan_push_hash_matches(
                     current["payload"], context.expected_hash
                 ):

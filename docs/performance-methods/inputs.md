@@ -126,7 +126,7 @@ Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` ve
   `critical_power` in the same payload, so the Analysis card line and the
   Coach tool show the same values.
 
-## M5 to M8 — derived local methods
+## M5 to M9 — derived local methods
 
 | Method | Inputs | Evidence |
 | --- | --- | --- |
@@ -134,6 +134,7 @@ Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` ve
 | M6 | The canonical session summary (power, pace, heart rate, durations) and the thresholds valid on the session's local day; stored as derived observations owned by the session. | `backend/performance/local_tss.py`, `backend/sync/local_load.py` |
 | M7 | The stored M6 loads summed per local day (`daily_local_loads`); computed on read, never stored. | `backend/performance/fitness_fatigue.py`, `backend/sync/local_load.py` |
 | M8 | The session summary and the full-resolution stream sets of the session (the session analysis); stored as derived observations owned by the session. | `backend/performance/session_metrics.py`, `backend/sync/session_metrics.py` |
+| M9 | The full-resolution stream sets of the ride and run sessions of 60 days (session curves: pace and power per heart-rate bin) and the LT1 heart rate in effect; computed on read, never stored. | `backend/performance/pace_at_hr.py`, `backend/performance/current_metrics.py` |
 
 Their consumers (Coach training report, public performance history, PWA)
 are listed per method in `openspec/specs/performance-and-readiness/spec.md`.

@@ -63,7 +63,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         )
 
     def test_rate_limit_retries_response_after_sync_without_requeuing(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(sport="VirtualRide")]
+        )
 
         def sync(_):
             return {
@@ -184,7 +186,9 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertNotIn("previous_response_id", retry)
 
     def test_failed_answer_keeps_observed_sync_status(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([self.workout()])
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(sport="VirtualRide")]
+        )
         job = server.SYNC_JOB_QUEUE.service().enqueue(
             "intervals",
             "plan_push",

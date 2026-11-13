@@ -12,12 +12,11 @@ from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
-
-SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 
 OBJECT_SCOPE_TABLES = {
     "planned_unit": ("planned_units", "local_id"),
@@ -318,10 +317,9 @@ class CoachDialogueActionService:
         }
         with self._db_lock, self._database_manager.unit_of_work() as db:
             for entry in arguments.get("entries") or []:
-                row = db.execute(
-                    SELECT_PLANNED_PAYLOAD_SQL,
-                    (str(entry.get("library_workout_id") or ""),),
-                ).fetchone()
+                row = planning_store.planned_unit_row(
+                    db, str(entry.get("library_workout_id") or "")
+                )
                 day = str(json.loads(row["payload"]).get("date") or "") if row else ""
                 if not action["_repair_period"]["start"] <= day <= period["end"]:
                     raise AppError(

@@ -9,7 +9,9 @@ from typing import Any
 
 from backend import change_history
 from backend.athlete.local_date import LocalDate
+from backend.db import planning_store
 from backend.errors import AppError
+from backend.planning.repository import parse_payload
 
 COACH_PLAN_CONSTRAINTS_PREFIX = "coach_plan_constraints:"
 TRAINING_PLAN_STATUS_ALIASES = {
@@ -27,20 +29,10 @@ TRAINING_PLAN_STATUSES = frozenset(
 
 
 def _member_dates(db: Any, plan_id: str) -> list[str]:
-    rows = db.execute(
-        "SELECT payload FROM planned_units "
-        "WHERE json_extract(payload, '$.plan_id') = ? "
-        "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-        "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0",
-        (plan_id,),
-    ).fetchall()
+    rows = planning_store.active_planned_unit_rows(db, plan_id)
     dates: list[str] = []
     for row in rows:
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError, KeyError:
-            payload = {}
-        if isinstance(payload, dict):
+        if (payload := parse_payload(row["payload"])) is not None:
             try:
                 dates.append(LocalDate.parse(payload.get("date")).isoformat())
             except TypeError, ValueError:

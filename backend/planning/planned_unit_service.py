@@ -20,6 +20,7 @@ from backend.canonical.planning_fields import (
 )
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, INVALID_PLANNING_DATE_ERROR, AppError
 from backend.planning import calendar as planning_calendar
@@ -29,22 +30,10 @@ from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import find_orphans
 from backend.planning.intervals_orphans import find_intervals_orphans
 from backend.planning.push_state import attach_push_state, garmin_baselines
-from backend.planning.repository import (
-    planned_unit_payload,
-    planned_unit_rows,
-    planned_unit_rows_between,
-)
+from backend.planning.repository import parse_payload, planned_unit_payload
 from backend.planning.wahoo_orphans import find_wahoo_orphans
 
 _REMOTE_LINKS = RemoteLinkRepository()
-UPDATE_SQL = (
-    "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
-    "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
-)
-
-
-# A focus-only edit changes nothing the provider holds, so sync state stays.
-FOCUS_UPDATE_SQL = "UPDATE planned_units SET payload=?, updated_at=? WHERE local_id=?"
 
 
 # Local keys no provider receives: the classification and the template link.
@@ -137,25 +126,20 @@ class PlannedUnitService:
         """Insert one planned unit on the caller-owned transaction."""
         now = self._now()
         stored = {**entry, "sync_status": sync_state}
-        db.execute(
-            "INSERT INTO planned_units(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                stored["id"],
-                stored["id"],
-                stored.get("external_id"),
-                json.dumps(stored, ensure_ascii=False),
-                int(sync_dirty),
-                sync_state,
-                self._redact(str(sync_error))[:1000] if sync_error else None,
-                json.dumps(stored.get("sync_conflict"), ensure_ascii=False)
-                if stored.get("sync_conflict")
-                else "",
-                baseline_hash,
-                last_synced_at,
-                now,
-                now,
-            ),
+        planning_store.insert_planned_unit(
+            db,
+            stored,
+            local_id=stored["id"],
+            external_id=stored.get("external_id"),
+            sync_dirty=int(sync_dirty),
+            sync_state=sync_state,
+            sync_error=self._redact(str(sync_error))[:1000] if sync_error else None,
+            sync_conflict=json.dumps(stored.get("sync_conflict"), ensure_ascii=False)
+            if stored.get("sync_conflict")
+            else "",
+            baseline_hash=baseline_hash,
+            last_synced_at=last_synced_at,
+            now=now,
         )
         _REMOTE_LINKS.refresh_from_slots(
             db, RemoteEntityKind.PLANNED_UNIT, str(stored["id"])
@@ -174,7 +158,7 @@ class PlannedUnitService:
         if target is None:
             if hidden := self._hide_intervals_linked(db, entity_id, current):
                 return hidden
-            db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
+            planning_store.delete_planned_unit(db, entity_id)
             # A pushed Garmin workout stays removable by its link.
             _REMOTE_LINKS.delete_for_entity(
                 db,
@@ -203,17 +187,13 @@ class PlannedUnitService:
         """
         if current is None:
             return None
-        try:
-            payload = json.loads(current.get("payload") or "{}")
-        except TypeError, ValueError:
+        payload = parse_payload(current.get("payload"))
+        if payload is None:
             return None
         remote_id = _REMOTE_LINKS.resolve_remote_id(
-            db,
-            RemoteEntityKind.PLANNED_UNIT,
-            entity_id,
-            payload.get("remote_event_id") if isinstance(payload, dict) else None,
+            db, RemoteEntityKind.PLANNED_UNIT, entity_id, payload.get("remote_event_id")
         )
-        if not isinstance(payload, dict) or not remote_id:
+        if not remote_id:
             return None
         hidden = {
             **payload,
@@ -222,10 +202,8 @@ class PlannedUnitService:
             "archived": True,
             "sync_status": "local",
         }
-        db.execute(
-            "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, "
-            "sync_conflict='', updated_at=? WHERE local_id = ?",
-            (json.dumps(hidden, ensure_ascii=False), self._now(), entity_id),
+        planning_store.update_planned_unit(
+            db, entity_id, hidden, self._now(), clear_error=False
         )
         return hidden
 
@@ -237,13 +215,8 @@ class PlannedUnitService:
         target: dict[str, Any],
         history_action: str,
     ) -> dict[str, Any]:
-        try:
-            current_payload = json.loads(current.get("payload") or "{}")
-        except (TypeError, ValueError) as exc:
-            raise AppError(
-                409, "Die lokale Planung kann nicht wiederhergestellt werden."
-            ) from exc
-        if not isinstance(current_payload, dict):
+        current_payload = parse_payload(current.get("payload"))
+        if current_payload is None:
             raise AppError(
                 409, "Die lokale Planung kann nicht wiederhergestellt werden."
             )
@@ -289,9 +262,9 @@ class PlannedUnitService:
         focus_only = _differs_only_in_focus(restored, current_payload)
         if focus_only:
             restored["sync_status"] = current_payload.get("sync_status")
-        db.execute(
-            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
-            (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
+        # A focus-only edit changes nothing the provider holds, so sync state stays.
+        planning_store.update_planned_unit(
+            db, entity_id, restored, self._now(), mark_local=not focus_only
         )
         _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, entity_id)
         return restored
@@ -414,7 +387,7 @@ class PlannedUnitService:
     ) -> list[dict[str, Any]]:
         """Return planned units; ``push_state`` adds the calendar sync-button state."""
         with self._database_manager.reader() as db:
-            rows = planned_unit_rows(
+            rows = planning_store.planned_unit_rows(
                 db,
                 limit,
                 include_archived,
@@ -455,7 +428,7 @@ class PlannedUnitService:
     def list_between(self, start: date, end: date) -> builtins.list[dict[str, Any]]:
         """Return the unarchived planned units from ``start`` to ``end`` inclusive."""
         with self._database_manager.reader() as db:
-            rows = planned_unit_rows_between(db, start, end)
+            rows = planning_store.planned_unit_rows_between(db, start, end)
         return [
             payload for row in rows if (payload := planned_unit_payload(row, False))
         ]
@@ -473,10 +446,7 @@ class PlannedUnitService:
     def _load_for_update(
         self, db: Any, normalized_id: str
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        row = db.execute(
-            "SELECT payload, external_id, sync_state FROM planned_units WHERE local_id = ?",
-            (normalized_id,),
-        ).fetchone()
+        row = planning_store.planned_unit_row(db, normalized_id)
         if not row:
             raise AppError(404, "Lokale Planung nicht gefunden.")
         try:
@@ -505,9 +475,8 @@ class PlannedUnitService:
     ) -> None:
         if focus_only:
             normalized["sync_status"] = before.get("sync_status")
-        db.execute(
-            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
-            (json.dumps(normalized, ensure_ascii=False), self._now(), normalized_id),
+        planning_store.update_planned_unit(
+            db, normalized_id, normalized, self._now(), mark_local=not focus_only
         )
         _REMOTE_LINKS.refresh_from_slots(
             db, RemoteEntityKind.PLANNED_UNIT, normalized_id
@@ -551,10 +520,8 @@ class PlannedUnitService:
                 "archived": True,
                 "sync_status": "local",
             }
-            db.execute(
-                "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, "
-                "sync_conflict='', updated_at=? WHERE local_id = ?",
-                (json.dumps(deleted, ensure_ascii=False), self._now(), normalized_id),
+            planning_store.update_planned_unit(
+                db, normalized_id, deleted, self._now(), clear_error=False
             )
             change_history.record_change(
                 db, "planned_unit", normalized_id, "delete", before, deleted
@@ -728,11 +695,8 @@ class PlannedUnitService:
 
 def _unchanged_row(db: Any, local_id: Any, expected_hash: Any) -> Any:
     """The stored unit, if its content hash still matches the browser's read."""
-    row = db.execute(
-        "SELECT payload, sync_state FROM planned_units WHERE local_id=? AND tombstone=0",
-        (str(local_id),),
-    ).fetchone()
-    if row is None:
+    row = planning_store.planned_unit_row(db, str(local_id))
+    if row is None or row["tombstone"]:
         raise AppError(404, "Einheit nicht gefunden.")
     if not planned_units.plan_push_hash_matches(row["payload"], expected_hash):
         raise AppError(

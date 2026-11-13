@@ -38,9 +38,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from backend.activities.hr_cap import stored_cap
-from backend.activities.hr_cap_export import capped_description
-from backend.activities.workout_text import structured_blocks
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import (
     ProviderId,
@@ -48,29 +45,31 @@ from backend.canonical.vocabulary import (
     RemoteLinkState,
     Sport,
 )
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units, strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
-from backend.planning.push_state import garmin_fingerprint
+from backend.planning.push_state import (
+    WORKOUT_MARKER,
+    garmin_fingerprint,
+    run_document,
+    run_document_digest,
+    run_sent_key,
+)
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
-from backend.providers.garmin_run_workout import (
-    GarminRunMappingError,
-    GarminRunTargets,
-    comparable_steps,
-    run_workout,
-)
+from backend.providers.garmin_run_workout import comparable_steps
 from backend.providers.garmin_strength_workout import (
     NO_STRUCTURE_MESSAGE,
     GarminExercise,
     GarminStrengthMappingError,
+    exercise_steps_match,
     strength_workout,
-    workout_exercise_steps,
 )
+from backend.sync.garmin_personal_status import SDK_REQUIRED_MESSAGE
 from backend.sync.garmin_service import _persist_garmin_tokens, shared_garmin_sync_lock
 from backend.sync.gates import ProviderResyncGate
 
@@ -80,12 +79,6 @@ _KEY_VALUES = KeyValueRepository(lambda: datetime.now(UTC).isoformat())
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
 _LOCK_WAIT_S = 30.0
 _LOGGER = logging.getLogger("intervals_coach")
-SDK_REQUIRED_MESSAGE = (
-    "Garmin-Workouts brauchen die Garmin-Anmeldung (SDK); "
-    "die Personal API kann nicht schreiben."
-)
-# First line of every description, so a workout this app sent can be told apart.
-WORKOUT_MARKER = "Pacecraft"
 # Workouts of past days removed per refresh; the next refresh takes the rest.
 _PAST_REMOVAL_BATCH = 20
 _PAST_REMOVAL_ATTEMPTS = 2 * _PAST_REMOVAL_BATCH
@@ -115,6 +108,8 @@ class _Prepared:
     document: dict[str, Any] | None = None
     # What the calendar compares to show the sync button again (push_state).
     fingerprint: str | None = None
+    # What Garmin acts on in a run document, to see later threshold moves (#2546).
+    run_digest: str | None = None
 
 
 def _status(error: BaseException) -> int | None:
@@ -158,7 +153,7 @@ class GarminStrengthPushService:
         run_zones: Callable[[], _ZonesFor] | None = None,
     ) -> None:
         self._configured = configured
-        # False while the latest refresh could not log the SDK in (login, MFA).
+        # False without an SDK login or while the latest refresh could not log it in.
         self._write_ready = write_ready
         self._database_manager = database_manager
         self._sdk_session = sdk_session
@@ -181,6 +176,8 @@ class GarminStrengthPushService:
             raise AppError(
                 409, "Garmin ist nicht konfiguriert.", reason="not_configured"
             )
+        if not self._write_ready():
+            raise AppError(409, SDK_REQUIRED_MESSAGE, reason="garmin_sdk_required")
         requested = _entries(payload.get("entries"))
         operation = self._gate.operation() if self._gate is not None else nullcontext()
         with operation, self._lock:
@@ -289,20 +286,13 @@ class GarminStrengthPushService:
     def _past_links(self) -> list[tuple[str, str | None, str | None]]:
         """(unit id, workout id, schedule id) of linked units before today, oldest first."""
         with self._database_manager().unit_of_work() as db:
-            rows = db.execute(
-                "SELECT l.local_id, l.remote_id, l.remote_external_id FROM remote_links l "
-                "JOIN planned_units p ON p.local_id = l.local_id "
-                "WHERE l.provider=? AND l.entity_kind=? AND json_valid(p.payload) "
-                "AND substr(json_extract(p.payload, '$.date'), 1, 10) "
-                "BETWEEN '0001-01-01' AND ? "
-                "ORDER BY substr(json_extract(p.payload, '$.date'), 1, 10), l.local_id",
-                (
-                    GARMIN,
-                    RemoteEntityKind.PLANNED_UNIT.value,
-                    # BETWEEN is inclusive: the day before today is the last one.
-                    (self._today() - timedelta(days=1)).isoformat(),
-                ),
-            ).fetchall()
+            rows = planning_store.garmin_links_until(
+                db,
+                GARMIN,
+                RemoteEntityKind.PLANNED_UNIT.value,
+                # Inclusive: the day before today is the last one.
+                (self._today() - timedelta(days=1)).isoformat(),
+            )
         return [
             (str(row["local_id"]), row["remote_id"], row["remote_external_id"])
             for row in rows
@@ -388,15 +378,9 @@ class GarminStrengthPushService:
     def _upcoming_workout_ids(self, today: date) -> set[str]:
         """Workouts linked to a stored unit dated today or later."""
         with self._database_manager().unit_of_work() as db:
-            rows = db.execute(
-                "SELECT l.remote_id FROM remote_links l "
-                "JOIN planned_units p ON p.local_id = l.local_id "
-                "WHERE l.provider=? AND l.entity_kind=? AND l.remote_id IS NOT NULL "
-                "AND json_valid(p.payload) "
-                "AND substr(json_extract(p.payload, '$.date'), 1, 10) >= ?",
-                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, today.isoformat()),
-            ).fetchall()
-        return {str(row["remote_id"]) for row in rows}
+            return planning_store.garmin_remote_ids_from(
+                db, GARMIN, RemoteEntityKind.PLANNED_UNIT.value, today.isoformat()
+            )
 
     def _cleanup_state(self) -> dict[str, Any]:
         with self._database_manager().unit_of_work() as db:
@@ -477,10 +461,7 @@ class GarminStrengthPushService:
                 return _already_removed(local_id)
             return _Prepared(local_id, None, True)
         with self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload, tombstone FROM planned_units WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, local_id)
             remembered = remembered_exercises(db)
         if not row or row["tombstone"]:
             return _error_result(local_id, "Einheit nicht gefunden", "conflict")
@@ -499,7 +480,8 @@ class GarminStrengthPushService:
             False,
             plan_date,
             document,
-            garmin_fingerprint(unit),
+            garmin_fingerprint(unit, remembered),
+            run_document_digest(document),
         )
 
     def _document(
@@ -524,7 +506,7 @@ class GarminStrengthPushService:
         if day < self._today():
             raise ValueError("Vergangene Einheiten werden nicht an Garmin gesendet.")
         if sport is Sport.RUN:
-            return plan_date, _run_document(unit, zones_for(unit))
+            return plan_date, run_document(unit, zones_for(unit))
         exercises = strength_structure.normalize_structure(
             unit.get("strength_structure"), stored=True
         )
@@ -566,15 +548,23 @@ class GarminStrengthPushService:
         self._save_link(unit, workout_id, schedule_id, None)
         if not self._verified(client, workout_id, unit.document):
             self._drop_broken(client, unit, workout_id, schedule_id, created=created)
+        # A schedule an earlier push made without confirming its id is reused.
+        existing = (
+            None
+            if created or schedule_id
+            else _scheduled_on(client, workout_id, unit.plan_date)
+        )
         if schedule_id:
             try:
                 _call(client.unschedule_workout, schedule_id)
             except _Missing:
                 pass
             self._save_link(unit, workout_id, None, None)
-        schedule_id = _schedule_id(
-            _call(client.schedule_workout, workout_id, unit.plan_date)
-        ) or _scheduled_on(client, workout_id, unit.plan_date)
+        schedule_id = (
+            existing
+            or _schedule_id(_call(client.schedule_workout, workout_id, unit.plan_date))
+            or _scheduled_on(client, workout_id, unit.plan_date)
+        )
         if schedule_id is None:
             # Without the id a later push could not move this entry; the push
             # stays incomplete instead of reporting success.
@@ -614,6 +604,8 @@ class GarminStrengthPushService:
     ) -> None:
         """Store the workout and schedule ids; the fingerprint only once fully pushed."""
         with self._database_manager().unit_of_work() as db:
+            if payload_hash and unit.run_digest:
+                _KEY_VALUES.set(db, run_sent_key(unit.local_id), unit.run_digest)
             _REMOTE_LINKS.upsert(
                 db,
                 RemoteLink(
@@ -632,9 +624,11 @@ class GarminStrengthPushService:
     def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
         """Whether the saved workout kept every sent exercise or run step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        running = (document.get("sportType") or {}).get("sportTypeKey") == "running"
-        steps = comparable_steps if running else workout_exercise_steps
-        return isinstance(saved, dict) and steps(saved) == steps(document)
+        if not isinstance(saved, dict):
+            return False
+        if (document.get("sportType") or {}).get("sportTypeKey") == "running":
+            return comparable_steps(saved) == comparable_steps(document)
+        return exercise_steps_match(saved, document)
 
     def _drop_broken(
         self,
@@ -707,37 +701,6 @@ def _call(method: Callable[..., Any], *args: Any) -> Any:
 
 def _no_zones(_unit: Mapping[str, Any]) -> ZoneSettings | None:
     return None
-
-
-def _run_document(
-    unit: Mapping[str, Any], zones: ZoneSettings | None
-) -> dict[str, Any]:
-    """The Garmin running workout of a run unit; relative targets need ``zones``."""
-    description = str(unit.get("description") or "")
-    lthr = zones.lthr if zones else None
-    if stored_cap(unit) is not None and not lthr:
-        # The cap is percent of the threshold HR; without it the cap would be lost.
-        raise GarminRunMappingError(
-            "Die Pulsobergrenze braucht den Schwellenpuls, der nicht vorliegt."
-        )
-    capped = capped_description(description, unit, lthr=lthr)
-    return run_workout(
-        name=str(unit.get("name") or ""),
-        description=f"{WORKOUT_MARKER}\n{description}",
-        blocks=structured_blocks(capped, str(unit.get("target") or "AUTO")),
-        targets=None
-        if zones is None
-        else GarminRunTargets(
-            ftp=zones.ftp,
-            threshold_hr=zones.lthr,
-            max_hr=zones.max_hr,
-            threshold_speed=zones.threshold_pace,
-            hr_zone_basis=zones.hr_zone_reference,
-            power_limits=zones.power_limits,
-            hr_limits=zones.hr_limits,
-            pace_limits=zones.pace_limits,
-        ),
-    )
 
 
 def _workout_id(saved: Any) -> str:

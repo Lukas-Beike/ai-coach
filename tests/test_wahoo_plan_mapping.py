@@ -22,7 +22,7 @@ from backend.providers.wahoo_plan_mapping import (
     WahooPlanReferences,
     wahoo_plan,
 )
-from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
+from backend.sync.wahoo_wiring import build_wahoo_sync
 from backend.sync.wahoo_workout_export import (
     WahooWorkoutExport,
     plan_references,
@@ -273,27 +273,19 @@ class AssemblyReferenceTests(unittest.TestCase):
             seen.append(db)
             return THRESHOLDS
 
-        assembly = WahooSyncAssembly(
-            WahooSyncInputs(
-                config=Mock(),
-                connection=Mock(),
-                json_request=Mock(),
-                database_manager=lambda: manager,
-                database_lock=Mock(),
-                key_values=Mock(),
-                daily_markers=Mock(),
-                observer=Mock(),
-                zone_provider=Mock(),
-                now=lambda: datetime(2026, 10, 13, tzinfo=UTC),
-                logger=Mock(),
-                redactor=Mock(),
-                resync_gate=Mock(),
-                export_thresholds=thresholds,
-                history_earliest_date=date(2020, 1, 1),
-            )
+        context = Mock()
+        context.database.return_value = manager
+        services = build_wahoo_sync(
+            context,
+            connection=Mock(),
+            daily_markers=Mock(),
+            resync_gate=Mock(),
+            export_thresholds=thresholds,
+            history_earliest_date=date(2020, 1, 1),
+            fit_opener=Mock(),
         )
 
-        export = assembly.workout_export()
+        export = services.workout_export()
         envelope = export.serialize_library(
             {"local_id": "w1", "type": "Ride", "description": "- 10m 88%"}
         )

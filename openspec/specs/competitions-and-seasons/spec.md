@@ -160,13 +160,13 @@ The overview SHALL preserve canonical local records, existing Coach editing and 
 
 #### Scenario: Load and refresh failure
 - **WHEN** the initial read is pending or a refresh fails
-- **THEN** the screen distinguishes loading from an empty list, retains available cached facts with a stale/error indication, and offers retry without claiming a successful refresh.
+- **THEN** the screen distinguishes loading from an empty list, retains available cached facts with a stale/error indication, and offers retry without claiming a successful refresh. Without stored data the texts are "Wettkämpfe werden geladen …" and "Wettkämpfe konnten nicht geladen werden." with "Erneut laden"; with stored data "Gespeicherter Stand wird aktualisiert …" and "Gespeicherter Stand. Aktualisierung fehlgeschlagen.".
 
 #### Scenario: Return after a Coach edit
 - **WHEN** an authorized Coach competition edit succeeds and the overview refreshes
 - **THEN** the saved updated event appears with its stable identity and existing receipt/undo behavior, without an additional remote write.
 
-Evidence: `public/state-loader.js` (canonical competition state), `public/app.js` (local retry), `backend/http_api/bootstrap_state.py` and `backend/http_api/athlete_get.py` (reads), `backend/planning/competition_service.py:CompetitionService.save` (local mutation authority); `e2e/competitions.spec.js` (no writes while reading, failed reads with retry, saved Coach edit shown).
+Evidence: `public/state-loader.js` (canonical competition state), `public/app.js` (local retry), `public/plan-views.js:renderCompetitionReadStatus`, `backend/http_api/bootstrap_state.py` and `backend/http_api/athlete_get.py` (reads), `backend/planning/competition_service.py:CompetitionService.save` (local mutation authority); `e2e/competitions.spec.js` (no writes while reading, failed reads with retry, saved Coach edit shown).
 
 Evidence limits for CS9–CS12: Coach-edit refresh is exercised using simulated canonical saved state rather than an end-to-end real-model mutation. Real-device microphone/notification permissions and keyboard-open behavior were not verified.
 

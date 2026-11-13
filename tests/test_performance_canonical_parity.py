@@ -322,6 +322,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
             zone_configurations=(),
+            lt1_session_records=None,
         )
         self.assertEqual(manager.events, ["enter", "exit"])
         self.assertEqual(reader.calls, [])
@@ -341,6 +342,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
             zone_configurations=(),
+            lt1_session_records=None,
         )
 
     def test_activity_performance_inputs_share_the_snapshot_unit(self) -> None:
@@ -479,6 +481,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
             session_feedback=None,
             zone_configurations=(),
+            lt1_session_records=None,
         )
 
 
