@@ -1,9 +1,9 @@
 """Garmin gear links resolve to activities through canonical sessions.
 
-An Intervals.icu activity and the same ride from Garmin are ingested, so the
-session linker bundles them. A Garmin gear item listing the Garmin ride then links
-the Intervals.icu row without ``activity_matches`` or ``external_id``, once, and an
-explicit assignment still wins. Temporary database and synthetic rows only.
+A Wahoo ride and the same ride from Garmin are ingested, so the session linker
+bundles them. A Garmin gear item listing the Garmin ride then links the bundled
+session without ``activity_matches`` or ``external_id``, once, and an explicit
+assignment still wins. Temporary database and synthetic rows only.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
-import intervals_compaction as intervals_fixture
 from support import temp_database
+from test_feedback_session_identity import ingest_wahoo, wahoo_row
 
 from backend.activities.activity_summary import activity_summaries
 from backend.athlete.equipment import EquipmentService
@@ -32,20 +32,7 @@ ZONE = ZoneInfo("Europe/Berlin")
 SYNCED = "2026-09-20T08:00:00+00:00"
 
 
-def intervals_row(identifier: str) -> dict[str, Any]:
-    return {
-        "id": identifier,
-        "start_date_local": "2026-09-10T07:00:00",
-        "type": "Ride",
-        "distance": 20000.0,
-        "moving_time": 3600,
-        "elapsed_time": 3600,
-    }
-
-
-def session_of(
-    manager: Any, provider_activity_id: str, provider: str = "intervals"
-) -> str:
+def session_of(manager: Any, provider_activity_id: str, provider: str = "wahoo") -> str:
     """The live session id a provider activity belongs to."""
     with manager.reader() as db:
         local = canonical_store.activity_local_ids(
@@ -55,7 +42,7 @@ def session_of(
 
 
 def canonical_store_local_id(
-    manager: Any, provider_activity_id: str, provider: str = "intervals"
+    manager: Any, provider_activity_id: str, provider: str = "wahoo"
 ) -> str:
     """The session id of the record itself, before any merge."""
     with manager.reader() as db:
@@ -86,14 +73,7 @@ class EquipmentSessionTests(unittest.TestCase):
         key_values = KeyValueRepository(lambda: SYNCED)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {"activities": [intervals_row("i1")]},
-                },
-                zone=ZONE,
-            )
+            ingest_wahoo(db, [wahoo_row("601")])
             GarminSnapshotWriter(key_values, lambda: ZONE).write(
                 db,
                 {
@@ -113,7 +93,6 @@ class EquipmentSessionTests(unittest.TestCase):
                     ],
                 },
             )
-        self.rows = [intervals_row("i1")]
         self.service = EquipmentService(
             self.manager,
             lambda: stored_summaries(self.manager),
@@ -246,16 +225,16 @@ class EquipmentSessionTests(unittest.TestCase):
     def links(self) -> dict[str, Any]:
         return {row["activity_id"]: row for row in self.service.read()["assignments"]}
 
-    def test_the_garmin_ride_links_the_bundled_intervals_row_once(self) -> None:
+    def test_the_garmin_ride_links_the_bundled_wahoo_session_once(self) -> None:
         links = self.links()
-        session = session_of(self.manager, "i1")
+        session = session_of(self.manager, "601")
         self.assertEqual(set(links), {session})
         self.assertEqual(links[session]["source"], "garmin_gear")
         (item,) = self.service.read()["items"]
         self.assertEqual(item["usage"]["assigned_sessions"], 1)
 
     def test_an_explicit_assignment_still_wins(self) -> None:
-        self.service.assign({"activity_id": "i1", "equipment_id": None})
+        self.service.assign({"activity_id": "601", "equipment_id": None})
         (item,) = self.service.read()["items"]
         self.assertEqual(item["usage"]["assigned_sessions"], 0)
 
@@ -345,14 +324,9 @@ class CanonicalGearParityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.manager = temp_database(self, "gear.db", row_factory=row_factory)
-        self.rows = [intervals_row("i1"), intervals_row("i2")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {"synced_at": SYNCED, "raw_provider_data": {"activities": self.rows}},
-                zone=ZONE,
-            )
+            ingest_wahoo(db, [wahoo_row("601"), wahoo_row("602")])
             GarminSnapshotWriter(
                 KeyValueRepository(lambda: SYNCED), lambda: ZONE
             ).write(
@@ -409,7 +383,7 @@ class CanonicalGearParityTests(unittest.TestCase):
             read["assignments"],
             [
                 {
-                    "activity_id": session_of(self.manager, "i1"),
+                    "activity_id": session_of(self.manager, "601"),
                     "equipment_id": by_gear["g1"]["id"],
                     "source": "garmin_gear",
                 }
@@ -432,21 +406,14 @@ def wahoo_summary(identifier: str, day: str = "2026-09-10") -> dict[str, Any]:
 
 
 class SessionOnlyEquipmentTests(unittest.TestCase):
-    """Sessions without an Intervals.icu record count like any other session."""
+    """Sessions without a Wahoo record count like any other session."""
 
     def setUp(self) -> None:
         self.manager = temp_database(self, "sessions.db", row_factory=row_factory)
         self.wahoo: list[dict[str, Any]] = [wahoo_summary("w1")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {"activities": [intervals_row("i1")]},
-                },
-                zone=ZONE,
-            )
+            ingest_wahoo(db, [wahoo_row("601")])
             GarminSnapshotWriter(
                 KeyValueRepository(lambda: SYNCED), lambda: ZONE
             ).write(
@@ -486,7 +453,7 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         (session,) = (
             summary["id"]
             for summary in stored_summaries(self.manager)
-            if "intervals" not in summary["record_ids"]
+            if "wahoo" not in summary["record_ids"]
         )
         return str(session)
 
@@ -517,13 +484,13 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         links = {row["activity_id"]: row for row in self.service.read()["assignments"]}
         # Both rides are keyed by their session id.
         self.assertEqual(
-            set(links), {session_of(self.manager, "i1"), self.garmin_only_session()}
+            set(links), {session_of(self.manager, "601"), self.garmin_only_session()}
         )
         usage = self.usage("Road bike")
         self.assertEqual(usage["assigned_sessions"], 2)
         self.assertEqual(usage["hours"], 1.5)
 
-    def test_a_second_bundled_intervals_id_names_the_session_for_assign(self) -> None:
+    def test_a_second_bundled_provider_id_names_the_session_for_assign(self) -> None:
         with self.manager.reader() as db:
             from backend.db import canonical_store
 
@@ -579,9 +546,9 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         (bundled,) = (
             summary
             for summary in stored_summaries(self.manager)
-            if "intervals" in summary["record_ids"]
+            if "wahoo" in summary["record_ids"]
         )
-        self.assertEqual(set(bundled["record_ids"]), {"intervals", "garmin"})
+        self.assertEqual(set(bundled["record_ids"]), {"wahoo", "garmin"})
         saved = self.service.assign(
             {"activity_id": bundled["id"], "equipment_id": bike["id"]}
         )
@@ -591,23 +558,9 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.assertEqual(usage["hours"], 1)
         self.assertEqual(usage["distance_km"], 20)
 
-    def test_assignment_stored_under_an_intervals_id_still_applies(self) -> None:
+    def test_assignment_stored_under_a_provider_id_still_applies(self) -> None:
         bike = self.local_bike()
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
-                (
-                    "equipment_assignment:i1",
-                    json.dumps(
-                        {
-                            "activity_id": "i1",
-                            "equipment_id": bike["id"],
-                            "observed_at": SYNCED,
-                        }
-                    ),
-                    SYNCED,
-                ),
-            )
+        self.store_assignment("601", bike["id"], SYNCED)
         usage = self.usage("Local bike")
         self.assertEqual(usage["assigned_sessions"], 1)
         self.assertEqual(usage["distance_km"], 20)
@@ -632,22 +585,22 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
 
     def test_a_legacy_assignment_is_listed_under_the_session_id(self) -> None:
         bike = self.local_bike()
-        session = session_of(self.manager, "i1")
-        self.store_assignment("i1", bike["id"], SYNCED)
+        session = session_of(self.manager, "601")
+        self.store_assignment("601", bike["id"], SYNCED)
 
         (listed,) = self.service.read(activity_id=session)["assignments"]
 
         self.assertEqual(
             (listed["activity_id"], listed["equipment_id"]), (session, bike["id"])
         )
-        self.assertEqual(self.service.read(activity_id="i1")["assignments"], [])
+        self.assertEqual(self.service.read(activity_id="601")["assignments"], [])
 
     def test_an_assignment_under_the_session_id_wins_over_a_legacy_one(self) -> None:
         old, new = self.local_bike(name="Old bike"), self.local_bike(name="New bike")
-        session = session_of(self.manager, "i1")
+        session = session_of(self.manager, "601")
         self.store_assignment(session, new["id"], "2026-09-19T08:00:00+00:00")
         # The legacy row is the newer one, yet the session-id row still wins.
-        self.store_assignment("i1", old["id"], "2026-09-21T08:00:00+00:00")
+        self.store_assignment("601", old["id"], "2026-09-21T08:00:00+00:00")
 
         (listed,) = self.service.read(activity_id=session)["assignments"]
 
@@ -659,18 +612,16 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self,
     ) -> None:
         old, new = self.local_bike(name="Old bike"), self.local_bike(name="New bike")
-        session = session_of(self.manager, "i1")
+        session = session_of(self.manager, "601")
         with self.manager.reader() as db:
             local = canonical_store.activity_local_ids(db, "garmin", ["910"])["910"]
         alias = local if local != session else None
         if alias is None:
             with self.manager.reader() as db:
-                alias = canonical_store.activity_local_ids(db, "intervals", ["i1"])[
-                    "i1"
-                ]
+                alias = canonical_store.activity_local_ids(db, "wahoo", ["601"])["601"]
         self.assertNotEqual(alias, session)
         # The record-id row is older, the alias-session row newer: it wins.
-        self.store_assignment("i1", old["id"], "2026-09-19T08:00:00+00:00")
+        self.store_assignment("601", old["id"], "2026-09-19T08:00:00+00:00")
         self.store_assignment(alias, new["id"], "2026-09-21T08:00:00+00:00")
 
         (listed,) = self.service.read(activity_id=session)["assignments"]
@@ -681,18 +632,16 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
 
     def test_an_older_alias_row_loses_to_a_newer_record_id_row(self) -> None:
         old, new = self.local_bike(name="Old bike"), self.local_bike(name="New bike")
-        session = session_of(self.manager, "i1")
+        session = session_of(self.manager, "601")
         with self.manager.reader() as db:
             local = canonical_store.activity_local_ids(db, "garmin", ["910"])["910"]
         alias = local if local != session else None
         if alias is None:
             with self.manager.reader() as db:
-                alias = canonical_store.activity_local_ids(db, "intervals", ["i1"])[
-                    "i1"
-                ]
+                alias = canonical_store.activity_local_ids(db, "wahoo", ["601"])["601"]
         # The alias-session id sorts first but is older: the newest still wins.
         self.store_assignment(alias, old["id"], "2026-09-19T08:00:00+00:00")
-        self.store_assignment("i1", new["id"], "2026-09-21T08:00:00+00:00")
+        self.store_assignment("601", new["id"], "2026-09-21T08:00:00+00:00")
 
         (listed,) = self.service.read(activity_id=session)["assignments"]
 
@@ -702,19 +651,19 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self,
     ) -> None:
         bike = self.local_bike()
-        own = canonical_store_local_id(self.manager, "i1")
+        own = canonical_store_local_id(self.manager, "601")
 
-        saved = self.service.assign({"activity_id": "i1", "equipment_id": bike["id"]})
+        saved = self.service.assign({"activity_id": "601", "equipment_id": bike["id"]})
 
         self.assertEqual(saved["assignment"]["activity_id"], own)
-        (listed,) = self.service.read(activity_id=session_of(self.manager, "i1"))[
+        (listed,) = self.service.read(activity_id=session_of(self.manager, "601"))[
             "assignments"
         ]
         self.assertEqual(listed["equipment_id"], bike["id"])
         # A later assignment through the other copy replaces it, never doubles it.
         other = self.local_bike(name="Other bike")
         self.service.assign({"activity_id": "910", "equipment_id": other["id"]})
-        (listed,) = self.service.read(activity_id=session_of(self.manager, "i1"))[
+        (listed,) = self.service.read(activity_id=session_of(self.manager, "601"))[
             "assignments"
         ]
         self.assertEqual(listed["equipment_id"], other["id"])
@@ -725,7 +674,7 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
 
             self.service.sync_garmin_snapshot(garmin_store.read_state(db))
         self.assertEqual(self.usage("Road bike")["assigned_sessions"], 2)
-        self.store_assignment("i1", None, SYNCED)
+        self.store_assignment("601", None, SYNCED)
 
         self.assertEqual(self.usage("Road bike")["assigned_sessions"], 1)
 

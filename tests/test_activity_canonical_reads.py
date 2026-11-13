@@ -8,10 +8,12 @@ from datetime import date
 from typing import Any
 
 from canonical_read_support import (
+    WAHOO_RUN_COPY,
     CanonicalReadFixture,
     LatestSnapshot,
     make_selector,
     populate,
+    store_wahoo_run_copy,
 )
 from intervals_compaction import compact_activity_rows
 
@@ -118,6 +120,7 @@ class PendingAndTableReadTests(_ActivityCase):
         self.assertEqual(pending.recent(today=TODAY)["activities"], [])
 
         populate(self)
+        store_wahoo_run_copy(self)
         tables = self.read_service(make_selector(self))
 
         with self.manager.reader() as db:
@@ -126,22 +129,16 @@ class PendingAndTableReadTests(_ActivityCase):
         page = tables.page(today=TODAY)
         listed = page["activities"]
         self.assertEqual([row["id"] for row in listed], expected)
-        # Each session once: the Intervals duplicate pair is one entry and the
-        # Garmin-only session is listed.
-        intervals_ids = [
-            row["record_ids"].get("intervals")
-            for row in listed
-            if "intervals" in row["record_ids"]
-        ]
-        self.assertEqual(len(intervals_ids), len(set(intervals_ids)))
+        # Each session once: the Garmin run and its Wahoo copy are one entry.
         self.assertEqual(
-            1,
-            sum(
-                row["record_ids"].get("intervals") in (WAHOO_ID, GARMIN_ID)
+            [{"garmin": "910002", "wahoo": WAHOO_RUN_COPY}],
+            [
+                row["record_ids"]
                 for row in listed
-            ),
+                if "910002" in row["record_ids"].values()
+                or WAHOO_RUN_COPY in row["record_ids"].values()
+            ],
         )
-        self.assertIn({"garmin": "910002"}, [row["record_ids"] for row in listed])
         self.assertEqual(
             {k: v for k, v in page.items() if k != "activities"},
             {"snapshot_synced_at": None, "next_cursor": None, "limit": 100, "days": -1},

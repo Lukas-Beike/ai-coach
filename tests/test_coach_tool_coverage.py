@@ -18,6 +18,7 @@ import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
 from support import latest_tool_outputs, mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
+from test_feedback_session_identity import ZONE, ingest_wahoo, wahoo_row
 
 from backend.activities.hr_cap import effective_caps
 from backend.coach.receipt_compaction import compact_receipt
@@ -29,6 +30,7 @@ from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
 from backend.providers import openai_requests
 from backend.providers.openai_responses_adapter import model_turn, request_payload
+from backend.sync import canonical_ingest
 from backend.sync.adaptive import IllnessPauseSyncService
 
 
@@ -1516,18 +1518,31 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), before)
 
     @staticmethod
-    def seed_duplicate_pair(common):
-        """Ingest the Wahoo ride and its Garmin copy into the canonical tables."""
+    def seed_duplicate_pair():
+        """Ingest a Wahoo ride and its Garmin copy into the canonical tables."""
         mark_tables_serving(server)
-        for identifier, source in (
-            ("synthetic-wahoo", "Wahoo"),
-            ("synthetic-garmin", "GARMIN_CONNECT"),
-        ):
-            seed_intervals_activity(
-                server.database_manager(),
-                identifier,
-                **{**common, "source": source},
+        garmin = {
+            "synced_at": "2026-09-06T12:00:00+00:00",
+            "activities": [
+                {
+                    "activityId": 7101,
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": "2026-09-06 10:00:00",
+                    "duration": 3600.0,
+                    "distance": 30000.0,
+                }
+            ],
+        }
+        with server.database_manager().unit_of_work() as db:
+            ingest_wahoo(
+                db,
+                [
+                    wahoo_row(
+                        "7001", starts="2026-09-06T08:00:00.000Z", distance="30000"
+                    )
+                ],
             )
+            canonical_ingest.ingest_garmin_payload(db, garmin, zone=ZONE)
 
     @covers(
         "confirm_activity_session:success",
@@ -1535,13 +1550,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         "merge_activity_sessions:success",
     )
     def test_session_tools_correct_the_bundle_and_leave_a_change_receipt(self):
-        common = {
-            "type": "Ride",
-            "start_date_local": "2026-09-06T10:00:00",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        self.seed_duplicate_pair(common)
+        self.seed_duplicate_pair()
         sessions = server.ATHLETE_DATA.session_corrections()
         with server.database_manager().read_snapshot() as db:
             first = db.execute(
