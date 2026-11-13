@@ -3,8 +3,9 @@
 Stored provider records are re-projected only when the version of their mapper
 changes. Sub-mappers have no version of their own: they ride on the version of
 the mapper that calls them. This guard pins a fingerprint of every mapping
-module's code together with the versions that replay it. Changing the code
-without bumping one of those versions fails here.
+module's code, and of every provider helper module a replayed mapper imports
+(directly or through another helper), together with the versions that replay
+it. Changing the code without bumping one of those versions fails here.
 
 The fingerprint ignores comments, docstrings and layout, so documentation edits
 pass. When a code change does not alter any mapped output (a pure refactor),
@@ -62,6 +63,10 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         (9, 10),
         "f7fc2667529631b41c1146091f8e7566a0d287c73baecd5267f6fff7d09dba26",
     ),
+    "fit_file": (
+        (9, 10),
+        "fb27149c7f770bae44b8a485dbcb3f1d2aaeff7c25cd4006c89fc825fc625b11",
+    ),
     "fit_rr_mapping": (
         (9, 10),
         "4319aab924017281cffb92b24b53fa67ed8633d747b55e9f61f57b58821c6981",
@@ -78,6 +83,14 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         (21,),
         "adb059dae3b2103933de835f3cec94d2abf0a2e9d76e2898d394f1b015a27f8b",
     ),
+    "garmin_device_records": (
+        (23,),
+        "68ecba9d45e93b4ec7d4427cca42a212b43e921f264960cdb532f67b192cce66",
+    ),
+    "garmin_fields": (
+        (23,),
+        "0091aa0ad891d7b0fe6d7e2dd90d3003c19dce4dc01f5509b0ba66a268bbb9ab",
+    ),
     "garmin_gear_mapping": (
         (23,),
         "b53d3b960450b21475f4f86a73c6be8ecd3d182afa0b73ed3055b535482d9028",
@@ -86,6 +99,10 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         (23,),
         "a7d0fdc2a154c9cac611309961922df4c6b0ac289f4c9ca057f139be69de1154",
     ),
+    "garmin_performance_fields": (
+        (23,),
+        "98a564406e58585f05bf02dd85dcb174960412a742e12e86fecb2105b40605ad",
+    ),
     "garmin_status_mapping": (
         (23,),
         "5da9d6874214b0b966721bd1cdd155ffdb64dcc247c79db92c11739b112a1f96",
@@ -93,6 +110,10 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "garmin_training_mapping": (
         (23,),
         "39bfa63cd233c003f99a41fdd5eaac447bfc9373f3b13dda2084e7778e93aaa7",
+    ),
+    "garmin_weight_walk": (
+        (23,),
+        "8f795a850ba38fc4c15ea53623ecdca84e34a3ca7760f9c4379462b51372ed9d",
     ),
     "garmin_zone_mapping": (
         (23,),
@@ -136,9 +157,50 @@ def fingerprint(source: str) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
+def provider_imports(module: str) -> set[str]:
+    """The backend.providers modules that ``module`` imports."""
+    names: set[str] = set()
+    tree = ast.parse((PROVIDERS / f"{module}.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level == 1 and base:
+                names.add(base.split(".")[0])
+            elif node.level == 1 or base == "backend.providers":
+                names.update(alias.name for alias in node.names)
+            elif base.startswith("backend.providers."):
+                names.add(base.split(".")[2])
+        elif isinstance(node, ast.Import):
+            names.update(
+                alias.name.split(".")[2]
+                for alias in node.names
+                if alias.name.startswith("backend.providers.")
+            )
+    return {name for name in names if (PROVIDERS / f"{name}.py").is_file()}
+
+
+def helper_replayed_by() -> dict[str, tuple[str, ...]]:
+    """Helper module -> the versions replaying every mapper that reaches it."""
+    owners: dict[str, set[str]] = {}
+    for mapping, replaying in REPLAYED_BY.items():
+        pending, seen = [mapping], set()
+        while pending:
+            for name in provider_imports(pending.pop()):
+                if not name.endswith("_mapping") and name not in seen:
+                    seen.add(name)
+                    pending.append(name)
+        for helper in seen:
+            owners.setdefault(helper, set()).update(replaying)
+    return {helper: tuple(sorted(found)) for helper, found in owners.items()}
+
+
+def replayed_by() -> dict[str, tuple[str, ...]]:
+    return {**REPLAYED_BY, **helper_replayed_by()}
+
+
 def current_table() -> dict[str, tuple[tuple[int, ...], str]]:
     table = {}
-    for module, owners in sorted(REPLAYED_BY.items()):
+    for module, owners in sorted(replayed_by().items()):
         versions = tuple(
             int(importlib.import_module(f"backend.providers.{owner}").MAPPER_VERSION)
             for owner in owners
@@ -152,6 +214,11 @@ class MapperVersionGuardTests(unittest.TestCase):
     def test_every_mapping_module_is_registered(self) -> None:
         modules = {path.stem for path in PROVIDERS.glob("*_mapping.py")}
         self.assertEqual(modules, set(REPLAYED_BY) | set(NOT_REPLAYED))
+        # Every mapper and every provider helper it reaches is pinned (#2484).
+        self.assertEqual(set(PINNED), set(replayed_by()))
+        self.assertEqual(
+            helper_replayed_by()["garmin_weight_walk"], ("garmin_health_mapping",)
+        )
 
     def test_code_changes_come_with_a_replaying_version_bump(self) -> None:
         for module, (versions, digest) in current_table().items():
@@ -162,7 +229,7 @@ class MapperVersionGuardTests(unittest.TestCase):
                         versions,
                         pinned_versions,
                         f"{module} changed without bumping the MAPPER_VERSION of "
-                        f"{', '.join(REPLAYED_BY[module])}; bump it so stored "
+                        f"{', '.join(replayed_by()[module])}; bump it so stored "
                         "records replay, then update PINNED",
                     )
                 self.assertEqual(
