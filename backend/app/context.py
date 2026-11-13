@@ -85,5 +85,5 @@ class AppContext:
     coach_dialogue_tools: Any = None
     weather: Any = None
     run_lthr: Any = None
-    # The cached morning body battery service of the active database.
+    # Returns the cached morning body battery service of the active database.
     morning_body_battery_service: Any = None
