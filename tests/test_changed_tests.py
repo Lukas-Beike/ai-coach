@@ -170,6 +170,9 @@ class SelectModulesTests(unittest.TestCase):
 
     def test_full_suite_paths_name_existing_repository_paths(self):
         root = changed_tests.ROOT
+        for module in changed_tests.REPOSITORY_WIDE:
+            with self.subTest(module=module):
+                self.assertTrue((root / "tests" / f"{module}.py").is_file(), module)
         for prefix in changed_tests.FULL_SUITE_PATHS:
             with self.subTest(prefix=prefix):
                 self.assertTrue(
