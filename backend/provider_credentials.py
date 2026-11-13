@@ -326,12 +326,13 @@ class ProviderCredentialService:
     def refresh(self) -> Config:
         """Recompute the runtime configuration from env plus stored credentials.
 
-        Read and apply happen under the database lock, so concurrent saves or a
-        privacy deletion apply their configurations in commit order. Only
+        Read and apply happen inside one unit of work, so the writer excludes
+        concurrent saves or a privacy deletion and they apply their
+        configurations in commit order. Only
         credential fields change: a field no longer stored returns to its
         environment value, and every other runtime setting is kept.
         """
-        with self._database_lock():
+        with self._database_lock(), self._database_manager().unit_of_work():
             stored = self._read_stored()
             current = self._current_config()
             base = _with_values(

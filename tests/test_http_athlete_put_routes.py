@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from threading import RLock
-from unittest.mock import Mock, call
+from unittest.mock import MagicMock, Mock, call
 
 from support import dispatch_route
 
@@ -17,15 +17,19 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.profile_factory = Mock(return_value=self.profile)
         self.handler = Mock()
         self.database_lock = RLock()
-        self.routes = AthletePutRoutes(self.profile_factory, self.database_lock)
+        self.manager = MagicMock()
+        self.routes = AthletePutRoutes(
+            self.profile_factory, lambda: self.manager, self.database_lock
+        )
 
     def test_profile_write_holds_shared_database_lock(self) -> None:
         payload = {"name": "Example", "timezone": "Europe/Berlin"}
         self.handler.read_json.return_value = payload
+        unit_of_work = self.manager.unit_of_work.return_value
         self.profile.patch.side_effect = lambda _value: (
             {"name": "Example"}
-            if self.database_lock._is_owned()
-            else self.fail("profile writes must hold the shared database lock")
+            if self.database_lock._is_owned() and unit_of_work.__enter__.called
+            else self.fail("profile writes must hold the lock and a unit of work")
         )
         self.handler.send_json.side_effect = lambda *_args: self.assertFalse(
             self.database_lock._is_owned()
@@ -34,6 +38,7 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.assertTrue(
             dispatch_route(self.routes, self.handler, "/api/profile", method="PUT")
         )
+        unit_of_work.__exit__.assert_called_once()
 
     def test_athlete_context_route_is_gone(self) -> None:
         self.assertFalse(
@@ -66,6 +71,7 @@ class AthletePutRoutesTests(unittest.TestCase):
         zones.remove.return_value = {"change": "removed"}
         routes = AthletePutRoutes(
             self.profile_factory,
+            lambda: self.manager,
             self.database_lock,
             Mock(return_value=zones),
         )

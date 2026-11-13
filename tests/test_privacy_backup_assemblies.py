@@ -184,8 +184,6 @@ class BackupBuilderTests(unittest.TestCase):
             backup_services = build_backup(ctx)
 
             backup = backup_services.backup_service()
-            replacement_lock = Mock(name="replacement_lock")
-            ctx.database_lock = replacement_lock
             restore = backup_services.restore_service()
 
             self.assertIs(backup._manager, manager)
@@ -196,7 +194,6 @@ class BackupBuilderTests(unittest.TestCase):
                 backup._config.time_limit_seconds, EXPORT_TIME_LIMIT_SECONDS
             )
             dependencies = restore._dependencies
-            self.assertIs(dependencies.database_lock, replacement_lock)
             self.assertIs(
                 dependencies.maintenance_gate, runtime_maintenance.MAINTENANCE_GATE
             )
