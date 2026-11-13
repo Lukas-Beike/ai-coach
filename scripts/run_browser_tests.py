@@ -233,6 +233,7 @@ class Processes:
     ):
         if self.stop.is_set() and not cleanup:
             raise InterruptedError
+        self.errors.last = b""
         options = (
             {
                 "creationflags": subprocess.CREATE_NO_WINDOW
@@ -257,7 +258,7 @@ class Processes:
             while True:
                 try:
                     output, error = process.communicate(timeout=0.2)
-                    self.errors.last = (error or b"").decode("utf-8", errors="replace")
+                    self.errors.last = error or b""
                     return process.returncode, (output or b"").decode(
                         "utf-8", errors="replace"
                     )
@@ -308,17 +309,27 @@ class Processes:
                 self.terminate(process)
 
 
+def _tail(text, lines=10):
+    """The last lines of a stream, each cut short, with the fixture password hidden."""
+    text = text.replace(FAKE_PASSWORD, "[redacted]")
+    return [line[:300] for line in text.strip().splitlines()[-lines:]]
+
+
 def checked(processes, command, **kwargs):
     code, output = processes.run(command, **kwargs)
     if code:
-        # Name the command by its first words (never its arguments) and show the
-        # end of what it printed, so a failed build or start is visible (#2656).
-        error = getattr(getattr(processes, "errors", None), "last", "")
-        tail = "\n".join((output + "\n" + error).strip().splitlines()[-20:])
-        name = " ".join([Path(str(command[0])).name, *map(str, command[1:3])])
+        # Name the program and its subcommand words only (no options, paths or
+        # scripts) and show the end of each stream, so a failure is visible (#2656).
+        words = [Path(str(command[0])).name]
+        for word in map(str, command[1:4]):
+            if word.startswith("-") or "/" in word or "\\" in word or "\n" in word:
+                break
+            words.append(word)
+        error = getattr(getattr(processes, "errors", None), "last", b"") or b""
+        tail = _tail(output) + _tail(error.decode("utf-8", errors="replace"))
         raise RunnerError(
-            f"Required tool/container command failed (exit {code}): {name}"
-            + (f"\n{tail}" if tail else "")
+            f"Required tool/container command failed (exit {code}): {' '.join(words)}"
+            + "".join(f"\n{line}" for line in tail)
         )
     return output
 
