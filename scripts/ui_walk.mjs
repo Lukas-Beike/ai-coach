@@ -83,11 +83,21 @@ export function releaseMarks(serviceWorker, indexHtml) {
   return { cache, assetVersions: [...new Set(versions)].sort((a, b) => a.localeCompare(b)) };
 }
 
+// How load times are measured; walks measured another way are not compared (#2581).
+export const LOAD_MEASURE = "ready";
+const EVENT_STREAM = "GET /api/state/events";
+const READY_CAP_MS = 15000;
+const QUIET_MS = 300;
+
 export function compareLines(current, previous) {
   const lines = [];
   if (!previous) return lines;
   const same = current.marks.cache === previous.marks?.cache;
   lines.push(`info service-worker cache ${same ? "unchanged" : "changed"} since the previous walk`);
+  if (previous.measure !== current.measure) {
+    lines.push("info load times not compared: the previous walk measured them differently");
+    return lines;
+  }
   for (const [key, ms] of Object.entries(current.loadMs)) {
     const before = previous.loadMs?.[key];
     if (typeof before === "number") lines.push(`info load ${key} ${ms} ms (was ${before} ms)`);
@@ -95,24 +105,41 @@ export function compareLines(current, previous) {
   return lines;
 }
 
-// A view counts as loaded once it rendered and its active panel shows no loading
-// state; network idle never comes while a long read or poll runs (#2581).
-async function rendered(page, route) {
+// Method and path of a request (no query or body); other hosts keep their origin, non-http(s) is skipped.
+export function requestKey(method, url, appOrigin) {
+  const parsed = new URL(url);
+  if (!["http:", "https:"].includes(parsed.protocol)) return null;
+  return `${method} ${parsed.origin === appOrigin ? "" : parsed.origin}${parsed.pathname}`;
+}
+
+// A view is loaded once its active panel shows no visible loading marker and no
+// request started for it has been open for QUIET_MS (the event stream stays open
+// by design). Network idle never came on the Coach view since 2.1.6 (#2581).
+async function rendered(page, route, open) {
+  const before = new Set(open.keys());
   const started = Date.now();
-  await page.evaluate(async (next) => {
+  await page.evaluate(async ([next, cap]) => {
     const done = new Promise((resolve) => {
       document.addEventListener("app:route-rendered", resolve, { once: true });
-      setTimeout(resolve, 15000);
+      setTimeout(resolve, cap);
     });
     if (globalThis.location.hash === `#${next}`) globalThis.location.hash = "";
     globalThis.location.hash = next;
     await done;
-  }, route);
-  await page.waitForFunction(() => {
-    const panel = document.querySelector(".panel.active");
-    return Boolean(panel) && !panel.querySelector(".loading-state, [aria-busy='true'], .skeleton");
-  }, null, { timeout: 15000 }).catch(() => {});
-  return Date.now() - started;
+  }, [route, READY_CAP_MS]);
+  const pending = () => [...new Set([...open].filter(([request, key]) => !before.has(request) && key !== EVENT_STREAM).map(([, key]) => key))];
+  let quietSince = null;
+  while (Date.now() - started < READY_CAP_MS) {
+    const busy = await page.evaluate(() => {
+      const panel = document.querySelector(".panel.active");
+      return !panel || [...panel.querySelectorAll(".loading-state, [aria-busy='true'], .skeleton")].some((node) => node.checkVisibility());
+    }).catch(() => true);
+    if (busy || pending().length) quietSince = null;
+    else if (quietSince === null) quietSince = Date.now();
+    else if (Date.now() - quietSince >= QUIET_MS) return { ms: quietSince - started, capped: false, open: [] };
+    await page.waitForTimeout(50);
+  }
+  return { ms: Date.now() - started, capped: true, open: pending() };
 }
 
 // Views render asynchronously: wait briefly for a visible control.
@@ -146,7 +173,7 @@ async function walkCalendar(page, shot) {
 }
 
 async function walk({ chromium, url, password, outDir }) {
-  const result = { loadMs: {}, errors: {}, calendar: {}, marks: null, logout: {}, openAtReady: {} };
+  const result = { measure: LOAD_MEASURE, loadMs: {}, notReady: {}, errors: {}, calendar: {}, marks: null, logout: {} };
   const browser = await chromium.launch();
   try {
     for (const [name, viewport] of Object.entries(WIDTHS)) {
@@ -158,7 +185,10 @@ async function walk({ chromium, url, password, outDir }) {
       page.on("response", (response) => response.status() >= 500 && errors.push(`http ${response.status()}`));
       // Paths only (no query or body) of requests still open when a view is ready; the event stream stays open by design.
       const open = new Map();
-      page.on("request", (request) => open.set(request, `${request.method()} ${new URL(request.url()).pathname}`));
+      page.on("request", (request) => {
+        const key = requestKey(request.method(), request.url(), new URL(url).origin);
+        if (key) open.set(request, key);
+      });
       for (const event of ["requestfinished", "requestfailed"]) page.on(event, (request) => open.delete(request));
       await page.goto("/");
       await page.getByLabel("Passwort", { exact: true }).fill(password);
@@ -169,8 +199,9 @@ async function walk({ chromium, url, password, outDir }) {
       let counted = errors.length;
       const shot = (label) => page.screenshot({ path: path.join(outDir, `${name}-${label}.png`), fullPage: false });
       for (const route of VIEWS) {
-        result.loadMs[`${name} ${route}`] = await rendered(page, route);
-        result.openAtReady[`${name} ${route}`] = [...new Set(open.values())].filter((key) => key !== "GET /api/state/events");
+        const view = await rendered(page, route, open);
+        result.loadMs[`${name} ${route}`] = view.ms;
+        if (view.capped) result.notReady[`${name} ${route}`] = view.open;
         await shot(route);
         if (route === "plan") result.calendar[name] = await walkCalendar(page, shot);
         result.errors[`${name} ${route}`] = errors.length - counted;
@@ -206,8 +237,8 @@ export function reportLines(result) {
   for (const [key, errors] of Object.entries(result.errors)) {
     if (errors && !(key in result.loadMs)) lines.push(`FAIL ${key} ${errors} error(s)`);
   }
-  for (const [key, requests] of Object.entries(result.openAtReady || {})) {
-    if (requests.length) lines.push(`info ${key} still loading: ${requests.join(", ")}`);
+  for (const [key, requests] of Object.entries(result.notReady || {})) {
+    lines.push(`info ${key} not ready within 15 s; still loading: ${requests.join(", ") || "only a loading marker"}`);
   }
   for (const [name, steps] of Object.entries(result.calendar)) lines.push(`info calendar ${name}: ${steps.join(", ") || "no controls found"}`);
   lines.push(`info service-worker cache ${result.marks?.cache || "missing"}, ${result.marks?.assetVersions.length || 0} asset versions`);
