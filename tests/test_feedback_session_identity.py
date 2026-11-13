@@ -1,7 +1,7 @@
 """Activity feedback belongs to the canonical session across provider copies.
 
-An Intervals.icu ride and the same ride from Garmin are ingested, so session
-linking bundles them. Feedback saved through either provider id is one effective
+A Wahoo ride and the same ride from Garmin are ingested, so session linking
+bundles them. Feedback saved through either provider id is one effective
 feedback of that session; conflicting originals stay stored and are named, a
 cleared group stays cleared, an ambiguous id stands alone and a deleted provider
 copy keeps its feedback. Temporary database and synthetic rows only.
@@ -10,11 +10,10 @@ copy keeps its feedback. Temporary database and synthetic rows only.
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import intervals_compaction as intervals_fixture
 from support import temp_database
 
 from backend.activities.activity_reference import ActivityReferences
@@ -28,6 +27,8 @@ from backend.performance.report_service import (
     TrainingReportReadService,
 )
 from backend.planning.block_review import block_review, last_completed_test
+from backend.providers.canonical_plans import wahoo_ingest_plan
+from backend.sync import canonical_ingest
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from tests.test_training_report import (
     _FakeDatabaseManager,
@@ -38,20 +39,38 @@ from tests.test_weekly_progress import _EmptyReader
 
 ZONE = ZoneInfo("Europe/Berlin")
 SYNCED = "2026-09-20T08:00:00+00:00"
-INTERVALS_ID = "i1"
+WAHOO_ID = "601"
 GARMIN_ID = "910"
 
 
-def intervals_row(identifier: str, **extra: Any) -> dict[str, Any]:
+def wahoo_row(
+    identifier: str,
+    *,
+    starts: str = "2026-09-10T05:00:00.000Z",
+    distance: str = "20000",
+) -> dict[str, Any]:
+    """A Wahoo ride at 07:00 Berlin time; ``starts`` is UTC."""
     return {
         "id": identifier,
-        "start_date_local": "2026-09-10T07:00:00",
-        "type": "Ride",
-        "distance": 20000.0,
-        "moving_time": 3600,
-        "elapsed_time": 3600,
-        **extra,
+        "starts": starts,
+        "name": "Ride",
+        "workout_type_id": 0,
+        "workout_summary": {
+            "duration_active_accum": "3600",
+            "distance_accum": distance,
+        },
     }
+
+
+def ingest_wahoo(db: Any, rows: list[dict[str, Any]], synced: str = SYNCED) -> None:
+    plan = wahoo_ingest_plan({"synced_at": synced, "workouts": rows}, zone=ZONE)
+    canonical_ingest.ingest_plan(
+        db,
+        plan,
+        retrieved_at=datetime.fromisoformat(synced),
+        deletion_window=None,
+        zone=ZONE,
+    )
 
 
 def stored_rows(fixture: Any) -> list[dict[str, Any]]:
@@ -60,7 +79,7 @@ def stored_rows(fixture: Any) -> list[dict[str, Any]]:
 
 
 def merged_session_id(case: Any) -> str:
-    """The one effective session the case's Intervals and Garmin records lead to."""
+    """The one effective session the case's Wahoo and Garmin records lead to."""
     with case.manager.reader() as db:
         effective = canonical_store.effective_session_ids(
             db, list(case.sessions.values())
@@ -74,16 +93,7 @@ class FeedbackSessionFixture(unittest.TestCase):
         self.manager = temp_database(self, "feedback.db", row_factory=row_factory)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {
-                        "activities": [intervals_row(INTERVALS_ID, icu_rpe=7)]
-                    },
-                },
-                zone=ZONE,
-            )
+            ingest_wahoo(db, [wahoo_row(WAHOO_ID)])
             GarminSnapshotWriter(
                 KeyValueRepository(lambda: SYNCED), lambda: ZONE
             ).write(
@@ -98,6 +108,8 @@ class FeedbackSessionFixture(unittest.TestCase):
                             "startTimeLocal": "2026-09-10 07:00:00",
                             "distance": 20000.0,
                             "duration": 3600.0,
+                            # A provider RPE that local feedback must never take.
+                            "directWorkoutRpe": 70,
                         }
                     ],
                 },
@@ -105,7 +117,7 @@ class FeedbackSessionFixture(unittest.TestCase):
             self.sessions = {
                 provider: canonical_store.activity_local_ids(db, provider, [key])[key]
                 for provider, key in (
-                    ("intervals", INTERVALS_ID),
+                    ("wahoo", WAHOO_ID),
                     ("garmin", GARMIN_ID),
                 )
             }
@@ -139,7 +151,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(len(set(effective.values())), 1)
 
     def test_either_provider_id_reads_and_edits_the_same_feedback(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "Heavy legs", "session_rpe": 6})
+        self.service.save(WAHOO_ID, {"notes": "Heavy legs", "session_rpe": 6})
         saved = self.service.save(GARMIN_ID, {"session_rpe": 5})["activity_feedback"]
 
         # The edit through the Garmin id moves the one row to the Garmin session.
@@ -153,16 +165,16 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(effective["session_rpe"], 5)
         by_id = {
             item["activity_id"]: item
-            for item in self.service.for_activity_ids([INTERVALS_ID, GARMIN_ID])
+            for item in self.service.for_activity_ids([WAHOO_ID, GARMIN_ID])
         }
-        self.assertEqual(by_id[GARMIN_ID]["notes"], by_id[INTERVALS_ID]["notes"])
+        self.assertEqual(by_id[GARMIN_ID]["notes"], by_id[WAHOO_ID]["notes"])
 
     def test_feedback_stays_with_the_copy_it_was_written_through(self) -> None:
         # Whichever session survives the bundle, the row is stored under the
         # session of the id it was saved through, so a split keeps it there.
         for written_through, own, other in (
-            (INTERVALS_ID, self.sessions["intervals"], self.sessions["garmin"]),
-            (GARMIN_ID, self.sessions["garmin"], self.sessions["intervals"]),
+            (WAHOO_ID, self.sessions["wahoo"], self.sessions["garmin"]),
+            (GARMIN_ID, self.sessions["garmin"], self.sessions["wahoo"]),
         ):
             with self.subTest(written_through):
                 self.service.save(written_through, {"notes": "Heavy legs"})
@@ -187,12 +199,12 @@ class FeedbackSessionTests(FeedbackSessionFixture):
                         (own, other),
                     )
 
-    def test_a_legacy_row_under_the_intervals_id_is_found_for_the_session(self) -> None:
+    def test_a_legacy_row_under_the_wahoo_id_is_found_for_the_session(self) -> None:
         session = merged_session_id(self)
-        for stored_session in (self.sessions["intervals"], None):
+        for stored_session in (self.sessions["wahoo"], None):
             with self.subTest(session=stored_session):
                 self.store_legacy(
-                    INTERVALS_ID, "legacy", "2026-09-19", session=stored_session, rpe=4
+                    WAHOO_ID, "legacy", "2026-09-19", session=stored_session, rpe=4
                 )
                 (found,) = self.service.for_activity_ids([session])
                 self.assertEqual(
@@ -205,7 +217,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
     def test_a_row_under_the_session_id_wins_over_a_legacy_row(self) -> None:
         session = merged_session_id(self)
         # The legacy row is the newer one, yet the session-id row still wins.
-        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-21", session=None, rpe=9)
+        self.store_legacy(WAHOO_ID, "legacy", "2026-09-21", session=None, rpe=9)
         self.store_legacy(session, "current", "2026-09-19", session=session, rpe=3)
 
         (found,) = self.service.for_activity_ids([session])
@@ -215,7 +227,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
     def test_a_new_save_over_a_legacy_row_is_stored_under_the_session_id(self) -> None:
         session = merged_session_id(self)
         self.store_legacy(
-            INTERVALS_ID, "legacy", "2026-09-19", session=self.sessions["intervals"]
+            WAHOO_ID, "legacy", "2026-09-19", session=self.sessions["wahoo"]
         )
 
         saved = self.service.save(session, {"session_rpe": 5})["activity_feedback"]
@@ -234,15 +246,15 @@ class FeedbackSessionTests(FeedbackSessionFixture):
     def test_ordinary_edits_never_add_rows_or_conflicts(self) -> None:
         session = merged_session_id(self)
         self.store_legacy(
-            INTERVALS_ID,
+            WAHOO_ID,
             "legacy",
             "2026-09-19",
-            session=self.sessions["intervals"],
+            session=self.sessions["wahoo"],
             rpe=4,
         )
         for rpe in (5, 6, 7):
             self.service.save(session, {"session_rpe": rpe})
-            self.service.save(INTERVALS_ID, {"notes": f"note {rpe}"})
+            self.service.save(WAHOO_ID, {"notes": f"note {rpe}"})
             # One row, whichever copy the last edit was written through.
             self.assertEqual(len(stored_rows(self)), 1)
             (effective,) = self.service.list()
@@ -253,7 +265,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
 
     def test_a_save_keeps_the_fields_of_a_legacy_row_without_a_session(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
+        self.store_legacy(WAHOO_ID, "legacy", "2026-09-19", session=None, rpe=4)
 
         saved = self.service.save(session, {"deviation_reason": "illness"})
         saved = saved["activity_feedback"]
@@ -266,7 +278,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
 
     def test_clearing_removes_the_session_row_and_its_legacy_rows(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-21", session=None)
+        self.store_legacy(WAHOO_ID, "legacy", "2026-09-21", session=None)
         self.store_legacy(session, "current", "2026-09-19", session=session)
 
         result = self.service.save(session, {"notes": ""})
@@ -281,14 +293,14 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             db.execute(
                 "INSERT INTO activity_feedback(activity_id, notes, created_at, "
                 "updated_at, provider) VALUES (?, 'other', ?, ?, 'garmin')",
-                (INTERVALS_ID, "2026-09-19", "2026-09-19"),
+                (WAHOO_ID, "2026-09-19", "2026-09-19"),
             )
         self.assertEqual(self.service.for_activity_ids([session]), [])
         self.assertEqual([item["notes"] for item in self.service.list()], ["other"])
 
     def test_an_unambiguous_legacy_row_counts_for_sessions_only(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
+        self.store_legacy(WAHOO_ID, "legacy", "2026-09-19", session=None, rpe=4)
 
         (found,) = self.service.for_activity_ids([session], sessions_only=True)
 
@@ -298,7 +310,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         session = merged_session_id(self)
         (alias,) = {*self.sessions.values()} - {session}
         self.store_legacy(alias, "old alias", "2026-09-19", session=alias)
-        self.store_legacy(INTERVALS_ID, "newer", "2026-09-21", session=session)
+        self.store_legacy(WAHOO_ID, "newer", "2026-09-21", session=session)
 
         (found,) = self.service.for_activity_ids([session])
 
@@ -307,7 +319,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
     def test_conflicting_originals_stay_stored_and_are_named(self) -> None:
         with self.manager.unit_of_work() as db:
             for key, session, notes, updated in (
-                (INTERVALS_ID, self.sessions["intervals"], "older", "2026-09-19"),
+                (WAHOO_ID, self.sessions["wahoo"], "older", "2026-09-19"),
                 (GARMIN_ID, self.sessions["garmin"], "newer", "2026-09-20"),
             ):
                 db.execute(
@@ -319,15 +331,15 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(effective["notes"], "newer")
         self.assertEqual(
             effective["conflicting_feedback"],
-            [{"activity_id": INTERVALS_ID, "updated_at": "2026-09-19"}],
+            [{"activity_id": WAHOO_ID, "updated_at": "2026-09-19"}],
         )
         self.assertEqual(len(stored_rows(self)), 2)
 
-        self.service.save(INTERVALS_ID, {"notes": ""})
+        self.service.save(WAHOO_ID, {"notes": ""})
         self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
 
     def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "No RPE given"})
+        self.service.save(WAHOO_ID, {"notes": "No RPE given"})
         (effective,) = self.service.list()
         self.assertIsNone(effective["session_rpe"])
 
@@ -345,32 +357,24 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             )
         (row,) = stored_rows(self)
         self.assertEqual(row["notes"], "Saved on the Garmin copy")
-        (shown,) = self.service.for_activity_ids([INTERVALS_ID])
+        (shown,) = self.service.for_activity_ids([WAHOO_ID])
         self.assertEqual(shown["notes"], "Saved on the Garmin copy")
 
     def test_an_ambiguous_id_stands_alone(self) -> None:
         with self.manager.unit_of_work() as db:
-            intervals_fixture.ingest_intervals_partial_snapshot(
+            ingest_wahoo(
                 db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {
-                        "activities": [
-                            intervals_row(INTERVALS_ID, icu_rpe=7),
-                            intervals_row(
-                                GARMIN_ID, start_date_local="2026-09-12T07:00:00"
-                            ),
-                        ]
-                    },
-                },
-                zone=ZONE,
+                [
+                    wahoo_row(WAHOO_ID),
+                    wahoo_row(GARMIN_ID, starts="2026-09-12T05:00:00.000Z"),
+                ],
             )
         self.service.save(GARMIN_ID, {"notes": "Which one?"})
-        self.service.save(INTERVALS_ID, {"notes": "The Intervals ride"})
+        self.service.save(WAHOO_ID, {"notes": "The Wahoo ride"})
 
         self.assertEqual(
             sorted(item["notes"] for item in self.service.list()),
-            ["The Intervals ride", "Which one?"],
+            ["The Wahoo ride", "Which one?"],
         )
         (ambiguous,) = [
             row for row in stored_rows(self) if row["activity_id"] == GARMIN_ID
@@ -387,7 +391,7 @@ class ReportFeedbackTests(FeedbackSessionFixture):
             "2026-09-10T07:00:00",
             sport="ride",
             moving_duration_s=3600,
-            record_ids={"intervals": INTERVALS_ID},
+            record_ids={"wahoo": WAHOO_ID},
         )
         return TrainingReportReadService(
             read_plan=lambda: None,
@@ -417,15 +421,13 @@ class ReportFeedbackTests(FeedbackSessionFixture):
 
     def test_legacy_feedback_is_found_for_the_session(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(
-            INTERVALS_ID, "legacy note", "2026-09-19", session=None, rpe=4
-        )
+        self.store_legacy(WAHOO_ID, "legacy note", "2026-09-19", session=None, rpe=4)
 
         self.assertEqual(self.notes(session), (["legacy note"], ["legacy note"]))
 
     def test_feedback_under_the_session_id_wins_over_a_legacy_row(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(INTERVALS_ID, "legacy note", "2026-09-21", session=None)
+        self.store_legacy(WAHOO_ID, "legacy note", "2026-09-21", session=None)
         self.store_legacy(session, "new note", "2026-09-19", session=session)
 
         self.assertEqual(self.notes(session), (["new note"], ["new note"]))

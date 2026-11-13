@@ -156,10 +156,10 @@ class LinkingCase(unittest.TestCase):
             ]
         return sessions, records
 
-    def _ingest_all_three(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
+    def _ingest_both(self) -> None:
+        """A Garmin ride and, later, its Wahoo recording: the Garmin session survives."""
+        self._ingest_garmin([garmin_ride()], FIRST)
         self._ingest_wahoo([wahoo_workout()], SECOND)
-        self._ingest_garmin([garmin_ride()], THIRD)
 
     def _set_session(self, provider_activity_id: str, **columns: Any) -> None:
         assignments = ", ".join(f"{name} = ?" for name in columns)
@@ -172,24 +172,22 @@ class LinkingCase(unittest.TestCase):
 
 
 class PersistedLinkTests(LinkingCase):
-    def test_three_providers_of_one_ride_become_one_surviving_session(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
+    def test_two_providers_of_one_ride_become_one_surviving_session(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
         wahoo_counters = self._ingest_wahoo([wahoo_workout()], SECOND)
-        garmin_counters = self._ingest_garmin([garmin_ride()], THIRD)
-        self.assertEqual((wahoo_counters.linked, garmin_counters.linked), (1, 1))
+        self.assertEqual(wahoo_counters.linked, 1)
         sessions = self._sessions()
-        survivor = sessions[INTERVALS_ID]
+        survivor = sessions[GARMIN_ID]
         self.assertEqual(survivor["state"], "active")
         self.assertEqual(survivor["link_kind"], "heuristic")
         self.assertIsNone(survivor["merged_into"])
-        for provider_activity_id in (WAHOO_ID, GARMIN_ID):
-            alias = sessions[provider_activity_id]
-            self.assertEqual(alias["state"], "duplicate")
-            self.assertEqual(alias["merged_into"], survivor["activity_id"])
-            self.assertEqual(alias["link_kind"], "single")
+        alias = sessions[WAHOO_ID]
+        self.assertEqual(alias["state"], "duplicate")
+        self.assertEqual(alias["merged_into"], survivor["activity_id"])
+        self.assertEqual(alias["link_kind"], "single")
 
     def test_records_and_primary_columns_are_not_repointed(self) -> None:
-        self._ingest_all_three()
+        self._ingest_both()
         with self.manager.reader() as db:
             rows = db.execute(
                 "SELECT r.provider, r.provider_activity_id, r.activity_id, "
@@ -197,7 +195,7 @@ class PersistedLinkTests(LinkingCase):
                 "FROM activity_records AS r JOIN activity_sessions AS s "
                 "ON s.activity_id = r.activity_id"
             ).fetchall()
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 2)
         for row in rows:
             self.assertEqual(row["provider"], row["primary_provider"])
             self.assertEqual(
@@ -206,83 +204,80 @@ class PersistedLinkTests(LinkingCase):
 
     def test_the_older_session_survives_whatever_the_ingest_order(self) -> None:
         self._ingest_wahoo([wahoo_workout()], FIRST)
-        self._ingest_intervals([intervals_ride()], SECOND)
+        self._ingest_garmin([garmin_ride()], SECOND)
         sessions = self._sessions()
         self.assertEqual(sessions[WAHOO_ID]["state"], "active")
-        self.assertEqual(sessions[INTERVALS_ID]["state"], "duplicate")
+        self.assertEqual(sessions[GARMIN_ID]["state"], "duplicate")
         self.assertEqual(
-            sessions[INTERVALS_ID]["merged_into"], sessions[WAHOO_ID]["activity_id"]
+            sessions[GARMIN_ID]["merged_into"], sessions[WAHOO_ID]["activity_id"]
         )
 
     def test_a_later_garmin_ride_joins_the_survivor_of_an_alias(self) -> None:
+        relay = garmin_ride("9001", manufacturer="WAHOO_FITNESS")
+        watch = garmin_ride(
+            "9002",
+            manufacturer="GARMIN",
+            startTimeLocal="2026-09-10 07:01:00",
+            duration=3700.0,
+        )
         self._ingest_wahoo([wahoo_workout()], FIRST)
-        self._ingest_intervals([intervals_ride()], SECOND)
-        self._ingest_garmin([garmin_ride()], THIRD)
+        self._ingest_garmin([relay], SECOND)
+        self._ingest_garmin([relay, watch], THIRD)
         sessions = self._sessions()
         survivor = sessions[WAHOO_ID]["activity_id"]
-        self.assertEqual(sessions[GARMIN_ID]["merged_into"], survivor)
-        self.assertEqual(sessions[INTERVALS_ID]["merged_into"], survivor)
+        self.assertEqual(sessions["9001"]["merged_into"], survivor)
+        self.assertEqual(sessions["9002"]["merged_into"], survivor)
 
     def test_a_relink_never_merges_two_records_of_one_origin(self) -> None:
-        # Two walks 25 minutes apart. G2 arrives first and joins I1, its only
-        # candidate. Once I2 and G1 arrive, bundling pairs G1 with I1 and G2 with
-        # I2; following those pairs through the persisted merge would join all
+        # Two rides 25 minutes apart. G2 arrives first and joins W1, its only
+        # candidate. Once W2 and G1 arrive, bundling pairs G1 with W1 and G2 with
+        # W2; following those pairs through the persisted merge would join all
         # four records in one session.
-        def walk(identifier: str, start: str, seconds: int) -> dict[str, Any]:
-            return intervals_ride(
+        def ride(identifier: str, starts: str, seconds: int) -> dict[str, Any]:
+            return wahoo_workout(
                 identifier,
-                type="Walk",
-                device_name="Garmin Forerunner",
-                start_date_local=f"2026-09-10T{start}:00",
-                moving_time=seconds,
-                distance=None,
+                starts=f"2026-09-10T{starts}:00.000Z",
+                workout_summary={
+                    "duration_active_accum": str(seconds),
+                    "distance_accum": "30000",
+                },
             )
 
-        def garmin_walk(identifier: str, start: str, seconds: float) -> dict[str, Any]:
+        def garmin(identifier: str, start: str, seconds: float) -> dict[str, Any]:
             return garmin_ride(
                 identifier,
-                activityType={"typeKey": "walking"},
                 startTimeLocal=f"2026-09-10 {start}:00",
                 duration=seconds,
-                distance=None,
+                distance=30000.0,
             )
 
-        first = walk("i-1", "07:00", 2400)
-        self._ingest_intervals([first], FIRST)
-        self._ingest_garmin([garmin_walk("9002", "07:25", 2280.0)], SECOND)
-        self._ingest_intervals([first, walk("i-2", "07:25", 2280)], THIRD)
+        first = ride("501", "05:00", 2400)
+        self._ingest_wahoo([first], FIRST)
+        self._ingest_garmin([garmin("9002", "07:25", 2280.0)], SECOND)
+        self._ingest_wahoo([first, ride("502", "05:25", 2280)], THIRD)
         self._ingest_garmin(
-            [
-                garmin_walk("9001", "07:00", 2400.0),
-                garmin_walk("9002", "07:25", 2280.0),
-            ],
+            [garmin("9001", "07:00", 2400.0), garmin("9002", "07:25", 2280.0)],
             LATER,
         )
 
         sessions = self._sessions()
         self.assertEqual(
-            sessions["9002"]["merged_into"], sessions["i-1"]["activity_id"]
+            sessions["9002"]["merged_into"], sessions["501"]["activity_id"]
         )
-        for provider_activity_id in ("i-1", "i-2", "9001"):
+        for provider_activity_id in ("501", "502", "9001"):
             self.assertEqual(sessions[provider_activity_id]["state"], "active")
 
     def test_unrelated_activities_stay_single(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
-        counters = (
-            self._ingest_wahoo(
-                [wahoo_workout(starts="2026-09-10T12:00:00.000Z")], SECOND
-            ),
-            self._ingest_garmin(
-                [garmin_ride(startTimeLocal="2026-09-12 07:00:00")], THIRD
-            ),
+        self._ingest_garmin([garmin_ride(startTimeLocal="2026-09-12 07:00:00")], FIRST)
+        counters = self._ingest_wahoo(
+            [wahoo_workout(starts="2026-09-10T12:00:00.000Z")], SECOND
         )
-        self.assertEqual(sum(item.linked for item in counters), 0)
+        self.assertEqual(counters.linked, 0)
         states = {row["state"] for row in self._sessions().values()}
         self.assertEqual(states, {"active"})
 
     def test_a_ride_on_the_next_local_day_links_across_midnight(self) -> None:
-        late = intervals_ride(start_date_local="2026-09-10T23:50:00")
-        self._ingest_intervals([late], FIRST)
+        self._ingest_garmin([garmin_ride(startTimeLocal="2026-09-10 23:50:00")], FIRST)
         # 00:05 on the next local day is 15 minutes later on the wall clock.
         self._ingest_wahoo([wahoo_workout(starts="2026-09-10T22:05:00.000Z")], SECOND)
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "duplicate")
@@ -308,7 +303,7 @@ class PersistedLinkTests(LinkingCase):
                 "'Ride', '{}', ?, ?, ?)",
                 (stamp, stamp, stamp, stamp),
             )
-        self._ingest_intervals([intervals_ride()], FIRST)
+        self._ingest_garmin([garmin_ride()], FIRST)
         counters = self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(counters.linked, 1)
         other = self._sessions()["o-1"]
@@ -345,22 +340,22 @@ class WahooPlaceholderTests(LinkingCase):
             }
 
     def test_a_listed_placeholder_never_becomes_a_session(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
+        self._ingest_garmin([garmin_ride()], FIRST)
         counters = self._ingest_wahoo([wahoo_workout(workout_summary=None)], SECOND)
 
         self.assertEqual((counters.written, counters.deleted), (0, 0))
-        self.assertEqual({INTERVALS_ID: "active"}, self._states())
+        self.assertEqual({GARMIN_ID: "active"}, self._states())
 
     def test_a_stored_placeholder_is_withdrawn_and_revived_with_its_summary(
         self,
     ) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
+        self._ingest_garmin([garmin_ride()], FIRST)
         self._store_placeholder_as_an_older_build_did()
-        self.assertEqual({INTERVALS_ID: "active", WAHOO_ID: "active"}, self._states())
+        self.assertEqual({GARMIN_ID: "active", WAHOO_ID: "active"}, self._states())
 
         withdrawn = self._ingest_wahoo([wahoo_workout(workout_summary=None)], THIRD)
         self.assertEqual(withdrawn.deleted, 1)
-        self.assertEqual({INTERVALS_ID: "active", WAHOO_ID: "deleted"}, self._states())
+        self.assertEqual({GARMIN_ID: "active", WAHOO_ID: "deleted"}, self._states())
         self.assertEqual(
             self._ingest_wahoo([wahoo_workout(workout_summary=None)], LATER).deleted,
             0,
@@ -373,7 +368,7 @@ class WahooPlaceholderTests(LinkingCase):
         self.assertIsNotNone(sessions[WAHOO_ID]["merged_into"])
 
     def test_a_stored_recording_listed_without_its_summary_is_kept(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
+        self._ingest_garmin([garmin_ride()], FIRST)
         self._ingest_wahoo([wahoo_workout()], SECOND)
         before = self._snapshot()
 
@@ -385,12 +380,11 @@ class WahooPlaceholderTests(LinkingCase):
 
 class IdempotenceTests(LinkingCase):
     def test_reingesting_changes_neither_rows_nor_states(self) -> None:
-        self._ingest_all_three()
+        self._ingest_both()
         before = self._snapshot()
         repeated = (
-            self._ingest_intervals([intervals_ride()], LATER),
-            self._ingest_wahoo([wahoo_workout()], LATER),
             self._ingest_garmin([garmin_ride()], LATER),
+            self._ingest_wahoo([wahoo_workout()], LATER),
         )
         after = self._snapshot()
         self.assertEqual(before[0], after[0])
@@ -399,7 +393,7 @@ class IdempotenceTests(LinkingCase):
         self.assertEqual(sum(counters.written for counters in repeated), 0)
 
     def test_linking_directly_a_second_time_is_a_no_op(self) -> None:
-        self._ingest_all_three()
+        self._ingest_both()
         before = self._snapshot()
         with self.manager.unit_of_work() as db:
             linked = link_activity_sessions(
@@ -414,44 +408,44 @@ class IdempotenceTests(LinkingCase):
 
 class ProtectedSessionTests(LinkingCase):
     def test_confirmed_session_is_never_merged(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
-        self._set_session(INTERVALS_ID, athlete_confirmed=1, link_kind="confirmed")
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, athlete_confirmed=1, link_kind="confirmed")
         counters = self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(counters.linked, 0)
         sessions = self._sessions()
-        self.assertEqual(sessions[INTERVALS_ID]["state"], "active")
-        self.assertEqual(sessions[INTERVALS_ID]["link_kind"], "confirmed")
+        self.assertEqual(sessions[GARMIN_ID]["state"], "active")
+        self.assertEqual(sessions[GARMIN_ID]["link_kind"], "confirmed")
         self.assertEqual(sessions[WAHOO_ID]["state"], "active")
 
     def test_hidden_session_is_never_merged_or_reopened(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
-        self._set_session(INTERVALS_ID, state="hidden")
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, state="hidden")
         counters = self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(counters.linked, 0)
-        self.assertEqual(self._sessions()[INTERVALS_ID]["state"], "hidden")
+        self.assertEqual(self._sessions()[GARMIN_ID]["state"], "hidden")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "active")
 
     def test_deleted_session_is_never_merged(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
-        self._set_session(INTERVALS_ID, state="deleted")
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, state="deleted")
         counters = self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(counters.linked, 0)
-        self.assertEqual(self._sessions()[INTERVALS_ID]["state"], "deleted")
+        self.assertEqual(self._sessions()[GARMIN_ID]["state"], "deleted")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "active")
 
     def test_an_alias_that_no_longer_matches_is_split_off(self) -> None:
-        self._ingest_all_three()
-        survivor = self._sessions()[INTERVALS_ID]["activity_id"]
+        self._ingest_both()
+        survivor = self._sessions()[GARMIN_ID]["activity_id"]
         # The Wahoo workout later drifts out of the matching window.
         self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
         alias = self._sessions()[WAHOO_ID]
         self.assertEqual((alias["state"], alias["merged_into"]), ("active", None))
-        self.assertEqual(self._sessions()[INTERVALS_ID]["activity_id"], survivor)
+        self.assertEqual(self._sessions()[GARMIN_ID]["activity_id"], survivor)
 
     def test_a_confirmed_session_is_never_split(self) -> None:
-        self._ingest_all_three()
-        survivor = self._sessions()[INTERVALS_ID]["activity_id"]
-        self._set_session(INTERVALS_ID, athlete_confirmed=1)
+        self._ingest_both()
+        survivor = self._sessions()[GARMIN_ID]["activity_id"]
+        self._set_session(GARMIN_ID, athlete_confirmed=1)
         self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
         alias = self._sessions()[WAHOO_ID]
         self.assertEqual(
@@ -459,10 +453,10 @@ class ProtectedSessionTests(LinkingCase):
         )
 
     def test_a_confirmed_link_kind_is_never_downgraded(self) -> None:
-        self._ingest_intervals([intervals_ride()], FIRST)
-        self._set_session(INTERVALS_ID, link_kind="confirmed")
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, link_kind="confirmed")
         self._ingest_wahoo([wahoo_workout()], SECOND)
-        self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "confirmed")
+        self.assertEqual(self._sessions()[GARMIN_ID]["link_kind"], "confirmed")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "duplicate")
 
 
@@ -674,11 +668,19 @@ class ConfirmedBundleRevivalTests(LinkingCase):
         )
 
     def test_every_new_copy_in_a_bundle_follows_an_athlete_delete(self) -> None:
-        # The lead (Wahoo) pairs with the earlier Intervals.icu copy before it
-        # meets the deleted Garmin session (#2137, B-011).
-        self._ingest_all_three()
+        # The lead (Wahoo) pairs with the relayed Garmin copy before it meets the
+        # deleted session of the watch recording (#2137, B-011).
+        relay = garmin_ride("9001", manufacturer="WAHOO_FITNESS")
+        watch = garmin_ride(
+            "9002",
+            manufacturer="GARMIN",
+            startTimeLocal="2026-09-10 07:01:00",
+            duration=3700.0,
+        )
+        self._ingest_wahoo([wahoo_workout()], FIRST)
+        self._ingest_garmin([relay, watch], SECOND)
         with self.manager.unit_of_work() as db:
-            for provider_id in (WAHOO_ID, GARMIN_ID):
+            for provider_id in ("9001", "9002"):
                 session = db.execute(
                     "SELECT activity_id FROM activity_sessions "
                     "WHERE primary_provider_activity_id = ?",
@@ -693,7 +695,7 @@ class ConfirmedBundleRevivalTests(LinkingCase):
                 "UPDATE activity_sessions SET state = 'deleted', "
                 "merged_into_retained = activity_id "
                 "WHERE primary_provider_activity_id = ?",
-                (GARMIN_ID,),
+                ("9002",),
             )
             link_activity_sessions(
                 db,
@@ -702,7 +704,7 @@ class ConfirmedBundleRevivalTests(LinkingCase):
                 now=LATER.isoformat(),
             )
         self.assertEqual(
-            {GARMIN_ID: "deleted", INTERVALS_ID: "deleted", WAHOO_ID: "deleted"},
+            {"9002": "deleted", "9001": "deleted", WAHOO_ID: "deleted"},
             _states(self._sessions()),
         )
 
@@ -821,7 +823,7 @@ class AliasResolutionTests(LinkingCase):
         return ActivityReferences(self.manager)
 
     def test_a_wahoo_alias_resolves_to_its_own_session(self) -> None:
-        self._ingest_all_three()
+        self._ingest_both()
         wahoo_alias = self._sessions()[WAHOO_ID]["activity_id"]
         reference = self._references().resolve_reference(wahoo_alias)
         # Athlete data is stored under the session it was written for.
@@ -832,7 +834,7 @@ class AliasResolutionTests(LinkingCase):
 
 class ReadersUnchangedTests(LinkingCase):
     def test_table_reads_return_every_record_before_and_after_linking(self) -> None:
-        self._ingest_all_three()
+        self._ingest_both()
         with self.manager.reader() as db:
             rows = canonical_store.active_activity_rows(db)
             texts = [
@@ -840,33 +842,28 @@ class ReadersUnchangedTests(LinkingCase):
                 for row in db.execute(
                     "SELECT payload FROM provider_records WHERE provider = ? "
                     "AND record_kind = ? AND state = 'active'",
-                    (ProviderId.INTERVALS.value, ACTIVITY_RECORD_KIND),
+                    (ProviderId.GARMIN.value, ACTIVITY_RECORD_KIND),
                 )
             ]
         self.assertEqual(
             sorted((row["provider"], row["provider_activity_id"]) for row in rows),
-            [
-                (ProviderId.GARMIN.value, GARMIN_ID),
-                (ProviderId.INTERVALS.value, INTERVALS_ID),
-                (ProviderId.WAHOO.value, WAHOO_ID),
-            ],
+            [(ProviderId.GARMIN.value, GARMIN_ID), (ProviderId.WAHOO.value, WAHOO_ID)],
         )
         self.assertEqual(len(texts), 1)
 
-    def test_deleting_the_intervals_activity_leaves_the_aliases_readable(self) -> None:
-        self._ingest_all_three()
+    def test_deleting_the_surviving_activity_leaves_the_alias_readable(self) -> None:
+        self._ingest_both()
         with self.manager.unit_of_work() as db:
             canonical_store.mark_activity_deleted(
                 db,
-                ProviderId.INTERVALS.value,
+                ProviderId.GARMIN.value,
                 record_kind=ACTIVITY_RECORD_KIND,
-                provider_activity_id=INTERVALS_ID,
+                provider_activity_id=GARMIN_ID,
                 now=LATER.isoformat(),
             )
             rows = canonical_store.active_activity_rows(db)
         self.assertEqual(
-            sorted(row["provider"] for row in rows),
-            [ProviderId.GARMIN.value, ProviderId.WAHOO.value],
+            sorted(row["provider"] for row in rows), [ProviderId.WAHOO.value]
         )
 
 

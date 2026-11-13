@@ -1,8 +1,8 @@
 """Session-RPE load (M1, gate G3): values, sums, sources, edits, undo, duplicates.
 
 Unit cases build neutral activity summaries directly. Integration cases use the
-two-provider ride of ``test_feedback_session_identity`` (Intervals.icu with
-``icu_rpe`` 7 plus its Garmin copy, one canonical session) with the real
+two-provider ride of ``test_feedback_session_identity`` (Wahoo plus its Garmin
+copy with the provider RPE 7, one canonical session) with the real
 feedback service, change history undo and canonical summaries. Temporary
 database and synthetic rows only.
 """
@@ -16,14 +16,13 @@ from datetime import date
 from functools import partial
 from typing import Any
 
-import intervals_compaction as intervals_fixture
 from test_feedback_session_identity import (
     GARMIN_ID,
-    INTERVALS_ID,
-    SYNCED,
+    WAHOO_ID,
     ZONE,
     FeedbackSessionFixture,
-    intervals_row,
+    ingest_wahoo,
+    wahoo_row,
 )
 
 from backend.activities.activity_summary import activity_summaries
@@ -63,7 +62,7 @@ def summary(
 
 
 def provider_rpe(rpe: float) -> dict[str, Any]:
-    return {"rpe": rpe, "sources": {"rpe": "Intervals.icu"}}
+    return {"rpe": rpe, "sources": {"rpe": "Wahoo"}}
 
 
 def report(
@@ -114,7 +113,7 @@ class SessionLoadTests(unittest.TestCase):
         self.assertEqual(value, 300.0)
         self.assertEqual(
             (entry["rpe_source"], entry["rpe_source_label"]),
-            ("provider", "Intervals.icu"),
+            ("provider", "Wahoo"),
         )
         self.assertIsNone(entry["rated_minutes_after_end"])
 
@@ -254,11 +253,11 @@ class PeriodSumTests(unittest.TestCase):
         )
         # C-007: the chart names the provider that rated, served by the server.
         self.assertEqual(
-            result["totals"]["rpe_provider_labels"], ["Garmin Connect", "Intervals.icu"]
+            result["totals"]["rpe_provider_labels"], ["Garmin Connect", "Wahoo"]
         )
         self.assertEqual(
             result["days"][0]["rpe_provider_labels"],
-            ["Garmin Connect", "Intervals.icu"],
+            ["Garmin Connect", "Wahoo"],
         )
 
     def test_days_weeks_and_sports_cover_the_whole_period(self) -> None:
@@ -353,7 +352,7 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
             timezone="Europe/Berlin",
         )
 
-    def test_duplicate_provider_copies_count_once_with_the_intervals_fallback(
+    def test_duplicate_provider_copies_count_once_with_the_provider_fallback(
         self,
     ) -> None:
         result = self.load()
@@ -361,7 +360,7 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
         (session,) = result["sessions"]
         self.assertEqual(
             (session["value"], session["rpe"], session["rpe_source_label"]),
-            (420.0, 7.0, "Intervals.icu"),
+            (420.0, 7.0, "Garmin Connect"),
         )
 
     def test_edits_switch_the_source_and_undo_restores_the_previous_value(
@@ -373,7 +372,7 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
             (session["value"], session["rpe_source"]), (300.0, "athlete_feedback")
         )
         self.assertIsNotNone(session["rated_minutes_after_end"])
-        edited = self.service.save(INTERVALS_ID, {"session_rpe": 6})
+        edited = self.service.save(WAHOO_ID, {"session_rpe": 6})
         self.assertEqual(self.load()["totals"]["value"], 360.0)
         self.undo(edited["change"])
         self.assertEqual(self.load()["totals"]["value"], 300.0)
@@ -385,8 +384,8 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
         self,
     ) -> None:
         # Written before its record was linked: session_id stays NULL, but the
-        # Intervals.icu id now resolves to exactly one session.
-        self.service.save(INTERVALS_ID, {"session_rpe": 5})
+        # Wahoo id now resolves to exactly one session.
+        self.service.save(WAHOO_ID, {"session_rpe": 5})
         with self.manager.unit_of_work() as db:
             db.execute("UPDATE activity_feedback SET session_id = NULL")
         (session,) = self.load()["sessions"]
@@ -397,30 +396,22 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
     def test_clearing_the_local_rating_falls_back_to_the_provider_rating(
         self,
     ) -> None:
-        self.service.save(INTERVALS_ID, {"session_rpe": 3, "notes": "kept"})
+        self.service.save(WAHOO_ID, {"session_rpe": 3, "notes": "kept"})
         self.assertEqual(self.load()["totals"]["value"], 180.0)
-        self.service.save(INTERVALS_ID, {"session_rpe": None})
+        self.service.save(WAHOO_ID, {"session_rpe": None})
         (session,) = self.load()["sessions"]
         self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
 
     def test_a_rating_with_an_ambiguous_session_gives_no_load(self) -> None:
-        # A second Intervals.icu ride uses the Garmin copy's id, so feedback
+        # A second Wahoo ride uses the Garmin copy's id, so feedback
         # saved under that id cannot be assigned to one session.
         with self.manager.unit_of_work() as db:
-            intervals_fixture.ingest_intervals_partial_snapshot(
+            ingest_wahoo(
                 db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {
-                        "activities": [
-                            intervals_row(INTERVALS_ID, icu_rpe=7),
-                            intervals_row(
-                                GARMIN_ID, start_date_local="2026-09-12T07:00:00"
-                            ),
-                        ]
-                    },
-                },
-                zone=ZONE,
+                [
+                    wahoo_row(WAHOO_ID),
+                    wahoo_row(GARMIN_ID, starts="2026-09-12T05:00:00.000Z"),
+                ],
             )
         self.service.save(GARMIN_ID, {"session_rpe": 10})
         with self.manager.reader() as db:
