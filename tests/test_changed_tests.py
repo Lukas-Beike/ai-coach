@@ -37,6 +37,14 @@ FILES = {
     "tests/test_docs.py": "DOC = 'README.md'\n",
     "tests/test_tool.py": "from tools import helper\n",
     "tests/test_lazy.py": "def load():\n    from backend.app import old\n",
+    "tests/fixtures/providers/demo/day.json": "{}",
+    "tests/fixtures/other.json": "{}",
+    "tests/fixture_loader.py": "from pathlib import Path\n"
+    "ROOT = Path(__file__).parent / 'fixtures' / 'providers'\n",
+    "tests/test_fixture_reader.py": "import fixture_loader\n",
+    "tests/test_baseline.py": "BASELINE = 'tests/fixtures/other.json'\n",
+    "tests/test_prose.py": "NOTE = 'Shared fixtures for this test.'\n",
+    "tests/test_line_endings.py": "",
 }
 
 
@@ -125,6 +133,16 @@ class SelectModulesTests(unittest.TestCase):
             "test_fixture_standard_data",
             changed_tests.heavy_skips(["e2e/fixture_runtime.py"]),
         )
+
+    def test_fixture_selects_modules_naming_the_fixtures_directory(self):
+        # Loaders build fixture paths from parts, so the directory segment counts
+        # wherever it appears; prose does not, and the repository-wide check runs.
+        for fixture in ("tests/fixtures/providers/demo/day.json", "tests/fixtures/other.json"):
+            with self.subTest(fixture=fixture):
+                self.assertEqual(
+                    set(self.select(fixture)),
+                    {"test_fixture_reader", "test_baseline", "test_line_endings"},
+                )
 
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
         modules, reason = changed_tests.select_modules(

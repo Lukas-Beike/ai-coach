@@ -22,10 +22,13 @@ selects the tests of the module that names it. Imports reached only through
 `backend/runtime/` changed. The full suite runs when `backend/db/manager.py`,
 `backend/db/bootstrap.py`, `backend/db/migrations.py`, the test harness
 (`tests/run_tests.py`, `tests/changed_tests.py`, `tests/support.py`,
-`tests/server_test_support.py`), `tests/fixtures/`, or dependency and build
-files (`requirements*`, `Dockerfile`, `pyproject.toml`) changed, when a source
+`tests/server_test_support.py`), or dependency and build files
+(`requirements*`, `Dockerfile`, `pyproject.toml`) changed, when a source
 cannot be parsed, or when the selection covers at least 80% of the test
-modules; the run prints the reason. The slow tooling modules
+modules; the run prints the reason. A changed file under `tests/fixtures/`
+selects every test whose sources or imported modules name `fixtures` as a path
+segment (loaders build fixture paths from parts), plus `test_line_endings` and
+`test_ai_docs_contract`, which check tracked files across the repository. The slow tooling modules
 `test_fixture_standard_data` and `test_ci_contracts` run under `--changed` only
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if

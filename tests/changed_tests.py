@@ -36,7 +36,6 @@ FULL_SUITE_PATHS = (
     "tests/changed_tests.py",
     "tests/support.py",
     "tests/server_test_support.py",
-    "tests/fixtures/",
     "requirements",
     "Dockerfile",
     "pyproject.toml",
@@ -71,6 +70,14 @@ HEAVY_MODULES = {
         "tests/test_ci_contracts.py",
     ),
 }
+# A changed fixture selects every test whose sources, or the modules it
+# imports, name the fixtures directory as a path segment: loaders build fixture
+# paths from parts, so the file name alone would miss them.
+FIXTURES = "tests/fixtures/"
+# Tests that check tracked files across the repository (line endings, guidance
+# links to files such as tests/fixtures/providers/README.md), so a changed
+# fixture can break them too.
+REPOSITORY_WIDE = ("test_line_endings", "test_ai_docs_contract")
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
 # Too generic to identify one file by name alone.
@@ -211,6 +218,13 @@ def _names(source: _Source, literal: str, exact: set[str], dotted: set[str]) -> 
     )
 
 
+def _names_fixtures(source: _Source) -> bool:
+    return any(
+        " " not in literal and "fixtures" in literal.split("/")
+        for literal in source.literals
+    )
+
+
 def full_suite_reason(paths: list[str]) -> str | None:
     for path in paths:
         for prefix in FULL_SUITE_PATHS:
@@ -297,6 +311,21 @@ def select_modules(
             if owner:
                 selected[module] = f"{owner.path} names {path}"
                 break
+        if module in selected or not any(p.startswith(FIXTURES) for p in paths):
+            continue
+        if module in REPOSITORY_WIDE:
+            selected[module] = "checks every tracked file"
+            continue
+        owner = next(
+            (
+                s
+                for s in [source, *(sources[m] for m in sorted(reach))]
+                if _names_fixtures(s)
+            ),
+            None,
+        )
+        if owner:
+            selected[module] = f"{owner.path} names {FIXTURES.rstrip('/')}"
     total = sum(
         1
         for module, source in sources.items()
