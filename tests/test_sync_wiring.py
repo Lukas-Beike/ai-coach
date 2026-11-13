@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC
+from datetime import UTC, date
+from pathlib import Path
 from unittest.mock import ANY, MagicMock, Mock, patch
+
+from support import garmin_services
 
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
-from backend.sync import freshness, wiring
+from backend.sync import freshness, garmin, garmin_wiring, wiring
 from backend.sync.gates import resetting_providers
 from backend.sync.worker import shared_sync_job_wake_event
 
@@ -291,6 +294,128 @@ class SyncCommandBuilderTests(unittest.TestCase):
         repair.assert_called_once_with(
             ctx.database.return_value, authority.return_value
         )
+
+
+class GarminBuilderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ctx = Mock(name="context")
+        self.tokens = Mock(name="tokens")
+        self.run_zones = Mock(name="run_zones")
+        self.services = garmin_services(
+            self.ctx, tokens=self.tokens, run_zones=self.run_zones
+        )
+
+    def test_building_resolves_no_owner(self) -> None:
+        self.ctx.config.assert_not_called()
+        self.ctx.database.assert_not_called()
+        self.ctx.clock.now.assert_not_called()
+
+    def test_services_are_fresh_and_read_the_live_configuration(self) -> None:
+        ctx = self.ctx
+        ctx.config.side_effect = [Mock(name="first"), Mock(name="second")]
+        with patch.object(garmin, "GarminFixtureLoader") as loader:
+            self.assertIs(self.services.fixture_loader(), loader.return_value)
+            self.services.fixture_loader()
+
+        configs = [call.args[0] for call in loader.call_args_list]
+        self.assertIsNot(configs[0], configs[1])
+        loader.assert_called_with(
+            configs[1],
+            Path("."),
+            ctx.clock.now,
+            garmin_wiring.runtime_clock.utc_now,
+            date(2000, 1, 1),
+            -1,
+        )
+        self.assertIsNot(
+            self.services.payload_service(), self.services.payload_service()
+        )
+
+    def test_the_remote_reader_gets_the_tokens_and_the_live_owners(self) -> None:
+        ctx = self.ctx
+        with (
+            patch.object(garmin_wiring, "GarminRemoteReader") as reader,
+            patch.object(garmin, "GarminSyncStateService") as state,
+        ):
+            self.assertIs(self.services.remote_reader(), reader.return_value)
+
+        args = reader.call_args.args
+        self.assertEqual(
+            args[:5],
+            (
+                ctx.config.return_value,
+                args[1],
+                state.return_value,
+                ctx.diagnostic_capture,
+                ctx.redactor.redact_text,
+            ),
+        )
+        self.assertIs(args[5], ctx.logger)
+        self.assertEqual(args[8:11], (date(2000, 1, 1), 90, -1))
+        self.assertIs(reader.call_args.kwargs["garmin_tokens"], self.tokens)
+
+    def test_the_strength_push_reads_the_run_zones_it_was_given(self) -> None:
+        with (
+            patch(
+                "backend.sync.garmin_strength_push.GarminStrengthPushService"
+            ) as push,
+            patch.object(garmin_wiring, "GarminSyncSource"),
+            patch.object(garmin_wiring, "GarminRemoteReader"),
+        ):
+            self.assertIs(self.services.strength_push_service(), push.return_value)
+
+        self.assertIs(push.call_args.kwargs["run_zones"], self.run_zones)
+        self.assertIs(push.call_args.kwargs["database_manager"], self.ctx.database)
+        self.run_zones.assert_not_called()
+
+    def test_one_change_check_and_one_reader_per_configuration(self) -> None:
+        ctx = self.ctx
+        ctx.config.side_effect = None
+        with (
+            patch.object(garmin_wiring, "GarminChangeCheck") as check,
+            patch.object(garmin_wiring, "GarminRemoteReader") as reader,
+            patch.object(garmin, "GarminFixtureLoader") as loader,
+        ):
+            loader.return_value.path.return_value = None
+            self.assertIs(self.services.change_check(), check.return_value)
+            self.assertIs(self.services.change_check(), check.return_value)
+            check.assert_called_once()
+
+            client = self.services.change_personal_client()
+            self.assertIs(client, reader.return_value.personal_client.return_value)
+            self.services.change_personal_client()
+            reader.assert_called_once()
+
+            ctx.config.return_value = Mock(name="saved configuration")
+            self.services.change_personal_client()
+            self.assertEqual(reader.call_count, 2)
+
+            loader.return_value.path.return_value = "fixture.json"
+            self.assertIsNone(self.services.change_personal_client())
+            self.assertEqual(reader.call_count, 2)
+
+    def test_the_change_check_reads_the_athlete_clock_and_markers(self) -> None:
+        markers = Mock(name="markers")
+        services = garmin_services(self.ctx, daily_sync_markers=lambda: markers)
+        with patch.object(garmin_wiring, "GarminChangeCheck") as check:
+            services.change_check()
+
+        kwargs = check.call_args.kwargs
+        self.assertIs(kwargs["local_now"], self.ctx.clock.now)
+        self.assertIs(kwargs["logger"], self.ctx.logger)
+        kwargs["last_refresh"]()
+        markers.last_success.assert_called_once_with("garmin")
+
+    def test_projections_read_the_canonical_owner_when_used(self) -> None:
+        ctx = self.ctx
+        with patch.object(garmin_wiring, "GarminProjectionService") as projection:
+            self.assertIs(self.services.projection_service(), projection.return_value)
+
+        sources = projection.call_args.kwargs["canonical"]
+        ctx.canonical_read = Mock(name="late canonical read")
+        self.assertIs(sources.observations(), ctx.canonical_read)
+        self.assertIs(sources.activity_summaries(), ctx.canonical_read)
+        self.assertIs(projection.call_args.args[4], ctx.morning_body_battery_service())
 
 
 if __name__ == "__main__":

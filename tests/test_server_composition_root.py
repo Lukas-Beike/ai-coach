@@ -54,6 +54,7 @@ from backend.privacy import PrivacyDeleteService
 from backend.providers import audio as audio_provider
 from backend.providers.claude_models import ClaudeModelResolver
 from backend.providers.claude_requests import ClaudeMessagesClient
+from backend.providers.garmin import GarminClientFactory
 from backend.providers.http import JsonHttpClient
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.openai_requests import OpenAIResponsesClient
@@ -64,11 +65,27 @@ from backend.sync.authority import PlanningAuthorityService
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.garmin import (
+    GarminFixtureLoader,
+    GarminPayloadService,
+    GarminSyncStateService,
+)
+from backend.sync.garmin_activity_details import GarminActivityDetailService
+from backend.sync.garmin_change_check import GarminChangeCheck
+from backend.sync.garmin_projection_service import GarminProjectionService
+from backend.sync.garmin_service import (
+    GarminAnalysisRefreshService,
+    GarminNutritionRefreshService,
+    GarminRemoteReader,
+    GarminSyncService,
+)
+from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
+from backend.sync.stream_backfill import StreamBackfillService
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker
 from backend.weather.service import WeatherService
@@ -290,6 +307,33 @@ class CompositionRootTests(ServerTestCase):
             with self.subTest(kind=kind.__name__):
                 self.assertIsInstance(factory(), kind)
                 self.assertIsNot(factory(), factory())
+
+    def test_garmin_services_resolve_through_the_root(self) -> None:
+        garmin = server.GARMIN_ASSEMBLY
+
+        self.assertIs(server.APP.garmin, garmin)
+        for factory, kind in (
+            (garmin.fixture_loader, GarminFixtureLoader),
+            (garmin.client_factory, GarminClientFactory),
+            (garmin.payload_service, GarminPayloadService),
+            (garmin.sync_state_service, GarminSyncStateService),
+            (garmin.remote_reader, GarminRemoteReader),
+            (garmin.sync_service, GarminSyncService),
+            (garmin.activity_detail_service, GarminActivityDetailService),
+            (garmin.nutrition_refresh_service, GarminNutritionRefreshService),
+            (garmin.wellness_history_service, GarminWellnessHistoryService),
+            (garmin.stream_backfill_service, StreamBackfillService),
+            (garmin.analysis_refresh_service, GarminAnalysisRefreshService),
+            (garmin.projection_service, GarminProjectionService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
+        self.assertTrue(callable(garmin.strength_push_service()._configured))
+        self.assertIsInstance(garmin.sdk_write_ready(), bool)
+        self.assertIsNotNone(garmin.body_export(server.ATHLETE_DATA.profile()))
+        self.assertIsInstance(garmin.change_check(), GarminChangeCheck)
+        self.assertIs(garmin.change_check(), garmin.change_check())
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

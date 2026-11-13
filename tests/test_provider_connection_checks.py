@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from support import dispatch_route
+from support import dispatch_route, garmin_services
 
 from backend.errors import AppError
 from backend.http_api.provider_connections import (
@@ -22,7 +22,7 @@ from backend.providers.connection_checks import (
     classify_failure,
     simple_probe,
 )
-from backend.sync.garmin_assembly import GarminAssembly
+from backend.sync import garmin, garmin_wiring
 
 
 def _checks(check, *, configured=True):
@@ -477,18 +477,18 @@ class RotationAndDeadlineTests(unittest.TestCase):
 
 class GarminCheckGuardTests(unittest.TestCase):
     def _assembly(self, operation):
-        assembly = object.__new__(GarminAssembly)
+        assembly = garmin_services()
         coordination = Mock()
         coordination.operation = operation
         reader = Mock()
         with (
             patch.object(
-                GarminAssembly, "_sync_coordination", return_value=coordination
+                garmin_wiring, "GarminSyncCoordination", return_value=coordination
             ),
-            patch.object(GarminAssembly, "remote_reader", return_value=reader),
+            patch.object(garmin_wiring, "GarminRemoteReader", return_value=reader),
             patch.object(
-                GarminAssembly,
-                "fixture_loader",
+                garmin,
+                "GarminFixtureLoader",
                 return_value=Mock(path=Mock(return_value=None)),
             ),
         ):

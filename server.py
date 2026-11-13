@@ -292,25 +292,18 @@ from backend.sync.external_calendar_assembly import (
     ExternalCalendarSyncRuntime,
 )
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
-from backend.sync.garmin_assembly import (
-    GarminAssembly,
-    GarminPersistenceOwners,
-    GarminProviderSettings,
-    GarminSyncControl,
-    GarminSyncTelemetry,
-)
 from backend.sync.garmin_login import (
     GarminLoginService,
     GarminSecretRegistry,
     GarminTokenStore,
 )
-from backend.sync.garmin_projection_service import GarminCanonicalSources
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_wiring import GarminServices, build_garmin
 from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
@@ -794,51 +787,21 @@ GARMIN_LOGIN: GarminLoginService = GarminLoginService(
         GARMIN_ID, requested_by="connection"
     ),
 )
-GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
-    dependencies=GarminAssembly.Inputs(
-        provider=GarminProviderSettings(
-            config=lambda: CONFIG,
-            root=ROOT,
-            athlete_clock=ATHLETE_CLOCK,
-            earliest_date=SYNC_EARLIEST_DATE,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            all_sync_days=ALL_SYNC_DAYS,
-        ),
-        persistence=GarminPersistenceOwners(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            sync_state_repository=sync_state_repository,
-            daily_sync_marker_service=sync_daily_markers,
-            sync_equipment=lambda payload: (
-                ATHLETE_DATA.equipment().sync_garmin_snapshot(payload)
-            ),
-        ),
-        telemetry=GarminSyncTelemetry(
-            redactor=REDACTOR,
-            logger=LOGGER,
-            diagnostic_capture=DIAGNOSTIC_CAPTURE,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-        ),
-        control=GarminSyncControl(
-            utc_now=runtime_clock.utc_now,
-            datetime_now=lambda: datetime.now(UTC),
-            resync_gate=GARMIN_RESYNC_GATE,
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
-            morning_body_battery_service=morning_body_battery_service,
-            metric_export=lambda: (
-                METRIC_EXPORT.sync_automatic()
-                if _intervals_export_configured()
-                else None
-            ),
-        ),
-        canonical=GarminCanonicalSources(
-            observations=lambda: CANONICAL_READ,
-            activity_summaries=lambda: CANONICAL_READ,
-        ),
-        tokens=GARMIN_TOKENS,
-        run_zones=lambda: RUN_LTHR.zones_resolver(),
-    )
+GARMIN_ASSEMBLY: GarminServices = build_garmin(
+    APP,
+    root=ROOT,
+    earliest_date=SYNC_EARLIEST_DATE,
+    sync_chunk_days=SYNC_CHUNK_DAYS,
+    all_sync_days=ALL_SYNC_DAYS,
+    sync_state_repository=sync_state_repository,
+    daily_sync_markers=sync_daily_markers,
+    resync_gate=GARMIN_RESYNC_GATE,
+    lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
+    metric_export=lambda: (
+        METRIC_EXPORT.sync_automatic() if _intervals_export_configured() else None
+    ),
+    tokens=GARMIN_TOKENS,
+    run_zones=lambda: RUN_LTHR.zones_resolver(),
 )
 APP.garmin = GARMIN_ASSEMBLY
 

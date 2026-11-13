@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from canonical_detail_support import NOW, ZONE, open_manager, seed_intervals_activity
-from support import make_config
+from support import garmin_services, make_config
 from test_garmin_activity_detail_job import _collected
 
 from backend.canonical.vocabulary import GARMIN_ID, ActivityRecordState, RecordingOrigin
@@ -25,6 +25,7 @@ from backend.errors import AppError
 from backend.providers import canonical_plans as plans
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
+from backend.sync import garmin, garmin_wiring
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_activity_details import (
     BACKFILL_BATCH_SIZE,
@@ -34,7 +35,6 @@ from backend.sync.garmin_activity_details import (
     BACKFILL_WINDOW,
     GarminActivityDetailService,
 )
-from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.garmin_service import GarminRemoteReader
 
 NOW_AT = datetime.fromisoformat(NOW)
@@ -782,23 +782,16 @@ class BackfillAssemblyTests(unittest.TestCase):
     def test_sync_service_runs_the_backfill_of_the_composed_detail_service(
         self,
     ) -> None:
-        control: Any = Mock(name="control")
-        control.resync_gate = None
-        assembly = GarminAssembly(
-            dependencies=GarminAssembly.Inputs(
-                provider=Mock(name="provider"),
-                persistence=Mock(name="persistence"),
-                telemetry=Mock(name="telemetry"),
-                control=control,
-            )
-        )
+        services = garmin_services()
         state = Mock(name="state")
-        with patch.object(assembly, "sync_state_service", return_value=state):
-            detail_service = assembly.activity_detail_service()
+        with patch.object(garmin, "GarminSyncStateService", return_value=state):
+            detail_service = services.activity_detail_service()
             with patch.object(
-                assembly, "activity_detail_service", return_value=detail_service
+                garmin_wiring,
+                "GarminActivityDetailService",
+                return_value=detail_service,
             ):
-                sync_service = assembly.sync_service()
+                sync_service = services.sync_service()
 
         self.assertIs(detail_service._capability_allowed, state.capability_allowed)
         self.assertIsNotNone(detail_service._key_values)

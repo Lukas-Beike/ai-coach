@@ -3,7 +3,7 @@
 The Garmin sync service and the Morning Body Battery refresh both write Garmin
 snapshots. They coordinate through ``shared_garmin_sync_lock()``; if either
 side is wired to a different lock, the two writers can interleave. The sync
-service is built through the production ``GarminAssembly``; the Morning gate is
+service is built through the production ``build_garmin``; the Morning gate is
 built directly because its server.py wiring is not importable here. Collaborators
 are inert mocks, and no Garmin, OpenAI or database access happens.
 """
@@ -12,12 +12,11 @@ import threading
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
-from unittest.mock import Mock
+
+from support import garmin_services
 
 from backend.performance.morning_battery_service import MorningBatteryExecutionGate
 from backend.sync import garmin_service
-from backend.sync.garmin_assembly import GarminAssembly
 from backend.sync.garmin_service import GarminSyncCoordination, shared_garmin_sync_lock
 
 WAIT_SECONDS = 5
@@ -35,23 +34,6 @@ def _morning_gate(wait_seconds: int = 0) -> MorningBatteryExecutionGate:
     )
 
 
-def _garmin_assembly() -> GarminAssembly:
-    provider: Any = Mock(name="provider")
-    persistence: Any = Mock(name="persistence")
-    telemetry: Any = Mock(name="telemetry")
-    control: Any = Mock(name="control")
-    control.lock_wait_seconds = 0
-    control.resync_gate = None
-    return GarminAssembly(
-        dependencies=GarminAssembly.Inputs(
-            provider=provider,
-            persistence=persistence,
-            telemetry=telemetry,
-            control=control,
-        )
-    )
-
-
 class GarminSnapshotWriterLockTests(unittest.TestCase):
     def setUp(self) -> None:
         self.lock = shared_garmin_sync_lock()
@@ -62,7 +44,7 @@ class GarminSnapshotWriterLockTests(unittest.TestCase):
         self.assertIs(shared_garmin_sync_lock(), shared_garmin_sync_lock())
 
     def test_production_garmin_sync_service_uses_the_global_lock(self) -> None:
-        sync_service = _garmin_assembly().sync_service()
+        sync_service = garmin_services().sync_service()
 
         self.assertFalse(sync_service.running())
         self.assertTrue(self.lock.acquire(timeout=WAIT_SECONDS))
