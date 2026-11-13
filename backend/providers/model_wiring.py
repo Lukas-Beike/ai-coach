@@ -2,7 +2,8 @@
 
 The selected model names its provider: a Claude family goes to the Anthropic
 Messages API, anything else to OpenAI Responses. There is no fallback from one
-provider to the other; voice transcription always uses OpenAI.
+provider to the other. Voice transcription uses OpenAI unless a separate
+OpenAI-compatible transcription endpoint is configured.
 """
 
 from __future__ import annotations
@@ -161,15 +162,18 @@ def build_model_transport(
 
     def audio_transcription_client() -> audio_provider.AudioTranscriptionClient:
         active = config()
+        local = bool(active.transcription_base_url)
         return audio_provider.AudioTranscriptionClient(
             max_audio_bytes=max_audio_bytes,
-            openai_api_key=active.openai_api_key,
-            openai_base_url=active.openai_base_url,
-            default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
-            openai_transcription_model=TRANSCRIPTION_MODEL,
+            # A local server never receives the OpenAI key.
+            api_key=active.transcription_api_key if local else active.openai_api_key,
+            base_url=active.transcription_base_url or active.openai_base_url,
+            default_base_url=DEFAULT_OPENAI_BASE_URL,
+            model=active.transcription_model if local else TRANSCRIPTION_MODEL,
             response_timeout_seconds=TRANSCRIPTION_TIMEOUT_SECONDS,
             http_client=http_client(),
             provider_state=provider_state(),
+            local_endpoint=local,
         )
 
     def complete(request: ModelRequest) -> ModelTurn:

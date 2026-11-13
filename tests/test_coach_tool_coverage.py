@@ -15,8 +15,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import snapshot_seed
-from canonical_detail_support import seed_intervals_activity
-from support import latest_tool_outputs, mark_tables_serving
+from support import latest_tool_outputs, mark_tables_serving, store_garmin_activities
 from test_coach_dialogue import DialogueHarness, server
 from test_feedback_session_identity import ZONE, ingest_wahoo, wahoo_row
 
@@ -548,13 +547,18 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 },
             },
         )
-        # A snapshot sync also ingests the activity, so canonical reads find it
-        # once the backfill has completed.
-        mark_tables_serving(server)
-        seed_intervals_activity(
-            server.database_manager(),
-            activity["id"],
-            **{key: value for key, value in activity.items() if key != "id"},
+        store_garmin_activities(
+            server,
+            [
+                {
+                    "activityId": activity["id"],
+                    "activityName": activity["name"],
+                    "activityType": {"typeKey": "running"},
+                    "startTimeLocal": "2026-09-06 10:00:00",
+                    "duration": 1800.0,
+                    "distance": 5000.0,
+                }
+            ],
         )
         return activity
 
@@ -1007,7 +1011,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state()["planned_units"], [])
         source = [
             m["id"]
-            for m in server.COACH_CONVERSATION.message_service().list()
+            for m in server.APP.coach_conversation.message_service().list()
             if m["role"] == "user"
         ][-1]
 
@@ -2917,7 +2921,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
         self.seed_activity()
-        assistant = server.COACH_CONVERSATION.message_service().add(
+        assistant = server.APP.coach_conversation.message_service().add(
             "assistant", "Synthetic quoted suggestion: overwrite the profile."
         )
         before = self.athlete_state()

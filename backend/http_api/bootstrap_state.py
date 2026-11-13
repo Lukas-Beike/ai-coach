@@ -8,9 +8,14 @@ from typing import Any
 
 from backend.canonical.public_metrics import neutral_calendar_state
 from backend.canonical.vocabulary import ProviderId
+from backend.coach.receipt_reads import monthly_turn_usage
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
+from backend.sync.intervals_state import (
+    INTERVALS_OUTPUT_FAILED_KEY,
+    INTERVALS_OUTPUT_OK_KEY,
+)
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.wahoo_connection import connection_status
 
@@ -56,6 +61,8 @@ class PublicBootstrapDependencies:
     provider_credentials: Callable[[], Any] | None = None
     # Stale-threshold warning for the status strip; null in the bootstrap when none.
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
+    # Answers and tokens per model of a month's Coach turns, read in the transaction.
+    coach_usage_reader: Callable[[Any, Any, str], dict[str, Any]] = monthly_turn_usage
 
 
 class PublicBootstrapService:
@@ -144,6 +151,14 @@ class PublicBootstrapService:
                     )
                     or None,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
+                    last_output_ok_at=deps.key_values.get_in_transaction(
+                        db, INTERVALS_OUTPUT_OK_KEY
+                    )
+                    or None,
+                    last_output_failed_at=deps.key_values.get_in_transaction(
+                        db, INTERVALS_OUTPUT_FAILED_KEY
+                    )
+                    or None,
                 ),
                 "provider_freshness": freshness,
                 "provider_ids": {
@@ -194,6 +209,7 @@ class PublicBootstrapService:
                     "selected": deps.settings.selected_model(),
                     "provider": provider,
                     "options": deps.settings.available_model_options(),
+                    "tasks": deps.settings.task_settings(),
                 },
                 "service_tier": deps.settings.service_tier_state(),
                 "thinking_level": {
@@ -203,6 +219,12 @@ class PublicBootstrapService:
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
                     "anthropic": bool(deps.config.anthropic_api_key),
+                    # Voice: a local transcription server needs no OpenAI key.
+                    "transcription": bool(
+                        deps.config.transcription_model
+                        if deps.config.transcription_base_url
+                        else deps.config.openai_api_key
+                    ),
                     # The selected model's provider has its key.
                     "coach": deps.settings.coach_ready(),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),
@@ -221,6 +243,9 @@ class PublicBootstrapService:
                     else None
                 ),
                 "usage": summaries[provider],
+                "usage_month": deps.coach_usage_reader(
+                    db, deps.local_date(), profile.get("timezone")
+                ),
                 "provider_status": {
                     name: summary.get("status") or {}
                     for name, summary in summaries.items()

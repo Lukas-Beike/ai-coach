@@ -83,6 +83,7 @@ class ConfigTests(unittest.TestCase):
                     "OPENAI_MODEL": "",
                     "INTERVALS_ATHLETE_ID": " ",
                     "GARMINTOKENS": "",
+                    "TRANSCRIPTION_BASE_URL": " ",
                 },
             )
 
@@ -93,6 +94,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.openai_model, "gpt-6-luna")
         self.assertEqual(config.intervals_athlete_id, "0")
         self.assertEqual(config.garmin_tokenstore, str(root / "garmin_tokens"))
+        # Unset: voice stays on OpenAI with the Coach's endpoint and key.
+        self.assertEqual(
+            (
+                config.transcription_base_url,
+                config.transcription_api_key,
+                config.transcription_model,
+            ),
+            ("", "", ""),
+        )
 
     def test_sync_history_floor_defaults_parses_and_rejects_invalid_values(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -236,6 +246,26 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(AppError) as raised:
                 load_config(root, root, {"ANTHROPIC_BASE_URL": "http://example.test"})
         self.assertIn("ANTHROPIC_BASE_URL", raised.exception.message)
+        # The LAN transcription server follows the same HTTPS rule (athlete, #2596).
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(AppError) as raised:
+                load_config(
+                    root, root, {"TRANSCRIPTION_BASE_URL": "http://192.168.1.5:8000/v1"}
+                )
+            self.assertIn("TRANSCRIPTION_BASE_URL", raised.exception.message)
+            config = load_config(
+                root,
+                root,
+                {
+                    "TRANSCRIPTION_BASE_URL": "https://stt.lan.example/v1/",
+                    "TRANSCRIPTION_API_KEY": " stt-key ",
+                    "TRANSCRIPTION_MODEL": "Systran/faster-whisper-small",
+                },
+            )
+        self.assertEqual(config.transcription_base_url, "https://stt.lan.example/v1")
+        self.assertEqual(config.transcription_api_key, "stt-key")
+        self.assertEqual(config.transcription_model, "Systran/faster-whisper-small")
 
     def test_import_has_no_filesystem_side_effect(self):
         with tempfile.TemporaryDirectory() as temporary:

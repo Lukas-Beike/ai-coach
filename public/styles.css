@@ -121,7 +121,7 @@
   --planned-session-strength: #e0a35c;
   --planned-session-strength-on: var(--on-session);
   --planned-session-strength-surface: #e0a35c26;
-  --sharing-warning-border: rgba(255, 193, 7, .3);
+  --sharing-warning-border: rgba(255, 193, 7, .45);
   --sharing-warning-surface: rgba(255, 193, 7, .06);
   --sync-progress-border: rgba(52, 207, 161, .38);
   --sync-progress-surface: rgba(52, 207, 161, .07);
@@ -140,6 +140,8 @@
 
 :root[data-theme="light"] {
   --warning-border: var(--orange);
+  --sharing-warning-border: var(--orange);
+  --nutrition-warning-border: var(--orange);
   color-scheme: light;
   --bg: #f4f5f6;
   --surface: #ffffff;
@@ -532,6 +534,7 @@ h2 {
 .message-changes.is-undone { color: var(--muted); }
 .message-changes.is-undone .message-changes-icon { color: var(--muted); }
 .message-changes-text { flex: 1 1 12rem; min-width: 0; }
+.message-model { display: block; margin-top: 8px; color: var(--subtle); font-size: .72rem; }
 .message.assistant.is-failed { padding: 12px 14px; border: 1px solid var(--danger-border-strong); border-radius: 16px; background: var(--surface-raised); }
 .message-retry { display: block; min-height: 44px; margin-top: 10px; }
 .message-plan-note { margin-top: 4px; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
@@ -605,6 +608,8 @@ h2 {
   min-width: 0;
   max-height: 150px;
   max-height: 40dvh;
+  field-sizing: content;
+  overflow-y: auto;
   resize: none;
   border: 0;
   outline: 0;
@@ -1103,7 +1108,10 @@ h2 {
   .competition-card-facts { grid-template-columns: 1fr; }
 }
 
-.model-selector, .diagnostic-actions { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.model-selector, .diagnostic-actions, .task-model { padding: 18px 0 10px; border-top: 1px solid var(--line); }
+.task-model h3 { margin: 0 0 8px; font-size: .8rem; font-weight: 600; }
+.task-model-pair { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+.task-model-pair select { width: 100%; }
 .model-notice { display: block; margin-top: 8px; color: var(--orange); font-size: .74rem; }
 .model-notice[hidden], .model-selector[hidden] { display: none; }
 .calendar-display-form { display: grid; gap: 14px; padding: 18px 0 10px; }
@@ -1262,6 +1270,12 @@ h2 {
 .usage-stats dd, .usage-details dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
 .usage-stats dd { font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-details dd { font-size: .76rem; text-align: right; }
+.usage-month { display: grid; gap: 6px; margin-top: 12px; }
+.usage-month h3 { margin: 0; color: var(--subtle); font-size: .72rem; font-weight: 500; }
+.usage-month table { width: 100%; border-collapse: collapse; font-size: .76rem; font-variant-numeric: tabular-nums; }
+.usage-month th, .usage-month td { padding: 6px 0 6px 6px; text-align: right; border-top: 1px solid var(--line); }
+.usage-month thead th { border-top: 0; color: var(--subtle); font-weight: 400; }
+.usage-month th:first-child { padding-left: 0; text-align: left; font-weight: 500; }
 .backup-actions label { flex: 1; }
 .backup-actions input[type="file"] { padding: 8px; font-size: .72rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }

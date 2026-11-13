@@ -176,6 +176,11 @@ class Config:
     garmin_personal_api_key: str = ""
     anthropic_api_key: str = ""
     anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
+    # Voice only; an empty base URL means OpenAI with the Coach's endpoint and key,
+    # and the other two are then ignored.
+    transcription_base_url: str = ""
+    transcription_api_key: str = ""
+    transcription_model: str = ""
     # ISO date the athlete entered for the key's expiry; Garmin does not report it.
     garmin_personal_api_key_expires: str = ""
     yazio_email: str = ""
@@ -278,6 +283,13 @@ def load_config(
             value("ANTHROPIC_BASE_URL", "").strip() or DEFAULT_ANTHROPIC_BASE_URL,
             "ANTHROPIC_BASE_URL",
         ),
+        transcription_base_url=validated_base_url(
+            value("TRANSCRIPTION_BASE_URL", ""), "TRANSCRIPTION_BASE_URL"
+        )
+        if value("TRANSCRIPTION_BASE_URL", "").strip()
+        else "",
+        transcription_api_key=value("TRANSCRIPTION_API_KEY", "").strip(),
+        transcription_model=value("TRANSCRIPTION_MODEL", "").strip(),
         garmin_personal_api_key_expires=value(
             "GARMIN_PERSONAL_API_KEY_EXPIRES", ""
         ).strip(),

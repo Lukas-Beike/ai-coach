@@ -5,17 +5,26 @@ import threading
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import remote_reconcilers
 import snapshot_seed
-from canonical_detail_support import add_garmin_copy, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
-from support import complete_canonical_backfill, store_canonical_snapshot
+from support import store_canonical_snapshot, store_garmin_activities
 
+from backend.canonical.activity_detail import ActivityStreamSet
+from backend.canonical.records import Provenance
+from backend.canonical.vocabulary import (
+    ActivityDetailOrigin,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    StreamChannel,
+    StreamResolution,
+)
 from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
@@ -25,6 +34,7 @@ from backend.coach.context import (
 )
 from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.proposal_validation import validated_coach_action_preview_input
+from backend.db.activity_detail_store import replace_detail_set
 from backend.errors import AppError
 from backend.http_api import server as http_server_module
 from backend.performance.freshness import GarminSyncStatus
@@ -207,70 +217,49 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
     def test_explicit_activity_detail_reads_only_the_requested_local_session(self):
-        snapshot_seed.save_snapshot(
-            server.SYNC_PERSISTENCE.state_repository(),
-            {
-                "synced_at": "2026-09-11T08:00:00+00:00",
-                "athlete": {},
-                "recent_activities": [
-                    {
-                        "id": "activity-1",
-                        "name": "Tempo",
-                        "type": "Run",
-                        "start_date_local": "2026-09-10T07:00:00",
-                    },
-                    {
-                        "id": "activity-2",
-                        "name": "Recovery",
-                        "type": "Ride",
-                        "start_date_local": "2026-09-11T07:00:00",
-                    },
-                ],
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-                "raw_provider_data": {
-                    "athlete": {},
-                    "activities": [
-                        {
-                            "id": "activity-1",
-                            "name": "Tempo",
-                            "type": "Run",
-                            "start_date_local": "2026-09-10T07:00:00",
-                            "average_speed": 3.2,
-                            "average_heartrate": 166,
-                            "average_watts": 245,
-                            "streams": {
-                                "watts": [200, 250, 280],
-                                "latlng": [[1, 2], [3, 4]],
-                            },
-                            "provider_extra": "must not pass",
-                        },
-                        {
-                            "id": "activity-2",
-                            "name": "Recovery",
-                            "type": "Ride",
-                            "start_date_local": "2026-09-11T07:00:00",
-                            "average_watts": 120,
-                        },
-                    ],
-                    "wellness": [],
-                    "upcoming_calendar": [],
+        store_garmin_activities(
+            server,
+            [
+                {
+                    "activityId": "activity-1",
+                    "activityName": "Tempo",
+                    "activityType": {"typeKey": "running"},
+                    "startTimeLocal": "2026-09-10 07:00:00",
+                    "averageHR": 166,
+                    "provider_extra": "must not pass",
                 },
-            },
+                {
+                    "activityId": "activity-2",
+                    "activityName": "Recovery",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": "2026-09-11 07:00:00",
+                },
+            ],
         )
-        manager = server.database_manager()
-        seed_intervals_activity(manager, "activity-1", name="Tempo", type="Run")
-        seed_intervals_activity(
-            manager,
-            "activity-2",
-            name="Recovery",
-            start_date_local="2026-09-11T07:00:00",
-        )
-        complete_canonical_backfill(server)
-        # Intervals.icu detail is never read (#1685): the streams sit on a Garmin copy.
-        with server.DB_LOCK:
-            add_garmin_copy(
-                manager, "activity-1", {"time": [0, 1, 2], "watts": [200, 250, 280]}
+        # The streams sit on the Garmin record of the run.
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            replace_detail_set(
+                db,
+                ActivityStreamSet(
+                    provider_activity_id="activity-1",
+                    provenance=Provenance(
+                        provider=ProviderId.GARMIN,
+                        source_kind=SourceKind.PROVIDER_REPORTED,
+                        source_record_id=None,
+                        recorded_by=RecordingOrigin.GARMIN,
+                        retrieved_at=datetime(2026, 9, 11, 8, tzinfo=UTC),
+                        label="Garmin Connect",
+                    ),
+                    origin=ActivityDetailOrigin.FETCH,
+                    resolution=StreamResolution.FULL,
+                    channels={
+                        StreamChannel.TIME_S: (0.0, 1.0, 2.0),
+                        StreamChannel.POWER_W: (200.0, 250.0, 280.0),
+                    },
+                ),
+                mapper_version=1,
+                summary_sha256=None,
+                now="2026-09-11T08:00:00+00:00",
             )
         intent = {
             "intent": "local_action",
@@ -305,7 +294,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             result["data_scope"],
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Garmin Connect, Intervals.icu; recorded by: garmin",
+            "session; providers: Garmin Connect; recorded by: garmin",
         )
         self.assertNotIn("activity-2", json.dumps(result))
         self.assertNotIn("Recovery", json.dumps(result))
@@ -584,21 +573,16 @@ class ServerCoachTests(ServerTestCase):
         )
 
     def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
-        store_canonical_snapshot(
+        store_garmin_activities(
             server,
-            {
-                "synced_at": "2026-08-30T08:00:00+00:00",
-                "athlete": {},
-                "recent_activities": [
-                    {
-                        "id": "activity-1",
-                        "name": "Morgenlauf",
-                        "start_date_local": "2026-08-30T07:00:00",
-                    }
-                ],
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-            },
+            [
+                {
+                    "activityId": "activity-1",
+                    "activityName": "Morgenlauf",
+                    "activityType": {"typeKey": "running"},
+                    "startTimeLocal": "2026-08-30 07:00:00",
+                }
+            ],
         )
         result = server.ATHLETE_DATA.activity_feedback().save_coach(
             "activity-1",
@@ -902,7 +886,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(workout["properties"]["duration_minutes"]["minimum"], 5)
 
     def test_context_preview_exposes_context_and_last_chat_input(self):
-        server.COACH_CONVERSATION.message_service().add(
+        server.APP.coach_conversation.message_service().add(
             "user", "Wie soll ich morgen trainieren?"
         )
         preview = server.COACH_CONTEXT.preview_service().preview()
@@ -1180,7 +1164,7 @@ class ServerCoachTests(ServerTestCase):
             "delete_conversation",
             return_value=True,
         ):
-            result = server.COACH_CONVERSATION.reset_service().reset()
+            result = server.APP.coach_conversation.reset_service().reset()
         self.assertEqual(result["status"], "ok")
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             row = db.execute(
@@ -1189,11 +1173,11 @@ class ServerCoachTests(ServerTestCase):
             ).fetchone()
         self.assertEqual(row["status"], "superseded")
         self.assertEqual(
-            server.COACH_CONVERSATION.dialogue_read_service().artifact_refs(), []
+            server.APP.coach_conversation.dialogue_read_service().artifact_refs(), []
         )
 
     def test_coach_reset_keeps_local_history_when_reset_transaction_fails(self):
-        message = server.COACH_CONVERSATION.message_service().add(
+        message = server.APP.coach_conversation.message_service().add(
             "user", "Keep this message"
         )
         generation = server.key_value_service().get("chat_generation")
@@ -1210,7 +1194,7 @@ class ServerCoachTests(ServerTestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "synthetic reset failure"),
         ):
-            server.COACH_CONVERSATION.reset_service().reset()
+            server.APP.coach_conversation.reset_service().reset()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             saved = db.execute(
                 "SELECT id FROM messages WHERE id=?", (message["id"],)
@@ -1220,8 +1204,8 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
-        server.COACH_CONVERSATION.message_service().add("user", "Clear this message")
-        service = server.COACH_CONVERSATION.reset_service()
+        server.APP.coach_conversation.message_service().add("user", "Clear this message")
+        service = server.APP.coach_conversation.reset_service()
         with patch.object(
             openai_requests.OpenAIResponsesClient,
             "delete_conversation",
@@ -1232,7 +1216,7 @@ class ServerCoachTests(ServerTestCase):
         delete_conversation.assert_called_once_with("conv-reset-failure")
         self.assertIsNone(result["remote_conversation_deleted"])
         self.assertEqual(server.key_value_service().get("openai_conversation_id"), "")
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+        self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_background_job_replay_reuses_receipt_without_republishing(self):
         registry = server.coach_streams.CHAT_STREAM_REGISTRY
@@ -1569,7 +1553,7 @@ class ServerCoachTests(ServerTestCase):
                 }
             ),
         }
-        result = server.COACH_CONVERSATION.dialogue_read_service()._command_result(row)
+        result = server.APP.coach_conversation.dialogue_read_service()._command_result(row)
         self.assertEqual(result["client_turn_id"], "turn-1")
         self.assertEqual(len(result["sync_job_ids"]), 40)
         self.assertTrue(result["steps"][0]["scope_truncated"])

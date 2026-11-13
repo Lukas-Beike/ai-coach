@@ -484,6 +484,22 @@ def _stored(row: Mapping[str, Any], detail: ActivityDetailSet) -> StoredDetailSe
     )
 
 
+# The detail-set kinds the session curves read: full-resolution streams and laps.
+_FULL_STREAMS: Final = (
+    "d.detail_kind = ? AND d.resolution = ?",
+    (ActivityDetailKind.STREAMS.value, StreamResolution.FULL.value),
+)
+_LAPS: Final = ("d.detail_kind = ?", (ActivityDetailKind.LAPS.value,))
+_RECORD_SOURCE: Final = (
+    "activity_records AS r JOIN activity_sessions AS s ON s.activity_id = r.activity_id"
+)
+_SET_SOURCE: Final = (
+    "activity_detail_sets AS d JOIN activity_records AS r "
+    "ON r.provider = d.provider AND r.provider_activity_id = d.provider_activity_id "
+    "JOIN activity_sessions AS s ON s.activity_id = r.activity_id"
+)
+
+
 def full_stream_keys(
     db: Any, activity_ids: Iterable[str]
 ) -> dict[str, tuple[FullStreamKey, ...]]:
@@ -493,21 +509,14 @@ def full_stream_keys(
     count as its own. Sessions without such a set are absent. No sensor data is
     decoded, so a caller can tell whether a computed curve is still current.
     """
-    return _set_keys(
-        db,
-        activity_ids,
-        "d.detail_kind = ? AND d.resolution = ?",
-        (ActivityDetailKind.STREAMS.value, StreamResolution.FULL.value),
-    )
+    return _set_keys(db, activity_ids, *_FULL_STREAMS)
 
 
 def lap_set_keys(
     db: Any, activity_ids: Iterable[str]
 ) -> dict[str, tuple[FullStreamKey, ...]]:
     """Return the keys of each session's lap sets, as ``full_stream_keys`` does."""
-    return _set_keys(
-        db, activity_ids, "d.detail_kind = ?", (ActivityDetailKind.LAPS.value,)
-    )
+    return _set_keys(db, activity_ids, *_LAPS)
 
 
 def analysis_set_keys(
@@ -522,49 +531,117 @@ def analysis_set_keys(
     )
 
 
+def session_curve_inputs(
+    db: Any, activity_ids: Iterable[str], record_kind: str
+) -> list[tuple[Any, ...]]:
+    """Return the stored rows the session curves of ``activity_ids`` are read from.
+
+    The same sessions, merged copies and sets that ``curves`` reads (the rules of
+    ``full_stream_keys`` and ``lap_set_keys``): each active record with its
+    session, merge target and change time, and each full-resolution stream set and
+    lap set with its content and summary hashes, fetch time and the payload hash
+    of the active provider summary of ``record_kind`` that decides whether the set
+    is still current. Any change to what a curve is read from changes the rows, so
+    a caller can tell without reading each session whether its curves are current.
+    """
+    ids = list(activity_ids)
+    kind_clause = f"({_FULL_STREAMS[0]}) OR ({_LAPS[0]})"
+    active = ActivityRecordState.ACTIVE.value
+    rows = [
+        *_owned_rows(
+            db,
+            ids,
+            "r.provider, r.provider_activity_id, r.activity_id, r.mapper_version, "
+            "r.updated_at",
+            _RECORD_SOURCE,
+            (),
+            "r.state = ?",
+            (active,),
+        ),
+        *_owned_rows(
+            db,
+            ids,
+            "d.provider, d.provider_activity_id, d.detail_kind, d.content_sha256, "
+            "d.summary_sha256, d.fetched_at, p.payload_hash",
+            f"{_SET_SOURCE} LEFT JOIN provider_records AS p ON p.provider = d.provider "
+            "AND p.source_record_id = d.provider_activity_id AND p.record_kind = ? "
+            "AND p.state = ?",
+            (record_kind, ProviderRecordState.ACTIVE.value),
+            f"r.state = ? AND ({kind_clause})",
+            (active, *_FULL_STREAMS[1], *_LAPS[1]),
+        ),
+    ]
+    # A record bundled in two requested sessions comes back twice.
+    return sorted({tuple(dict(row).values()) for row in rows}, key=repr)
+
+
+def _owned_rows(
+    db: Any,
+    activity_ids: list[str],
+    columns: str,
+    source: str,
+    source_values: tuple[str, ...],
+    where: str,
+    where_values: tuple[str, ...],
+) -> list[Any]:
+    """Return ``columns`` of the rows owned by each live session in ``activity_ids``.
+
+    Rows of records of the session itself and of sessions merged into it count as
+    its own, and the ``owner`` column names that session; rows of records whose
+    own session is deleted are left out. ``source`` is the FROM clause with the
+    aliases ``r`` and ``s``.
+    """
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
+    )
+    rows: list[Any] = []
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        marks = ", ".join("?" * len(chunk))
+        rows += db.execute(
+            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+            f"AS owner, {columns} FROM {source} WHERE s.state <> ? AND {where} "
+            f"AND (s.activity_id IN ({marks}) "
+            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+            (
+                ActivitySessionState.DUPLICATE.value,
+                *source_values,
+                ActivitySessionState.DELETED.value,
+                *where_values,
+                *chunk,
+                ActivitySessionState.DUPLICATE.value,
+                *chunk,
+            ),
+        ).fetchall()
+    return rows
+
+
 def _set_keys(
     db: Any,
     activity_ids: Iterable[str],
     kind_clause: str,
     kind_values: tuple[str, ...],
 ) -> dict[str, tuple[FullStreamKey, ...]]:
-    ids = list(
-        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
-    )
     keys: dict[str, set[FullStreamKey]] = {}
-    for start in range(0, len(ids), 400):
-        chunk = ids[start : start + 400]
-        marks = ", ".join("?" * len(chunk))
-        rows = db.execute(
-            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
-            "AS owner, d.provider, d.provider_activity_id, d.content_sha256, "
-            "d.summary_sha256, d.fetched_at FROM activity_detail_sets AS d "
-            "JOIN activity_records AS r ON r.provider = d.provider "
-            "AND r.provider_activity_id = d.provider_activity_id "
-            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-            f"WHERE r.state = ? AND s.state <> ? AND {kind_clause} "
-            f"AND (s.activity_id IN ({marks}) "
-            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
-            (
-                ActivitySessionState.DUPLICATE.value,
-                ActivityRecordState.ACTIVE.value,
-                ActivitySessionState.DELETED.value,
-                *kind_values,
-                *chunk,
-                ActivitySessionState.DUPLICATE.value,
-                *chunk,
-            ),
-        ).fetchall()
-        for row in rows:
-            keys.setdefault(row["owner"], set()).add(
-                FullStreamKey(
-                    provider=row["provider"],
-                    provider_activity_id=row["provider_activity_id"],
-                    content_sha256=row["content_sha256"],
-                    summary_sha256=row["summary_sha256"],
-                    fetched_at=row["fetched_at"],
-                )
+    for row in _owned_rows(
+        db,
+        list(activity_ids),
+        "d.provider, d.provider_activity_id, d.content_sha256, d.summary_sha256, "
+        "d.fetched_at",
+        _SET_SOURCE,
+        (),
+        f"r.state = ? AND ({kind_clause})",
+        (ActivityRecordState.ACTIVE.value, *kind_values),
+    ):
+        keys.setdefault(row["owner"], set()).add(
+            FullStreamKey(
+                provider=row["provider"],
+                provider_activity_id=row["provider_activity_id"],
+                content_sha256=row["content_sha256"],
+                summary_sha256=row["summary_sha256"],
+                fetched_at=row["fetched_at"],
             )
+        )
     return {
         owner: tuple(sorted(values, key=lambda key: key.content_sha256))
         for owner, values in keys.items()

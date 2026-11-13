@@ -155,11 +155,15 @@ The client SHALL show the settings areas under the fixed title "Mehr" as one swi
 - **WHEN** a configured Intervals.icu or Claude card shows "Nicht geprüft" and the athlete runs "Verbindung prüfen"
 - **THEN** its chip shows "Verbunden" after a successful check and "Fehler" after a failed one, also after a reload while the server keeps the result.
 
+#### Scenario: A reload keeps a connected chip
+- **WHEN** the page is reloaded and the server reports that the last check or the last use of a configured Intervals.icu or Yazio card succeeded or failed
+- **THEN** the chip shows "Verbunden" after a success and "Fehler" after a failure, and "Nicht geprüft" only while the server knows neither; loading the card sends no provider request.
+
 #### Scenario: Unsaved profile
 - **WHEN** a profile field changes
 - **THEN** the save bar shows "Ungespeichert" until the profile is saved, then "Gespeichert"; a closed section opens when it holds an invalid value.
 
-Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`, `tests/provider-checks.test.cjs::Intervals.icu and Claude chips follow the last explicit check, also after a reload`.
+Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`, `tests/provider-checks.test.cjs::Intervals.icu and Claude chips follow the last explicit check, also after a reload`, `tests/settings-hub.test.cjs::the Intervals.icu detail names the last export, also one that was no library push`, `e2e/provider-checks.spec.js::@responsive Intervals.icu shows the server's last export after a reload and checks nothing`, `e2e/yazio-connection.spec.js::@responsive Yazio shows the server's last check or lookup after a reload without checking`.
 
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.
@@ -176,7 +180,7 @@ The client SHALL support editable multiline Coach drafts, sending with the expli
 - **WHEN** the draft grows, the Coach becomes busy, or voice status appears
 - **THEN** the composer resizes within its bounds and keeps the existing control layout and bottom-edge behavior without a busy-state height jump.
 
-Evidence: `public/coach.js::chatEnterAction`, `public/coach.js::resizeChatInput`, `public/coach.js::publishComposerHeight`, `public/shared.js::hasTouchFirstInput`; `tests/coach-enter.test.cjs::desktop Enter sends the draft`, `tests/coach-enter.test.cjs::IME composition never triggers an action`, `tests/coach-enter.test.cjs::touch Ctrl/Cmd+Enter sends from a physical keyboard`, `e2e/coach-composer.spec.js::composer height does not change while busy @responsive`.
+Evidence: `public/coach.js::chatEnterAction`, `public/styles.css` (`.composer textarea` field-sizing), `public/coach.js::publishComposerHeight`, `public/shared.js::hasTouchFirstInput`; `tests/coach-enter.test.cjs::desktop Enter sends the draft`, `tests/coach-enter.test.cjs::IME composition never triggers an action`, `tests/coach-enter.test.cjs::touch Ctrl/Cmd+Enter sends from a physical keyboard`, `e2e/coach-composer.spec.js::composer height does not change while busy @responsive`.
 
 ### Requirement: Streamed Coach responses preserve recoverable turn state
 The client SHALL display incremental response text and distinguish started, background, completed, rejected, recovering, and cancelled turns. A transport failure SHALL not silently resend an already accepted turn or erase its draft/recovery path.
@@ -362,7 +366,7 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 
 #### Scenario: Equipment and maintenance
 - **WHEN** equipment is displayed or maintenance is requested
-- **THEN** each item is one collapsible card that starts collapsed on every visit and shows its name (with a Garmin source tag for Garmin-only items), one status chip, one short line (parent bike for components, distance, lifetime percent) and a slim lifetime bar; a screen reader hears the name (and the Garmin source tag), the state and the lifetime percent once, with its meaning and an exceeded target the chip does not name, because the bar is decorative and hidden from the accessibility tree; an open card shows usage, maintenance with its history, Garmin state and status conflict, and the maintenance action with its receipt and undo, which only eligible active local gear offers under the equipment domain contract; archived items appear only in a collapsed "Ausgemustert (n)" group.
+- **THEN** each item is one collapsible card that starts collapsed on every visit and shows its name (with a Garmin source tag for Garmin-only items), one status chip, one short line (parent bike for components, distance, lifetime percent) and a slim lifetime bar; a screen reader hears the name (and the Garmin source tag), the state and the lifetime percent once, with its meaning and an exceeded target the chip does not name, because the bar is decorative and hidden from the accessibility tree; an open card shows usage, maintenance with its history, Garmin state and status conflict, and the maintenance action with its receipt and undo, which only eligible active local gear offers under the equipment domain contract and whose receipt a background refresh of the list keeps during the same visit, tab and session; archived items appear only in a collapsed "Ausgemustert (n)" group.
 
 Evidence:
 - `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`
@@ -518,11 +522,11 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 
 #### Scenario: Laufen
 - **WHEN** the athlete opens Analyse › Laufen
-- **THEN** it shows the running current values (threshold pace, threshold power, threshold heart rate, LT1 pace and heart rate as on the zones page, VO2max), the development charts (threshold pace, VO2max, running tolerance), the best efforts of the last 90 days (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date and source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
+- **THEN** it shows the running current values (LT2 pace, power and heart rate as "Anaerobe Schwelle (LT2) · …", LT1 pace and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the development charts (threshold pace, VO2max, running tolerance), the best efforts of the last 90 days (best pace over 1, 3, 5, 7, 12 and 20 minutes and best time over 1 km and 5 km, each with its date and source, missing ones marked as missing) with the experimental critical-speed line, and the race predictions; no cycling value appears.
 
 #### Scenario: Radfahren
 - **WHEN** the athlete opens Analyse › Radfahren
-- **THEN** it shows the cycling current values (FTP, power per weight, threshold heart rate, LT1 power and heart rate as on the zones page, VO2max), the power profile with its coverage note and the experimental critical-power line, and the development charts (FTP, VO2max); no running value appears.
+- **THEN** it shows the cycling current values (LT2 FTP and heart rate as "Anaerobe Schwelle (LT2) · …", power per weight, LT1 power and heart rate as "Aerobe Schwelle (LT1) · …", VO2max), the power profile with its coverage note and the experimental critical-power line, and the development charts (FTP, VO2max); no running value appears.
 
 #### Scenario: Cross-sport values
 - **WHEN** the athlete opens Analyse › Belastung or Erholung
@@ -699,13 +703,13 @@ Evidence: `public/coach.js::chatSendLabel`; `public/coach.js::updateChatSendButt
 
 ### Requirement: Reply annotations and receipts
 
-Under a Coach reply the client SHALL show its change labels joined by " · ", then one line per plan note as "Warnung|Hinweis: <label> · <dates> · <evidence>" using a fixed label and evidence phrase per note code; unknown codes are skipped. A user message with files SHALL show "Anhänge: <names>" and offer no edit action.
+Under a Coach reply the client SHALL show its change labels joined by " · ", then one line per plan note code and severity as "Warnung|Hinweis: <label> · <dates> · <evidence>" using a fixed label and evidence phrase per note code, the dates of all its notes merged (an intensity distribution note names its week as "Woche ab <first planned day>", several as "Wochen ab <days>"); unknown codes are skipped. A user message with files SHALL show "Anhänge: <names>" and offer no edit action.
 
 #### Scenario: Receipt toast
 - **WHEN** a turn reports command receipts
 - **THEN** one toast joins the distinct titles with " · ", failures first and the toast red when one failed; each tool has a fixed German title (for example `save_checkin` is "Tages-Check-in gespeichert"), read-only refresh and sync tools are left out unless they failed, a staged plan is left out when the turn also commits, and only the final plan commit counts
 
-Evidence: `public/coach.js::appendMessageChanges`; `public/coach.js::appendPlanNotes`; `public/coach.js::messageAttachmentLabel`; `public/coach.js::receiptIsVisible`; `public/coach.js::toastCoachReceipts`; `public/coach.js` (`COACH_RECEIPT_LABELS`, `HIDDEN_CHAT_RECEIPT_TOOLS`). Tests: `tests/coach-turn-undo.test.cjs::plan notes render safe labels, dates, evidence and warning emphasis`; `tests/coach-receipts.test.cjs::a Coach action announces itself in one toast with its failures first`; `tests/coach-receipts.test.cjs::synchronization progress does not create chat cards`; `e2e/coach-plan-notes.spec.js`; `e2e/coach-tool-receipts.spec.js`.
+Evidence: `public/coach.js::appendMessageChanges`; `public/coach.js::appendPlanNotes`; `public/coach.js::messageAttachmentLabel`; `public/coach.js::receiptIsVisible`; `public/coach.js::toastCoachReceipts`; `public/coach.js` (`COACH_RECEIPT_LABELS`, `HIDDEN_CHAT_RECEIPT_TOOLS`). Tests: `tests/coach-turn-undo.test.cjs::plan notes render safe labels, dates, evidence and warning emphasis`; `tests/coach-turn-undo.test.cjs::repeated plan notes condense to one line, distribution weeks by their first day (#2617)`; `tests/coach-receipts.test.cjs::a Coach action announces itself in one toast with its failures first`; `tests/coach-receipts.test.cjs::synchronization progress does not create chat cards`; `e2e/coach-plan-notes.spec.js`; `e2e/coach-tool-receipts.spec.js`.
 
 ### Requirement: Follow-latest and history paging rules
 

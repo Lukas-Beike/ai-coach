@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from backend import change_history
 from backend.canonical import garmin_payload
-from backend.db import garmin_store, planning_store
+from backend.db import coach_store, garmin_store, planning_store
 from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
 from backend.db.canonical_domain_store import zone_configuration_export_rows
 from backend.errors import AppError
@@ -415,12 +415,7 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
             "FROM remote_links ORDER BY entity_kind, local_id, provider"
         ),
     ),
-    (
-        "messages.jsonl",
-        _select(
-            "SELECT role, content, attachments, created_at FROM messages ORDER BY id"
-        ),
-    ),
+    ("messages.jsonl", lambda db: map(dict, coach_store.message_export_rows(db))),
     (
         "coach_plan_artifacts.jsonl",
         _select(
@@ -429,9 +424,7 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
     ),
     (
         "coach_commands.jsonl",
-        _select(
-            "SELECT id, client_turn_id, conversation_id, intent, target_system, artifact_id, status, receipt, error_class, created_at, updated_at FROM coach_commands ORDER BY created_at"
-        ),
+        lambda db: map(dict, coach_store.command_export_rows(db)),
     ),
     (
         "coach_action_proposals.jsonl",

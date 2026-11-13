@@ -4,13 +4,52 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from backend.athlete.profile import timezone_name
 from backend.coach.authorization import coach_session_key
 from backend.coach.proposal_models import coach_action_view
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+
+
+def monthly_turn_usage(db: Any, local_date: date, timezone: str) -> dict[str, Any]:
+    """Answers and tokens per model of the turns started in the local month.
+
+    Failed and cancelled turns add their tokens but no answer.
+    """
+    zone = ZoneInfo(timezone_name(timezone))
+    start = datetime(local_date.year, local_date.month, 1, tzinfo=zone)
+    end = datetime(
+        local_date.year + local_date.month // 12,
+        local_date.month % 12 + 1,
+        1,
+        tzinfo=zone,
+    )
+    bounds = (start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat())
+    rows = coach_store.monthly_usage_rows(db, *bounds)
+    return {
+        "month": f"{local_date:%Y-%m}",
+        "models": [
+            {
+                "model": str(row["model"] or ""),
+                **{
+                    key: int(row[key] or 0)
+                    for key in (
+                        "answers",
+                        "input_tokens",
+                        "cached_input_tokens",
+                        "output_tokens",
+                    )
+                },
+            }
+            for row in rows
+        ],
+    }
 
 
 class CoachCommandReceiptService:
@@ -42,10 +81,7 @@ class CoachCommandReceiptService:
 
         # Receipt reads are pure SELECTs; a WAL snapshot never waits for the writer.
         with self._manager_factory().read_snapshot() as db:
-            row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
-                (turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, turn_id)
             if not row:
                 raise AppError(
                     404, "Coach-Auftrag nicht gefunden.", reason="command_not_found"

@@ -39,6 +39,13 @@ def setting_family(model: str | None) -> str | None:
     return SETTING_FAMILIES.get(str(model or ""))
 
 
+def family_setting(model: str) -> str:
+    """The setting a resolved Claude model id belongs to, so its usage counts
+    under the model the receipt names (#2638); any other id stays as it is."""
+    match = re.match(r"^claude-(opus|sonnet|haiku)-", model)
+    return f"claude-{match.group(1)}" if match else model
+
+
 def newest_by_family(models: Any) -> dict[str, str]:
     """The newest model id of each family in a Models API page."""
     entries = models.get("data") if isinstance(models, Mapping) else None

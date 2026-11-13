@@ -85,8 +85,10 @@ Explicit read-only test inputs exclude the checkout root, `.git`, `.env` and liv
 data. Application server/backend/public files come from the current image.
 By default it runs CI's `container_tests` selection (`--suite container`), which
 includes the SQLCipher migration, upgrade and restore modules. `-Suite all` runs
-every module; duration recording and coverage require it, and there the tests
-that need the repository checkout, Git or the Sonar CLI report environment failures.
+every module; duration recording and coverage require it. It finishes green: the
+repository files tests read are mounted, `/tmp` allows the temporary scripts some
+tests run, and the few Windows-, PowerShell- or Node-only tests skip with their
+reason, which each shard's `result.json` lists under `skip_reasons` (#2553).
 
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
@@ -102,6 +104,11 @@ cannot report complete success. Every class remains in one shard; all selected
 IDs must form the complete selected suite exactly once. Compare complete one- and
 two-worker runs on the same host, including the additional CPU/memory and summed
 runner time, before increasing concurrency.
+
+For modules that need the image's dependencies (`garminconnect`, SQLCipher),
+`python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) runs
+only those modules in the same container with the same mounts, including `docs/`
+and `openspec/`; without `--suite` it selects from every module.
 
 Coverage is optional. Prepare an offline wheel matching the locked dev pin and
 the image's Python/Linux architecture separately; for the default amd64 image:
@@ -246,7 +253,7 @@ not the gain over the old runner:
 | --- | --- | --- | --- |
 | Browser, 3 projects, 187 specs, native Chromium, all passed | `--jobs 1`: 1425.8 s | `--jobs 2`: 909.4 s, summed child time +21% | -36.2%, met against serial |
 | Python `-Suite all`, 9,358 tests | `-Workers 1`: 278.1 s | `-Workers 2`: 164.6 s, summed test time +6.8% | -40.8%, unverified |
-| GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min | | missed; queue and runner-minute split in #2536 |
+| GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min (#2149) | hosted runners (#2536): 17.1 min before, 9.0 min with two shards per browser project | lower, partly lighter queueing; six-minute goal missed |
 
 GitHub split (#2536): five natural successful PR runs of `publish-container.yml`
 on 2026-11-13 (43407572797, 43407637046, 43408243035, 43408548488,
@@ -263,11 +270,22 @@ to 39.0 min of queue; each extra browser shard repeats about 0.7 min of setup.
 The mobile and tablet-landscape projects therefore run as two shards each, like
 desktop; the required check names stay unchanged. Six minutes stays out of
 reach while the image, the queue and the native chain together take about that
-long. The result on five later natural runs, including queue with the larger
-matrix and the per-shard balance, is still to be recorded in #2536.
+long.
 
-The Python goal stays unverified: both runs end with the same 18 checkout/Git
-environment failures that `-Suite all` documents above, and an earlier same-host
+After the change, five natural successful PR runs on 2026-11-13 (43440109218,
+43441233129, 43444249213, 43445764847, 43446210240) took 7.9 to 9.5 min, median
+9.0 min. The six browser shards ran 4.2 to 7.0 min each; the last job before
+the aggregate was a desktop shard in four runs and a mobile shard in one; the
+largest queue of any job was 0.1 to 1.1 min and the 18 jobs queued 0.6 to 6.8 min
+in sum (before: up to 4.8 min per job and 11.4 to 39.0 min in sum, under heavier
+load, so part of the gain is lighter queueing); execution summed 40.7 to 45.4
+runner-minutes, about the same as the 41.2 to 45.3 before. The
+native chain ended at 2.8 to 6.0 min. The next lever would be a third desktop
+shard; six minutes stays missed while source, image and one browser shard take
+about seven.
+
+The Python goal stays unverified: both runs ended with the same 18 checkout/Git
+environment failures that #2553 later removed, and an earlier same-host
 sample on 26 October 2026 (7,289 tests, 728.71 s against 525.62 s) gave 27.87%.
 Browser fixture readiness is hidden by prewarming:
 6.9 s of readiness wait in 1425.8 s, median per spec 0.03 s, fixture start 0.32 s,

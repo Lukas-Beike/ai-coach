@@ -32,7 +32,11 @@ from support import canonical_backfill_stopped
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
-from backend.db.repositories import CompetitionRepository
+from backend.db.repositories import (
+    CheckinRepository,
+    CompetitionRepository,
+    ProfileRepository,
+)
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
@@ -281,7 +285,7 @@ class ServerDatabaseTests(ServerTestCase):
             )
 
     def test_checkin_repository_preserves_upsert_and_date_order_contract(self):
-        repository = server.CheckinRepository(lambda: "2026-09-01T00:00:00+00:00")
+        repository = CheckinRepository(lambda: "2026-09-01T00:00:00+00:00")
         older = {
             "checkin_date": "2026-08-30",
             "soreness": 2,
@@ -308,7 +312,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertEqual(rows[0]["created_at"], "2026-09-01T00:00:00+00:00")
 
     def test_profile_repository_preserves_serialized_profile_contract(self):
-        repository = server.ProfileRepository(
+        repository = ProfileRepository(
             server.KeyValueRepository(lambda: "2026-09-01T00:00:00+00:00")
         )
         payload = json.dumps(
@@ -489,6 +493,7 @@ class ServerDatabaseTests(ServerTestCase):
                     intervals_api_key="",
                     openai_api_key="",
                     anthropic_api_key="",
+                    transcription_base_url="",
                     calendar_ical_url="",
                     wahoo_configured=False,
                 ),
@@ -1090,7 +1095,7 @@ class ServerDatabaseTests(ServerTestCase):
                 )
 
     def test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure(self):
-        server.COACH_CONVERSATION.message_service().add(
+        server.APP.coach_conversation.message_service().add(
             "user", "Synthetic private message"
         )
         snapshot_seed.save_snapshot(
@@ -1131,7 +1136,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_chat_history_cursor_and_generation_share_database_unit_of_work(self):
         added = [
-            server.COACH_CONVERSATION.message_service().add(
+            server.APP.coach_conversation.message_service().add(
                 "user", f"cursor message {index}"
             )
             for index in range(5)
@@ -1139,7 +1144,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.key_value_service().set("chat_generation", "synthetic-generation")
         manager = server.database_manager()
         page_service = ChatHistoryPageService(
-            server.COACH_CONVERSATION.history_service(),
+            server.APP.coach_conversation.history_service(),
             Mock(current=Mock(return_value=[])),
             maximum=server.CHAT_PAGE_MAX,
         )

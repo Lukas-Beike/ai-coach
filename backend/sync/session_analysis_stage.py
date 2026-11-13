@@ -58,7 +58,6 @@ from backend.performance.canonical_session_analysis import (
     ANALYSIS_VERSION,
     METHOD_VERSION,
     analysis_fingerprint,
-    analysis_records,
     calendar_profile,
     session_analysis,
     session_heart_rate_histogram,
@@ -369,9 +368,7 @@ class SessionAnalysisStage:
             session_id = str(summary["id"])
             own = keys.get(session_id, ())
             row = rows.get(session_id)
-            records = analysis_records(records_by_id[session_id])
-            if not records:
-                own = ()
+            records = records_by_id[session_id]
             if not own and _version(row) != ANALYSIS_VERSION:
                 continue
             zones = (

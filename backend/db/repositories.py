@@ -1261,7 +1261,11 @@ _MESSAGE_COLUMNS = (
     "THEN COALESCE(json_extract(receipt, '$.request_kind'), '') END FROM coach_commands "
     "WHERE messages.role='assistant' "
     "AND coach_commands.client_turn_id=messages.client_turn_id "
-    "AND json_valid(receipt)) AS coach_failed"
+    "AND json_valid(receipt)) AS coach_failed, "
+    "(SELECT json_extract(receipt, '$.model') FROM coach_commands "
+    "WHERE messages.role='assistant' "
+    "AND coach_commands.client_turn_id=messages.client_turn_id "
+    "AND json_valid(receipt)) AS coach_model"
 )
 
 
@@ -1273,6 +1277,7 @@ def _message_view(row: Any) -> dict[str, Any]:
         and (key != "attachment_names" or value != "[]")
         and (key != "coach_changes" or value is not None)
         and key != "coach_failed"
+        and (key != "coach_model" or value is not None)
     }
     if row["coach_failed"] is not None:
         message["coach_failed"] = True

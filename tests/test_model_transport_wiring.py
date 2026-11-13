@@ -20,13 +20,17 @@ from backend.providers.model_wiring import CLAUDE_MODELS_KEY, build_model_transp
 
 
 class ModelTransportWiringTests(unittest.TestCase):
-    def make_services(self):
+    def make_services(self, **overrides):
         config = SimpleNamespace(
             openai_api_key="openai-test-key",
             openai_base_url="https://openai.example.invalid/v1",
             anthropic_api_key="anthropic-test-key",
             anthropic_base_url="https://claude.example.invalid",
+            transcription_base_url="",
+            transcription_api_key="",
+            transcription_model="",
         )
+        vars(config).update(overrides)
         self.values = {}
         self.thinking = Mock(return_value="high")
         self.config = Mock(return_value=config)
@@ -151,18 +155,42 @@ class ModelTransportWiringTests(unittest.TestCase):
         )
 
     def test_audio_client_transcribes_through_openai_with_its_own_limits(self):
-        services = self.make_services()
+        # Without a local endpoint, a leftover Whisper model id is ignored.
+        services = self.make_services(
+            transcription_model="Systran/faster-whisper-small",
+            transcription_api_key="stt-key",
+        )
         with patch.object(
             audio_provider, "AudioTranscriptionClient", return_value="audio"
         ) as factory:
             self.assertEqual(services.audio_transcription_client(), "audio")
         kwargs = factory.call_args.kwargs
         self.assertEqual(kwargs["max_audio_bytes"], 2048)
-        self.assertEqual(kwargs["openai_api_key"], "openai-test-key")
-        self.assertEqual(kwargs["openai_transcription_model"], "gpt-transcribe")
+        self.assertEqual(kwargs["api_key"], "openai-test-key")
+        self.assertEqual(kwargs["base_url"], "https://openai.example.invalid/v1")
+        self.assertEqual(kwargs["model"], "gpt-transcribe")
         self.assertEqual(kwargs["response_timeout_seconds"], 90)
+        self.assertIs(kwargs["local_endpoint"], False)
         self.assertIs(kwargs["http_client"], self.http.return_value)
         self.assertIs(kwargs["provider_state"], self.state.return_value)
+
+    def test_local_transcription_endpoint_never_gets_the_openai_key(self):
+        services = self.make_services(
+            transcription_base_url="https://stt.example.invalid/v1",
+            transcription_model="Systran/faster-whisper-small",
+        )
+        with patch.object(
+            audio_provider, "AudioTranscriptionClient", return_value="audio"
+        ) as factory:
+            services.audio_transcription_client()
+        kwargs = factory.call_args.kwargs
+        self.assertEqual(kwargs["base_url"], "https://stt.example.invalid/v1")
+        self.assertEqual(kwargs["api_key"], "")
+        self.assertEqual(kwargs["model"], "Systran/faster-whisper-small")
+        self.assertEqual(
+            (kwargs["max_audio_bytes"], kwargs["response_timeout_seconds"]), (2048, 90)
+        )
+        self.assertIs(kwargs["local_endpoint"], True)
 
     def test_stream_opener_patch_targets_remain_at_provider_owners(self):
         services = self.make_services()

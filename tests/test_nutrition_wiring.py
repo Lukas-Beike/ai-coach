@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from backend.nutrition import wiring as nutrition_wiring
+from backend.providers.model_seam import ModelRequest
 
 
 class NutritionBuilderTests(unittest.TestCase):
@@ -55,6 +56,24 @@ class NutritionBuilderTests(unittest.TestCase):
             config=self.config, api_client=client.return_value, diary_service="diary"
         )
 
+    def test_label_photo_uses_the_nutrition_model_and_thinking(self) -> None:
+        self.make_services()
+        settings = self.ctx.settings
+        settings.selected_model.side_effect = lambda task="conversation": f"m-{task}"
+        settings.selected_thinking_level.side_effect = lambda task="conversation": (
+            f"t-{task}"
+        )
+        with patch.object(nutrition_wiring, "NutritionPhotoExtractionService") as photo:
+            nutrition_wiring.build_nutrition(self.ctx).meal_library_service()
+        options = photo.call_args.kwargs
+        self.assertEqual(options["selected_model"](), "m-nutrition")
+        complete = self.ctx.model_transport.complete
+        options["complete"](ModelRequest(model="m"))
+        self.assertEqual(complete.call_args.args[0].reasoning_effort, "t-nutrition")
+        # A fixed effort, such as the web search's, is kept.
+        options["complete"](ModelRequest(model="m", reasoning_effort="low"))
+        self.assertEqual(complete.call_args.args[0].reasoning_effort, "low")
+
     def test_each_owner_reaches_its_parameter(self) -> None:
         ctx = Mock()
         ctx.athlete_profile.get.return_value = {"sex": "female"}
@@ -77,9 +96,10 @@ class NutritionBuilderTests(unittest.TestCase):
         self.assertIs(ctx.database_lock, library.call_args.kwargs["db_lock"])
         self.assertIs(ctx.database_lock, diary.call_args.kwargs["db_lock"])
         self.assertIs(library.return_value, diary.call_args.kwargs["meal_library"])
-        self.assertEqual(
-            ctx.settings.selected_model, search.call_args.kwargs["selected_model"]
-        )
+        # The product web search reads the Nutrition model choice.
+        ctx.settings.selected_model.return_value = "nutrition-model"
+        self.assertEqual("nutrition-model", search.call_args.kwargs["selected_model"]())
+        ctx.settings.selected_model.assert_called_with("nutrition")
         reader = diary.call_args.kwargs["observation_reader"]
         ctx.canonical_read = "live reader"
         self.assertEqual("live reader", reader())

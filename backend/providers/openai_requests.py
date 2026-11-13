@@ -210,26 +210,31 @@ class OpenAIResponsesClient:
             **request_kwargs,  # type: ignore[arg-type]
         )
         operation = path.strip("/") or "request"
-        result = self._validated(path, result, operation)
-        self.provider_state.record_usage("openai", result, operation)
+        model = str(payload.get("model") or "")
+        result = self._validated(path, result, operation, model)
+        self.provider_state.record_usage("openai", result, operation, model)
         return result
 
-    def _validated(self, path: str, result: Any, operation: str) -> dict[str, Any]:
+    def _validated(
+        self, path: str, result: Any, operation: str, model: str = ""
+    ) -> dict[str, Any]:
         """Validate a decoded response, billing the usage of a failed one first."""
         try:
             validated = self.provider_state.validate_openai_response(path, result)
         except AppError as exc:
             if exc.reason != "invalid_response":
-                self._record_terminal_usage(result, operation)
+                self._record_terminal_usage(result, operation, model)
             raise
         if not isinstance(validated, dict):
             raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
         return validated
 
-    def _record_terminal_usage(self, result: Any, operation: str) -> None:
+    def _record_terminal_usage(
+        self, result: Any, operation: str, model: str = ""
+    ) -> None:
         """Record usage carried by a failed, cancelled, or incomplete response body."""
         if isinstance(result, dict):
-            self.provider_state.record_usage("openai", result, operation)
+            self.provider_state.record_usage("openai", result, operation, model)
 
     def request(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Send one OpenAI JSON request and observe its response."""

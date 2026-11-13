@@ -12,10 +12,6 @@ from typing import Any
 
 from backend import change_history
 from backend.athlete.equipment import (
-    ASSIGNMENT_PREFIX,
-    EQUIPMENT_PREFIX,
-    MAINTENANCE_PREFIX,
-    UPSERT_KV,
     activity_row,
     assignable_equipment,
     equipment_in_use,
@@ -23,6 +19,12 @@ from backend.athlete.equipment import (
     validate_restored_equipment,
 )
 from backend.canonical.activity_summary import ActivitySummary
+from backend.db import equipment_store
+from backend.db.equipment_store import (
+    ASSIGNMENT_PREFIX,
+    EQUIPMENT_PREFIX,
+    MAINTENANCE_PREFIX,
+)
 from backend.errors import AppError
 
 # Stored only once set; a restore of an unset value removes the key again.
@@ -46,17 +48,15 @@ class _EquipmentRecordHistory:
         return value, change_history.audit_projection(self.entity_type, value)
 
     def _write(self, db: Any, entity_id: str, record: dict[str, Any]) -> None:
-        db.execute(
-            UPSERT_KV,
-            (
-                self.prefix + entity_id,
-                json.dumps(record, allow_nan=False),
-                self._utc_now(),
-            ),
+        equipment_store.put(
+            db,
+            self.prefix + entity_id,
+            json.dumps(record, allow_nan=False),
+            self._utc_now(),
         )
 
     def _delete(self, db: Any, entity_id: str) -> None:
-        db.execute("DELETE FROM kv WHERE key=?", (self.prefix + entity_id,))
+        equipment_store.delete(db, self.prefix + entity_id)
 
     def _fields(self) -> tuple[str, ...]:
         return tuple(sorted(change_history.audit_projection_fields(self.entity_type)))

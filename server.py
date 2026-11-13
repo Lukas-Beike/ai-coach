@@ -8,7 +8,6 @@ import signal
 import sqlite3
 import sys
 import threading
-import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -33,92 +32,25 @@ from backend.backup.wiring import build_backup
 from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
-from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
 from backend.coach import streams as coach_streams
-from backend.coach import structured_tool_round
-from backend.coach.background_jobs_assembly import (
-    CoachBackgroundJobsAssembly,
-    CoachJobAthleteServices,
-    CoachJobLimits,
-    CoachJobPersistence,
-    CoachJobTurnServices,
-    CoachJobWorkerRuntime,
-)
-from backend.coach.command_tools_assembly import (
-    CoachAthleteToolFactories,
-    CoachCommandToolsAssembly,
-    CoachProfileToolDependencies,
-    CoachSyncAuthorityTools,
-    CoachSyncMutationTools,
-    CoachSyncProvider,
-)
-from backend.coach.context_assembly import (
-    CoachContextAssembly,
-    CoachContextDialogueSources,
-    CoachContextPerformanceSources,
-    CoachContextPlanningSources,
-)
-from backend.coach.conversation_assembly import (
-    CoachConversationAssembly,
-    ConversationModelDependencies,
-    ConversationPersistence,
-    ConversationProfile,
-    ConversationRuntime,
-)
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.dialogue import dialogue_tools
 from backend.coach.job_worker import COACH_JOB_WORKER
-from backend.coach.local_assembly import (
-    CoachLocalAssembly,
-    CoachLocalGarmin,
-    CoachLocalPlanning,
-    CoachLocalState,
-)
-from backend.coach.planning_tools_assembly import (
-    CoachAdaptivePlanningDependencies,
-    CoachPlanArtifactDependencies,
-    CoachPlanningToolsAssembly,
-    CoachTrainingPatchDependencies,
-)
-from backend.coach.proposal_assembly import (
-    CoachProposalAssembly,
-    ProposalClock,
-    ProposalExecutionOwners,
-    ProposalPersistence,
-)
-from backend.coach.read_tools_assembly import (
-    CoachActivityReadSources,
-    CoachPlanningReadSources,
-    CoachReadToolPolicy,
-    CoachReadToolsAssembly,
-)
-from backend.coach.structured_tool_round import (
-    CoachStructuredToolRoundLimits,
-)
-from backend.coach.structured_tool_round_assembly import (
-    CoachStructuredToolRoundAssembly,
-    StructuredToolRoundContract,
-    StructuredToolRoundConversation,
-    StructuredToolRoundRuntime,
-    StructuredToolRoundServices,
-    StructuredToolRoundState,
-)
-from backend.coach.tool_dispatch_assembly import (
-    CoachPlanningToolOwners,
-    CoachProposalToolOwners,
-    CoachReadToolOwners,
-    CoachSyncToolOwners,
-    CoachToolDispatchAssembly,
-)
 from backend.coach.tool_registry import build_tool_contracts
-from backend.coach.turn_assembly import (
-    ChatEntryServices,
-    CoachTurnAssembly,
-    StructuredTurnControlServices,
-    StructuredTurnDialogueServices,
-    TurnLifecycle,
-    TurnPersistence,
+from backend.coach.tool_wiring import (
+    build_coach_command_tools,
+    build_coach_planning_tools,
+    build_coach_tool_dispatch,
+    build_coach_tool_rounds,
+)
+from backend.coach.turn_wiring import build_coach_background_jobs, build_coach_turns
+from backend.coach.wiring import (
+    build_coach_context,
+    build_coach_conversation,
+    build_coach_local,
+    build_coach_proposals,
+    build_coach_read_tools,
 )
 from backend.config import (
     DEFAULT_ANTHROPIC_BASE_URL,
@@ -141,11 +73,9 @@ from backend.db.manager import (
 from backend.db.repositories import (
     ActivityFeedbackRepository,
     ChatRepository,
-    CheckinRepository,
     KeyValueRepository,
     PlanAdjustmentRepository,
     PlanningStateRepository,
-    ProfileRepository,
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher
@@ -154,10 +84,6 @@ from backend.diagnostics.wiring import build_diagnostics
 from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.wiring import build_history
 from backend.http_api import server as http_server
-from backend.http_api.activity_assembly import (
-    ActivityReadAssembly,
-    ActivityReadSources,
-)
 from backend.http_api.assembly import (
     HttpApiAssembly,
     HttpAthleteServices,
@@ -185,11 +111,6 @@ from backend.http_api.assembly import (
     HttpResponseServices,
     HttpSyncServices,
 )
-from backend.http_api.athlete_assembly import (
-    AthleteDataAssembly,
-    AthleteRepositories,
-    AthleteRuntime,
-)
 from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
@@ -204,7 +125,6 @@ from backend.http_api.public_state_assembly import (
 )
 from backend.http_api.response_transport import HttpResponseTransport
 from backend.nutrition.wiring import NutritionServices, build_nutrition
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
     MorningBatteryClock,
@@ -217,12 +137,15 @@ from backend.performance.morning_battery_service import (
 )
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
-from backend.performance.wiring import build_performance
+from backend.performance.wiring import (
+    build_activity_reads,
+    build_athlete_data,
+    build_performance,
+)
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
 from backend.planning.block_review import block_review, last_completed_test
-from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.plan_guard_service import (
     read_load_thresholds,
 )
@@ -252,7 +175,6 @@ from backend.providers.connection_check_probes import (
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.model_wiring import (
-    JSON_MEDIA_TYPE,
     OPENAI_RESPONSE_TIMEOUT_SECONDS,
     ModelTransportServices,
     build_model_transport,
@@ -348,7 +270,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.8"
+APP_VERSION = "2.1.9"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 COACH_CONVERSATION_GATE = CoachConversationGate()
@@ -387,7 +309,6 @@ REDACTOR = observability.Redactor(
 
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
 ATHLETE_SESSION_SERVICE = AthleteSessionService()
-PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 PLANNING_STATE_REPOSITORY = PlanningStateRepository()
 PLANNING_REVISION_SERVICE = PlanningRevisionService(
@@ -395,7 +316,6 @@ PLANNING_REVISION_SERVICE = PlanningRevisionService(
 )
 PLAN_ADJUSTMENT_REPOSITORY = PlanAdjustmentRepository()
 CHAT_REPOSITORY = ChatRepository(runtime_clock.utc_now)
-CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
 
 
@@ -497,30 +417,20 @@ RUN_LTHR: RunLthr
 METRIC_EXPORT_RUNNER: MetricExportRunner
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
 THRESHOLD_WARNINGS: ThresholdStalenessService
-ATHLETE_DATA = AthleteDataAssembly(
-    dependencies=AthleteDataAssembly.Inputs(
-        database_manager=database_manager,
-        profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
-        repositories=AthleteRepositories(
-            activity_feedback=ACTIVITY_FEEDBACK_REPOSITORY,
-            checkin=CHECKIN_REPOSITORY,
-            profile=PROFILE_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            activity_rows=lambda: CANONICAL_READ,
-            table_serving=lambda: CANONICAL_READ,
-        ),
-        runtime=AthleteRuntime(
-            utc_now=runtime_clock.utc_now,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
-            load_inputs_changed=lambda: start_canonical_backfill(),
-            thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
-            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
-            run_lthr_on=lambda day: RUN_LTHR.on(day),
-            run_lthr_resolver=lambda: RUN_LTHR.day_resolver(),
-        ),
-    )
+ATHLETE_DATA = build_athlete_data(
+    database_manager=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    activity_feedback_repository=ACTIVITY_FEEDBACK_REPOSITORY,
+    profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
+    utc_now=runtime_clock.utc_now,
+    local_date=lambda: ATHLETE_CLOCK.now().date(),
+    event_buffer=runtime_events.STATE_EVENT_BUFFER,
+    activity_rows=lambda: CANONICAL_READ,
+    table_reader=CanonicalTableReader,
+    run_lthr=lambda: RUN_LTHR,
+    load_inputs_changed=lambda: start_canonical_backfill(),
+    thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
+    threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
 )
 ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
     database_manager_runtime.DATABASE_MANAGER_CACHE
@@ -531,23 +441,6 @@ CANONICAL_READ: CanonicalReadSelector
 # Renames a recognised route of outdoor sessions (#1868); only the label is exposed.
 ACTIVITY_ROUTES = ActivityRouteService(database_manager, DB_LOCK, KEY_VALUE_REPOSITORY)
 
-ACTIVITY_READS = ActivityReadAssembly(
-    database_manager,
-    ActivityReadSources(
-        lambda: CANONICAL_READ,
-        observation_reader=lambda: CANONICAL_READ,
-        coverage=lambda: CANONICAL_READ,
-        serving=lambda: CANONICAL_READ,
-        source_preferences=lambda db: preferences_from_profile(
-            ATHLETE_DATA.profile().get_from_db(db)
-        ),
-    ),
-    ATHLETE_DATA.activity_feedback,
-    lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
-    refreshable_providers=lambda: configured_for_job(
-        PROVIDER_CONFIGURED, "activity_details"
-    ),
-)
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
 # The application context the domain builders read (#2069). Owners whose
@@ -599,6 +492,13 @@ PERFORMANCE = build_performance(
     season_preparation=season_preparation,
 )
 APP.performance = PERFORMANCE
+ACTIVITY_READS = build_activity_reads(
+    APP,
+    session_activities=CanonicalTableReader().session_activities,
+    refreshable_providers=lambda: configured_for_job(
+        PROVIDER_CONFIGURED, "activity_details"
+    ),
+)
 PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
 
@@ -840,55 +740,11 @@ MODEL_TRANSPORT: ModelTransportServices = build_model_transport(
     max_audio_bytes=MAX_AUDIO_BODY_BYTES,
 )
 APP.model_transport = MODEL_TRANSPORT
-COACH_CONVERSATION = CoachConversationAssembly(
-    persistence=ConversationPersistence(
-        database_manager=database_manager,
-        key_values=KEY_VALUE_REPOSITORY,
-        chat_repository=CHAT_REPOSITORY,
-        state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
-        database_lock=DB_LOCK,
-    ),
-    runtime=ConversationRuntime(
-        streams=coach_streams.CHAT_STREAM_REGISTRY,
-        conversation_lock=COACH_CONVERSATION_GATE.lock,
-        openai_client=MODEL_TRANSPORT.openai_responses_client,
-        utc_now=runtime_clock.utc_now,
-        uuid_factory=uuid.uuid4,
-        logger=LOGGER,
-    ),
-    profile=ConversationProfile(
-        profile_service=ATHLETE_DATA.profile,
-    ),
-    model=ConversationModelDependencies(
-        model_transport=MODEL_TRANSPORT,
-        default_thinking_level=SETTINGS.selected_thinking_level,
-        default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-        json_media_type=JSON_MEDIA_TYPE,
-    ),
+COACH_CONVERSATION = build_coach_conversation(
+    APP, chat_repository=CHAT_REPOSITORY, conversation_lock=COACH_CONVERSATION_GATE.lock
 )
 APP.coach_conversation = COACH_CONVERSATION
-COACH_LOCAL = CoachLocalAssembly(
-    dependencies=CoachLocalAssembly.Inputs(
-        state=CoachLocalState(
-            database_manager=database_manager,
-            database_lock=DB_LOCK,
-            key_values=KEY_VALUE_REPOSITORY,
-        ),
-        planning=CoachLocalPlanning(
-            sync_job_queue=SYNC_JOB_QUEUE.service,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            adaptive_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-            planned_workout_label=PLANNED_WORKOUT_LABEL,
-        ),
-        garmin=CoachLocalGarmin(
-            sync_service=GARMIN_ASSEMBLY.sync_service,
-            payload_service=GARMIN_ASSEMBLY.payload_service,
-            morning_body_battery=morning_body_battery_service,
-            logger=LOGGER,
-            observations=lambda: CANONICAL_READ,
-        ),
-    )
-)
+COACH_LOCAL = build_coach_local(APP)
 APP.coach_local = COACH_LOCAL
 PLANNED_UNIT_SYNC = build_planned_unit_sync(APP)
 PLANNED_CALENDAR_SYNC = build_planned_calendar_sync(
@@ -905,120 +761,19 @@ WEATHER: WeatherServices = build_weather(APP)
 APP.weather = WEATHER
 WEATHER_SYNC = build_weather_sync(APP, WEATHER)
 
-COACH_CONTEXT = CoachContextAssembly(
-    dependencies=CoachContextAssembly.Inputs(
-        performance=CoachContextPerformanceSources(
-            weather_service=WEATHER.service,
-            garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
-            garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
-            activity_feedback_service=ATHLETE_DATA.activity_feedback,
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            utc_now=lambda: datetime.now(UTC),
-            canonical=CanonicalPerformanceSource(
-                database_manager=lambda: database_manager(),
-                observation_reader=lambda: CANONICAL_READ,
-                serving=lambda: CANONICAL_READ,
-                activity_summaries=lambda: CANONICAL_READ,
-                coverage=lambda: CANONICAL_READ,
-                source_preferences=lambda db: preferences_from_profile(
-                    ATHLETE_DATA.profile().get_from_db(db)
-                ),
-            ),
-            activity_rows=ActivitySummarySource(
-                database_manager=lambda: database_manager(),
-                reader=lambda: CANONICAL_READ,
-                coverage=lambda: CANONICAL_READ,
-            ),
-            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
-            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
-            first_threshold_estimate=lambda: ATHLETE_DATA.first_threshold().estimate(),
-            lt1_session_records=lambda days: (
-                PERFORMANCE.training_reports().profiles.curve_records(days)
-            ),
-        ),
-        planning=CoachContextPlanningSources(
-            checkin_service=ATHLETE_DATA.checkin,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            daily_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
-            external_calendar_reader=EXTERNAL_CALENDAR.reader,
-            competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
-            adaptive_preview_service=lambda: (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service()
-            ),
-            workout_library_service=PLANNING_DATA.workout_library,
-            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
-            planning_brief=lambda: PLAN_GUARD.plan_guard_service().brief(),
-        ),
-        dialogue=CoachContextDialogueSources(
-            profile_service=ATHLETE_DATA.profile,
-            message_service=COACH_CONVERSATION.message_service,
-            settings=SETTINGS,
-            limits=lambda: {
-                "local_planned_limit": coach_context_module.COACH_LOCAL_PLANNED_LIMIT,
-                "library_limit": coach_context_module.COACH_LIBRARY_LIMIT,
-                "library_description_limit": coach_context_module.COACH_LIBRARY_DESCRIPTION_LIMIT,
-                "section_limits": coach_context_module.COACH_CONTEXT_SECTION_LIMITS,
-                "total_char_limit": coach_context_module.COACH_CONTEXT_TOTAL_CHAR_LIMIT,
-                "activity_limit_per_sport": coach_context_module.COACH_RECENT_ACTIVITIES_PER_SPORT,
-                "planned_event_limit": coach_context_module.COACH_PLANNED_EVENT_LIMIT,
-            },
-            default_max_output_tokens=lambda: (
-                coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS
-            ),
-        ),
-    )
+COACH_CONTEXT = build_coach_context(
+    APP, threshold_warnings=lambda: THRESHOLD_WARNINGS.read(), plan_guard=PLAN_GUARD
 )
-COACH_READ_TOOLS = CoachReadToolsAssembly(
-    dependencies=CoachReadToolsAssembly.Inputs(
-        activity=CoachActivityReadSources(
-            activity_read_service=ACTIVITY_READS.activity_read,
-            garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
-            profile_service=ATHLETE_DATA.profile,
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            report_services=PERFORMANCE.training_reports,
-            session_corrections=ATHLETE_DATA.session_corrections,
-        ),
-        planning=CoachPlanningReadSources(
-            structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
-            workout_library_service=PLANNING_DATA.workout_library,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            unit_thresholds=PLAN_GUARD.planned_unit_estimator,
-            change_history_service=HISTORY.change_history_service,
-            competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
-        ),
-        policy=CoachReadToolPolicy(
-            nutrition_diary=NUTRITION_SERVICES.diary_service,
-            nutrition_meal_library=NUTRITION_SERVICES.meal_library_service,
-            training_change_limit=lambda: coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-            context_service=COACH_CONTEXT.structured_context_service,
-        ),
-    )
+APP.coach_context = COACH_CONTEXT
+COACH_READ_TOOLS = build_coach_read_tools(
+    APP,
+    activity_read=ACTIVITY_READS.activity_read,
+    history=HISTORY,
+    plan_guard=PLAN_GUARD,
 )
-COACH_PROPOSALS = CoachProposalAssembly(
-    dependencies=CoachProposalAssembly.Inputs(
-        persistence=ProposalPersistence(
-            database_manager=database_manager,
-            nutrition_diary_service=NUTRITION_SERVICES.diary_service,
-        ),
-        execution=ProposalExecutionOwners(
-            history_undo_service=HISTORY.undo_service,
-            intervals_client_factory=lambda *args: (
-                APP.provider_transport.intervals_client(*args)
-            ),
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
-        ),
-        clock=ProposalClock(
-            now=lambda: time.time(),
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=uuid.uuid4,
-            today=lambda: ATHLETE_CLOCK.now().date(),
-        ),
-    )
-)
+APP.coach_read_tools = COACH_READ_TOOLS
+COACH_PROPOSALS = build_coach_proposals(APP, history=HISTORY)
+APP.coach_proposals = COACH_PROPOSALS
 
 # Derived passes (local load, canonical backfill, Wahoo metric export) after any
 # provider read: a queued job, a Coach request that waits and a full resync.
@@ -1119,220 +874,38 @@ RUN_LTHR = RunLthr(
 APP.run_lthr = RUN_LTHR
 
 
-COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
-    dependencies=CoachPlanningToolsAssembly.Inputs(
-        database_manager=database_manager,
-        artifacts=CoachPlanArtifactDependencies(
-            local_plan_creation_service=PLANNING_WORKFLOWS.local_plan_creation_service,
-            athlete_date=lambda: ATHLETE_CLOCK.now().date(),
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=uuid.uuid4,
-        ),
-        workout_library_plan_service=PLANNING_WORKFLOWS.workout_library_plan_service,
-        training_patch=CoachTrainingPatchDependencies(
-            database_lock=DB_LOCK,
-            training_change_validator=PLANNING_WORKFLOWS.structured_training_change_validator,
-            training_change_service=PLANNING_WORKFLOWS.structured_training_change_service,
-            calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        ),
-        adaptive=CoachAdaptivePlanningDependencies(
-            adaptive_preview_service=lambda: (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service()
-            ),
-            illness_pause_sync_service=SYNC_COMMANDS.illness_pause,
-            plan_guard=PLAN_GUARD.plan_guard_service,
-        ),
-    )
+COACH_PLANNING_TOOLS = build_coach_planning_tools(
+    APP, plan_guard=PLAN_GUARD, sync_commands=SYNC_COMMANDS
 )
-
-
-COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
-    sync_authority=CoachSyncAuthorityTools(
-        sync_job_queue=lambda: SYNC_JOB_QUEUE.service(),
-        planning_authority=SYNC_COMMANDS.authority,
-        sync_conflict_commands=SYNC_COMMANDS.conflicts,
-        structured_plan_sync=SYNC_COMMANDS.structured_plan_sync,
-    ),
-    sync_mutations=CoachSyncMutationTools(
-        plan_repair_manifest=SYNC_COMMANDS.repair_manifest,
-        plan_push_command=SYNC_COMMANDS.plan_push,
-        provider_refresh_command=SYNC_COMMANDS.provider_refresh,
-    ),
-    sync_provider=CoachSyncProvider(
-        intervals_client=lambda: APP.provider_transport.intervals_client(),
-    ),
-    athlete_tools=CoachAthleteToolFactories(
-        checkin_service=lambda: ATHLETE_DATA.checkin(),
-        activity_feedback_service=lambda: ATHLETE_DATA.activity_feedback(),
-        competition_service=lambda: PLANNING_DATA.competition(),
-        nutrition_diary_service=NUTRITION_SERVICES.diary_service,
-        nutrition_meal_library_service=NUTRITION_SERVICES.meal_library_service,
-        equipment_service=ATHLETE_DATA.equipment,
-        session_corrections_service=ATHLETE_DATA.session_corrections,
-    ),
-    profile_tools=CoachProfileToolDependencies(
-        profile_service=lambda: ATHLETE_DATA.profile(),
-        database_manager=lambda: database_manager(),
-        database_lock=DB_LOCK,
-    ),
+APP.coach_planning_tools = COACH_PLANNING_TOOLS
+COACH_COMMAND_TOOLS = build_coach_command_tools(APP, sync_commands=SYNC_COMMANDS)
+APP.coach_command_tools = COACH_COMMAND_TOOLS
+COACH_TOOL_DISPATCH = build_coach_tool_dispatch(APP, history=HISTORY)
+APP.coach_tool_dispatch = COACH_TOOL_DISPATCH
+COACH_TOOL_ROUNDS = build_coach_tool_rounds(
+    APP,
+    root=ROOT,
+    read_only_tools=STRUCTURED_READ_ONLY_TOOLS,
+    plan_guard=PLAN_GUARD,
+    sync_commands=SYNC_COMMANDS,
 )
-
-
-COACH_TOOL_DISPATCH = CoachToolDispatchAssembly(
-    dependencies=CoachToolDispatchAssembly.Inputs(
-        reads=CoachReadToolOwners(
-            read_tools=COACH_READ_TOOLS.read_service,
-            profile_update=COACH_COMMAND_TOOLS.profile_update_service,
-            athlete_records=COACH_COMMAND_TOOLS.athlete_record_tool_service,
-        ),
-        planning=CoachPlanningToolOwners(
-            training_plan_artifacts=COACH_PLANNING_TOOLS.training_plan_artifact_service,
-            training_plan_replacement=PLANNING_WORKFLOWS.structured_training_plan_replacement_service,
-            training_changes=PLANNING_WORKFLOWS.structured_training_change_service,
-            database_manager=database_manager,
-            database_lock=DB_LOCK,
-            workout_library_service=PLANNING_DATA.workout_library,
-            training_plan_service=PLANNING_DATA.training_plan,
-        ),
-        sync=CoachSyncToolOwners(
-            library_plan_tools=COACH_PLANNING_TOOLS.library_plan_tool_service,
-            sync_tools=COACH_COMMAND_TOOLS.sync_tool_service,
-            history_undo=HISTORY.undo_service,
-        ),
-        proposals=CoachProposalToolOwners(
-            adaptive_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-            adaptive_apply=COACH_PLANNING_TOOLS.adaptive_apply_service,
-            proposal_creation=COACH_PROPOSALS.creation_service,
-        ),
-    )
-)
-
-
-COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
-    dependencies=CoachStructuredToolRoundAssembly.Inputs(
-        runtime=StructuredToolRoundRuntime(
-            database_manager=lambda: database_manager(),
-            database_lock=DB_LOCK,
-            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            root=ROOT,
-            logger=LOGGER,
-        ),
-        contract=StructuredToolRoundContract(
-            tool_names=lambda: (tool["name"] for tool in COACH_DIALOGUE_TOOLS),
-            read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
-            limits=lambda: CoachStructuredToolRoundLimits(
-                max_rounds=structured_tool_round.COACH_TOOL_MAX_ROUNDS,
-                background_horizon_days=coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
-                default_max_output_tokens=coach_limits.COACH_DEFAULT_MAX_OUTPUT_TOKENS,
-                long_plan_max_output_tokens=coach_limits.COACH_LONG_PLAN_MAX_OUTPUT_TOKENS,
-            ),
-        ),
-        services=StructuredToolRoundServices(
-            clarification_service=COACH_LOCAL.clarification_service,
-            training_patch_service=lambda: (
-                COACH_PLANNING_TOOLS.training_patch_service()
-            ),
-            proposal_creation_service=lambda: COACH_PROPOSALS.creation_service(),
-            tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
-            dialogue_action_service=COACH_LOCAL.dialogue_action_service,
-            planning_authority_service=SYNC_COMMANDS.authority,
-            plan_guard_service=PLAN_GUARD.plan_guard_service,
-        ),
-        state=StructuredToolRoundState(
-            job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
-        ),
-        conversation=StructuredToolRoundConversation(
-            training_context_service=lambda: COACH_CONTEXT.training_context_service(),
-            response_service=lambda: COACH_TURNS.structured_response_service(),
-            response_transport=lambda: COACH_CONVERSATION.response_transport(),
-        ),
-    )
-)
-
-
-COACH_BACKGROUND_JOBS = CoachBackgroundJobsAssembly(
-    dependencies=CoachBackgroundJobsAssembly.Inputs(
-        persistence=CoachJobPersistence(
-            database_manager=lambda: database_manager(),
-            database_lock=DB_LOCK,
-            chat_repository=CHAT_REPOSITORY,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-        ),
-        worker=CoachJobWorkerRuntime(
-            worker_wake_event=lambda: COACH_JOB_WORKER.wake_event,
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            utc_now=runtime_clock.utc_now,
-            redactor=REDACTOR,
-            repository_root=ROOT,
-            logger=LOGGER,
-        ),
-        turn=CoachJobTurnServices(
-            read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
-            settings=SETTINGS,
-            stream_registry=lambda: coach_streams.CHAT_STREAM_REGISTRY,
-            session_auth_service=session_auth_service,
-            chat_turn_service=lambda: COACH_TURNS.chat_turn_service(),
-        ),
-        athlete=CoachJobAthleteServices(
-            manual_morning_checkin_service=COACH_LOCAL.manual_morning_checkin_service,
-            quick_actions_service=COACH_LOCAL.quick_actions_service,
-            athlete_clock=lambda: ATHLETE_CLOCK.now,
-        ),
-        limits=CoachJobLimits(
-            background_horizon_days=lambda: coach_limits.COACH_BACKGROUND_HORIZON_DAYS,
-            max_attachment_storage_bytes=lambda: (
-                coach_attachments.MAX_ATTACHMENT_STORAGE_BYTES
-            ),
-        ),
-    )
+APP.coach_tool_rounds = COACH_TOOL_ROUNDS
+COACH_BACKGROUND_JOBS = build_coach_background_jobs(
+    APP,
+    chat_repository=CHAT_REPOSITORY,
+    root=ROOT,
+    read_only_tools=STRUCTURED_READ_ONLY_TOOLS,
+    session_auth_service=session_auth_service,
 )
 APP.coach_background_jobs = COACH_BACKGROUND_JOBS
-
-
-COACH_TURNS = CoachTurnAssembly(
-    dependencies=CoachTurnAssembly.Inputs(
-        persistence=TurnPersistence(
-            database_manager=database_manager,
-            database_lock=DB_LOCK,
-            chat_repository=CHAT_REPOSITORY,
-            key_value_repository=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=uuid.uuid4,
-        ),
-        lifecycle=TurnLifecycle(
-            root=ROOT,
-            logger=LOGGER,
-            conversation_gate=COACH_CONVERSATION_GATE,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-        ),
-        chat_entry=ChatEntryServices(
-            settings=SETTINGS,
-            conversation_provision_service=lambda: COACH_CONVERSATION.provision_service,
-        ),
-        dialogue=StructuredTurnDialogueServices(
-            attachment_context_service=lambda: (
-                COACH_CONVERSATION.attachment_context_service()
-            ),
-            dialogue_read_service=lambda: COACH_CONVERSATION.dialogue_read_service(),
-            request_payload_service=lambda: COACH_CONTEXT.request_payload_service(),
-            response_transport=lambda: COACH_CONVERSATION.response_transport(),
-            tool_round_service=lambda: COACH_TOOL_ROUNDS.service(),
-        ),
-        controls=StructuredTurnControlServices(
-            tools=lambda: COACH_DIALOGUE_TOOLS,
-            read_only_tools=lambda: STRUCTURED_READ_ONLY_TOOLS,
-            job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
-            turn_failure_service=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
-            tool_dispatch_service=COACH_TOOL_DISPATCH.service,
-        ),
-    )
+COACH_TURNS = build_coach_turns(
+    APP,
+    chat_repository=CHAT_REPOSITORY,
+    conversation_gate=COACH_CONVERSATION_GATE,
+    root=ROOT,
+    read_only_tools=STRUCTURED_READ_ONLY_TOOLS,
 )
+APP.coach_turns = COACH_TURNS
 
 
 PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
@@ -1351,6 +924,7 @@ PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
             canonical_serving=lambda: CANONICAL_READ,
             activity_summary_reader=lambda: CANONICAL_READ,
             coverage=lambda: CANONICAL_READ,
+            lt1_session_records=lambda days: PERFORMANCE.curve_records(days),
         ),
         owners=PublicStateOwnerAssemblies(
             sync_persistence=lambda: SYNC_PERSISTENCE,
@@ -1365,7 +939,7 @@ PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
             weather=lambda: WEATHER,
             workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
             provider_resync=lambda: PROVIDER_RESYNC,
-            coach_conversation=lambda: COACH_CONVERSATION,
+            coach_conversation=lambda: APP.coach_conversation,
             calendar_local=lambda: calendar_local,
             planning_season=lambda: planning_season,
             intervals_state=lambda: intervals_state,
@@ -1564,7 +1138,9 @@ HTTP_API = HttpApiAssembly(
         ),
         coach=HttpCoachRouteServices(
             reads=HttpCoachReadServices(
-                conversation_history_service=COACH_CONVERSATION.history_service,
+                conversation_history_service=lambda: (
+                    APP.coach_conversation.history_service()
+                ),
                 proposal_read_service=COACH_PROPOSALS.read_service,
                 chat_page_max=CHAT_PAGE_MAX,
                 command_receipt_service=COACH_TURNS.command_receipt_service,
@@ -1576,7 +1152,7 @@ HTTP_API = HttpApiAssembly(
                     context_preview_service=COACH_CONTEXT.preview_service,
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
-                    reset_service=COACH_CONVERSATION.reset_service,
+                    reset_service=lambda: APP.coach_conversation.reset_service(),
                 ),
                 stream=HttpCoachStreamSettings(
                     max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,

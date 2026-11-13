@@ -20,6 +20,7 @@ from backend.coach.turn_undo import CoachTurnUndoService
 from backend.db import row_factory as production_row_factory
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError, DatabaseBusyError
+from backend.providers.state import metered_turn
 from backend.runtime.events import StateEventBuffer
 
 
@@ -216,6 +217,28 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertEqual(step["changes"], [{"id": "change-1"}])
         self.assertNotIn("synthetic bulk", json.dumps(stored))
 
+    def test_failed_and_cancelled_turns_keep_the_usage_they_spent(self) -> None:
+        usage = {
+            "requests": 2,
+            "input_tokens": 4000,
+            "cached_input_tokens": 1000,
+            "output_tokens": 30,
+        }
+        for error in (
+            AppError(503, "failed", reason="provider_unavailable"),
+            AppError(499, "cancelled", reason="chat_cancelled"),
+        ):
+            with self.subTest(reason=error.reason):
+                with self.manager.unit_of_work() as db:
+                    db.execute("DELETE FROM coach_commands")
+                    user = self.chat.add(db, "user", "Frage", client_turn_id="turn-1")
+                self._seed({"user_message_id": user["id"]})
+                with metered_turn(usage):
+                    self.service.persist("turn-1", {}, error)
+                self.assertEqual(
+                    self._stored()[1]["usage"], {**usage, "by_model": {"": usage}}
+                )
+
     def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(
         self,
     ) -> None:
@@ -364,6 +387,16 @@ class CoachTurnFailureTests(unittest.TestCase):
         )
         self.assertEqual(result["message"]["coach_request_kind"], "plan_week")
         self.assertEqual(self._reloaded_reply()["coach_request_kind"], "plan_week")
+
+    def test_reloaded_reply_names_the_model_that_wrote_it(self) -> None:
+        self._seed({"command_receipts": [], "model": "claude-opus"})
+        self.service.persist(
+            "turn-1", {}, AppError(504, "late", reason="provider_timeout")
+        )
+        self.assertEqual(self._reloaded_reply()["coach_model"], "claude-opus")
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE coach_commands SET receipt='{}'")
+        self.assertNotIn("coach_model", self._reloaded_reply())
 
     def test_cancelled_turn_is_not_marked_as_failed(self) -> None:
         self._seed({"command_receipts": []})

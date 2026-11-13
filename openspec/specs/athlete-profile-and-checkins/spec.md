@@ -247,7 +247,17 @@ The system SHALL list the distinct heart rate, power meter and trainer sensors n
 - **WHEN** a listed sensor has a stored link
 - **THEN** the registry shows that equipment id for the sensor, and a link to equipment that no longer exists is not reported.
 
+#### Scenario: Registry entries and order
+- **WHEN** the athlete's sensors are listed
+- **THEN** each distinct role and sensor key is one entry with `id` (the first 16 characters of the key), `role`, `connection`, `manufacturer`, `product`, `first_seen`, `last_seen`, the number of sessions, the sports and the assigned `equipment_id`, newest `last_seen` first; a bundled activity counts once and deleted sessions leave the registry.
+
 Evidence: `backend/athlete/equipment.py:EquipmentService.read`, `backend/canonical/sensor_registry.py:registry`; `tests/test_sensor_equipment.py`.
+
+Added evidence:
+- `backend/db/activity_detail_store.py:sensor_uses`
+- `tests/test_sensor_sources.py:test_a_merged_session_counts_once_for_a_shared_sensor`
+- `tests/test_sensor_sources.py:test_deleted_sessions_leave_the_registry`
+- `tests/test_sensor_sources.py:test_registry_deduplicates_a_sensor_across_sessions`
 
 ### Requirement: AP9 Explicit equipment assignments and honest usage
 The system SHALL assign only resolved canonical completed activities to compatible active main equipment, allow explicit unassignment, and calculate usage from known assignments and supported Garmin links with coverage metadata. Usage, hours, distance, maintenance and sport derivation SHALL read canonical session summaries, so each session counts once whichever providers recorded it.

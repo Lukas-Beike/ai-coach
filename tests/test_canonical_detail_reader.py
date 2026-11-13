@@ -184,7 +184,6 @@ class CanonicalDetailReaderTests(unittest.TestCase):
             sorted(
                 (item["provider"], item["refreshable"])
                 for item in doc["detail_data"]["providers"]
-                if item["provider"] != "intervals"
             ),
         )
         streams = doc["streams"]
@@ -283,10 +282,11 @@ class CanonicalDetailReaderTests(unittest.TestCase):
 
     def test_intervals_detail_and_decoupling_are_never_analysis_inputs(self) -> None:
         # Athlete decision 2026-11-07 (#1685): Garmin, Wahoo and local data only.
+        # A session of a stored Intervals.icu copy alone has nothing to read (#2148).
         self.add_session("act_7")
         self.add_record(INTERVALS, "i-only-97", "act_7")
         self.store_streams(INTERVALS, "i-only-97", {HR: heart_rate(), POWER: power()})
-        self.assertIsNone(self.read("act_7")["analysis"])
+        self.assertIsNone(self.read("act_7"))
 
         self.garmin_ride()
         save_analysis(
@@ -364,18 +364,17 @@ class CanonicalDetailReaderTests(unittest.TestCase):
         )
 
     def test_intervals_copies_are_never_served(self) -> None:
-        # Athlete decision 2026-11-07 (#1685): no Intervals.icu fallback.
+        # Athlete decision 2026-11-07 (#1685): no Intervals.icu fallback. Since
+        # #2148 the stored copy is not even named, nor offered for refresh,
+        # though Intervals.icu is configured as refreshable here.
         self.ride_session()
 
         doc = self.read("act_1")
 
-        intervals = next(
-            item
-            for item in doc["detail_data"]["providers"]
-            if item["provider"] == "intervals"
+        self.assertEqual(
+            ["garmin", "wahoo"],
+            sorted(item["provider"] for item in doc["detail_data"]["providers"]),
         )
-        # The record is named, but its sets are neither served nor offered.
-        self.assertEqual(([], False), (intervals["kinds"], intervals["refreshable"]))
         self.assertNotIn("Intervals", doc["analysis"]["aerobic"]["source"])
 
 

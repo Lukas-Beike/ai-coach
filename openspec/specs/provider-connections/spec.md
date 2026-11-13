@@ -38,6 +38,23 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 
 Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_any_job_is_stored`, `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
+### Requirement: Intervals.icu connection status from output outcomes
+The system SHALL project the Intervals.icu connection state from durable stamps of the last export success and the last provider failure, and an unreadable stamp SHALL be ignored.
+
+#### Scenario: Only a round trip counts
+- **WHEN** a plan, competition or nutrition push ends
+- **THEN** a synced entry or completed run stamps a success and a provider failure stamps a failure; a skipped, already synced or conflicting entry, a local failure and a contended run stamp nothing.
+
+#### Scenario: An export outlives a restart
+- **WHEN** a plan push synced an entry and the server restarts or the page reloads, however long ago the push was
+- **THEN** the Intervals.icu state is connected and `last_used_at` names that push, without a provider request.
+
+#### Scenario: A provider failure after a success
+- **WHEN** an output job fails with a provider answer or without a response after the last success
+- **THEN** the state is error until a later export succeeds; the state is connected when the newest success is newer, and configured when there is neither.
+
+Evidence: `backend/sync/intervals_state.py::public_state`, `backend/sync/executor.py::IntervalsJobAdapter.execute`, `backend/sync/execution_wiring.py::build_sync_job_execution`; `tests/test_intervals_state.py`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_intervals_output_leaves_a_stamp_only_for_a_real_round_trip`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_only_a_provider_failure_leaves_a_failed_stamp`, `tests/test_server_http.py::ServerHttpTests.test_intervals_public_state_follows_the_output_stamps`.
+
 ### Requirement: Intervals.icu request contract
 The system SHALL call Intervals.icu only at `https://intervals.icu/api/v1`, with basic authentication (user `API_KEY`, password the stored key), and only for the explicit writes and read-backs of its output role. Collection reads SHALL page with `limit` 500 and an offset, read at most 100 pages, and fail on a page that is no list of objects or that repeats an earlier non-empty page.
 
@@ -490,6 +507,10 @@ The system SHALL present Yazio on the connections screen, distinguish missing co
 - **WHEN** a check is rejected, rate-limited, or encounters a transient or unexpected provider failure
 - **THEN** the card shows a safe actionable category and does not claim success or reveal provider responses, account values, or tokens.
 
+#### Scenario: A food lookup counts as a check
+- **WHEN** a food search or product read gets an HTTP answer from Yazio with the current credentials
+- **THEN** the passive status reports its outcome as the last check, `success` when Yazio accepted the login and the safe failure category otherwise, without a separate button press; a local rate limit or login pause never changes it.
+
 #### Scenario: Credentials change or server restarts
 - **WHEN** effective Yazio credentials change or the server restarts
 - **THEN** an old successful result is not presented as a current verification; complete configuration is shown as unchecked.
@@ -502,7 +523,7 @@ The system SHALL present Yazio on the connections screen, distinguish missing co
 - **WHEN** a check request lacks an authenticated session or valid CSRF protection
 - **THEN** it is rejected before contacting Yazio.
 
-Evidence: `backend/providers/yazio.py::YazioClient.connection_status`, `backend/providers/yazio.py::YazioClient.check_connection`, `backend/http_api/nutrition.py::NutritionGetRoutes.routes`, `backend/http_api/nutrition.py::NutritionPostRoutes._check_yazio`, `public/provider-connections.js::checkYazioConnection`, `public/provider-connections.js::loadYazioStatus`; `tests/test_yazio.py::YazioConnectionTests.test_passive_status_check_and_credential_change`, `tests/test_yazio.py::YazioConnectionTests.test_check_uses_password_grant_and_restart_is_unchecked`, `tests/test_yazio.py::YazioConnectionTests.test_inflight_result_is_discarded_after_credential_replacement`, `tests/test_yazio_connection_routes.py`, `tests/provider-connections.test.cjs`, `e2e/yazio-connection.spec.js::@responsive Yazio shows a checked login and refreshes its local status`. The check reports `not_configured`, `unchecked`, `success`, `auth_failed`, `rate_limited` or `unavailable`.
+Evidence: `backend/providers/yazio.py::YazioClient.connection_status`, `backend/providers/yazio.py::YazioClient.check_connection`, `backend/http_api/nutrition.py::NutritionGetRoutes.routes`, `backend/http_api/nutrition.py::NutritionPostRoutes._check_yazio`, `public/provider-connections.js::checkYazioConnection`, `public/provider-connections.js::loadYazioStatus`; `tests/test_yazio.py::YazioConnectionTests.test_passive_status_check_and_credential_change`, `tests/test_yazio.py::YazioConnectionTests.test_check_uses_password_grant_and_restart_is_unchecked`, `tests/test_yazio.py::YazioConnectionTests.test_inflight_result_is_discarded_after_credential_replacement`, `tests/test_yazio.py::YazioConnectionTests.test_lookup_outcomes_become_the_last_check_without_a_button_press`, `tests/test_yazio_connection_routes.py`, `tests/provider-connections.test.cjs`, `e2e/yazio-connection.spec.js::@responsive Yazio shows a checked login and refreshes its local status`. The check reports `not_configured`, `unchecked`, `success`, `auth_failed`, `rate_limited` or `unavailable`.
 
 ### Requirement: Optional Anthropic configuration
 The system SHALL accept an Anthropic API key and base URL from server-side environment values, overridable from the PWA and stored encrypted. Stored values SHALL take precedence and clearing them SHALL restore the environment value. The base URL SHALL default to the official endpoint and be validated like the OpenAI base URL; setting it SHALL need the app password. Status SHALL report the key's presence and source only, never its value.

@@ -9,11 +9,11 @@ from typing import Any
 
 from backend.coach.service import command_receipt
 from backend.coach.turn_failures import CoachTurnFailureService
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
-SELECT_RECEIPT_SQL = "SELECT receipt FROM coach_commands WHERE client_turn_id=?"
 # A job whose failure escapes its own error handling is retried this many times in
 # total, then ended; contention requeues are counted separately and never end a job.
 MAX_FAILED_ATTEMPTS = 3
@@ -46,13 +46,7 @@ class CoachJobStore:
     def busy(self) -> bool:
         """Report whether a Coach turn is queued or running."""
         with self._database_manager().reader() as db:
-            return (
-                db.execute(
-                    "SELECT 1 FROM coach_commands "
-                    "WHERE status IN ('queued', 'running') LIMIT 1"
-                ).fetchone()
-                is not None
-            )
+            return bool(coach_store.command_rows(db, "1", limit=1))
 
     def claim(self) -> dict[str, Any] | None:
         with (
@@ -60,10 +54,9 @@ class CoachJobStore:
             self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
-            rows = db.execute(
-                "SELECT * FROM coach_commands WHERE status='queued' "
-                "ORDER BY created_at LIMIT 20"
-            ).fetchall()
+            rows = coach_store.command_rows(
+                db, "*", ("queued",), order="oldest", limit=20
+            )
             for row in rows:
                 receipt = command_receipt(row.get("receipt"))
                 if receipt.get("mode") != "background":
@@ -75,12 +68,9 @@ class CoachJobStore:
                 # A cancelled job is due at once, so it ends instead of waiting.
                 if retry_after > time.time() and not receipt.get("cancel_requested"):
                     continue
-                claimed = db.execute(
-                    "UPDATE coach_commands SET status='running', updated_at=? "
-                    "WHERE client_turn_id=? AND status='queued'",
-                    (self._utc_now(), row["client_turn_id"]),
-                ).rowcount
-                if claimed == 1:
+                if coach_store.claim_command(
+                    db, row["client_turn_id"], self._utc_now()
+                ):
                     return {
                         **dict(row),
                         "status": "running",
@@ -106,10 +96,7 @@ class CoachJobStore:
             "contention_attempts" if wait_seconds is None else "data_wait_attempts"
         )
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                SELECT_RECEIPT_SQL,
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id)
             if not row:
                 return False
             receipt = command_receipt(row.get("receipt"))
@@ -135,14 +122,13 @@ class CoachJobStore:
                     "retry_after": time.time() + delay,
                 }
             )
-            db.execute(
-                "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
-                "WHERE client_turn_id=? AND status='running'",
-                (
-                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                    self._utc_now(),
-                    client_turn_id,
-                ),
+            coach_store.write_command(
+                db,
+                client_turn_id,
+                receipt,
+                self._utc_now(),
+                status="queued",
+                only=("running",),
             )
         self._wake_event.set()
         return True
@@ -151,10 +137,7 @@ class CoachJobStore:
         receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
         message_id = receipt.get("user_message_id")
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT content FROM messages WHERE id=? AND role='user'",
-                (message_id,),
-            ).fetchone()
+            row = coach_store.message_by_id(db, message_id, "content")
         if not row or not str(row.get("content") or "").strip():
             raise AppError(
                 500,
@@ -170,19 +153,13 @@ class CoachJobStore:
         that is still running it must stop executing tools.
         """
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT status FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id, "status")
         return bool(row and row["status"] in {"queued", "running"})
 
     def record_failed_attempt(self, client_turn_id: str) -> int:
         """Count a failure that escaped the job's own error handling."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                SELECT_RECEIPT_SQL,
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id)
             if not row:
                 return 0
             receipt = command_receipt(row.get("receipt"))
@@ -191,56 +168,30 @@ class CoachJobStore:
             except TypeError, ValueError:
                 attempts = 1
             receipt["failed_attempts"] = attempts
-            db.execute(
-                "UPDATE coach_commands SET receipt=?, updated_at=? "
-                "WHERE client_turn_id=? AND status IN ('queued', 'running')",
-                (
-                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                    self._utc_now(),
-                    client_turn_id,
-                ),
+            coach_store.write_command(
+                db, client_turn_id, receipt, self._utc_now(), only=coach_store.ACTIVE
             )
         return attempts
 
     def cancel_requested(self, client_turn_id: str) -> bool:
         """Read a persisted cancel flag before a claimed worker resumes."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                SELECT_RECEIPT_SQL,
-                (client_turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, client_turn_id)
         return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
 
     def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> None:
-        """Write only the changed top-level keys of a queued/running command.
-
-        ``json_set`` stores each key in place, so a progress step does not decode
-        and re-encode the receipt's other, possibly large, values.
-        """
+        """Write only the changed top-level keys of a queued/running command."""
         if not updates:
             return
-        paths = ", ".join("?, json(?)" for _ in updates)
-        values: list[str] = []
-        for key, value in updates.items():
-            values.append("$." + json.dumps(str(key)))
-            values.append(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            db.execute(
-                "UPDATE coach_commands SET receipt=json_set("
-                "CASE WHEN json_valid(receipt) AND json_type(receipt)='object' "
-                f"THEN receipt ELSE '{{}}' END, {paths}), updated_at=? "
-                "WHERE client_turn_id=? AND status IN ('queued', 'running')",
-                (*values, self._utc_now(), client_turn_id),
+            coach_store.merge_command_receipt(
+                db, client_turn_id, updates, self._utc_now()
             )
 
     def resume_interrupted(self, failures: CoachTurnFailureService) -> int:
         """Recover durable turns after a process restart."""
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            interrupted = db.execute(
-                "SELECT client_turn_id, intent FROM coach_commands "
-                "WHERE status='running' "
-                "AND COALESCE(json_extract(receipt, '$.mode'), '') != 'background'"
-            ).fetchall()
+            interrupted = coach_store.interrupted_foreground_rows(db)
         for command in interrupted:
             failures.persist(
                 command["client_turn_id"],
@@ -255,10 +206,9 @@ class CoachJobStore:
         resumed = 0
         now = self._utc_now()
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            rows = db.execute(
-                "SELECT client_turn_id, status, receipt, intent FROM coach_commands "
-                "WHERE status IN ('queued', 'running') ORDER BY created_at"
-            ).fetchall()
+            rows = coach_store.command_rows(
+                db, "client_turn_id, status, receipt, intent", order="oldest"
+            )
             for row in rows:
                 receipt = command_receipt(row.get("receipt"))
                 if receipt.get("mode") != "background":
@@ -271,14 +221,8 @@ class CoachJobStore:
                     receipt["openai_reached"] = True
                 for key in LEGACY_RESUME_KEYS:
                     receipt.pop(key, None)
-                db.execute(
-                    "UPDATE coach_commands SET status='queued', receipt=?, updated_at=? "
-                    "WHERE client_turn_id=?",
-                    (
-                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                        now,
-                        row["client_turn_id"],
-                    ),
+                coach_store.write_command(
+                    db, row["client_turn_id"], receipt, now, status="queued"
                 )
                 resumed += 1
 

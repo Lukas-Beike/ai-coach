@@ -167,6 +167,14 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
     case.fail("backfill did not finish")
 
 
+def drop_intervals_activities(case: CanonicalReadFixture) -> None:
+    """Leave the Intervals.icu activity copies out of what `populate` ingests.
+
+    The Garmin activities stay, so the tables serve the Garmin records alone.
+    """
+    case.intervals["raw_provider_data"]["activities"] = []
+
+
 # The Wahoo recording of the fixture's Garmin-only run 910002 (18:05 Berlin time).
 WAHOO_RUN_COPY = "990002"
 

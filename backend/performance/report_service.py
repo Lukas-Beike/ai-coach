@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal, overload
 
 from backend.activities.activity_summary import (
     ActivitySummary,
@@ -164,18 +164,32 @@ class TrainingProfileSelectionService:
         self._canonical = canonical
         self._curves = curves
 
+    @overload
     def curve_records(
-        self, days: int = PROFILE_WINDOW_DAYS[-1]
-    ) -> list[dict[str, Any]]:
+        self, days: int = ..., *, shared: Literal[False] = False
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def curve_records(
+        self, days: int = ..., *, shared: Literal[True]
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
+    def curve_records(
+        self, days: int = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
+    ) -> list[dict[str, Any]] | tuple[Mapping[str, Any], ...]:
         """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
         ``effort_context`` "race".
+        ``shared`` returns the records of the last read while the day, what they
+        show of the sessions and the stored inputs of their curves are unchanged:
+        one tuple of read-only mappings for every such caller.
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
-        if self._canonical is None or self._curves is None:
+        curve_reader = self._curves
+        if self._canonical is None or curve_reader is None:
             raise RuntimeError("power profiles need the canonical source and curves")
         reader = self._canonical.activity_summary_reader()
         if reader is None:
@@ -199,13 +213,23 @@ class TrainingProfileSelectionService:
                 <= today.isoformat()
             ]
             session_ids = [str(summary.get("id") or "") for summary in sessions]
-            curves = self._curves.curves(db, session_ids)
-        records = [
-            _curve_record(summary, curves.get(str(summary.get("id") or "")))
-            for summary in sessions
-        ]
-        records.sort(key=lambda row: row["date"], reverse=True)
-        return records
+
+            def build() -> list[dict[str, Any]]:
+                curves = curve_reader.curves(db, session_ids)
+                records = [
+                    _curve_record(summary, curves.get(str(summary.get("id") or "")))
+                    for summary in sessions
+                ]
+                records.sort(key=lambda row: row["date"], reverse=True)
+                return records
+
+            if not shared:
+                return build()
+            # What the records show of a session is its curve-less record.
+            shown = [_curve_record(summary, None) for summary in sessions]
+            return curve_reader.shared_records(
+                db, session_ids, (today.isoformat(), days, shown), build
+            )
 
     def power_profiles(
         self, records: list[dict[str, Any]] | None = None

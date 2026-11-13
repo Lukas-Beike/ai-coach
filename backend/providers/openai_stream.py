@@ -86,8 +86,10 @@ class OpenAIStreamTelemetry:
         self.clock = clock
         self.now = now
 
-    def record_usage(self, response: Any, operation: str) -> None:
-        self.provider_state.record_usage("openai", response, operation)
+    def record_usage(self, response: Any, operation: str, context: dict) -> None:
+        self.provider_state.record_usage(
+            "openai", response, operation, str(context.get("model") or "")
+        )
 
     def record_transport(self, state: StreamReadState) -> None:
         if state.headers is not None:
@@ -144,7 +146,7 @@ class OpenAIStreamTelemetry:
         started: float,
         context: dict[str, Any],
     ) -> None:
-        self.record_usage(response, "responses_stream")
+        self.record_usage(response, "responses_stream", context)
         duration_ms = round((self.clock() - started) * 1000, 1)
         self.diagnostic_capture.capture(
             "openai_stream_completed",
@@ -293,7 +295,7 @@ class OpenAIStreamTelemetry:
         started: float,
         response_bytes: int,
     ) -> None:
-        self.record_usage({"usage": {}}, "responses_stream_cancelled")
+        self.record_usage({"usage": {}}, "responses_stream_cancelled", context)
         self.log_failure(
             context, started, response_bytes, "chat_cancelled", 499, level=logging.INFO
         )
@@ -478,9 +480,12 @@ class OpenAIStreamClient:
                 "responses_stream_cancelled"
                 if cancelled
                 else "responses_stream_failed",
+                context,
             )
         elif cancelled:
-            self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
+            self.telemetry.record_usage(
+                {"usage": {}}, "responses_stream_cancelled", context
+            )
         self.telemetry.record_app_error(
             context,
             started,
@@ -503,6 +508,7 @@ class OpenAIStreamClient:
         self.telemetry.record_usage(
             final_response if final_response is not None else {"usage": {}},
             "responses_stream_cancelled",
+            context,
         )
         self.telemetry.record_disconnect(context, started, stream_bytes)
         raise ClientDisconnected()

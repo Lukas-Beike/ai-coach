@@ -344,6 +344,13 @@ class OutputAtHeartRateTests(unittest.TestCase):
                 "power_at_hr_profile": {"status": status, "bins": {"130": band}},
             }
 
+        # The LT1 ride limit stays 0.15 (athlete decision 2026-11-13, #2535):
+        # rides at 0.14 give the band's 200 W, rides at 0.16 give no value.
+        steady = [ride(f"2026-11-0{day}", 0.14) for day in (1, 2, 3)]
+        rolling = [ride(f"2026-11-0{day}", 0.16) for day in (1, 2, 3)]
+        self.assertEqual(200, output_at_heart_rate(steady, "ride", 131, self.TODAY))
+        self.assertIsNone(output_at_heart_rate(rolling, "ride", 131, self.TODAY))
+
         records = [
             ride("2026-11-01", 0.10),
             ride("2026-11-02", 0.18),

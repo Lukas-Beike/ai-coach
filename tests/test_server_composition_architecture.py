@@ -472,19 +472,12 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         )
 
     def test_activity_reads_receive_the_canonical_read_state(self) -> None:
-        server_tree = _parse(SERVER_PATH)
-        activity_reads = next(
+        builder = next(
             node
-            for node in server_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "ACTIVITY_READS"
-                for target in node.targets
-            )
+            for node in _parse(BACKEND_ROOT / "performance" / "wiring.py").body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_activity_reads"
         )
-        self.assertIn(
-            "serving=lambda: CANONICAL_READ", ast.unparse(activity_reads.value)
-        )
+        self.assertIn("serving=lambda: ctx.canonical_read", ast.unparse(builder))
 
         transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_wiring.py")
         builder = next(
@@ -744,13 +737,21 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             "responses_background_request",
             "responses_stream_request",
         }
+        tree = _parse(fixture)
         patched = [
             target.attr
-            for node in ast.walk(_parse(fixture))
+            for node in ast.walk(tree)
             if isinstance(node, ast.Assign)
             for target in node.targets
             if isinstance(target, ast.Attribute)
-            and ast.unparse(target.value) in {"server", "server.COACH_CONVERSATION"}
+            and ast.unparse(target.value) == "server"
+        ] + [
+            keyword.arg
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "replace"
+            and ast.unparse(node.args[0]) == "server.APP.coach_conversation"
+            for keyword in node.keywords
         ]
         self.assertTrue(removed.isdisjoint(patched))
         self.assertIn("response_transport", patched)

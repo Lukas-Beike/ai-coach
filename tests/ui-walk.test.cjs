@@ -29,6 +29,26 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
   fs.symlinkSync(root, link, "junction");
   try {
     assert.throws(() => walk.secretPath(path.join(link, "package.json"), t3), /T3 secret folder/);
+    // The scratch guard follows the link too, also for a directory not created yet (#2615).
+    assert.throws(() => walk.scratchPath(path.join(link, "shots")), /system temp directory/);
+    assert.throws(() => walk.scratchPath(path.join(link, "new", "deeper")), /system temp directory/);
+    assert.equal(walk.scratchPath(path.join(linkDir, "shots")), path.join(linkDir, "shots"));
+    // A link that leaves the temp directory without entering the repository, and a
+    // dangling link, are refused as well; the drive letter's case does not matter.
+    const away = path.join(linkDir, "home");
+    fs.symlinkSync(os.homedir(), away, "junction");
+    const dangling = path.join(linkDir, "dangling");
+    fs.symlinkSync(path.join(linkDir, "missing"), dangling, "junction");
+    try {
+      assert.throws(() => walk.scratchPath(path.join(away, "shots")), /system temp directory/);
+      assert.throws(() => walk.scratchPath(path.join(dangling, "shots")), /system temp directory/);
+    } finally {
+      fs.unlinkSync(away);
+      fs.unlinkSync(dangling);
+    }
+    const other = path.join(linkDir, "shots");
+    const swapped = other[0] === other[0].toLowerCase() ? other[0].toUpperCase() : other[0].toLowerCase();
+    assert.equal(walk.scratchPath(swapped + other.slice(1)).toLowerCase(), other.toLowerCase());
   } finally {
     // Remove the link itself first so cleanup never descends into the checkout.
     fs.unlinkSync(link);

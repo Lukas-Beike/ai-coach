@@ -120,7 +120,7 @@ class _ClientState:
         self.validated.append((path, result))
         return result
 
-    def record_usage(self, provider, response, operation):
+    def record_usage(self, provider, response, operation, model=""):
         self.usage.append((provider, response, operation))
 
 

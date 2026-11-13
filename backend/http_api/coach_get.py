@@ -42,7 +42,7 @@ class CoachGetRoutes:
         Response: 200 with `generation` (chat generation, changes on a reset),
         `messages` (one page, oldest first, going back from the cursor; each has
         `id`, `role`, `content`, `created_at` and, when present, `client_turn_id`,
-        `attachment_names`, `coach_changes`, `coach_failed`, `coach_request_kind`),
+        `attachment_names`, `coach_changes`, `coach_failed`, `coach_request_kind`, `coach_model`),
         `proposed_actions` (this session's open Coach proposals, at most 30),
         `next_cursor` (null on the last page), `limit` and `search`.
 

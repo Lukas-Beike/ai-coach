@@ -96,8 +96,9 @@ confirmation. List every unfixed finding with its reason in the PR body.
   [line-balance](../pacecraft-line-balance/SKILL.md). Name the issue with `Closes #N`, or `Part of #N` when more
   PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
-- Enable `gh pr merge <number> --auto --squash` only when the base is `develop`
-  and no feedback is open.
+- Enable `gh pr merge <number> --auto --squash` only when the base is `develop`,
+  Gitar has reviewed the current head, and no feedback is open: review
+  comments do not block an armed auto-merge (#2520 merged past one).
 
 ## 4. Monitor to merge
 
@@ -108,8 +109,8 @@ yield; otherwise poll about every 30 seconds. On each wake:
   [pr-state](../pacecraft-pr-state/SKILL.md). For each open item: fix it if
   valid, run the affected checks, reply with the result, then resolve the
   thread; if not actionable, reply with the concrete reason before resolving.
-  Disable auto-merge while repairs are in progress, and re-enable it once the
-  current head has no open feedback.
+  Disable auto-merge as soon as a finding arrives, and re-enable it once
+  Gitar has reviewed the repaired head and no feedback is open.
 - Later changes (feedback fixes, CI fixes, conflict resolutions, rebases) need
   validation, not another local review; CI reviews the new head.
 - If the branch falls behind or conflicts, rebase and push with

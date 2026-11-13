@@ -496,38 +496,58 @@ function modelNoticeText(model) {
   return selected?.rejected ? `${selected.rejected} abgelehnt – Coach nutzt ${selected.model}.` : "";
 }
 
-function renderModel(model) {
-  renderModelChoice(model, "#modelSelect");
-  const notice = $("#modelNotice");
-  if (notice) {
-    notice.textContent = modelNoticeText(model);
-    notice.hidden = !notice.textContent;
-  }
-  // Speed modes exist only at OpenAI.
-  const tierRow = $("#serviceTierRow");
-  if (tierRow) tierRow.hidden = model?.provider === "anthropic";
+// The selects of one task: conversation keeps the original ids.
+const COACH_TASKS = ["conversation", "planning", "nutrition"];
+function taskSelectId(task, name) {
+  return task === "conversation" ? `#${name[0].toLowerCase()}${name.slice(1)}Select` : `#${task}${name}Select`;
 }
 
-function renderThinkingLevel(thinkingLevel) {
-  if (!thinkingLevel) return;
-  const select = $("#thinkingLevelSelect");
-  const currentIds = [...select.options].map((option) => option.value).join(",");
-  const nextIds = (thinkingLevel.options || []).map((option) => option.id).join(",");
-  if (currentIds !== nextIds) {
-    select.replaceChildren();
-    for (const option of thinkingLevel.options || []) {
-      const element = document.createElement("option");
-      element.value = option.id;
-      element.textContent = option.label;
-      element.title = option.description || "";
-      select.append(element);
+function renderModel(model) {
+  for (const task of COACH_TASKS) {
+    const taskModel = model && { ...model, selected: model.tasks?.[task]?.model ?? model.selected };
+    renderModelChoice(taskModel, taskSelectId(task, "Model"));
+    // Each task block names its own rejected Claude model (#2639).
+    const notice = $(task === "conversation" ? "#modelNotice" : `#${task}ModelNotice`);
+    if (notice) {
+      notice.textContent = modelNoticeText(taskModel);
+      notice.hidden = !notice.textContent;
     }
   }
-  select.value = thinkingLevel.selected;
-  const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
-  const modelSelect = $("#modelSelect");
+  // A task whose provider has no key disables only its own entry points.
+  // Every quick-action kind but the morning check-in runs on the planning model,
+  // in the "Analyse & Plan" menu and its copies in the composer's "+" menu.
+  const planningOff = model?.tasks?.planning?.ready === false;
+  const planning = $("#quickAnalysisButton");
+  if (planning) planning.disabled = planningOff;
+  document.querySelectorAll("[data-request-kind]:not([data-request-kind=morning_checkin])").forEach((button) => { button.disabled = planningOff; });
+  const label = $("#nutritionLabelButton");
+  if (label) label.disabled = model?.tasks?.nutrition?.ready === false;
+  // Speed modes exist only at OpenAI.
+  const tierRow = $("#serviceTierRow");
+  const provider = (id) => (model?.options || []).find((option) => option.id === id)?.provider;
+  if (tierRow) tierRow.hidden = Boolean(model) && COACH_TASKS.every((task) => provider(model.tasks?.[task]?.model ?? model.selected) === "anthropic");
+}
+
+function renderThinkingLevel(thinkingLevel, tasks = {}) {
+  if (!thinkingLevel) return;
+  const nextIds = (thinkingLevel.options || []).map((option) => option.id).join(",");
+  for (const task of COACH_TASKS) {
+    const select = $(taskSelectId(task, "ThinkingLevel"));
+    if ([...select.options].map((option) => option.value).join(",") !== nextIds) {
+      select.replaceChildren();
+      for (const option of thinkingLevel.options || []) {
+        const element = document.createElement("option");
+        element.value = option.id;
+        element.textContent = option.label;
+        element.title = option.description || "";
+        select.append(element);
+      }
+    }
+    select.value = tasks?.[task]?.thinking_level ?? thinkingLevel.selected;
+  }
   const modelSummary = $("#modelSettingsSummary");
-  if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
+  const labels = COACH_TASKS.map((task) => $(taskSelectId(task, "Model"))?.selectedOptions?.[0]?.textContent).filter(Boolean);
+  if (modelSummary) modelSummary.textContent = [...new Set(labels)].join(" · ");
 }
 
 function renderAppVersion(app = {}) {
@@ -576,10 +596,11 @@ function intervalsConnectionDetail(intervals) {
   const librarySync = intervals.library_sync || {};
   if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
   if (intervals.state === "syncing") return "Intervals.icu wird synchronisiert.";
-  if (intervals.last_error) return intervals.last_error;
+  if (intervals.state === "error") return intervals.last_error || "Letzter Export fehlgeschlagen";
   if (intervals.state === "configured") return "Noch nicht getestet";
-  if (!librarySync.last_sync_at) return "Noch keine Synchronisierung durchgeführt";
-  const updated = formatTime(librarySync.last_sync_at);
+  const usedAt = intervals.last_used_at || librarySync.last_sync_at;
+  if (!usedAt) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(usedAt);
   const libraryCount = Number(librarySync.state?.synced || 0);
   const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
   return "Letzte Aktualisierung: " + updated + counts;
@@ -590,7 +611,7 @@ function renderIntervalsConnection(data, configured) {
   setConnectionChip("#intervalsConnectionStatus", intervalsConnectionKind(intervals));
   const detail = $("#intervalsConnectionDetail");
   if (detail) {
-    detail.classList.toggle("error", Boolean(intervals.last_error));
+    detail.classList.toggle("error", intervals.state === "error");
     detail.textContent = intervalsConnectionDetail(intervals);
   }
 }
@@ -690,6 +711,37 @@ function renderSettingsUsage(data) {
   }
 }
 
+function renderUsageMonth(data) {
+  const usageMonth = data.usage_month || {};
+  const models = Array.isArray(usageMonth.models) ? usageMonth.models : [];
+  const section = document.getElementById("usageMonth");
+  const rows = document.getElementById("usageMonthRows");
+  if (!section || !rows) return;
+  section.hidden = models.length === 0;
+  const [year, month] = String(usageMonth.month || "").split("-").map(Number);
+  const title = document.getElementById("usageMonthTitle");
+  if (title && year && month) title.textContent = new Date(year, month - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const labels = new Map((data.model?.options || []).map((option) => [option.id, option.label]));
+  const tokens = new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 });
+  rows.replaceChildren(...models.map((entry) => {
+    const row = document.createElement("tr");
+    const cells = [
+      labels.get(entry.model) || entry.model || "Unbekannt",
+      Number(entry.answers || 0).toLocaleString("de-DE"),
+      tokens.format(Number(entry.input_tokens || 0)),
+      tokens.format(Number(entry.cached_input_tokens || 0)),
+      tokens.format(Number(entry.output_tokens || 0)),
+    ];
+    row.replaceChildren(...cells.map((text, index) => {
+      const cell = document.createElement(index === 0 ? "th" : "td");
+      if (index === 0) cell.scope = "row";
+      cell.textContent = text;
+      return cell;
+    }));
+    return row;
+  }));
+}
+
 function renderGarminConnection(data) {
   const garmin = data.garmin || {};
   setConnectionChip("#garminConnectionStatus", garminConnectionKind(garmin));
@@ -715,6 +767,7 @@ function renderSettings(data) {
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
   renderSettingsUsage(data);
+  renderUsageMonth(data);
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);

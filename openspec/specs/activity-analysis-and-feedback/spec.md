@@ -30,7 +30,7 @@ Evidence: `backend/activities/strength_sets.py:plan_comparison`, `backend/activi
 
 #### Scenario: Provider ratings with their scale
 - **WHEN** a record of the session carries the watch's `rpe` or `feel`
-- **THEN** the metric is `athlete_entered` with the value of the first record in rating order (Garmin, then retired Intervals.icu copies, then the rest) and, for a known provider scale, the scale text, label and a `normalized_0_1` value; the local feedback RPE stays separate and authoritative.
+- **THEN** the metric is `athlete_entered` with the value of the first record in rating order (Garmin, then the rest) and, for a known provider scale, the scale text, label and a `normalized_0_1` value; the local feedback RPE stays separate and authoritative.
 
 Evidence: `backend/activities/detail_contract.py:rating_order`, `backend/canonical/rating_scales.py:rating_fields`; `tests/test_garmin_activity_ratings.py:test_detail_document_names_the_garmin_scale`.
 
@@ -52,7 +52,7 @@ Evidence: `backend/activities/detail_contract.py:rating_order`, `backend/canonic
 
 Detailed contract: Derived metrics SHALL identify source and load model. Every `source` object SHALL carry an additive `recorded_by` field naming the recording device from the record provenance, and the response `data_scope` SHALL name the contributing provider(s) and the recording device instead of a fixed provider. A local session id of any provider session, including Garmin-only and Wahoo-only sessions, SHALL resolve through the same read path. Detail status SHALL expose available kinds, refreshability, stale/load-error metadata, and coverage. The PWA SHALL render only from the served document and SHALL derive its refresh offer from `detail_data.providers[]` entries rather than from an Intervals-only activity check. Frontend asset query versions and the service-worker cache name SHALL change together with the contract.
 
-Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/http_api/activity_assembly.py`; `tests/test_detail_envelope.py:test_envelope_is_filled_for_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all three Playwright projects. Added evidence: `backend/performance/canonical_detail.py:read_reference`, `tests/test_canonical_detail_reader.py:test_a_deleted_alias_resolves_to_the_session_it_retained`, `tests/test_canonical_detail_reader.py:test_an_id_of_records_in_several_sessions_is_not_a_reference`.
+Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/performance/wiring.py:build_activity_reads`; `tests/test_detail_envelope.py:test_envelope_is_filled_for_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all three Playwright projects. Added evidence: `backend/performance/canonical_detail.py:read_reference`, `tests/test_canonical_detail_reader.py:test_a_deleted_alias_resolves_to_the_session_it_retained`, `tests/test_canonical_detail_reader.py:test_an_id_of_records_in_several_sessions_is_not_a_reference`.
 
 ### Requirement: Executed strength set selection and comparison
 A session SHALL use exactly one stored strength set list: Garmin's exercise sets (with the athlete's corrections) first, else a file set list in the order Garmin, Wahoo, then output-only Intervals.icu. Set lists SHALL never be merged set by set.
@@ -123,8 +123,8 @@ The system SHALL read local details without implicit provider refresh, serve onl
 - **THEN** the canonical backfill stage `session_analysis` recomputes its `activity_detail_analysis` version 3 row (analysis, recorded workout profile, carried-over target snapshot, input fingerprint) in bounded batches, an unchanged input writes nothing, and the detail view, Coach detail tool, calendar profiles and recurring comparisons show the same values for Garmin- and Wahoo-only sessions too.
 
 #### Scenario: Intervals.icu copy not served
-- **WHEN** a session holds an Intervals.icu record with stored detail sets, zone times or a failure note
-- **THEN** its provider entry lists no kinds, no load error and no refresh, the document serves no Intervals.icu streams, laps, zone times or summary-row metrics, and its staleness withholds nothing.
+- **WHEN** a session holds a stored Intervals.icu record with detail sets, zone times or a failure note
+- **THEN** the readers do not serve the record (#2148): the document names no Intervals.icu provider and serves no Intervals.icu streams, laps, zone times or summary-row metrics, its staleness withholds nothing, and a session of such a record alone has no detail.
 
 #### Scenario: Zone times from streams
 - **WHEN** a session has a heart-rate or power stream
@@ -271,10 +271,33 @@ The system SHALL group repeated rides and runs with a stored GPS track that are 
 - **WHEN** the athlete posts a name of 1 to 60 characters without control characters for a known route to `/api/routes/rename`
 - **THEN** the route shows that label from then on, also after recomputation; an unknown route answers 404 and an invalid name 400
 
+#### Scenario: Usable track
+- **WHEN** a track is fingerprinted
+- **THEN** fixes that are missing, out of range or at latitude 0 and longitude 0 are skipped, a cell is recorded about every 150 m of chord, a jump of more than 1000 m between two fixes adds no distance, the distance is the session's summary distance or else the summed chords, and a track under 3000 m or with fewer than 4 cells of about 500 m has no fingerprint and no route; the first provider in precedence order with a usable full-resolution track supplies it.
+
+#### Scenario: Choosing the route
+- **WHEN** a session's track matches several stored routes
+- **THEN** it stays on its current route while it still matches that route's reference; otherwise it joins the route with the highest overlap, the older route on a tie, and without a match it founds route `r<n>` with the next number, which is never reused. A route's reference is the track of the session that founded it.
+
+#### Scenario: Route without sessions
+- **WHEN** the last session of a route is deleted or loses its track
+- **THEN** the route and its name are removed.
+
+Detailed contract: the index is the key-value record `activity_routes` (`next`, `routes.<id>.{name, ref}`, `sessions.<id>.{h, at, route}`) and its state `activity_routes_state` (`status`, `method_version`, counts only). The stage places at most 50 changed sessions per batch; a session is changed when the hash of its start, distance and stream content hashes differs. The rename route's request, response and errors are in `docs/api-routes.md`.
+
 Evidence: `backend/activities/routes.py:same_route`, `backend/sync/activity_routes.py:ActivityRoutesStage`, `backend/activities/route_store.py:ActivityRouteService`, `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`; `tests/test_activity_routes.py`, `tests/test_activity_read_service.py:test_detail_carries_only_the_route_label_and_repeat_count`, `tests/activity-route.test.cjs`.
 
+Added evidence:
+- `backend/activities/routes.py:fingerprint`
+- `backend/activities/routes.py:place`
+- `backend/activities/routes.py:prune`
+- `tests/test_activity_routes.py:test_a_session_keeps_its_route_while_it_still_matches`
+- `tests/test_activity_routes.py:test_a_signal_gap_is_no_distance`
+- `tests/test_activity_routes.py:test_prune_forgets_gone_sessions_and_empty_routes`
+- `tests/test_activity_routes.py:test_short_or_stationary_tracks_have_no_fingerprint`
+
 ### Requirement: Conservative planned-workout matching and interval quality
-The system SHALL match planned units to compatible completed activities using the implemented identity/time/sport rules and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
+The system SHALL match planned units to compatible completed activities in three steps (provider pairing, nearest start of timed units, best fit of date-only units) and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
 
 #### Scenario: Percentage target with frozen FTP
 - **WHEN** a uniquely matched planned step targets a percentage of the frozen FTP and only some planned steps have measured laps
@@ -285,6 +308,37 @@ The system SHALL match planned units to compatible completed activities using th
 - **THEN** it never completes a planned workout and no target is frozen for it; a workout the provider paired with such a session stays open instead of matching another session by date.
 
 Evidence: `backend/activities/matching.py:match_planned_workouts`; `tests/test_activity_matching.py:test_commutes_and_warmups_never_complete_a_planned_workout`.
+
+#### Scenario: Provider pairing first
+- **WHEN** a session names a `planned_event_id` equal to a listed unit's id
+- **THEN** it matches that unit whatever its sport or day (the earliest start when several do), before any day-and-sport matching; a unit of sport `other` matches through a pairing only.
+
+#### Scenario: Timed units
+- **WHEN** a unit has a start time and unpaired sessions of its local day and canonical sport exist
+- **THEN** it takes the one whose start is nearest, units in input order and each session serving one unit.
+
+#### Scenario: Date-only units on one day
+- **WHEN** two units without a planned time and two sessions share a day and sport
+- **THEN** the pairs are formed best first by relative duration difference, then load difference, then session start, then identity, so the input order never decides; a start that is a bare date or local midnight is date-only, any other time makes a unit timed.
+
+#### Scenario: Session paired with an event outside the plan
+- **WHEN** a session names a `planned_event_id` that is not in the planned list
+- **THEN** it is free to match by day and sport; a session paired with a listed unit matches that unit only.
+
+#### Scenario: Calendar record without a category
+- **WHEN** a planned record has no `category`
+- **THEN** it counts as a workout only when it has a planned duration; with a category only `WORKOUT` counts.
+
+Added evidence:
+- `backend/activities/matching.py:is_planned_workout_event`
+- `backend/activities/matching.py:_best_fit_rank`
+- `tests/test_activity_matching.py:test_activity_paired_to_an_unlisted_event_still_matches_by_day_and_sport`
+- `tests/test_activity_matching.py:test_category_and_duration_fallback_match_the_workout_contract`
+- `tests/test_activity_matching.py:test_paired_candidates_use_earliest_provider_start`
+- `tests/test_activity_matching.py:test_unclassified_sport_never_matches_through_the_fallbacks`
+- `tests/test_activity_matching.py:test_unpaired_matching_is_same_date_same_sport_and_nearest_start`
+- `tests/test_characterization_activity_identity.py:test_midnight_units_are_date_only_and_other_starts_are_timed`
+- `tests/test_characterization_activity_identity.py:test_paired_activity_ignores_sport_and_calendar_day`
 
 #### Scenario: Ambiguous or unmeasurable target
 - **WHEN** several completed activities could match a local plan, lap duration does not match, or the percentage basis is missing
@@ -626,8 +680,8 @@ Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backe
 The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. Rows SHALL carry no `detail_error`: Intervals.icu details are never served (#1685), so their failure notes mark no session.
 
 #### Scenario: Sessions from several providers
-- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session, a bundled Garmin and Wahoo session and, in a database that still holds stored Intervals.icu rows, Intervals.icu-only sessions or an Intervals.icu duplicate pair bundled into one session
-- **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order.
+- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session and a bundled Garmin and Wahoo session
+- **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order; a session of stored Intervals.icu records alone is not listed (#2148).
 
 #### Scenario: Older cursor
 - **WHEN** a client sends a version-2 cursor
@@ -697,3 +751,39 @@ The activity dialog SHALL offer a feedback form with "Art der Einheit" (Automati
 - **THEN** the dialog closes and the view below stays
 
 Evidence: `public/activity-details.js::renderFeedback`; `public/activity-details.js::rpeSelect`; `public/activity-details.js::setRpe`; `public/activity-details.js::renderBundle`; `public/activity-details.js::requestDetails`; `public/activity-details.js::open`. Tests: `e2e/activity-details.spec.js::provider copies split with a receipt whose undo restores the bundle`; `e2e/activity-details.spec.js::deleting an activity locally asks first and can be undone`; `tests/activity-route.test.cjs::renaming posts the route id and name, then shows the new label`.
+
+### Requirement: Field contract of the activity detail document
+Each part of `activity_detail.v1` SHALL have the fields listed in the detailed contract. A metric entry SHALL be `{value, unit, source, alternatives}` with the other records' values as alternatives; a series SHALL hold at most 2000 evenly spaced points that include the first and the last, at the same positions for the time axis and every channel, and `detail_data.display_sampled` SHALL be true when the merged stream was longer.
+
+#### Scenario: Average without a record value
+- **WHEN** no record of the session has `avg_hr` or `avg_power` and the merged stream has that channel
+- **THEN** the metric is the mean of the channel's values (of moving points only when a `moving` channel is shown), with source kind `derived` and the source of the channel's stream set.
+
+#### Scenario: Rating outside its scale
+- **WHEN** a provider `rpe` or `feel` lies outside the provider's scale
+- **THEN** the metric keeps its value and the `scale` text but has no `rating_label` and no `normalized_0_1`.
+
+#### Scenario: Laps of a recording that cannot be aligned
+- **WHEN** the lap set's recording has no known start difference to the primary stream set
+- **THEN** `laps.on_stream_clock` is false and the offsets stay on the lap recording's clock.
+
+Detailed contract: `session` holds `activity_id`, `sport`, `environment`, `started_at`, `started_at_local` (naive wall time in seconds), `name`, `device_type` and `local_offset_minutes` when a record reports one. `metrics` has the measured keys `duration_s`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `elevation_loss_m`, `elevation_high_m`, `elevation_low_m`, `avg_hr`, `max_hr`, `min_hr`, `avg_power`, `max_power_w`, `avg_cadence`, `max_speed_mps`, `min_temp_c`, `max_temp_c`, `steps`, `lap_count`, `energy_kj`, `energy_kcal` and the five running dynamics averages; the derived keys `normalized_power`, `load` (with `model`), `aerobic_training_effect`, `anaerobic_training_effect` and `water_estimated_ml`; and the ratings `rpe` and `feel` (kind `athlete_entered`, plus `scale`, `rating_label` and `normalized_0_1` to three decimals). `streams` holds `time_s`, `source` and `channels.<name>.{values, source, aligned}` without position and running dynamics channels; `running_dynamics_streams` holds those channels on the same axis. `laps` holds `lap_source`, `source`, `on_stream_clock`, `laps[]` (`index`, `kind`, `start_offset_s`, `end_offset_s`, `name` and the lap metrics) and `alternatives[]` (`lap_source`, `source`, `count`). `zones.<metric>` holds `boundary_source`, `source`, `buckets[]` (`index`, `seconds`, `lower`, `upper`, `label`) and the sources of the alternative sets. `detail_data.providers[]` holds `provider`, `label`, `kinds`, `fetched_at`, `refreshable` and, with the stored state, `stale`, `load_error` and `coverage.<channel>.{points, valid_points}`. Every `source` is `{provider, label, kind, recorded_by}`.
+
+Evidence:
+- `backend/activities/detail_contract.py:_coverage`
+- `backend/activities/detail_contract.py:_laps`
+- `backend/activities/detail_contract.py:_metrics`
+- `backend/activities/detail_contract.py:_providers`
+- `backend/activities/detail_contract.py:_session`
+- `backend/activities/detail_contract.py:_streams`
+- `backend/activities/detail_contract.py:_zones`
+- `backend/activities/detail_contract.py:activity_detail_contract`
+- `backend/canonical/rating_scales.py:rating_fields`
+- `tests/test_activity_detail_contract.py:test_display_sampled_follows_the_downsampling_cap`
+- `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`
+- `tests/test_activity_detail_contract.py:test_missing_average_is_filled_from_the_stream_mean_and_labelled_derived`
+- `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`
+- `tests/test_activity_detail_contract.py:test_streams_are_downsampled_with_aligned_equal_length_channels`
+- `tests/test_activity_detail_contract.py:test_unalignable_laps_keep_their_own_clock`
+- `tests/test_activity_detail_contract.py:test_zones_name_their_boundary_source_and_list_the_others`
+- `tests/test_garmin_activity_ratings.py:test_detail_document_names_the_garmin_scale`

@@ -20,8 +20,53 @@ from backend.backup.export import PrivacyArchiveExportService
 from backend.backup.restore import DatabaseRestoreService
 from backend.backup.restore_validation import DatabaseRestoreValidationService
 from backend.calendar.external import ExternalCalendarReader
+from backend.coach.adaptive_apply import CoachAdaptiveApplyService
+from backend.coach.athlete_record_tools import CoachAthleteRecordToolService
+from backend.coach.background_job import CoachBackgroundJobRunner
+from backend.coach.cancellation import CoachCancellationService
+from backend.coach.chat_turn import CoachChatTurnService
+from backend.coach.clarification import CoachClarificationService
+from backend.coach.context import (
+    CoachContextPreviewService,
+    CoachQuickActionsService,
+    CoachStructuredContextService,
+    CoachTrainingContextService,
+)
+from backend.coach.conversation import (
+    CoachAttachmentContextService,
+    CoachConversationHistoryService,
+    CoachConversationProvisionService,
+    CoachConversationResetService,
+    CoachMessageService,
+)
+from backend.coach.dialogue import CoachDialogueReadService
+from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.job_store import CoachJobStore
+from backend.coach.job_submission import CoachJobSubmissionService
+from backend.coach.library_plan_tools import CoachLibraryPlanToolService
+from backend.coach.morning import (
+    ManualMorningCheckinService,
+    MorningCheckinStateService,
+)
+from backend.coach.profile_update import CoachProfileUpdateService
+from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_read import (
+    CoachProposalConfirmationService,
+    CoachProposalReadService,
+)
+from backend.coach.read_tools import CoachReadToolService
+from backend.coach.receipt_reads import CoachCommandReceiptService
+from backend.coach.request_payload import CoachRequestPayloadService
+from backend.coach.response_transport import CoachResponseTransport
+from backend.coach.structured_response import CoachStructuredResponseService
+from backend.coach.structured_tool_round import CoachStructuredToolRoundService
+from backend.coach.structured_turn import CoachStructuredTurnService
+from backend.coach.sync_tools import CoachSyncToolService
+from backend.coach.tool_dispatch import CoachToolDispatchService
+from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.turn_failures import CoachTurnFailureService
+from backend.coach.turn_outcome import CoachStructuredOutcomeService
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.report import DiagnosticReportService
@@ -31,7 +76,10 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
-from backend.performance.report_service import TrainingReportServices
+from backend.performance.report_service import (
+    TrainingProfileSelectionService,
+    TrainingReportServices,
+)
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive import AdaptiveReplanApplyService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -50,6 +98,7 @@ from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
 )
 from backend.planning.state_service import StructuredTrainingStateService
+from backend.planning.training_plan_artifact_service import TrainingPlanArtifactService
 from backend.planning.training_plans import TrainingPlanService
 from backend.privacy import PrivacyDeleteService
 from backend.providers import audio as audio_provider
@@ -201,6 +250,26 @@ class CompositionRootTests(ServerTestCase):
         self.assertIs(
             server.HTTP_API.analysis_routes._reports, performance.training_reports
         )
+
+    def test_the_public_state_reads_the_session_curves_of_the_report_services(
+        self,
+    ) -> None:
+        shared = server.PERFORMANCE.training_reports().profiles._curves
+        with patch.object(
+            TrainingProfileSelectionService,
+            "curve_records",
+            autospec=True,
+            return_value=[],
+        ) as records:
+            public = server.PUBLIC_STATE.performance_state_service()
+            lt1_records = public._lt1_session_records
+            assert lt1_records is not None
+            self.assertEqual([], lt1_records(90))
+
+        records.assert_called_once()
+        profiles, days = records.call_args.args
+        self.assertIs(shared, profiles._curves)
+        self.assertEqual(90, days)
 
     def test_weather_services_resolve(self) -> None:
         self.assertIsInstance(server.WEATHER.service(), WeatherService)
@@ -457,6 +526,81 @@ class CompositionRootTests(ServerTestCase):
         )
         for check in server.PROVIDER_CONFIGURED.values():
             self.assertIsInstance(check(), bool)
+
+    def test_coach_services_resolve_through_the_root(self) -> None:
+        owners = {
+            "coach_conversation": server.COACH_CONVERSATION,
+            "coach_local": server.COACH_LOCAL,
+            "coach_context": server.COACH_CONTEXT,
+            "coach_read_tools": server.COACH_READ_TOOLS,
+            "coach_proposals": server.COACH_PROPOSALS,
+            "coach_planning_tools": server.COACH_PLANNING_TOOLS,
+            "coach_command_tools": server.COACH_COMMAND_TOOLS,
+            "coach_tool_dispatch": server.COACH_TOOL_DISPATCH,
+            "coach_tool_rounds": server.COACH_TOOL_ROUNDS,
+            "coach_background_jobs": server.COACH_BACKGROUND_JOBS,
+            "coach_turns": server.COACH_TURNS,
+        }
+        for name, owner in owners.items():
+            with self.subTest(owner=name):
+                self.assertIs(getattr(server.APP, name), owner)
+        self.assertIs(server.APP.coach_dialogue_tools, server.COACH_DIALOGUE_TOOLS)
+        conversation, local, context = (
+            server.APP.coach_conversation,
+            server.COACH_LOCAL,
+            server.COACH_CONTEXT,
+        )
+        proposals, planning = server.COACH_PROPOSALS, server.COACH_PLANNING_TOOLS
+        commands, jobs = server.COACH_COMMAND_TOOLS, server.COACH_BACKGROUND_JOBS
+        turns = server.COACH_TURNS
+        for factory, kind in (
+            (conversation.provision_service, CoachConversationProvisionService),
+            (conversation.reset_service, CoachConversationResetService),
+            (conversation.message_service, CoachMessageService),
+            (conversation.history_service, CoachConversationHistoryService),
+            (conversation.dialogue_read_service, CoachDialogueReadService),
+            (conversation.attachment_context_service, CoachAttachmentContextService),
+            (conversation.response_transport, CoachResponseTransport),
+            (local.quick_actions_service, CoachQuickActionsService),
+            (local.dialogue_action_service, CoachDialogueActionService),
+            (local.clarification_service, CoachClarificationService),
+            (local.manual_morning_checkin_service, ManualMorningCheckinService),
+            (local.morning_checkin_state_service, MorningCheckinStateService),
+            (context.structured_context_service, CoachStructuredContextService),
+            (context.training_context_service, CoachTrainingContextService),
+            (context.request_payload_service, CoachRequestPayloadService),
+            (context.preview_service, CoachContextPreviewService),
+            (server.COACH_READ_TOOLS.read_service, CoachReadToolService),
+            (proposals.read_service, CoachProposalReadService),
+            (proposals.creation_service, CoachProposalCreationService),
+            (proposals.confirmation_service, CoachProposalConfirmationService),
+            (proposals.execution_service, CoachProposalExecutionService),
+            (planning.training_plan_artifact_service, TrainingPlanArtifactService),
+            (planning.library_plan_tool_service, CoachLibraryPlanToolService),
+            (planning.training_patch_service, CoachTrainingPatchService),
+            (planning.adaptive_apply_service, CoachAdaptiveApplyService),
+            (commands.sync_tool_service, CoachSyncToolService),
+            (commands.athlete_record_tool_service, CoachAthleteRecordToolService),
+            (commands.profile_update_service, CoachProfileUpdateService),
+            (server.COACH_TOOL_ROUNDS.service, CoachStructuredToolRoundService),
+            (jobs.job_store, CoachJobStore),
+            (jobs.turn_failure_service, CoachTurnFailureService),
+            (jobs.job_submission_service, CoachJobSubmissionService),
+            (jobs.cancellation_service, CoachCancellationService),
+            (jobs.background_job_runner, CoachBackgroundJobRunner),
+            (turns.command_receipt_service, CoachCommandReceiptService),
+            (turns.outcome_service, CoachStructuredOutcomeService),
+            (turns.structured_response_service, CoachStructuredResponseService),
+            (turns.structured_turn_service, CoachStructuredTurnService),
+            (turns.chat_turn_service, CoachChatTurnService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
+        # The dispatcher is stateless: built once, on first use.
+        dispatch = server.COACH_TOOL_DISPATCH.service()
+        self.assertIsInstance(dispatch, CoachToolDispatchService)
+        self.assertIs(dispatch, server.COACH_TOOL_DISPATCH.service())
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

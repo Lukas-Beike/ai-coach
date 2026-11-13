@@ -6,13 +6,17 @@ import json
 import sqlite3
 import threading
 import unittest
+from datetime import date
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 from support import temp_database
 
 from backend.coach.final_receipt import CoachFinalReceiptService
+from backend.coach.receipt_reads import monthly_turn_usage
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.providers.model_seam import ModelTurn
+from backend.providers.state import metered_turn
 from backend.runtime.events import StateEventBuffer
 
 
@@ -80,6 +84,29 @@ class CoachFinalReceiptTests(unittest.TestCase):
         self.assertIn("pending_tool_calls", receipt)
         # A re-requested turn keeps the attachment window anchor it had.
         self.assertIs(final["openai_reached"], True)
+        self.assertNotIn("usage", final)
+
+    def test_build_keeps_the_usage_of_the_metered_turn(self) -> None:
+        options: dict[str, Any] = {
+            "status": "completed",
+            "turn": ModelTurn(),
+            "client_turn_id": "turn-1",
+            "command_receipts": [],
+            "sync_job_ids": [],
+            "intent": {},
+            "rounds": 1,
+            "failures": [],
+            "awaiting_clarification": False,
+        }
+        with metered_turn({"requests": 3, "input_tokens": 9000}):
+            final = self.service.build({"model": "claude-opus"}, **options)
+        counts = {
+            "requests": 3,
+            "input_tokens": 9000,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+        }
+        self.assertEqual(final["usage"], {**counts, "by_model": {"": counts}})
 
     def test_completed_command_returns_stored_receipt_without_duplicate_effect(
         self,
@@ -347,6 +374,100 @@ class CoachFinalReceiptTests(unittest.TestCase):
                 "running",
             )
         self.assertEqual(events.since()["events"], [])
+
+
+class MonthlyTurnUsageTests(unittest.TestCase):
+    def test_month_sums_turns_with_usage_per_model_in_local_time(self) -> None:
+        manager = temp_database(self, "usage.sqlite3", schema=True)
+        usage = {
+            "requests": 2,
+            "input_tokens": 1000,
+            "cached_input_tokens": 600,
+            "output_tokens": 50,
+        }
+        opus = {"model": "claude-opus", "usage": usage}
+        rows = (
+            # 00:30 on 1 November in Berlin is still 31 October in UTC.
+            ("a", "completed", opus, "2026-10-31T23:30:00+00:00"),
+            ("b", "completed", opus, "2026-11-30T22:59:59.5+00:00"),
+            (
+                "c",
+                "completed",
+                {"model": "gpt-6-luna", "usage": usage},
+                "2026-11-05T08:00:00+00:00",
+            ),
+            # A failed turn adds its tokens but no answer.
+            (
+                "d",
+                "completed",
+                {**opus, "status": "failed"},
+                "2026-11-06T08:00:00+00:00",
+            ),
+            # A turn on gpt-6-luna whose web search ran on claude-opus (#2638);
+            # a request of unknown model counts under the turn's model.
+            (
+                "j",
+                "completed",
+                {
+                    "model": "gpt-6-luna",
+                    "usage": {
+                        **usage,
+                        "by_model": {
+                            "claude-opus": {"input_tokens": 70, "output_tokens": 7},
+                            "": {"input_tokens": 30, "cached_input_tokens": 5},
+                        },
+                    },
+                },
+                "2026-11-08T08:00:00+00:00",
+            ),
+            # Older turns without usage, other months and open turns are left out.
+            ("e", "completed", {"model": "gpt-6-luna"}, "2026-11-05T08:00:00+00:00"),
+            ("f", "completed", opus, "2026-11-30T23:00:00+00:00"),
+            ("g", "completed", opus, "2026-10-31T22:59:59+00:00"),
+            ("h", "running", opus, "2026-11-06T08:00:00+00:00"),
+            ("i", "completed", "not json", "2026-11-07T08:00:00+00:00"),
+        )
+        with manager.unit_of_work() as db:
+            for turn_id, status, receipt, created in rows:
+                db.execute(
+                    "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
+                    "status, receipt, created_at, updated_at) VALUES (?, ?, '{}', 'local', ?, ?, ?, ?)",
+                    (
+                        turn_id,
+                        turn_id,
+                        status,
+                        receipt if isinstance(receipt, str) else json.dumps(receipt),
+                        created,
+                        created,
+                    ),
+                )
+            result = monthly_turn_usage(db, date(2026, 11, 13), "Europe/Berlin")
+        self.assertEqual(
+            result,
+            {
+                "month": "2026-11",
+                "models": [
+                    {
+                        "model": "claude-opus",
+                        "answers": 2,
+                        "input_tokens": 3070,
+                        "cached_input_tokens": 1800,
+                        "output_tokens": 157,
+                    },
+                    {
+                        "model": "gpt-6-luna",
+                        "answers": 2,
+                        "input_tokens": 1030,
+                        "cached_input_tokens": 605,
+                        "output_tokens": 50,
+                    },
+                ],
+            },
+        )
+        with manager.unit_of_work() as db:
+            december = monthly_turn_usage(db, date(2026, 12, 1), "Europe/Berlin")
+        self.assertEqual(december["month"], "2026-12")
+        self.assertEqual([entry["answers"] for entry in december["models"]], [1])
 
 
 if __name__ == "__main__":

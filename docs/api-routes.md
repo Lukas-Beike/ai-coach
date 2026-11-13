@@ -111,7 +111,7 @@ handler's docstring. Regenerate it with
 | POST | `/api/routes/rename` | Session + CSRF | after access | Rename one recognised activity route; nothing is written remotely. |
 | PUT | `/api/settings/calendar-display` | Session + CSRF | before access | Update the calendar display settings. |
 | PUT | `/api/settings/credentials` | Session + CSRF | before access | Save or clear provider credentials in the encrypted database. |
-| PUT | `/api/settings/model` | Session + CSRF | before access | Select the Coach model. |
+| PUT | `/api/settings/model` | Session + CSRF | before access | Select the Coach model of one task. |
 | PUT | `/api/settings/service-tier` | Session + CSRF | before access | Select the OpenAI service tier. |
 | PUT | `/api/settings/thinking-level` | Session + CSRF | before access | Select the thinking level. |
 | GET | `/api/state/events` | Session | no | Authenticated state event stream. |
@@ -339,7 +339,7 @@ No body.
 Response: 200 with `generation` (chat generation, changes on a reset),
 `messages` (one page, oldest first, going back from the cursor; each has
 `id`, `role`, `content`, `created_at` and, when present, `client_turn_id`,
-`attachment_names`, `coach_changes`, `coach_failed`, `coach_request_kind`),
+`attachment_names`, `coach_changes`, `coach_failed`, `coach_request_kind`, `coach_model`),
 `proposed_actions` (this session's open Coach proposals, at most 30),
 `next_cursor` (null on the last page), `limit` and `search`.
 
@@ -1392,7 +1392,9 @@ Loopback verwenden." (`ANTHROPIC_BASE_URL` for the other field).
 
 ### `PUT /api/settings/model`
 
-Request: JSON body `{"model": string}`. `model` is `claude-opus`,
+Request: JSON body `{"model": string, "task": string}`. `task` is
+`conversation` (default), `planning` (the quick actions) or `nutrition`
+(label photo and product web search). `model` is `claude-opus`,
 `claude-sonnet`, `claude-haiku`, the model configured in the environment,
 or, with the default OpenAI base URL, `gpt-6-luna`, `gpt-6-sol`,
 `gpt-6.1-sol` or `gpt-6-astra`.
@@ -1401,7 +1403,7 @@ Response: 200 `{"model": string}`.
 
 Errors: 400 "Nicht unterstützte Modellauswahl."; 400 "Für dieses Modell
 fehlt der API-Schlüssel unter Mehr › Anbindungen." when the model's provider
-has no key.
+has no key; 400 "Unbekannte Coach-Aufgabe.".
 
 ### `PUT /api/settings/service-tier`
 
@@ -1417,12 +1419,14 @@ Errors: 400 "Nicht unterstützter Geschwindigkeitsmodus für dieses Modell.".
 
 ### `PUT /api/settings/thinking-level`
 
-Request: JSON body `{"thinking_level": string}`, case-insensitive: `low`,
-`medium` or `high`.
+Request: JSON body `{"thinking_level": string, "task": string}`; the level is
+case-insensitive: `low`, `medium` or `high`. `task` is
+optional, as for the model.
 
 Response: 200 `{"thinking_level": string}`.
 
-Errors: 400 "Nicht unterstütztes Thinking Level.".
+Errors: 400 "Nicht unterstütztes Thinking Level."; 400 "Unbekannte
+Coach-Aufgabe.".
 
 ### `GET /api/state/events`
 
@@ -1507,7 +1511,13 @@ bytes; 400 "Die Audioaufnahme wurde unvollständig übertragen."; 503
 Anbindungen hinterlegen."; 502 "OpenAI hat kein Transkript
 zurückgegeben." when the provider returns no text; 502 `network_error`,
 `http_error` or `client_error` when the OpenAI request fails ("OpenAI ist
-nicht erreichbar." and similar).
+nicht erreichbar." and similar). With `TRANSCRIPTION_BASE_URL` set, no key
+is required; 503 `not_configured` "Für den Transkriptionsserver fehlt
+TRANSCRIPTION_MODEL in der Konfiguration." without a model; 502 "Der
+Transkriptionsserver hat kein Transkript zurückgegeben." or "Der
+Transkriptionsserver ist nicht erreichbar." with the `provider_*` reasons;
+an HTTP error status gives "Anfrage an externen Dienst fehlgeschlagen
+(status).".
 
 ### `GET /api/wahoo/callback`
 

@@ -1,5 +1,8 @@
 # Frontend development instructions
 
+- Before custom JavaScript for dialogs, popovers, sheets, forms, transitions,
+  performance or accessibility, look up the native feature with
+  [pacecraft-modern-web](../.agents/skills/pacecraft-modern-web/SKILL.md).
 - Keep the client mobile-first and compatible with the existing plain
   JavaScript/PWA architecture. Do not introduce a framework or build step
   without an explicit request.

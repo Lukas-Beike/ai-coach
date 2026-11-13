@@ -8,6 +8,7 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 from backend import observability
+from backend.db import coach_store
 
 _STATUSES = frozenset(
     {"queued", "running", "completed", "partial", "failed", "cancelled"}
@@ -33,11 +34,7 @@ class CoachDiagnosticHistoryService:
     def history(self) -> list[dict[str, Any]]:
         """Return recent command evidence after credential redaction."""
         with self._database() as db:
-            rows = db.execute(
-                "SELECT client_turn_id, receipt, created_at, updated_at "
-                "FROM coach_commands "
-                "ORDER BY created_at DESC, client_turn_id DESC LIMIT 20"
-            ).fetchall()
+            rows = coach_store.command_history_rows(db)
         return [self._history_entry(row) for row in rows]
 
     def _history_entry(self, row: Any) -> dict[str, Any]:

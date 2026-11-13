@@ -47,8 +47,7 @@ from backend.sync.garmin_payload_metrics import garmin_payload_performance_metri
 # setUp re-apply the replacements for this module's tests only.
 _SERVER_HOOKS = (
     (provider_http.JsonHttpClient, "request"),
-    (server.COACH_CONVERSATION, "provision_service"),
-    (server.COACH_CONVERSATION, "response_transport"),
+    (server.APP, "coach_conversation"),
     (server, "initialise_database"),
     (server.HTTP_API, "request_handler_class"),
     (http_auth.RATE_LIMITER, "allow"),
@@ -81,8 +80,8 @@ def _canonical_details(db, snapshot):
     activities = {row["id"]: row for row in snapshot["recent_activities"]}
     details = []
     for activity_id, activity in activities.items():
-        sets = detail_sets_for(db, "intervals", activity_id)
-        analysis = analysis_row_for_record(db, "intervals", activity_id)
+        sets = detail_sets_for(db, "wahoo", activity_id)
+        analysis = analysis_row_for_record(db, "wahoo", activity_id)
         streams = {
             _LEGACY_STREAM_NAMES.get(channel, channel.value): list(values)
             for item in sets

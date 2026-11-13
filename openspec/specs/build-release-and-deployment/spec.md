@@ -337,7 +337,7 @@ Dependabot SHALL propose npm, pip, Docker and GitHub Actions updates against `de
 
 #### Scenario: Update cadence
 - **WHEN** Dependabot runs
-- **THEN** npm, pip and Docker are checked daily and GitHub Actions weekly, commit prefixes are `build` (`ci` for Actions), and at most 10 pip pull requests are open
+- **THEN** npm, pip and Docker are checked daily and GitHub Actions weekly, commit prefixes are `build` (`ci` for Actions), and at most 10 pip pull requests are open; the only ignored dependencies are `graphifyy` and `pywin32`, the direct Graphify requirements, bumped by hand on Windows because a Linux lock drops their Windows-only pins, and the npm agent tool `modern-web-guidance`, whose pin and hash are raised by hand
 
 #### Scenario: Auto-merge scope
 - **WHEN** a pull request is opened, reopened or updated

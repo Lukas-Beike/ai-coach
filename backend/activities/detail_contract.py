@@ -161,19 +161,16 @@ def _measured_key(record: ActivityRecord) -> tuple[int, int, int, float, str]:
     return _own_rank(record), rank, origin, retrieved, activity_id
 
 
-# The provider where the athlete rates a session first; Intervals.icu copies it.
-_RATING_RANK: Final[Mapping[ProviderId, int]] = {
-    ProviderId.GARMIN: 0,
-    ProviderId.INTERVALS: 1,
-}
+# The provider where the athlete rates a session first.
+_RATING_RANK: Final[Mapping[ProviderId, int]] = {ProviderId.GARMIN: 0}
 _RATING_KEYS: Final = ("rpe", "feel")
 
 
 def rating_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
-    """Order records for the athlete's provider ratings: Garmin, Intervals.icu, rest.
+    """Order records for the athlete's provider ratings: Garmin, then the rest.
 
-    The athlete rates on the watch; Intervals.icu imports that rating. Within one
-    provider the derived order (newest retrieval, id) decides.
+    The athlete rates on the watch. Within one provider the derived order
+    (newest retrieval, id) decides.
     """
 
     def rank(record: ActivityRecord) -> int:

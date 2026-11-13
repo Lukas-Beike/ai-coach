@@ -68,6 +68,11 @@ propose its refresh as a separate task.
    Check the current owner before proposing edits or a new skill. Prefer deleting
    a redundant rule, narrowing a trigger, or correcting one decision over adding
    a universal checklist for a single occurrence.
+   For each finding, check in the local transcript or tool log whether the skill
+   that should have applied was loaded before the step went wrong (idea from
+   Superpowers `diagnosing-superpowers`; see [THIRD_PARTY.md](../THIRD_PARTY.md)).
+   A skill that existed but was not loaded is a description or trigger finding
+   for that skill, not a new rule.
 3. **Application behavior:** Trace observed symptoms and missed acceptance criteria
    into the actual owning flow and affected callers/consumers. Look for related
    defects suggested by the evidence: incomplete durable effects, source/freshness

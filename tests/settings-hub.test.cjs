@@ -91,6 +91,14 @@ test("long goals are cut for the one-line summary", () => {
   assert.ok(summaries.profileGoalsSummary.endsWith("…"));
 });
 
+test("the Intervals.icu detail names the last export, also one that was no library push", () => {
+  const { intervalsConnectionDetail } = extractFunctions("views.js", ["intervalsConnectionDetail"], { formatTime: (value) => `um ${value}` });
+  const base = { configured: true, library_sync: { last_sync_at: null, state: {} } };
+  assert.equal(intervalsConnectionDetail({ ...base, state: "connected", last_used_at: "T1" }), "Letzte Aktualisierung: um T1");
+  assert.equal(intervalsConnectionDetail({ ...base, state: "configured" }), "Noch nicht getestet");
+  assert.equal(intervalsConnectionDetail({ ...base, state: "error", last_error: null }), "Letzter Export fehlgeschlagen");
+});
+
 test("the Coach model list groups OpenAI and Claude and names the resolved Claude model", () => {
   const { modelOptionLabel, modelNoticeText } = extractFunctions("views.js", ["modelOptionLabel", "modelNoticeText"]);
   assert.equal(modelOptionLabel({ id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai" }), "GPT-6 Luna");
@@ -114,9 +122,21 @@ test("the chat needs the selected model's key; before a load it stays usable", (
   assert.equal(coachConfigured({ openai: false }), false);
 });
 
-test("the microphone needs the OpenAI key whichever model answers", () => {
+test("a quick action needs the planning model's key, the morning check-in the chat's (#2639)", () => {
+  const state = { data: { model: { tasks: { planning: { ready: false } } } } };
+  const { coachConfigured } = extractFunctions("coach.js", ["coachConfigured"], { state });
+  const chatReady = { coach: true };
+  assert.equal(coachConfigured(chatReady, "plan_week"), false);
+  assert.equal(coachConfigured(chatReady, "morning_checkin"), true);
+  assert.equal(coachConfigured(chatReady), true);
+  state.data.model.tasks.planning.ready = true;
+  assert.equal(coachConfigured({ coach: false }, "session_analysis"), true);
+  assert.equal(coachConfigured({ coach: false }), false);
+});
+
+test("the microphone needs a transcription endpoint whichever model answers", () => {
   const button = { disabled: false, classList: { toggle() {} }, setAttribute() {}, title: "", innerHTML: "" };
-  const state = { data: { messages: [], configured: { openai: false, coach: true } }, voiceTranscribing: false };
+  const state = { data: { messages: [], configured: { openai: true, transcription: false, coach: true } }, voiceTranscribing: false };
   const { updateVoiceButton } = extractFunctions("coach.js", ["voiceIsRecording", "setVoiceButtonIcon", "updateVoiceButton"], {
     $: () => button,
     state,
@@ -124,7 +144,7 @@ test("the microphone needs the OpenAI key whichever model answers", () => {
   });
   updateVoiceButton();
   assert.equal(button.disabled, true);
-  state.data.configured.openai = true;
+  state.data.configured.transcription = true;
   updateVoiceButton();
   assert.equal(button.disabled, false);
 });

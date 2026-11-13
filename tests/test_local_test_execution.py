@@ -79,6 +79,7 @@ class RunnerEvidenceTests(unittest.TestCase):
         code, result = self.run_fixture(Skipped)
         self.assertEqual(code, 0)
         self.assertEqual(result["skips"], 1)
+        self.assertEqual(result["skip_reasons"], {"synthetic skip": 1})
         self.assertEqual(result["tests_run"], 1)
         self.assertEqual(result["executed_ids"], result["selected_ids"])
 
@@ -86,7 +87,12 @@ class RunnerEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "durations.json"
             path.write_text("existing")
-            for selection in (["--total", "2"], ["--suite", "container"], ["--list"]):
+            for selection in (
+                ["--total", "2"],
+                ["--suite", "container"],
+                ["--list"],
+                ["--module", "test_db_manager"],
+            ):
                 with (
                     mock.patch.object(
                         sys,
@@ -98,6 +104,28 @@ class RunnerEvidenceTests(unittest.TestCase):
                 ):
                     run_tests.parse_args()
                 self.assertEqual(path.read_text(), "existing")
+
+    def test_module_selection_loads_only_the_named_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            argv = ["runner", "--module", "test_changed_tests", "--list"]
+            with (
+                mock.patch.object(sys, "argv", [*argv, "--result-json", str(path)]),
+                mock.patch.object(
+                    run_tests, "discover_tests", side_effect=AssertionError
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(run_tests.main(), 0)
+            result = json.loads(path.read_text())
+        self.assertEqual(result["modules"], ["test_changed_tests"])
+        self.assertTrue(result["selected_ids"])
+        self.assertTrue(
+            all(
+                item.startswith("test_changed_tests.")
+                for item in result["selected_ids"]
+            )
+        )
 
     def test_empty_list_fails_with_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +203,23 @@ class SupervisorTests(unittest.TestCase):
         for partial in (
             ["--record-durations-directory", str(self.root)],
             ["--coverage-wheel", str(wheel)],
+            # A module selection is never the complete suite (#2545).
+            [
+                "--suite",
+                "all",
+                "--module",
+                "test_db_manager",
+                "--coverage-wheel",
+                str(wheel),
+            ],
+            [
+                "--suite",
+                "all",
+                "--module",
+                "test_db_manager",
+                "--record-durations-directory",
+                str(self.root),
+            ],
         ):
             with (
                 self.subTest(partial=partial[0]),
@@ -224,6 +269,12 @@ class SupervisorTests(unittest.TestCase):
     def test_complete_static_inputs_and_built_application_mounts(self):
         for relative in (
             "backend",
+            "openspec",
+            ".gitattributes",
+            ".gitignore",
+            ".dockerignore",
+            ".githooks",
+            "garmin-fixture.example.json",
             "requirements-graphify.in",
             "requirements-graphify.txt",
             "run-server.ps1",
@@ -602,9 +653,42 @@ class SupervisorTests(unittest.TestCase):
             {"container"},
         )
         self.assertTrue(all("coverage" not in command for command in tests))
+        self.assertTrue(all("--module" not in command for command in [*lists, *tests]))
         self.assertEqual(
             [shard["status"] for shard in summary["shards"]], ["passed", "passed"]
         )
+
+    def test_module_selection_reaches_every_list_and_test_command(self):
+        # Focused runs keep the mounts and the shard partition check (#2545);
+        # without --suite they select from every module.
+        args = ["--results-dir", str(self.root), "--workers", "2"]
+        modules = ["--module", "test_db_manager", "--module", "test_config"]
+        self.assertEqual(local.parse_args([*args, *modules]).suite, "all")
+        for name in ("tests/test_db_manager.py", "test_db_manager.py", "test_nope"):
+            with (
+                self.subTest(name=name),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                local.parse_args([*args, "--module", name])
+        # The mocked plans describe the container suite.
+        self.args = local.parse_args([*args, *modules, "--suite", "container"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.owner = local.Supervisor(self.args)
+        code, spawned, summary = self.run_mocked()
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["selection_mode"], "modules")
+        self.assertEqual(summary["modules"], ["test_db_manager", "test_config"])
+        commands = [
+            command for command, name in spawned if name.startswith(("list-", "test-"))
+        ]
+        self.assertEqual(len(commands), 4)
+        for command in commands:
+            runner = command[command.index("/app/tests/run_tests.py") :]
+            self.assertEqual(
+                [runner[i + 1] for i, part in enumerate(runner) if part == "--module"],
+                ["test_db_manager", "test_config"],
+            )
 
     def test_nonzero_missing_and_suite_error_cannot_pass(self):
         for failure in ("nonzero", "missing", "suite_error"):

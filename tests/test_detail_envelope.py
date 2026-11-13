@@ -3,13 +3,15 @@
 import tempfile
 import unittest
 from datetime import date
+from types import SimpleNamespace
 
-from activity_row_support import NoObservations, SnapshotActivityRows, StoredCoverage
+from activity_row_support import ServedActivityReads
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.canonical.vocabulary import ProviderId
-from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
+from backend.performance.wiring import build_activity_reads
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 TODAY = date(2026, 9, 20)
 ENVELOPE_KEYS = ("activity_feedback", "equipment", "activity_validation")
@@ -76,15 +78,21 @@ class DetailEnvelopeTests(unittest.TestCase):
                 for reference in ("act_s", "act_g", "act_w")
             ]
         )
-        self.assembly = ActivityReadAssembly(
-            lambda: self.manager,
-            ActivityReadSources(
-                lambda: SnapshotActivityRows(snapshots),
-                observation_reader=NoObservations,
-                coverage=lambda: StoredCoverage(None),
+        athlete = SimpleNamespace(
+            activity_feedback=lambda: feedback,
+            profile=lambda: SimpleNamespace(get_from_db=lambda _db: {}),
+            equipment=lambda: SimpleNamespace(
+                read=lambda *, activity_id: self.read_equipment(activity_id)
             ),
-            lambda: feedback,
-            self.read_equipment,
+        )
+        ctx = SimpleNamespace(
+            database=lambda: self.manager,
+            athlete=athlete,
+            canonical_read=ServedActivityReads(snapshots),
+        )
+        self.assembly = build_activity_reads(
+            ctx,
+            session_activities=CanonicalTableReader().session_activities,
             refreshable_providers=lambda: self.configured,
         )
 

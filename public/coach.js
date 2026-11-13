@@ -253,7 +253,6 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   const input = $("#messageInput");
   input.value = "";
   state.chatDraftDirty = false;
-  input.style.height = "auto";
   renderMessages(state.data?.messages || [], true);
   updateChatControls();
   return true;
@@ -325,7 +324,7 @@ function rejectChatStreamResponse(error, context) {
     renderChatAttachments();
     const input = $("#messageInput");
     if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: "Bitte erneut anmelden." });
-    else { input.value = message; resizeChatInput(input); }
+    else input.value = message;
     state.chatDraftDirty = true;
   }
   throw error;
@@ -495,7 +494,6 @@ async function recoverChatRequestFailure(error, context) {
     } else {
       state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
       input.value = message;
-      resizeChatInput(input);
       state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
       renderChatAttachments();
     }
@@ -670,7 +668,7 @@ function setupQuickActionMenu(button = $("#quickAnalysisButton"), menu = $("#qui
 
 async function sendMessage(event) {
   event.preventDefault();
-  if (!coachConfigured(state.data?.configured)) {
+  if (!coachConfigured(state.data?.configured, $("#messageInput")?.dataset.requestKind)) {
     toast("Für das gewählte Coach-Modell fehlt der API-Schlüssel unter Mehr › Anbindungen.", true);
     return;
   }
@@ -693,7 +691,6 @@ async function sendMessage(event) {
   input.value = "";
   delete input.dataset.requestKind;
   state.chatDraftDirty = false;
-  input.style.height = "auto";
   updateChatControls();
   updateVoiceButton();
   try {
@@ -799,8 +796,8 @@ function updateVoiceButton() {
   const recording = voiceIsRecording();
   const transcribing = state.voiceTranscribing;
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
-  // Transcription always uses OpenAI, whichever model answers.
-  const voiceConfigured = Boolean(state.data?.configured?.openai ?? true);
+  // Transcription uses its own endpoint (OpenAI by default), whichever model answers.
+  const voiceConfigured = Boolean(state.data?.configured?.transcription ?? true);
   // Recording stays available while the Coach works; the transcript is queued like a typed follow-up.
   button.disabled = !chatReady || transcribing || (!voiceConfigured && !recording);
   button.classList.toggle("recording", recording);
@@ -822,13 +819,16 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
-// The selected model's provider has its key (before the first load: assume yes).
-function coachConfigured(configured) {
+// The provider of the model that answers has its key (before the first load:
+// assume yes). Every quick-action kind but the morning check-in runs on the
+// planning model (#2639), so it needs that task's key instead.
+function coachConfigured(configured, requestKind = null) {
+  if (requestKind && requestKind !== "morning_checkin") return state.data?.model?.tasks?.planning?.ready !== false;
   return !configured || Boolean(configured.coach ?? configured.openai);
 }
 
 function chatControlState(input) {
-  const aiConfigured = coachConfigured(state.data?.configured);
+  const aiConfigured = coachConfigured(state.data?.configured, input?.dataset.requestKind);
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages) && aiConfigured);
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;
@@ -950,7 +950,7 @@ async function transcribeVoice(blob) {
     const result = await apiAudio("/api/transcribe", blob);
     if (generation !== state.sessionGeneration) return;
     const transcript = String(result.transcript || "").trim();
-    if (!transcript) throw new Error("OpenAI hat kein Transkript zurückgegeben.");
+    if (!transcript) throw new Error("Kein Transkript erhalten.");
     const input = $("#messageInput");
     const current = input.value.trim();
     input.value = current ? `${current}\n${transcript}` : transcript;
@@ -1720,7 +1720,6 @@ function restoreRejectedMessage(message) {
   const input = $("#messageInput");
   if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
   input.value = message.content;
-  resizeChatInput(input);
   state.chatAttachments = message.attachments || [];
   renderChatAttachments();
   state.chatDraftDirty = true;
@@ -1757,6 +1756,10 @@ function renderMessageNode(message, latest = false) {
   appendMessageRetry(node, message);
   appendFailedTurnRetry(node, message, latest);
   appendMessageChanges(node, message);
+  if (message.role === "assistant" && message.coach_model) {
+    const option = (state.data?.model?.options || []).find((entry) => entry.id === message.coach_model);
+    node.append(h("small", "message-model", option?.label || message.coach_model));
+  }
   const actions = h("div", "message-actions");
   const copy = messageActionButton("copy", "Nachricht kopieren");
   copy.addEventListener("click", async () => {
@@ -1799,6 +1802,20 @@ function appendMessageChanges(node, message) {
   appendPlanNotes(node, changes.plan_check_notes);
 }
 
+// One entry per known finding and severity, its dates merged (#2617); a
+// distribution note covers a week, named by its first planned day.
+function groupPlanNotes(planNotes, labels) {
+  const groups = new Map();
+  for (const note of Array.isArray(planNotes) ? planNotes : []) {
+    if (!labels[note?.code]) continue;
+    const key = `${note.code}|${note.severity}`;
+    if (!groups.has(key)) groups.set(key, { code: note.code, severity: note.severity, days: [] });
+    const days = Array.isArray(note.dates) ? note.dates : [];
+    groups.get(key).days.push(...(note.code === "intensity_distribution" ? days.slice(0, 1) : days));
+  }
+  return groups.values();
+}
+
 function appendPlanNotes(node, planNotes) {
   const planNoteLabels = {
     run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
@@ -1809,18 +1826,19 @@ function appendPlanNotes(node, planNotes) {
     strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
     missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
     illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
-    intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
+    intensity_distribution: ["Intensitätsverteilung", "Praxisbasierte Referenzbereiche"],
     leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
     all_day_event: ["Ganztägiger Termin", "Kalender; weicher Hinweis"],
   };
-  for (const note of Array.isArray(planNotes) ? planNotes : []) {
-    const label = planNoteLabels[note?.code];
-    if (!label) continue;
-    const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
-    const dateLabel = dates ? " · " + dates : "";
-    node.append(h("div", `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`, `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`));
+  for (const { code, severity, days } of groupPlanNotes(planNotes, planNoteLabels)) {
+    const label = planNoteLabels[code];
+    const dates = [...new Set(days)].sort((a, b) => a.localeCompare(b)).map((day) => AppFormat.date(day)).filter(Boolean);
+    let weeks = "";
+    if (code === "intensity_distribution") weeks = dates.length > 1 ? "Wochen ab " : "Woche ab ";
+    const dateLabel = dates.length ? ` · ${weeks}${dates.join(", ")}` : "";
+    node.append(h("div", `message-plan-note${severity === "warning" ? " is-warning" : ""}`, `${severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`));
   }
 }
 
@@ -1879,7 +1897,6 @@ function resendChatText(text, requestKind = null) {
   else delete input.dataset.requestKind;
   state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
   renderChatAttachments();
-  resizeChatInput(input);
   state.chatDraftDirty = Boolean(draft.trim()) || state.chatAttachments.length > 0;
   updateChatControls();
 }
@@ -1904,7 +1921,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null, Boolean(message.coach_failed)]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null, Boolean(message.coach_failed), message.coach_model || null]),
     appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
     state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,
@@ -2379,15 +2396,6 @@ function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposi
   return shiftKey ? "newline" : "send";
 }
 
-// Grows the draft up to the CSS max-height; the scrollbar appears only once the
-// content no longer fits.
-function resizeChatInput(input) {
-  input.style.overflowY = "hidden";
-  input.style.height = "auto";
-  input.style.height = `${input.scrollHeight}px`;
-  if (input.scrollHeight > input.clientHeight + 1) input.style.overflowY = "auto";
-}
-
 function setupCoachEvents() {
   publishComposerHeight();
   $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");
@@ -2452,7 +2460,6 @@ function setupCoachEvents() {
     // A typed edit makes the draft the athlete's own request, not a quick action.
     if (event.isTrusted) delete event.target.dataset.requestKind;
     state.chatDraftDirty = Boolean(event.target.value.trim());
-    resizeChatInput(event.target);
     updateChatControls();
     if (keepLatestVisible) scrollChatToLatest();
   });

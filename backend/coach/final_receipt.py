@@ -10,9 +10,11 @@ from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.providers.model_seam import ModelTurn
+from backend.providers.state import turn_usage
 from backend.runtime.events import StateEventBuffer
 
 
@@ -71,6 +73,8 @@ class CoachFinalReceiptService:
             "change_summary": change_summary(command_receipts),
         }
         final_receipt.pop("pending_tool_calls", None)
+        if (usage := turn_usage()) is not None:
+            final_receipt["usage"] = usage
         return final_receipt
 
     def persist(
@@ -81,10 +85,9 @@ class CoachFinalReceiptService:
         command_receipts: list[dict[str, Any]],
     ) -> dict[str, Any]:
         with self._database_lock, self._database_manager.unit_of_work() as db:
-            current_command = db.execute(
-                "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            current_command = coach_store.command_row(
+                db, client_turn_id, "status, receipt"
+            )
             if current_command and current_command["status"] == "completed":
                 return command_receipt(current_command["receipt"])
 
@@ -124,22 +127,18 @@ class CoachFinalReceiptService:
                 "last_coach_ai_provider",
                 str(final_receipt.get("ai_provider") or AI_PROVIDER),
             )
-            db.execute(
-                "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
-                (
-                    json.dumps(
-                        compact_receipt(
-                            {
-                                key: value
-                                for key, value in final_receipt.items()
-                                if key != "text"
-                            }
-                        ),
-                        ensure_ascii=False,
-                    ),
-                    self._now(),
-                    client_turn_id,
+            coach_store.write_command(
+                db,
+                client_turn_id,
+                compact_receipt(
+                    {
+                        key: value
+                        for key, value in final_receipt.items()
+                        if key != "text"
+                    }
                 ),
+                self._now(),
+                status="completed",
             )
         final_receipt.pop("text", None)
         self._events.publish(

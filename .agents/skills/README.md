@@ -103,6 +103,7 @@ output never echoes text that can quote a file.
 | [pacecraft-prod-logs](pacecraft-prod-logs/SKILL.md) | Warning and error counts by event name, never log text |
 | [pacecraft-prod-guards](pacecraft-prod-guards/SKILL.md) | 401 without session, 403 without CSRF token, TLS expiry |
 | [pacecraft-ui-walk](pacecraft-ui-walk/SKILL.md) | Headless phone and desktop walk with screenshots and load times |
+| [pacecraft-modern-web](pacecraft-modern-web/SKILL.md) | Pinned, telemetry-free modern-web-guidance search and retrieve for frontend work |
 
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by

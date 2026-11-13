@@ -36,6 +36,7 @@ from backend.canonical.vocabulary import (
 from backend.db.activity_detail_store import replace_detail_set
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
+from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import activity_equipment
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
@@ -136,12 +137,6 @@ def _detail_service(
     )
 
 
-def _intervals_entry(detail: dict[str, Any]) -> dict[str, Any]:
-    (entry,) = detail["detail_data"]["providers"]
-    assert entry["provider"] == "intervals", entry
-    return entry
-
-
 def _activity(activity_id: Any, start: str = DAY, **fields: Any) -> dict[str, Any]:
     return {
         "id": activity_id,
@@ -238,15 +233,17 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             )
 
     def test_intervals_detail_is_never_served(self) -> None:
-        # Athlete decision 2026-11-07 (#1685): no Intervals.icu fallback, so a stored
-        # copy stays unread.
+        # Athlete decision 2026-11-07 (#1685): no Intervals.icu fallback. A session
+        # of a stored copy alone is not served at all (#2148); the copy stays stored.
         self._save_streams()
-        result = self._detail([self.RAW])
-        entry = _intervals_entry(result)
-        self.assertEqual(([], None), (entry["kinds"], entry["load_error"]))
-        self.assertFalse(entry["refreshable"])
-        self.assertIsNone(result["analysis"])
-        self.assertIsNone(result["streams"])
+        with self.assertRaises(AppError) as raised:
+            self._detail([self.RAW])
+        self.assertEqual(404, raised.exception.status)
+        with cast(DatabaseManager, self.database).reader() as db:
+            stored = db.execute(
+                "SELECT COUNT(*) FROM activity_records WHERE provider = 'intervals'"
+            ).fetchone()[0]
+        self.assertEqual(1, stored)
 
 
 class ActivityEquipmentTests(unittest.TestCase):

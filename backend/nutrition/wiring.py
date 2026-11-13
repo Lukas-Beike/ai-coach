@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from backend.app.context import AppContext
 from backend.db.repositories import (
@@ -54,7 +54,14 @@ def build_nutrition(ctx: AppContext) -> NutritionServices:
     templates = NutritionTemplateRepository()
 
     def complete(request: ModelRequest) -> ModelTurn:
-        return ctx.model_transport.complete(request)
+        # A fixed effort (the web search) stays; otherwise the Nutrition choice.
+        effort = request.reasoning_effort or ctx.settings.selected_thinking_level(
+            "nutrition"
+        )
+        return ctx.model_transport.complete(replace(request, reasoning_effort=effort))
+
+    def nutrition_model() -> str:
+        return ctx.settings.selected_model("nutrition")
 
     def meal_library_service() -> NutritionMealLibraryService:
         return NutritionMealLibraryService(
@@ -64,12 +71,12 @@ def build_nutrition(ctx: AppContext) -> NutritionServices:
             local_now=ctx.clock.now,
             food_database=food_database,
             photo_extractor=NutritionPhotoExtractionService(
-                selected_model=ctx.settings.selected_model, complete=complete
+                selected_model=nutrition_model, complete=complete
             ),
             product_repository=products,
             template_repository=templates,
             web_search=NutritionWebSearchService(
-                selected_model=ctx.settings.selected_model, complete=complete
+                selected_model=nutrition_model, complete=complete
             ),
         )
 

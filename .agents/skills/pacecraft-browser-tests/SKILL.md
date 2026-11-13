@@ -28,3 +28,7 @@ python scripts/run_browser_tests.py --project all --keep-going
   `test-results/browser-runs/`) or the host ran out of resources; the output says
   which and how to rerun. Report what was not run.
 - Reports and traces can hold fixture data: never publish them.
+- Long runs: the complete selection takes about 24 min with `--jobs 1` and
+  15 min with `--jobs 2` (#2149); one project with `--jobs 2` took 15-19 min on
+  a loaded host (#2515). Start such a run with the long-run rule of
+  [validation](../pacecraft-validation/SKILL.md).

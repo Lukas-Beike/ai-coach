@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -291,6 +292,17 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
 
 
 @contextmanager
+def athlete_checkin(server, service: Any):
+    """Serve the given check-in service from the athlete data, as the context reads it."""
+    athlete = replace(server.ATHLETE_DATA, checkin=lambda: service)
+    with (
+        patch.object(server, "ATHLETE_DATA", athlete),
+        patch.object(server.APP, "athlete", athlete),
+    ):
+        yield
+
+
+@contextmanager
 def canonical_backfill_stopped(server, timeout: float = 10.0):
     """Stop and join the backfill thread a real restore starts before cleanup."""
     try:
@@ -362,6 +374,26 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
     complete_canonical_backfill(server)
 
 
+def store_garmin_activities(server, activities: list[dict[str, Any]]) -> None:
+    """Ingest Garmin activity rows into the canonical tables, so reads serve them.
+
+    Stands in for a Garmin sync of those activities: the rows are written as a
+    fetched payload with their coverage and the backfill runs to completion.
+    """
+    from zoneinfo import ZoneInfo
+
+    from backend.athlete.profile import timezone_name
+    from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+
+    zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
+    payload = {"synced_at": runtime_clock.utc_now(), "activities": activities}
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        GarminSnapshotWriter(server.KEY_VALUE_REPOSITORY, lambda: zone).write(
+            db, payload
+        )
+    complete_canonical_backfill(server)
+
+
 def complete_canonical_backfill(server) -> None:
     """Run the canonical backfill to completion, so reads come from the tables."""
     backfill = server.CANONICAL_BACKFILL.status_reader
@@ -379,7 +411,7 @@ def create_test_session(server) -> str:
     from backend.http_api.auth import SESSION_TTL_SECONDS
 
     token = f"session-{uuid.uuid4().hex}"
-    now = server.time.time()
+    now = time.time()
     auth = server.session_auth_service()
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(

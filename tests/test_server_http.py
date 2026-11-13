@@ -7,6 +7,7 @@ import queue
 import re
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import replace
 from datetime import timedelta
@@ -26,7 +27,7 @@ from server_test_support import (
     create_test_session,
     server,
 )
-from support import dispatch_route, store_canonical_snapshot
+from support import dispatch_route, store_garmin_activities
 
 from backend.coach import streams as coach_streams
 from backend.errors import AppError, ClientDisconnected, public_error_contract
@@ -546,7 +547,7 @@ class ServerHttpTests(ServerTestCase):
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE sessions SET expires_at=? WHERE token_hash=?",
-                (server.time.time() - 1, auth.session_token_hash(token)),
+                (time.time() - 1, auth.session_token_hash(token)),
             )
         self.assertIsNone(auth.authenticated_session(Handler(f"ic_session={token}")))
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -565,7 +566,7 @@ class ServerHttpTests(ServerTestCase):
                     (f"expired-{index}", f"csrf-{index}", 0, "now", "now"),
                 )
             auth = server.session_auth_service()
-            deleted = auth.cleanup_expired_sessions(db, server.time.time(), force=True)
+            deleted = auth.cleanup_expired_sessions(db, time.time(), force=True)
             remaining = db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()[
                 "count"
             ]
@@ -684,38 +685,32 @@ class ServerHttpTests(ServerTestCase):
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()
-        store_canonical_snapshot(
+        store_garmin_activities(
             server,
-            {
-                "synced_at": "now",
-                "athlete": {},
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-                "recent_activities": [
-                    {
-                        "id": f"activity-{index}",
-                        "name": f"Activity {index}",
-                        "type": "Ride",
-                        "start_date_local": f"{today.isoformat()}T08:0{index}:00",
-                    }
-                    for index in range(5)
-                ]
-                + [
-                    {
-                        "id": "old",
-                        "name": "Old",
-                        "type": "Ride",
-                        "start_date_local": "2000-01-01T08:00:00",
-                    }
-                ],
-            },
+            [
+                {
+                    "activityId": f"activity-{index}",
+                    "activityName": f"Activity {index}",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": f"{today.isoformat()} 08:0{index}:00",
+                }
+                for index in range(5)
+            ]
+            + [
+                {
+                    "activityId": "old",
+                    "activityName": "Old",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": "2000-01-01 08:00:00",
+                }
+            ],
         )
         service = server.ACTIVITY_READS.activity_read()
         first = service.page(limit=2, days=1, today=today)
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)
         ids = [
-            item["record_ids"]["intervals"]
+            item["record_ids"]["garmin"]
             for page in (first, second, third)
             for item in page["activities"]
         ]
@@ -726,7 +721,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
-            server.COACH_CONVERSATION.message_service().add(
+            server.APP.coach_conversation.message_service().add(
                 "user", f"searchable {index}"
             )
         page_service = server.HTTP_API.chat_history_page_service()
@@ -756,7 +751,7 @@ class ServerHttpTests(ServerTestCase):
             "literal backslashmarker",
         )
         for content in contents:
-            server.COACH_CONVERSATION.message_service().add("user", content)
+            server.APP.coach_conversation.message_service().add("user", content)
 
         page_service = server.HTTP_API.chat_history_page_service()
         for search_term, expected in (
@@ -859,7 +854,9 @@ class ServerHttpTests(ServerTestCase):
             },
         )
         for index in range(500):
-            server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
+            server.APP.coach_conversation.message_service().add(
+                "user", f"message {index}"
+            )
         bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),
@@ -904,6 +901,7 @@ class ServerHttpTests(ServerTestCase):
                 "wahoo",
                 "credentials",
                 "usage",
+                "usage_month",
                 "provider_status",
                 "threshold_warnings",
             ],
@@ -1670,21 +1668,17 @@ class ServerHttpTests(ServerTestCase):
                 "duration_minutes": 30,
             }
         )
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [
+        store_garmin_activities(
+            server,
+            [
                 {
-                    "id": "run-1",
-                    "name": "Morgenlauf",
-                    "type": "Run",
-                    "start_date_local": "2026-08-25T07:00:00",
+                    "activityId": "run-1",
+                    "activityName": "Morgenlauf",
+                    "activityType": {"typeKey": "running"},
+                    "startTimeLocal": "2026-08-25 07:00:00",
                 }
             ],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        store_canonical_snapshot(server, snapshot)
+        )
         state = server.PUBLIC_STATE.bootstrap_service().read()
         state["activities"] = server.ACTIVITY_READS.activity_read().page(
             today=server.ATHLETE_CLOCK.now().date()
@@ -1779,6 +1773,59 @@ class ServerHttpTests(ServerTestCase):
             state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00"
         )
         self.assertIsNone(state["last_error"])
+
+    def test_intervals_public_state_follows_the_output_stamps(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        keys = (
+            "intervals_last_output_ok_at",
+            "intervals_last_output_failed_at",
+            "last_library_push_at",
+            "last_library_sync_error",
+        )
+
+        def clear():
+            for key in keys:
+                server.key_value_service().set(key, "")
+            with server.database_manager().unit_of_work() as db:
+                db.execute("DELETE FROM sync_jobs WHERE requested_by = 'test'")
+
+        def read_state(**stamps):
+            for key, value in stamps.items():
+                server.key_value_service().set(f"intervals_last_output_{key}_at", value)
+            with patch.object(server, "CONFIG", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        clear()
+        self.addCleanup(clear)
+        # A failed job of the retired ingest says nothing about the output.
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO sync_jobs(id, provider, type, status, payload, "
+                "requested_by, finished_at, created_at, updated_at) "
+                "VALUES ('old-ingest', 'intervals', 'refresh', 'failed', '{}', "
+                "'test', '2026-09-05T08:00:00+00:00', '2026-09-05T08:00:00+00:00', "
+                "'2026-09-05T08:00:00+00:00')"
+            )
+        self.assertEqual(read_state()["state"], "configured")
+        # A plan export stamps the card; a success from months ago stays connected.
+        state = read_state(ok="2026-01-01T08:00:00+00:00")
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_used_at"], "2026-01-01T08:00:00+00:00")
+        self.assertIsNone(state["library_sync"]["last_sync_at"])
+        self.assertEqual(
+            read_state(failed="2026-09-02T08:00:00+00:00")["state"], "error"
+        )
+        self.assertEqual(
+            read_state(ok="2026-09-03T08:00:00+00:00")["state"], "connected"
+        )
+        # An old library error text never outranks a later success.
+        server.key_value_service().set("last_library_sync_error", "alt")
+        self.assertEqual(read_state()["state"], "connected")
+        # An unreadable stamp is ignored instead of breaking the bootstrap.
+        server.key_value_service().set("last_library_sync_error", "")
+        self.assertEqual(
+            read_state(ok="kaputt", failed="kaputt")["state"], "configured"
+        )
 
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
@@ -2029,7 +2076,7 @@ class ServerHttpTests(ServerTestCase):
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.COACH_CONVERSATION.response_transport().request(request)
+            result = server.APP.coach_conversation.response_transport().request(request)
         self.assertEqual(result.text, "ok")
         responses.assert_called_once_with(request_payload(request))
 
@@ -2044,7 +2091,7 @@ class ServerHttpTests(ServerTestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.COACH_CONVERSATION.response_transport().stream_request(
+            result = server.APP.coach_conversation.response_transport().stream_request(
                 request, on_delta, cancel_event, on_response_id
             )
 

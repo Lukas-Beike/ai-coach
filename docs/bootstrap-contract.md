@@ -51,20 +51,20 @@ when its marker changes. Each marker is built from local durable state
 | `checkins` | list | always empty here; its area route loads it |
 | `coach_quick_actions` | object | `adjust_plan`, `analyze_latest_activity`, `horizon_days`, `morning_checkin`, `plan_blockers` |
 | `competitions` | list |  |
-| `configured` | object | `anthropic`, `coach`, `external_calendar`, `intervals`, `openai`, `weather` |
+| `configured` | object | `anthropic`, `coach`, `external_calendar`, `intervals`, `openai`, `transcription`, `weather` |
 | `credentials` | object | `anthropic_configured`, `fields`, `garmin_connected`, `garmin_connection`, `garmin_connection_source`, `intervals_configured`, `openai_configured`, `wahoo_configured`, `yazio_configured` |
 | `daily_planning_context` | list | always empty here; its area route loads it |
 | `diagnostic_capture` | object | `active`, `bytes`, `entries`, `maximum_age_days`, `maximum_bytes`, `maximum_entries`, `maximum_entry_bytes` |
 | `external_calendar` | object | `configured`, `events`, `last_error`, `last_sync_at`, `provider`, `read_only`, `running`, `skipped_events`, `window_days` |
 | `garmin` | object | `activities`, `available`, `can_write_workouts`, `configured`, `has_estimated_run_times`, `has_hrv`, `has_max_hr`, `has_race_predictions`, `has_readiness`, `has_resting_hr`, `has_sleep`, `has_thresholds`, `has_vo2max`, `has_weight`, `last_error`, `last_sync_at`, `metric_export_enabled`, `morning_body_battery`, `pagination`, `source`, `source_freshness` |
 | `garmin_sync` | object | `running`, `status` |
-| `intervals` | object | `configured`, `last_error`, `library_sync`, `running`, `state` |
+| `intervals` | object | `configured`, `last_error`, `last_used_at`, `library_sync`, `running`, `state` |
 | `library` | list | always empty here; its area route loads it |
 | `library_sync` | object | `last_error`, `last_sync_at`, `state` |
 | `local_feedback` | object | `recent`, `scope`, `today` |
 | `messages` | list |  |
 | `messages_next_cursor` | null |  |
-| `model` | object | `options`, `provider`, `selected` |
+| `model` | object | `options`, `provider`, `selected`, `tasks` |
 | `morning_checkin` | object | `current_for_today`, `date`, `status` |
 | `performance` | object | always empty here; its area route loads it |
 | `planned` | list |  |
@@ -83,6 +83,7 @@ when its marker changes. Each marker is built from local durable state
 | `thinking_level` | object | `options`, `selected` |
 | `threshold_warnings` | null |  |
 | `usage` | object | `date`, `input_tokens`, `output_tokens`, `rate_limits`, `requests`, `status`, `total_tokens` |
+| `usage_month` | object | `models`, `month` |
 | `wahoo` | object | `configured`, `connected`, `connected_at`, `scope` |
 | `weather` | object | always empty here; its area route loads it |
 

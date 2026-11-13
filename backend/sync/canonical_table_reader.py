@@ -114,7 +114,9 @@ class CanonicalTableReader(
         rows = canonical_store.active_activity_rows(
             db, start=_iso(start), end=_iso(end)
         )
-        return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+        return tuple(
+            sorted((_activity(row) for row in rows if _served(row)), key=activity_order)
+        )
 
     def activity_max_hr(
         self, db: Any, provider: ProviderId, *, low: float, high: float
@@ -139,7 +141,9 @@ class CanonicalTableReader(
         Same mapping and order as ``activities``. A deleted session returns nothing.
         """
         rows = canonical_store.session_activity_rows(db, activity_id)
-        return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+        return tuple(
+            sorted((_activity(row) for row in rows if _served(row)), key=activity_order)
+        )
 
     def activity_sessions(
         self,
@@ -179,7 +183,7 @@ class CanonicalTableReader(
         for session_id, row in canonical_store.active_session_activity_rows(
             db, start=_iso(start), end=_iso(end)
         ):
-            if _provider_or_none(row["provider"]) is not None:
+            if _served(row):
                 grouped.setdefault(session_id, []).append(_activity(row))
         return tuple(
             (session_id, tuple(sorted(records, key=activity_order)))
@@ -289,6 +293,16 @@ def _payload_object(text: str) -> dict[str, Any] | None:
     except ValueError, RecursionError:
         return None
     return loaded if isinstance(loaded, dict) else None
+
+
+def _served(row: Mapping[str, Any]) -> bool:
+    """A record of a known provider other than Intervals.icu.
+
+    Intervals.icu is output only: a stored activity copy stays stored, exported
+    and purgeable, but no reader serves it (#2148).
+    """
+    provider = _provider_or_none(row["provider"])
+    return provider is not None and provider is not ProviderId.INTERVALS
 
 
 def _iso(day: date | None) -> str | None:

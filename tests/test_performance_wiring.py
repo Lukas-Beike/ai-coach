@@ -74,6 +74,22 @@ class PerformanceBuilderTests(unittest.TestCase):
                 call.kwargs["canonical"],
             )
 
+    def test_the_session_curve_records_are_the_shared_read_over_the_one_reader(
+        self,
+    ) -> None:
+        services = self.build()
+
+        records = services.curve_records(60)
+
+        selection = self.mocks["TrainingProfileSelectionService"]
+        selection.return_value.curve_records.assert_called_once_with(60, shared=True)
+        self.assertIs(selection.return_value.curve_records.return_value, records)
+        self.assertIs(
+            self.mocks["SessionCurveReader"].return_value,
+            selection.call_args.kwargs["curves"],
+        )
+        self.mocks["TrainingReportServices"].assert_not_called()
+
     def test_the_records_read_the_equipment_of_the_athlete(self) -> None:
         self.build().training_reports()
 

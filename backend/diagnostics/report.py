@@ -190,6 +190,9 @@ class DiagnosticReportService:
                     # Only whether the endpoint differs from the default, never the URL.
                     "openai_base_url_custom": deps.config.openai_base_url
                     != DEFAULT_OPENAI_BASE_URL,
+                    "transcription_endpoint_custom": bool(
+                        deps.config.transcription_base_url
+                    ),
                     "anthropic_configured": bool(deps.config.anthropic_api_key),
                     "anthropic_base_url_custom": deps.config.anthropic_base_url
                     != DEFAULT_ANTHROPIC_BASE_URL,
@@ -201,6 +204,7 @@ class DiagnosticReportService:
                     "model": deps.settings.selected_model(),
                     "model_provider": deps.settings.selected_provider(),
                     "thinking_level": deps.settings.selected_thinking_level(),
+                    "tasks": deps.settings.task_settings(),
                     "available_models": [
                         option["id"]
                         for option in deps.settings.available_model_options()

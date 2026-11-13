@@ -12,7 +12,8 @@ full run, for example inside the image used by run_sqlcipher_tests.ps1.
 CONTAINER_SUITE_PATTERNS. The default ``--suite all`` runs everything.
 ``--changed`` keeps only the modules changed_tests.py finds affected by the
 diff against ``--base``; it falls back to the whole suite where that selector
-says so, and CI never uses it.
+says so, and CI never uses it. ``--module`` (repeatable) runs only the named
+test modules, for focused runs in the SQLCipher container.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import time
 import unittest
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -217,6 +219,13 @@ def parse_args() -> argparse.Namespace:
         help="ref whose merge base --changed compares against",
     )
     parser.add_argument(
+        "--module",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="run only this test module, such as test_db_manager (repeatable)",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list selected test IDs without executing them",
@@ -233,9 +242,15 @@ def parse_args() -> argparse.Namespace:
             "--shard must be between 1 and --total, and --total must be positive"
         )
     if args.record_durations and (
-        args.total != 1 or args.suite != "all" or args.list or args.changed
+        args.total != 1
+        or args.suite != "all"
+        or args.list
+        or args.changed
+        or args.module
     ):
         parser.error("--record-durations needs the full suite in a single shard")
+    if args.module and args.changed:
+        parser.error("--module and --changed select modules in different ways")
     return args
 
 
@@ -255,7 +270,11 @@ def main() -> int:
             write_result(args.result_json, evidence)
 
     save()
-    modules = None
+    modules: dict[str, str] | None = (
+        dict.fromkeys(args.module, "named") if args.module else None
+    )
+    if modules:
+        evidence["modules"] = sorted(modules)
     skipped: dict[str, str] = {}
     if args.changed:
         try:
@@ -324,10 +343,13 @@ def main() -> int:
         raise
     assert isinstance(result, ClassTimingResult)
     elapsed = time.perf_counter() - started
+    # Environment skips (#2553) stay visible by reason, not only as a count.
+    skip_reasons = Counter(reason for _test, reason in result.skipped)
     evidence.update(
         status="passed" if result.wasSuccessful() else "failed",
         tests_run=result.testsRun,
         skips=len(result.skipped),
+        skip_reasons=dict(sorted(skip_reasons.items())),
         failures=len(result.failures),
         errors=len(result.errors),
         error_ids=[test.id() for test, _ in result.errors],
@@ -340,6 +362,8 @@ def main() -> int:
         f"Discovery: {len(tests)} tests; shard {args.shard}/{args.total}: "
         f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
     )
+    for reason, count in sorted(skip_reasons.items()):
+        print(f"  skip reason ({count}): {reason}")
     # Last, so a reader of the output's tail still sees which tests failed.
     for kind, entries in (("FAILED", result.failures), ("ERROR", result.errors)):
         for test, _trace in entries:

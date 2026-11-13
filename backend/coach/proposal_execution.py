@@ -18,6 +18,7 @@ from backend.coach.proposal_validation import (
     _validate_local_coach_write,
     _validate_remote_coach_write,
 )
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.history.undo_service import HistoryUndoService
@@ -261,10 +262,9 @@ class CoachProposalExecutionService:
         source_ids = intent["request"].get("source_message_ids") or []
         session_key = hashlib.sha256(str(session_csrf_hash).encode("utf-8")).hexdigest()
         with self._database_manager.unit_of_work() as db:
-            bound = db.execute(
-                "SELECT conversation_id, receipt FROM coach_commands WHERE client_turn_id=?",
-                (client_turn_id,),
-            ).fetchone()
+            bound = coach_store.command_row(
+                db, client_turn_id, "conversation_id, receipt"
+            )
             receipt = json.loads(bound["receipt"] or "{}") if bound else {}
             if (
                 not bound
@@ -275,14 +275,7 @@ class CoachProposalExecutionService:
                     409,
                     "Der freigegebene Coach-Auftrag geh\u00f6rt nicht mehr zu dieser Sitzung.",
                 )
-            placeholders = ",".join("?" for _ in source_ids)
-            existing = db.execute(
-                "SELECT m.id, m.client_turn_id, c.conversation_id, c.receipt "
-                "FROM messages m LEFT JOIN coach_commands c "
-                "ON c.client_turn_id=m.client_turn_id "
-                f"WHERE m.role='user' AND m.id IN ({placeholders})",
-                tuple(source_ids),
-            ).fetchall()
+            existing = coach_store.source_message_rows(db, source_ids)
             valid_ids = set()
             current_turn_ids = set()
             for message in existing:

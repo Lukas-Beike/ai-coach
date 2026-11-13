@@ -1174,7 +1174,10 @@ async function renderTrainingRecords() { // NOSONAR
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
     const openDetails = new Set([...gear.querySelectorAll("details[open]")].map((details) => details.dataset.key));
-    gear.replaceChildren(heading());
+    // A background refresh of the same tab and session keeps the maintenance receipt and its undo.
+    const receipt = gear.querySelector(":scope > .maintenance-receipt");
+    const keep = receipt?.dataset.tab === equipmentTab && receipt.dataset.session === String(session);
+    gear.replaceChildren(heading(), ...(keep ? [receipt] : []));
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = h("div", { className: "segmented-control equipment-tabs", "aria-label": "Ausrüstung nach Sportart" });
@@ -1629,9 +1632,11 @@ function maintenanceButton(item) {
 }
 
 function showMaintenanceReceipt(change, message = "Wartung erfasst. ") {
-  const status = h("p", null, message);
+  const status = h("p", { className: "maintenance-receipt", dataset: { tab: equipmentTab, session: String(state.sessionGeneration) } }, message);
   status.setAttribute("role", "status");
-  document.getElementById("equipmentItems")?.querySelector("h3")?.after(status);
+  const gear = document.getElementById("equipmentItems");
+  gear?.querySelector(":scope > .maintenance-receipt")?.remove();
+  gear?.querySelector("h3")?.after(status);
   if (!change?.id) return;
   const undo = h("button", { className: "message-undo", type: "button" }, "Rückgängig");
   undo.addEventListener("click", async () => {

@@ -25,7 +25,8 @@ class SettingsPutRoutesTests(unittest.TestCase):
             )
         )
 
-        self.settings.save_model.assert_called_once_with("gpt-6-luna")
+        # Without a task the conversation choice is saved.
+        self.settings.save_model.assert_called_once_with("gpt-6-luna", "conversation")
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, {"model": "gpt-6-luna"})
 
@@ -39,9 +40,25 @@ class SettingsPutRoutesTests(unittest.TestCase):
             )
         )
 
-        self.settings.save_thinking_level.assert_called_once_with("high")
+        self.settings.save_thinking_level.assert_called_once_with(
+            "high", "conversation"
+        )
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, {"thinking_level": "high"})
+
+    def test_model_and_thinking_routes_pass_the_task(self) -> None:
+        for path, field, save in (
+            ("/api/settings/model", "model", self.settings.save_model),
+            (
+                "/api/settings/thinking-level",
+                "thinking_level",
+                self.settings.save_thinking_level,
+            ),
+        ):
+            with self.subTest(path=path):
+                self.handler.read_json.return_value = {field: "x", "task": "planning"}
+                dispatch_route(self.routes, self.handler, path, method="PUT")
+                save.assert_called_once_with("x", "planning")
 
     def test_calendar_display_route_passes_whole_payload(self) -> None:
         payload = {"past_weeks": 3, "future_weeks": 7}
