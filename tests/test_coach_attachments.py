@@ -595,7 +595,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         saved = json.loads(row["attachments"])
         self.assertEqual(saved[0]["summary"]["point_count"], 2)
         self.assertEqual(saved[1]["data"], PNG)
-        history = server.COACH_CONVERSATION.message_service().list()
+        history = server.APP.coach_conversation.message_service().list()
         self.assertNotIn(PNG, json.dumps(history))
         self.assertEqual(
             json.loads(history[0]["attachment_names"]), ["route.gpx", "chart.png"]
@@ -610,8 +610,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         finally:
             archive_path.unlink()
         self.assertEqual(json.loads(exported[0]["attachments"]), saved)
-        server.COACH_CONVERSATION.message_service().add("assistant", "Synthetic answer")
-        server.COACH_CONVERSATION.message_service().add(
+        server.APP.coach_conversation.message_service().add("assistant", "Synthetic answer")
+        server.APP.coach_conversation.message_service().add(
             "user", "What does the chart show?"
         )
 
@@ -623,7 +623,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 "synthetic-csrf",
                 attachments=[self.upload(b"bad")],
             )
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+        self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_attachment_storage_quota_prevents_backup_growth(self):
         with (
@@ -637,7 +637,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 attachments=[{"name": "chart.png", "data": PNG}],
             )
         self.assertEqual(error.exception.reason, "attachment_storage_quota")
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+        self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_outgoing_provider_payload_is_limited_to_request_budget(self):
         fit_upload = self.upload(FIT, "ride.fit")
@@ -674,7 +674,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             )
         self.assertEqual(error.exception.status, 413)
         self.assertEqual(error.exception.reason, "attachment_request_too_large")
-        self.assertEqual(server.COACH_CONVERSATION.message_service().list(), [])
+        self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_openai_model_input_includes_image_gpx_and_fit_evidence(self):
         attachments = validate_attachments(
@@ -876,7 +876,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertNotIn("dialogue", json.loads(captured[-1]["input"]))
         current = [
             item
-            for item in server.COACH_CONVERSATION.message_service().list()
+            for item in server.APP.coach_conversation.message_service().list()
             if item["role"] == "user"
         ][-1]
         self.assertEqual(

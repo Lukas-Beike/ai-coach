@@ -726,7 +726,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_chat_history_pagination_and_bounded_search_use_message_id_cursor(self):
         for index in range(5):
-            server.COACH_CONVERSATION.message_service().add(
+            server.APP.coach_conversation.message_service().add(
                 "user", f"searchable {index}"
             )
         page_service = server.HTTP_API.chat_history_page_service()
@@ -756,7 +756,7 @@ class ServerHttpTests(ServerTestCase):
             "literal backslashmarker",
         )
         for content in contents:
-            server.COACH_CONVERSATION.message_service().add("user", content)
+            server.APP.coach_conversation.message_service().add("user", content)
 
         page_service = server.HTTP_API.chat_history_page_service()
         for search_term, expected in (
@@ -859,7 +859,7 @@ class ServerHttpTests(ServerTestCase):
             },
         )
         for index in range(500):
-            server.COACH_CONVERSATION.message_service().add("user", f"message {index}")
+            server.APP.coach_conversation.message_service().add("user", f"message {index}")
         bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(
             list(bootstrap),
@@ -2029,7 +2029,7 @@ class ServerHttpTests(ServerTestCase):
             "responses",
             return_value={"output_text": "ok"},
         ) as responses:
-            result = server.COACH_CONVERSATION.response_transport().request(request)
+            result = server.APP.coach_conversation.response_transport().request(request)
         self.assertEqual(result.text, "ok")
         responses.assert_called_once_with(request_payload(request))
 
@@ -2044,7 +2044,7 @@ class ServerHttpTests(ServerTestCase):
             "stream",
             return_value={"status": "completed"},
         ) as stream:
-            result = server.COACH_CONVERSATION.response_transport().stream_request(
+            result = server.APP.coach_conversation.response_transport().stream_request(
                 request, on_delta, cancel_event, on_response_id
             )
 

@@ -238,11 +238,11 @@ class CoachContextBuilderTests(unittest.TestCase):
         self.assertIs(canonical.database_manager, ctx.database)
         self.assertIs(canonical.observation_reader(), ctx.canonical_read)
         self.assertIs(canonical.serving(), ctx.canonical_read)
-        ctx.performance.training_reports.assert_not_called()
+        ctx.performance.curve_records.assert_not_called()
         performance._lt1_session_records(90)
-        ctx.performance.training_reports.return_value.profiles.curve_records.assert_called_once_with(
-            90
-        )
+        # The curve records come without building the whole report bundle.
+        ctx.performance.curve_records.assert_called_once_with(90)
+        ctx.performance.training_reports.assert_not_called()
         self.assertIs(
             factory.call_args.kwargs["planning_brief"](),
             self.guard.plan_guard_service().brief(),

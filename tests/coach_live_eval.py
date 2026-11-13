@@ -794,7 +794,7 @@ def _seed_activity(server: Any, name: str) -> None:
 
 
 def _seed_draft(server: Any, kind: str) -> str:
-    server.COACH_CONVERSATION.message_service().add("user", "Ein Entwurf bitte")
+    server.APP.coach_conversation.message_service().add("user", "Ein Entwurf bitte")
     with server.database_manager().unit_of_work() as db:
         server.CHAT_REPOSITORY.add(db, "user", "Entwurf", client_turn_id="draft-source")
     workout = _workout("2026-09-11", "Lockerer Lauf (Entwurf)", "Run")
@@ -809,7 +809,7 @@ def _seed_draft(server: Any, kind: str) -> str:
 
 
 def _seed_pending(server: Any, pending: dict[str, str]) -> None:
-    messages = server.COACH_CONVERSATION.message_service()
+    messages = server.APP.coach_conversation.message_service()
     user = messages.add("user", pending["user"])
     messages.add("assistant", pending["question"])
     server.key_value_service().set(
@@ -1009,7 +1009,7 @@ def case_server(base_url: str, model: str, thinking: str, api_key: str):
                 return_value=datetime(2026, 9, 7, 12, tzinfo=UTC),
             )
         )
-        original = server.COACH_CONVERSATION.dialogue_read_service
+        original = server.APP.coach_conversation.dialogue_read_service
 
         def dated_dialogue_service():
             service = original()
@@ -1111,7 +1111,7 @@ def run_case(
         tags = _seed(server, case)
         before = snapshot(server)
         transport = CountingTransport(
-            server.COACH_CONVERSATION.response_transport(),
+            server.APP.coach_conversation.response_transport(),
             counter,
             _stale_once(server) if case["setup"].get("stale_revision") else None,
         )

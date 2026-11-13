@@ -606,7 +606,7 @@ with patch.object(Path, 'read_text', deny):
 
     def test_chat_reset_changes_history_generation(self):
         before = server.HTTP_API.chat_history_page_service().page()["generation"]
-        server.COACH_CONVERSATION.reset_service().reset()
+        server.APP.coach_conversation.reset_service().reset()
         self.assertNotEqual(
             server.HTTP_API.chat_history_page_service().page()["generation"], before
         )

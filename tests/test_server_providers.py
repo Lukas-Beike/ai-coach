@@ -186,7 +186,7 @@ class ServerProvidersTests(ServerTestCase):
                 provider_http, "urlopen", return_value=FakeResponse()
             ) as urlopen,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="foundry-deployment", instructions=""),
                 lambda _: None,
             )
@@ -213,7 +213,7 @@ class ServerProvidersTests(ServerTestCase):
                 side_effect=fake_openai,
             ),
         ):
-            server.COACH_CONVERSATION.response_transport().request(
+            server.APP.coach_conversation.response_transport().request(
                 ModelRequest(model="gpt-6-luna", instructions="", input="test")
             )
         self.assertEqual(captured["reasoning"], {"effort": "low"})
@@ -632,7 +632,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen", side_effect=upstream_error),
             self.assertRaises(AppError) as raised,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "rate_limit_exceeded")
@@ -661,7 +661,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen", side_effect=upstream_error),
             self.assertRaises(AppError) as raised,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "conversation_state_invalid")
@@ -717,7 +717,7 @@ class ServerProvidersTests(ServerTestCase):
         with patch.object(
             provider_http, "urlopen", return_value=FakeResponse()
         ) as urlopen:
-            result = server.COACH_CONVERSATION.response_transport().stream_request(
+            result = server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""), deltas.append
             )
         self.assertEqual("".join(deltas), "Hallo")
@@ -754,7 +754,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen", return_value=OversizedResponse()),
             self.assertRaises(AppError) as raised,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
 
@@ -781,7 +781,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen") as urlopen,
             self.assertRaises(AppError) as raised,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""),
                 lambda _: None,
                 cancel_event,
@@ -811,7 +811,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen", return_value=TimeoutResponse()),
             self.assertRaises(AppError) as raised,
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""), lambda _: None
             )
         self.assertEqual(raised.exception.reason, "provider_timeout")
@@ -852,7 +852,7 @@ class ServerProvidersTests(ServerTestCase):
             patch.object(provider_http, "urlopen", return_value=DisconnectResponse()),
             self.assertRaises(ClientDisconnected),
         ):
-            server.COACH_CONVERSATION.response_transport().stream_request(
+            server.APP.coach_conversation.response_transport().stream_request(
                 ModelRequest(model="gpt-6-luna", instructions=""),
                 lambda _: (_ for _ in ()).throw(ClientDisconnected()),
             )

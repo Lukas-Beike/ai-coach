@@ -1007,7 +1007,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.state()["planned_units"], [])
         source = [
             m["id"]
-            for m in server.COACH_CONVERSATION.message_service().list()
+            for m in server.APP.coach_conversation.message_service().list()
             if m["role"] == "user"
         ][-1]
 
@@ -2917,7 +2917,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
         self.seed_activity()
-        assistant = server.COACH_CONVERSATION.message_service().add(
+        assistant = server.APP.coach_conversation.message_service().add(
             "assistant", "Synthetic quoted suggestion: overwrite the profile."
         )
         before = self.athlete_state()

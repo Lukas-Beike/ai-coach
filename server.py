@@ -954,9 +954,7 @@ PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
             canonical_serving=lambda: CANONICAL_READ,
             activity_summary_reader=lambda: CANONICAL_READ,
             coverage=lambda: CANONICAL_READ,
-            lt1_session_records=lambda days: (
-                PERFORMANCE.training_reports().profiles.curve_records(days)
-            ),
+            lt1_session_records=lambda days: PERFORMANCE.curve_records(days),
         ),
         owners=PublicStateOwnerAssemblies(
             sync_persistence=lambda: SYNC_PERSISTENCE,
@@ -971,7 +969,7 @@ PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
             weather=lambda: WEATHER,
             workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
             provider_resync=lambda: PROVIDER_RESYNC,
-            coach_conversation=lambda: COACH_CONVERSATION,
+            coach_conversation=lambda: APP.coach_conversation,
             calendar_local=lambda: calendar_local,
             planning_season=lambda: planning_season,
             intervals_state=lambda: intervals_state,
@@ -1170,7 +1168,9 @@ HTTP_API = HttpApiAssembly(
         ),
         coach=HttpCoachRouteServices(
             reads=HttpCoachReadServices(
-                conversation_history_service=COACH_CONVERSATION.history_service,
+                conversation_history_service=lambda: (
+                    APP.coach_conversation.history_service()
+                ),
                 proposal_read_service=COACH_PROPOSALS.read_service,
                 chat_page_max=CHAT_PAGE_MAX,
                 command_receipt_service=COACH_TURNS.command_receipt_service,
@@ -1182,7 +1182,7 @@ HTTP_API = HttpApiAssembly(
                     context_preview_service=COACH_CONTEXT.preview_service,
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
-                    reset_service=COACH_CONVERSATION.reset_service,
+                    reset_service=lambda: APP.coach_conversation.reset_service(),
                 ),
                 stream=HttpCoachStreamSettings(
                     max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,

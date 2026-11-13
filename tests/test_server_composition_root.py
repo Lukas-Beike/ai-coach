@@ -546,7 +546,7 @@ class CompositionRootTests(ServerTestCase):
                 self.assertIs(getattr(server.APP, name), owner)
         self.assertIs(server.APP.coach_dialogue_tools, server.COACH_DIALOGUE_TOOLS)
         conversation, local, context = (
-            server.COACH_CONVERSATION,
+            server.APP.coach_conversation,
             server.COACH_LOCAL,
             server.COACH_CONTEXT,
         )

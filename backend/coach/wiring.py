@@ -284,7 +284,7 @@ def build_coach_context(
         return ctx.athlete.zones().configurations()
 
     def lt1_session_records(days: int) -> Any:
-        return ctx.performance.training_reports().profiles.curve_records(days)
+        return ctx.performance.curve_records(days)
 
     def structured_context_service() -> CoachStructuredContextService:
         athlete, planning, garmin = ctx.athlete, ctx.planning, ctx.garmin
