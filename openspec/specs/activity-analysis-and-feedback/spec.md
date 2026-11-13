@@ -30,7 +30,7 @@ Evidence: `backend/activities/strength_sets.py:plan_comparison`, `backend/activi
 
 #### Scenario: Provider ratings with their scale
 - **WHEN** a record of the session carries the watch's `rpe` or `feel`
-- **THEN** the metric is `athlete_entered` with the value of the first record in rating order (Garmin, then retired Intervals.icu copies, then the rest) and, for a known provider scale, the scale text, label and a `normalized_0_1` value; the local feedback RPE stays separate and authoritative.
+- **THEN** the metric is `athlete_entered` with the value of the first record in rating order (Garmin, then the rest) and, for a known provider scale, the scale text, label and a `normalized_0_1` value; the local feedback RPE stays separate and authoritative.
 
 Evidence: `backend/activities/detail_contract.py:rating_order`, `backend/canonical/rating_scales.py:rating_fields`; `tests/test_garmin_activity_ratings.py:test_detail_document_names_the_garmin_scale`.
 
@@ -123,8 +123,8 @@ The system SHALL read local details without implicit provider refresh, serve onl
 - **THEN** the canonical backfill stage `session_analysis` recomputes its `activity_detail_analysis` version 3 row (analysis, recorded workout profile, carried-over target snapshot, input fingerprint) in bounded batches, an unchanged input writes nothing, and the detail view, Coach detail tool, calendar profiles and recurring comparisons show the same values for Garmin- and Wahoo-only sessions too.
 
 #### Scenario: Intervals.icu copy not served
-- **WHEN** a session holds an Intervals.icu record with stored detail sets, zone times or a failure note
-- **THEN** its provider entry lists no kinds, no load error and no refresh, the document serves no Intervals.icu streams, laps, zone times or summary-row metrics, and its staleness withholds nothing.
+- **WHEN** a session holds a stored Intervals.icu record with detail sets, zone times or a failure note
+- **THEN** the readers do not serve the record (#2148): the document names no Intervals.icu provider and serves no Intervals.icu streams, laps, zone times or summary-row metrics, its staleness withholds nothing, and a session of such a record alone has no detail.
 
 #### Scenario: Zone times from streams
 - **WHEN** a session has a heart-rate or power stream
@@ -626,8 +626,8 @@ Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backe
 The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. Rows SHALL carry no `detail_error`: Intervals.icu details are never served (#1685), so their failure notes mark no session.
 
 #### Scenario: Sessions from several providers
-- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session, a bundled Garmin and Wahoo session and, in a database that still holds stored Intervals.icu rows, Intervals.icu-only sessions or an Intervals.icu duplicate pair bundled into one session
-- **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order.
+- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session and a bundled Garmin and Wahoo session
+- **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order; a session of stored Intervals.icu records alone is not listed (#2148).
 
 #### Scenario: Older cursor
 - **WHEN** a client sends a version-2 cursor

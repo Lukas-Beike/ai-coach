@@ -26,7 +26,6 @@ from backend.canonical.activity_detail import ActivityStreamSet
 from backend.canonical.records import ActivityRecord, fingerprint_inputs
 from backend.canonical.vocabulary import (
     HeartRateSource,
-    ProviderId,
     StreamChannel,
     StreamResolution,
 )
@@ -54,15 +53,6 @@ ANALYSIS_VERSION: Final = 3
 # v8: the calendar profile uses the session's configured zone limits (#2136).
 # The stored heart-rate histogram has its own version in the fingerprint.
 METHOD_VERSION: Final = 8
-
-
-def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
-    """The session records the canonical analysis reads: every non-Intervals one."""
-    return tuple(
-        record
-        for record in records
-        if record.provenance.provider is not ProviderId.INTERVALS
-    )
 
 
 def stream_resolution(
@@ -93,7 +83,7 @@ def session_analysis(
 ) -> dict[str, Any]:
     """Compute the session analysis from the merged streams and laps.
 
-    ``records`` are the session's analysis records (see ``analysis_records``),
+    ``records`` are the session's served records (no stored Intervals.icu copy),
     at least one. Each analysis credits only the providers of the channels it
     reads.
     """

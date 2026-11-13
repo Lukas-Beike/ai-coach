@@ -335,7 +335,7 @@ Detailed contract: the plan playbook tells the Coach to use these thresholds for
 Evidence: `backend/performance/current_metrics.py:coach_thresholds`, `backend/performance/canonical_current.py:read_current_inputs`, `backend/planning/load_checks.py:load_thresholds`, `backend/coach/playbooks.py:_THRESHOLDS`; `tests/test_current_thresholds.py:CoachAndPlanParityTests`, `tests/test_current_thresholds.py:ResolverTests.test_ftp_conflict_keeps_both_values_visible`.
 
 ### Requirement: Subjective ratings carry scale, direction and source
-The system SHALL give every subjective rating that reaches the Coach (activity RPE and feel from Garmin or retired Intervals.icu rows, check-in and activity feedback scores) with its scale, direction and athlete-entered source. Same-named ratings of different scales SHALL never be presented as comparable numbers. The Intervals.icu 1–4 wellness ratings (fatigue, soreness, stress, mood) are no Coach input any more (#1728).
+The system SHALL give every subjective rating that reaches the Coach (activity RPE and feel from Garmin rows, check-in and activity feedback scores) with its scale, direction and athlete-entered source. Same-named ratings of different scales SHALL never be presented as comparable numbers. The Intervals.icu 1–4 wellness ratings (fatigue, soreness, stress, mood) are no Coach input any more (#1728).
 
 #### Scenario: Ratings of different scales
 - **WHEN** the context carries an activity `feel` (1–5, 1 = best) or `rpe` (1–10) from a provider and check-in soreness or stress (0–10, higher is worse) in `local_feedback`
