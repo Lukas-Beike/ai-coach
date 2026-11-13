@@ -14,6 +14,13 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
   assert.throws(() => walk.scratchPath(path.join(__dirname, "..")), /system temp directory/);
   assert.throws(() => walk.scratchPath(path.join(os.tmpdir(), "..", "elsewhere")), /system temp directory/);
   assert.equal(walk.scratchPath(path.join(os.tmpdir(), "walk")), path.resolve(os.tmpdir(), "walk"));
+  // The password file may come from the T3 secret folder, read only (#2527).
+  const t3 = path.join(os.homedir(), "t3-folder-for-a-test", "secrets");
+  assert.equal(walk.secretPath(path.join(t3, "app-password"), t3), path.join(t3, "app-password"));
+  assert.equal(walk.secretPath(path.join(os.tmpdir(), "secret"), t3), path.resolve(os.tmpdir(), "secret"));
+  assert.throws(() => walk.secretPath(path.join(__dirname, "..", ".env"), t3), /T3 secret folder/);
+  assert.throws(() => walk.secretPath(path.join(t3, "..", "other"), t3), /T3 secret folder/);
+  assert.throws(() => walk.scratchPath(path.join(t3, "shots")), /system temp directory/);
   assert.equal(walk.baseUrl("https://app.example.test:8090/some/path"), "https://app.example.test:8090");
   assert.throws(() => walk.baseUrl("file:///etc/passwd"), /http\(s\) URL/);
 });

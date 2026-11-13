@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import prod_client
@@ -187,6 +188,17 @@ class ProdChecksTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("system temp directory", text)
         self.assertFalse(inside.exists())
+        # The password file may come from the T3 secret folder, read only;
+        # outputs stay in the temp directory and nothing reads the repository.
+        t3 = Path.home() / "t3-folder-for-a-test" / "secrets"
+        with mock.patch.object(prod_client, "T3_SECRETS", t3):
+            secret = t3 / "app-password"
+            self.assertEqual(prod_client.secret_path(str(secret)), secret.resolve())
+            for path in (prod_client.ROOT / ".env", t3.parent / "other"):
+                with self.subTest(path=path), self.assertRaises(prod_client.ProdError):
+                    prod_client.secret_path(str(path))
+            with self.assertRaisesRegex(prod_client.ProdError, "system temp directory"):
+                prod_client.scratch_path(str(t3 / "result.json"))
 
     def test_guards_hold_and_detect_a_missing_csrf_check(self):
         code, text = self.run_main(

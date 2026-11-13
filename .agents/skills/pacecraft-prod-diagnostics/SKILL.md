@@ -7,9 +7,10 @@ description: Base skill. Read named health and diagnostics fields and record cou
 
 The app address and the secret file come from the session at run time (the
 athlete's private notes and a secret delivered with file delivery); never write
-either into the repository, a tracked file, or output. The secret file and the
-result files must lie in the system temp directory (the session scratchpad);
-the scripts refuse any other path.
+either into the repository, a tracked file, or output. The secret file must
+lie in the T3 secret folder (`~/.t3/userdata/secrets`) or the system temp
+directory, and is only read; result files must lie in the system temp
+directory (the session scratchpad). The scripts refuse any other path.
 
 ```powershell
 python scripts/prod_diagnostics.py --url <app address> --password-file <secret file> --expect-version <tag> --expect-schema <current schema> --out <scratchpad>/diagnostics.json [--compare <previous result>]

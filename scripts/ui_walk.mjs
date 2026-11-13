@@ -30,6 +30,18 @@ export function scratchPath(target) {
   return resolved;
 }
 
+// The password file is only read: the temp directory or the folder where a T3
+// secret request delivers files, never the repository (#2527).
+export const T3_SECRETS = path.join(os.homedir(), ".t3", "userdata", "secrets");
+export function secretPath(target, secrets = T3_SECRETS) {
+  const resolved = path.resolve(os.tmpdir(), String(target));
+  const within = (root) => (resolved + path.sep).startsWith(path.resolve(root) + path.sep);
+  if (within(ROOT) || !(within(os.tmpdir()) || within(secrets))) {
+    throw new Error("the password file must be in the system temp directory or the T3 secret folder");
+  }
+  return resolved;
+}
+
 export function baseUrl(text) {
   const url = new URL(text);
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("the app address must be an http(s) URL");
@@ -173,7 +185,7 @@ async function main() {
     if (!values.url || !values["password-file"] || !values["out-dir"]) throw new Error("--url, --password-file and --out-dir are required");
     url = baseUrl(values.url);
     outDir = scratchPath(values["out-dir"]);
-    password = fs.readFileSync(scratchPath(values["password-file"]), "utf8").trim();
+    password = fs.readFileSync(secretPath(values["password-file"]), "utf8").trim();
     if (!password) throw new Error("the secret file is empty");
   } catch (error) {
     console.log(`FAIL ${error.code === "ENOENT" ? "cannot read the secret file" : error.message}`);
