@@ -1,5 +1,5 @@
 {
-  "catalog_version": 10,
+  "catalog_version": 11,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -357,6 +357,20 @@
       "setup": "Synthetic backend-only branch; no frontend file changed.",
       "expected": ["Open the PR without screenshots or an assets branch"],
       "prohibited": ["Create an assets branch or capture browser screenshots for a backend change"]
+    },
+    {
+      "id": "pwa-e2e-mutation-check-worktree", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,
+      "prompt": "Prove the contrast sweep catches a too-light muted colour by breaking it on purpose.",
+      "setup": "Synthetic UI branch; a second validation run is building the app image from the same task worktree.",
+      "expected": ["Make the deliberate mutation in a separate temporary worktree and build it under that worktree's own --print-image tag before running the sweep there", "Remove that worktree afterwards; the task worktree never holds the mutated file"],
+      "prohibited": ["Edit the stylesheet in the task worktree", "Build the mutated source under a shared image tag"]
+    },
+    {
+      "id": "pwa-e2e-normal-spec-run-no-worktree", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
+      "prompt": "Run the calendar spec on mobile for my change.",
+      "setup": "Synthetic UI branch with the change committed; no deliberate mutation is needed.",
+      "expected": ["Run the affected spec in the task worktree with the browser runner"],
+      "prohibited": ["Create an extra worktree for an ordinary spec run"]
     },
     {
       "id": "pwa-e2e-pr-screenshots-real-data", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
