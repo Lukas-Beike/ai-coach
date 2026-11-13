@@ -21,7 +21,16 @@
       "Edit(//**/ai-coach/data/**)",
       "Edit(//**/pacecraft/data/**)",
       "Bash(git reset --soft origin/*)",
-      "PowerShell(git reset --soft origin/*)"
+      "PowerShell(git reset --soft origin/*)",
+      "Bash(npx *modern-web-guidance*)",
+      "Bash(pnpx *modern-web-guidance*)",
+      "PowerShell(npx *modern-web-guidance*)",
+      "PowerShell(npx.cmd *modern-web-guidance*)",
+      "Bash(npm exec *modern-web-guidance*)",
+      "Bash(pnpm dlx *modern-web-guidance*)",
+      "PowerShell(pnpx *modern-web-guidance*)",
+      "PowerShell(npm exec *modern-web-guidance*)",
+      "PowerShell(pnpm dlx *modern-web-guidance*)"
     ]
   },
   "hooks": {

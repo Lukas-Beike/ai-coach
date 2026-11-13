@@ -53,19 +53,22 @@ class WorkflowSourceTests(unittest.TestCase):
             {update.splitlines()[0] for update in updates},
             {"pip", "npm", "docker", "github-actions"},
         )
-        # The only ignores are the direct Graphify requirements, whose Linux lock
-        # drops Windows-only pins (athlete decision, #2554); any other fails.
-        graphify = (
-            "    ignore:\n"
+        # The only ignores (athlete decisions): the direct Graphify requirements,
+        # whose Linux lock drops Windows-only pins (#2554), and modern-web-guidance,
+        # updated by hand only (#2633); any other fails.
+        allowed = {
+            "pip": "    ignore:\n"
             "      - dependency-name: graphifyy\n"
-            "      - dependency-name: pywin32\n"
-        )
+            "      - dependency-name: pywin32\n",
+            "npm": "    ignore:\n      - dependency-name: modern-web-guidance\n",
+        }
         for update in updates:
             self.assertIn("target-branch: develop", update)
             self.assertIn("commit-message:", update)
-            if update.startswith("pip\n"):
-                self.assertEqual(update.count(graphify), 1)
-                update = update.replace(graphify, "")
+            ecosystem = update.splitlines()[0]
+            if ecosystem in allowed:
+                self.assertEqual(update.count(allowed[ecosystem]), 1)
+                update = update.replace(allowed[ecosystem], "")
             self.assertNotIn("ignore:", update)
             self.assertNotIn("dependency-name:", update)
 

@@ -9,6 +9,9 @@ updates:
       interval: daily
     commit-message:
       prefix: build
+    # A local agent tool; its pin and hash are raised by hand (#2633).
+    ignore:
+      - dependency-name: modern-web-guidance
   - package-ecosystem: pip
     directory: "/"
     target-branch: develop
