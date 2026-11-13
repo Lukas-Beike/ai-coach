@@ -91,6 +91,14 @@ test("long goals are cut for the one-line summary", () => {
   assert.ok(summaries.profileGoalsSummary.endsWith("…"));
 });
 
+test("the Intervals.icu detail names the last export, also one that was no library push", () => {
+  const { intervalsConnectionDetail } = extractFunctions("views.js", ["intervalsConnectionDetail"], { formatTime: (value) => `um ${value}` });
+  const base = { configured: true, library_sync: { last_sync_at: null, state: {} } };
+  assert.equal(intervalsConnectionDetail({ ...base, state: "connected", last_used_at: "T1" }), "Letzte Aktualisierung: um T1");
+  assert.equal(intervalsConnectionDetail({ ...base, state: "configured" }), "Noch nicht getestet");
+  assert.equal(intervalsConnectionDetail({ ...base, state: "error", last_error: null }), "Letzter Export fehlgeschlagen");
+});
+
 test("the Coach model list groups OpenAI and Claude and names the resolved Claude model", () => {
   const { modelOptionLabel, modelNoticeText } = extractFunctions("views.js", ["modelOptionLabel", "modelNoticeText"]);
   assert.equal(modelOptionLabel({ id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai" }), "GPT-6 Luna");

@@ -490,6 +490,10 @@ The system SHALL present Yazio on the connections screen, distinguish missing co
 - **WHEN** a check is rejected, rate-limited, or encounters a transient or unexpected provider failure
 - **THEN** the card shows a safe actionable category and does not claim success or reveal provider responses, account values, or tokens.
 
+#### Scenario: A food lookup counts as a check
+- **WHEN** a food search or product read reaches Yazio with the current credentials
+- **THEN** the passive status reports its outcome as the last check, `success` when Yazio answered and the safe failure category otherwise, without a separate button press.
+
 #### Scenario: Credentials change or server restarts
 - **WHEN** effective Yazio credentials change or the server restarts
 - **THEN** an old successful result is not presented as a current verification; complete configuration is shown as unchecked.
@@ -502,7 +506,7 @@ The system SHALL present Yazio on the connections screen, distinguish missing co
 - **WHEN** a check request lacks an authenticated session or valid CSRF protection
 - **THEN** it is rejected before contacting Yazio.
 
-Evidence: `backend/providers/yazio.py::YazioClient.connection_status`, `backend/providers/yazio.py::YazioClient.check_connection`, `backend/http_api/nutrition.py::NutritionGetRoutes.routes`, `backend/http_api/nutrition.py::NutritionPostRoutes._check_yazio`, `public/provider-connections.js::checkYazioConnection`, `public/provider-connections.js::loadYazioStatus`; `tests/test_yazio.py::YazioConnectionTests.test_passive_status_check_and_credential_change`, `tests/test_yazio.py::YazioConnectionTests.test_check_uses_password_grant_and_restart_is_unchecked`, `tests/test_yazio.py::YazioConnectionTests.test_inflight_result_is_discarded_after_credential_replacement`, `tests/test_yazio_connection_routes.py`, `tests/provider-connections.test.cjs`, `e2e/yazio-connection.spec.js::@responsive Yazio shows a checked login and refreshes its local status`. The check reports `not_configured`, `unchecked`, `success`, `auth_failed`, `rate_limited` or `unavailable`.
+Evidence: `backend/providers/yazio.py::YazioClient.connection_status`, `backend/providers/yazio.py::YazioClient.check_connection`, `backend/http_api/nutrition.py::NutritionGetRoutes.routes`, `backend/http_api/nutrition.py::NutritionPostRoutes._check_yazio`, `public/provider-connections.js::checkYazioConnection`, `public/provider-connections.js::loadYazioStatus`; `tests/test_yazio.py::YazioConnectionTests.test_passive_status_check_and_credential_change`, `tests/test_yazio.py::YazioConnectionTests.test_check_uses_password_grant_and_restart_is_unchecked`, `tests/test_yazio.py::YazioConnectionTests.test_inflight_result_is_discarded_after_credential_replacement`, `tests/test_yazio.py::YazioConnectionTests.test_lookup_outcomes_become_the_last_check_without_a_button_press`, `tests/test_yazio_connection_routes.py`, `tests/provider-connections.test.cjs`, `e2e/yazio-connection.spec.js::@responsive Yazio shows a checked login and refreshes its local status`. The check reports `not_configured`, `unchecked`, `success`, `auth_failed`, `rate_limited` or `unavailable`.
 
 ### Requirement: Optional Anthropic configuration
 The system SHALL accept an Anthropic API key and base URL from server-side environment values, overridable from the PWA and stored encrypted. Stored values SHALL take precedence and clearing them SHALL restore the environment value. The base URL SHALL default to the official endpoint and be validated like the OpenAI base URL; setting it SHALL need the app password. Status SHALL report the key's presence and source only, never its value.

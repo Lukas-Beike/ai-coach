@@ -58,7 +58,7 @@ when its marker changes. Each marker is built from local durable state
 | `external_calendar` | object | `configured`, `events`, `last_error`, `last_sync_at`, `provider`, `read_only`, `running`, `skipped_events`, `window_days` |
 | `garmin` | object | `activities`, `available`, `can_write_workouts`, `configured`, `has_estimated_run_times`, `has_hrv`, `has_max_hr`, `has_race_predictions`, `has_readiness`, `has_resting_hr`, `has_sleep`, `has_thresholds`, `has_vo2max`, `has_weight`, `last_error`, `last_sync_at`, `metric_export_enabled`, `morning_body_battery`, `pagination`, `source`, `source_freshness` |
 | `garmin_sync` | object | `running`, `status` |
-| `intervals` | object | `configured`, `last_error`, `library_sync`, `running`, `state` |
+| `intervals` | object | `configured`, `last_error`, `last_used_at`, `library_sync`, `running`, `state` |
 | `library` | list | always empty here; its area route loads it |
 | `library_sync` | object | `last_error`, `last_sync_at`, `state` |
 | `local_feedback` | object | `recent`, `scope`, `today` |

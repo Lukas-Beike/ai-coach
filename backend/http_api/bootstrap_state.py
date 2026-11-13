@@ -12,6 +12,7 @@ from backend.coach.receipt_reads import monthly_turn_usage
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
+from backend.sync.jobs import last_finished_at
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.wahoo_connection import connection_status
 
@@ -98,6 +99,9 @@ class PublicBootstrapService:
             summaries = {
                 name: provider_state.summary(name) for name in ("openai", "anthropic")
             }
+            intervals_job_ok_at, intervals_job_failed_at = last_finished_at(
+                db, ProviderId.INTERVALS.value
+            )
             state = {
                 "state_versions": state_version_values,
                 "app": {"name": deps.app_name, "version": deps.app_version},
@@ -147,6 +151,8 @@ class PublicBootstrapService:
                     )
                     or None,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
+                    last_job_ok_at=intervals_job_ok_at,
+                    last_job_failed_at=intervals_job_failed_at,
                 ),
                 "provider_freshness": freshness,
                 "provider_ids": {

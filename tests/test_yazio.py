@@ -127,6 +127,25 @@ class YazioConnectionTests(unittest.TestCase):
             "unchecked",
         )
 
+    def test_lookup_outcomes_become_the_last_check_without_a_button_press(self):
+        holder = {"config": config()}
+        script = Script(tokens=[token()], api=[[hit()], failure(500), failure(404)])
+        client = YazioClient(lambda: holder["config"], opener=script, clock=lambda: 100)
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+        client.search("skyr")
+        used = client.connection_status()
+        self.assertEqual(used["status"], "success")
+        self.assertTrue(used["checked_at"])
+        with self.assertRaises(AppError):
+            client.search("quark")
+        self.assertEqual(client.connection_status()["status"], "unavailable")
+        # A missing product still means Yazio accepted the login.
+        with self.assertRaises(AppError):
+            client.product(PRODUCT_ID)
+        self.assertEqual(client.connection_status()["status"], "success")
+        holder["config"] = config(yazio_password="replacement")
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+
     def test_transient_check_failures_preserve_tokens_for_lookup(self):
         for failed in (failure(500), failure(429), {}):
             with self.subTest(failure=failed):

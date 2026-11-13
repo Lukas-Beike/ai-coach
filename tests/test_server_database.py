@@ -509,7 +509,10 @@ class ServerDatabaseTests(ServerTestCase):
         old_manager.closed = True
         active_manager[0] = new_manager
 
-        result = service.read()
+        with patch.object(
+            bootstrap_state_module, "last_finished_at", return_value=(None, None)
+        ):
+            result = service.read()
 
         self.assertIn("configured", result)
         self.assertEqual(old_manager.unit_of_work_calls, 0)

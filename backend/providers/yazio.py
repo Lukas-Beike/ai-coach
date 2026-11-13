@@ -159,6 +159,18 @@ def _throttled() -> AppError:
     return AppError(429, THROTTLED, reason="food_database_rate_limited")
 
 
+_CHECK_STATUS = {
+    "food_database_auth_failed": "auth_failed",
+    "food_database_rate_limited": "rate_limited",
+    # Yazio answered, so the login worked.
+    "food_not_found": "success",
+}
+
+
+def _check_status(error: AppError) -> str:
+    return _CHECK_STATUS.get(error.reason or "", "unavailable")
+
+
 def _retry_after(headers: Any) -> float:
     value = headers.get("Retry-After") if headers is not None else None
     return max(60.0, bounded_number(value, 86400) or 60.0)
@@ -245,10 +257,7 @@ class YazioClient:
                         self._access_token, self._refresh_token, self._expires_at = (
                             tokens
                         )
-                result = {
-                    "food_database_auth_failed": "auth_failed",
-                    "food_database_rate_limited": "rate_limited",
-                }.get(exc.reason or "", "unavailable")
+                result = _check_status(exc)
             with self._lock:
                 self._follow_credentials()
                 if (
@@ -337,7 +346,14 @@ class YazioClient:
                     return cached
                 self._reserve(self._clock())
             identity = self._identity
-            payload = self._authorized_get(path)
+            generation = self._identity_generation
+            try:
+                payload = self._authorized_get(path)
+            except AppError as exc:
+                # A lookup that reached Yazio is as good a check as the button.
+                self._record_use(_check_status(exc), identity, generation)
+                raise
+            self._record_use("success", identity, generation)
             with self._lock:
                 if identity != self._identity:
                     # The account changed meanwhile; do not cache its answer.
@@ -347,6 +363,18 @@ class YazioClient:
                 while len(self._cache) > _CACHE_ENTRIES:
                     self._cache.popitem(last=False)
             return copy.deepcopy(payload)
+
+    def _record_use(
+        self, status: str, identity: tuple[str, ...], generation: int
+    ) -> None:
+        """Keep the outcome of a lookup as the last check of its account."""
+        with self._lock:
+            self._follow_credentials()
+            if identity == self._identity and generation == self._identity_generation:
+                self._last_check = {
+                    "status": status,
+                    "checked_at": datetime.now(UTC).isoformat(),
+                }
 
     def _cached(self, path: str) -> Any:
         cached = self._cache.get(path)

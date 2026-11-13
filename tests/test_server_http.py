@@ -1774,6 +1774,39 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertIsNone(state["last_error"])
 
+    def test_intervals_public_state_follows_the_last_plan_push_job(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+
+        def push_job(job_id, status, finished_at):
+            with server.database_manager().unit_of_work() as db:
+                db.execute(
+                    "INSERT INTO sync_jobs(id, provider, type, status, payload, "
+                    "requested_by, finished_at, created_at, updated_at) "
+                    "VALUES (?, 'intervals', 'plan_push', ?, '{}', 'test', ?, ?, ?)",
+                    (job_id, status, finished_at, finished_at, finished_at),
+                )
+
+        def read_state():
+            with patch.object(server, "CONFIG", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        def clear_jobs():
+            with server.database_manager().unit_of_work() as db:
+                db.execute("DELETE FROM sync_jobs WHERE requested_by = 'test'")
+
+        clear_jobs()
+        self.addCleanup(clear_jobs)
+        self.assertEqual(read_state()["state"], "configured")
+        push_job("plan-ok", "completed", "2026-09-01T08:00:00+00:00")
+        state = read_state()
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_used_at"], "2026-09-01T08:00:00+00:00")
+        self.assertIsNone(state["library_sync"]["last_sync_at"])
+        push_job("plan-bad", "failed", "2026-09-02T08:00:00+00:00")
+        self.assertEqual(read_state()["state"], "error")
+        push_job("plan-ok-again", "partial", "2026-09-03T08:00:00+00:00")
+        self.assertEqual(read_state()["state"], "connected")
+
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):

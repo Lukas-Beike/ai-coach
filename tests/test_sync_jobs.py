@@ -27,6 +27,7 @@ from backend.sync.jobs import (
     has_active_job,
     is_retryable_error,
     job_dto,
+    last_finished_at,
     list_jobs,
     normalize_sync_job_request,
     read_job,
@@ -917,14 +918,23 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(claimed["id"], garmin["id"])
         self.assertEqual(claimed["attempts"], 1)
 
-    def _insert_job(self, job_id, status, created_at, finished_at=None):
+    def _insert_job(
+        self, job_id, status, created_at, finished_at=None, provider="garmin"
+    ):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO sync_jobs(id, provider, type, status, payload, "
                 "requested_by, attempts, progress_total, progress_completed, "
                 "finished_at, created_at, updated_at) "
-                "VALUES (?, 'garmin', 'refresh', ?, '{}', 'test', 1, 1, 1, ?, ?, ?)",
-                (job_id, status, finished_at, created_at, finished_at or created_at),
+                "VALUES (?, ?, 'refresh', ?, '{}', 'test', 1, 1, 1, ?, ?, ?)",
+                (
+                    job_id,
+                    provider,
+                    status,
+                    finished_at,
+                    created_at,
+                    finished_at or created_at,
+                ),
             )
             db.execute(
                 "INSERT INTO sync_job_items(id, job_id, item_key, operation, "
@@ -936,6 +946,22 @@ class SyncJobStoreTests(unittest.TestCase):
     def _job_ids(self):
         with self.manager.reader() as db:
             return {row["id"] for row in db.execute("SELECT id FROM sync_jobs")}
+
+    def test_last_finished_at_splits_jobs_that_reached_the_provider_from_failures(self):
+        early, middle, late = (
+            "2026-09-10T10:00:00+00:00",
+            "2026-09-12T10:00:00+00:00",
+            "2026-09-14T10:00:00+00:00",
+        )
+        self._insert_job("done", "completed", early, early, "intervals")
+        self._insert_job("part", "partial", middle, middle, "intervals")
+        self._insert_job("bad", "failed", late, late, "intervals")
+        self._insert_job("queued", "queued", late, None, "intervals")
+        self._insert_job("other", "completed", late, late, "garmin")
+
+        with self.manager.reader() as db:
+            self.assertEqual((middle, late), last_finished_at(db, "intervals"))
+            self.assertEqual((None, None), last_finished_at(db, "wahoo"))
 
     def test_prune_removes_old_completed_jobs_and_their_items_only(self):
         # now is 2026-09-20; the age bound is 30 days, the newest 2 always stay.
