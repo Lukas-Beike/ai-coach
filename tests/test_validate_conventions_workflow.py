@@ -115,6 +115,7 @@ FAKE_CLOSING_GH = (
     '  [[ "$*" == *owner=example\\ * && "$*" == *closingIssuesReferences* ]] \\\n'
     '    || { echo "bad gh call" >&2; return 1; }\n'
     '  [[ "${FAKE_GH_MODE:-ok}" == fail ]] && { echo "synthetic gh api failure" >&2; return 1; }\n'
+    '  if [[ -n "${FAKE_LATE:-}" && ! -e "$FAKE_LATE" ]]; then : > "$FAKE_LATE"; return 0; fi\n'
     '  printf "%s" "${FAKE_CLOSING:-}"\n'
     "}\n"
 )
@@ -122,7 +123,7 @@ FAKE_CLOSING_GH = (
 
 @unittest.skipUnless(BASH, "a working bash is required to run the workflow step")
 class IssueLinkStepTests(unittest.TestCase):
-    def run_step(self, body, closing="", base="develop", mode="ok"):
+    def run_step(self, body, closing="", base="develop", mode="ok", late=""):
         with tempfile.TemporaryDirectory() as temp:
             script = Path(temp) / "link.sh"
             script.write_text(
@@ -140,6 +141,7 @@ class IssueLinkStepTests(unittest.TestCase):
                     "PR_BODY": body,
                     "FAKE_CLOSING": closing,
                     "FAKE_GH_MODE": mode,
+                    "FAKE_LATE": late,
                     "REPOSITORY": "example/ai-coach",
                     "PR_NUMBER": "7",
                     "BASE_REF": base,
@@ -177,6 +179,17 @@ class IssueLinkStepTests(unittest.TestCase):
                 "Part of #2148\n\nThis PR does not close #2148.", "2148\n"
             ).stdout,
         )
+
+    def test_a_late_parse_is_waited_for(self):
+        # The first read misses #2148 although the body names it (#2648 review).
+        with tempfile.TemporaryDirectory() as temp:
+            result = self.run_step(
+                "Part of #2148\n\nThis PR does not close #2148.",
+                "2148\n",
+                late=str(Path(temp) / "first-call"),
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("GitHub will close #2148", result.stdout)
 
     def test_other_base_branches_and_gh_failures(self):
         # Closing references exist only for PRs into the default branch.

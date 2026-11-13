@@ -73,7 +73,11 @@ jobs:
           [[ "${BASE_REF:-}" == "${DEFAULT_BRANCH:-}" ]] || exit 0
           closes="$(grep -oiE '(^|[^[:alnum:]_])(closes|fixes|resolves) #[0-9]+' <<< "${PR_BODY:-}" \
             | grep -oE '[0-9]+$' | sed 's/^0*//' | sort -u || true)"
-          # GitHub parses the body asynchronously; a fresh edit may need a moment.
+          # Every closing phrase GitHub may parse, also negated ones like "does not close #N".
+          expected="$(grep -oiE '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?):? *#[0-9]+' <<< "${PR_BODY:-}" \
+            | grep -oE '[0-9]+$' | sed 's/^0*//' | sort -u || true)"
+          # GitHub parses the body asynchronously: retry while its list still lacks a
+          # phrase from the body or still holds an issue the body does not mean.
           for attempt in 1 2 3; do
             closing="$(gh api graphql -f owner="${REPOSITORY%%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER" \
               -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}}}}}}' \
@@ -82,9 +86,15 @@ jobs:
             for issue in $closing; do
               grep -qx "$issue" <<< "$closes" || unmeant="$unmeant $issue"
             done
-            [[ -z "$unmeant" ]] && exit 0
+            pending=""
+            for issue in $expected; do
+              grep -qx "$issue" <<< "$closing" || pending="$pending $issue"
+            done
+            [[ -z "$unmeant" && -z "$pending" ]] && exit 0
             [[ "$attempt" -lt 3 ]] && sleep "${CLOSING_RETRY_SECONDS:-10}"
           done
+          # A phrase GitHub never lists (in code or quotes) closes nothing.
+          [[ -z "$unmeant" ]] && exit 0
           for issue in $unmeant; do
             phrase="$(grep -oiE "[[:alpha:] ]{0,20}(close[sd]?|fix(e[sd])?|resolve[sd]?):? *#$issue([^0-9]|$)" <<< "${PR_BODY:-}" | head -1 || true)"
             echo "GitHub will close #$issue on merge (phrase: '${phrase:-closing keyword}'), but the body does not say 'Closes #$issue'; reword it, for example '#$issue stays open'."
