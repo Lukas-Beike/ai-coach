@@ -75,8 +75,8 @@ HEAVY_MODULES = {
 # paths from parts, so the file name alone would miss them.
 FIXTURES = "tests/fixtures/"
 # Tests that check tracked files across the repository (line endings, guidance
-# links to files such as tests/fixtures/providers/README.md), so a changed
-# fixture can break them too.
+# links to files such as tests/fixtures/providers/README.md), so any changed
+# path can break them: every change selects them (#2502).
 REPOSITORY_WIDE = ("test_line_endings", "test_ai_docs_contract")
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
@@ -311,10 +311,13 @@ def select_modules(
             if owner:
                 selected[module] = f"{owner.path} names {path}"
                 break
-        if module in selected or not any(p.startswith(FIXTURES) for p in paths):
+        if module in selected:
             continue
-        if module in REPOSITORY_WIDE:
+        # Any changed path can break a repository-wide check (#2502).
+        if module in REPOSITORY_WIDE and paths:
             selected[module] = "checks every tracked file"
+            continue
+        if not any(p.startswith(FIXTURES) for p in paths):
             continue
         owner = next(
             (
