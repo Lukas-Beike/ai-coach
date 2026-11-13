@@ -1590,6 +1590,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-toolbar { display: flex; align-items: center; gap: 8px; margin: 20px 0; }
 .nutrition-toolbar label { flex: 1; min-width: 0; }
 .nutrition-toolbar input { width: 100%; text-align: center; font-weight: 650; }
+@media (max-width: 360px) { .nutrition-toolbar { flex-wrap: wrap; } .nutrition-toolbar label { flex: 1 1 100%; order: -1; } }
 .nutrition-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 12px; margin: 18px 0; }
 .nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .nutrition-total { min-width: 0; overflow-wrap: break-word; hyphens: auto; }
