@@ -40,7 +40,8 @@ class IssueStatusTests(unittest.TestCase):
         )
         criteria = issue_status.open_boxes(BODY)[1]
         self.assertEqual(
-            [m[1] for m in criteria], ["closing summary covers this", "still a criterion"]
+            [m[1] for m in criteria],
+            ["closing summary covers this", "still a criterion"],
         )
 
     def test_empty_body_has_no_checkboxes(self):

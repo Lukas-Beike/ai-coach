@@ -27,15 +27,11 @@ def open_boxes(body):
     parts, criteria, level, fenced = [], [], 0, False
     for line in LINE.finditer(body):
         text = line[0].strip()
-        if text.startswith(("```", "~~~")):
-            fenced = not fenced
-        heading = None if fenced else HEADING.match(text)
-        if heading:
-            depth = len(heading[1])
-            if level and depth <= level:
-                level = 0
-            if heading[2].lower().startswith("acceptance criteria"):
-                level = depth
+        fenced ^= text.startswith(("```", "~~~"))
+        if (heading := HEADING.match(text)) and not fenced:
+            depth = len(heading[1])  # a deeper heading stays inside the section
+            starts = heading[2].lower().startswith("acceptance criteria")
+            level = depth if starts else level * (depth > level)
         if box := CHECKBOX.match(body, line.start(), line.end()):
             (criteria if level else parts).append(box)
     return parts, criteria

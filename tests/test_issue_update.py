@@ -212,7 +212,11 @@ class IssueUpdateTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(  # ticks first: a rerun after a failed edit posts once
             fake.writes(),
-            [["issue", "edit", "12"], ["issue", "comment", "12"], ["issue", "edit", "12"]],
+            [
+                ["issue", "edit", "12"],
+                ["issue", "comment", "12"],
+                ["issue", "edit", "12"],
+            ],
         )
         self.assertEqual(
             fake.edited_body,
