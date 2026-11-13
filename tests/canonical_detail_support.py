@@ -148,6 +148,7 @@ def add_session_record(
     sport: str = "ride",
     name: str | None = None,
     merged_into: str | None = None,
+    started_at: str = "2026-09-10T05:00:00+00:00",
     **measured: float,
 ) -> None:
     """Store one active provider record and, unless it exists, its session.
@@ -155,7 +156,6 @@ def add_session_record(
     ``merged_into`` makes the session a duplicate of that session. ``measured``
     fills activity record columns such as ``duration_s`` or ``distance_m``.
     """
-    started_at = "2026-09-10T05:00:00+00:00"
     columns = ", ".join(measured)
     with manager.unit_of_work() as db:
         db.execute(
@@ -196,17 +196,15 @@ def add_session_record(
         )
 
 
-def add_garmin_copy(
+def store_garmin_streams(
     manager: DatabaseManager,
-    intervals_id: str,
+    garmin_id: str,
     streams: dict,
     laps: list[dict] | None = None,
-) -> str:
-    """Bundle a Garmin copy with full streams (and laps) into an Intervals session.
+) -> None:
+    """Store full streams (and laps) on the existing Garmin record ``garmin_id``.
 
-    The activity detail document reads Garmin, Wahoo and local detail only
-    (#1685), so tests that stored Intervals.icu streams use this copy instead.
-    ``streams`` uses the legacy stream keys; returns the Garmin activity id.
+    ``streams`` uses the legacy stream keys.
     """
     from backend.canonical.activity_detail import (
         ActivityLap,
@@ -224,7 +222,6 @@ def add_garmin_copy(
     )
     from backend.db.activity_detail_store import replace_detail_set
 
-    garmin_id = f"garmin-{intervals_id}"
     provenance = Provenance(
         provider=ProviderId.GARMIN,
         source_kind=SourceKind.PROVIDER_REPORTED,
@@ -234,29 +231,6 @@ def add_garmin_copy(
         label="Garmin Connect",
     )
     with manager.unit_of_work() as db:
-        row = db.execute(
-            "SELECT activity_id, sport, environment, started_at, name "
-            "FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
-            (INTERVALS, intervals_id),
-        ).fetchone()
-        db.execute(
-            "INSERT INTO activity_records(provider, provider_activity_id, "
-            "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
-            "environment, started_at, load_model, name, fetched_at, created_at, "
-            "updated_at) VALUES ('garmin', ?, ?, 'active', 1, 'provider_reported', "
-            "'garmin', ?, ?, ?, 'unknown', ?, ?, ?, ?)",
-            (
-                garmin_id,
-                row["activity_id"],
-                row["sport"],
-                row["environment"],
-                row["started_at"],
-                row["name"],
-                NOW,
-                NOW,
-                NOW,
-            ),
-        )
         replace_detail_set(
             db,
             ActivityStreamSet(
@@ -297,4 +271,44 @@ def add_garmin_copy(
                 summary_sha256=None,
                 now=NOW,
             )
+
+
+def add_garmin_copy(
+    manager: DatabaseManager,
+    intervals_id: str,
+    streams: dict,
+    laps: list[dict] | None = None,
+) -> str:
+    """Bundle a Garmin copy with full streams (and laps) into an Intervals session.
+
+    The activity detail document reads Garmin, Wahoo and local detail only
+    (#1685), so tests that stored Intervals.icu streams use this copy instead.
+    Returns the Garmin activity id.
+    """
+    garmin_id = f"garmin-{intervals_id}"
+    with manager.unit_of_work() as db:
+        row = db.execute(
+            "SELECT activity_id, sport, environment, started_at, name "
+            "FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
+            (INTERVALS, intervals_id),
+        ).fetchone()
+        db.execute(
+            "INSERT INTO activity_records(provider, provider_activity_id, "
+            "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
+            "environment, started_at, load_model, name, fetched_at, created_at, "
+            "updated_at) VALUES ('garmin', ?, ?, 'active', 1, 'provider_reported', "
+            "'garmin', ?, ?, ?, 'unknown', ?, ?, ?, ?)",
+            (
+                garmin_id,
+                row["activity_id"],
+                row["sport"],
+                row["environment"],
+                row["started_at"],
+                row["name"],
+                NOW,
+                NOW,
+                NOW,
+            ),
+        )
+    store_garmin_streams(manager, garmin_id, streams, laps)
     return garmin_id

@@ -92,14 +92,14 @@ class SessionActivityReadTests(unittest.TestCase):
     def test_reader_maps_the_session_records_in_activity_order(self):
         self.add_session("act_1")
         self.add_session("act_2", "duplicate", merged_into="act_1")
-        self.add_record(ProviderId.INTERVALS, "i1", "act_1", started=STAMP)
+        self.add_record(ProviderId.WAHOO, "w1", "act_1", started=STAMP)
         self.add_record(ProviderId.GARMIN, "g1", "act_2", started=LATE)
 
         records = CanonicalTableReader().session_activities(self.db, "act_1")
 
-        self.assertEqual(("i1", "g1"), tuple(r.activity_id for r in records))
+        self.assertEqual(("w1", "g1"), tuple(r.activity_id for r in records))
         self.assertEqual(
-            (ProviderId.INTERVALS, ProviderId.GARMIN),
+            (ProviderId.WAHOO, ProviderId.GARMIN),
             tuple(r.provenance.provider for r in records),
         )
 

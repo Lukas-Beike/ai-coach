@@ -26,7 +26,6 @@ from backend.sync.activity_routes import ActivityRoutesStage
 from backend.sync.activity_weather import ActivityWeatherStage
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
-INTERVALS = ProviderId.INTERVALS
 LEGACY_KEYS = {
     "activity",
     "session_analysis",
@@ -121,10 +120,20 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.manager = open_manager(directory.name)
         self.addCleanup(self.manager.close)
         add_session_record(
-            self.manager, INTERVALS, "new", "act_new", sport="run", name="Morning run"
+            self.manager,
+            ProviderId.GARMIN,
+            "new",
+            "act_new",
+            sport="run",
+            name="Morning run",
         )
         add_session_record(
-            self.manager, INTERVALS, "old", "act_old", sport="run", name="Winter run"
+            self.manager,
+            ProviderId.GARMIN,
+            "old",
+            "act_old",
+            sport="run",
+            name="Winter run",
         )
 
     def detail_service(self, snapshot, **kwargs):
@@ -218,7 +227,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual("good", result["activity_feedback"]["notes"])
         self.assertEqual(
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu; recorded by: garmin",
+            "session; providers: Garmin Connect; recorded by: garmin",
             result["data_scope"],
         )
         self.assertFalse(LEGACY_KEYS & set(result))

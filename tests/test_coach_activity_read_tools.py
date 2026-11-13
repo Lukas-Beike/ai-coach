@@ -11,15 +11,15 @@ from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import SnapshotActivityRows, canonical_source
 from canonical_detail_support import (
-    add_garmin_copy,
+    add_session_record,
     open_manager,
-    seed_intervals_activity,
+    store_garmin_streams,
 )
 from intervals_wellness_stub import map_intervals_wellness
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_contract import COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import coach_context_json_size
 from backend.errors import AppError
@@ -230,7 +230,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertEqual([200, 250], result["streams"]["channels"]["power_w"]["values"])
         self.assertEqual(
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Garmin Connect, Intervals.icu; recorded by: garmin",
+            "session; providers: Garmin Connect; recorded by: garmin",
             result["data_scope"],
         )
         self.assertTrue(result["activity_validation"]["available"])
@@ -412,14 +412,21 @@ def _sessions(case: unittest.TestCase, *activities: dict):
     manager = open_manager(directory.name)
     case.addCleanup(manager.close)
     for activity in activities:
-        fields = {key: value for key, value in activity.items() if key != "id"}
-        seed_intervals_activity(manager, activity["id"], **fields)
+        add_session_record(
+            manager,
+            ProviderId.GARMIN,
+            activity["id"],
+            f"act_{activity['id']}",
+            sport=activity["type"].lower(),
+            name=activity.get("name"),
+            started_at=f"{activity['start_date_local'][:10]}T05:00:00+00:00",
+        )
     return manager
 
 
 def _store_streams(manager, activity_id: str, streams: dict, laps=None) -> None:
-    """Store the streams on a Garmin copy: Intervals.icu detail is never read."""
-    add_garmin_copy(manager, activity_id, streams, laps)
+    """Store the streams on the Garmin record: Intervals.icu detail is never read."""
+    store_garmin_streams(manager, activity_id, streams, laps)
 
 
 def _detail_tool(manager, activities: list[dict], garmin, profile, planned=None):
