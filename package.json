@@ -9,7 +9,7 @@
     "@axe-core/playwright": "4.14.0",
     "@fission-ai/openspec": "1.17.0",
     "@playwright/test": "1.65.0",
-    "eslint": "10.13.0",
+    "eslint": "10.14.0",
     "eslint-plugin-sonarjs": "4.2.2"
   }
 }
