@@ -269,22 +269,10 @@ from backend.sync import observation as sync_observation
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.adaptive import AdaptivePreviewFollowupService
-from backend.sync.assembly import (
-    ProviderRefreshRetryPolicy,
-    ProviderSyncAssembly,
-    ProviderSyncPersistence,
-    ProviderSyncRuntime,
-)
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.command_assembly import (
-    IllnessPauseDependencies,
-    SyncCommandAssembly,
-    SyncCommandCore,
-    coach_synchronous_refreshes,
-)
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
@@ -327,7 +315,6 @@ from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
-    resetting_providers,
 )
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
@@ -342,7 +329,6 @@ from backend.sync.metric_export_assembly import (
     export_thresholds_reader,
 )
 from backend.sync.metric_export_runner import MetricExportRunner
-from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
     PlannedCalendarLocalState,
     PlannedCalendarProvider,
@@ -361,12 +347,6 @@ from backend.sync.provider_resync_assembly import (
     ProviderResyncPersistence,
     ProviderResyncRuntime,
     ResyncProviderOwners,
-)
-from backend.sync.queue_assembly import (
-    SyncJobQueueAssembly,
-    SyncQueuePersistence,
-    SyncQueuePolicy,
-    SyncQueueWorker,
 )
 from backend.sync.rating_backfill_removal import RatingBackfillRemoval
 from backend.sync.retry_hold import ProviderRetryHold
@@ -394,8 +374,14 @@ from backend.sync.wahoo_connection_assembly import (
 )
 from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
 from backend.sync.weather import build_weather_sync
-from backend.sync.worker import shared_sync_job_wake_event
-from backend.sync.worker_assembly import SyncJobWorkerAssembly
+from backend.sync.wiring import (
+    build_provider_sync,
+    build_sync_commands,
+    build_sync_job_queue,
+    build_sync_persistence,
+    build_sync_worker,
+    coach_synchronous_refreshes,
+)
 from backend.weather.activity_weather_store import home_coordinates
 from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
 from backend.weather.wiring import WeatherServices, build_weather
@@ -466,11 +452,6 @@ CHECKIN_REPOSITORY = CheckinRepository(runtime_clock.utc_now)
 ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
 
 
-PROVIDER_REFRESH_RETRY_BASE_SECONDS = 15 * 60
-PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
-SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
-SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
-SYNC_JOB_POLL_SECONDS = 1.0
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
@@ -517,28 +498,6 @@ def provider_state_service() -> provider_state.ProviderStateService:
         lambda: ATHLETE_CLOCK.now().date(),
         LOGGER,
     )
-
-
-PROVIDER_SYNC = ProviderSyncAssembly(
-    dependencies=ProviderSyncAssembly.Inputs(
-        persistence=ProviderSyncPersistence(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-        ),
-        runtime=ProviderSyncRuntime(
-            config=lambda: CONFIG,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            logger=LOGGER,
-            now=lambda: datetime.now(UTC),
-        ),
-        retry_policy=ProviderRefreshRetryPolicy(
-            uuid_factory=lambda: uuid.uuid4().hex,
-            retry_base_seconds=PROVIDER_REFRESH_RETRY_BASE_SECONDS,
-            retry_max_seconds=PROVIDER_REFRESH_RETRY_MAX_SECONDS,
-        ),
-    ),
-)
 
 
 def morning_body_battery_service() -> MorningBodyBatteryService:
@@ -672,9 +631,10 @@ APP = AppContext(
     athlete=ATHLETE_DATA,
     athlete_profile=ATHLETE_PROFILE_SERVICE,
     planning_revision=PLANNING_REVISION_SERVICE,
-    provider_sync=PROVIDER_SYNC,
     morning_body_battery_service=morning_body_battery_service,
 )
+PROVIDER_SYNC = build_provider_sync(APP)
+APP.provider_sync = PROVIDER_SYNC
 PLANNING_DATA = build_planning_data(APP)
 APP.planning = PLANNING_DATA
 PLANNING_WORKFLOWS = build_planning_workflows(APP)
@@ -730,7 +690,7 @@ def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
     """Return the one restartable persistent synchronization worker."""
     global SYNC_JOB_WORKER
     if SYNC_JOB_WORKER is None:
-        SYNC_JOB_WORKER = SYNC_JOB_WORKER_ASSEMBLY.create()
+        SYNC_JOB_WORKER = SYNC_WORKERS.create()
     return SYNC_JOB_WORKER
 
 
@@ -802,12 +762,7 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 )
 APP.diagnostic_capture = DIAGNOSTIC_CAPTURE
 
-SYNC_PERSISTENCE = SyncPersistenceAssembly(
-    database_manager=database_manager,
-    key_values=KEY_VALUE_REPOSITORY,
-    utc_now=runtime_clock.utc_now,
-    athlete_clock=lambda: ATHLETE_CLOCK,
-)
+SYNC_PERSISTENCE = build_sync_persistence(APP)
 
 
 def sync_state_repository() -> SyncStateRepository:
@@ -888,34 +843,8 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
 APP.garmin = GARMIN_ASSEMBLY
 
 
-def _coach_foreground_busy() -> bool:
-    return COACH_BACKGROUND_JOBS.job_store().busy()
-
-
-SYNC_JOB_QUEUE = SyncJobQueueAssembly(
-    dependencies=SyncJobQueueAssembly.Inputs(
-        persistence=SyncQueuePersistence(
-            database_manager=database_manager,
-            now=runtime_clock.utc_now,
-            current_time=lambda: datetime.now(UTC),
-            uuid_factory=lambda: uuid.uuid4().hex,
-        ),
-        worker=SyncQueueWorker(
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            wake_event=shared_sync_job_wake_event,
-            daily_sync_marker_service=sync_daily_markers,
-        ),
-        policy=SyncQueuePolicy(
-            all_sync_days=ALL_SYNC_DAYS,
-            redact_text=REDACTOR.redact_text,
-            logger=LOGGER,
-            retry_base_seconds=SYNC_JOB_RETRY_BASE_SECONDS,
-            retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
-            foreground_busy=_coach_foreground_busy,
-            held_providers=resetting_providers,
-        ),
-    )
+SYNC_JOB_QUEUE = build_sync_job_queue(
+    APP, all_sync_days=ALL_SYNC_DAYS, daily_sync_markers=sync_daily_markers
 )
 APP.sync_job_queue = SYNC_JOB_QUEUE
 
@@ -1365,13 +1294,7 @@ SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
 )
 
 
-SYNC_JOB_WORKER_ASSEMBLY = SyncJobWorkerAssembly(
-    store=SYNC_JOB_QUEUE.store,
-    executor=SYNC_JOB_EXECUTION.executor,
-    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-    poll_seconds=SYNC_JOB_POLL_SECONDS,
-    wake_event=shared_sync_job_wake_event,
-)
+SYNC_WORKERS = build_sync_worker(APP, executor=SYNC_JOB_EXECUTION.executor)
 
 
 # The daily schedule follows the history's next_retry_at; an auth failure waits
@@ -1429,28 +1352,12 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
     ),
 )
 
-SYNC_COMMANDS = SyncCommandAssembly(
-    core=SyncCommandCore(
-        database_manager=database_manager,
-        queue_service=SYNC_JOB_QUEUE.service,
-        competition_service=PLANNING_DATA.competition,
-        workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
-        planning_revision=PLANNING_REVISION_SERVICE,
-        utc_now=runtime_clock.utc_now,
-        training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        synchronous_refreshes=lambda: coach_synchronous_refreshes(
-            SYNC_JOB_DEPENDENCIES
-        ),
-        after_refresh=DERIVED_PASS_HOOK,
-    ),
-    illness_pause=IllnessPauseDependencies(
-        config=lambda: CONFIG,
-        intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-        adaptive_replan_apply=PLANNING_DATA.adaptive_apply,
-        adaptive_replan_preview=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-        redactor=REDACTOR,
-        today=lambda: ATHLETE_CLOCK.now().date(),
-    ),
+SYNC_COMMANDS = build_sync_commands(
+    APP,
+    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    synchronous_refreshes=lambda: coach_synchronous_refreshes(SYNC_JOB_DEPENDENCIES),
+    after_refresh=DERIVED_PASS_HOOK,
+    training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
 )
 
 

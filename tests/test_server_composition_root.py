@@ -58,8 +58,19 @@ from backend.providers.http import JsonHttpClient
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.providers.openai_stream import OpenAIStreamClient
+from backend.sync import freshness, job_outcomes, jobs, observation, refresh
+from backend.sync.adaptive import IllnessPauseSyncService
+from backend.sync.authority import PlanningAuthorityService
+from backend.sync.commands import ProviderRefreshCommandService
+from backend.sync.conflict_commands import SyncConflictCommandService
+from backend.sync.daily import DailySyncMarkerService
+from backend.sync.plan_commands import PlanPushCommandService
+from backend.sync.plan_repair import PlanRepairManifestService
+from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
+from backend.sync.worker import SyncJobWorker
 from backend.weather.service import WeatherService
 
 
@@ -242,6 +253,43 @@ class CompositionRootTests(ServerTestCase):
             server.OPENAI_RESPONSE_TIMEOUT_SECONDS,
         )
         self.assertTrue(callable(model.complete) and callable(model.stream))
+
+    def test_sync_services_resolve_through_the_root(self) -> None:
+        persistence, provider = server.SYNC_PERSISTENCE, server.PROVIDER_SYNC
+        queue, commands = server.SYNC_JOB_QUEUE, server.SYNC_COMMANDS
+
+        self.assertIs(server.APP.provider_sync, provider)
+        self.assertIs(server.APP.sync_job_queue, queue)
+        self.assertIsInstance(persistence.state_repository(), SyncStateRepository)
+        self.assertIsInstance(persistence.daily_markers(), DailySyncMarkerService)
+        # One tracker is shared across calls; the observer wraps it.
+        tracker = provider.refresh_tracker()
+        self.assertIsInstance(tracker, refresh.ProviderRefreshTracker)
+        self.assertIs(tracker, provider.refresh_tracker())
+        self.assertIsInstance(
+            provider.operation_observer(), observation.SyncOperationObserver
+        )
+        self.assertIsInstance(
+            provider.freshness_service(), freshness.ProviderFreshnessService
+        )
+        self.assertIsInstance(queue.store(), jobs.SyncJobStore)
+        self.assertIsInstance(queue.service(), SyncJobQueueService)
+        self.assertIsInstance(
+            queue.outcome_service(), job_outcomes.SyncJobOutcomeService
+        )
+        self.assertIsInstance(server.SYNC_WORKERS.create(), SyncJobWorker)
+        for factory, kind in (
+            (commands.illness_pause, IllnessPauseSyncService),
+            (commands.provider_refresh, ProviderRefreshCommandService),
+            (commands.conflicts, SyncConflictCommandService),
+            (commands.plan_push, PlanPushCommandService),
+            (commands.authority, PlanningAuthorityService),
+            (commands.structured_plan_sync, StructuredPlanSyncService),
+            (commands.repair_manifest, PlanRepairManifestService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.
