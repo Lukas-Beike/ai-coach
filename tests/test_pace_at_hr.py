@@ -5,8 +5,10 @@ from datetime import date
 
 from backend.performance.pace_at_hr import (
     grade_adjusted,
+    output_at_heart_rate,
     pace_at_heart_rate,
     pace_at_heart_rate_trend,
+    power_at_heart_rate,
     session_comparison,
 )
 from backend.planning.block_review import _performance
@@ -237,6 +239,87 @@ class SessionComparisonTests(unittest.TestCase):
         self.assertEqual(
             "not_covered", session_comparison(self._records(3), "missing")["status"]
         )
+
+
+def _ride(watts=(200,), hr=131):
+    times = list(range(SECONDS))
+    return {
+        "sport": "ride",
+        "streams": {
+            "time": times,
+            "watts": [watts[t % len(watts)] for t in times],
+            "heartrate": [hr] * SECONDS,
+            "moving": [True] * SECONDS,
+        },
+    }
+
+
+def _ride_record(day, ride):
+    return {
+        "date": day,
+        "sport": "ride",
+        "power_at_hr_profile": power_at_heart_rate(ride),
+    }
+
+
+class OutputAtHeartRateTests(unittest.TestCase):
+    """LT1 pace and power from own steady sessions (#2427): fixtures only."""
+
+    TODAY = date(2026, 11, 13)
+
+    def test_ride_profile_pairs_heart_rate_with_the_power_of_the_last_minute(self):
+        # 300 W and 100 W alternate every second: the minute's mean is 200 W.
+        profile = power_at_heart_rate(_ride(watts=(300, 100)))
+        part = profile["bins"]["130"]
+        self.assertEqual("ok", profile["status"])
+        self.assertEqual(SECONDS - 600 - 1, part["seconds"])
+        self.assertAlmostEqual(200.0, part["work_j"] / part["seconds"], delta=0.5)
+        # Coasting samples (own power zero) do not count.
+        coasting = power_at_heart_rate(_ride(watts=(300, 0)))["bins"]["130"]
+        self.assertAlmostEqual(coasting["seconds"], part["seconds"] / 2, delta=1)
+
+    def test_a_run_or_a_ride_without_power_gives_no_ride_profile(self):
+        self.assertEqual("insufficient_data", power_at_heart_rate(_run())["status"])
+        short = _ride()
+        short["streams"] = {**short["streams"], "watts": []}
+        self.assertEqual("insufficient_data", power_at_heart_rate(short)["status"])
+
+    def test_median_of_the_sessions_in_the_band_nearest_to_the_heart_rate(self):
+        runs = [_peer(f"2026-11-0{day}", speed, hr=128)
+                for day, speed in ((1, 3.0), (2, 3.2), (3, 2.9))]  # fmt: skip
+        rides = [_ride_record(f"2026-11-0{day}", _ride(watts=(watts,)))
+                 for day, watts in ((1, 190), (2, 200), (3, 230))]  # fmt: skip
+        records = [*runs, *rides]
+        # 128 bpm reads the 125-134 band: median speed 3.0 m/s is 333.3 s/km.
+        self.assertAlmostEqual(
+            333.33, output_at_heart_rate(records, "run", 128, self.TODAY), places=2
+        )
+        self.assertEqual(200, output_at_heart_rate(records, "ride", 131, self.TODAY))
+        # No time in the band around 145 bpm, and too few sessions: no value.
+        self.assertIsNone(output_at_heart_rate(records, "run", 145, self.TODAY))
+        self.assertIsNone(output_at_heart_rate(records[:2], "run", 128, self.TODAY))
+
+    def test_outdoor_runs_first_indoor_runs_only_without_enough_outdoor_ones(self):
+        indoor = [_peer(f"2026-11-0{day}", 2.5, hr=128, environment="indoor")
+                  for day in (1, 2, 3)]  # fmt: skip
+        outdoor = [_peer(f"2026-11-0{day}", 3.0, hr=128) for day in (4, 5, 6)]
+        self.assertEqual(
+            400, output_at_heart_rate(indoor + outdoor[:2], "run", 128, self.TODAY)
+        )
+        self.assertAlmostEqual(
+            333.33,
+            output_at_heart_rate(indoor + outdoor, "run", 128, self.TODAY),
+            places=2,
+        )
+
+    def test_sessions_older_than_60_days_do_not_count(self):
+        runs = [
+            _peer(day, 3.0, hr=128)
+            for day in ("2026-09-14", "2026-09-15", "2026-11-01")
+        ]
+        self.assertIsNone(output_at_heart_rate(runs, "run", 128, self.TODAY))
+        runs[0]["date"] = "2026-11-02"
+        self.assertIsNotNone(output_at_heart_rate(runs, "run", 128, self.TODAY))
 
 
 if __name__ == "__main__":

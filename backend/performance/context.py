@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import functools
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -32,6 +33,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.performance.pace_at_hr import output_at_heart_rate
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.training_focus import training_focus
@@ -163,6 +165,16 @@ def _zone_two_tops(
     return tops
 
 
+def _at_heart_rate(
+    records: Callable[[], Sequence[Mapping[str, Any]]] | None, today: date
+) -> performance_current_metrics.OutputAtHeartRate | None:
+    """Pace or power at a heart rate from the session records, read at most once."""
+    if records is None:
+        return None
+    read = functools.cache(records)
+    return lambda sport, bpm: output_at_heart_rate(read(), sport, bpm, today)
+
+
 def current_performance_context(
     garmin: GarminSyncStatus,
     profile: dict[str, Any],
@@ -171,11 +183,14 @@ def current_performance_context(
     canonical: CanonicalPerformanceInputs,
     session_feedback: FeedbackLookup | None = None,
     zone_configurations: Iterable[ZoneConfiguration] = (),
+    lt1_session_records: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Compose the current performance projection from canonical inputs only.
 
     ``zone_configurations`` give LT1 the top of zone 2 of the sport's heart-rate,
-    pace or power zones in effect.
+    pace or power zones in effect. ``lt1_session_records`` reads the ride and run
+    sessions with their heart-rate profiles, so LT1 pace and power come from the
+    athlete's own steady sessions at the LT1 heart rate; read once, when needed.
 
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.
@@ -289,6 +304,7 @@ def current_performance_context(
                 first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
                 first_threshold_origin(profile),
                 _zone_two_tops(list(zone_configurations), metrics, today),
+                _at_heart_rate(lt1_session_records, today),
             ),
         },
         "current_load": load,

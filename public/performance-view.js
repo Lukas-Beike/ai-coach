@@ -138,10 +138,11 @@ function currentPerformanceRows(metrics, items) {
 }
 
 // LT1 per sport from the performance values (#2427): measured, the adopted HRV estimate,
-// the top of zone 2 or a fixed share of LT2; both stand-ins carry the estimate chip.
+// own sessions at the LT1 heart rate, the top of zone 2 or a fixed share of LT2; every
+// stand-in carries the estimate chip.
 function withFirstThresholds(metrics, thresholds) {
   const lt1 = thresholds?.first_thresholds || {};
-  const value = (number, unit, origin) => (number == null ? undefined : { value: number, unit, estimated: origin === "zone_2" || origin === "fixed_share" });
+  const value = (number, unit, origin) => (number == null ? undefined : { value: number, unit, estimated: ["own_sessions", "zone_2", "fixed_share"].includes(origin) });
   return {
     ...metrics,
     run_lt1_pace_seconds_per_km: value(lt1.run?.pace_seconds_per_km, "s/km", lt1.run?.pace_origin),

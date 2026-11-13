@@ -33,7 +33,11 @@ from backend.performance.canonical_detail import (
     primary_analysis_record,
 )
 from backend.performance.pace_at_hr import METHOD as PACE_METHOD
-from backend.performance.pace_at_hr import pace_at_heart_rate
+from backend.performance.pace_at_hr import (
+    POWER_METHOD,
+    pace_at_heart_rate,
+    power_at_heart_rate,
+)
 from backend.performance.power_profile import (
     METHOD_ID,
     METHOD_VERSION,
@@ -52,7 +56,7 @@ _DEFAULT_CAPACITY: Final = 1024
 
 @dataclass(frozen=True, slots=True)
 class SessionCurve:
-    """The power and running curves and the pace-at-heart-rate bins of one session and the fingerprint of their input."""
+    """The power and running curves, the pace- and power-at-heart-rate bins of one session and the fingerprint of their input."""
 
     power: dict[str, Any]
     running: dict[str, Any]
@@ -61,6 +65,7 @@ class SessionCurve:
     # The comparison numbers of the session's execution (streams and current
     # laps); only these are kept, not the full per-rep execution.
     execution_summary: dict[str, Any] | None = None
+    power_at_hr: dict[str, Any] | None = None
 
 
 class SessionCurveReader:
@@ -190,6 +195,10 @@ def _session_curve(
                 "velocity_smooth", "heartrate", "grade_smooth", "altitude", "moving"
             ),
         ),
+        power_at_hr=power_at_heart_rate(
+            adapted.activity,
+            source_label=adapted.label_for("watts", "heartrate", "moving"),
+        ),
         execution_summary=comparison_metrics(
             session_execution(
                 adapted.activity,
@@ -212,6 +221,7 @@ def _fingerprint(
             METHOD_ID,
             METHOD_VERSION,
             PACE_METHOD,
+            POWER_METHOD,
             EXECUTION_METHOD,
             sorted([key.content_sha256, key.fetched_at] for key in laps),
             analysis_sport(primary_analysis_record(records), measured_order(records)),

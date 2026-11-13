@@ -190,6 +190,15 @@ class SessionCurveReaderTests(unittest.TestCase):
         self.assertEqual(
             "Intervals.icu original watts stream", curves["act_1"].power["source"]
         )
+        # The power-at-heart-rate bins (#2427) come from the same streams; this
+        # ride has no heart rate, so it gives none.
+        self.assertEqual(
+            ("power-at-heart-rate-v1", "insufficient_data"),
+            (
+                curves["act_1"].power_at_hr["method"],
+                curves["act_1"].power_at_hr["status"],
+            ),
+        )
 
     def test_merged_duplicate_counts_once_under_its_session(self):
         add_session(self.db, "act_1")

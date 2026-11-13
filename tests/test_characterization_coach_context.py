@@ -137,6 +137,7 @@ def _context(
     profile: dict[str, Any],
     today: date,
     zone_configurations: tuple[Any, ...] = (),
+    lt1_session_records: Any = None,
 ) -> dict[str, Any]:
     """Current performance with recovery observations mapped from the fixtures."""
     canonical = canonical_from_snapshot(snapshot, today) if snapshot else None
@@ -152,6 +153,7 @@ def _context(
         if canonical is not None
         else _recovery(garmin, snapshot),
         zone_configurations=zone_configurations,
+        lt1_session_records=lt1_session_records,
     )
 
 
@@ -385,21 +387,18 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
     ) -> None:
         # 75 % of the Garmin FTP of 265 W; a local power zone 2 ends at 200 W.
         shared = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
-        zoned = _context(
-            _intervals_snapshot(),
-            _garmin_payload(),
-            {},
-            TODAY,
-            (
-                local_zone_configuration(
-                    metric=ZoneConfigurationMetric.POWER,
-                    sport=Sport.RIDE,
-                    threshold=265.0,
-                    maximum=None,
-                    resting=None,
-                    limits=(150.0, 200.0, 240.0),
-                ),
+        zoned_zones = (
+            local_zone_configuration(
+                metric=ZoneConfigurationMetric.POWER,
+                sport=Sport.RIDE,
+                threshold=265.0,
+                maximum=None,
+                resting=None,
+                limits=(150.0, 200.0, 240.0),
             ),
+        )
+        zoned = _context(
+            _intervals_snapshot(), _garmin_payload(), {}, TODAY, zoned_zones
         )
         self.assertEqual(
             (199, "fixed_share"),
@@ -410,6 +409,36 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
             (200, "zone_2"),
             tuple(zoned["thresholds"]["first_thresholds"]["ride"][key]
                   for key in ("watts", "power_origin")),
+        )  # fmt: skip
+        # Three steady rides at the heart-rate zone 2 top of 131 bpm win (#2427).
+        heart_rate_zone = local_zone_configuration(
+            metric=ZoneConfigurationMetric.HEART_RATE,
+            sport=Sport.RIDE,
+            threshold=160.0,
+            maximum=None,
+            resting=None,
+            limits=(115.0, 131.0, 150.0),
+        )
+        steady = {
+            "status": "ok",
+            "bins": {
+                "130": {
+                    "seconds": 900.0,
+                    "work_j": 900.0 * 185,
+                    "watts_sq": 900.0 * 185**2,
+                }
+            },
+        }
+        rides = [{"date": f"2026-05-0{day}", "sport": "ride",
+                  "power_at_hr_profile": steady} for day in (1, 2, 3)]  # fmt: skip
+        own = _context(
+            _intervals_snapshot(), _garmin_payload(), {}, TODAY,
+            (*zoned_zones, heart_rate_zone), lambda: rides,
+        )  # fmt: skip
+        self.assertEqual(
+            {"hr_bpm": 131, "hr_origin": "zone_2",
+             "watts": 185, "power_origin": "own_sessions"},
+            own["thresholds"]["first_thresholds"]["ride"],
         )  # fmt: skip
 
     def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(

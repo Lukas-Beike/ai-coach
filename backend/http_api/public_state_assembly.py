@@ -22,6 +22,8 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     resolve_reader,
 )
+from backend.performance.mean_max_curve import SessionCurveReader
+from backend.performance.report_service import TrainingProfileSelectionService
 from backend.performance.season_inputs import SeasonSource
 from backend.performance.source_policy import (
     SourcePreferences,
@@ -34,6 +36,7 @@ from backend.runtime.ports import (
     ObservationReader,
     ProviderCoverageReader,
 )
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.status import SyncPublicStateService
 
 
@@ -174,21 +177,29 @@ class PublicStateAssembly:
         self._planned_workout_label = calendar.planned_workout_label
         self._running_probes = running_probes
         self._provider_credentials = provider_credentials
+        # A second session-curve memo until the composition shares one (#2427).
+        self._lt1_curves = SessionCurveReader(CanonicalTableReader().session_activities)
 
     def performance_state_service(self) -> PublicPerformanceStateService:
         garmin = self._garmin()
         athlete = self._athlete_data()
+        source = self.canonical_performance_source()
         return PublicPerformanceStateService(
             garmin.payload_service(),
             athlete.profile(),
             garmin.projection_service(),
             self._local_date,
-            self.canonical_performance_source(),
+            source,
             session_feedback=partial(
                 athlete.activity_feedback().for_activity_ids, sessions_only=True
             ),
             now=self._local_now(),
             zone_configurations=athlete.zones().configurations,
+            lt1_session_records=None
+            if source is None or source.activity_summaries is None
+            else TrainingProfileSelectionService(
+                self._local_date, canonical=source, curves=self._lt1_curves
+            ).curve_records,
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:
