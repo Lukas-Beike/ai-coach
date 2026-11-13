@@ -126,27 +126,26 @@ class RemoteLinkRepositoryTests(unittest.TestCase):
             ["2"],
         )
 
-    def test_last_synced_at_is_the_newest_readable_time_of_one_provider(self) -> None:
-        def stamped(local_id: str, synced_at: str | None, provider: str = INTERVALS):
-            self.repository.upsert(
-                self.db,
-                self.link(
-                    local_id,
-                    provider=provider,
-                    remote_id=local_id,
-                    last_synced_at=synced_at,
-                ),
-            )
-
-        self.assertIsNone(self.repository.last_synced_at(self.db, INTERVALS))
-        stamped("1", "2026-10-02T08:00:00+00:00")
-        stamped("2", "2026-10-03T08:00:00+00:00")
-        stamped("3", "kaputt")
-        stamped("4", None)
-        stamped("5", "2026-10-09T08:00:00+00:00", provider=OTHER)
+    def test_synced_times_lists_only_synced_unit_and_competition_links(self) -> None:
+        at = "2026-10-02T08:00:00+00:00"
+        unit, competition = RemoteEntityKind.PLANNED_UNIT, RemoteEntityKind.COMPETITION
+        rows = (
+            ("1", {"entity_kind": unit}),
+            ("2", {"entity_kind": competition, "last_synced_at": "kaputt"}),
+            ("3", {"entity_kind": RemoteEntityKind.OBSERVATION}),
+            ("4", {"entity_kind": RemoteEntityKind.LIBRARY_WORKOUT}),
+            ("5", {"entity_kind": unit, "sync_state": RemoteLinkState.PENDING}),
+            ("7", {"entity_kind": unit, "last_synced_at": None}),
+            ("8", {"entity_kind": unit, "provider": OTHER}),
+        )
+        for local_id, values in rows:
+            defaults: dict[str, Any] = {"last_synced_at": at, "remote_id": local_id}
+            self.repository.upsert(self.db, self.link(local_id, **defaults | values))
         self.assertEqual(
-            "2026-10-03T08:00:00+00:00",
-            self.repository.last_synced_at(self.db, INTERVALS),
+            sorted(
+                self.repository.synced_times(self.db, INTERVALS, (unit, competition))
+            ),
+            [at, "kaputt"],
         )
 
     def test_invalid_vocabulary_and_identity_are_rejected_before_storage(self) -> None:

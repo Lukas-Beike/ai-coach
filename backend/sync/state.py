@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
 from backend.sync.cursors import read_cursor, write_cursor
+from backend.sync.intervals_state import INTERVALS_OUTPUT_OK_KEY, latest_stamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
@@ -59,10 +61,24 @@ class SyncStateRepository:
             self._key_value_repository.set(db, f"{source}_sync_days", str(days))
         return days
 
-    def last_remote_synced_at(self, provider: str) -> str | None:
-        """The newest time any local entity was synced to the provider."""
-        with self._database_manager.reader() as db:
-            return RemoteLinkRepository.last_synced_at(db, provider)
+    def adopt_intervals_export_time(self) -> None:
+        """Stamp the newest Intervals.icu export of a release without stamps, once.
+
+        Plan and competition links synced before the output stamps existed are the
+        only record of that export; an existing stamp is never replaced.
+        """
+        with self._database_manager.unit_of_work() as db:
+            if self._key_value_repository.get(db, INTERVALS_OUTPUT_OK_KEY):
+                return
+            newest = latest_stamp(
+                *RemoteLinkRepository().synced_times(
+                    db,
+                    ProviderId.INTERVALS.value,
+                    (RemoteEntityKind.PLANNED_UNIT, RemoteEntityKind.COMPETITION),
+                )
+            )
+            if newest:
+                self._key_value_repository.set(db, INTERVALS_OUTPUT_OK_KEY, newest)
 
     def cursor(self, provider: str, stream: str) -> dict[str, Any]:
         with self._database_manager.reader() as db:
