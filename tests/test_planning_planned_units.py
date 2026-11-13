@@ -17,6 +17,7 @@ from backend.planning.planned_units import (
     planned_workout_update_request,
     prepare_planned_workout_date,
 )
+from backend.planning.repository import parse_payload
 
 LOCAL_ID = "e8267245-0d20-456f-9c9b-b4bf3fc3c233"
 TODAY = date(2026, 9, 20)
@@ -155,6 +156,21 @@ def _stored_update(kind, current, action, values):
 
 
 class PlannedUnitPayloadHashTests(unittest.TestCase):
+    def test_parse_payload_returns_only_readable_objects(self):
+        for raw, expected in (
+            (
+                '{"date": "2026-09-22", "name": "Ride"}',
+                {"date": "2026-09-22", "name": "Ride"},
+            ),
+            ("", {}),
+            (None, {}),
+            ("not json", None),
+            ("[1, 2]", None),
+            ('"text"', None),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(parse_payload(raw), expected)
+
     def test_hash_is_stable_and_ignores_only_projection_state_fields(self):
         payload = {
             "name": "Änderung",

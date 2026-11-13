@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from backend.canonical.vocabulary import RemoteEntityKind
@@ -10,6 +9,7 @@ from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.observability import Redactor
 from backend.planning.planned_units import planned_unit_payload_hash
+from backend.planning.repository import parse_payload
 from backend.planning.revision import PlanningRevisionService
 from backend.providers.intervals_workouts import (
     PLANNING_DURATION_FIELD,
@@ -21,11 +21,7 @@ _REMOTE_LINKS = RemoteLinkRepository()
 
 
 def _load_payload(row: Any) -> dict[str, Any]:
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except TypeError, ValueError:
-        payload = {}
-    return payload if isinstance(payload, dict) else {}
+    return parse_payload(row["payload"]) or {}
 
 
 def _apply_remote_event(

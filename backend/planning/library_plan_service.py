@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -18,6 +17,7 @@ from backend.errors import (
     INVALID_PLANNING_DATE_ERROR,
     AppError,
 )
+from backend.planning.repository import parse_payload
 from backend.planning.sport import planned_stored_sport
 
 
@@ -79,11 +79,8 @@ class WorkoutLibraryPlanService:
         row = planning_store.library_row(db, workout_id)
         if not row:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
-        try:
-            workout = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-        if not isinstance(workout, dict):
+        workout = parse_payload(row["payload"])
+        if workout is None:
             raise AppError(500, CORRUPT_LIBRARY_ERROR)
         return {"library_workout_id": workout_id, "date": plan_date, "workout": workout}
 

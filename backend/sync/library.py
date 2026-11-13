@@ -28,6 +28,7 @@ from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning import workouts as planning_workouts
 from backend.planning.push_state import skips_intervals
+from backend.planning.repository import parse_payload
 from backend.providers.http import ProviderHTTPError
 from backend.sync.workout_export import WorkoutLibraryExportPort
 
@@ -369,10 +370,9 @@ class WorkoutLibrarySyncStateService:
         except TypeError, ValueError:
             return {}
 
-    @classmethod
-    def _object_payload(cls, raw_payload: Any) -> dict[str, Any]:
-        payload = cls._parse_payload(raw_payload)
-        return payload if isinstance(payload, dict) else {}
+    @staticmethod
+    def _object_payload(raw_payload: Any) -> dict[str, Any]:
+        return parse_payload(raw_payload) or {}
 
     @staticmethod
     def _category(state: str, is_planned: bool, has_remote_id: bool) -> str:

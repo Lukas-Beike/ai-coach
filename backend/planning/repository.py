@@ -8,14 +8,21 @@ from typing import Any
 from backend.planning.sport import with_activity_type
 
 
+def parse_payload(raw: Any) -> dict[str, Any] | None:
+    """A stored unit or template payload; None when it is no readable JSON object."""
+    try:
+        payload = json.loads(raw or "{}")
+    except TypeError, ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | None:
     try:
-        payload = json.loads(row["payload"] or "{}")
-    except TypeError, ValueError, KeyError:
+        payload = parse_payload(row["payload"])
+    except KeyError:
         return None
-    if not isinstance(payload, dict) or (
-        not include_archived and payload.get("archived")
-    ):
+    if payload is None or (not include_archived and payload.get("archived")):
         return None
     with_activity_type(payload)
     payload["id"] = str(row["local_id"] or payload.get("id") or "")

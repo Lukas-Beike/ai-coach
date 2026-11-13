@@ -30,6 +30,7 @@ from backend.errors import AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import workouts as planning_workouts
 from backend.planning.plan_checks import ILLNESS_DAYS
+from backend.planning.repository import parse_payload
 from backend.planning.sport import planned_activity_type, planned_sport_environment
 
 DEFAULT_ILLNESS_PAUSE_DAYS = ILLNESS_DAYS
@@ -472,14 +473,10 @@ class AdaptiveReplanApplyService:
         draft = planning_store.planned_unit_row(db, draft_id)
         if not draft:
             return 0, {"library_workout_id": draft_id, "reason": "missing"}
-        draft = dict(draft)
-        try:
-            current = json.loads(draft["payload"])
-        except TypeError, ValueError:
-            current = None
+        current = parse_payload(draft["payload"])
         expected_fingerprint = str(change.get("source_fingerprint") or "")
         stale_reason = cls._adaptive_change_stale_reason(current, expected_fingerprint)
-        if stale_reason:
+        if stale_reason or current is None:
             return 0, {"library_workout_id": draft_id, "reason": stale_reason}
         before = {
             **current,

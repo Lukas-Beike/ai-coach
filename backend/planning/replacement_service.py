@@ -11,6 +11,7 @@ from backend import change_history
 from backend.db import planning_store
 from backend.errors import STALE_PLANNING_REVISION_ERROR, AppError
 from backend.planning import replacement
+from backend.planning.repository import parse_payload
 from backend.planning.training_plans import COACH_PLAN_CONSTRAINTS_PREFIX
 
 
@@ -79,15 +80,8 @@ class StructuredTrainingPlanReplacementService:
         entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
         plan_ids: set[str] = set()
         for row in rows:
-            try:
-                current = json.loads(row.get("payload") or "{}")
-            except (TypeError, ValueError) as exc:
-                raise AppError(
-                    409,
-                    "Eine bestehende lokale Planung ist beschädigt.",
-                    reason="invalid_plan",
-                ) from exc
-            if not isinstance(current, dict):
+            current = parse_payload(row.get("payload"))
+            if current is None:
                 raise AppError(
                     409,
                     "Eine bestehende lokale Planung ist beschädigt.",

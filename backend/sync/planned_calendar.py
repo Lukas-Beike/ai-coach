@@ -26,6 +26,7 @@ from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.hr_cap_sync import record_sent
 from backend.planning.push_state import intervals_event_outdated
+from backend.planning.repository import parse_payload
 from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
 from backend.sync.workout_export import WorkoutExportPort
@@ -89,11 +90,8 @@ class PlannedCalendarSyncService:
             row = planning_store.planned_unit_row(db, normalized_id)
         if not row:
             raise AppError(404, "Lokale Planung nicht gefunden.")
-        try:
-            workout = json.loads(row["payload"] or "{}")
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_PLANNING_ERROR) from exc
-        if not isinstance(workout, dict):
+        workout = parse_payload(row["payload"])
+        if workout is None:
             raise AppError(500, CORRUPT_PLANNING_ERROR)
         return normalized_id, row, workout
 

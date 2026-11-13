@@ -34,6 +34,7 @@ from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
+from backend.planning.repository import parse_payload
 from backend.planning.workout_export import past_export_horizon
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
@@ -433,11 +434,7 @@ def _approved_plan_sync_arguments(
 
 
 def _payload_date(row: Any) -> str:
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except TypeError, ValueError:
-        return ""
-    return str(payload.get("date") or "") if isinstance(payload, dict) else ""
+    return str((parse_payload(row["payload"]) or {}).get("date") or "")
 
 
 # The Coach sync scopes that also remove the leftovers of hidden units.

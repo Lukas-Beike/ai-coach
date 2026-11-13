@@ -30,7 +30,7 @@ from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import find_orphans
 from backend.planning.intervals_orphans import find_intervals_orphans
 from backend.planning.push_state import attach_push_state, garmin_baselines
-from backend.planning.repository import planned_unit_payload
+from backend.planning.repository import parse_payload, planned_unit_payload
 from backend.planning.wahoo_orphans import find_wahoo_orphans
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -187,17 +187,13 @@ class PlannedUnitService:
         """
         if current is None:
             return None
-        try:
-            payload = json.loads(current.get("payload") or "{}")
-        except TypeError, ValueError:
+        payload = parse_payload(current.get("payload"))
+        if payload is None:
             return None
         remote_id = _REMOTE_LINKS.resolve_remote_id(
-            db,
-            RemoteEntityKind.PLANNED_UNIT,
-            entity_id,
-            payload.get("remote_event_id") if isinstance(payload, dict) else None,
+            db, RemoteEntityKind.PLANNED_UNIT, entity_id, payload.get("remote_event_id")
         )
-        if not isinstance(payload, dict) or not remote_id:
+        if not remote_id:
             return None
         hidden = {
             **payload,
@@ -219,13 +215,8 @@ class PlannedUnitService:
         target: dict[str, Any],
         history_action: str,
     ) -> dict[str, Any]:
-        try:
-            current_payload = json.loads(current.get("payload") or "{}")
-        except (TypeError, ValueError) as exc:
-            raise AppError(
-                409, "Die lokale Planung kann nicht wiederhergestellt werden."
-            ) from exc
-        if not isinstance(current_payload, dict):
+        current_payload = parse_payload(current.get("payload"))
+        if current_payload is None:
             raise AppError(
                 409, "Die lokale Planung kann nicht wiederhergestellt werden."
             )

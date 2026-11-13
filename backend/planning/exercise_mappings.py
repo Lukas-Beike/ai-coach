@@ -10,11 +10,11 @@ wins; deleted or archived ones do not count. Read-only.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
 from backend.db import planning_store
+from backend.planning.repository import parse_payload
 from backend.providers.garmin_strength_workout import (
     GarminExercise,
     name_key,
@@ -24,11 +24,7 @@ from backend.providers.garmin_strength_workout import (
 
 def _structure(raw: Any) -> list[Any]:
     """The stored exercises of one payload; anything unreadable gives none."""
-    try:
-        payload = json.loads(raw or "{}")
-    except TypeError, ValueError:
-        return []
-    structure = payload.get(STRENGTH_STRUCTURE) if isinstance(payload, dict) else None
+    structure = (parse_payload(raw) or {}).get(STRENGTH_STRUCTURE)
     return structure if isinstance(structure, list) else []
 
 
