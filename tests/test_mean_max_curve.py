@@ -183,6 +183,10 @@ def watts_at(curve, duration):
     )
 
 
+def _without_all_time(payload):
+    return {key: value for key, value in payload.items() if key != "all_time"}
+
+
 class SessionCurveReaderTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
@@ -658,6 +662,32 @@ class ProfileSelectionTests(unittest.TestCase):
         (kept,) = reader.shared_records(self.db, ["act_1"], "newer", lambda: build("x"))
         self.assertEqual("newer", kept["build"])
         self.assertEqual(["newer", "older"], builds)
+
+    def test_all_time_bests_keep_old_efforts_while_the_90_days_and_coach_do_not(self):
+        summaries = []
+        self.add_ride(summaries, "act_old", day="2025-03-14", peak=450.0)
+        self.add_ride(summaries, "act_recent", day="2026-10-10", peak=350.0)
+        service = self.service(summaries)
+
+        def best(window):
+            return next(
+                (point["watts"], point["activity_id"], point["date"])
+                for point in window["power"]
+                if point["duration_seconds"] == 180
+                and point["environment"] == "outdoor"
+            )
+
+        cards = service.power_profiles(all_time=True)
+        self.assertEqual((450.0, "act_old", "2025-03-14"), best(cards["all_time"]))
+        self.assertEqual("2025-03-14", cards["all_time"]["date_start"])
+        self.assertEqual(2, cards["all_time"]["cache_coverage"]["power_records"])
+        # The 90-day window, the CP/CS input and the Coach's copy stay recent.
+        self.assertEqual((350.0, "act_recent", "2026-10-10"), best(cards["windows"]["90"]))
+        self.assertEqual(["act_recent"], [row["activity_id"] for row in cards["activities"]])
+        self.assertNotIn("act_old", str(cards["critical_power"]))
+        coach = service.power_profiles()
+        self.assertNotIn("all_time", coach)
+        self.assertEqual(_without_all_time(cards), coach)
 
     def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
         summaries = []

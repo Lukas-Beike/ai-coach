@@ -2,11 +2,11 @@ const { test, expect } = require("@playwright/test");
 
 test("@responsive performance keeps Garmin measurements and one cycling best per duration", async ({ page, request }) => {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
-  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { windows: { "90": { power: [
+  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { all_time: { power: [
     { sport: "Ride", duration_seconds: 5, watts: 650, status: "ok", date: "2026-10-01" },
     { sport: "VirtualRide", duration_seconds: 5, watts: 700, status: "ok", date: "2026-10-02" },
     { sport: "Ride", duration_seconds: 60, watts: 420, status: "ok", date: "2026-10-01" },
-  ], cache_coverage: { records: 20, unknown_records: 5, power_records: 14, power_unknown_records: 3 } } }, critical_power: { window_days: 28, scope: "Experimentelle Modellschätzung", fits: [
+  ], cache_coverage: { records: 20, unknown_records: 5, power_records: 14, power_unknown_records: 3 } }, critical_power: { window_days: 28, scope: "Experimentelle Modellschätzung", fits: [
     { sport: "ride", environment: "outdoor", status: "ok", cp_watts: 250, w_prime_joules: 18000, efforts: [{ effort_context: "race" }, { effort_context: "training" }] },
     { sport: "ride", environment: "indoor", status: "insufficient_data" },
     { sport: "run", environment: "outdoor", status: "ok", cs_mps: 4.12, d_prime_meters: 200 },
@@ -59,7 +59,7 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
 
 test("@responsive Laufen and Radfahren each show only their sport", async ({ page, request }) => {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
-  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { windows: { "90": {
+  await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { all_time: {
     power: [{ sport: "ride", duration_seconds: 300, watts: 310, status: "ok", date: "2026-10-01" }],
     running: {
       speed: [
@@ -69,7 +69,7 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
       distance: [{ sport: "run", distance_meters: 5000, seconds: 1188, status: "ok", date: "2026-09-20", source: "Garmin Connect" }],
     },
     cache_coverage: { records: 4, unknown_records: 0, power_records: 1, power_unknown_records: 0 },
-  } } } }));
+  } } }));
   // An old Leistung link opens Laufen.
   await page.goto("/#analysis/performance");
   await expect(page).toHaveURL(/#analysis\/running$/);
@@ -77,9 +77,9 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(segments).toHaveText(["Laufen", "Radfahren", "Belastung", "Erholung"]);
   await expect(page.locator('[data-analysis-segment="running"]')).toHaveAttribute("aria-current", "page");
   const best = page.locator("#runningBestEfforts");
-  await expect(best.locator('[data-running-best="speed:60"] td')).toHaveText("3:20 min/km");
-  await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText("19:48");
-  await expect(best.locator('[data-running-best="speed:1200"] td')).toHaveText("nicht erfasst");
+  await expect(best.locator('[data-running-best="speed:60"] td')).toHaveText(["3:20 min/km", "01.10.2026"]);
+  await expect(best.locator('[data-running-best="distance:5000"] td')).toHaveText(["19:48", "20.09.2026"]);
+  await expect(best.locator('[data-running-best="speed:1200"] td')).toHaveText(["nicht erfasst", ""]);
   await expect(best.locator("tbody tr")).toHaveCount(3);
   await expect(page.locator("#currentPerformance table[data-analysis-sport='run']")).toBeVisible();
   await expect(page.locator("#currentPerformance table[data-analysis-sport='ride']")).toBeHidden();

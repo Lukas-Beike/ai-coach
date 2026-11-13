@@ -38,7 +38,8 @@ class AnalysisRoutes:
         Response: 200. `power-profiles`: `status` (`ok` or `insufficient_data`),
         `best`, `critical_power`, `power_meter_changes`, `activities`, `windows`
         (keys `28` and `90`), `running`, `method`, `method_version`,
-        `input_fingerprint` and `scope`. `training-records`: `{"equipment": object}`
+        `input_fingerprint`, `scope` and `all_time` (the window of every stored
+        session, for the analysis cards only). `training-records`: `{"equipment": object}`
         without query, `{"record_type": "equipment", "record": object}` for one
         record.
 
@@ -52,7 +53,7 @@ class AnalysisRoutes:
         if path.endswith("/training-records"):
             payload = reports.records.training_records(values)
         else:
-            payload = reports.profiles.power_profiles()
+            payload = reports.profiles.power_profiles(all_time=True)
         handler.send_json(200, payload)
 
     def _refresh_area(self, handler: Any, _request: RouteRequest) -> None:

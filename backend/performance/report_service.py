@@ -166,18 +166,18 @@ class TrainingProfileSelectionService:
 
     @overload
     def curve_records(
-        self, days: int = ..., *, shared: Literal[False] = False
+        self, days: int | None = ..., *, shared: Literal[False] = False
     ) -> list[dict[str, Any]]: ...
 
     @overload
     def curve_records(
-        self, days: int = ..., *, shared: Literal[True]
+        self, days: int | None = ..., *, shared: Literal[True]
     ) -> tuple[Mapping[str, Any], ...]: ...
 
     def curve_records(
-        self, days: int = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
+        self, days: int | None = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
     ) -> list[dict[str, Any]] | tuple[Mapping[str, Any], ...]:
-        """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
+        """Ride and run sessions of the last ``days`` (default the longest window, None all) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
@@ -195,9 +195,11 @@ class TrainingProfileSelectionService:
         if reader is None:
             raise RuntimeError("power profiles need the canonical activity summaries")
         today = self._today()
-        start = today - timedelta(days=days - 1)
+        start = None if days is None else today - timedelta(days=days - 1)
         # One spare day on each side; the local date below decides membership.
-        first, last = start - timedelta(days=1), today + timedelta(days=1)
+        first = None if start is None else start - timedelta(days=1)
+        last = today + timedelta(days=1)
+        earliest = "" if start is None else start.isoformat()
         with self._canonical.database_manager().read_snapshot() as db:
             sessions = [
                 summary
@@ -208,9 +210,7 @@ class TrainingProfileSelectionService:
                 and not summary_is_electric(summary)
                 # A commute, warm-up or cool-down is never a maximal effort.
                 and not summary_is_not_training(summary)
-                and start.isoformat()
-                <= summary_local_date(summary)
-                <= today.isoformat()
+                and earliest <= summary_local_date(summary) <= today.isoformat()
             ]
             session_ids = [str(summary.get("id") or "") for summary in sessions]
 
@@ -232,13 +232,24 @@ class TrainingProfileSelectionService:
             )
 
     def power_profiles(
-        self, records: list[dict[str, Any]] | None = None
+        self, records: list[dict[str, Any]] | None = None, *, all_time: bool = False
     ) -> dict[str, Any]:
+        """Best values, CP/CS and coverage of the last 90 days.
+
+        ``all_time`` (the analysis cards, #2694) reads every session once and adds
+        ``all_time``, the best values of all stored sessions; everything else,
+        the Coach's copy included, stays on the 90-day window.
+        """
         if records is None:
-            records = self.curve_records()
+            records = self.curve_records(None if all_time else PROFILE_WINDOW_DAYS[-1])
         today = self._today()
-        eligible_records = [
+        start = (today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)).isoformat()
+        every = [
             row for row in records if str(row.get("date") or "") <= today.isoformat()
+        ]
+        records = [row for row in records if start <= str(row.get("date") or "")]
+        eligible_records = [
+            row for row in every if start <= str(row.get("date") or "")
         ]
         valid = [
             row
@@ -269,7 +280,7 @@ class TrainingProfileSelectionService:
         if in_window:
             # The window's cycling efforts come from two power meters.
             critical_power["power_meter_changes"] = in_window
-        return {
+        result: dict[str, Any] = {
             "status": "ok" if compatibility or valid else "insufficient_data",
             "best": compatibility,
             # Before the activity list, so a bounded Coach copy keeps it.
@@ -287,6 +298,9 @@ class TrainingProfileSelectionService:
             "input_fingerprint": _records_fingerprint(eligible_records),
             "scope": "Beobachtete Bestwerte der letzten 90 Tage aus lokal gespeicherten Messreihen in voller Auflösung; heruntergerechnete Reihen zählen nicht. Fehlende oder ungültige Fenster bleiben unbekannt. Bestwerte mit gleicher effort_group stammen aus derselben Belastung und sind voneinander abhängig. Keine FTP- oder Tempo-Schätzung; CP/CS nur als experimentelle Modellschätzung unter critical_power.",
         }
+        if all_time:
+            result["all_time"] = self._profile_window(every, today, None)
+        return result
 
     def _power_meter_changes(self) -> list[dict[str, Any]]:
         """The days a sport's power meter changed, newest first (#1869)."""
@@ -333,13 +347,14 @@ class TrainingProfileSelectionService:
 
     @staticmethod
     def _profile_window(
-        records: list[dict[str, Any]], today: date, days: int
+        records: list[dict[str, Any]], today: date, days: int | None
     ) -> dict[str, Any]:
-        start = today - timedelta(days=days - 1)
+        """The window's best values and coverage; ``days`` None takes every record."""
+        start = "" if days is None else (today - timedelta(days=days - 1)).isoformat()
         eligible = [
             row
             for row in records
-            if start.isoformat() <= str(row.get("date") or "") <= today.isoformat()
+            if start <= str(row.get("date") or "") <= today.isoformat()
         ]
         source = "local full-resolution activity streams"
         usable = [
@@ -355,7 +370,8 @@ class TrainingProfileSelectionService:
             if (row.get("power_profile") or {}).get("status") == "ok"
         ]
         result: dict[str, Any] = {
-            "date_start": start.isoformat(),
+            "date_start": start
+            or min((str(row.get("date")) for row in eligible), default=None),
             "date_end": today.isoformat(),
             "source": source,
             "cache_coverage": {
