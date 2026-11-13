@@ -1351,6 +1351,9 @@ PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
             canonical_serving=lambda: CANONICAL_READ,
             activity_summary_reader=lambda: CANONICAL_READ,
             coverage=lambda: CANONICAL_READ,
+            lt1_session_records=lambda days: (
+                PERFORMANCE.training_reports().profiles.curve_records(days)
+            ),
         ),
         owners=PublicStateOwnerAssemblies(
             sync_persistence=lambda: SYNC_PERSISTENCE,

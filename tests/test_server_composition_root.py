@@ -31,7 +31,10 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
-from backend.performance.report_service import TrainingReportServices
+from backend.performance.report_service import (
+    TrainingProfileSelectionService,
+    TrainingReportServices,
+)
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive import AdaptiveReplanApplyService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -201,6 +204,26 @@ class CompositionRootTests(ServerTestCase):
         self.assertIs(
             server.HTTP_API.analysis_routes._reports, performance.training_reports
         )
+
+    def test_the_public_state_reads_the_session_curves_of_the_report_services(
+        self,
+    ) -> None:
+        shared = server.PERFORMANCE.training_reports().profiles._curves
+        with patch.object(
+            TrainingProfileSelectionService,
+            "curve_records",
+            autospec=True,
+            return_value=[],
+        ) as records:
+            public = server.PUBLIC_STATE.performance_state_service()
+            lt1_records = public._lt1_session_records
+            assert lt1_records is not None
+            self.assertEqual([], lt1_records(90))
+
+        records.assert_called_once()
+        profiles, days = records.call_args.args
+        self.assertIs(shared, profiles._curves)
+        self.assertEqual(90, days)
 
     def test_weather_services_resolve(self) -> None:
         self.assertIsInstance(server.WEATHER.service(), WeatherService)
