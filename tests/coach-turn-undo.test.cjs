@@ -68,6 +68,23 @@ test("plan notes render safe labels, dates, evidence and warning emphasis", () =
   assert.match(node.children[6].textContent, /Hinweis: Kalender und Einheit · 03\.11\.2026/);
 });
 
+test("repeated plan notes condense to one line, distribution weeks by their first day (#2617)", () => {
+  const { context } = harness();
+  const node = new FakeElement("div");
+  const week = (start) => [0, 1, 2, 3, 4].map((offset) => `2026-11-${String(start + offset).padStart(2, "0")}`);
+  context.appendMessageChanges(node, { role: "assistant", coach_changes: changes({
+    plan_check_notes: [16, 23, 9].map((start) => ({ code: "intensity_distribution", dates: week(start), severity: "notice" }))
+      .concat([{ code: "calendar_load", dates: ["2026-11-05"], severity: "notice" },
+        { code: "calendar_load", dates: ["2026-11-03", "2026-11-05"], severity: "notice" }]),
+  }) });
+  assert.equal(node.children.length, 3);
+  assert.equal(node.children[1].textContent, "Hinweis: Intensitätsverteilung · Wochen ab 09.11.2026, 16.11.2026, 23.11.2026 · Praxisbasierte Referenzbereiche");
+  assert.match(node.children[2].textContent, /^Hinweis: Kalender und Einheit · 03\.11\.2026, 05\.11\.2026 · /);
+  const single = new FakeElement("div");
+  context.appendPlanNotes(single, [{ code: "intensity_distribution", dates: week(16), severity: "notice" }]);
+  assert.match(single.children[0].textContent, /Intensitätsverteilung · Woche ab 16\.11\.2026 · /);
+});
+
 test("undone, untracked and turn-less changes show no undo button", () => {
   const { context } = harness();
   const cases = [
