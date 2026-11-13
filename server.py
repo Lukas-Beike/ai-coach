@@ -8,7 +8,6 @@ import signal
 import sqlite3
 import sys
 import threading
-import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
