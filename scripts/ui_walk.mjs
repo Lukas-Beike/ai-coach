@@ -44,12 +44,13 @@ const realPath = (target) => {
 const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
 export function secretPath(target, secrets = T3_SECRETS) {
   if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
-  const resolved = realPath(String(target));
-  const within = (root) => folded(resolved).startsWith(folded(realPath(root)));
-  if (within(ROOT) || !(within(os.tmpdir()) || within(secrets))) {
+  // The path that passed the check is the one opened (lower case on Windows).
+  const checked = folded(realPath(String(target)));
+  const roots = [os.tmpdir(), secrets].map((root) => folded(realPath(root)));
+  if (checked.startsWith(folded(realPath(ROOT))) || !roots.some((root) => checked.startsWith(root))) {
     throw new Error("the password file must be in the system temp directory or the T3 secret folder");
   }
-  return resolved;
+  return checked.slice(0, -path.sep.length);
 }
 
 export function baseUrl(text) {
