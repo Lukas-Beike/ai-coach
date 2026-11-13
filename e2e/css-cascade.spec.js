@@ -2,6 +2,12 @@ const { test, expect } = require("@playwright/test");
 
 const stylesheet = "/styles.css";
 
+// The computed colour a custom property resolves to in the current theme.
+const resolvedColour = (page, token) => page.locator("#tokenProbe").evaluate((probe, name) => {
+  probe.style.color = `var(${name})`;
+  return getComputedStyle(probe).color;
+}, token);
+
 test("visibility, chart variants and reduced motion override component styles", { tag: "@responsive" }, async ({ page }) => {
   await page.route("**/css-cascade-fixture", (route) => route.fulfill({
     contentType: "text/html",
@@ -11,6 +17,7 @@ test("visibility, chart variants and reduced motion override component styles", 
       <div class="auth-loading" hidden></div>
       <div class="chat-queue-status"></div>
       <input class="nutrition-low-confidence" aria-label="Uncertain nutrition value">
+      <span id="tokenProbe"></span>
       <div class="analysis-chart-card"><svg>
         <path class="analysis-form-area" data-series="2" data-color="2" d="M0 0L10 10Z" />
         <path class="analysis-range-whisker" data-series="1" data-color="1" d="M0 0L10 10" />
@@ -29,11 +36,14 @@ test("visibility, chart variants and reduced motion override component styles", 
     }
     await expect(page.locator(".analysis-form-area")).toHaveCSS("stroke", "none");
     await expect(page.locator(".analysis-range-whisker")).toHaveCSS("stroke-width", "8px");
-    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", theme === "dark" ? "rgb(220, 164, 72)" : "rgb(160, 90, 0)");
+    // The expected colours are the theme's resolved tokens, so a palette change keeps the cascade check green (#2667).
+    const warning = await resolvedColour(page, "--nutrition-warning-border");
+    const focusRing = await resolvedColour(page, "--accent-soft");
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", warning);
     await page.locator(".nutrition-low-confidence").focus();
     await expect(page.locator(".nutrition-low-confidence")).toBeFocused();
-    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", theme === "dark" ? "rgb(220, 164, 72)" : "rgb(160, 90, 0)");
-    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("box-shadow", `${theme === "dark" ? "rgba(52, 207, 161, 0.13)" : "rgba(8, 120, 95, 0.09)"} 0px 0px 0px 3px`);
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", warning);
+    await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("box-shadow", `${focusRing} 0px 0px 0px 3px`);
     await page.locator(".nutrition-low-confidence").blur();
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
