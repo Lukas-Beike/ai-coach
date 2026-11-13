@@ -62,6 +62,9 @@ test("@responsive personal events show as a band and take a decision per event o
   await page.screenshot({ path: testInfo.outputPath("event-sheet.png"), animations: "disabled" });
   await expect(sheet.getByRole("heading")).toContainText("Elternabend");
   await expect(sheet.locator(".planned-event-scope")).toHaveCount(0);
+  // A tap on the panel's own padding keeps it open.
+  await sheet.click({ position: { x: 4, y: 4 } });
+  await expect(sheet).toBeVisible();
   await expect(sheet).not.toContainText("null");
   await sheet.getByRole("button", { name: "Kürzer" }).click();
   await expect(sheet).toHaveCount(0);

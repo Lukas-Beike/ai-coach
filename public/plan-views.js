@@ -1520,6 +1520,15 @@ function plannedEventsByDate() {
   return byDate;
 }
 
+function plannedNoteContext(dayContext, dayEvents) {
+  if (!dayEvents.length) return dayContext;
+  const shown = new Set(dayEvents.map((event) => `${event.name}|${event.start_local}`));
+  const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
+    .filter((item) => !shown.has(`${item?.name}|${item?.start_local}`));
+  const flag = (key) => appointments.some((item) => item?.[key]);
+  return { ...dayContext, appointments, no_training: flag("no_training"), no_intensity: flag("no_intensity"), short_only: flag("short_only") };
+}
+
 function plannedEventTime(event) {
   if (event.all_day) return "ganztägig";
   const time = (value) => /(?:T|\s)(\d{2}:\d{2})/.exec(String(value || ""))?.[1] || "";
@@ -1550,7 +1559,9 @@ function plannedEventBand(events) {
 
 // One sheet for every event: a bottom sheet on phones, a side panel on wide screens (styles.css).
 function openPlannedEventSheet(event) {
-  document.querySelector(".planned-event-sheet")?.close();
+  const previous = document.querySelector(".planned-event-sheet");
+  previous?.close();
+  previous?.remove();
   const name = stripCalendarMarkers(event.name) || "Termin";
   const dateLabel = DETAIL_DATE_FORMAT.format(dateFromKey(String(event.start_local || event.event_date).slice(0, 10)));
   const dialog = h("dialog", { className: "planned-event-sheet", "aria-labelledby": "plannedEventTitle" });
@@ -1581,14 +1592,21 @@ function openPlannedEventSheet(event) {
   }
   dialog.append(...[h("div", "planned-event-head", h("h3", { id: "plannedEventTitle" }, name), close),
     h("p", "planned-event-meta", [dateLabel, plannedEventTime(event)].filter(Boolean).join(" · ")), choices, scope, status].filter(Boolean));
-  dialog.addEventListener("click", (click) => { if (click.target === dialog) dialog.close(); });
+  dialog.addEventListener("click", (click) => {
+    const box = dialog.getBoundingClientRect();
+    const outside = click.clientX < box.left || click.clientX > box.right || click.clientY < box.top || click.clientY > box.bottom;
+    if (click.target === dialog && outside) dialog.close();
+  });
   dialog.addEventListener("close", () => { dialog.remove(); restoreDialogFocus(dialog); }, { once: true });
   document.body.append(dialog);
   showAccessibleDialog(dialog, choices.querySelector("[aria-pressed='true']") || choices.firstElementChild);
 }
 
 async function decidePlannedEvent(event, impact, series, dialog, status) {
+  const choices = [...dialog.querySelectorAll(".planned-event-choices button")];
+  if (choices.some((button) => button.disabled)) return;
   status.textContent = "";
+  choices.forEach((button) => { button.disabled = true; });
   try {
     await api("/api/external-calendar/decisions", {
       method: "POST",
@@ -1596,8 +1614,10 @@ async function decidePlannedEvent(event, impact, series, dialog, status) {
     });
   } catch (error) {
     status.textContent = error.message;
+    choices.forEach((button) => { button.disabled = false; });
     return;
   }
+  scheduleStateEventRefresh(["plan"]);
   for (const item of state.data?.external_calendar?.events || []) {
     if (item.uid !== event.uid || (!series && item.start_local !== event.start_local)) continue;
     Object.assign(item, { impact, decision_scope: series ? "series" : "event" });
@@ -1650,7 +1670,7 @@ function renderPlannedDay(view, dateKey, weekHasPlan) {
   const day = h("section", { className: `planned-day${dateKey === todayKey ? " is-today" : ""}`, dataset: { date: dateKey } });
   const heading = plannedDayHeading(plannedDayWeather(dayContext, dateKey), dateKey, todayKey);
   // The band names the day's events and their impact, so the calendar note line leaves them out.
-  const noteContext = dayEvents.length ? { ...dayContext, appointments: [], no_training: false, no_intensity: false, short_only: false } : dayContext;
+  const noteContext = plannedNoteContext(dayContext, dayEvents);
   const notes = plannedDayNotes(noteContext, state.data?.competitions, dateKey);
   const emptyText = dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant";
   const content = h("div", "planned-day-content", heading, notes.childElementCount ? notes : null,
@@ -1949,7 +1969,7 @@ function renderPlanned(trainingCalendar) {
   const lastDateKey = addDateKey(lastWeekKey, 6);
   plannedLastDateKey = lastDateKey;
   keepPlannedSelection(todayKey, lastDateKey);
-  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, state.data?.external_calendar?.events]);
+  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name])]);
   if (snapshot === plannedRenderSnapshot && root.childElementCount) {
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
     return;
