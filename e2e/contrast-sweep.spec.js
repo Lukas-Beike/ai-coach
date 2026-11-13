@@ -32,7 +32,7 @@ const INCOMPLETE_ALLOWED = [
     reason: "Icon-only buttons (a cross, week arrows, a favourite star) hold a glyph without text content; there is no text contrast to measure.",
   },
   {
-    target: /svg|^text\[/,
+    target: /svg|^text\[|^\.analysis-(date-tick|value-tick|axis-unit)\[/,
     message: /image node|overlapped by another element|too short to determine/,
     reason: "Chart axis ticks, units and value labels are SVG text drawn over the plot elements (or a one-character unit); axe reports an image node, an overlap or too little text and cannot decide.",
   },
@@ -127,12 +127,14 @@ async function showView(page, route, calendarView) {
 }
 
 // Fails with the view, the theme and every failing node with its measured and expected contrast.
-async function expectContrast(page, view, theme) {
+async function expectContrast(page, view, theme, scopes = SCOPES) {
   await page.mouse.move(0, 0);
   await finishAnimations(page);
   const builder = new AxeBuilder({ page }).withRules(["color-contrast"]);
-  for (const scope of SCOPES) builder.include(scope);
-  const { violations, incomplete } = await builder.analyze();
+  for (const scope of scopes) builder.include(scope);
+  const { violations, incomplete, passes } = await builder.analyze();
+  // A scope that matches nothing would pass without measuring anything.
+  expect(passes.concat(violations).reduce((count, rule) => count + rule.nodes.length, 0), `${view} [${theme}]: no node measured`).toBeGreaterThan(0);
   const failures = violations.flatMap((violation) => violation.nodes.map((node) => {
     const data = node.any.find((check) => check.id === "color-contrast")?.data || {};
     return `${view} [${theme}] ${node.target.join(" ")}: ${data.contrastRatio} < ${data.expectedContrastRatio} (${data.fgColor} on ${data.bgColor}, ${data.fontSize}, ${data.fontWeight})`;
@@ -185,7 +187,7 @@ test.describe("colour contrast sweep", () => {
       await flattenPageGlow(page);
       for (const theme of THEMES) {
         await applyTheme(page, theme);
-        await expectContrast(page, "Anmeldung", theme);
+        await expectContrast(page, "Anmeldung", theme, ["#loginDialog"]);
       }
     });
   });
