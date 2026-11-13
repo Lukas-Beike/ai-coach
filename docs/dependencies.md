@@ -20,7 +20,9 @@ drops the Windows-only `pywin32` pin that `mcp` needs, and a hash-only Windows
 setup then fails. Dependabot therefore ignores the direct Graphify requirements
 `graphifyy` and `pywin32` (#2554): when `python scripts/prepare_worktree.py`
 reports a newer version, or a Dependabot alert names one of them, raise the pin
-in `requirements-graphify.in` and run the Graphify command above on Windows. A
+in `requirements-graphify.in` and run the Graphify command above on Windows.
+`prepare_worktree.py` reports only `==` pins, so it names `graphifyy`; `pywin32`
+(`>=`) moves to its newest release whenever that command regenerates the lock. A
 Dependabot update of a package the Graphify lock shares or pulls in transitively
 can still touch that lock; regenerate it on Windows the same way. The
 lock contract test accepts the options in any order, as pip-tools releases
