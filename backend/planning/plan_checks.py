@@ -691,9 +691,6 @@ def _sections(description: str, target: str) -> list[Any]:
         line = raw.strip()
         if not line:
             block = None
-        elif _REPEAT_HEADER.search(line):
-            block = []
-            sections.append(("repeat", block))
         elif line.startswith("-"):
             ramp = bool(structured_steps(line, target)[0].get("ramp"))
             if block is not None:
@@ -702,6 +699,9 @@ def _sections(description: str, target: str) -> list[Any]:
             # cool-down inside a steady run stays a variant of it.
             elif sections[-1:] != [("step", ramp)] or ramp:
                 sections.append(("step", ramp))
+        elif _REPEAT_HEADER.search(line):
+            block = []
+            sections.append(("repeat", block))
     return [
         (kind, tuple(value)) if kind == "repeat" else (kind, value)
         for kind, value in sections
