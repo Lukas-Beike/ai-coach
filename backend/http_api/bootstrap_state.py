@@ -103,7 +103,6 @@ class PublicBootstrapService:
                 "library": [],
                 "activities": [],
                 "planned": local_planned,
-                "training_calendar": local_planned,
                 "calendar": deps.local_calendar_events(
                     local_planned, competitions, relevant_external
                 ),

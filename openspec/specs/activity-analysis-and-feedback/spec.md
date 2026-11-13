@@ -382,7 +382,7 @@ Every completed-activity object that the HTTP API returns SHALL carry provider-n
 - **THEN** it is the session summary with `id`, `started_at`, `started_at_local`, `sport`, `environment`, `record_ids` and the neutral metric names such as `moving_duration_s`, `distance_m` and `training_load`, and none of `start_date_local`, `moving_time`, `type`, `local_activity_id` or `icu_*` is present.
 
 #### Scenario: Calendar actual activity
-- **WHEN** `/api/bootstrap` or `/api/plan` returns, in `training_calendar`, `planned`, `calendar` or `planning_view.items`, a completed-activity calendar entry or a planned unit matched to an activity
+- **WHEN** `/api/plan` returns, in `training_calendar`, `planned`, `calendar` or `planning_view.items`, or `/api/bootstrap` in `planned` or `calendar`, a completed-activity calendar entry or a planned unit matched to an activity
 - **THEN** the completed entry and `compliance.actual_activity` use the neutral keys. The planned unit keeps its own `starts_at_local` and `planned_duration_s` unchanged, and its `icu_training_load` appears as `training_load`.
 
 #### Scenario: Neutral value already present

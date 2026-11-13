@@ -871,7 +871,6 @@ class ServerHttpTests(ServerTestCase):
                 "library",
                 "activities",
                 "planned",
-                "training_calendar",
                 "calendar",
                 "planning_compliance",
                 "weather",
