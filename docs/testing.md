@@ -27,8 +27,9 @@ selects the tests of the module that names it. Imports reached only through
 cannot be parsed, or when the selection covers at least 80% of the test
 modules; the run prints the reason. A changed file under `tests/fixtures/`
 selects every test whose sources or imported modules name `fixtures` as a path
-segment (loaders build fixture paths from parts), plus `test_line_endings` and
-`test_ai_docs_contract`, which check tracked files across the repository. The slow tooling modules
+segment (loaders build fixture paths from parts). Every change also selects
+`test_line_endings` and `test_ai_docs_contract`, which check tracked files
+across the repository. The slow tooling modules
 `test_fixture_standard_data` and `test_ci_contracts` run under `--changed` only
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if

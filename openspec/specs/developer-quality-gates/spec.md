@@ -142,7 +142,7 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 
 #### Scenario: Selection rule
 - **WHEN** a path changes
-- **THEN** a test module is selected if its own file changed, it transitively imports a changed module, or a string literal in it or in a test support module it imports names the changed path, a parent directory, the file name or the dotted module
+- **THEN** a test module is selected if its own file changed, it transitively imports a changed module, or a string literal in it or in a test support module it imports names the changed path, a parent directory, the file name or the dotted module; `test_line_endings` and `test_ai_docs_contract`, which check tracked files across the repository, are selected for every change (#2502)
 
 #### Scenario: Reach through the composition root
 - **WHEN** a module is reached only through `server.py`
@@ -150,7 +150,7 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 
 #### Scenario: Changed fixture
 - **WHEN** only files under `tests/fixtures/` changed
-- **THEN** the selection holds every test module whose sources or imported modules name `fixtures` as a path segment, plus `test_line_endings` and `test_ai_docs_contract`, which check tracked files across the repository, instead of the whole suite
+- **THEN** the selection holds every test module whose sources or imported modules name `fixtures` as a path segment, plus the repository-wide checks, instead of the whole suite
 
 #### Scenario: Full-suite fallback
 - **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
@@ -161,7 +161,7 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 - **THEN** a local `--changed` run skips them and prints why; any other run executes them
 
 #### Scenario: Nothing affected or base unknown
-- **WHEN** no test module is affected, or the base ref cannot be diffed
+- **WHEN** no test module is affected (an empty change, or a suite filter that excludes the selected modules), or the base ref cannot be diffed
 - **THEN** the runner prints "No Python tests are affected." and exits 0, or exits non-zero with a message and no traceback
 
 Evidence:

@@ -8,7 +8,8 @@ name, or its dotted module name. The literal rule catches source-scanning
 contract tests and ``mock.patch("backend...")`` targets that imports miss.
 A bare top-level directory name only counts in a module that iterates
 directories. A module whose literals name a changed data file under backend/
-counts as changed. Imports reached only through ``server.py`` count only when
+counts as changed. Every change selects the REPOSITORY_WIDE checks of tracked
+files. Imports reached only through ``server.py`` count only when
 ``server.py`` or a module under SERVER_WIRED_PATHS changed: app-wide tests then
 stay in CI unless they import the changed module another way. Changes under
 FULL_SUITE_PATHS, a source that cannot be parsed, or a selection of at least
@@ -75,8 +76,8 @@ HEAVY_MODULES = {
 # paths from parts, so the file name alone would miss them.
 FIXTURES = "tests/fixtures/"
 # Tests that check tracked files across the repository (line endings, guidance
-# links to files such as tests/fixtures/providers/README.md), so a changed
-# fixture can break them too.
+# links to files such as tests/fixtures/providers/README.md), so any changed
+# path can break them: every change selects them (#2502).
 REPOSITORY_WIDE = ("test_line_endings", "test_ai_docs_contract")
 # A selection this large saves little time; run everything and say why.
 FULL_SUITE_SHARE = 0.8
@@ -279,6 +280,10 @@ def select_modules(
         if source.path in paths:
             selected[module] = f"changed {source.path}"
             continue
+        # Any changed path can break a repository-wide check (#2502).
+        if module in REPOSITORY_WIDE and paths:
+            selected[module] = "checks every tracked file"
+            continue
         reach = _closure(module, sources, through_server)
         hit = next(
             (changed_modules[m] for m in sorted(reach) if m in changed_modules), None
@@ -312,9 +317,6 @@ def select_modules(
                 selected[module] = f"{owner.path} names {path}"
                 break
         if module in selected or not any(p.startswith(FIXTURES) for p in paths):
-            continue
-        if module in REPOSITORY_WIDE:
-            selected[module] = "checks every tracked file"
             continue
         owner = next(
             (
