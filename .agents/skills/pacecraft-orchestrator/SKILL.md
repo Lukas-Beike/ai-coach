@@ -23,12 +23,16 @@ threads on every periodic check.
 
 ## Hand over
 
-When a successor orchestrator or lane takes over (adapted from Matt Pocock's
-`handoff`; see [THIRD_PARTY.md](../THIRD_PARTY.md)), write the handoff outside the
-repository (the session notes or the OS temp directory) and keep it short: link
-the issues, PRs, ledger and memory files instead of restating them, name the
-skills the successor must load first, state what is running or waiting and on
-whom, and leave out credentials, tokens and athlete data.
+When a successor orchestrator or lane takes over (Matt Pocock's `handoff`,
+rewritten for lane succession and this repository's privacy rules; see
+[THIRD_PARTY.md](../THIRD_PARTY.md)), keep the handoff short and outside the
+repository, and give it in the successor's start message: link the issues, PRs,
+ledger and memory files instead of restating them; name the skills to load first;
+state what is running or waiting and on whom, and for an orchestrator the
+AGENTS.md turn holder, the merge-rule state and any merge hold. A lane handoff
+still carries the "Start a lane" brief. Copy nothing `AGENTS.md` forbids copying
+(secrets, credentials, tokens, database keys, backup contents, athlete or
+personal data). The successor checks the handoff against the issues and ledger.
 
 ## Shared resources
 

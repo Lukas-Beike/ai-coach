@@ -22,7 +22,7 @@ Project changes replace broad upstream defaults with this repository's privacy,
 SQLCipher, ownership, validation, and authorization requirements. UI guidance
 extends the current design rather than requiring a new identity. Evaluation does
 not automatically spawn agents, install packages, or execute remote workflows.
-Matt Pocock's skills contribute single rules rewritten into existing owners: a red feedback loop, ranked hypotheses, tagged debug logs, the deletion test, a merge-danger line, and independent test expectations; no skill was imported.
+Matt Pocock's skills contribute single rules rewritten into existing owners: a red feedback loop, ranked hypotheses, tagged debug logs, the deletion test, a merge-danger line, independent test expectations, and a by-reference handoff kept outside the repository; no skill was imported.
 Ponytail is adapted for direct Markdown loading by any agent, with a distinct
 local skill name, plain-language modes, and project checks taking precedence.
 Code review preserves the original command as a provenance reference and adapts
