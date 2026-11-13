@@ -44,13 +44,21 @@ const realPath = (target) => {
 const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
 export function secretPath(target, secrets = T3_SECRETS) {
   if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
-  // The path that passed the check is the one opened (lower case on Windows).
-  const checked = folded(realPath(String(target)));
-  const roots = [os.tmpdir(), secrets].map((root) => folded(realPath(root)));
-  if (checked.startsWith(folded(realPath(ROOT))) || !roots.some((root) => checked.startsWith(root))) {
-    throw new Error("the password file must be in the system temp directory or the T3 secret folder");
+  const refused = new Error("the password file must be in the system temp directory or the T3 secret folder");
+  // The path as given, checked like scratchPath; this is the one opened.
+  const scratch = path.resolve(os.tmpdir()) + path.sep;
+  const delivered = path.resolve(secrets) + path.sep;
+  const resolved = path.resolve(scratch, String(target));
+  if (!(resolved.startsWith(scratch) || resolved.startsWith(delivered)) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
+    throw refused;
   }
-  return checked.slice(0, -path.sep.length);
+  // The file a link leads to must pass the same rule (links followed, Windows without case).
+  const linked = folded(realPath(resolved));
+  const roots = [os.tmpdir(), secrets].map((root) => folded(realPath(root)));
+  if (linked.startsWith(folded(realPath(ROOT))) || !roots.some((root) => linked.startsWith(root))) {
+    throw refused;
+  }
+  return resolved;
 }
 
 export function baseUrl(text) {
