@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from backend.config import Config
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
+from backend.db.schema import CALENDAR_DECISIONS_DDL, execute_ddl
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.sync.daily import DailySyncMarkerService
@@ -90,6 +91,7 @@ class ExternalCalendarSyncTests(unittest.TestCase):
                 "no_intensity INTEGER NOT NULL DEFAULT 0, "
                 "short_only INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, UNIQUE(uid, start_local))"
             )
+            execute_ddl(db, CALENDAR_DECISIONS_DDL)
         self.key_values = KeyValueRepository(lambda: NOW)
         self.daily_markers = DailySyncMarkerService(
             self.manager, self.key_values, lambda: LOCAL
@@ -183,6 +185,36 @@ class ExternalCalendarSyncTests(unittest.TestCase):
     def kv(self, key):
         with self.manager.unit_of_work() as db:
             return self.key_values.get(db, key)
+
+    def test_success_keeps_series_and_future_decisions_and_drops_past_ones(self):
+        decisions = (
+            ("uid-new", "", "none"),
+            ("uid-new", "2026-09-21T10:00:00+02:00", "block"),
+            ("uid-old", "2026-09-19T10:00:00+02:00", "short"),
+        )
+        with self.manager.unit_of_work() as db:
+            db.executemany(
+                "INSERT INTO external_calendar_decisions VALUES (?, ?, ?, ?)",
+                [(*decision, NOW) for decision in decisions],
+            )
+        with (
+            patch(
+                "backend.providers.calendar.external_calendar_url",
+                return_value="https://calendar.example/feed.ics",
+            ),
+            patch("backend.providers.calendar.fetch_calendar_feed", return_value=b""),
+            patch(
+                "backend.providers.calendar.parse_ical_calendar",
+                return_value=[self.parsed_event()],
+            ),
+        ):
+            self.service.sync("manual")
+        with self.manager.unit_of_work() as db:
+            kept = db.execute(
+                "SELECT uid, occurrence_start, impact FROM external_calendar_decisions "
+                "ORDER BY occurrence_start"
+            ).fetchall()
+        self.assertEqual([tuple(row.values()) for row in kept], list(decisions[:2]))
 
     def test_success_replaces_exact_columns_marks_daily_and_publishes_replan(self):
         self.add_existing_event()

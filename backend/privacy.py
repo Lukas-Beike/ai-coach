@@ -79,8 +79,13 @@ PRIVACY_DELETE_SCOPE = (
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),
     (
         "calendars",
-        "Kalenderquellen, Kandidaten und lokale Kalenderereignisse",
-        ("public_event_sources", "public_event_candidates", "external_calendar_events"),
+        "Kalenderquellen, Kandidaten, lokale Kalenderereignisse und ihre Einordnung",
+        (
+            "public_event_sources",
+            "public_event_candidates",
+            "external_calendar_events",
+            "external_calendar_decisions",
+        ),
     ),
     ("sessions", "Anmeldesitzungen", ("sessions",)),
     (

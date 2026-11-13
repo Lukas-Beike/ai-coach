@@ -19,7 +19,7 @@ from backend.canonical.vocabulary import (
     ProviderRecordState,
 )
 
-CURRENT_SCHEMA_VERSION = 27
+CURRENT_SCHEMA_VERSION = 28
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -613,6 +613,20 @@ OBSERVATION_LIFECYCLE_DDL = f"""
     CREATE INDEX idx_observations_owner ON observations(provider, owner_record_id)"""
 
 
+# Schema version 28: the athlete's training impact per external calendar event.
+# The feed sync deletes and re-inserts every event, so decisions live apart,
+# keyed by the iCalendar UID and the occurrence start; an empty start covers
+# every occurrence of the UID. No event text is stored here.
+CALENDAR_DECISIONS_DDL = """
+    CREATE TABLE external_calendar_decisions (
+        uid TEXT NOT NULL CHECK (length(uid) BETWEEN 1 AND 500),
+        occurrence_start TEXT NOT NULL DEFAULT '' CHECK (length(occurrence_start) <= 40),
+        impact TEXT NOT NULL CHECK (impact IN ('block', 'short', 'easy', 'none')),
+        decided_at TEXT NOT NULL,
+        PRIMARY KEY (uid, occurrence_start)
+    )"""
+
+
 def execute_ddl(db: Any, ddl: str) -> None:
     """Run DDL statement by statement inside the caller's transaction.
 
@@ -955,6 +969,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, STREAM_SENSORS_DDL)
     execute_ddl(db, STREAM_DFA_DDL)
     execute_ddl(db, SYNC_JOBS_BACKFILL_INDEX_DDL)
+    execute_ddl(db, CALENDAR_DECISIONS_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

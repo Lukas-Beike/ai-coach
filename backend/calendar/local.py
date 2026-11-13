@@ -53,7 +53,10 @@ def _external_event_is_relevant(event: dict[str, Any]) -> bool:
         for column in ("no_training", "no_intensity", "short_only")
     ):
         return True
-    return "[NO_TRAINING]" in str(event.get("name") or "").upper()
+    return (
+        not event.get("decision_scope")
+        and "[NO_TRAINING]" in str(event.get("name") or "").upper()
+    )
 
 
 def _local_calendar_external_event(event: Any) -> dict[str, Any] | None:

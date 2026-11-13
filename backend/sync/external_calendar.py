@@ -140,6 +140,11 @@ class ExternalCalendarSyncService:
         synced_at = self._utc_now()
         with self._database_manager.unit_of_work() as db:
             db.execute("DELETE FROM external_calendar_events")
+            db.execute(
+                "DELETE FROM external_calendar_decisions "
+                "WHERE occurrence_start <> '' AND occurrence_start < ?",
+                (today.isoformat(),),
+            )
             columns = {
                 str(row["name"])
                 for row in db.execute("PRAGMA table_info(external_calendar_events)")

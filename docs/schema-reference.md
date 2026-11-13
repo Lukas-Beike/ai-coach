@@ -31,11 +31,11 @@ releases and what each version added.
 ## Current schema
 
 <!-- BEGIN GENERATED SCHEMA -->
-Schema version: `27` (`PRAGMA user_version`).
+Schema version: `28` (`PRAGMA user_version`).
 
-Shape digest: `203082d2a81ca06ab66307e37edbcbfe83e9a9c4e7b442124e360124175f193c`.
+Shape digest: `3c06ad06de8948015a0508c6cae46662971ce58b06e919b3f964b662d62cc0e9`.
 
-46 tables and 35 named indexes, in signature order.
+47 tables and 35 named indexes, in signature order.
 
 ### index `idx_activity_feedback_session`
 
@@ -615,6 +615,18 @@ CREATE TABLE competitions (
     last_synced_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+```
+
+### table `external_calendar_decisions`
+
+```sql
+CREATE TABLE external_calendar_decisions (
+    uid TEXT NOT NULL CHECK (length(uid) BETWEEN 1 AND 500),
+    occurrence_start TEXT NOT NULL DEFAULT '' CHECK (length(occurrence_start) <= 40),
+    impact TEXT NOT NULL CHECK (impact IN ('block', 'short', 'easy', 'none')),
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (uid, occurrence_start)
 );
 ```
 

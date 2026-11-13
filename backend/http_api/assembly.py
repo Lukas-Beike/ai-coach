@@ -14,6 +14,7 @@ from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
 from backend.http_api.auth_post import AuthPostRoutes
+from backend.http_api.calendar_decision_post import CalendarDecisionPostRoutes
 from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
 from backend.http_api.chat_page import ChatHistoryPageService
 from backend.http_api.chat_post import ChatPostRoutes
@@ -268,6 +269,7 @@ class HttpDomainRouteServices:
     provider_credentials: Any | None = None
     garmin_login: Callable[[], Any] | None = None
     connection_checks: Callable[[], Any] | None = None
+    calendar_decisions: Callable[[], Any] | None = None
 
 
 def _present(route: Any) -> tuple[Any, ...]:
@@ -596,6 +598,12 @@ class HttpApiAssembly:
                     )
                 ),
                 *_present(_when(athlete.activity_routes, ActivityRoutePostRoutes)),
+                *_present(
+                    _when(
+                        dependencies.domains.calendar_decisions,
+                        CalendarDecisionPostRoutes,
+                    )
+                ),
             )
             for route in owner.routes()
         )

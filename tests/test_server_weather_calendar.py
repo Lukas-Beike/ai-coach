@@ -24,6 +24,7 @@ from backend.calendar import local as calendar_local
 from backend.coach.context import CoachIntervalsContextService
 from backend.errors import AppError
 from backend.http_api.public_weather import PublicWeatherStateService
+from backend.http_api.route_table import Access, RouteRequest
 from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.planning import planned_units as planning_planned_units
@@ -477,6 +478,61 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(
             server.PLANNING_DATA.planned_unit().list()[0]["planned_duration_s"],
             120 * 60,
+        )
+
+    def test_calendar_decision_route_changes_the_preview_and_survives_a_refresh(self):
+        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [
+                {
+                    "date": tomorrow,
+                    "sport": "Ride",
+                    "name": "Lange Ausfahrt",
+                    "description": "- 120m 60%",
+                    "duration_minutes": 120,
+                    "target": "POWER",
+                }
+            ]
+        )
+        event = (
+            "event-1",
+            "family-3",
+            "Family appointment",
+            tomorrow,
+            tomorrow + "T10:00:00",
+            tomorrow + "T13:00:00",
+            180,
+            0,
+            runtime_clock.utc_now(),
+        )
+        insert = (
+            "INSERT INTO external_calendar_events(id, uid, name, event_date, "
+            "start_local, end_local, duration_minutes, all_day, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute(insert, event)
+        preview_service = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service
+        self.assertEqual(len(preview_service().preview()["changes"]), 1)
+        handler = Mock()
+        handler.read_json.return_value = {"uid": "family-3", "impact": "none"}
+        path = "/api/external-calendar/decisions"
+        route, params = server.HTTP_API.route_table.match("POST", path)
+        self.assertEqual(route.access, Access.SESSION_CSRF)
+        route.handle(handler, RouteRequest(path, params, {}, {}))
+        status, body = handler.send_json.call_args.args
+        self.assertEqual(
+            (status, body["impact"], body["needs_replan"]), (200, "none", False)
+        )
+        # The feed sync replaces every row; the decision stays apart.
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute("DELETE FROM external_calendar_events")
+            db.execute(insert, event)
+        self.assertEqual(preview_service().preview()["changes"], [])
+        events = server.EXTERNAL_CALENDAR.reader().list_events()
+        self.assertEqual(
+            [(item["impact"], item["decision_scope"]) for item in events],
+            [("none", "series")],
         )
 
     def test_planned_unit_preserves_private_calendar_adjustment(self):

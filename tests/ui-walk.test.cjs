@@ -77,15 +77,27 @@ test("ui walk reports errors per view and compares load times with the previous 
     calendar: { phone: ["month", "next week"] },
     marks: { cache: "pacecraft-new", assetVersions: ["a"] },
     logout: { phone: 200 },
+    measure: walk.LOAD_MEASURE,
+    notReady: { "phone coach": ["GET /api/performance"], "phone more": [] },
   };
   const lines = walk.reportLines(result);
+  // A view that never became ready names the requests of that view still open (#2581).
+  assert.ok(lines.includes("info phone coach not ready within 15 s; still loading: GET /api/performance"));
+  assert.ok(lines.includes("info phone more not ready within 15 s; still loading: only a loading marker"));
+  assert.ok(!lines.some((line) => line.startsWith("info phone plan not ready")));
+  // Only method and path are kept; other hosts keep their origin, blob and data URLs are skipped.
+  assert.equal(walk.requestKey("GET", "https://app.test/api/plan?local=1", "https://app.test"), "GET /api/plan");
+  assert.equal(walk.requestKey("GET", "https://tiles.test/a/b.png?k=1", "https://app.test"), "GET https://tiles.test/a/b.png");
+  assert.equal(walk.requestKey("GET", "blob:https://app.test/1234", "https://app.test"), null);
+  // A walk measured another way is not compared.
+  assert.deepEqual(walk.compareLines(result, { marks: { cache: "pacecraft-new" }, loadMs: { "phone coach": 15000 } }), ["info service-worker cache unchanged since the previous walk", "info load times not compared: the previous walk measured them differently"]);
   assert.ok(lines.includes("ok phone coach 800 ms"));
   assert.ok(lines.includes("FAIL phone plan 1200 ms, 2 error(s)"));
   assert.ok(lines.includes("FAIL phone login 1 error(s)"));
   assert.ok(!lines.some((line) => line.includes("phone other")));
   assert.ok(lines.includes("info calendar phone: month, next week"));
   assert.ok(lines.includes("ok logout phone 200"));
-  const compared = walk.compareLines(result, { marks: { cache: "pacecraft-old" }, loadMs: { "phone coach": 700 } });
+  const compared = walk.compareLines(result, { measure: walk.LOAD_MEASURE, marks: { cache: "pacecraft-old" }, loadMs: { "phone coach": 700 } });
   assert.deepEqual(compared, ["info service-worker cache changed since the previous walk", "info load phone coach 800 ms (was 700 ms)"]);
   assert.deepEqual(walk.compareLines(result, null), []);
 });

@@ -270,7 +270,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.1.9"
+APP_VERSION = "2.1.10"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 COACH_CONVERSATION_GATE = CoachConversationGate()
@@ -1233,6 +1233,7 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
+            calendar_decisions=EXTERNAL_CALENDAR.decisions,
         ),
     ),
 )

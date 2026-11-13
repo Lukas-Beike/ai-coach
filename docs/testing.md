@@ -165,9 +165,10 @@ private authentication files and a unique result directory under
 `manifest.json` records selection, source, environment, phase times, child exits
 and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
-The runner warns when the application image's copy of `requirements.txt`,
-`server.py`, `backend/` or `public/` differs from the working
-tree; rebuild it before trusting results. A new `public/` file is served from the
+The runner stops before starting any fixture when the application image's copy
+of `requirements.txt`, `server.py`, `backend/` or `public/` differs from the
+working tree, and names the rebuild command; when it cannot compare them it warns
+and runs (#2644). A new `public/` file is served from the
 directory listing (`backend/http_api/static_assets.py`); add it to the
 service-worker `ASSETS` list only if it is cached. A failed child prints a failing test's location and first error
 line; its manifest entry lists all of them under `failures`. The run stops at the first failed child;
@@ -201,7 +202,8 @@ is not a cold-pull result. To roll back prepared execution locally, omit
 `--browser-image` after preparing the locked native browser. CI rollback requires
 restoring native browser/system preparation together with that invocation.
 Add CI shards or local lanes only when measured critical-path gains justify the
-additional runner-minutes (#2536 split mobile and tablet-landscape). The full isolated selection can take substantial time
+additional runner-minutes (#2536 split mobile and tablet-landscape; #2616 gave
+desktop, then the last job in four of five runs, a third shard). The full isolated selection can take substantial time
 on Docker Desktop; retain its manifest and wait for the terminal result.
 
 Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md)
@@ -267,8 +269,8 @@ checks) ended at 5.8 to 12.9 min, driven by up to 4 min of queue before the
 aggregate. Browser jobs start 1.6 to 5.1 min after creation (source and image).
 The 16 jobs of a run summed 41.2 to 45.3 runner-minutes of execution and 11.4
 to 39.0 min of queue; each extra browser shard repeats about 0.7 min of setup.
-The mobile and tablet-landscape projects therefore run as two shards each, like
-desktop; the required check names stay unchanged. Six minutes stays out of
+The mobile and tablet-landscape projects therefore got two shards each, like
+desktop had then; the required check names stay unchanged. Six minutes stays out of
 reach while the image, the queue and the native chain together take about that
 long.
 
@@ -280,9 +282,9 @@ largest queue of any job was 0.1 to 1.1 min and the 18 jobs queued 0.6 to 6.8 mi
 in sum (before: up to 4.8 min per job and 11.4 to 39.0 min in sum, under heavier
 load, so part of the gain is lighter queueing); execution summed 40.7 to 45.4
 runner-minutes, about the same as the 41.2 to 45.3 before. The
-native chain ended at 2.8 to 6.0 min. The next lever would be a third desktop
-shard; six minutes stays missed while source, image and one browser shard take
-about seven.
+native chain ended at 2.8 to 6.0 min. Six minutes stays missed while source,
+image and one browser shard take about seven. Desktop then got a third shard
+(#2616).
 
 The Python goal stays unverified: both runs ended with the same 18 checkout/Git
 environment failures that #2553 later removed, and an earlier same-host

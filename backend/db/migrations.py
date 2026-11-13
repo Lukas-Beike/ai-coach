@@ -4,7 +4,8 @@ The only supported baseline is the schema production runs: version 26, written
 by release 2.0.5. Older databases and backups are rejected unchanged; upgrade
 them with release 2.0.5 first. The baseline keeps its frozen fixture in
 tests/fixtures and its digest in backend.db.schema_history; each later schema
-adds one upgrade step here, so the baseline reaches the current schema.
+adds one upgrade step here, so the baseline reaches the current schema. A
+released later schema (v27) keeps only its digest and enters the chain there.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from backend.db.schema_history import (
     OLDEST_SUPPORTED_SCHEMA_VERSION,
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V26,
+    SHAPE_SCHEMA_V27,
     released_shape,
 )
 
@@ -350,7 +352,24 @@ def _canonical_products(db: Any) -> None:
     )
 
 
-# Baseline shape -> (next shape, step).
+# Frozen copy of the v28 decision table; the live DDL may change later.
+_V28_CALENDAR_DECISIONS_DDL: Final = """
+    CREATE TABLE external_calendar_decisions (
+        uid TEXT NOT NULL CHECK (length(uid) BETWEEN 1 AND 500),
+        occurrence_start TEXT NOT NULL DEFAULT '' CHECK (length(occurrence_start) <= 40),
+        impact TEXT NOT NULL CHECK (impact IN ('block', 'short', 'easy', 'none')),
+        decided_at TEXT NOT NULL,
+        PRIMARY KEY (uid, occurrence_start)
+    )"""
+
+
+def _calendar_decisions(db: Any) -> None:
+    """Schema v28: an empty table for the athlete's calendar event decisions."""
+    execute_ddl(db, _V28_CALENDAR_DECISIONS_DDL)
+
+
+# Released shape -> (next shape, step).
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
-    SHAPE_SCHEMA_V26: (SHAPE_CURRENT, _canonical_products),
+    SHAPE_SCHEMA_V26: (SHAPE_SCHEMA_V27, _canonical_products),
+    SHAPE_SCHEMA_V27: (SHAPE_CURRENT, _calendar_decisions),
 }
