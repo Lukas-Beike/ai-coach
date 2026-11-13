@@ -194,7 +194,11 @@ Evidence: `public/state-loader.js::requestBackgroundLoad`, `public/state-loader.
 
 ### Requirement: Request deadlines and error reasons
 
-The client SHALL abort a request after 25 seconds unless its call sets another deadline: 10 seconds for the start session check, 15 for a report or activity read, 55 for a Coach action execution or Garmin login, 60 for a connection check, 90 for the start data, 100 for a transcription and 130 for the backup, privacy export, log and diagnostics downloads. An abort SHALL read "Der Server antwortet nicht innerhalb von N Sekunden.".
+The client SHALL abort a request after 25 seconds unless its call sets another deadline: 10 seconds for the start session check, 15 for a report or activity read, 55 for a Coach action execution or Garmin login, 60 for a connection check, 90 for the start data, 100 for a transcription and 130 for the backup, privacy export, log and diagnostics downloads. An ordinary request's abort SHALL read "Der Server antwortet nicht innerhalb von N Sekunden.".
+
+#### Scenario: Abort text of a transcription or download
+- **WHEN** a transcription or a 130-second download exceeds its deadline
+- **THEN** it reads "Die Transkription antwortet nicht innerhalb von 100 Sekunden." or "Der Download konnte nicht innerhalb von zwei Minuten bestätigt werden."
 
 #### Scenario: No response
 - **WHEN** the request fails without a response
