@@ -19,6 +19,7 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Mapping
+from dataclasses import fields, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -27,9 +28,18 @@ from unittest.mock import Mock
 from support import dispatch_route, make_config, temp_database
 
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
+from backend.db.key_value import KeyValueService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.diagnostics.report import (
+    DiagnosticReportDependencies,
+    DiagnosticReportService,
+)
 from backend.errors import AppError
+from backend.http_api.bootstrap_state import (
+    PublicBootstrapDependencies,
+    PublicBootstrapService,
+)
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
@@ -40,6 +50,12 @@ from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.executor import SyncJobExecutor
 from backend.sync.freshness import ProviderFreshnessService
+from backend.sync.full_resync import (
+    PROVIDER_RESYNC_KEYS,
+    FullProviderResyncService,
+    FullResyncStateStore,
+)
+from backend.sync.garmin import GarminSyncStateService
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_table import (
@@ -554,6 +570,277 @@ class CoachRefreshTests(OrchestrationCase):
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(job_rows(self), [])
+
+
+SYNC_STATE = {
+    "sync_operation_id": "op-fake-1",
+    "sync_operation_status": "completed",
+    "sync_operation_phase": "wellness",
+    "sync_operation_progress": "40",
+    "sync_operation_message": "Fake sync message",
+    "sync_operation_started_at": "2026-09-20T11:00:00+00:00",
+    "sync_operation_finished_at": "2026-09-20T11:05:00+00:00",
+    "last_sync_error": "fake-last-sync-error",
+    "garmin_sync_status": "Fake Garmin status",
+    "last_garmin_sync_at": "2026-09-20T11:30:00+00:00",
+    "last_garmin_error": '[{"source":"activities","message":"fake garmin failure"}]',
+    "last_wahoo_sync_at": "2026-09-18T01:00:00+00:00",
+    "last_wahoo_sync_error": "fake-wahoo-error",
+    "last_external_calendar_sync_at": "2026-09-20T09:00:00+00:00",
+    "last_external_calendar_sync_error": "fake-calendar-error",
+    "last_competition_sync_at": "2026-09-20T08:00:00+00:00",
+    "last_competition_sync_error": "",
+    "sync_garmin_last_success_at": "2026-09-20T11:50:00+00:00",
+    "sync_garmin_last_attempt_at": "2026-09-20T11:55:00+00:00",
+    "sync_wahoo_last_success_at": "2026-09-20T09:00:00+00:00",
+    "sync_wahoo_last_attempt_at": "2026-09-20T10:00:00+00:00",
+    "sync_calendar_last_success_at": "2026-09-20T11:30:00+00:00",
+    "sync_calendar_last_attempt_at": "2026-09-20T10:00:00+00:00",
+    "garmin_full_resync_running": "0",
+    "garmin_full_resync_status": "hidden while not running",
+    "garmin_full_resync_at": "2026-09-19T08:00:00+00:00",
+    "garmin_full_resync_error": "",
+    "wahoo_full_resync_running": "1",
+    "wahoo_full_resync_status": "Fake Wahoo resync running",
+    "wahoo_full_resync_at": "2026-09-18T08:00:00+00:00",
+    "wahoo_full_resync_error": "fake-resync-error",
+}
+# Wahoo activities: an earlier success, then a newer failed attempt.
+HISTORY_ROWS = (
+    ("h-1", "2026-09-20T10:59:00+00:00", "2026-09-20T11:00:00+00:00", "success", None),
+    (
+        "h-2",
+        "2026-09-20T11:45:00+00:00",
+        "2026-09-20T11:46:00+00:00",
+        "error",
+        "auth_expired",
+    ),
+)
+RESYNC_PATHS = {
+    "/api/garmin/full-resync": GARMIN_ID,
+    "/api/wahoo/full-resync": WAHOO_ID,
+}
+RESYNC_STATES: dict[str, dict[str, Any]] = {
+    GARMIN_ID: {
+        "running": False,
+        "status": None,
+        "last_resync_at": "2026-09-19T08:00:00+00:00",
+        "last_error": None,
+    },
+    WAHOO_ID: {
+        "running": True,
+        "status": "Fake Wahoo resync running",
+        "last_resync_at": "2026-09-18T08:00:00+00:00",
+        "last_error": "fake-resync-error",
+    },
+}
+
+
+def seed_sync_state(case: OrchestrationCase) -> None:
+    """Write every key-value sync-state kind and the refresh history of one area."""
+    with case.database.unit_of_work() as db:
+        for key, value in SYNC_STATE.items():
+            case.key_values.set(db, key, value)
+        for row_id, started, finished, status, error_code in HISTORY_ROWS:
+            db.execute(
+                "INSERT INTO provider_refresh_history(id, provider, area, "
+                "operation_id, trigger, started_at, finished_at, phase, status, "
+                "error_code) VALUES (?, 'wahoo', 'activities', 'op', 'manual', "
+                "?, ?, 'done', ?, ?)",
+                (row_id, started, finished, status, error_code),
+            )
+
+
+def mock_dependencies(dependencies: type, **overrides: Any) -> Any:
+    """Build a dependency dataclass whose fields are mocks unless overridden."""
+    values = {field.name: Mock() for field in fields(dependencies)}
+    return dependencies(**{**values, **overrides})
+
+
+class SyncStateReaderTests(OrchestrationCase):
+    """Pin what every reader of the sync state shows for one seeded database."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        seed_sync_state(self)
+        self.config = replace(
+            self.config,
+            calendar_ical_url="https://calendar.example.invalid/feed.ics",
+            intervals_api_key="fake-intervals-key",
+        )
+        self.freshness = ProviderFreshnessService(
+            self.config, self.database, self.key_values, self.clock.now
+        )
+        self.garmin_errors = GarminSyncStateService(
+            self.database,
+            self.key_values,
+            self.sync_state,
+            self.markers,
+            Mock(),
+            self.clock.iso,
+            self.clock.now,
+            snapshot_writer=Mock(),
+        )
+        self.resync = FullProviderResyncService(
+            {GARMIN_ID: Mock(), WAHOO_ID: Mock()},
+            FullResyncStateStore(self.database, self.key_values, PROVIDER_RESYNC_KEYS),
+            Mock(),
+        )
+
+    def entries(self) -> dict[tuple[str, str], dict[str, Any]]:
+        entries = self.freshness.current(
+            profile={},
+            garmin_has_core_error=bool(self.garmin_errors.core_error_entries()),
+            garmin_tokenstore_exists=True,
+            read_only=True,
+        )
+        return {(entry["provider"], entry["area"]): entry for entry in entries}
+
+    def test_public_status_reads_operation_fields_and_running_probes(self) -> None:
+        running = [True]
+        service = SyncPublicStateService(
+            self.config,
+            self.database,
+            self.key_values,
+            self.freshness,
+            self.profile,
+            self.garmin_state,
+            self.gate,
+            self.queue,
+            self.state_versions,
+            running_probes={"garmin": lambda: False, "wahoo": lambda: running[0]},
+        )
+        expected = {
+            "status": "completed",
+            "phase": "wellness",
+            "progress": 40,
+            "operation_id": "op-fake-1",
+            "message": "Fake sync message",
+            "started_at": "2026-09-20T11:00:00+00:00",
+            "finished_at": "2026-09-20T11:05:00+00:00",
+            "last_error": "fake-last-sync-error",
+        }
+
+        state = service.state(freshness=[], jobs=[])
+        running[0] = False
+        idle_state = service.state(freshness=[], jobs=[])
+
+        self.assertEqual({key: state[key] for key in expected}, expected)
+        self.assertTrue(state["running"], "only a probe sets running")
+        self.assertEqual({key: idle_state[key] for key in expected}, expected)
+        self.assertFalse(idle_state["running"], "a stored status does not")
+
+    def test_freshness_reads_history_first_and_key_values_as_fallback(self) -> None:
+        entries = self.entries()
+
+        wahoo = entries[(WAHOO_ID, "activities")]
+        self.assertEqual(
+            {key: wahoo[key] for key in ("last_attempt_at", "last_success_at")},
+            {
+                "last_attempt_at": "2026-09-20T11:45:00+00:00",
+                "last_success_at": "2026-09-20T11:00:00+00:00",
+            },
+        )
+        self.assertEqual(
+            (wahoo["state"], wahoo["error_code"]), ("stale", "auth_expired")
+        )
+        fallbacks = {
+            (GARMIN_ID, "data"): ("2026-09-20T11:30:00+00:00", "provider_error"),
+            (CALENDAR_ID, "events"): ("2026-09-20T09:00:00+00:00", "provider_error"),
+            ("intervals", "competitions"): ("2026-09-20T08:00:00+00:00", None),
+        }
+        for key, (at, error_code) in fallbacks.items():
+            with self.subTest(key=key):
+                entry = entries[key]
+                self.assertEqual(
+                    (entry["last_attempt_at"], entry["last_success_at"]), (at, at)
+                )
+                self.assertEqual(
+                    (entry["state"], entry["error_code"]), ("fresh", error_code)
+                )
+
+    def test_full_resync_state_reaches_the_progress_route_and_bootstrap(self) -> None:
+        routes = SyncGetRoutes(
+            lambda: self.queue,
+            lambda: self.status,
+            Mock(),
+            lambda: date(2026, 9, 20),
+            -1,
+            full_resync=lambda: self.resync,
+            full_resync_providers=RESYNC_PATHS,
+        )
+        for path, provider in RESYNC_PATHS.items():
+            handler = Mock()
+            handler.path = path
+            dispatch_route(routes, handler, path)
+            self.assertEqual(
+                handler.send_json.call_args.args,
+                (200, {**RESYNC_STATES[provider], "outcome": None}),
+            )
+
+        bootstrap = PublicBootstrapService(
+            mock_dependencies(
+                PublicBootstrapDependencies,
+                database_manager=lambda: self.database,
+                config=self.config,
+                key_values=KeyValueService(self.database, self.key_values),
+                full_provider_resync_service=lambda: self.resync,
+                garmin_sync_service=lambda: Mock(running=lambda: False),
+                settings=Mock(selected_provider=lambda: "openai"),
+                threshold_warnings=lambda: None,
+            )
+        ).read()
+
+        self.assertEqual(bootstrap["provider_resync"], RESYNC_STATES)
+        self.assertEqual(
+            bootstrap["garmin_sync"], {"running": False, "status": "Fake Garmin status"}
+        )
+
+    def test_diagnostics_report_the_stored_errors_and_last_syncs(self) -> None:
+        report = DiagnosticReportService(
+            mock_dependencies(
+                DiagnosticReportDependencies,
+                database_manager=self.database,
+                key_values=self.key_values,
+                config=self.config,
+                utc_now=NOW.isoformat,
+                redactor=Mock(redact_text=lambda text: text),
+                diagnostic_capture=Mock(status=dict, entries=list),
+                settings=Mock(available_model_options=list),
+                canonical_backfill=None,
+                canonical_read=None,
+                garmin_change_check=None,
+                lt1_ride_coverage=None,
+            )
+        ).report()
+
+        self.assertEqual(report["sync"]["last_error"], "fake-last-sync-error")
+        self.assertEqual(
+            report["sync"]["providers"],
+            {
+                "garmin": {"last_sync_at": None, "last_plan_sync_at": None},
+                "wahoo": {
+                    "last_sync_at": "2026-09-20T11:00:00+00:00",
+                    "last_plan_sync_at": None,
+                },
+                "intervals": {"last_sync_at": None, "last_plan_sync_at": None},
+            },
+        )
+        wahoo = report["wahoo"]
+        self.assertEqual(
+            (wahoo["last_wahoo_sync_at"], wahoo["last_wahoo_sync_error"]),
+            ("2026-09-18T01:00:00+00:00", "fake-wahoo-error"),
+        )
+        calendar = report["external_calendar"]
+        self.assertEqual(
+            (calendar["last_sync_at"], calendar["last_error"]),
+            ("2026-09-20T09:00:00+00:00", "fake-calendar-error"),
+        )
+
+    def test_scheduler_due_check_uses_the_freshest_marker(self) -> None:
+        self.assertFalse(self.markers.is_due(GARMIN_ID), "attempt 5 minutes ago")
+        self.assertTrue(self.markers.is_due(WAHOO_ID), "newest marker 2 hours ago")
+        self.assertFalse(self.markers.is_due(CALENDAR_ID), "success 30 minutes ago")
 
 
 if __name__ == "__main__":
