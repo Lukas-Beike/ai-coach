@@ -42,6 +42,7 @@ from backend.db.schema import (
     database_table_names,
 )
 from backend.errors import AppError
+from backend.http_api import bootstrap_state as bootstrap_state_module
 from backend.http_api import server as http_server_module
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -70,7 +71,8 @@ WRITE_DOCS = "--write" in sys.argv
 
 def _bootstrap_placeholders() -> set[str]:
     """Keys that ``PublicBootstrapService.read`` always fills with an empty literal."""
-    source = Path(__file__).resolve().parents[1] / "backend/http_api/bootstrap_state.py"
+    # The module as imported: in the container image it is not under the tests mount.
+    source = Path(bootstrap_state_module.__file__)
     return {
         str(key.value)
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
