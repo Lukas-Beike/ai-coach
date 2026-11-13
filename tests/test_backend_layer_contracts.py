@@ -699,6 +699,23 @@ class BackendLayerContractTests(unittest.TestCase):
                 "backend/db/schema.py",
             },
         )
+        # #2120: equipment records reach the key-value table through their store.
+        kv_statement = re.compile(r"\b(?i:FROM|INTO|UPDATE)\s+kv\b")
+        equipment_key = re.compile(
+            r"[\"'](sensor_)?equipment(_assignment|_maintenance)?:"
+            r"|garmin_equipment_initialized"
+        )
+        self.assertEqual(
+            [],
+            [
+                relative
+                for path in sorted((REPOSITORY_ROOT / "backend").rglob("*.py"))
+                if (relative := path.relative_to(REPOSITORY_ROOT).as_posix())
+                != "backend/db/equipment_store.py"
+                and kv_statement.search(text := path.read_text(encoding="utf-8"))
+                and equipment_key.search(text)
+            ],
+        )
 
     def _assert_only_in(self, tables: str, owners: set[str]) -> None:
         # ``messages`` matches in lower case only, which keeps prose such as

@@ -33,6 +33,16 @@ def values(db: Any, prefix: str, limit: int | None = None) -> list[str]:
     ]
 
 
+def unordered_values(db: Any, prefix: str) -> list[str]:
+    """Every value under ``prefix`` in table order, as the Garmin import reads them."""
+    return [
+        row["value"]
+        for row in db.execute(
+            "SELECT value FROM kv WHERE key LIKE ?", (prefix + "%",)
+        ).fetchall()
+    ]
+
+
 def entries(db: Any, prefix: str) -> list[tuple[str, str]]:
     """(key without prefix, value) of every record under ``prefix``."""
     return [
@@ -47,9 +57,9 @@ def child_values(db: Any, parent_id: str) -> list[str]:
     return [
         row["value"]
         for row in db.execute(
-            "SELECT value FROM kv WHERE key LIKE 'equipment:%' "
+            "SELECT value FROM kv WHERE key LIKE ? "
             "AND json_extract(value, '$.parent_id')=?",
-            (parent_id,),
+            (EQUIPMENT_PREFIX + "%", parent_id),
         ).fetchall()
     ]
 
@@ -79,13 +89,17 @@ def put(db: Any, key: str, text: str, updated_at: str) -> None:
     )
 
 
-def insert(
-    db: Any, key: str, text: str, updated_at: str, *, if_absent: bool = False
-) -> None:
-    """Insert a new key; an existing one fails, or is kept with ``if_absent``."""
+def insert(db: Any, key: str, text: str, updated_at: str) -> None:
+    """Insert a new key; an existing key fails."""
     db.execute(
-        f"INSERT {'OR IGNORE ' if if_absent else ''}INTO kv(key,value,updated_at) "
-        "VALUES(?,?,?)",
+        "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)", (key, text, updated_at)
+    )
+
+
+def insert_if_absent(db: Any, key: str, text: str, updated_at: str) -> None:
+    """Insert a new key; an existing key keeps its value."""
+    db.execute(
+        "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
         (key, text, updated_at),
     )
 

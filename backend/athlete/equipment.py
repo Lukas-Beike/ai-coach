@@ -212,7 +212,7 @@ class EquipmentService:
             initialized = equipment_store.value(db, GARMIN_INITIALIZED_KEY) is not None
             local_rows = [
                 json.loads(text)
-                for text in equipment_store.values(db, EQUIPMENT_PREFIX)
+                for text in equipment_store.unordered_values(db, EQUIPMENT_PREFIX)
                 if text and isinstance(json.loads(text), dict)
             ]
             by_garmin = {
@@ -596,8 +596,8 @@ def _insert_initial_garmin_item(db: Any, gear: GearItem, today: date, now: str) 
         "updated_at": now,
         "source": GARMIN_INITIAL_SOURCE,
     }
-    equipment_store.insert(
-        db, EQUIPMENT_PREFIX + item_id, json.dumps(item), now, if_absent=True
+    equipment_store.insert_if_absent(
+        db, EQUIPMENT_PREFIX + item_id, json.dumps(item), now
     )
 
 
