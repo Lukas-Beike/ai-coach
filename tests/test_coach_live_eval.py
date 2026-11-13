@@ -11,6 +11,7 @@ import itertools
 import json
 import sys
 import unittest
+import urllib.error
 from fnmatch import fnmatch
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -1417,6 +1418,26 @@ class CommandLineTests(unittest.TestCase):
         self.assertNotIn("down", text)
         run_case.assert_not_called()
         temporary.assert_not_called()
+
+    def test_a_rejected_key_names_the_status_instead_of_an_unreachable_endpoint(self):
+        for status, expected in (
+            (401, "rejected the key (HTTP 401)"),
+            (500, "HTTP 500"),
+        ):
+            error = urllib.error.HTTPError(
+                "http://127.0.0.1:8317/v1/models", status, "no", None, None
+            )
+            with (
+                self.subTest(status=status),
+                patch.object(live, "fetch_model_ids", side_effect=error),
+                patch.object(live, "run_case") as run_case,
+            ):
+                code, text = run_main(*self.ARGS)
+            self.assertEqual(code, 2)
+            self.assertEqual(len(text.strip().splitlines()), 1)
+            self.assertIn(expected, text)
+            self.assertNotIn("unreachable", text)
+            run_case.assert_not_called()
 
     def test_a_missing_model_and_a_remote_plain_http_url_stop_before_any_case(self):
         with (

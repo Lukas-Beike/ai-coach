@@ -1228,6 +1228,11 @@ def _preflight(args: argparse.Namespace) -> str | None:
         )
     try:
         models = fetch_model_ids(args.base_url, args.api_key)
+    except urllib.error.HTTPError as error:
+        # The endpoint answered: name the status, never the key (#2669).
+        if error.code in (401, 403):
+            return f"Endpoint at {host} rejected the key (HTTP {error.code}); nothing was run."
+        return f"Endpoint at {host} answered HTTP {error.code}; nothing was run."
     except OSError, ValueError, KeyError, TypeError, urllib.error.URLError:
         return f"Endpoint at {host} is unreachable; nothing was run."
     if args.model not in models:
