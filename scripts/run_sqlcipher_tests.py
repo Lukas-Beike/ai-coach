@@ -343,7 +343,7 @@ class Supervisor:
             "version": 1,
             "run_id": self.run_id,
             "status": "preparing",
-            "selection_mode": "complete",
+            "selection_mode": "complete" if args.suite == "all" else args.suite,
             "workers": args.workers,
             "selection_status": "pending_discovery",
             "cache_state": args.cache_state,

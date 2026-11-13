@@ -187,6 +187,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(manifest["version"], 1)
         self.assertEqual(manifest["status"], "preparing")
         self.assertEqual(manifest["cache_state"], "unknown")
+        self.assertEqual(manifest["selection_mode"], "container")
         with contextlib.redirect_stdout(io.StringIO()):
             another = local.Supervisor(self.args)
         self.assertNotEqual(self.owner.output, another.output)
