@@ -25,7 +25,7 @@ from backend.sync.commands import (
     WahooSynchronousRefresh,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.wiring import coach_synchronous_refreshes
+from backend.sync.wiring import SyncWindow, coach_synchronous_refreshes
 
 
 class ProviderRefreshCommandServiceTests(unittest.TestCase):
@@ -313,11 +313,11 @@ class CoachSynchronousRefreshWiringTests(unittest.TestCase):
     """The production inline refreshes (replaces the runtime binding checks)."""
 
     def _refreshes(self, state: Mock) -> dict:
-        jobs = Mock()
-        jobs.historical.all_sync_days = -1
-        jobs.historical.sync_period_defaults = {WAHOO_ID: 84}
-        jobs.state.sync_state_repository.return_value = state
-        return coach_synchronous_refreshes(jobs)
+        ctx = Mock()
+        ctx.sync_persistence.state_repository.return_value = state
+        return coach_synchronous_refreshes(
+            ctx, SyncWindow({WAHOO_ID: 84}, -1, 90, date(2020, 1, 1))
+        )
 
     def test_every_waiting_provider_has_an_inline_refresh(self) -> None:
         waiting = {

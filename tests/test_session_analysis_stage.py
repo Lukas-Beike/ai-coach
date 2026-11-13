@@ -47,9 +47,9 @@ from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import canonical_backfill, session_analysis_stage
 from backend.sync.canonical_backfill import BatchReport
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_backfill
 from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
     summarize_session_analysis,

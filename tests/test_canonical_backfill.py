@@ -52,10 +52,10 @@ from backend.sync.canonical_backfill import (
     _write_reprojection,
     completed_observation_versions,
 )
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_backfill
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"

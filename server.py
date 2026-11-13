@@ -268,19 +268,12 @@ from backend.sync import observation as sync_observation
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.adaptive import AdaptivePreviewFollowupService
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.canonical_wiring import build_canonical_read
+from backend.sync.canonical_wiring import build_canonical_backfill, build_canonical_read
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.execution_assembly import (
-    CalendarWeatherJobDependencies,
-    GarminJobDependencies,
-    HistoricalSyncDependencies,
-    IntervalsJobDependencies,
-    SyncJobExecutionAssembly,
-    SyncJobStateDependencies,
-    WahooJobDependencies,
+from backend.sync.execution_wiring import (
+    build_sync_job_execution,
     configured_for_job,
     provider_configured_checks,
 )
@@ -301,7 +294,6 @@ from backend.sync.garmin_login import (
     GarminTokenStore,
 )
 from backend.sync.garmin_service import (
-    GARMIN_AUTOMATIC_SYNC_DAYS,
     GarminMorningRemoteReader,
     shared_garmin_sync_lock,
 )
@@ -318,24 +310,10 @@ from backend.sync.metric_export import MetricExportService
 from backend.sync.metric_export_runner import MetricExportRunner
 from backend.sync.profile_weekly_plan_removal import ProfileWeeklyPlanRemoval
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-from backend.sync.provider_resync_assembly import (
-    CompetitionSyncOwners,
-    ProviderResyncAssembly,
-    ProviderResyncPersistence,
-    ProviderResyncRuntime,
-    ResyncProviderOwners,
-)
 from backend.sync.rating_backfill_removal import RatingBackfillRemoval
+from backend.sync.resync_wiring import build_provider_resync
 from backend.sync.retry_hold import ProviderRetryHold
-from backend.sync.scheduler_assembly import (
-    DailySyncLoopSettings,
-    SyncScheduleControls,
-    SyncScheduleOwners,
-    SyncSchedulePersistence,
-    SyncSchedulePolicy,
-    SyncScheduleProviders,
-    SyncSchedulerAssembly,
-)
+from backend.sync.scheduler_wiring import SyncSchedulerServices, build_sync_schedulers
 from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
 from backend.sync.state import SyncStateRepository
@@ -343,6 +321,7 @@ from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_wiring import build_wahoo_connection, build_wahoo_sync
 from backend.sync.weather import build_weather_sync
 from backend.sync.wiring import (
+    SyncWindow,
     build_provider_sync,
     build_sync_commands,
     build_sync_job_queue,
@@ -685,6 +664,9 @@ ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
 SYNC_EARLIEST_DATE = CONFIG.sync_history_earliest_date
 PLANNED_CALENDAR_FUTURE_DAYS = 35
+SYNC_WINDOW = SyncWindow(
+    SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS, SYNC_CHUNK_DAYS, SYNC_EARLIEST_DATE
+)
 SETTINGS = SettingsService(
     lambda: CONFIG,
     lambda key: key_value_service().get(key),
@@ -1045,87 +1027,23 @@ DERIVED_PASS_HOOK = chained_after_job(
     lambda job: METRIC_EXPORT_RUNNER.after_job(job),
 )
 
-PROVIDER_RESYNC = ProviderResyncAssembly(
-    dependencies=ProviderResyncAssembly.Inputs(
-        competition=CompetitionSyncOwners(
-            config=lambda: CONFIG,
-            intervals_client=lambda: APP.provider_transport.intervals_client(),
-            competition_service=PLANNING_DATA.competition,
-        ),
-        resync=ResyncProviderOwners(
-            garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-            garmin_resync_gate=GARMIN_RESYNC_GATE,
-            wahoo_sync_service=WAHOO_SYNC.sync_service,
-            wahoo_resync_gate=WAHOO_RESYNC_GATE,
-            all_sync_days=ALL_SYNC_DAYS,
-        ),
-        persistence=ProviderResyncPersistence(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            redactor=REDACTOR,
-        ),
-        runtime=ProviderResyncRuntime(
-            logger=LOGGER,
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=lambda: uuid.uuid4().hex,
-            monotonic=time.perf_counter,
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            after_resync=DERIVED_PASS_HOOK,
-        ),
-    ),
+PROVIDER_RESYNC = build_provider_resync(
+    APP,
+    garmin_resync_gate=GARMIN_RESYNC_GATE,
+    wahoo_resync_gate=WAHOO_RESYNC_GATE,
+    all_sync_days=ALL_SYNC_DAYS,
+    after_resync=DERIVED_PASS_HOOK,
 )
 
+PROVIDER_CONFIGURED: dict[str, Callable[[], bool]] = provider_configured_checks(APP)
 
-# Shared by the executor, scheduler, Coach refreshes and configured checks.
-SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
-    historical=HistoricalSyncDependencies(
-        local_now=ATHLETE_CLOCK.now,
-        sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-        all_sync_days=ALL_SYNC_DAYS,
-        sync_chunk_days=SYNC_CHUNK_DAYS,
-        sync_earliest_date=SYNC_EARLIEST_DATE,
-    ),
-    state=SyncJobStateDependencies(
-        sync_state_repository=sync_state_repository,
-        queue_service=SYNC_JOB_QUEUE.service,
-        outcome_service=SYNC_JOB_QUEUE.outcome_service,
-    ),
-    intervals=IntervalsJobDependencies(
-        selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
-        competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
-        nutrition_sync_service=NUTRITION_SERVICES.intervals_sync_service,
-        operation_observer=PROVIDER_SYNC.operation_observer,
-        resync_gate=INTERVALS_RESYNC_GATE,
-    ),
-    garmin=GarminJobDependencies(
-        sync_service=GARMIN_ASSEMBLY.sync_service,
-        morning_body_battery_service=morning_body_battery_service,
-        fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
-        activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
-        strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
-        wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
-        stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
-        change_check=GARMIN_ASSEMBLY.change_check,
-    ),
-    calendar_weather=CalendarWeatherJobDependencies(
-        calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
-        weather_sync_service=WEATHER_SYNC,
-    ),
-    wahoo=WahooJobDependencies(
-        sync_service=WAHOO_SYNC.sync_service,
-        plan_push_service=WAHOO_SYNC.plan_push_service,
-        resync_gate=WAHOO_RESYNC_GATE,
-        stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
-    ),
-)
-
-PROVIDER_CONFIGURED: dict[str, Callable[[], bool]] = provider_configured_checks(
-    SYNC_JOB_DEPENDENCIES, config=lambda: CONFIG, profile=ATHLETE_DATA.profile
-)
-
-SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
-    dependencies=SYNC_JOB_DEPENDENCIES,
+SYNC_JOB_EXECUTION = build_sync_job_execution(
+    APP,
+    window=SYNC_WINDOW,
+    selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
+    competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
+    weather_sync_service=WEATHER_SYNC,
+    intervals_resync_gate=INTERVALS_RESYNC_GATE,
     after_job=DERIVED_PASS_HOOK,
 )
 
@@ -1148,50 +1066,19 @@ PROVIDER_RETRY_HOLD = ProviderRetryHold(
     },
 )
 
-SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
-    dependencies=SyncSchedulerAssembly.Inputs(
-        owners=SyncScheduleOwners(
-            profile_service=ATHLETE_DATA.profile,
-            queue_service=SYNC_JOB_QUEUE.service,
-            daily_sync_marker_service=sync_daily_markers,
-            garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-        ),
-        persistence=SyncSchedulePersistence(
-            sync_state_repository=sync_state_repository,
-            retry_held=PROVIDER_RETRY_HOLD.held,
-        ),
-        controls=SyncScheduleControls(
-            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-            sleep=time.sleep,
-        ),
-        policy=SyncSchedulePolicy(
-            config=lambda: CONFIG,
-            garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
-            auto_update_label=sync_scheduler_runtime.AUTO_UPDATE_LABEL,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-        ),
-        daily_loop=DailySyncLoopSettings(
-            morning_body_battery_service=morning_body_battery_service,
-            logger=LOGGER,
-            database_manager=database_manager,
-            morning_due=lambda: GARMIN_ASSEMBLY.change_check().morning_due(),
-        ),
-        providers=SyncScheduleProviders(
-            garmin_resync_gate=GARMIN_RESYNC_GATE,
-            weather_refresh_due=lambda: WEATHER_SYNC().refresh_due(),
-            wahoo=SYNC_JOB_DEPENDENCIES.wahoo,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            garmin_change_check=GARMIN_ASSEMBLY.change_check,
-        ),
-    ),
+SYNC_SCHEDULERS: SyncSchedulerServices = build_sync_schedulers(
+    APP,
+    window=SYNC_WINDOW,
+    weather_sync=WEATHER_SYNC,
+    garmin_resync_gate=GARMIN_RESYNC_GATE,
+    wahoo_resync_gate=WAHOO_RESYNC_GATE,
+    retry_held=PROVIDER_RETRY_HOLD.held,
 )
 
 SYNC_COMMANDS = build_sync_commands(
     APP,
     intervals_client=lambda: APP.provider_transport.intervals_client(),
-    synchronous_refreshes=lambda: coach_synchronous_refreshes(SYNC_JOB_DEPENDENCIES),
+    synchronous_refreshes=lambda: coach_synchronous_refreshes(APP, SYNC_WINDOW),
     after_refresh=DERIVED_PASS_HOOK,
     training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
 )

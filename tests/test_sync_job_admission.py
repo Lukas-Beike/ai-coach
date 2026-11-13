@@ -26,11 +26,7 @@ from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.execution_assembly import (
-    WahooJobDependencies,
-    provider_configured_checks,
-)
-from backend.sync.gates import ProviderResyncGate
+from backend.sync.execution_wiring import provider_configured_checks
 from backend.sync.jobs import SyncJobStore
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
@@ -54,17 +50,12 @@ def _configured(
     garmin.sync_service.return_value.configured.return_value = garmin_configured
     wahoo_sync = mock.Mock(name="wahoo_sync")
     wahoo_sync.configured.return_value = wahoo_connected
-    deps = mock.Mock(
+    ctx = mock.Mock(
+        config=lambda: config,
         garmin=garmin,
-        wahoo=WahooJobDependencies(
-            sync_service=lambda: wahoo_sync,
-            plan_push_service=lambda: mock.Mock(name="plan_push"),
-            resync_gate=ProviderResyncGate("Wahoo"),
-        ),
+        wahoo=SimpleNamespace(sync_service=lambda: wahoo_sync),
     )
-    return provider_configured_checks(
-        deps, config=lambda: config, profile=mock.Mock(name="profile")
-    )
+    return provider_configured_checks(ctx)
 
 
 def build_endpoint(

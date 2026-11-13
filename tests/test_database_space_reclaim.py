@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 from contextlib import nullcontext
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -38,15 +39,10 @@ from backend.privacy import (
     PrivacyDeleteService,
 )
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync import scheduler_wiring as sync_scheduler_wiring
 from backend.sync.scheduler import DailySyncLoop
-from backend.sync.scheduler_assembly import (
-    DailySyncLoopSettings,
-    SyncScheduleControls,
-    SyncScheduleOwners,
-    SyncSchedulePersistence,
-    SyncSchedulePolicy,
-    SyncSchedulerAssembly,
-)
+from backend.sync.scheduler_wiring import build_sync_schedulers
+from backend.sync.wiring import SyncWindow
 
 STAMP = "2026-10-01T08:00:00+00:00"
 SENTINEL = "synthetic-sentinel-4f9c2a71"
@@ -447,24 +443,22 @@ class IdleCheckpointLoopTests(unittest.TestCase):
         self.assertEqual(wal.stat().st_size, 0)
 
 
-class DailyLoopAssemblyTests(unittest.TestCase):
-    def _loop(self, manager: DatabaseManager | None) -> DailySyncLoop:
-        assembly = SyncSchedulerAssembly(
-            dependencies=SyncSchedulerAssembly.Inputs(
-                owners=SyncScheduleOwners(Mock(), Mock(), Mock(), Mock()),
-                persistence=SyncSchedulePersistence(Mock()),
-                controls=SyncScheduleControls(MaintenanceGate(), lambda _s: None),
-                policy=SyncSchedulePolicy(Mock(), 1, "label", 1, Mock()),
-                daily_loop=DailySyncLoopSettings(
-                    Mock(),
-                    Mock(),
-                    database_manager=None if manager is None else lambda: manager,
-                ),
-                providers=Mock(),
-            )
+class DailyLoopBuilderTests(unittest.TestCase):
+    def _loop(self, manager: DatabaseManager) -> DailySyncLoop:
+        ctx = Mock(name="context")
+        ctx.maintenance = MaintenanceGate()
+        ctx.database = lambda: manager
+        schedulers = build_sync_schedulers(
+            ctx,
+            window=SyncWindow({}, -1, 1, date(2020, 1, 1)),
+            weather_sync=Mock(),
+            garmin_resync_gate=Mock(),
+            wahoo_resync_gate=Mock(),
+            retry_held=Mock(),
+            sleep=lambda _s: None,
         )
-        with patch.object(assembly, "daily_scheduler"):
-            return assembly.daily_loop()
+        with patch.object(sync_scheduler_wiring.scheduler, "DailySyncScheduler"):
+            return schedulers.daily_loop()
 
     def test_the_composed_loop_truncates_the_wal(self) -> None:
         root, manager = _open(self)
@@ -477,9 +471,6 @@ class DailyLoopAssemblyTests(unittest.TestCase):
         checkpoint()
 
         self.assertEqual(wal.stat().st_size, 0)
-
-    def test_without_a_database_manager_the_loop_has_no_checkpoint(self) -> None:
-        self.assertIsNone(self._loop(None)._wal_checkpoint)
 
 
 if __name__ == "__main__":

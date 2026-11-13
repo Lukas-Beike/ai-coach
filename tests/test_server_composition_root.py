@@ -64,10 +64,19 @@ from backend.providers.wahoo_client import WahooClient
 from backend.sync import freshness, job_outcomes, jobs, observation, refresh
 from backend.sync.adaptive import IllnessPauseSyncService
 from backend.sync.authority import PlanningAuthorityService
+from backend.sync.backfill_resume import BackfillChainResumer
+from backend.sync.canonical_backfill import CanonicalBackfill
+from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.commands import ProviderRefreshCommandService
+from backend.sync.competitions import (
+    CompetitionSyncReconciler,
+    CompetitionSyncService,
+)
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.executor import SyncJobExecutor
 from backend.sync.external_calendar import ExternalCalendarSyncService
+from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin import (
     GarminFixtureLoader,
     GarminPayloadService,
@@ -97,6 +106,11 @@ from backend.sync.planned_calendar import (
 )
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
+from backend.sync.scheduler import (
+    DailySyncLoop,
+    DailySyncScheduler,
+    StartupSyncScheduler,
+)
 from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.stream_backfill import StreamBackfillService
@@ -410,6 +424,39 @@ class CompositionRootTests(ServerTestCase):
             server.WORKOUT_LIBRARY_SYNC.export_port(), WorkoutLibraryExportPort
         )
         self.assertIsInstance(server.METRIC_EXPORT, MetricExportService)
+
+    def test_execution_backfill_and_resync_services_resolve_through_the_root(
+        self,
+    ) -> None:
+        execution, schedulers = server.SYNC_JOB_EXECUTION, server.SYNC_SCHEDULERS
+        resync, backfill = server.PROVIDER_RESYNC, server.CANONICAL_BACKFILL
+
+        self.assertIsInstance(execution.executor(), SyncJobExecutor)
+        self.assertIsNot(execution.executor(), execution.executor())
+        for factory, kind in (
+            (schedulers.daily_scheduler, DailySyncScheduler),
+            (schedulers.startup_scheduler, StartupSyncScheduler),
+            (schedulers.backfill_resumer, BackfillChainResumer),
+            (schedulers.daily_loop, DailySyncLoop),
+            (resync.competition_reconciler, CompetitionSyncReconciler),
+            (resync.competition_sync_service, CompetitionSyncService),
+            (resync.full_resync_service, FullProviderResyncService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
+        # The run registry outlives each full resync service.
+        self.assertIs(
+            resync.full_resync_service()._runs, resync.full_resync_service()._runs
+        )
+        self.assertIs(server.APP.canonical_backfill, backfill)
+        self.assertIsInstance(backfill.worker, CanonicalBackfillWorker)
+        self.assertIsInstance(backfill.status_reader, CanonicalBackfill)
+        self.assertEqual(
+            set(server.DEFAULT_PROVIDER_REGISTRY.ids()), set(server.PROVIDER_CONFIGURED)
+        )
+        for check in server.PROVIDER_CONFIGURED.values():
+            self.assertIsInstance(check(), bool)
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

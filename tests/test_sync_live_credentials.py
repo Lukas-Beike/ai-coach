@@ -15,6 +15,7 @@ import unittest
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
@@ -29,19 +30,12 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.provider_credentials import ProviderCredentialService
 from backend.sync.competitions import CompetitionSyncService
-from backend.sync.execution_assembly import (
-    CalendarWeatherJobDependencies,
-    GarminJobDependencies,
-    HistoricalSyncDependencies,
-    IntervalsJobDependencies,
-    SyncJobExecutionAssembly,
-    SyncJobStateDependencies,
-    WahooJobDependencies,
-)
+from backend.sync.execution_wiring import build_sync_job_execution
 from backend.sync.executor import PerJobOwner
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.selected import SelectedWorkoutSyncService
+from backend.sync.wiring import SyncWindow
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 UNIT = "22222222-2222-4222-8222-222222222222"
@@ -131,48 +125,39 @@ class LiveCredentialHarness:
                 competition_lock=_LockedCompetitionLock(),
             )
 
-        historical = HistoricalSyncDependencies(
-            local_now=lambda: NOW,
-            sync_period_defaults={},
-            all_sync_days=-1,
-            sync_chunk_days=30,
-            sync_earliest_date=NOW.date(),
-        )
-        state = SyncJobStateDependencies(
-            sync_state_repository=mock.Mock,
-            queue_service=mock.Mock,
-            outcome_service=mock.Mock,
-        )
-        intervals = IntervalsJobDependencies(
-            selected_workout_sync_service=selected,
-            competition_sync_service=competitions,
-            nutrition_sync_service=mock.Mock,
-            operation_observer=cast(Any, _Observer),
-            resync_gate=gate,
-        )
-        garmin = GarminJobDependencies(
-            sync_service=mock.Mock,
+        ctx = SimpleNamespace(
+            clock=SimpleNamespace(now=lambda: NOW),
+            sync_persistence=SimpleNamespace(state_repository=mock.Mock),
+            sync_job_queue=SimpleNamespace(
+                service=mock.Mock, outcome_service=mock.Mock
+            ),
+            provider_sync=SimpleNamespace(operation_observer=_Observer),
+            nutrition=SimpleNamespace(intervals_sync_service=mock.Mock),
             morning_body_battery_service=mock.Mock,
-            fixture_loader=mock.Mock,
-        )
-        calendar_weather = CalendarWeatherJobDependencies(
-            calendar_sync_service=mock.Mock, weather_sync_service=mock.Mock
-        )
-        wahoo = WahooJobDependencies(
-            sync_service=mock.Mock,
-            plan_push_service=mock.Mock,
-            resync_gate=ProviderResyncGate("Wahoo"),
+            garmin=SimpleNamespace(
+                sync_service=mock.Mock,
+                fixture_loader=mock.Mock,
+                activity_detail_service=mock.Mock,
+                strength_push_service=mock.Mock,
+                wellness_history_service=mock.Mock,
+                stream_backfill_service=mock.Mock,
+            ),
+            external_calendar=SimpleNamespace(sync_service=mock.Mock),
+            wahoo=SimpleNamespace(
+                sync_service=mock.Mock,
+                plan_push_service=mock.Mock,
+                stream_backfill_service=mock.Mock,
+            ),
         )
         # Built once, like the sync worker; every later job reuses this executor.
-        self.executor = SyncJobExecutionAssembly(
-            dependencies=SyncJobExecutionAssembly.Inputs(
-                historical=historical,
-                state=state,
-                intervals=intervals,
-                garmin=garmin,
-                calendar_weather=calendar_weather,
-                wahoo=wahoo,
-            ),
+        self.executor = build_sync_job_execution(
+            cast(Any, ctx),
+            window=SyncWindow({}, -1, 30, NOW.date()),
+            selected_workout_sync_service=selected,
+            competition_sync_service=competitions,
+            weather_sync_service=mock.Mock,
+            intervals_resync_gate=gate,
+            after_job=lambda _job: None,
         ).executor()
 
     def _apply(self, config: Config) -> None:
