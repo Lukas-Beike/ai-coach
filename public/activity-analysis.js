@@ -3,6 +3,7 @@
   const WIDTH = 340; const HEIGHT = 150; const LEFT = 40; const RIGHT = 8; const TOP = 10; const BOTTOM = 22;
   // The latest load of each panel; an older answer for the same panel is dropped.
   const panelLoads = new WeakMap();
+  const panelReads = new WeakMap();
 
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const numberText = (value, digits = 0) => AppFormat.number(value, { digits }) ?? "—";
@@ -304,24 +305,25 @@
     const status = h("p", "muted", ""); status.setAttribute("role", "status");
     const isCurrent = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.append(ActivityDetails.refreshActions(payload, {
-      api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary),
+      api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary, undefined, true),
     }), status);
   }
 
-  // `read` is the calendar card's shared read of the same document; a retry reads again.
-  async function loadPanel(panel, summary, read) {
+  // `read(fresh)` is the calendar card's shared read of the same document; a retry or refresh reads it fresh.
+  async function loadPanel(panel, summary, read = panelReads.get(panel), fresh = false) {
+    if (read) panelReads.set(panel, read);
     const token = {};
     panelLoads.set(panel, token);
     const current = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.replaceChildren(createLoadingState("Details werden geladen …"));
     let payload;
     try {
-      payload = await (read || api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }));
+      payload = await (read ? read(fresh) : api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }));
     } catch (error) {
       if (!current()) return;
       // The card's summary values still render when the detail document cannot be read.
       renderPanel(panel, summary, null, token);
-      panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary)));
+      panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary, read, true)));
       return;
     }
     if (current()) renderPanel(panel, summary, payload, token);

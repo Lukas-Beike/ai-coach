@@ -683,8 +683,9 @@ const openActivityDetails = new Set();
 // One read of a session's detail document per calendar data, shared by the zone bar and "Details" (#2478).
 const plannedSessionReads = new Map();
 
-function plannedSessionRead(activityId) {
-  let read = plannedSessionReads.get(activityId);
+// `fresh` (a retry or a detail refresh in "Details") replaces the shared read, so a rebuild shows the new document.
+function plannedSessionRead(activityId, fresh = false) {
+  let read = fresh ? null : plannedSessionReads.get(activityId);
   if (!read) {
     read = api(`/api/activities/${encodeURIComponent(activityId)}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
     // A failed read is not shared: the next opening or retry reads again.
@@ -1265,7 +1266,7 @@ function plannedActivityActions(actual, dateKey, title, entryKey) {
   more.addEventListener("toggle", () => {
     if (entryKey && more.open) openActivityDetails.add(entryKey);
     else if (entryKey) openActivityDetails.delete(entryKey);
-    if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual, id && plannedSessionRead(id));
+    if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual, id && ((fresh) => plannedSessionRead(id, fresh)));
   });
   const id = String(actual.activity_id || actual.id || "");
   more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
