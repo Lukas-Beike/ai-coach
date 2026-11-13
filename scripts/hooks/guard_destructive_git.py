@@ -21,9 +21,13 @@ BLOCKED = tuple(
     for pattern in (
         r"\breset\b" + ARGS + r"\s--hard\b",
         r"\bclean\b" + ARGS + r"\s(?:-[a-zA-Z]*f[a-zA-Z]*|--force)(?=$|\s)",
-        r"\bbranch\b" + ARGS + r"\s(?:-[a-zA-Z]*D[a-zA-Z]*(?=$|\s)|--delete\s+--force|--force\s+--delete)",
+        r"\bbranch\b"
+        + ARGS
+        + r"\s(?:-[a-zA-Z]*D[a-zA-Z]*(?=$|\s)|--delete\s+--force|--force\s+--delete)",
         r"\b(?:checkout|restore)\b" + ARGS + r"\s(?:--\s+)?\.(?=$|[\s;&|])",
-        r"\bpush\b" + ARGS + r"\s(?:--force(?![-\w])|-[a-zA-Z]*f[a-zA-Z]*(?=$|\s)|\+\S)",
+        r"\bpush\b"
+        + ARGS
+        + r"\s(?:--force(?![-\w])|-[a-zA-Z]*f[a-zA-Z]*(?=$|\s)|\+\S)",
     )
 )
 
