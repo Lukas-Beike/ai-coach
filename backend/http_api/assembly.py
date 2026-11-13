@@ -602,7 +602,6 @@ class HttpApiAssembly:
                     _when(
                         dependencies.domains.calendar_decisions,
                         CalendarDecisionPostRoutes,
-                        database_lock(),
                     )
                 ),
             )

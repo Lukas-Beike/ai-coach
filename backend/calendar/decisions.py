@@ -39,7 +39,9 @@ class ExternalCalendarDecisionService:
             raise AppError(400, "Ungültiger Termin.")
         if len(start) > _MAX_START_LENGTH:
             raise AppError(400, "Ungültiger Termin.")
-        if impact is not None and impact not in IMPACTS:
+        if impact is not None and (
+            not isinstance(impact, str) or impact not in IMPACTS
+        ):
             raise AppError(400, "Ungültige Einordnung.")
         with self._database_manager.unit_of_work() as db:
             if not db.execute(

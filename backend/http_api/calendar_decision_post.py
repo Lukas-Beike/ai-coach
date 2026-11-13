@@ -12,9 +12,8 @@ from backend.http_api.route_table import Access, Route, RouteRequest
 class CalendarDecisionPostRoutes:
     """Store the athlete's decision for one external calendar event or series."""
 
-    def __init__(self, decision_service: Callable[[], Any], database_lock: Any):
+    def __init__(self, decision_service: Callable[[], Any]):
         self._decision_service = decision_service
-        self._database_lock = database_lock
 
     def routes(self) -> list[Route]:
         return [
@@ -44,10 +43,7 @@ class CalendarDecisionPostRoutes:
         payload = handler.read_json()
         if not isinstance(payload, dict):
             raise AppError(400, "Die Anfrage muss ein Objekt sein.")
-        with self._database_lock:
-            result = self._decision_service().decide(
-                payload.get("uid"),
-                payload.get("occurrence_start"),
-                payload.get("impact"),
-            )
+        result = self._decision_service().decide(
+            payload.get("uid"), payload.get("occurrence_start"), payload.get("impact")
+        )
         handler.send_json(200, result)

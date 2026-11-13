@@ -16,8 +16,8 @@ _LOCAL_MIDNIGHT = "T00:00:00"
 _DECIDED_EVENTS = """(
     SELECT id, uid, name, event_date, start_local, end_local, duration_minutes,
         all_day, updated_at, decision_scope, recurring,
-        CASE WHEN decision IS NULL THEN training_relevant ELSE decision <> 'none' END
-            AS training_relevant,
+        CASE WHEN decision IS NULL THEN training_relevant
+            ELSE decision IN ('short', 'easy') END AS training_relevant,
         CASE WHEN decision IS NULL THEN no_training ELSE decision = 'block' END
             AS no_training,
         CASE WHEN decision IS NULL THEN no_intensity ELSE decision = 'easy' END

@@ -13,8 +13,10 @@ from backend.calendar.external import (
     list_events_in_window,
     state,
 )
+from backend.calendar.local import local_calendar_events
 from backend.db.schema import CALENDAR_DECISIONS_DDL, execute_ddl
 from backend.errors import AppError
+from backend.planning.calendar import calendar_event_has_constraint
 from backend.planning.context import build_daily_planning_context
 
 
@@ -391,13 +393,25 @@ class ExternalCalendarTests(unittest.TestCase):
             {"team-1": ("block", "event"), "marked": ("short", None)},
             self.impacts(training_relevant_only=True),
         )
+        # A title marker yields to the decision in planning and the calendar.
+        self.db.execute(
+            "UPDATE external_calendar_events SET name='[NO_TRAINING] Team' "
+            "WHERE uid='team'"
+        )
+        decided = list_events(self.db, today=self.today)
+        self.assertFalse(calendar_event_has_constraint(decided[0], "no_training"))
+        self.assertTrue(calendar_event_has_constraint(decided[1], "no_training"))
+        self.assertEqual(
+            ["team-1", "marked"],
+            [item["id"] for item in local_calendar_events([], [], decided)],
+        )
         blocked = next(
             event
             for event in list_events(self.db, today=self.today)
             if event["id"] == "team-1"
         )
         self.assertEqual(
-            (1, 0, 0, 1, 1),
+            (1, 0, 0, 0, 1),
             tuple(
                 blocked[key]
                 for key in (
@@ -491,6 +505,7 @@ class ExternalCalendarTests(unittest.TestCase):
             (("team", None, "maybe"), 400),
             (("", None, "block"), 400),
             ((["team"], None, "block"), 400),
+            (("team", None, ["block"]), 400),
             (("team", 5, "block"), 400),
             (("x" * 501, None, "block"), 400),
         )
