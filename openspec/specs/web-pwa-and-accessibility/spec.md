@@ -699,13 +699,13 @@ Evidence: `public/coach.js::chatSendLabel`; `public/coach.js::updateChatSendButt
 
 ### Requirement: Reply annotations and receipts
 
-Under a Coach reply the client SHALL show its change labels joined by " · ", then one line per plan note as "Warnung|Hinweis: <label> · <dates> · <evidence>" using a fixed label and evidence phrase per note code; unknown codes are skipped. A user message with files SHALL show "Anhänge: <names>" and offer no edit action.
+Under a Coach reply the client SHALL show its change labels joined by " · ", then one line per plan note code and severity as "Warnung|Hinweis: <label> · <dates> · <evidence>" using a fixed label and evidence phrase per note code, the dates of all its notes merged (an intensity distribution note names its week as "Woche ab <first planned day>", several as "Wochen ab <days>"); unknown codes are skipped. A user message with files SHALL show "Anhänge: <names>" and offer no edit action.
 
 #### Scenario: Receipt toast
 - **WHEN** a turn reports command receipts
 - **THEN** one toast joins the distinct titles with " · ", failures first and the toast red when one failed; each tool has a fixed German title (for example `save_checkin` is "Tages-Check-in gespeichert"), read-only refresh and sync tools are left out unless they failed, a staged plan is left out when the turn also commits, and only the final plan commit counts
 
-Evidence: `public/coach.js::appendMessageChanges`; `public/coach.js::appendPlanNotes`; `public/coach.js::messageAttachmentLabel`; `public/coach.js::receiptIsVisible`; `public/coach.js::toastCoachReceipts`; `public/coach.js` (`COACH_RECEIPT_LABELS`, `HIDDEN_CHAT_RECEIPT_TOOLS`). Tests: `tests/coach-turn-undo.test.cjs::plan notes render safe labels, dates, evidence and warning emphasis`; `tests/coach-receipts.test.cjs::a Coach action announces itself in one toast with its failures first`; `tests/coach-receipts.test.cjs::synchronization progress does not create chat cards`; `e2e/coach-plan-notes.spec.js`; `e2e/coach-tool-receipts.spec.js`.
+Evidence: `public/coach.js::appendMessageChanges`; `public/coach.js::appendPlanNotes`; `public/coach.js::messageAttachmentLabel`; `public/coach.js::receiptIsVisible`; `public/coach.js::toastCoachReceipts`; `public/coach.js` (`COACH_RECEIPT_LABELS`, `HIDDEN_CHAT_RECEIPT_TOOLS`). Tests: `tests/coach-turn-undo.test.cjs::plan notes render safe labels, dates, evidence and warning emphasis`; `tests/coach-turn-undo.test.cjs::repeated plan notes condense to one line, distribution weeks by their first day (#2617)`; `tests/coach-receipts.test.cjs::a Coach action announces itself in one toast with its failures first`; `tests/coach-receipts.test.cjs::synchronization progress does not create chat cards`; `e2e/coach-plan-notes.spec.js`; `e2e/coach-tool-receipts.spec.js`.
 
 ### Requirement: Follow-latest and history paging rules
 

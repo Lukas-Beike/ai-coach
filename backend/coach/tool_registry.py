@@ -65,7 +65,7 @@ def build_tool_contracts(
             [
                 _canonical_coach_tool(
                     "apply_training_patch",
-                    "Apply related moves, edits, deletions and additions in one atomic local change. Read revision and per-unit hashes first. Existing objects keep their IDs. No remote writes.",
+                    "Apply related moves, edits, deletions and additions in one atomic local change. Read revision and per-unit hashes first. Existing objects keep their IDs. _request.scope names planned_unit:<local_id> for every changed or deleted unit, plus local_plan for additions. No remote writes.",
                     patch_properties,
                 )
             ],

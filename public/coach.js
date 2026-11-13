@@ -1799,6 +1799,20 @@ function appendMessageChanges(node, message) {
   appendPlanNotes(node, changes.plan_check_notes);
 }
 
+// One entry per known finding and severity, its dates merged (#2617); a
+// distribution note covers a week, named by its first planned day.
+function groupPlanNotes(planNotes, labels) {
+  const groups = new Map();
+  for (const note of Array.isArray(planNotes) ? planNotes : []) {
+    if (!labels[note?.code]) continue;
+    const key = `${note.code}|${note.severity}`;
+    if (!groups.has(key)) groups.set(key, { code: note.code, severity: note.severity, days: [] });
+    const days = Array.isArray(note.dates) ? note.dates : [];
+    groups.get(key).days.push(...(note.code === "intensity_distribution" ? days.slice(0, 1) : days));
+  }
+  return groups.values();
+}
+
 function appendPlanNotes(node, planNotes) {
   const planNoteLabels = {
     run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
@@ -1809,18 +1823,19 @@ function appendPlanNotes(node, planNotes) {
     strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
     missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
     illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
-    intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
+    intensity_distribution: ["Intensitätsverteilung", "Praxisbasierte Referenzbereiche"],
     leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
     all_day_event: ["Ganztägiger Termin", "Kalender; weicher Hinweis"],
   };
-  for (const note of Array.isArray(planNotes) ? planNotes : []) {
-    const label = planNoteLabels[note?.code];
-    if (!label) continue;
-    const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
-    const dateLabel = dates ? " · " + dates : "";
-    node.append(h("div", `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`, `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`));
+  for (const { code, severity, days } of groupPlanNotes(planNotes, planNoteLabels)) {
+    const label = planNoteLabels[code];
+    const dates = [...new Set(days)].sort((a, b) => a.localeCompare(b)).map((day) => AppFormat.date(day)).filter(Boolean);
+    let weeks = "";
+    if (code === "intensity_distribution") weeks = dates.length > 1 ? "Wochen ab " : "Woche ab ";
+    const dateLabel = dates.length ? ` · ${weeks}${dates.join(", ")}` : "";
+    node.append(h("div", `message-plan-note${severity === "warning" ? " is-warning" : ""}`, `${severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`));
   }
 }
 

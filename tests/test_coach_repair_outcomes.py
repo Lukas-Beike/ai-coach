@@ -1,6 +1,7 @@
 import unittest
 
 from backend.coach.outcomes import unresolved_coach_steps
+from backend.coach.service import dialogue_scope_repair_key, outcome_status
 
 
 class UnresolvedCoachStepsTests(unittest.TestCase):
@@ -87,6 +88,53 @@ class UnresolvedCoachStepsTests(unittest.TestCase):
         self.assertEqual(unresolved_coach_steps([failed, retry]), [])
         other = {**retry, "scope_repair_key": "other-effect"}
         self.assertEqual(unresolved_coach_steps([failed, other]), [failed])
+
+    def test_scope_denied_patch_retried_with_its_unit_tokens_completes_the_turn(self):
+        # Step sequences of commands 7f90b1199805 and dc44424c7caf (#2617).
+        def patch(scope: list[str], reason: str | None) -> dict:
+            arguments = {
+                "changes": [{"local_id": "u1", "duration_min": 50}],
+                "expected_revision": 7,
+                "_request": {"target": "local_plan", "scope": scope},
+            }
+            return {
+                "tool": "apply_training_patch",
+                "step_key": "+".join(scope),
+                "scope_repair_key": dialogue_scope_repair_key(
+                    "apply_training_patch", arguments
+                ),
+                "request": arguments["_request"],
+                "result": {"ok": reason is None, "reason": reason},
+            }
+
+        reads = [
+            {"tool": tool, "step_key": tool, "result": {"ok": True}}
+            for tool in (
+                "read_training_state",
+                "list_planned_workouts",
+                "manage_training_templates",
+            )
+        ]
+        denied = patch(["local_plan"], "intent_scope_denied")
+        retry = patch(["local_plan", "planned_unit:u1"], None)
+        missing = patch(["planned_unit:gone"], "request_object_missing")
+        for steps in ([*reads, denied, retry], [*reads, missing, denied, retry]):
+            failures = unresolved_coach_steps(steps)
+            self.assertEqual(failures, [])
+            self.assertEqual(
+                outcome_status(
+                    question="",
+                    incomplete_answer=False,
+                    failures=failures,
+                    missing_answer=False,
+                    effects=[retry],
+                    cancelled=False,
+                ),
+                "completed",
+            )
+        other = patch(["local_plan", "planned_unit:u2"], None)
+        other["scope_repair_key"] = "another-change"
+        self.assertEqual(unresolved_coach_steps([*reads, denied, other]), [denied])
 
     def test_profile_conflict_requires_exact_profile_fields(self):
         failed = {

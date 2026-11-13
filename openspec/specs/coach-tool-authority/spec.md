@@ -323,7 +323,7 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 
 #### Scenario: Same tool repairs its failure
 - **WHEN** a later call of the same tool succeeds in the turn
-- **THEN** it repairs an earlier failure when target, period and the set of scope tokens are equal; or when the failure was `request_scope` or `request_object_missing` and both calls agree on arguments (without `expected_revision` and per-change payload hashes) and on target, period, constraints, `remote_write` and `sync_scope`; or when the failed step had no validated request and failed with `request_invalid`, `tool_arguments_invalid` or `plan_check_failed`; a `profile_conflict` is repaired only by a success on the same profile fields, and a successful `all_pending` plan sync repairs an earlier failed `selected` or `all_pending` plan sync of the same target
+- **THEN** it repairs an earlier failure when target, period and the set of scope tokens are equal; or when the failure was `request_scope`, `request_object_missing` or `intent_scope_denied` and both calls agree on arguments (without `expected_revision` and per-change payload hashes) and on target, period, constraints, `remote_write` and `sync_scope`; or when the failed step had no validated request and failed with `request_invalid`, `tool_arguments_invalid` or `plan_check_failed`; a `profile_conflict` is repaired only by a success on the same profile fields, and a successful `all_pending` plan sync repairs an earlier failed `selected` or `all_pending` plan sync of the same target
 
 #### Scenario: Patch and replacement
 - **WHEN** `apply_training_patch` failed with `request_invalid`, `tool_arguments_invalid` or `plan_check_failed` and `replace_training_plan` succeeds, or the reverse
