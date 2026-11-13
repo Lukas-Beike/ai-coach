@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
+from backend.db.repositories import KeyValueRepository
 from backend.sync.adaptive import IllnessPauseSyncService
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.commands import (
@@ -17,9 +18,12 @@ from backend.sync.commands import (
 )
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.execution_assembly import SyncJobExecutionAssembly
+from backend.sync.garmin_personal_status import sdk_write_ready
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
+
+_KEY_VALUES = KeyValueRepository(lambda: "")  # reads only
 
 
 @dataclass(frozen=True)
@@ -82,7 +86,13 @@ class SyncCommandAssembly:
         )
 
     def plan_push(self) -> PlanPushCommandService:
-        return PlanPushCommandService(self._core.queue_service())
+        def garmin_writable() -> bool:
+            with self._core.database_manager().reader() as db:
+                return sdk_write_ready(
+                    self._illness_pause.config(), lambda key: _KEY_VALUES.get(db, key)
+                )
+
+        return PlanPushCommandService(self._core.queue_service(), garmin_writable)
 
     def authority(self) -> PlanningAuthorityService:
         return PlanningAuthorityService(

@@ -2,13 +2,14 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { extractFunctions } = require("./frontend-harness.cjs");
 
-const PLAN_PUSH = ["runPlanPush", "leftoverEntry", "plannedWeekSyncSummary", "plannedGarminBlockedText", "plannedPushTargets", "PLAN_PUSH_MAX_ENTRIES", "plannedWeekSyncJobs", "runPlannedWeekSync", "plannedLeftoverWeek"];
+const PLAN_PUSH = ["runPlanPush", "leftoverEntry", "plannedWeekSyncSummary", "plannedGarminBlockedText", "plannedGarminSdkRequired", "plannedPushTargets", "PLAN_PUSH_MAX_ENTRIES", "plannedWeekSyncJobs", "runPlannedWeekSync", "plannedLeftoverWeek"];
 const sent = [];
 const context = extractFunctions("plan-views.js", PLAN_PUSH, {
   api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: JSON.parse(options.body).provider }; },
   // A Wahoo job fails, every other job completes.
   waitForSyncJob: async (id) => ({ id, status: id === "wahoo" ? "failed" : "completed" }),
   providerJobErrorDetail: () => "abgelehnt",
+  providerIds: () => ({ intervals: "intervals", garmin: "garmin", wahoo: "wahoo" }),
   focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null,
 });
 
@@ -101,6 +102,17 @@ test("a strength unit says why it was not sent to Garmin", () => {
   assert.equal(context.plannedGarminBlockedText({ push_blocked: { garmin: "unmapped" } }), "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet");
   assert.equal(context.plannedGarminBlockedText({ push_blocked: {} }), "");
   assert.equal(context.plannedGarminBlockedText({}), "");
+});
+
+test("a Garmin unit needs the SDK login: with the Personal API key alone the notice replaces the push", () => {
+  const waiting = { push_pending: { garmin: true } };
+  const personalOnly = { configured: true, can_write_workouts: false };
+  assert.equal(context.plannedGarminSdkRequired(waiting, personalOnly), true);
+  assert.equal(context.plannedGarminSdkRequired({ push_pending: { garmin: false } }, personalOnly), false);
+  assert.equal(context.plannedGarminSdkRequired({ push_pending: { intervals: true } }, personalOnly), false);
+  assert.equal(context.plannedGarminSdkRequired(waiting, { configured: true, can_write_workouts: true }), false);
+  assert.equal(context.plannedGarminSdkRequired(waiting, { configured: false, can_write_workouts: false }), false);
+  assert.equal(context.plannedGarminSdkRequired(waiting, undefined), false);
 });
 
 test("a push job carries its entries; a leftover is removed by the entry its provider understands", async () => {

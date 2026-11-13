@@ -183,9 +183,23 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(list(range(1, 9)), orders)
         self.assertEqual(
             [
-                ("warmup", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
-                ("interval", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
-                ("interval", "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP"),
+                (
+                    "warmup",
+                    "BENCH_PRESS",
+                    "INCLINE_BARBELL_BENCH_PRESS",
+                    12.0,
+                    1.0,
+                    20.0,
+                ),
+                (
+                    "interval",
+                    "BENCH_PRESS",
+                    "INCLINE_BARBELL_BENCH_PRESS",
+                    8.0,
+                    3.0,
+                    40.0,
+                ),
+                ("interval", "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP", 10.0, 4.0, None),
             ],
             mapping.workout_exercise_steps(document),
         )
@@ -254,11 +268,61 @@ class MappingTests(unittest.TestCase):
         self.assertNotIn("weightValue", plank["workoutSteps"][0])
         self.assertEqual(
             [
-                ("interval", "SQUAT", "BARBELL_BACK_SQUAT"),
-                ("interval", "PLANK", "SIDE_PLANK"),
+                ("interval", "SQUAT", "BARBELL_BACK_SQUAT", 5.0, 4.0, 80.0),
+                ("interval", "PLANK", "SIDE_PLANK", 1.0, 2.0, None),
             ],
             mapping.workout_exercise_steps(document),
         )
+
+    def test_the_read_back_compares_reps_sets_and_weight_in_kilograms(self) -> None:
+        sent = mapping.strength_workout(name="Kraft", description="", exercises=[SQUAT])
+
+        def read_back(change: Any) -> dict[str, Any]:
+            saved = json.loads(json.dumps(sent))
+            group = saved["workoutSegments"][0]["workoutSteps"][0]
+            change(group, group["workoutSteps"][0])
+            return saved
+
+        def unit(key: str, value: float) -> Any:
+            def change(_group: Any, step: Any) -> None:
+                step["weightValue"] = value
+                step["weightUnit"] = {"unitKey": key}
+
+            return change
+
+        def drop_weight(_group: Any, step: Any) -> None:
+            del step["weightValue"]
+
+        same = [
+            lambda g, s: None,
+            unit("pound", 176.4),
+            unit("kilogram", 80.04),
+            unit("stone", 12.6),
+            lambda g, s: s.pop("weightUnit"),
+        ]
+        different = [
+            lambda g, s: g.update(numberOfIterations=3),
+            lambda g, s: s.update(endConditionValue=6),
+            unit("kilogram", 60),
+            unit("kilogram", 80000),
+            unit("pound", 80),
+            drop_weight,
+        ]
+        for change in same:
+            self.assertTrue(mapping.exercise_steps_match(read_back(change), sent))
+        for change in different:
+            self.assertFalse(mapping.exercise_steps_match(read_back(change), sent))
+
+    def test_a_pound_read_back_of_a_half_step_weight_still_matches(self) -> None:
+        # 2.25 kg read back as 4.9604 lb lies on the other side of a 0.1 kg rounding.
+        sent = mapping.strength_workout(
+            name="Kraft", description="", exercises=[{**SQUAT, "kg": 2.25}]
+        )
+        saved = json.loads(json.dumps(sent))
+        step = saved["workoutSegments"][0]["workoutSteps"][0]["workoutSteps"][0]
+        step.update(weightValue=4.9604, weightUnit={"unitKey": "pound"})
+
+        self.assertTrue(mapping.exercise_steps_match(saved, sent))
 
     def test_an_unresolved_exercise_blocks_the_whole_workout(self) -> None:
         with self.assertRaises(mapping.GarminStrengthMappingError) as raised:
@@ -671,6 +735,76 @@ class PushTests(PushHarness):
         self.assertEqual("error", result["status"])
         self.assertIn("Termin-ID", result["results"][0]["error"])
         self.assertIsNone(self.link(U1).baseline_hash)
+
+    def test_a_schedule_without_id_is_reused_by_the_retry(self) -> None:
+        digest = self.insert(U1, UNIT)
+        original = self.garmin.schedule_workout
+        lookup = self.garmin.get_scheduled_workouts_by_period
+
+        def no_id(workout_id, day):
+            original(workout_id, day)
+            return {}
+
+        self.garmin.schedule_workout = no_id  # type: ignore[method-assign]
+        self.garmin.get_scheduled_workouts_by_period = lambda start, end: []  # type: ignore[method-assign]
+        self.assertEqual("error", self.push((U1, digest))["status"])
+        self.assertIsNone(self.link(U1).remote_external_id)
+
+        self.garmin.get_scheduled_workouts_by_period = lookup  # type: ignore[method-assign]
+        self.assertEqual("ok", self.push((U1, digest))["status"])
+
+        # The retry found the earlier schedule instead of adding a second one.
+        self.assertEqual({"502": ("501", "2026-11-09")}, self.garmin.schedules)
+        self.assertEqual("502", self.link(U1).remote_external_id)
+
+    def test_a_changed_read_back_is_never_scheduled(self) -> None:
+        def altered(change):
+            plain = FakeGarmin.upload_workout
+
+            def upload(document):
+                saved = plain(self.garmin, document)
+                stored = self.garmin.workouts[str(saved["workoutId"])]
+                group = stored["workoutSegments"][0]["workoutSteps"][0]
+                change(group, group["workoutSteps"][0])
+                return saved
+
+            return upload
+
+        def drop_weight(_group, step):
+            del step["weightValue"]
+
+        digest = self.insert(U1, UNIT)
+        for name, change in (
+            ("reps", lambda g, s: s.update(endConditionValue=6.0)),
+            ("sets", lambda g, s: g.update(numberOfIterations=3)),
+            ("weight", lambda g, s: s.update(weightValue=60.0)),
+            ("dropped weight", drop_weight),
+        ):
+            with self.subTest(name):
+                self.garmin.upload_workout = altered(change)  # type: ignore[method-assign]
+                result = self.push((U1, digest))
+                self.assertEqual("error", result["status"])
+                self.assertIn(
+                    "nicht vollständig übernommen", result["results"][0]["error"]
+                )
+                self.assertEqual({}, self.garmin.schedules)
+
+        # A weight in a unit this code does not know is not a mismatch.
+        self.garmin.upload_workout = altered(  # type: ignore[method-assign]
+            lambda g, s: s.update(weightValue=12.6, weightUnit={"unitKey": "stone"})
+        )
+        self.assertEqual("ok", self.push((U1, digest))["status"])
+
+    def test_without_an_sdk_login_nothing_is_started(self) -> None:
+        digest = self.insert(U1, UNIT)
+        self.service._write_ready = lambda: False
+
+        with self.assertRaises(AppError) as raised:
+            self.push((U1, digest))
+
+        self.assertEqual("garmin_sdk_required", raised.exception.reason)
+        self.assertEqual(0, self.sessions)
+        self.assertIsNone(self.link(U1))
 
     def test_blanked_exercise_names_are_deleted_and_never_scheduled(self) -> None:
         self.garmin.blank_names = True

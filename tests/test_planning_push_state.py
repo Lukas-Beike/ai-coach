@@ -34,6 +34,7 @@ from backend.planning.wahoo_orphans import WahooOrphan
 from backend.providers import garmin_run_workout
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
+    GarminExercise,
     catalogue_available,
 )
 
@@ -357,6 +358,26 @@ class PushStateTests(unittest.TestCase):
         attach_push_state(pairs, {})
         self.assertEqual({"garmin": "unmapped"}, pairs[0][1]["push_blocked"])
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
+    def test_a_changed_remembered_exercise_marks_the_pushed_unit_changed(self) -> None:
+        unit = {
+            **STRENGTH,
+            "strength_structure": [{"name": "Rudern eng", "sets": 3, "reps": 10}],
+        }
+        v_grip = GarminExercise("V-grip Cable Row", "ROW", "V_GRIP_CABLE_ROW")
+        seated = GarminExercise("Seated Cable Row", "ROW", "SEATED_CABLE_ROW")
+        self.link("r1", garmin_fingerprint(unit, {"ruderneng": v_grip}) or "")
+        rows = [{"local_id": "r1", "payload": json.dumps(unit), "sync_state": "synced"}]
+
+        def pending(remembered: dict[str, GarminExercise]) -> bool:
+            pairs = [(row, json.loads(row["payload"])) for row in rows]
+            with self.manager.reader() as db:
+                attach_push_state(pairs, garmin_baselines(db), remembered)
+            return pairs[0][1]["push_pending"]["garmin"]
+
+        self.assertFalse(pending({"ruderneng": v_grip}))
+        self.assertTrue(pending({"ruderneng": seated}))
+
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
         projected = self.project(
@@ -464,20 +485,37 @@ class PushStateTests(unittest.TestCase):
 
         self.assertEqual(expected, garmin_fingerprint(RUN))
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_the_strength_fingerprint_keeps_its_formula(self) -> None:
+        unit = {
+            **STRENGTH,
+            "strength_structure": [
+                {
+                    "name": "Kniebeuge",
+                    "sets": 3,
+                    "reps": 5,
+                    "garmin_exercise": "Barbell Back Squat",
+                    "garmin_pair": {
+                        "category": "SQUAT",
+                        "exercise": "BARBELL_BACK_SQUAT",
+                    },
+                }
+            ],
+        }
         content = {
             "name": "",
             "date": STRENGTH["date"],
             "exercises": strength_structure.normalize_structure(
-                STRENGTH["strength_structure"]
+                unit["strength_structure"], stored=True
             ),
             "payload_version": PAYLOAD_VERSION,
+            "pairs": [["SQUAT", "BARBELL_BACK_SQUAT"]],
         }
         expected = hashlib.sha256(
             json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
 
-        self.assertEqual(expected, garmin_fingerprint(STRENGTH))
+        self.assertEqual(expected, garmin_fingerprint(unit))
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

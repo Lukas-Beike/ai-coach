@@ -21,6 +21,7 @@ from backend.providers.garmin_personal import GarminPersonalClient
 from backend.sync import garmin, garmin_service
 from backend.sync.garmin_activity_details import GarminActivityDetailService
 from backend.sync.garmin_change_check import GarminChangeCheck
+from backend.sync.garmin_personal_status import sdk_write_ready
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
@@ -216,9 +217,16 @@ class GarminAssembly:
             now=self._datetime_now,
             redactor=self._redactor.redact_text,
             gate=self._resync_gate,
-            write_ready=lambda: self.sync_state_service().sdk_skipped() is None,
+            write_ready=self.sdk_write_ready,
             run_zones=self._run_zones,
         )
+
+    def sdk_write_ready(self) -> bool:
+        """Whether Garmin workouts can be written: an SDK login, not skipped."""
+        with self._database_manager().reader() as db:
+            return sdk_write_ready(
+                self._config(), lambda key: self._key_values.get(db, key)
+            )
 
     def body_export(self, profile: Any) -> Any:
         from backend.sync.garmin_profile_body_export import GarminProfileBodyExport

@@ -438,35 +438,87 @@ def strength_workout(
 
 
 _EXERCISE_STEP_KEYS: Final = frozenset({"interval", "warmup"})
+_KG_PER_UNIT: Final = {"kilogram": 1.0, "pound": 0.45359237}
+# A weight read back in a unit this code does not know is not compared.
+_UNKNOWN_UNIT: Final = "unknown unit"
+# Weights match within this many kg, so a pound read-back of a .x5 kg weight
+# is not taken for a change.
+_KG_TOLERANCE: Final = 0.05
 
 
-def _exercise_steps(steps: Any) -> list[tuple[str, str, str]]:
-    pairs: list[tuple[str, str, str]] = []
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return round(float(value), 1)
+
+
+def _weight_kg(step: Mapping[str, Any]) -> float | str | None:
+    """The step's weight in kg, None when dropped, or ``_UNKNOWN_UNIT``."""
+    value = step.get("weightValue")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    unit = step.get("weightUnit")
+    factor = _KG_PER_UNIT.get(
+        str(unit.get("unitKey")) if isinstance(unit, Mapping) else ""
+    )
+    if factor is None:
+        return _UNKNOWN_UNIT
+    return round(float(value) * factor, 3) or None
+
+
+def _exercise_steps(steps: Any, sets: float | None = None) -> list[tuple[Any, ...]]:
+    found: list[tuple[Any, ...]] = []
     for step in steps if isinstance(steps, list) else []:
         if not isinstance(step, Mapping):
             continue
         kind = str((step.get("stepType") or {}).get("stepTypeKey") or "")
         if step.get("type") == "RepeatGroupDTO":
-            pairs.extend(_exercise_steps(step.get("workoutSteps")))
+            found.extend(
+                _exercise_steps(
+                    step.get("workoutSteps"), _number(step.get("numberOfIterations"))
+                )
+            )
         elif kind in _EXERCISE_STEP_KEYS:
-            pairs.append(
+            found.append(
                 (
                     kind,
                     str(step.get("category") or ""),
                     str(step.get("exerciseName") or ""),
+                    _number(step.get("endConditionValue")),
+                    sets,
+                    _weight_kg(step),
                 )
             )
-    return pairs
+    return found
 
 
-def workout_exercise_steps(workout: Mapping[str, Any]) -> list[tuple[str, str, str]]:
-    """Return (step type, category, exercise) of every exercise step, in order.
+def workout_exercise_steps(workout: Mapping[str, Any]) -> list[tuple[Any, ...]]:
+    """Return (step type, category, exercise, reps, sets, kg) of every exercise step.
 
     The step type keeps a warm-up step that Garmin turned into a working set,
-    or dropped, from passing the read-back check.
+    or dropped, from passing the read-back check; reps, the sets of the repeat
+    group and the weight in kilograms (pounds converted) keep a changed value
+    from passing it too.
     """
-    pairs: list[tuple[str, str, str]] = []
+    found: list[tuple[Any, ...]] = []
     for segment in workout.get("workoutSegments") or []:
         if isinstance(segment, Mapping):
-            pairs.extend(_exercise_steps(segment.get("workoutSteps")))
-    return pairs
+            found.extend(_exercise_steps(segment.get("workoutSteps")))
+    return found
+
+
+def exercise_steps_match(saved: Mapping[str, Any], sent: Mapping[str, Any]) -> bool:
+    """Whether the read-back kept every sent exercise step, weight in an unknown unit aside."""
+    read, wanted = workout_exercise_steps(saved), workout_exercise_steps(sent)
+    return len(read) == len(wanted) and all(
+        a[:-1] == b[:-1] and _same_weight(a[-1], b[-1])
+        for a, b in zip(read, wanted, strict=True)
+    )
+
+
+def _same_weight(read: float | str | None, sent: float | str | None) -> bool:
+    if read == _UNKNOWN_UNIT:
+        return True
+    if isinstance(read, float) and isinstance(sent, float):
+        return abs(read - sent) <= _KG_TOLERANCE
+    return read == sent
