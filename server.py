@@ -1188,6 +1188,9 @@ COACH_CONTEXT = CoachContextAssembly(
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
             first_threshold_estimate=lambda: ATHLETE_DATA.first_threshold().estimate(),
+            lt1_session_records=lambda days: (
+                PERFORMANCE.training_reports().profiles.curve_records(days)
+            ),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,

@@ -165,8 +165,10 @@ class TrainingProfileSelectionService:
         self._canonical = canonical
         self._curves = curves
 
-    def curve_records(self) -> list[dict[str, Any]]:
-        """Ride and run sessions of the longest window with their session curves.
+    def curve_records(
+        self, days: int = PROFILE_WINDOW_DAYS[-1]
+    ) -> list[dict[str, Any]]:
+        """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
@@ -180,7 +182,7 @@ class TrainingProfileSelectionService:
         if reader is None:
             raise RuntimeError("power profiles need the canonical activity summaries")
         today = self._today()
-        start = today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        start = today - timedelta(days=days - 1)
         # One spare day on each side; the local date below decides membership.
         first, last = start - timedelta(days=1), today + timedelta(days=1)
         with self._canonical.database_manager().read_snapshot() as db:
@@ -770,6 +772,7 @@ def _curve_record(
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
         "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
+        "power_at_hr_profile": {} if curve is None else curve.power_at_hr,
         "execution_summary": None if curve is None else curve.execution_summary,
         "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,

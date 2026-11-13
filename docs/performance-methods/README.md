@@ -15,12 +15,14 @@ a card by its `Card` ID.
 | [M6](m6-local-tss-load.md) | Local TSS-scale session load and intensity | model estimate |
 | [M7](m7-local-fitness-fatigue.md) | Local fitness, fatigue and form | model estimate |
 | [M8](m8-local-session-metrics.md) | Local efficiency factor, variability index, work and decoupling | descriptive statistic |
+| [M9](m9-lt1-output-own-sessions.md) | LT1 pace and power from own steady sessions | model estimate |
 
 M5 covers the smoothed load curves (#1432). M6 (#1725) replaces provider TSS
 with a local load; Banister TRIMP appears only as its heart-rate branch. M7
 (#1726) smooths the M6 load into local fitness, fatigue and form in place of
 the Intervals.icu CTL, ATL and form.
-Passive CP/CS, other TRIMP uses, further
+M9 (#2427) reads LT1 pace and power at the LT1 heart rate from the athlete's
+own steady sessions. Passive CP/CS, other TRIMP uses, further
 threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based
 recommendations stay deferred without a card.
 
@@ -208,6 +210,8 @@ accessible text, not a declared absence.
 | R51 | Hunter, Ledger & Muniz-Pumares 2023, "Remote determination of critical speed and critical power in recreational runners", IJSPP, PMID 37888148 | abstract | 23 recreational runners, 8 weeks of foot-pod training data vs time trials and 3-min all-out tests. CS/CP from habitual training agreed with the tests; D′/W′ agreed only weakly and were moderately reliable. Running, not cycling. |
 | R52 | Manzi et al. 2009, "Relation between individualized training impulses and performance in distance runners", Med Sci Sports Exerc 41(11):2090-2096, PMID 19812506, DOI `10.1249/MSS.0b013e3181a6a959` | abstract (PubMed summary) | 8 recreational runners over 8 weeks: a training impulse weighted by each runner's own heart-rate and lactate profiles correlated with gains in speed at 2 and 4 mmol/L lactate and with 5 and 10 km performance; group-average weights did not. Small sample. Supports summing the impulse over the heart-rate distribution; the card keeps Banister weights. |
 | R53 | Charoensap et al. 2025 (author order differs between sources), "Durability of the moderate-to-heavy intensity transition can be predicted using readily available markers of physiological decoupling", Eur J Appl Physiol 125:2911-2920, PMC12479576 | abstract | 51 trained cyclists pooled from four studies; power at VT1 before and after about 2.5 h of moderate cycling; HR decoupling correlated with the VT1 power loss (r = −0.76), respiratory frequency weaker, ventilation not. Candidate reference for M8; laboratory sessions, not field files. |
+| R54 | Faude, Kindermann & Meyer 2009, "Lactate threshold concepts: how valid are they?", Sports Med 39(6):469-490, PMID 19453206, DOI `10.2165/00007256-200939060-00003` | abstract | Review of 25 lactate threshold concepts; the first rise of lactate above baseline (LT1) lies close to the first ventilatory threshold. Laboratory step tests; defines the target construct of M9, which does not measure it. |
+| R55 | Seiler 2010, "What is best practice for training intensity and duration distribution in endurance athletes?", IJSPP 5(3):276-291, PMID 20861519, DOI `10.1123/ijspp.5.3.276` | abstract | Descriptive review; three-zone model with LT1/VT1 as the upper boundary of the easy zone. Background for M9, not a validation of field readings. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -246,6 +250,11 @@ R45 and R46 were added on 2026-11-07 (#1771) from a web and PubMed search
 (`session RPE resistance training`, TrainingPeaks and Intervals.icu pages on
 TSS from RPE); no study converting session-RPE AU into TSS was found. Their
 correction status was not checked.
+R54 and R55 were added on 2026-11-12 (#2427) from a web search (`heart rate
+drift test aerobic threshold validity`, `Firstbeat aerobic threshold heart rate
+speed`, `intervals.icu DFA a1 aerobic threshold`) and the method document on
+the issue; no peer-reviewed validation of a decoupling or drift test against a
+laboratory LT1 was found. Their correction status was not checked.
 R52 was added on 2026-11-08 (#1773) from a PubMed search
 (`Manzi individualized training impulse`); its correction status was not
 checked.

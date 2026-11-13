@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import functools
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -16,6 +17,7 @@ from backend.canonical.first_threshold import (
     first_threshold_percent,
 )
 from backend.canonical.vocabulary import Sport, ZoneConfigurationMetric
+from backend.errors import DatabaseBusyError
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -32,6 +34,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.performance.pace_at_hr import LT1_DAYS, output_at_heart_rate
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.training_focus import training_focus
@@ -163,6 +166,27 @@ def _zone_two_tops(
     return tops
 
 
+def _at_heart_rate(
+    records: Callable[[int], Sequence[Mapping[str, Any]]] | None, today: date
+) -> performance_current_metrics.OutputAtHeartRate | None:
+    """Pace or power at a heart rate from the session records, read at most once.
+
+    A busy database or a missing session source reads as no sessions, so LT1
+    falls back to zone 2 or the fixed share instead of failing the projection.
+    """
+    if records is None:
+        return None
+
+    @functools.cache
+    def read() -> Sequence[Mapping[str, Any]]:
+        try:
+            return records(LT1_DAYS)
+        except DatabaseBusyError, RuntimeError:
+            return ()
+
+    return lambda sport, bpm: output_at_heart_rate(read(), sport, bpm, today)
+
+
 def current_performance_context(
     garmin: GarminSyncStatus,
     profile: dict[str, Any],
@@ -171,11 +195,14 @@ def current_performance_context(
     canonical: CanonicalPerformanceInputs,
     session_feedback: FeedbackLookup | None = None,
     zone_configurations: Iterable[ZoneConfiguration] = (),
+    lt1_session_records: Callable[[int], Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Compose the current performance projection from canonical inputs only.
 
     ``zone_configurations`` give LT1 the top of zone 2 of the sport's heart-rate,
-    pace or power zones in effect.
+    pace or power zones in effect. ``lt1_session_records(days)`` reads the ride
+    and run sessions of the last days with their heart-rate profiles, so LT1 pace and power come from the
+    athlete's own steady sessions at the LT1 heart rate; read once, when needed.
 
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.
@@ -289,6 +316,7 @@ def current_performance_context(
                 first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
                 first_threshold_origin(profile),
                 _zone_two_tops(list(zone_configurations), metrics, today),
+                _at_heart_rate(lt1_session_records, today),
             ),
         },
         "current_load": load,

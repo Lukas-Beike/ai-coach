@@ -434,33 +434,56 @@ class FirstThresholdTests(unittest.TestCase):
     def test_precedence_of_each_value(self) -> None:
         # Worked examples: 85 % of 172 and 160 bpm is 146 and 136 bpm; 4:30 /km at
         # 88 % speed is 5:07 /km; 75 % of 280 W is 210 W; 86 % of 172 and 160 bpm
-        # is 148 and 138 bpm.
-        fixed, zone = "fixed_share", "zone_2"
-        for name, pct, origin, tops, expected in (
-            ("no LT1 value and no zones", None, "", None, {
+        # is 148 and 138 bpm. Own sessions are read at the LT1 heart rate in
+        # effect: 128 and 131 bpm from zone 2, 148 and 138 bpm when measured.
+        fixed, zone, own = "fixed_share", "zone_2", "own_sessions"
+        sessions = {("run", 128): 331.6, ("ride", 131): 187.4,
+                    ("run", 148): 296.2, ("ride", 138): 201.0}  # fmt: skip
+        at_hr = lambda sport, bpm: sessions.get((sport, bpm))
+        for name, pct, origin, tops, at_heart_rate, expected in (
+            ("no LT1 value and no zones", None, "", None, None, {
                 "run": {"hr_bpm": 146, "hr_origin": fixed,
                         "pace_seconds_per_km": 307, "pace_origin": fixed},
                 "ride": {"hr_bpm": 136, "hr_origin": fixed,
                          "watts": 210, "power_origin": fixed}}),
-            ("zone 2 of every kind", None, "", self.TOPS, {
+            ("zone 2 of every kind", None, "", self.TOPS, None, {
                 "run": {"hr_bpm": 128, "hr_origin": zone,
                         "pace_seconds_per_km": 300, "pace_origin": zone},
                 "ride": {"hr_bpm": 131, "hr_origin": zone,
                          "watts": 200, "power_origin": zone}}),
-            ("measured wins over zone 2", 86.0, "measured", self.TOPS, {
+            ("measured wins over zone 2", 86.0, "measured", self.TOPS, None, {
                 "run": {"hr_bpm": 148, "hr_origin": "measured",
                         "pace_seconds_per_km": 300, "pace_origin": zone},
                 "ride": {"hr_bpm": 138, "hr_origin": "measured",
                          "watts": 200, "power_origin": zone}}),
-            ("adopted DFA estimate", 86.0, "estimated", None, {
+            ("adopted DFA estimate", 86.0, "estimated", None, None, {
                 "run": {"hr_bpm": 148, "hr_origin": "estimated",
                         "pace_seconds_per_km": 307, "pace_origin": fixed},
                 "ride": {"hr_bpm": 138, "hr_origin": "estimated",
                          "watts": 210, "power_origin": fixed}}),
+            ("own sessions at the zone 2 heart rate win over zone 2", None, "",
+             self.TOPS, at_hr, {
+                "run": {"hr_bpm": 128, "hr_origin": zone,
+                        "pace_seconds_per_km": 332, "pace_origin": own},
+                "ride": {"hr_bpm": 131, "hr_origin": zone,
+                         "watts": 187, "power_origin": own}}),
+            ("own sessions at the measured heart rate", 86.0, "measured", None,
+             at_hr, {
+                "run": {"hr_bpm": 148, "hr_origin": "measured",
+                        "pace_seconds_per_km": 296, "pace_origin": own},
+                "ride": {"hr_bpm": 138, "hr_origin": "measured",
+                         "watts": 201, "power_origin": own}}),
+            ("too few own sessions fall back", None, "", None,
+             lambda sport, bpm: None, {
+                "run": {"hr_bpm": 146, "hr_origin": fixed,
+                        "pace_seconds_per_km": 307, "pace_origin": fixed},
+                "ride": {"hr_bpm": 136, "hr_origin": fixed,
+                         "watts": 210, "power_origin": fixed}}),
         ):  # fmt: skip
             with self.subTest(name):
                 self.assertEqual(
-                    expected, first_thresholds(self.METRICS, pct, origin, tops)
+                    expected,
+                    first_thresholds(self.METRICS, pct, origin, tops, at_heart_rate),
                 )
 
     def test_a_value_without_its_lt2_or_zone_is_left_out(self) -> None:
