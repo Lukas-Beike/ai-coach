@@ -2,6 +2,7 @@
 
 import json
 import threading
+import time
 import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -221,7 +222,7 @@ class ServerProvidersTests(ServerTestCase):
     def test_openai_client_composition_keeps_runtime_hooks(self):
         client = server.MODEL_TRANSPORT.openai_responses_client()
 
-        self.assertIs(client.wait, server.time.sleep)
+        self.assertIs(client.wait, time.sleep)
         self.assertEqual(client.response_timeout_seconds, 180)
         self.assertEqual(server.OPENAI_RESPONSE_TIMEOUT_SECONDS, 600)
         self.assertEqual(

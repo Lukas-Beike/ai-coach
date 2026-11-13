@@ -1,6 +1,7 @@
 """A failed provider response must preserve an already queued sync."""
 
 import json
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -68,7 +69,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             patch.object(
                 openai_stream.OpenAIStreamClient, "stream", side_effect=create
             ),
-            patch.object(server.time, "sleep"),
+            patch.object(time, "sleep"),
             patch.object(
                 sync_queue.SyncJobQueueService,
                 "enqueue",
@@ -153,7 +154,7 @@ class CoachResponseFailureTests(unittest.TestCase):
             patch.object(
                 openai_stream.OpenAIStreamClient, "stream", side_effect=create
             ),
-            patch.object(server.time, "sleep"),
+            patch.object(time, "sleep"),
             patch.object(
                 sync_queue.SyncJobQueueService,
                 "enqueue",

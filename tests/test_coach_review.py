@@ -439,7 +439,7 @@ class CoachReviewTests(unittest.TestCase):
         )
         with (
             patch.object(
-                server.time,
+                time,
                 "time",
                 return_value=time.time() + COACH_ACTION_TTL_SECONDS + 1,
             ),

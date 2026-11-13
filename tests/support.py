@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -379,7 +380,7 @@ def create_test_session(server) -> str:
     from backend.http_api.auth import SESSION_TTL_SECONDS
 
     token = f"session-{uuid.uuid4().hex}"
-    now = server.time.time()
+    now = time.time()
     auth = server.session_auth_service()
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         db.execute(
