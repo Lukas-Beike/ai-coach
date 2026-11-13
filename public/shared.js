@@ -127,7 +127,11 @@ let shownMoreSegment = null;
 
 function renderActiveRoute(mainRoute, panelRoute) {
   const moreSegment = mainRoute === "more" ? AppRouter.moreSegmentFromRoute(panelRoute) : null;
-  if (moreSegment && moreSegment !== shownMoreSegment) document.querySelectorAll(".connection-card[open], #equipmentItems details[open], #profilePanel details.profile-section[open]").forEach((card) => { card.open = false; });
+  if (moreSegment && moreSegment !== shownMoreSegment) {
+    document.querySelectorAll(".connection-card[open], #equipmentItems details[open], #profilePanel details.profile-section[open]").forEach((card) => { card.open = false; });
+    // A maintenance receipt belongs to its visit, like the open cards.
+    document.querySelector("#equipmentItems > .maintenance-receipt")?.remove();
+  }
   shownMoreSegment = moreSegment;
   document.dispatchEvent(new CustomEvent("app:route-rendered", { detail: { route: mainRoute } }));
   AppNutrition.handleRoute(panelRoute);
