@@ -1023,7 +1023,9 @@ COACH_PROPOSALS = CoachProposalAssembly(
         ),
         execution=ProposalExecutionOwners(
             history_undo_service=HISTORY.undo_service,
-            intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
+            intervals_client_factory=lambda *args: (
+                APP.provider_transport.intervals_client(*args)
+            ),
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
             tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
         ),
@@ -1047,7 +1049,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
     dependencies=ProviderResyncAssembly.Inputs(
         competition=CompetitionSyncOwners(
             config=lambda: CONFIG,
-            intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+            intervals_client=lambda: APP.provider_transport.intervals_client(),
             competition_service=PLANNING_DATA.competition,
         ),
         resync=ResyncProviderOwners(
@@ -1188,7 +1190,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
 
 SYNC_COMMANDS = build_sync_commands(
     APP,
-    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    intervals_client=lambda: APP.provider_transport.intervals_client(),
     synchronous_refreshes=lambda: coach_synchronous_refreshes(SYNC_JOB_DEPENDENCIES),
     after_refresh=DERIVED_PASS_HOOK,
     training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
@@ -1273,7 +1275,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         provider_refresh_command=SYNC_COMMANDS.provider_refresh,
     ),
     sync_provider=CoachSyncProvider(
-        intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+        intervals_client=lambda: APP.provider_transport.intervals_client(),
     ),
     athlete_tools=CoachAthleteToolFactories(
         checkin_service=lambda: ATHLETE_DATA.checkin(),
@@ -1620,7 +1622,7 @@ PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
         ),
         default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
         default_anthropic_base_url=DEFAULT_ANTHROPIC_BASE_URL,
-        intervals_get=lambda path: PROVIDER_TRANSPORT.intervals_client().get(path),
+        intervals_get=lambda path: APP.provider_transport.intervals_client().get(path),
         wahoo_status=lambda: WAHOO_CONNECTION.service().status(),
         wahoo_user=lambda: WAHOO_SYNC.client().user(),
         garmin_connected=lambda: GARMIN_TOKENS.source() == GARMIN_SOURCE_DB,
