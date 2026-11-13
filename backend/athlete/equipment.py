@@ -25,14 +25,21 @@ from backend.canonical.stored_sports import (
     resolve_equipment_sport,
 )
 from backend.canonical.vocabulary import ProviderId, Sport
-from backend.db import activity_detail_store, canonical_store, garmin_store
+from backend.db import (
+    activity_detail_store,
+    canonical_store,
+    equipment_store,
+    garmin_store,
+)
+from backend.db.equipment_store import (
+    ASSIGNMENT_PREFIX,
+    EQUIPMENT_PREFIX,
+    GARMIN_INITIALIZED_KEY,
+    MAINTENANCE_PREFIX,
+    SENSOR_EQUIPMENT_PREFIX,
+)
 from backend.errors import AppError
 
-EQUIPMENT_PREFIX = "equipment:"
-ASSIGNMENT_PREFIX = "equipment_assignment:"
-MAINTENANCE_PREFIX = "equipment_maintenance:"
-SENSOR_EQUIPMENT_PREFIX = "sensor_equipment:"
-SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
 # The read lists at most this many assignments, whole activities only; usage
 # counts all of them.
@@ -40,11 +47,6 @@ ASSIGNMENT_LIST_LIMIT = 2000
 GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
-
-UPSERT_KV = (
-    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE "
-    "SET value=excluded.value,updated_at=excluded.updated_at"
-)
 
 
 class GearReader(Protocol):
@@ -90,15 +92,13 @@ def canonical_garmin_gear(
 def _sensor_assignments(db: Any) -> dict[str, str]:
     """Full sensor key -> equipment id of every athlete link."""
     assignments: dict[str, str] = {}
-    for row in db.execute(
-        "SELECT key, value FROM kv WHERE key LIKE ?", (SENSOR_EQUIPMENT_PREFIX + "%",)
-    ).fetchall():
+    for sensor, text in equipment_store.entries(db, SENSOR_EQUIPMENT_PREFIX):
         try:
-            equipment_id = json.loads(row["value"]).get("equipment_id")
+            equipment_id = json.loads(text).get("equipment_id")
         except TypeError, ValueError, AttributeError:
             continue
         if isinstance(equipment_id, str):
-            assignments[row["key"][len(SENSOR_EQUIPMENT_PREFIX) :]] = equipment_id
+            assignments[sensor] = equipment_id
     return assignments
 
 
@@ -121,13 +121,7 @@ class EquipmentService:
 
     def _records(self, db: Any, prefix: str, limit: int | None) -> list[dict[str, Any]]:
         """Return the newest records of a kind; a limit of None reads them all."""
-        return [
-            json.loads(row["value"])
-            for row in db.execute(
-                "SELECT value FROM kv WHERE key LIKE ? ORDER BY updated_at DESC LIMIT ?",
-                (prefix + ":%", -1 if limit is None else limit),
-            ).fetchall()
-        ]
+        return [json.loads(text) for text in equipment_store.values(db, prefix, limit)]
 
     def read(
         self, item_id: str | None = None, *, activity_id: str | None = None
@@ -141,28 +135,25 @@ class EquipmentService:
             if status.get("source") == "fixture":
                 gear, listed = [], {}
             gear_initialized = (
-                db.execute(SELECT_VALUE, ("garmin_equipment_initialized",)).fetchone()
-                is not None
+                equipment_store.value(db, GARMIN_INITIALIZED_KEY) is not None
             )
             garmin_usage = {item.gear_id: _garmin_distance_km(item) for item in gear}
-            items = self._records(db, "equipment", 100)
+            items = self._records(db, EQUIPMENT_PREFIX, 100)
             links = _garmin_links(items, listed, rows, _gear_sessions(db, listed))
             partial = _partial_garmin_history(items, gear)
             # Every explicit assignment, including an unassignment, overrides the link.
             explicit = _session_assignments(
-                db, rows, self._records(db, "equipment_assignment", None)
+                db, rows, self._records(db, ASSIGNMENT_PREFIX, None)
             )
             links = {key: value for key, value in links.items() if key not in explicit}
             if item_id:
-                selected = db.execute(
-                    SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)
-                ).fetchone()
-                if not selected:
+                selected = equipment_store.value(db, EQUIPMENT_PREFIX + item_id)
+                if selected is None:
                     raise AppError(404, "Ausrüstung nicht gefunden.")
-                items = [json.loads(selected["value"])]
+                items = [json.loads(selected)]
             assignments = _effective_assignments(rows, explicit, links)
-            maintenance = self._records(db, "equipment_maintenance", 1000)
-            known = {item["id"] for item in self._records(db, "equipment", None)}
+            maintenance = self._records(db, MAINTENANCE_PREFIX, 1000)
+            known = {item["id"] for item in self._records(db, EQUIPMENT_PREFIX, None)}
             sensors = sensor_registry.registry(
                 activity_detail_store.sensor_uses(db),
                 {
@@ -218,15 +209,11 @@ class EquipmentService:
         # Garmin lists no gear activities: skip reading every session.
         activity_rows = _session_rows(self._read_summaries()) if listed else []
         with self._manager.unit_of_work() as db:
-            initialized = db.execute(
-                SELECT_VALUE, ("garmin_equipment_initialized",)
-            ).fetchone()
+            initialized = equipment_store.value(db, GARMIN_INITIALIZED_KEY) is not None
             local_rows = [
-                json.loads(row["value"])
-                for row in db.execute(
-                    "SELECT value FROM kv WHERE key LIKE ?", (EQUIPMENT_PREFIX + "%",)
-                ).fetchall()
-                if row["value"] and isinstance(json.loads(row["value"]), dict)
+                json.loads(text)
+                for text in equipment_store.values(db, EQUIPMENT_PREFIX)
+                if text and isinstance(json.loads(text), dict)
             ]
             by_garmin = {
                 str(item["garmin_uuid"]): item
@@ -245,7 +232,7 @@ class EquipmentService:
             # An explicit assignment, including an unassignment, overrides the link.
             explicit = set(
                 _session_assignments(
-                    db, activity_rows, self._records(db, "equipment_assignment", None)
+                    db, activity_rows, self._records(db, ASSIGNMENT_PREFIX, None)
                 )
             )
             links = _garmin_links(
@@ -258,10 +245,7 @@ class EquipmentService:
             )
             _refresh_garmin_distances(db, gear, by_garmin, now, derived)
             if not initialized:
-                db.execute(
-                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
-                    ("garmin_equipment_initialized", "1", now),
-                )
+                equipment_store.insert(db, GARMIN_INITIALIZED_KEY, "1", now)
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {
@@ -285,8 +269,8 @@ class EquipmentService:
         name, start, item_id = _equipment_identity(payload, self._today())
         amounts = _equipment_amounts(payload)
         with self._manager.unit_of_work() as db:
-            old = db.execute(SELECT_VALUE, (EQUIPMENT_PREFIX + item_id,)).fetchone()
-            previous = json.loads(old["value"]) if old else None
+            old = equipment_store.value(db, EQUIPMENT_PREFIX + item_id)
+            previous = json.loads(old) if old is not None else None
             if payload.get("id") and not previous:
                 raise AppError(404, "Ausrüstung nicht gefunden.")
             if previous and payload.get("expected_revision") != previous["revision"]:
@@ -309,13 +293,11 @@ class EquipmentService:
                 "parent_pending": payload["kind"] == "component" and not parent_id,
             }
             _preserve_equipment_metadata(saved, previous, payload)
-            db.execute(
-                UPSERT_KV,
-                (
-                    EQUIPMENT_PREFIX + item_id,
-                    json.dumps(saved, allow_nan=False),
-                    saved["updated_at"],
-                ),
+            equipment_store.put(
+                db,
+                EQUIPMENT_PREFIX + item_id,
+                json.dumps(saved, allow_nan=False),
+                saved["updated_at"],
             )
             change = _record_change(
                 db,
@@ -357,11 +339,10 @@ class EquipmentService:
         if row is None:
             raise AppError(404, "Kanonische Aktivität nicht gefunden.")
         with self._manager.unit_of_work() as db:
-            item = db.execute(
-                SELECT_VALUE,
-                (EQUIPMENT_PREFIX + str(payload["equipment_id"]),),
-            ).fetchone()
-            equipment = json.loads(item["value"]) if item else None
+            item = equipment_store.value(
+                db, EQUIPMENT_PREFIX + str(payload["equipment_id"])
+            )
+            equipment = json.loads(item) if item is not None else None
             if payload["equipment_id"] is not None and not assignable_equipment(
                 equipment, row
             ):
@@ -380,19 +361,18 @@ class EquipmentService:
                 key = str(row["id"])
             for other in family - {key}:
                 replaced = stored_value(db, ASSIGNMENT_PREFIX + other)
-                db.execute("DELETE FROM kv WHERE key = ?", (ASSIGNMENT_PREFIX + other,))
+                equipment_store.delete(db, ASSIGNMENT_PREFIX + other)
                 _record_change(
                     db, "equipment_assignment", other, "delete", replaced, None
                 )
             previous = stored_value(db, ASSIGNMENT_PREFIX + key)
-            saved = {
+            saved: dict[str, Any] = {
                 "activity_id": key,
                 "equipment_id": equipment["id"] if equipment else None,
                 "observed_at": self._utc_now(),
             }
-            db.execute(
-                UPSERT_KV,
-                (ASSIGNMENT_PREFIX + key, json.dumps(saved), saved["observed_at"]),
+            equipment_store.put(
+                db, ASSIGNMENT_PREFIX + key, json.dumps(saved), saved["observed_at"]
             )
             change = _record_change(
                 db,
@@ -446,13 +426,11 @@ class EquipmentService:
             "observed_at": self._utc_now(),
         }
         with self._manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
-                (
-                    MAINTENANCE_PREFIX + saved["id"],
-                    json.dumps(saved),
-                    saved["observed_at"],
-                ),
+            equipment_store.insert(
+                db,
+                MAINTENANCE_PREFIX + saved["id"],
+                json.dumps(saved),
+                saved["observed_at"],
             )
             change = _record_change(
                 db, "equipment_maintenance", saved["id"], "create", None, saved
@@ -467,11 +445,11 @@ class EquipmentService:
 
 def stored_value(db: Any, key: str) -> dict[str, Any] | None:
     """The JSON record stored under one key, or None."""
-    row = db.execute(SELECT_VALUE, (key,)).fetchone()
-    if row is None:
+    text = equipment_store.value(db, key)
+    if text is None:
         return None
     try:
-        value = json.loads(row["value"])
+        value = json.loads(text)
     except TypeError, ValueError:
         return None
     return value if isinstance(value, dict) else None
@@ -527,18 +505,8 @@ def activity_row(
 
 def equipment_in_use(db: Any, item_id: str) -> bool:
     """Whether a component, assignment, maintenance entry or sensor link names it."""
-    return bool(_equipment_children(db, item_id)) or (
-        db.execute(
-            "SELECT 1 FROM kv WHERE (key LIKE ? OR key LIKE ? OR key LIKE ?) "
-            "AND json_extract(value, '$.equipment_id')=? LIMIT 1",
-            (
-                ASSIGNMENT_PREFIX + "%",
-                MAINTENANCE_PREFIX + "%",
-                SENSOR_EQUIPMENT_PREFIX + "%",
-                item_id,
-            ),
-        ).fetchone()
-        is not None
+    return bool(_equipment_children(db, item_id)) or equipment_store.is_referenced(
+        db, item_id
     )
 
 
@@ -628,9 +596,8 @@ def _insert_initial_garmin_item(db: Any, gear: GearItem, today: date, now: str) 
         "updated_at": now,
         "source": GARMIN_INITIAL_SOURCE,
     }
-    db.execute(
-        "INSERT OR IGNORE INTO kv(key,value,updated_at) VALUES(?,?,?)",
-        (EQUIPMENT_PREFIX + item_id, json.dumps(item), now),
+    equipment_store.insert(
+        db, EQUIPMENT_PREFIX + item_id, json.dumps(item), now, if_absent=True
     )
 
 
@@ -653,20 +620,13 @@ def _refresh_garmin_distances(
         if not changed:
             continue
         linked["updated_at"] = now
-        db.execute(
-            "UPDATE kv SET value=?, updated_at=? WHERE key=?",
-            (json.dumps(linked), now, EQUIPMENT_PREFIX + str(linked["id"])),
+        equipment_store.update(
+            db, EQUIPMENT_PREFIX + str(linked["id"]), json.dumps(linked), now
         )
 
 
 def _equipment_children(db: Any, item_id: str) -> list[dict[str, Any]]:
-    return [
-        json.loads(row["value"])
-        for row in db.execute(
-            "SELECT value FROM kv WHERE key LIKE 'equipment:%' AND json_extract(value, '$.parent_id')=?",
-            (item_id,),
-        ).fetchall()
-    ]
+    return [json.loads(text) for text in equipment_store.child_values(db, item_id)]
 
 
 def _validate_equipment_children(
@@ -866,17 +826,14 @@ def _equipment_parent(db: Any, payload: dict, item_id: str) -> str | None:
     if payload["kind"] == "component" and not parent_id:
         raise AppError(400, "Eine Komponente benötigt einen Hauptgegenstand.")
     if parent_id:
-        parent = db.execute(
-            SELECT_VALUE, (EQUIPMENT_PREFIX + str(parent_id),)
-        ).fetchone()
+        parent = equipment_store.value(db, EQUIPMENT_PREFIX + str(parent_id))
         if (
             payload["kind"] != "component"
-            or not parent
+            or parent is None
             or parent_id == item_id
-            or json.loads(parent["value"]).get("parent_id")
-            or json.loads(parent["value"])["kind"] == "component"
-            or _item_pair(json.loads(parent["value"]))
-            != _stored_pair(_payload_sport(payload))
+            or json.loads(parent).get("parent_id")
+            or json.loads(parent)["kind"] == "component"
+            or _item_pair(json.loads(parent)) != _stored_pair(_payload_sport(payload))
         ):
             raise AppError(
                 400,
