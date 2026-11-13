@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
+from backend.sync.jobs import last_completed_jobs
 
 _INPUT_PROVIDERS: Final = (GARMIN_ID, WAHOO_ID)
 _PLAN_PUSH: Final = "plan_push"
@@ -27,11 +28,7 @@ def summarize_provider_sync(db: Any) -> dict[str, dict[str, str | None]]:
         ).fetchall()
     }
     pushes: dict[str, dict[str, str]] = {}
-    for row in db.execute(
-        "SELECT provider, type, MAX(finished_at) AS finished_at FROM sync_jobs "
-        "WHERE status = 'completed' AND finished_at IS NOT NULL "
-        "GROUP BY provider, type"
-    ).fetchall():
+    for row in last_completed_jobs(db):
         pushes.setdefault(row["provider"], {})[row["type"]] = row["finished_at"]
     report: dict[str, dict[str, str | None]] = {}
     for provider in (*_INPUT_PROVIDERS, INTERVALS_ID):

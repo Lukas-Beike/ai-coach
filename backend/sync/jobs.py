@@ -239,6 +239,51 @@ def has_active_job(db: Any, provider: str, job_type: str) -> bool:
     return row is not None
 
 
+def job_provider_payload(db: Any, job_id: str) -> Any:
+    return db.execute(
+        "SELECT provider, payload FROM sync_jobs WHERE id=?", (job_id,)
+    ).fetchone()
+
+
+def recent_plan_push_rows(db: Any, limit: int) -> builtins.list[Any]:
+    return db.execute(
+        "SELECT id FROM sync_jobs WHERE type='plan_push' "
+        "ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def last_completed_jobs(db: Any) -> builtins.list[Any]:
+    """The newest finish time of each provider's completed job types."""
+    return db.execute(
+        "SELECT provider, type, MAX(finished_at) AS finished_at FROM sync_jobs "
+        "WHERE status = 'completed' AND finished_at IS NOT NULL "
+        "GROUP BY provider, type"
+    ).fetchall()
+
+
+def queued_refresh_times(db: Any, provider: str) -> builtins.list[Any]:
+    """When the provider's queued refresh jobs become available, earliest first."""
+    return db.execute(
+        "SELECT available_at FROM sync_jobs "
+        "WHERE provider=? AND type='refresh' "
+        "AND status='queued' AND available_at IS NOT NULL ORDER BY available_at",
+        (provider,),
+    ).fetchall()
+
+
+def job_export_rows(db: Any) -> Any:
+    return db.execute(
+        "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
+    )
+
+
+def job_item_export_rows(db: Any) -> Any:
+    return db.execute(
+        "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
+    )
+
+
 def utc_timestamp(now: datetime | None = None) -> str:
     """Return a stable UTC timestamp for durable job records."""
     value = now or datetime.fromisoformat(system_utc_now())

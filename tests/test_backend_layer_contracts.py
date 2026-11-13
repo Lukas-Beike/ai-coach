@@ -699,6 +699,11 @@ class BackendLayerContractTests(unittest.TestCase):
                 "backend/db/schema.py",
             },
         )
+        # #2120: the sync domain owns its job tables.
+        self._assert_only_in(
+            r"(?i:sync_jobs|sync_job_items)",
+            {"backend/sync/jobs.py", "backend/db/schema.py"},
+        )
         # #2120: equipment records reach the key-value table through their store.
         kv_statement = re.compile(r"\b(?i:FROM|INTO|UPDATE)\s+kv\b")
         equipment_key = re.compile(

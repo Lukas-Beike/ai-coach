@@ -28,6 +28,7 @@ from backend.provider_credentials import (
     PROVIDER_CREDENTIALS_KEY,
     stored_visible_settings,
 )
+from backend.sync.jobs import job_export_rows, job_item_export_rows
 from backend.weather import cache as weather_cache
 
 if TYPE_CHECKING:
@@ -473,18 +474,8 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
             "SELECT id, provider, area, operation_id, trigger, started_at, finished_at, phase, status, error_code, next_retry_at FROM provider_refresh_history ORDER BY started_at"
         ),
     ),
-    (
-        "sync_jobs.jsonl",
-        _select(
-            "SELECT id, provider, type, status, payload, requested_by, attempts, progress_total, progress_completed, error_class, available_at, started_at, finished_at, created_at, updated_at FROM sync_jobs ORDER BY created_at"
-        ),
-    ),
-    (
-        "sync_job_items.jsonl",
-        _select(
-            "SELECT id, job_id, item_key, operation, payload_hash, remote_id, status, attempts, error_class, error_detail, created_at, updated_at FROM sync_job_items ORDER BY created_at"
-        ),
-    ),
+    ("sync_jobs.jsonl", lambda db: map(dict, job_export_rows(db))),
+    ("sync_job_items.jsonl", lambda db: map(dict, job_item_export_rows(db))),
     (
         "provider_sync_cursors.jsonl",
         _select(
