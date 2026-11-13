@@ -58,7 +58,7 @@ class PublicBootstrapDependencies:
     # Stale-threshold warning for the status strip; null in the bootstrap when none.
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
     # Answers and tokens per model of a month's Coach turns, read in the transaction.
-    coach_usage_reader: Callable[[Any, str], dict[str, Any]] = monthly_turn_usage
+    coach_usage_reader: Callable[[Any, Any, str], dict[str, Any]] = monthly_turn_usage
 
 
 class PublicBootstrapService:
@@ -224,7 +224,9 @@ class PublicBootstrapService:
                     else None
                 ),
                 "usage": summaries[provider],
-                "usage_month": deps.coach_usage_reader(db, str(deps.local_date())[:7]),
+                "usage_month": deps.coach_usage_reader(
+                    db, deps.local_date(), profile.get("timezone")
+                ),
                 "provider_status": {
                     name: summary.get("status") or {}
                     for name, summary in summaries.items()

@@ -17,7 +17,7 @@ def _decoded(value: Any) -> Any:
     return value
 
 
-def _count(value: Any) -> int:
+def count(value: Any) -> int:
     if isinstance(value, bool):
         return 0
     try:
@@ -66,7 +66,7 @@ def daily_summary(
     else:
         summary = {"date": today_value}
         for field in _USAGE_FIELDS:
-            summary[field] = _count(usage.get(field))
+            summary[field] = count(usage.get(field))
         for field in ("last_operation", "last_request_at"):
             if field in usage:
                 summary[field] = usage[field]
@@ -83,9 +83,9 @@ def usage_counts(response: Any, *, provider: str) -> dict[str, int]:
     _provider(provider)
     candidate = response.get("usage") if isinstance(response, dict) else None
     raw: dict[str, Any] = candidate if isinstance(candidate, dict) else {}
-    input_tokens = _count(raw.get("input_tokens") or raw.get("prompt_tokens"))
-    output_tokens = _count(raw.get("output_tokens") or raw.get("completion_tokens"))
-    total_tokens = _count(raw.get("total_tokens"))
+    input_tokens = count(raw.get("input_tokens") or raw.get("prompt_tokens"))
+    output_tokens = count(raw.get("output_tokens") or raw.get("completion_tokens"))
+    total_tokens = count(raw.get("total_tokens"))
     if not total_tokens:
         total_tokens = input_tokens + output_tokens
     return {
@@ -99,7 +99,7 @@ def openai_cached_input_tokens(response: Any) -> int:
     """Return the prompt-cache hit count from a Responses API usage block."""
     usage = response.get("usage") if isinstance(response, dict) else None
     details = usage.get("input_tokens_details") if isinstance(usage, dict) else None
-    return _count(details.get("cached_tokens")) if isinstance(details, dict) else 0
+    return count(details.get("cached_tokens")) if isinstance(details, dict) else 0
 
 
 def recorded_usage(
@@ -120,7 +120,7 @@ def recorded_usage(
         value = source.get(field)
         updated[field] = dict(value) if isinstance(value, dict) else {}
     for field in _USAGE_FIELDS:
-        updated[field] = _count(source.get(field))
+        updated[field] = count(source.get(field))
     updated["requests"] += 1
     updated["input_tokens"] += counts["input_tokens"]
     updated["output_tokens"] += counts["output_tokens"]

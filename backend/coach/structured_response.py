@@ -15,10 +15,10 @@ from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
     raise_if_chat_cancelled,
-    turn_usage,
 )
 from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.state import turn_usage
 
 
 def _discard_delta(_delta: str) -> None:

@@ -12,7 +12,6 @@ from unittest.mock import Mock
 
 from support import temp_database
 
-from backend.coach.response_transport import metered_turn
 from backend.coach.turn_failures import (
     CoachTurnFailureDependencies,
     CoachTurnFailureService,
@@ -21,6 +20,7 @@ from backend.coach.turn_undo import CoachTurnUndoService
 from backend.db import row_factory as production_row_factory
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError, DatabaseBusyError
+from backend.providers.state import metered_turn
 from backend.runtime.events import StateEventBuffer
 
 

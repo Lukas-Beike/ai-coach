@@ -19,7 +19,6 @@ from backend.coach.outcomes import (
     unresolved_coach_steps,
 )
 from backend.coach.receipt_compaction import compact_receipt
-from backend.coach.response_transport import turn_usage
 from backend.coach.service import command_receipt
 from backend.coach.tool_specs import ACTION_LABELS
 from backend.db.manager import DatabaseManager
@@ -27,6 +26,7 @@ from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.providers.claude_messages_adapter import REFUSED_MESSAGE
 from backend.providers.claude_requests import ANTHROPIC_API_KEY_ERROR
+from backend.providers.state import turn_usage
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]

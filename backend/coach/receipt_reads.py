@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from backend.athlete.profile import timezone_name
 from backend.coach.authorization import coach_session_key
 from backend.coach.proposal_models import coach_action_view
 from backend.coach.service import command_receipt
@@ -13,22 +16,35 @@ from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 _MONTHLY_USAGE_SQL = """
-SELECT json_extract(receipt, '$.model') AS model, COUNT(*) AS answers,
+SELECT json_extract(receipt, '$.model') AS model,
+       SUM(COALESCE(json_extract(receipt, '$.status'), '') NOT IN ('failed', 'cancelled')) AS answers,
        SUM(json_extract(receipt, '$.usage.input_tokens')) AS input_tokens,
        SUM(json_extract(receipt, '$.usage.cached_input_tokens')) AS cached_input_tokens,
        SUM(json_extract(receipt, '$.usage.output_tokens')) AS output_tokens
 FROM coach_commands
-WHERE status = 'completed' AND substr(created_at, 1, 7) = ?
+WHERE created_at >= ? AND created_at < ? AND status = 'completed'
   AND json_valid(receipt) AND json_type(receipt, '$.usage') = 'object'
 GROUP BY model ORDER BY answers DESC, model
 """
 
 
-def monthly_turn_usage(db: Any, month: str) -> dict[str, Any]:
-    """Answers and tokens per model of the turns started in ``month`` (YYYY-MM)."""
-    rows = db.execute(_MONTHLY_USAGE_SQL, (month,)).fetchall()
+def monthly_turn_usage(db: Any, local_date: date, timezone: str) -> dict[str, Any]:
+    """Answers and tokens per model of the turns started in the local month.
+
+    Failed and cancelled turns add their tokens but no answer.
+    """
+    zone = ZoneInfo(timezone_name(timezone))
+    start = datetime(local_date.year, local_date.month, 1, tzinfo=zone)
+    end = datetime(
+        local_date.year + local_date.month // 12,
+        local_date.month % 12 + 1,
+        1,
+        tzinfo=zone,
+    )
+    bounds = (start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat())
+    rows = db.execute(_MONTHLY_USAGE_SQL, bounds).fetchall()
     return {
-        "month": month,
+        "month": f"{local_date:%Y-%m}",
         "models": [
             {
                 "model": str(row["model"] or ""),

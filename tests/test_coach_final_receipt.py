@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import unittest
+from datetime import date
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -13,9 +14,9 @@ from support import temp_database
 
 from backend.coach.final_receipt import CoachFinalReceiptService
 from backend.coach.receipt_reads import monthly_turn_usage
-from backend.coach.response_transport import metered_turn
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.providers.model_seam import ModelTurn
+from backend.providers.state import metered_turn
 from backend.runtime.events import StateEventBuffer
 
 
@@ -378,7 +379,7 @@ class CoachFinalReceiptTests(unittest.TestCase):
 
 
 class MonthlyTurnUsageTests(unittest.TestCase):
-    def test_month_sums_completed_turns_with_usage_per_model(self) -> None:
+    def test_month_sums_turns_with_usage_per_model_in_local_time(self) -> None:
         manager = temp_database(self, "usage.sqlite3", schema=True)
         usage = {
             "requests": 2,
@@ -386,17 +387,33 @@ class MonthlyTurnUsageTests(unittest.TestCase):
             "cached_input_tokens": 600,
             "output_tokens": 50,
         }
+        opus = {"model": "claude-opus", "usage": usage}
         rows = (
-            ("a", "completed", {"model": "claude-opus", "usage": usage}, "2026-11-02"),
-            ("b", "completed", {"model": "claude-opus", "usage": usage}, "2026-11-30"),
-            ("c", "completed", {"model": "gpt-6-luna", "usage": usage}, "2026-11-05"),
+            # 00:30 on 1 November in Berlin is still 31 October in UTC.
+            ("a", "completed", opus, "2026-10-31T23:30:00+00:00"),
+            ("b", "completed", opus, "2026-11-30T22:59:59.5+00:00"),
+            (
+                "c",
+                "completed",
+                {"model": "gpt-6-luna", "usage": usage},
+                "2026-11-05T08:00:00+00:00",
+            ),
+            # A failed turn adds its tokens but no answer.
+            (
+                "d",
+                "completed",
+                {**opus, "status": "failed"},
+                "2026-11-06T08:00:00+00:00",
+            ),
             # Older turns without usage, other months and open turns are left out.
-            ("d", "completed", {"model": "gpt-6-luna"}, "2026-11-05"),
-            ("e", "completed", {"model": "claude-opus", "usage": usage}, "2026-10-31"),
-            ("f", "running", {"model": "claude-opus", "usage": usage}, "2026-11-06"),
+            ("e", "completed", {"model": "gpt-6-luna"}, "2026-11-05T08:00:00+00:00"),
+            ("f", "completed", opus, "2026-11-30T23:00:00+00:00"),
+            ("g", "completed", opus, "2026-10-31T22:59:59+00:00"),
+            ("h", "running", opus, "2026-11-06T08:00:00+00:00"),
+            ("i", "completed", "not json", "2026-11-07T08:00:00+00:00"),
         )
         with manager.unit_of_work() as db:
-            for turn_id, status, receipt, day in rows:
+            for turn_id, status, receipt, created in rows:
                 db.execute(
                     "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
                     "status, receipt, created_at, updated_at) VALUES (?, ?, '{}', 'local', ?, ?, ?, ?)",
@@ -404,17 +421,12 @@ class MonthlyTurnUsageTests(unittest.TestCase):
                         turn_id,
                         turn_id,
                         status,
-                        json.dumps(receipt),
-                        f"{day}T08:00:00Z",
-                        day,
+                        receipt if isinstance(receipt, str) else json.dumps(receipt),
+                        created,
+                        created,
                     ),
                 )
-            db.execute(
-                "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
-                "status, receipt, created_at, updated_at) VALUES ('g', 'g', '{}', 'local', "
-                "'completed', 'not json', '2026-11-07T08:00:00Z', '')"
-            )
-            result = monthly_turn_usage(db, "2026-11")
+            result = monthly_turn_usage(db, date(2026, 11, 13), "Europe/Berlin")
         totals = {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 50}
         self.assertEqual(
             result,
@@ -424,12 +436,16 @@ class MonthlyTurnUsageTests(unittest.TestCase):
                     {
                         "model": "claude-opus",
                         "answers": 2,
-                        **{key: value * 2 for key, value in totals.items()},
+                        **{key: value * 3 for key, value in totals.items()},
                     },
                     {"model": "gpt-6-luna", "answers": 1, **totals},
                 ],
             },
         )
+        with manager.unit_of_work() as db:
+            december = monthly_turn_usage(db, date(2026, 12, 1), "Europe/Berlin")
+        self.assertEqual(december["month"], "2026-12")
+        self.assertEqual([entry["answers"] for entry in december["models"]], [1])
 
 
 if __name__ == "__main__":

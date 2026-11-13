@@ -7,10 +7,10 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from backend.coach.response_retry import CoachResponseRetryPolicy
-from backend.coach.response_transport import metered_turn
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
+from backend.providers.state import metered_turn
 
 
 class CoachStructuredResponseTests(unittest.TestCase):

@@ -11,11 +11,12 @@ from backend.coach.conversation import CoachConversationProvisionService
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.response_transport import metered_turn, raise_if_chat_cancelled
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.service import command_receipt
 from backend.coach.structured_turn import CoachStructuredTurnService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.providers.state import metered_turn
 from backend.runtime.maintenance import MaintenanceGate
 from backend.settings import SettingsService
 
