@@ -13,65 +13,18 @@ from backend.coach.constants import AI_PROVIDER
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.errors import AppError
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.events import StateEventBuffer
 
-MESSAGE_ATTACHMENTS_QUERY = "SELECT attachments FROM messages WHERE id=?"
 # User messages after the latest earlier attachment turn that keep the OpenAI
 # conversation (counting the current message) before local dialogue takes over.
 ATTACHMENT_RETENTION_USER_MESSAGES = 3
-# The latest prior Coach turn that sent attachments to OpenAI, how many user
-# messages (including the current one) follow it, and how many turns of another
-# provider ran since: the OpenAI conversation holds none of those. Receipts are filtered in SQL so
-# a turn does not decode every stored receipt; the CASE guards skip malformed JSON.
-PRIOR_OPENAI_ATTACHMENT_QUERY = (
-    "WITH prior AS (SELECT MAX(messages.id) AS id FROM coach_commands JOIN messages "
-    "ON messages.id=json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
-    "'$.user_message_id') "
-    "WHERE json_type(CASE WHEN json_valid(receipt) THEN receipt END, "
-    "'$.user_message_id')='integer' "
-    "AND json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
-    "'$.ai_provider')=? "
-    "AND (json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
-    "'$.openai_reached')=1 "
-    "OR json_extract(CASE WHEN json_valid(receipt) THEN receipt END, "
-    "'$.status')='completed') "
-    "AND messages.id<? AND messages.attachments!='[]') "
-    "SELECT prior.id AS id, (SELECT COUNT(*) FROM messages WHERE role='user' "
-    "AND messages.id<=? AND messages.id>prior.id) AS turns, "
-    "(SELECT COUNT(*) FROM coach_commands WHERE json_valid(receipt) "
-    "AND json_extract(receipt, '$.user_message_id')>prior.id "
-    "AND json_extract(receipt, '$.user_message_id')<? "
-    "AND COALESCE(json_extract(receipt, '$.ai_provider'), ?)!=?) AS other_turns "
-    "FROM prior"
-)
-CONVERSATION_IN_USE_QUERY = (
-    "SELECT 1 FROM coach_commands WHERE conversation_id=? AND client_turn_id!=? LIMIT 1"
-)
-BIND_CONVERSATION_QUERY = (
-    "UPDATE coach_commands SET conversation_id=? WHERE client_turn_id=?"
-)
 # Prefix of the locally generated binding id used until a turn needs OpenAI state.
 LOCAL_BINDING_PREFIX = "local-"
-MARK_CONVERSATION_ROTATED_QUERY = (
-    "UPDATE coach_commands SET receipt=json_set(receipt, "
-    "'$.openai_conversation_rotated', json('true')) WHERE client_turn_id=?"
-)
-ROTATE_CONVERSATION_QUERY = (
-    "UPDATE coach_commands SET conversation_id=?, receipt=json_set(receipt, "
-    "'$.openai_conversation_rotated', json('true')) WHERE client_turn_id=?"
-)
-# Attachment items without their encoded file data, which evidence never shows.
-ATTACHMENT_EVIDENCE_QUERY = (
-    "SELECT json_each.type AS kind, CASE WHEN json_each.type='object' "
-    "THEN json_remove(json_each.value, '$.data') ELSE json_each.value END AS item "
-    "FROM messages, json_each(CASE WHEN json_valid(messages.attachments) "
-    "AND json_type(messages.attachments)='array' THEN messages.attachments "
-    "ELSE '[]' END) WHERE messages.id=? ORDER BY json_each.key"
-)
 
 
 # Bounded below the browser's 25 s request timeout so the athlete gets the
@@ -132,13 +85,9 @@ class CoachConversationResetService:
         return True
 
     def _active_operation_ids(self, *, running_only: bool = False) -> list[str]:
-        query = (
-            "SELECT receipt FROM coach_commands WHERE status = 'running'"
-            if running_only
-            else "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-        )
+        statuses = ("running",) if running_only else coach_store.ACTIVE
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            rows = db.execute(query).fetchall()
+            rows = coach_store.command_rows(db, "receipt", statuses)
         operation_ids = (
             str(command_receipt(row["receipt"]).get("operation_id") or "")
             for row in rows
@@ -160,10 +109,7 @@ class CoachConversationResetService:
             now = self._utc_now()
             conversation_id = self._key_values.get(db, "openai_conversation_id") or ""
             operation_ids: list[str] = []
-            rows = db.execute(
-                "SELECT client_turn_id, receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-            ).fetchall()
-            for row in rows:
+            for row in coach_store.command_rows(db, "client_turn_id, receipt"):
                 receipt = command_receipt(row["receipt"])
                 operation_id = str(receipt.get("operation_id") or "")
                 if operation_id:
@@ -174,19 +120,14 @@ class CoachConversationResetService:
                     cancel_requested=True,
                     message=None,
                 )
-                db.execute(
-                    "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
-                    (
-                        json.dumps(
-                            compact_receipt(receipt),
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        ),
-                        now,
-                        row["client_turn_id"],
-                    ),
+                coach_store.write_command(
+                    db,
+                    row["client_turn_id"],
+                    compact_receipt(receipt),
+                    now,
+                    status="completed",
                 )
-            db.execute("DELETE FROM messages")
+            coach_store.delete_messages(db)
             db.execute(
                 "UPDATE coach_action_proposals SET status='cancelled', action_token_hash=NULL WHERE action_type IN ('remote_coach_write', 'local_coach_write') AND status IN ('preview', 'ready')"
             )
@@ -278,7 +219,7 @@ class CoachConversationProvisionService:
             return current_conversation_id
         remote_id = self.ensure()
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            db.execute(BIND_CONVERSATION_QUERY, (remote_id, client_turn_id))
+            coach_store.bind_conversation(db, client_turn_id, remote_id)
         return remote_id
 
     def ensure(self) -> str:
@@ -300,19 +241,20 @@ class CoachConversationProvisionService:
         if self.is_local_binding(current_conversation_id):
             remote_id = self.ensure()
             with self._db_lock, self._database_manager.unit_of_work() as db:
-                db.execute(ROTATE_CONVERSATION_QUERY, (remote_id, client_turn_id))
+                coach_store.bind_conversation(
+                    db, client_turn_id, remote_id, rotated=True
+                )
             return remote_id
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            in_use = db.execute(
-                CONVERSATION_IN_USE_QUERY, (current_conversation_id, client_turn_id)
-            ).fetchone()
-            if not in_use:
-                db.execute(MARK_CONVERSATION_ROTATED_QUERY, (client_turn_id,))
+            if not coach_store.conversation_in_use(
+                db, current_conversation_id, client_turn_id
+            ):
+                coach_store.bind_conversation(db, client_turn_id, rotated=True)
                 return current_conversation_id
         rotated_id = self._create_remote()
         with self._db_lock, self._database_manager.unit_of_work() as db:
             self._key_values.set(db, "openai_conversation_id", rotated_id)
-            db.execute(ROTATE_CONVERSATION_QUERY, (rotated_id, client_turn_id))
+            coach_store.bind_conversation(db, client_turn_id, rotated_id, rotated=True)
         self._start_remote_delete(current_conversation_id)
         return rotated_id
 
@@ -351,20 +293,11 @@ class CoachAttachmentContextService:
         and whether that earlier attachment turn is still inside the retention window."""
         message_id = receipt.get("user_message_id") or 0
         with self._database_manager.reader() as db:
-            attachment_row = db.execute(
-                MESSAGE_ATTACHMENTS_QUERY, (receipt.get("user_message_id"),)
-            ).fetchone()
-            prior = db.execute(
-                PRIOR_OPENAI_ATTACHMENT_QUERY,
-                (
-                    AI_PROVIDER,
-                    message_id,
-                    message_id,
-                    message_id,
-                    AI_PROVIDER,
-                    AI_PROVIDER,
-                ),
-            ).fetchone()
+            attachment_row = coach_store.message_attachments(
+                db, receipt.get("user_message_id")
+            )
+            # The OpenAI conversation holds none of the later turns of another provider.
+            prior = coach_store.prior_attachment_turn(db, AI_PROVIDER, message_id)
         has_prior = bool(prior and prior["id"] is not None)
         within_window = bool(
             has_prior
@@ -387,8 +320,7 @@ class CoachAttachmentContextService:
         with self._database_manager.reader() as db:
             context["attachment_evidence"] = []
             for message in context["messages"]:
-                rows = db.execute(ATTACHMENT_EVIDENCE_QUERY, (message["id"],))
-                for row in rows.fetchall():
+                for row in coach_store.attachment_evidence_rows(db, message["id"]):
                     item = (
                         json.loads(row["item"])
                         if row["kind"] == "object"

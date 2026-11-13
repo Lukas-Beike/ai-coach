@@ -682,18 +682,26 @@ class BackendLayerContractTests(unittest.TestCase):
         )
         self.assertEqual([], _http_sql_literals(REPOSITORY_ROOT))
 
-    def test_planning_tables_are_queried_only_in_their_store(self) -> None:
-        # #2118: one column change touches one file; the schema keeps its DDL.
-        statement = re.compile(
-            r"\b(FROM|INTO|UPDATE|JOIN)\s+(planned_units|workout_library)\b",
-            re.IGNORECASE,
+    def test_tables_are_queried_only_in_their_store(self) -> None:
+        # #2118 and #2119: one column change touches the persistence owner only.
+        self._assert_only_in(
+            r"planned_units|workout_library",
+            {"backend/db/planning_store.py", "backend/db/schema.py"},
         )
-        owners = {"backend/db/planning_store.py", "backend/db/schema.py"}
+        db_files = (REPOSITORY_ROOT / "backend/db").glob("*.py")
+        self._assert_only_in(
+            r"coach_commands|messages",
+            {path.relative_to(REPOSITORY_ROOT).as_posix() for path in db_files},
+        )
+
+    def _assert_only_in(self, tables: str, owners: set[str]) -> None:
+        # Any keyword case; a lower-case table name keeps prose such as
+        # "from Messages SSE events" out.
+        statement = re.compile(rf"\b(?i:FROM|INTO|UPDATE|JOIN)\s+({tables})\b")
         outside = [
             relative
             for path in sorted((REPOSITORY_ROOT / "backend").rglob("*.py"))
-            if (relative := path.relative_to(REPOSITORY_ROOT).as_posix())
-            not in owners
+            if (relative := path.relative_to(REPOSITORY_ROOT).as_posix()) not in owners
             and statement.search(path.read_text(encoding="utf-8"))
         ]
         self.assertEqual([], outside)

@@ -16,6 +16,7 @@ from backend.athlete.profile import ProfileService, timezone_name
 from backend.coach.authorization import REQUEST_SCHEMA, dialogue_tools, validate_request
 from backend.coach.conversation import CoachMessageService
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -300,10 +301,7 @@ class CoachDialogueReadService:
     def context(self, client_turn_id: str) -> dict[str, Any]:
         messages = self._coach_messages.list(24)
         with self._database_manager.reader() as db:
-            current = db.execute(
-                "SELECT id FROM messages WHERE client_turn_id=? AND role='user'",
-                (client_turn_id,),
-            ).fetchone()
+            current = coach_store.user_message_for_turn(db, client_turn_id)
             pending = json.loads(
                 self._key_values.get(db, "coach_pending_request") or "null"
             )
@@ -312,20 +310,13 @@ class CoachDialogueReadService:
                 for message_id in pending.get("source_message_ids", []):
                     if message_id in known_ids:
                         continue
-                    row = db.execute(
-                        "SELECT id, role, content, created_at FROM messages "
-                        "WHERE id=? AND role='user'",
-                        (message_id,),
-                    ).fetchone()
+                    row = coach_store.message_by_id(
+                        db, message_id, "id, role, content, created_at"
+                    )
                     if row:
                         messages.append(dict(row))
                         known_ids.add(message_id)
-            recent_rows = db.execute(
-                "SELECT c.client_turn_id, c.receipt FROM coach_commands c "
-                "WHERE c.status='completed' AND EXISTS ("
-                "SELECT 1 FROM messages m WHERE m.client_turn_id=c.client_turn_id) "
-                "ORDER BY c.created_at DESC LIMIT 12"
-            ).fetchall()
+            recent_rows = coach_store.recent_completed_turn_rows(db)
             timezone = timezone_name(self._profile.get_from_db(db).get("timezone"))
 
         now = self._local_clock(ZoneInfo(timezone))
@@ -348,16 +339,7 @@ class CoachDialogueReadService:
     def artifact_refs(self) -> list[dict[str, Any]]:
         """Return drafts only when their turn has a corresponding local user message."""
         with self._database_manager.reader() as db:
-            rows = db.execute(
-                "SELECT a.id, a.status, a.base_revision, a.created_at, "
-                "(SELECT m.id FROM messages m WHERE m.client_turn_id=a.client_turn_id "
-                "AND m.role='user' LIMIT 1) AS source_message_id, "
-                "json_extract(a.payload, '$.plan_name') AS name "
-                "FROM coach_plan_artifacts a WHERE a.status='draft' "
-                "AND EXISTS (SELECT 1 FROM messages m "
-                "WHERE m.client_turn_id=a.client_turn_id) "
-                "ORDER BY a.created_at DESC LIMIT 20"
-            ).fetchall()
+            rows = coach_store.draft_artifact_refs(db)
         return [dict(row) for row in rows]
 
     @staticmethod

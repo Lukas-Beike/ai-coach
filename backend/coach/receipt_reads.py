@@ -9,6 +9,7 @@ from typing import Any
 from backend.coach.authorization import coach_session_key
 from backend.coach.proposal_models import coach_action_view
 from backend.coach.service import command_receipt
+from backend.db import coach_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
@@ -42,10 +43,7 @@ class CoachCommandReceiptService:
 
         # Receipt reads are pure SELECTs; a WAL snapshot never waits for the writer.
         with self._manager_factory().read_snapshot() as db:
-            row = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
-                (turn_id,),
-            ).fetchone()
+            row = coach_store.command_row(db, turn_id)
             if not row:
                 raise AppError(
                     404, "Coach-Auftrag nicht gefunden.", reason="command_not_found"

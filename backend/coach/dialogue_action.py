@@ -12,7 +12,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
 from backend.coach.dialogue_plan_scope import CoachDialoguePlanScopeService
-from backend.db import planning_store
+from backend.db import coach_store, planning_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -101,13 +101,7 @@ class CoachDialogueActionService:
         }
         # A referenced draft may predate the bounded recent dialogue.
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            user_ids.update(
-                row["id"]
-                for row in db.execute(
-                    "SELECT m.id FROM messages m JOIN coach_plan_artifacts a ON a.client_turn_id=m.client_turn_id "
-                    "WHERE m.role='user' AND a.status='draft'"
-                ).fetchall()
-            )
+            user_ids.update(coach_store.draft_user_message_ids(db))
         try:
             request = validate_request(
                 arguments.pop("_request", None),
