@@ -55,10 +55,10 @@ test("the calendar tab shows a calendar and a selected tab is one filled style @
   await expect(segment).toBeVisible();
   await expect(range).toBeVisible();
   const [segmentBackground, segmentColor] = await style(segment);
-  // The text on an accent fill is the paired token, in either theme.
+  // A selected tab is the raised surface item with ink text, in either theme.
   const onAccent = await page.evaluate(() => {
     const probe = document.body.appendChild(document.createElement("i"));
-    probe.style.color = "var(--on-accent)";
+    probe.style.color = "var(--ink)";
     const color = getComputedStyle(probe).color;
     probe.remove();
     return color;
