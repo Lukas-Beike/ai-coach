@@ -25,6 +25,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import row_factory
 from backend.db.activity_detail_store import (
+    full_stream_keys,
     lap_set_keys,
     lap_sets_for_session,
     replace_detail_set,
@@ -34,6 +35,7 @@ from backend.performance import mean_max_curve
 from backend.performance.canonical_detail import CanonicalDetailReader
 from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import TrainingProfileSelectionService
+from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 STAMP = "2026-10-18T08:00:00+00:00"
@@ -53,7 +55,7 @@ def add_session(db, activity_id, state="active", merged_into=None):
     db.execute(
         "INSERT INTO activity_sessions(activity_id, primary_provider, "
         "primary_provider_activity_id, state, merged_into, started_at, "
-        "created_at, updated_at) VALUES (?, 'intervals', ?, ?, ?, ?, ?, ?)",
+        "created_at, updated_at) VALUES (?, 'garmin', ?, ?, ?, ?, ?, ?)",
         (activity_id, activity_id, state, merged_into, STAMP, STAMP, STAMP),
     )
 
@@ -71,6 +73,25 @@ def add_record(db, provider, provider_activity_id, activity_id, sport="ride"):
             activity_id,
             sport,
             STAMP,
+            STAMP,
+            STAMP,
+            STAMP,
+        ),
+    )
+
+
+def store_summary(db, provider_activity_id, payload_hash):
+    """Store the Garmin raw summary whose hash decides whether a set is current."""
+    db.execute(
+        "INSERT INTO provider_records(provider, record_kind, source_record_id, "
+        "payload_hash, fetched_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(provider, record_kind, source_record_id) "
+        "DO UPDATE SET payload_hash=excluded.payload_hash",
+        (
+            GARMIN.value,
+            ACTIVITY_RECORD_KIND,
+            provider_activity_id,
+            payload_hash,
             STAMP,
             STAMP,
             STAMP,
@@ -169,10 +190,8 @@ class SessionCurveReaderTests(unittest.TestCase):
 
     def test_only_full_resolution_streams_enter_the_curve(self):
         add_session(self.db, "act_1")
-        add_record(self.db, INTERVALS, "i-1", "act_1")
-        store_streams(
-            self.db, INTERVALS, "i-1", ride_power(350.0), StreamResolution.FULL
-        )
+        add_record(self.db, WAHOO, "w-1", "act_1")
+        store_streams(self.db, WAHOO, "w-1", ride_power(350.0), StreamResolution.FULL)
         add_record(self.db, GARMIN, "g-1", "act_1")
         store_streams(
             self.db, GARMIN, "g-1", ride_power(999.0), StreamResolution.DOWNSAMPLED
@@ -183,13 +202,11 @@ class SessionCurveReaderTests(unittest.TestCase):
             self.db, GARMIN, "g-2", ride_power(999.0), StreamResolution.DOWNSAMPLED
         )
 
-        curves = self.reader.curves(self.db, ["act_1", "act_2"], {})
+        curves = self.reader.curves(self.db, ["act_1", "act_2"])
 
         self.assertEqual({"act_1"}, set(curves))
         self.assertEqual(350.0, watts_at(curves["act_1"], 180))
-        self.assertEqual(
-            "Intervals.icu original watts stream", curves["act_1"].power["source"]
-        )
+        self.assertEqual("Wahoo original watts stream", curves["act_1"].power["source"])
         # The power-at-heart-rate bins (#2427) come from the same streams; this
         # ride has no heart rate, so it gives none.
         self.assertEqual(
@@ -202,35 +219,31 @@ class SessionCurveReaderTests(unittest.TestCase):
 
     def test_merged_duplicate_counts_once_under_its_session(self):
         add_session(self.db, "act_1")
-        add_record(self.db, INTERVALS, "i-1", "act_1")
-        store_streams(
-            self.db, INTERVALS, "i-1", ride_power(350.0), StreamResolution.FULL
-        )
+        add_record(self.db, GARMIN, "g-1", "act_1")
+        store_streams(self.db, GARMIN, "g-1", ride_power(350.0), StreamResolution.FULL)
         add_session(self.db, "act_2", "duplicate", merged_into="act_1")
         add_record(self.db, WAHOO, "w-1", "act_2")
         store_streams(self.db, WAHOO, "w-1", ride_power(350.0), StreamResolution.FULL)
 
-        curves = self.reader.curves(self.db, ["act_1", "act_2"], {})
+        curves = self.reader.curves(self.db, ["act_1", "act_2"])
 
         self.assertEqual({"act_1"}, set(curves))
         self.assertEqual(350.0, watts_at(curves["act_1"], 180))
 
     def test_curves_are_recomputed_only_when_the_stream_content_changes(self):
         add_session(self.db, "act_1")
-        add_record(self.db, INTERVALS, "i-1", "act_1")
-        store_streams(
-            self.db, INTERVALS, "i-1", ride_power(350.0), StreamResolution.FULL
-        )
+        add_record(self.db, GARMIN, "g-1", "act_1")
+        store_streams(self.db, GARMIN, "g-1", ride_power(350.0), StreamResolution.FULL)
 
         with patch.object(
             mean_max_curve, "power_profile", wraps=mean_max_curve.power_profile
         ) as computed:
-            first = self.reader.curves(self.db, ["act_1"], {})["act_1"]
-            again = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+            first = self.reader.curves(self.db, ["act_1"])["act_1"]
+            again = self.reader.curves(self.db, ["act_1"])["act_1"]
             store_streams(
-                self.db, INTERVALS, "i-1", ride_power(380.0), StreamResolution.FULL
+                self.db, GARMIN, "g-1", ride_power(380.0), StreamResolution.FULL
             )
-            changed = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+            changed = self.reader.curves(self.db, ["act_1"])["act_1"]
 
         self.assertEqual(2, computed.call_count)
         self.assertIs(first, again)
@@ -244,7 +257,7 @@ class SessionCurveReaderTests(unittest.TestCase):
         add_session(self.db, "act_2", "duplicate", merged_into="act_1")
         add_record(self.db, WAHOO, "w-2", "act_2")
         store_streams(self.db, WAHOO, "w-2", ride_power(450.0), StreamResolution.FULL)
-        before = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        before = self.reader.curves(self.db, ["act_1"])["act_1"]
 
         # Same content fetched later: the merge now prefers this set.
         later = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
@@ -258,28 +271,42 @@ class SessionCurveReaderTests(unittest.TestCase):
                     StreamResolution.FULL,
                     retrieved_at=later,
                 )
-        cached = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        cached = self.reader.curves(self.db, ["act_1"])["act_1"]
         fresh = SessionCurveReader(CanonicalTableReader().session_activities).curves(
-            self.db, ["act_1"], {}
+            self.db, ["act_1"]
         )["act_1"]
 
         self.assertNotEqual(watts_at(before, 180), watts_at(fresh, 180))
         self.assertEqual(watts_at(fresh, 180), watts_at(cached, 180))
 
-    def test_a_set_fetched_for_an_older_summary_is_left_out(self):
+    def test_a_stored_intervals_copy_is_ignored_but_kept(self):
+        # #2148: an Intervals.icu stream set counts nowhere, yet stays stored.
         add_session(self.db, "act_1")
         add_record(self.db, INTERVALS, "i-1", "act_1")
         store_streams(
+            self.db, INTERVALS, "i-1", ride_power(350.0), StreamResolution.FULL
+        )
+
+        self.assertEqual({}, self.reader.curves(self.db, ["act_1"]))
+        stored = full_stream_keys(self.db, ["act_1"])["act_1"]
+        self.assertEqual(["i-1"], [key.provider_activity_id for key in stored])
+
+    def test_a_set_fetched_for_an_older_summary_is_left_out(self):
+        add_session(self.db, "act_1")
+        add_record(self.db, GARMIN, "g-1", "act_1")
+        store_streams(
             self.db,
-            INTERVALS,
-            "i-1",
+            GARMIN,
+            "g-1",
             ride_power(350.0),
             StreamResolution.FULL,
             summary_sha256="a" * 64,
         )
 
-        current = self.reader.curves(self.db, ["act_1"], {"i-1": "a" * 64})
-        changed = self.reader.curves(self.db, ["act_1"], {"i-1": "b" * 64})
+        store_summary(self.db, "g-1", "a" * 64)
+        current = self.reader.curves(self.db, ["act_1"])
+        store_summary(self.db, "g-1", "b" * 64)
+        changed = self.reader.curves(self.db, ["act_1"])
 
         self.assertEqual(350.0, watts_at(current["act_1"], 180))
         self.assertEqual({}, changed)
@@ -316,32 +343,32 @@ class SessionExecutionCurveTests(unittest.TestCase):
         initialize_schema(self.db)
         self.reader = SessionCurveReader(CanonicalTableReader().session_activities)
         add_session(self.db, "act_1")
-        add_record(self.db, INTERVALS, "i-1", "act_1")
-        store_streams(
-            self.db, INTERVALS, "i-1", interval_power(), StreamResolution.FULL
-        )
+        add_record(self.db, GARMIN, "g-1", "act_1")
+        store_streams(self.db, GARMIN, "g-1", interval_power(), StreamResolution.FULL)
 
     def test_lap_sets_are_read_by_key_and_alone(self):
-        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
+        store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS)
         keys = lap_set_keys(self.db, ["act_1"])
-        self.assertEqual(["i-1"], [key.provider_activity_id for key in keys["act_1"]])
+        self.assertEqual(["g-1"], [key.provider_activity_id for key in keys["act_1"]])
         sets = lap_sets_for_session(self.db, "act_1")
         self.assertEqual(1, len(sets))
         self.assertIsInstance(sets[0].detail, ActivityLapSet)
 
     def test_the_curve_holds_the_execution_summary_of_its_laps(self):
-        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
-        curve = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS)
+        curve = self.reader.curves(self.db, ["act_1"])["act_1"]
         self.assertEqual("interval", curve.execution_summary["structure"])
         self.assertEqual(2, curve.execution_summary["rep_count"])
         self.assertEqual(300, curve.execution_summary["rep_output_mean"])
 
     def test_a_lap_change_recomputes_and_a_stale_lap_set_stays_out(self):
-        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
-        first = self.reader.curves(self.db, ["act_1"], {})["act_1"]
-        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS, summary_sha256="a" * 64)
-        current = self.reader.curves(self.db, ["act_1"], {"i-1": "a" * 64})["act_1"]
-        stale = self.reader.curves(self.db, ["act_1"], {"i-1": "b" * 64})["act_1"]
+        store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS)
+        first = self.reader.curves(self.db, ["act_1"])["act_1"]
+        store_laps(self.db, GARMIN, "g-1", INTERVAL_LAPS, summary_sha256="a" * 64)
+        store_summary(self.db, "g-1", "a" * 64)
+        current = self.reader.curves(self.db, ["act_1"])["act_1"]
+        store_summary(self.db, "g-1", "b" * 64)
+        stale = self.reader.curves(self.db, ["act_1"])["act_1"]
         assert current.execution_summary is not None
         assert stale.execution_summary is not None
         self.assertNotEqual(first.fingerprint, stale.fingerprint)
@@ -384,9 +411,9 @@ class ProfileSelectionTests(unittest.TestCase):
             ("act_4", "2026-10-19", 999.0, StreamResolution.FULL),
         ):
             add_session(self.db, activity_id)
-            add_record(self.db, INTERVALS, f"i-{activity_id}", activity_id)
+            add_record(self.db, GARMIN, f"g-{activity_id}", activity_id)
             store_streams(
-                self.db, INTERVALS, f"i-{activity_id}", ride_power(peak), resolution
+                self.db, GARMIN, f"g-{activity_id}", ride_power(peak), resolution
             )
             summaries.append(
                 {
@@ -395,7 +422,7 @@ class ProfileSelectionTests(unittest.TestCase):
                     "environment": "outdoor",
                     "started_at": f"{day}T08:00:00+00:00",
                     "started_at_local": f"{day}T10:00:00",
-                    "record_ids": {"intervals": f"i-{activity_id}"},
+                    "record_ids": {"garmin": f"g-{activity_id}"},
                     "source": "Intervals.icu",
                 }
             )
@@ -415,7 +442,7 @@ class ProfileSelectionTests(unittest.TestCase):
             for point in window["power"]
             if point["duration_seconds"] == 180 and point["environment"] == "outdoor"
         )
-        self.assertEqual("Intervals.icu original watts stream", best["source"])
+        self.assertEqual("Garmin Connect original watts stream", best["source"])
         self.assertEqual(
             (350.0, "act_1", 300.0),
             (best["watts"], best["activity_id"], best["start_seconds"]),
@@ -432,11 +459,11 @@ class ProfileSelectionTests(unittest.TestCase):
             ("act_2", 900.0, "electric"),
         ):
             add_session(self.db, activity_id)
-            add_record(self.db, INTERVALS, f"i-{activity_id}", activity_id)
+            add_record(self.db, GARMIN, f"g-{activity_id}", activity_id)
             store_streams(
                 self.db,
-                INTERVALS,
-                f"i-{activity_id}",
+                GARMIN,
+                f"g-{activity_id}",
                 ride_power(peak),
                 StreamResolution.FULL,
             )
@@ -446,7 +473,7 @@ class ProfileSelectionTests(unittest.TestCase):
                 "environment": "outdoor",
                 "started_at": "2026-10-10T08:00:00+00:00",
                 "started_at_local": "2026-10-10T10:00:00",
-                "record_ids": {"intervals": f"i-{activity_id}"},
+                "record_ids": {"garmin": f"g-{activity_id}"},
                 "source": "Intervals.icu",
             }
             if assist:
@@ -474,11 +501,11 @@ class ProfileSelectionTests(unittest.TestCase):
             ("act_3", 950.0, "warmup"),
         ):
             add_session(self.db, activity_id)
-            add_record(self.db, INTERVALS, f"i-{activity_id}", activity_id)
+            add_record(self.db, GARMIN, f"g-{activity_id}", activity_id)
             store_streams(
                 self.db,
-                INTERVALS,
-                f"i-{activity_id}",
+                GARMIN,
+                f"g-{activity_id}",
                 ride_power(peak),
                 StreamResolution.FULL,
             )
@@ -489,7 +516,7 @@ class ProfileSelectionTests(unittest.TestCase):
                     "environment": "outdoor",
                     "started_at": "2026-10-10T08:00:00+00:00",
                     "started_at_local": "2026-10-10T10:00:00",
-                    "record_ids": {"intervals": f"i-{activity_id}"},
+                    "record_ids": {"garmin": f"g-{activity_id}"},
                     "source": "Intervals.icu",
                     "purpose": purpose,
                 }

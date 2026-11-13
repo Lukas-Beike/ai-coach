@@ -16,7 +16,7 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -82,29 +82,18 @@ class SessionCurveReader:
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
         self._lock = threading.Lock()
 
-    def curves(
-        self,
-        db: Any,
-        activity_ids: Iterable[str],
-        intervals_fingerprints: Mapping[str, str],
-    ) -> dict[str, SessionCurve]:
-        """Return the curve of each session that has current full-resolution streams.
-
-        ``intervals_fingerprints`` maps an Intervals.icu activity id to the
-        fingerprint of its current summary row.
-        """
+    def curves(self, db: Any, activity_ids: Iterable[str]) -> dict[str, SessionCurve]:
+        """Return the curve of each session that has current full-resolution streams."""
         curves: dict[str, SessionCurve] = {}
         wanted = list(activity_ids)
         keys_by_session = activity_detail_store.full_stream_keys(db, wanted)
         laps_by_session = activity_detail_store.lap_set_keys(db, wanted)
         for activity_id, keys in keys_by_session.items():
-            current = _current(db, keys, intervals_fingerprints)
+            current = _current(db, keys)
             records = tuple(self._session_records(db, activity_id))
             if not current or not records:
                 continue
-            laps = _current(
-                db, laps_by_session.get(activity_id, ()), intervals_fingerprints
-            )
+            laps = _current(db, laps_by_session.get(activity_id, ()))
             fingerprint = _fingerprint(records, current, laps)
             with self._lock:
                 cached = self._memo.get(fingerprint)
@@ -127,29 +116,25 @@ def input_fingerprint(parts: Iterable[object]) -> str:
     return _sha256(sorted({_canonical(part) for part in parts}))
 
 
-def _current(
-    db: Any,
-    keys: Iterable[FullStreamKey],
-    intervals_fingerprints: Mapping[str, str],
-) -> list[FullStreamKey]:
-    """The keys whose sets still belong to the provider's current summary."""
+def _current(db: Any, keys: Iterable[FullStreamKey]) -> list[FullStreamKey]:
+    """The keys whose sets still belong to the provider's current summary.
+
+    A stored Intervals.icu set is never read: such copies count nowhere (#2148).
+    """
     return [
         key
         for key in keys
-        if not _stale(db, key, intervals_fingerprints.get(key.provider_activity_id))
+        if key.provider != ProviderId.INTERVALS.value and not _stale(db, key)
     ]
 
 
-def _stale(db: Any, key: FullStreamKey, intervals_fingerprint: str | None) -> bool:
+def _stale(db: Any, key: FullStreamKey) -> bool:
     """Whether the provider summary changed since the set was fetched."""
     if key.summary_sha256 is None:
         return False
-    if key.provider == ProviderId.INTERVALS.value:
-        current = intervals_fingerprint
-    else:
-        current = canonical_store.active_provider_record_hash(
-            db, key.provider, ACTIVITY_RECORD_KIND, key.provider_activity_id
-        )
+    current = canonical_store.active_provider_record_hash(
+        db, key.provider, ACTIVITY_RECORD_KIND, key.provider_activity_id
+    )
     return current is not None and current != key.summary_sha256
 
 

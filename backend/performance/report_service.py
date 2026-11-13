@@ -19,7 +19,6 @@ from backend.activities.activity_summary import (
 from backend.activities.session_purpose import summary_is_not_training, summary_is_race
 from backend.canonical import sensor_registry
 from backend.canonical.stored_sports import resolve_workout_sport
-from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
@@ -200,25 +199,7 @@ class TrainingProfileSelectionService:
                 <= today.isoformat()
             ]
             session_ids = [str(summary.get("id") or "") for summary in sessions]
-            # Every Intervals.icu record with stored sets, also a second bundled copy.
-            intervals_ids = {
-                key.provider_activity_id
-                for stored in (
-                    activity_detail_store.full_stream_keys(db, session_ids),
-                    activity_detail_store.lap_set_keys(db, session_ids),
-                )
-                for keys in stored.values()
-                for key in keys
-                if key.provider == ProviderId.INTERVALS.value
-            }
-            fingerprints = {
-                activity_id: fingerprint
-                for (_, activity_id), fingerprint in reader.summary_fingerprints(
-                    db,
-                    [(ProviderId.INTERVALS.value, value) for value in intervals_ids],
-                ).items()
-            }
-            curves = self._curves.curves(db, session_ids, fingerprints)
+            curves = self._curves.curves(db, session_ids)
         records = [
             _curve_record(summary, curves.get(str(summary.get("id") or "")))
             for summary in sessions
