@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
-const { loadPublicScript, extractFunctions } = require("./frontend-harness.cjs");
+const { babelParse, traverse, loadPublicScript, extractFunctions } = require("./frontend-harness.cjs");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -179,21 +179,114 @@ test("leaving a panel with unsaved changes asks first and stays when the athlete
   assert.equal(calls[0], "discard");
 });
 
-// The view catalogue in docs/view-catalogue.md is generated from the router's own tables.
-// Regenerate it with: node tests/navigation-state.test.cjs --write
+// docs/view-catalogue.md is generated from the router's own tables (the routes with their view descriptors) and
+// from the state and confirmation texts found in public/*.js. Regenerate it with:
+// node tests/navigation-state.test.cjs --write
 const CATALOGUE = path.join(__dirname, "..", "docs", "view-catalogue.md");
-const BEGIN = "<!-- BEGIN GENERATED VIEWS -->\n";
-const END = "<!-- END GENERATED VIEWS -->\n";
+const PUBLIC = path.join(__dirname, "..", "public");
+const STATE_NAMES = ["loading", "empty", "error", "notConfigured", "offline"];
+const publicFiles = () => fs.readdirSync(PUBLIC).filter((file) => file.endsWith(".js")).sort();
+const publicSource = (file) => fs.readFileSync(path.join(PUBLIC, file), "utf8").replaceAll("\r\n", "\n");
+
+// Problems of the view descriptors: a route without one, a descriptor without a route, an unknown state, and a
+// read path or control label that none of the public sources contains.
+function contractProblems(routes, views, scripts, markup) {
+  const problems = [];
+  for (const route of Object.keys(routes)) if (!Object.hasOwn(views, route)) problems.push(`${route} has no view descriptor`);
+  for (const [route, view] of Object.entries(views)) {
+    if (!Object.hasOwn(routes, route)) problems.push(`${route} is no route`);
+    for (const state of view.states) if (!STATE_NAMES.includes(state)) problems.push(`${route}: unknown state ${state}`);
+    for (const load of view.loads) if (!scripts.includes(load)) problems.push(`${route}: no code reads ${load}`);
+    for (const action of view.actions) if (!scripts.includes(action) && !markup.includes(action)) problems.push(`${route}: no control labelled ${action}`);
+    if (!view.actions.length || !view.states.length) problems.push(`${route}: empty actions or states`);
+  }
+  return problems;
+}
+
+test("every route has one view descriptor that the sources bear out", () => {
+  const { routes, views } = loadPublicScript("navigation.js").AppNavigation;
+  const scripts = publicFiles().map(publicSource).join("\n");
+  const markup = publicSource("index.html").replaceAll("&amp;", "&");
+  assert.deepEqual(contractProblems(routes, views, scripts, markup), []);
+  assert.ok(Object.isFrozen(views) && Object.isFrozen(views.coach) && Object.isFrozen(views.coach.loads));
+});
+
+test("a missing, extra or unfounded view descriptor is a problem", () => {
+  const view = { loads: ["/api/a"], actions: ["Los"], states: ["empty"] };
+  assert.deepEqual(contractProblems({ a: "p", b: "p" }, { a: view, c: view }, "/api/a", "Los"), ["b has no view descriptor", "c is no route"]);
+  const broken = { loads: ["/api/x"], actions: ["Weg"], states: ["busy"] };
+  assert.deepEqual(contractProblems({ a: "p" }, { a: broken }, "/api/a", "Los"),
+    ["a: unknown state busy", "a: no code reads /api/x", "a: no control labelled Weg"]);
+});
+
+// The state helpers of components.js and the argument positions that carry text.
+const STATE_HELPERS = { createEmptyState: [0, 1], createLoadingState: [0], createErrorState: [0], markValueMissing: [1] };
+
+function functionName(callPath) {
+  const key = (name) => name?.name ?? name?.value;
+  for (let up = callPath.parentPath; up; up = up.parentPath) {
+    if (!up.isFunction()) continue;
+    const { node, parent } = up;
+    const name = node.id?.name ?? key(node.key) ?? (parent.type === "VariableDeclarator" ? parent.id.name : null) ?? (parent.type === "ObjectProperty" ? key(parent.key) : null);
+    if (name) return name;
+  }
+  return "(top level)";
+}
+
+const fence = (code) => { const ticks = "`".repeat(Math.max(0, ...(code.match(/`+/g) || []).map((run) => run.length)) + 1); return `${ticks} ${code} ${ticks}`; };
+const cell = (text) => String(text).replaceAll("|", "\\|").replaceAll("\n", " ");
+
+// A literal argument is its text; anything else is listed as computed with its expression.
+function argumentText(node, source) {
+  if (!node || node.type === "NullLiteral") return "–";
+  if (node.type === "StringLiteral") return cell(node.value);
+  if (node.type === "TemplateLiteral" && !node.expressions.length) return cell(node.quasis[0].value.cooked);
+  return cell(`(computed) ${fence(source.slice(node.start, node.end).replace(/\s+/g, " "))}`);
+}
+
+// Every state helper call and every requestConfirmation call (the app's one confirmation dialog) of public/*.js,
+// in file and source order, with the function it sits in.
+function scanPublicTexts() {
+  const states = [];
+  const confirmations = [];
+  const defaults = {};
+  for (const file of publicFiles()) {
+    const source = publicSource(file);
+    traverse(babelParse(source, file, false), {
+      FunctionDeclaration(item) {
+        const { id, params } = item.node;
+        if (id.name === "markValueMissing") defaults.text = argumentText(params[1].right, source);
+        if (id.name === "requestConfirmation") for (const property of params[1].left.properties) defaults[property.key.name] = argumentText(property.value.right, source);
+      },
+      CallExpression(item) {
+        const { callee, arguments: args } = item.node;
+        if (callee.type !== "Identifier") return;
+        const where = { file, fn: functionName(item) };
+        if (callee.name in STATE_HELPERS) states.push({ ...where, helper: callee.name, texts: STATE_HELPERS[callee.name].map((index) => (args[index] ? argumentText(args[index], source) : null)) });
+        if (callee.name !== "requestConfirmation") return;
+        const options = Object.fromEntries((args[1]?.properties || []).map((property) => [property.key.name, argumentText(property.value, source)]));
+        confirmations.push({ ...where, message: argumentText(args[0], source), options });
+      },
+    });
+  }
+  // The text a state helper shows when its call gives none is the default of its parameter.
+  for (const row of states) row.texts = row.texts.map((text) => text ?? defaults.text);
+  return { states, confirmations, defaults };
+}
+
+const BEGIN = (name) => `<!-- BEGIN GENERATED ${name} -->\n`;
+const END = (name) => `<!-- END GENERATED ${name} -->\n`;
 
 function viewCatalogue() {
-  const { routes, linkRoutes, defaultRoute, planSegments, moreSegments } = loadPublicScript("navigation.js").AppNavigation;
+  const { routes, views, linkRoutes, defaultRoute, planSegments, moreSegments } = loadPublicScript("navigation.js").AppNavigation;
   const { ROUTE_ALIASES } = extractFunctions("navigation.js", ["ROUTE_ALIASES"]);
+  const list = (items, code) => items.map((item) => (code ? `\`${item}\`` : item)).join(", ");
   const lines = [
     `Default route: \`#${defaultRoute}\`. Navigation items: ${Object.values(linkRoutes).map((route) => `\`#${route}\``).join(", ")}.`,
     "",
-    "| Route | Panel | Navigation item |",
-    "| --- | --- | --- |",
-    ...Object.keys(routes).sort().map((route) => `| \`#${route}\` | \`${routes[route]}\` | \`${linkRoutes[route.split("/")[0]] || route.split("/")[0]}\` |`),
+    "| Route | Panel | Navigation item | Loads | Actions | States |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...Object.keys(routes).sort().map((route) => `| \`#${route}\` | \`${routes[route]}\` | \`${linkRoutes[route.split("/")[0]] || route.split("/")[0]}\` | ${list(views[route].loads, true)} | ${list(views[route].actions)} | ${list(views[route].states)} |`),
     "",
     `Kalender segments: ${planSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
     `Mehr segments: ${moreSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
@@ -205,12 +298,54 @@ function viewCatalogue() {
   return lines.join("\n") + "\n";
 }
 
-test("the view catalogue lists every route of the router", () => {
-  const document = fs.readFileSync(CATALOGUE, "utf8").replaceAll("\r\n", "\n");
-  assert.equal(document.split(BEGIN)[1].split(END)[0], viewCatalogue(), "Regenerate with: node tests/navigation-state.test.cjs --write");
+function stateTables() {
+  const lines = [];
+  let file = "";
+  for (const row of scanPublicTexts().states) {
+    if (row.file !== file) {
+      file = row.file;
+      lines.push(...(lines.length ? [""] : []), `### \`public/${file}\``, "", "| Function | Helper | Text | Detail |", "| --- | --- | --- | --- |");
+    }
+    lines.push(`| \`${row.fn}\` | \`${row.helper}\` | ${row.texts[0]} | ${row.texts[1] ?? ""} |`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+function copyDeck() {
+  const { confirmations, defaults } = scanPublicTexts();
+  const lines = ["| Where | Title | Message | Button |", "| --- | --- | --- | --- |"];
+  for (const row of confirmations) {
+    lines.push(`| \`public/${row.file}\` \`${row.fn}\` | ${row.options.title ?? defaults.title} | ${row.message} | ${row.options.confirmLabel ?? defaults.confirmLabel} |`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+const ARTEFACTS = { VIEWS: viewCatalogue, STATES: stateTables, COPY: copyDeck };
+const catalogueDocument = () => fs.readFileSync(CATALOGUE, "utf8").replaceAll("\r\n", "\n");
+const generatedSection = (document, name) => document.split(BEGIN(name))[1].split(END(name))[0];
+
+for (const [name, render] of Object.entries(ARTEFACTS)) {
+  test(`the ${name.toLowerCase()} section of the view catalogue is current`, () => {
+    assert.equal(generatedSection(catalogueDocument(), name), render(), "Regenerate with: node tests/navigation-state.test.cjs --write");
+  });
+}
+
+test("the scan finds the state helper calls with their text and the confirmation dialogs with the dialog defaults", () => {
+  const { states, confirmations, defaults } = scanPublicTexts();
+  assert.deepEqual(states.find((row) => row.fn === "loadPanel" && row.helper === "createLoadingState"), { file: "activity-analysis.js", fn: "loadPanel", helper: "createLoadingState", texts: ["Details werden geladen …"] });
+  assert.deepEqual(plain(states.find((row) => row.helper === "createEmptyState" && row.fn === "analysisEmptyCard").texts), ["(computed) ` ANALYSIS_EMPTY_TITLES[segment] `", "(computed) ` cause `"]);
+  assert.deepEqual([defaults.title, defaults.confirmLabel, defaults.text], ["Aktion bestätigen", "Bestätigen", "nicht erfasst"]);
+  assert.deepEqual(plain(states.find((row) => row.fn === "kcalValue").texts), ["nicht erfasst"]);
+  const discard = confirmations.find((row) => row.fn === "confirmDiscardDraft");
+  assert.deepEqual([discard.message, discard.options.title], ["Ungespeicherte Änderungen verwerfen?", "Änderungen verwerfen?"]);
+  assert.ok(confirmations.some((row) => row.message.startsWith("(computed)")));
 });
 
 if (process.argv.includes("--write")) {
-  const [before, rest] = fs.readFileSync(CATALOGUE, "utf8").replaceAll("\r\n", "\n").split(BEGIN);
-  fs.writeFileSync(CATALOGUE, before + BEGIN + viewCatalogue() + END + rest.split(END)[1]);
+  let document = catalogueDocument();
+  for (const [name, render] of Object.entries(ARTEFACTS)) {
+    const [before, rest] = document.split(BEGIN(name));
+    document = before + BEGIN(name) + render() + END(name) + rest.split(END(name))[1];
+  }
+  fs.writeFileSync(CATALOGUE, document);
 }

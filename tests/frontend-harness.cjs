@@ -125,4 +125,4 @@ const textOf = (node) => {
   return node instanceof FakeElement ? node.children.map(textOf).join("") : `${node.textContent || ""}${node.children.map(textOf).join("")}`;
 };
 
-module.exports = { babelParse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
+module.exports = { babelParse, traverse, loadPublicScript, extractFunctions, FakeElement, fakeDocument, textOf };
