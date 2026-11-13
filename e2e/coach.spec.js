@@ -585,6 +585,8 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
       content: `Neue Antwort aus einem anderen Browser-Tab.\n\n${"Neue Trainingshinweise. ".repeat(300)}`,
       created_at: "2099-01-03T00:18:00Z",
     }];
+    // Until the event stream reported ready, the page drops events that its state load already shows.
+    await expect.poll(() => page.evaluate(() => state.stateEventBaselined)).toBe(true);
     await page.evaluate(() => handleStateEvent({ type: "coach", data: "{}", lastEventId: "99" }));
     const latest = page.locator('[data-message-id="92018"]');
     await expect(latest).toBeAttached();
