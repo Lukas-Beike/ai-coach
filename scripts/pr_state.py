@@ -25,7 +25,7 @@ THREADS = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) {
     reviewThreads(first: 100) {
       pageInfo { hasNextPage }
-      nodes { isResolved path line
+      nodes { id isResolved path line
         comments(first: 1) { nodes { author { login } body } } }
     }
   } }
@@ -82,7 +82,8 @@ def unresolved_threads(number: int) -> tuple[list[str], bool]:
         first = (node["comments"]["nodes"] or [{}])[0]
         author = (first.get("author") or {}).get("login", "?")
         lines.append(
-            f"  {node['path']}:{node['line'] or '-'} @{author}: {snippet(first.get('body'))}"
+            f"  {node['id']} {node['path']}:{node['line'] or '-'} @{author}: "
+            f"{snippet(first.get('body'))}"
         )
     return lines, threads["pageInfo"]["hasNextPage"]
 
