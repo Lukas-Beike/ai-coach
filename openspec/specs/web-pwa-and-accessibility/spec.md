@@ -454,7 +454,7 @@ The calendar card of a completed session SHALL carry its single-session analysis
 
 #### Scenario: Time in zones
 - **WHEN** the athlete opens a completed session's card
-- **THEN** below its values one slim bar shows the session's time per zone (power zones for a ride that has them, else heart-rate zones) with the minutes per zone below and the zone kind and source ("HF-Zonen · Garmin Connect"), read from the same session read as "Details"; a session without zones or with a failed read shows no bar.
+- **THEN** below its values one slim bar shows the session's time per zone (power zones for a ride that has them, else heart-rate zones) with the minutes per zone below and the zone kind and source ("HF-Zonen · Garmin Connect"), read from the same session read as "Details" (one request per session and calendar data while both are open; a failed read is read again); a session without zones or with a failed read shows no bar.
 
 #### Scenario: Running dynamics per second
 - **WHEN** a run has stored running dynamics streams
