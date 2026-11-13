@@ -982,6 +982,40 @@ h2 {
 .planned-month-names span:last-child, .planned-month-kw { display: none; }
 .planned-month-day { display: grid; min-width: 0; min-height: 48px; justify-items: center; align-content: start; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; color: var(--ink); background: none; font: inherit; cursor: pointer; }
 .planned-month-day.is-outside { color: var(--muted); }
+.planned-month-day.has-blocked-event .planned-month-number { box-shadow: inset 0 -2px 0 var(--danger); }
+/* Personal calendar events (#2620): a band of chips above the day's units; the left edge names the impact. */
+.planned-event-band { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.planned-event-chip { --event-edge: var(--muted); display: inline-flex; max-width: 100%; min-height: 32px; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border: 1px solid var(--transparent); border-left: 3px solid var(--event-edge); border-radius: 9px; color: var(--ink); background: var(--surface-raised); font: inherit; font-size: .75rem; line-height: 1.3; text-align: left; cursor: pointer; }
+.planned-event-chip small { color: var(--muted); font-size: inherit; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.planned-event-name { min-width: 0; overflow-wrap: anywhere; }
+.planned-event-chip[data-impact="block"] { --event-edge: var(--danger); }
+.planned-event-chip[data-impact="short"] { --event-edge: var(--orange); }
+.planned-event-chip[data-impact="easy"] { --event-edge: var(--blue); }
+.planned-event-chip[data-impact="none"] { color: var(--muted); }
+.planned-event-chip[data-impact="open"] { --event-edge: var(--orange); border-color: var(--orange); border-style: dashed; border-left-style: solid; background: none; }
+.planned-event-chip:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-event-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--orange); }
+.planned-event-sheet { width: 100%; max-width: 100%; margin: auto 0 0; padding: 12px 16px max(18px, env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line-strong); border-radius: 20px 20px 0 0; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
+.planned-event-head { display: flex; align-items: center; gap: 10px; }
+.planned-event-head h3 { flex: 1; min-width: 0; margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
+.planned-event-meta { margin: 2px 0 12px; color: var(--muted); font-size: .8rem; }
+.planned-event-choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.planned-event-choices button { min-height: 48px; padding: 6px 4px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--ink); background: var(--surface); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+.planned-event-choices button[data-impact="block"] { color: var(--danger); }
+.planned-event-choices button[data-impact="short"] { color: var(--orange); }
+.planned-event-choices button[data-impact="easy"] { color: var(--blue); }
+.planned-event-choices button[data-impact="none"] { color: var(--muted); }
+.planned-event-choices button[aria-pressed="true"] { border: 2px solid var(--accent); background: var(--accent-soft); }
+.planned-event-scope { display: flex; gap: 4px; margin-top: 10px; padding: 3px; border-radius: 10px; background: var(--surface-raised); }
+.planned-event-scope button { flex: 1; min-height: 36px; border: 0; border-radius: 8px; color: var(--muted); background: none; font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.planned-event-scope button[aria-pressed="true"] { color: var(--ink); background: var(--surface); }
+.planned-event-choices button:focus-visible, .planned-event-scope button:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.planned-event-status { margin: 8px 0 0; color: var(--danger-ink); font-size: .78rem; }
+.planned-event-status:empty { display: none; }
+@media (min-width: 1100px) {
+  .planned-event-sheet::backdrop { background: none; backdrop-filter: none; }
+  .planned-event-sheet { width: 380px; max-height: 100dvh; margin: 0 0 0 auto; height: 100dvh; border-top: 0; border-left: 1px solid var(--line-strong); border-radius: 0; padding: 18px; }
+}
 .planned-month-day:disabled { opacity: .45; cursor: default; }
 .planned-month-number { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid var(--transparent); border-radius: 50%; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .planned-month-day.is-today .planned-month-number { color: var(--on-accent); background: var(--accent); }

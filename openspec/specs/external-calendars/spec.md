@@ -218,7 +218,11 @@ The client SHALL show the external calendar under the connections with a status 
 - **WHEN** an appointment is named "Familienfeier [NO_TRAINING]"
 - **THEN** the planned day shows "Familienfeier", and the marker as its own label ("Kein Training").
 
-Evidence: `public/plan-views.js::externalCalendarDetail`, `public/plan-views.js::stripCalendarMarkers`, `public/plan-views.js::plannedAppointmentLabel`, `public/plan-views.js::renderExternalCalendar`, `public/sync-actions.js::syncExternalCalendar`; `tests/plan-views-external-calendar.test.cjs::the calendar status names the skipped appointments`, `tests/plan-views-external-calendar.test.cjs::an error outranks the skipped count`.
+#### Scenario: Event band and decision
+- **WHEN** a day from today on has personal events
+- **THEN** the week view shows them as a band of chips above the day's units (time, name without markers, impact Blockiert, Kürzer, Locker, Egal or Offen) instead of the calendar note line, and a tap opens a sheet (a side panel on wide screens) whose choice saves the decision for that event or, for a recurring event, for every occurrence; the month view marks a day with a blocked event.
+
+Evidence: `public/plan-views.js::externalCalendarDetail`, `public/plan-views.js::stripCalendarMarkers`, `public/plan-views.js::plannedAppointmentLabel`, `public/plan-views.js::renderExternalCalendar`, `public/sync-actions.js::syncExternalCalendar`, `public/plan-views.js::plannedEventBand`, `public/plan-views.js::openPlannedEventSheet`; `e2e/calendar-events.spec.js::personal events show as a band and take a decision per event or series`, `tests/plan-views-times.test.cjs::a personal event covers its days, without the end day at midnight`, `tests/plan-views-external-calendar.test.cjs::the calendar status names the skipped appointments`, `tests/plan-views-external-calendar.test.cjs::an error outranks the skipped count`.
 
 ### Requirement: Local calendar projection fields
 The system SHALL project a local planned workout with `id` (the remote event id when linked, else the local id), `local_id`, `remote_id`, `category` "WORKOUT", `starts_at_local` (midnight of its date when no time is set), `is_local: true`, `is_remote: false`, `sync_source: "local"` and its stored `sync_status` (default `local`).
