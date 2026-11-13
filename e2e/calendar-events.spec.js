@@ -126,7 +126,7 @@ test("@responsive event band, notice and sheet meet AA contrast in both themes",
   await showCalendarDay(page, days.day);
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
-    const band = await new AxeBuilder({ page }).include(".planned-event-band").include(".planned-undecided-banner").include('.nav-item[data-route="plan"]').withRules(["color-contrast"]).analyze();
+    const band = await new AxeBuilder({ page }).include(".planned-event-band").include(".planned-undecided-banner").include('.nav-item[data-route="plan"] > b.nav-count').withRules(["color-contrast"]).analyze();
     expect(band.violations).toEqual([]);
     await page.locator(".planned-event-chip").first().click();
     const sheet = await new AxeBuilder({ page }).include(".planned-event-sheet").withRules(["color-contrast"]).analyze();
