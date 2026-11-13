@@ -193,8 +193,8 @@ fails explicitly. Measure complete cold and warm preparation costs; a warm cache
 is not a cold-pull result. To roll back prepared execution locally, omit
 `--browser-image` after preparing the locked native browser. CI rollback requires
 restoring native browser/system preparation together with that invocation.
-Keep the smaller matrix/serial path until measured concurrency gains justify
-additional runner-minutes. The full isolated selection can take substantial time
+Add CI shards or local lanes only when measured critical-path gains justify the
+additional runner-minutes (#2536 split mobile and tablet-landscape). The full isolated selection can take substantial time
 on Docker Desktop; retain its manifest and wait for the terminal result.
 
 Follow the [disposable browser validation notes](../.agents/skills/pacecraft-pwa-e2e/references/browser-validation.md)
@@ -247,6 +247,24 @@ not the gain over the old runner:
 | Browser, 3 projects, 187 specs, native Chromium, all passed | `--jobs 1`: 1425.8 s | `--jobs 2`: 909.4 s, summed child time +21% | -36.2%, met against serial |
 | Python `-Suite all`, 9,358 tests | `-Workers 1`: 278.1 s | `-Workers 2`: 164.6 s, summed test time +6.8% | -40.8%, unverified |
 | GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min | | missed; queue and runner-minute split in #2536 |
+
+GitHub split (#2536): five natural successful PR runs of `publish-container.yml`
+on 2026-11-13 (43407572797, 43407637046, 43408243035, 43408548488,
+43410126789), from workflow creation to completion, median 17.1 min (14.6 to
+20.4). Queue time per job was 0.1 to 4.8 min; execution decided the critical
+path. The last job before the aggregate was the single `mobile` browser job in
+four runs and `tablet-landscape` in one: `mobile` ran 8.1 to 11.8 min and
+`tablet-landscape` 8.6 to 10.7 min of tests, against 4.7 to 7.0 min per
+`desktop` shard. The native chain (`test` aggregate, then incremental quality
+checks) ended at 5.8 to 12.9 min, driven by up to 4 min of queue before the
+aggregate. Browser jobs start 1.6 to 5.1 min after creation (source and image).
+The 16 jobs of a run summed 41.2 to 45.3 runner-minutes of execution and 11.4
+to 39.0 min of queue; each extra browser shard repeats about 0.7 min of setup.
+The mobile and tablet-landscape projects therefore run as two shards each, like
+desktop; the required check names stay unchanged. Six minutes stays out of
+reach while the image, the queue and the native chain together take about that
+long. The result on five later natural runs, including queue with the larger
+matrix and the per-shard balance, is still to be recorded in #2536.
 
 The Python goal stays unverified: both runs end with the same 18 checkout/Git
 environment failures that `-Suite all` documents above, and an earlier same-host
