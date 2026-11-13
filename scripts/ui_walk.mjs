@@ -69,6 +69,7 @@ export function scratchPath(target) {
 // any entry already at the name (a file, a link or a hard link) stops the walk
 // instead of being followed. Each walk needs a fresh --out-dir.
 export const FRESH_OUT_DIR = "the out-dir already holds walk files; use a fresh --out-dir";
+const stopLine = (error, fallback) => `FAIL ${error.code === "EEXIST" ? FRESH_OUT_DIR : fallback}`;
 export function writeFresh(outDir, name, data) {
   const file = path.join(scratchPath(outDir), name);
   fs.writeFileSync(scratchPath(file), data, { flag: "wx" });
@@ -293,13 +294,13 @@ async function main() {
   try {
     result = await walk({ chromium, url, password, outDir });
   } catch (error) {
-    console.log(error.code === "EEXIST" ? `FAIL ${FRESH_OUT_DIR}` : `FAIL walk stopped (${error.name})`);
+    console.log(stopLine(error, `walk stopped (${error.name})`));
     return 2;
   }
   try {
     writeFresh(outDir, "ui-walk.json", JSON.stringify(result, null, 2));
   } catch (error) {
-    console.log(error.code === "EEXIST" ? `FAIL ${FRESH_OUT_DIR}` : `FAIL cannot write the walk result (${error.code})`);
+    console.log(stopLine(error, `cannot write the walk result (${error.code})`));
     return 2;
   }
   const lines = [...reportLines(result), ...compareLines(result, previous)];
