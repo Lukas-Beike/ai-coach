@@ -38,9 +38,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from backend.activities.hr_cap import stored_cap
-from backend.activities.hr_cap_export import capped_description
-from backend.activities.workout_text import structured_blocks
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import (
     ProviderId,
@@ -55,15 +52,16 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units, strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
-from backend.planning.push_state import garmin_fingerprint
+from backend.planning.push_state import (
+    WORKOUT_MARKER,
+    garmin_fingerprint,
+    run_document,
+    run_document_digest,
+    run_sent_key,
+)
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
-from backend.providers.garmin_run_workout import (
-    GarminRunMappingError,
-    GarminRunTargets,
-    comparable_steps,
-    run_workout,
-)
+from backend.providers.garmin_run_workout import comparable_steps
 from backend.providers.garmin_strength_workout import (
     NO_STRUCTURE_MESSAGE,
     GarminExercise,
@@ -81,8 +79,6 @@ _KEY_VALUES = KeyValueRepository(lambda: datetime.now(UTC).isoformat())
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
 _LOCK_WAIT_S = 30.0
 _LOGGER = logging.getLogger("intervals_coach")
-# First line of every description, so a workout this app sent can be told apart.
-WORKOUT_MARKER = "Pacecraft"
 # Workouts of past days removed per refresh; the next refresh takes the rest.
 _PAST_REMOVAL_BATCH = 20
 _PAST_REMOVAL_ATTEMPTS = 2 * _PAST_REMOVAL_BATCH
@@ -112,6 +108,8 @@ class _Prepared:
     document: dict[str, Any] | None = None
     # What the calendar compares to show the sync button again (push_state).
     fingerprint: str | None = None
+    # What Garmin acts on in a run document, to see later threshold moves (#2546).
+    run_digest: str | None = None
 
 
 def _status(error: BaseException) -> int | None:
@@ -483,6 +481,7 @@ class GarminStrengthPushService:
             plan_date,
             document,
             garmin_fingerprint(unit, remembered),
+            run_document_digest(document),
         )
 
     def _document(
@@ -507,7 +506,7 @@ class GarminStrengthPushService:
         if day < self._today():
             raise ValueError("Vergangene Einheiten werden nicht an Garmin gesendet.")
         if sport is Sport.RUN:
-            return plan_date, _run_document(unit, zones_for(unit))
+            return plan_date, run_document(unit, zones_for(unit))
         exercises = strength_structure.normalize_structure(
             unit.get("strength_structure"), stored=True
         )
@@ -605,6 +604,8 @@ class GarminStrengthPushService:
     ) -> None:
         """Store the workout and schedule ids; the fingerprint only once fully pushed."""
         with self._database_manager().unit_of_work() as db:
+            if payload_hash and unit.run_digest:
+                _KEY_VALUES.set(db, run_sent_key(unit.local_id), unit.run_digest)
             _REMOTE_LINKS.upsert(
                 db,
                 RemoteLink(
@@ -700,37 +701,6 @@ def _call(method: Callable[..., Any], *args: Any) -> Any:
 
 def _no_zones(_unit: Mapping[str, Any]) -> ZoneSettings | None:
     return None
-
-
-def _run_document(
-    unit: Mapping[str, Any], zones: ZoneSettings | None
-) -> dict[str, Any]:
-    """The Garmin running workout of a run unit; relative targets need ``zones``."""
-    description = str(unit.get("description") or "")
-    lthr = zones.lthr if zones else None
-    if stored_cap(unit) is not None and not lthr:
-        # The cap is percent of the threshold HR; without it the cap would be lost.
-        raise GarminRunMappingError(
-            "Die Pulsobergrenze braucht den Schwellenpuls, der nicht vorliegt."
-        )
-    capped = capped_description(description, unit, lthr=lthr)
-    return run_workout(
-        name=str(unit.get("name") or ""),
-        description=f"{WORKOUT_MARKER}\n{description}",
-        blocks=structured_blocks(capped, str(unit.get("target") or "AUTO")),
-        targets=None
-        if zones is None
-        else GarminRunTargets(
-            ftp=zones.ftp,
-            threshold_hr=zones.lthr,
-            max_hr=zones.max_hr,
-            threshold_speed=zones.threshold_pace,
-            hr_zone_basis=zones.hr_zone_reference,
-            power_limits=zones.power_limits,
-            hr_limits=zones.hr_limits,
-            pace_limits=zones.pace_limits,
-        ),
-    )
 
 
 def _workout_id(saved: Any) -> str:

@@ -105,14 +105,6 @@ def hidden_planned_unit_ids(db: Any) -> set[str]:
     return {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
 
 
-def synced_capped_planned_unit_rows(db: Any) -> list[Any]:
-    return db.execute(
-        f"SELECT {_STATE_COLUMNS} FROM planned_units "
-        "WHERE sync_state='synced' AND json_extract(payload, '$.hr_cap') IS NOT NULL "
-        "ORDER BY local_id"
-    ).fetchall()
-
-
 def planned_unit_rows(
     db: Any,
     limit: int,

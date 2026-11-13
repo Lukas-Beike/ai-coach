@@ -29,9 +29,7 @@ from backend.activities.hr_cap import (
 from backend.activities.hr_cap_export import capped_description
 from backend.activities.workout_text import structured_steps
 from backend.errors import AppError
-from backend.planning.hr_cap_sync import record_sent, resync_ids, sent_key
 from backend.planning.planned_units import planned_unit_payload_hash
-from backend.planning.push_state import attach_push_state
 from backend.planning.workout_export import build_planned_workout_export
 from backend.providers.intervals_workouts import intervals_event_payload
 from backend.providers.wahoo_plan_mapping import WahooPlanReferences
@@ -278,12 +276,10 @@ class IntervalsLibraryExportTests(unittest.TestCase):
 
 
 class CalendarSyncTests(unittest.TestCase):
-    """The Intervals.icu calendar push resolves the range and remembers what it sent."""
+    """The Intervals.icu calendar push resolves the range for the unit's day."""
 
     @staticmethod
-    def service(
-        lthr: float | None, kv: Any, export: Any = None
-    ) -> PlannedCalendarSyncService:
+    def service(lthr: float | None, export: Any = None) -> PlannedCalendarSyncService:
         export = export or MagicMock()
         export.serialize.side_effect = lambda local_id, model: intervals_event_payload(
             local_id, model
@@ -297,34 +293,19 @@ class CalendarSyncTests(unittest.TestCase):
             lambda: "2026-11-09T08:00:00+00:00",
             lambda: TODAY,
             run_lthr_for=lambda _unit: lthr,
-            key_values=kv,
         )
 
     def test_the_event_carries_the_range_resolved_for_the_unit_day(self) -> None:
         item = unit()
         for lthr in (LTHR, NEW_LTHR):
-            payload = self.service(lthr, None)._event_payload("u1", item, lthr)
+            payload = self.service(lthr)._event_payload("u1", item, lthr)
             low, high = resolved_range(item["hr_cap"], lthr) or (0, 0)
             self.assertIn(f"{low}-{high}bpm", payload["description"])
-
-    def test_the_sent_range_is_remembered_so_a_later_threshold_move_is_seen(
-        self,
-    ) -> None:
-        kv = ChangedFlagTests.kv()
-        item = unit()
-        service = self.service(LTHR, kv)
-        service._remember_sent_range("u1", item, LTHR)
-        low, high = resolved_range(item["hr_cap"], LTHR) or (0, 0)
-        self.assertEqual({sent_key("u1"): f"{low}-{high}"}, kv.store)
-        flagged = resync_ids(
-            kv, None, [{**item, "sync_status": "synced"}], lambda _u: NEW_LTHR
-        )
-        self.assertEqual({"u1"}, flagged)
 
     def test_the_readback_is_checked_against_the_text_that_was_sent(self) -> None:
         item = unit()
         export = MagicMock()
-        service = self.service(LTHR, None, export)
+        service = self.service(LTHR, export)
         payload = service._event_payload("u1", item, LTHR)
         export.upsert.return_value = [{"id": "e1"}]
         export.event_identity.return_value = "e1"
@@ -333,78 +314,9 @@ class CalendarSyncTests(unittest.TestCase):
         self.assertEqual(payload["description"], sent["description"])
         self.assertNotEqual(item["description"], sent["description"])
 
-    def test_a_capped_unit_sent_without_a_threshold_remembers_none(self) -> None:
-        kv = ChangedFlagTests.kv()
-        self.service(None, kv)._remember_sent_range("u1", unit(), None)
-        self.assertEqual({sent_key("u1"): "none"}, kv.store)
-
-    def test_a_unit_without_a_cap_remembers_nothing(self) -> None:
-        kv = ChangedFlagTests.kv()
-        self.service(LTHR, kv)._remember_sent_range("u1", unit(hr_cap=None), LTHR)
-        self.assertEqual({}, kv.store)
-
 
 class ChangedFlagTests(unittest.TestCase):
-    """Garmin's bpm path: a synced unit is changed when only the LTHR moved."""
-
-    @staticmethod
-    def kv(sent: dict[str, str] | None = None) -> MagicMock:
-        store = dict(sent or {})
-        kv = MagicMock()
-        kv.get.side_effect = lambda _db, key: store.get(key)
-        kv.set.side_effect = lambda _db, key, value: store.__setitem__(key, value)
-        kv.delete.side_effect = lambda _db, key: store.pop(key, None)
-        kv.store = store
-        return kv
-
-    def payload(self, **overrides: Any) -> dict[str, Any]:
-        return unit(sync_status="synced", **overrides)
-
-    def test_the_sent_range_is_remembered_and_none_when_no_range_resolved(self) -> None:
-        kv = self.kv()
-        record_sent(kv, None, "u1", (98, 120))
-        self.assertEqual({sent_key("u1"): "98-120"}, kv.store)
-        record_sent(kv, None, "u1", None)
-        self.assertEqual({sent_key("u1"): "none"}, kv.store)
-
-    def test_a_unit_sent_without_a_threshold_is_flagged_once_one_is_known(
-        self,
-    ) -> None:
-        kv = self.kv()
-        item = self.payload()
-        record_sent(kv, None, "u1", resolved_range(item["hr_cap"], None))
-        self.assertEqual(set(), resync_ids(kv, None, [item], lambda _u: None))
-        self.assertEqual({"u1"}, resync_ids(kv, None, [item], lambda _u: LTHR))
-
-    def test_only_a_moved_lthr_flags_a_synced_unit(self) -> None:
-        item = self.payload()
-        low, high = resolved_range(item["hr_cap"], LTHR) or (0, 0)
-        kv = self.kv({sent_key("u1"): f"{low}-{high}"})
-        self.assertEqual(set(), resync_ids(kv, None, [item], lambda _u: LTHR))
-        self.assertEqual({"u1"}, resync_ids(kv, None, [item], lambda _u: NEW_LTHR))
-
-    def test_nothing_is_flagged_without_a_remembered_range_a_threshold_or_a_sync(
-        self,
-    ) -> None:
-        item = self.payload()
-        self.assertEqual(
-            set(), resync_ids(self.kv(), None, [item], lambda _u: NEW_LTHR)
-        )
-        kv = self.kv({sent_key("u1"): "1-2"})
-        self.assertEqual(set(), resync_ids(kv, None, [item], lambda _u: None))
-        local = unit(sync_status="local")
-        self.assertEqual(set(), resync_ids(kv, None, [local], lambda _u: NEW_LTHR))
-        plain = self.payload(hr_cap=None)
-        self.assertEqual(set(), resync_ids(kv, None, [plain], lambda _u: NEW_LTHR))
-
-    def test_the_calendar_sync_button_returns_for_a_flagged_unit(self) -> None:
-        row = {"local_id": "u1", "payload": "{}", "sync_state": "synced"}
-        flagged: dict[str, Any] = {"sport": "VirtualRide"}
-        attach_push_state([(row, flagged)], {}, {}, {"u1"})
-        self.assertTrue(flagged["push_pending"]["intervals"])
-        steady: dict[str, Any] = {"sport": "VirtualRide"}
-        attach_push_state([(row, steady)], {}, {}, set())
-        self.assertFalse(steady["push_pending"]["intervals"])
+    """The unit hash follows the cap percent, not the focus label."""
 
     def test_a_percent_change_changes_the_unit_hash_but_a_focus_edit_does_not(
         self,

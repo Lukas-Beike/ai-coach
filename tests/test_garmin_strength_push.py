@@ -6,6 +6,7 @@ import json
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -33,9 +34,12 @@ from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.push_state import (
     attach_push_state,
+    garmin_baselines,
     garmin_fingerprint,
     pushable_fingerprint,
+    run_sent_key,
 )
+from backend.planning.run_lthr import RunLthr
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import (
@@ -1228,6 +1232,71 @@ class RunPushTests(PushHarness):
             ("501", "502", garmin_fingerprint(RUN)),
             (link.remote_id, link.remote_external_id, link.baseline_hash),
         )
+
+    def garmin_pending(self, unit: dict, *, local_id: str = U1) -> bool:
+        """Whether the calendar offers the pushed run to Garmin with today's zones."""
+        thresholds: Any = SimpleNamespace(
+            unavailable=False,
+            for_sport=lambda *_args: SimpleNamespace(zones=self.zones),
+        )
+        run_lthr = RunLthr(
+            lambda: thresholds, lambda: TODAY, KeyValueRepository(lambda: "")
+        )
+        payload: dict[str, Any] = {**unit, "local_id": local_id}
+        row = {"local_id": local_id, "payload": json.dumps(unit), "sync_state": "local"}
+        with self.database_manager.reader() as db:
+            resync = run_lthr.resync(db, [payload])
+            attach_push_state([(row, payload)], garmin_baselines(db), {}, resync)
+        return payload["push_pending"]["garmin"]
+
+    def test_a_threshold_move_marks_a_pushed_relative_run_pending_until_resent(
+        self,
+    ) -> None:
+        digest = self.insert(U1, RUN)
+        self.push((U1, digest))
+        self.assertFalse(self.garmin_pending(RUN))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+        self.assertTrue(self.garmin_pending(RUN))
+
+        self.push((U1, digest))
+        self.assertFalse(self.garmin_pending(RUN))
+
+    def test_a_threshold_move_marks_a_pushed_capped_run_pending(self) -> None:
+        unit = {
+            **RUN,
+            "description": "- 10m Z1 HR",
+            "session_focus": next(iter(HR_CAP_PERCENT)),
+            "hr_cap": CAP,
+        }
+        self.push((U1, self.insert(U1, unit)))
+        self.assertFalse(self.garmin_pending(unit))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+        self.assertTrue(self.garmin_pending(unit))
+
+    def test_a_threshold_move_leaves_an_absolute_only_run_alone(self) -> None:
+        self.push((U1, self.insert(U1, RUN_ABSOLUTE)))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+
+        self.assertFalse(self.garmin_pending(RUN_ABSOLUTE))
+
+    def test_a_run_pushed_without_a_recorded_digest_is_never_flagged(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+        with self.database_manager.unit_of_work() as db:
+            KeyValueRepository(lambda: "").delete(db, run_sent_key(U1))
+
+        self.zones = ZoneSettings(lthr=175.0, max_hr=190.0)
+
+        self.assertFalse(self.garmin_pending(RUN))
+
+    def test_a_run_that_cannot_be_built_now_is_not_flagged_here(self) -> None:
+        self.push((U1, self.insert(U1, RUN)))
+
+        self.zones = None
+
+        self.assertFalse(self.garmin_pending(RUN))
 
     def test_the_heart_rate_cap_is_sent_as_bpm(self) -> None:
         unit = {

@@ -184,8 +184,9 @@ class PushStateTests(unittest.TestCase):
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
     def test_only_indoor_and_virtual_rides_wait_for_intervals(self) -> None:
-        # Intervals.icu serves Zwift (#2419): whatever the sync state, an existing
-        # event or a moved heart-rate range, other units never wait for it.
+        # Intervals.icu serves Zwift (#2419): whatever the sync state or an
+        # existing event, other units never wait for it; a synced ride only
+        # when its event has another category than it gets now.
         cases: list[tuple[dict[str, Any], bool]] = [
             (RIDE, True),
             ({**RIDE, "sport": "Ride", "environment": "indoor"}, True),
@@ -211,11 +212,13 @@ class PushStateTests(unittest.TestCase):
                 )
                 for index, (payload, _waits) in enumerate(cases)
             ]
-            attach_push_state(
-                pairs, {}, resync={f"u{index}" for index in range(len(cases))}
-            )
+            attach_push_state(pairs, {})
+            open_state = state in {"local", "sync_error"}
             self.assertEqual(
-                [waits for _payload, waits in cases],
+                [
+                    waits and (open_state or "remote_event_category" in payload)
+                    for payload, waits in cases
+                ],
                 [payload["push_pending"]["intervals"] for _row, payload in pairs],
                 state,
             )
@@ -443,6 +446,17 @@ class PushStateTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertTrue(
                     pending({**RUN, field: value})["push_pending"]["garmin"]
+                )
+
+    def test_a_resync_id_offers_a_pushed_run_to_garmin_only(self) -> None:
+        row = {"local_id": "r1", "payload": json.dumps(RUN), "sync_state": "synced"}
+        baselines = {"r1": garmin_fingerprint(RUN)}
+        for resync, expected in (({"r1"}, True), (set(), False)):
+            with self.subTest(resync=resync):
+                payload = {**RUN}
+                attach_push_state([(row, payload)], baselines, {}, resync)
+                self.assertEqual(
+                    {"intervals": False, "garmin": expected}, payload["push_pending"]
                 )
 
     def test_the_run_fingerprint_follows_the_cap_the_push_applies(self) -> None:

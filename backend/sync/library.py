@@ -69,16 +69,11 @@ class WorkoutLibrarySyncStateService:
         redactor: Redactor,
         key_value_repository: KeyValueRepository,
         now: Callable[[], str],
-        hr_cap_resync: Callable[[Any, list[dict[str, Any]]], set[str]] = (
-            lambda _db, _payloads: set()
-        ),
     ):
         self._database_manager = database_manager
         self._redactor = redactor
         self._key_value_repository = key_value_repository
         self._now = now
-        # Synced capped units whose bpm range moved with the threshold HR.
-        self._hr_cap_resync = hr_cap_resync
 
     def reset_interrupted(self) -> int:
         """Offer again the units a crash left "syncing"; run before any worker.
@@ -98,12 +93,9 @@ class WorkoutLibrarySyncStateService:
             planned_rows = sorted(
                 [
                     row
-                    for row in [
-                        *planning_store.planned_unit_rows_in_states(
-                            db, _OPEN_SYNC_STATES
-                        ),
-                        *self._resync_planned_rows(db),
-                    ]
+                    for row in planning_store.planned_unit_rows_in_states(
+                        db, _OPEN_SYNC_STATES
+                    )
                     if not self._skipped(row)
                 ],
                 key=lambda row: str(row.get("local_id") or ""),
@@ -119,25 +111,6 @@ class WorkoutLibrarySyncStateService:
     @classmethod
     def _skipped(cls, row: Any) -> bool:
         return skips_intervals(cls._object_payload(row["payload"]))
-
-    def _resync_planned_rows(self, db: Any) -> list[Any]:
-        """Synced capped units the calendar offers again after a threshold move."""
-        rows = planning_store.synced_capped_planned_unit_rows(db)
-        payloads = [
-            {**payload, "local_id": row["local_id"], "sync_status": row["sync_state"]}
-            for row in rows
-            if isinstance(payload := self._parse_payload(row["payload"]), dict)
-            # Like the calendar: archived or deleted units are never offered.
-            and not payload.get("archived")
-            and not payload.get("local_deleted")
-        ]
-        active = {str(payload["local_id"]) for payload in payloads}
-        moved = self._hr_cap_resync(db, payloads) if payloads else set()
-        return [
-            row
-            for row in rows
-            if str(row["local_id"]) in moved and str(row["local_id"]) in active
-        ]
 
     @staticmethod
     def _with_linked_external_ids(
