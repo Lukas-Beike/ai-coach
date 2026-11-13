@@ -1,7 +1,7 @@
 // Headless read-only walk through the running app at phone and desktop width.
 //
 //   node scripts/ui_walk.mjs --url <app address> --password-file <secret file>
-//     --out-dir <scratchpad dir> [--compare <previous ui-walk.json>]
+//     --out-dir <new scratchpad dir> [--compare <previous ui-walk.json>]
 //
 // Logs in with the password read from the file (never printed or passed on a
 // command line), opens each main view, switches the calendar between week and
@@ -62,6 +62,17 @@ function confined(target, roots, refused) {
 // session scratchpad), never in the repository or anywhere else a path could reach.
 export function scratchPath(target) {
   return confined(target, [os.tmpdir()], new Error("files must be in the system temp directory"));
+}
+
+// Writes one file of the walk by its fixed name (#2661): the out-dir is
+// checked again right before the write and the file is created exclusively, so
+// any entry already at the name (a file, a link or a hard link) stops the walk
+// instead of being followed. Each walk needs a fresh --out-dir.
+export const FRESH_OUT_DIR = "the out-dir already holds walk files; use a fresh --out-dir";
+const stopLine = (error, fallback) => `FAIL ${error.code === "EEXIST" ? FRESH_OUT_DIR : fallback}`;
+export function writeFresh(outDir, name, data) {
+  const file = path.join(scratchPath(outDir), name);
+  fs.writeFileSync(scratchPath(file), data, { flag: "wx" });
 }
 
 export function secretPath(target, secrets = T3_SECRETS) {
@@ -197,7 +208,7 @@ async function walk({ chromium, url, password, outDir }) {
       // Every error counts against a step: login, a view (with its calendar walk), or the rest.
       result.errors[`${name} login`] = errors.length;
       let counted = errors.length;
-      const shot = (label) => page.screenshot({ path: path.join(outDir, `${name}-${label}.png`), fullPage: false });
+      const shot = async (label) => writeFresh(outDir, `${name}-${label}.png`, await page.screenshot({ fullPage: false }));
       for (const route of VIEWS) {
         const view = await rendered(page, route, open);
         result.loadMs[`${name} ${route}`] = view.ms;
@@ -264,7 +275,12 @@ async function main() {
     console.log(`FAIL ${error.syscall ? "cannot read the secret file" : error.message}`);
     return 2;
   }
-  fs.mkdirSync(outDir, { recursive: true });
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+  } catch {
+    console.log("FAIL cannot create the out-dir");
+    return 2;
+  }
   let previous = null;
   try {
     previous = values.compare ? JSON.parse(fs.readFileSync(scratchPath(values.compare), "utf8")) : null;
@@ -278,10 +294,15 @@ async function main() {
   try {
     result = await walk({ chromium, url, password, outDir });
   } catch (error) {
-    console.log(`FAIL walk stopped (${error.name})`);
+    console.log(stopLine(error, `walk stopped (${error.name})`));
     return 2;
   }
-  fs.writeFileSync(path.join(outDir, "ui-walk.json"), JSON.stringify(result, null, 2));
+  try {
+    writeFresh(outDir, "ui-walk.json", JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.log(stopLine(error, `cannot write the walk result (${error.code})`));
+    return 2;
+  }
   const lines = [...reportLines(result), ...compareLines(result, previous)];
   for (const line of lines) console.log(line);
   return lines.some((line) => line.startsWith("FAIL")) ? 1 : 0;
