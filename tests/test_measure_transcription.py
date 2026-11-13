@@ -25,7 +25,7 @@ class MeasureTranscriptionTests(unittest.TestCase):
         self.assertEqual(
             lan_base_url("http://192.168.1.5:8000/v1"), "http://192.168.1.5:8000/v1"
         )
-        self.assertEqual(lan_base_url("https://127.0.0.1"), "https://127.0.0.1:8000/v1")
+        self.assertEqual(lan_base_url("https://127.0.0.1"), "https://127.0.0.1:8080/v1")
         for value in ("http://example.com:8000", "http://8.8.8.8:8000"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 lan_base_url(value)

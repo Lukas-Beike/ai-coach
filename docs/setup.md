@@ -123,14 +123,15 @@ server {
 
 ## Local voice transcription
 
-Voice notes can be transcribed by a Whisper server on the LAN instead of OpenAI (#2596). [Speaches](https://speaches.ai/) offers the OpenAI-compatible `/v1/audio/transcriptions` endpoint; it runs on the CPU (there is no Intel iGPU/OpenVINO image). Unraid **Add Container**:
+Voice notes can be transcribed by a Whisper server on the LAN instead of OpenAI (#2596). [LocalAI](https://localai.io/) offers the OpenAI-compatible `/v1/audio/transcriptions` endpoint with whisper.cpp; the Community Applications template ships Nvidia flags and outdated tags, so add the container by hand. Unraid **Add Container**:
 
-- **Repository**: `ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu`, **Network Type**: `Bridge`, **Port**: `8000` -> `8000`, reachable on the LAN only.
-- **Path**: `/mnt/user/appdata/speaches` -> `/home/ubuntu/.cache/huggingface/hub` (Read/Write); the container runs as UID 1000, so run `chown -R 1000:1000 /mnt/user/appdata/speaches` first.
-- **Variables**: `PRELOAD_MODELS` = `["Systran/faster-whisper-small"]` (German needs a multilingual id, never `.en`), `WHISPER__COMPUTE_TYPE` = `int8`, `STT_MODEL_TTL` = `-1`, `ENABLE_UI` = `False`, `LOG_LEVEL` = `info`, optional `API_KEY`.
-- **Extra Parameters**: `--health-cmd="curl -fs http://localhost:8000/health" --health-interval=30s`.
+- **Repository**: `localai/localai:v4.12.1` (CPU), **Network Type**: `Bridge`, **Port**: `8080` -> `8080`, reachable on the LAN only.
+- **Paths** (Read/Write; the container paths are fixed): `/mnt/user/appdata/localai/models` -> `/models`, `.../backends` -> `/backends`, `.../configuration` -> `/configuration`, `.../data` -> `/data`.
+- **Variables**: `LOCALAI_API_KEY` (a long random value), `LOCALAI_THREADS` (physical cores), `LOCALAI_FORCE_META_BACKEND_CAPABILITY` = `default` (CPU whisper backend).
+- **Intel iGPU comparison**: `localai/localai:v4.12.1-gpu-intel` with `--device=/dev/dri` and without the capability variable; only worth it if the measurement shows it faster.
+- **Model**: German needs a multilingual model, never `.en`: install it once with `curl http://<unraid-ip>:8080/models/apply -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"id":"localai@whisper-large-turbo-q5_0"}'` (or `whisper-medium-q5_0`, `whisper-small-q5_1`); `GET /v1/models` lists the name to use.
 
-Pacecraft accepts only HTTPS here, like the Coach endpoints: add a LAN-only host to the reverse proxy above that forwards to `speaches:8000`, with a certificate the Pacecraft container trusts. Then set `TRANSCRIPTION_BASE_URL=https://<that-host>/v1`, `TRANSCRIPTION_MODEL` to the loaded model id and, if set, `TRANSCRIPTION_API_KEY`. Leave all three empty to keep voice on OpenAI. `python scripts/measure_transcription.py --help` measures word error rate and latency per model on public German samples.
+Pacecraft accepts only HTTPS here, like the Coach endpoints: add a LAN-only host to the reverse proxy above that forwards to `localai:8080`, with a certificate the Pacecraft container trusts. Then set `TRANSCRIPTION_BASE_URL=https://<that-host>/v1`, `TRANSCRIPTION_MODEL` to the installed model name and `TRANSCRIPTION_API_KEY` to the LocalAI key. Leave all three empty to keep voice on OpenAI. `python scripts/measure_transcription.py --help` measures word error rate and latency per model on public German samples.
 
 ## Provider credentials in the app
 

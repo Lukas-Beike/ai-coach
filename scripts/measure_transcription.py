@@ -1,10 +1,9 @@
 """Measure word error rate and latency of a local Whisper server per model (#2596).
 
-Run from a LAN machine against an OpenAI-compatible server such as Speaches:
+Run from a LAN machine against an OpenAI-compatible server such as LocalAI:
 
-    python scripts/measure_transcription.py --base-url http://<LAN IP>:8000 \
-        --model Systran/faster-whisper-small \
-        --model deepdml/faster-whisper-large-v3-turbo-ct2
+    python scripts/measure_transcription.py --base-url http://<LAN IP>:8080 \
+        --model whisper-small-q5_1 --model whisper-large-turbo-q5_0
 
 The samples are public German read speech from Google FLEURS (dev split,
 CC BY 4.0), streamed until enough clips sit in the temp directory; never the athlete's
@@ -69,7 +68,7 @@ def lan_base_url(value: str) -> str:
         raise ValueError("the server must be a private LAN or loopback IP address")
     scheme = "https" if parsed.scheme == "https" else "http"
     host = f"[{address}]" if address.version == 6 else str(address)
-    return f"{scheme}://{host}:{int(parsed.port or 8000)}/v1"
+    return f"{scheme}://{host}:{int(parsed.port or 8080)}/v1"
 
 
 def fetch_samples(count: int) -> list[tuple[Path, str]]:
