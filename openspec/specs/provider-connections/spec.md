@@ -533,3 +533,39 @@ The system SHALL offer the explicit read-only connection check of the uniform pr
 - **THEN** the card shows the safe failure category with key and base URL guidance, or reports that the endpoint does not support the check.
 
 Evidence: `backend/providers/connection_check_probes.py:build_probes`, `public/index.html` (`connection-anthropic`), `public/provider-connections.js:CREDENTIAL_FORMS`; `tests/test_provider_connection_checks.py`, `tests/provider-connections.test.cjs`.
+
+### Requirement: Connection status in the PWA
+
+A configured provider SHALL ask for manual attention when its error is `auth_required` or `invalid_configuration`, or its state is error, stale or partial without a retry in the future; a busy local database SHALL never count. The freshness list SHALL name each state ("Frisch", "Teilweise erfolgreich", "Veraltet, aber nutzbar", "Wird aktualisiert", "Fehler", "Noch nie geladen", "Nicht konfiguriert").
+
+#### Scenario: Retry
+- **WHEN** a configured provider is in error or stale
+- **THEN** "Erneut versuchen" starts that provider's normal sync
+
+#### Scenario: Connection check
+- **WHEN** "Verbindung prüfen" is used
+- **THEN** `POST /api/providers/{id}/check` runs with a 60-second deadline; while the server reports `checking` the status is read every 3 seconds, at most 200 times and only while the section is visible; a `busy` or `checking` answer keeps the earlier result
+
+Evidence: `public/sync-status.js::providerRequiresManualAttention`; `public/sync-status.js::renderProviderFreshness`; `public/provider-checks.js::checkProviderConnection`; `public/provider-checks.js::readProviderChecks`. Tests: `tests/sync-actions.test.cjs::a busy local database never asks for manual attention`; `tests/provider-checks.test.cjs::a concurrent-check or busy answer does not replace the stored result`.
+
+### Requirement: Credential and connection cards in the PWA
+
+Each credential field SHALL state its source ("In der App gespeichert", "Aus Umgebung", "Nicht gesetzt"), show its current value only for the base URLs of OpenAI and Anthropic, the Intervals.icu athlete id, the Wahoo client id and the Garmin key expiry, and offer "Entfernen" only for a value stored in the app.
+
+#### Scenario: Garmin login
+- **WHEN** the login answers `mfa_required`, or the code step answers 409
+- **THEN** the code form is shown, or the login form returns with the server message; both requests use a 55-second deadline
+
+#### Scenario: Full resync
+- **WHEN** a full resync is confirmed (for Garmin after typing the provider name)
+- **THEN** the client posts `{confirm: "FULL_RESYNC"}`, reads the state every second, ends tracking after five failed reads in a row with "Der Resync-Status ist nicht erreichbar. Er läuft auf dem Server weiter.", and a page opened during a run follows it
+
+#### Scenario: Wahoo return
+- **WHEN** the page opens with `?wahoo=connected` or `?wahoo=error`
+- **THEN** the outcome is announced once and removed from the address, and Anbindungen is shown unless the address names a route
+
+#### Scenario: Garmin period
+- **WHEN** "Garmin synchronisieren" is used
+- **THEN** the day count of the field (-1 to 90, default 84) is sent as `days`
+
+Evidence: `public/provider-connections.js::credentialSourceView`; `public/provider-connections.js::submitGarminLogin`; `public/provider-connections.js::submitGarminMfa`; `public/sync-actions.js::fullResync`; `public/sync-actions.js::waitForFullResync`; `public/sync-actions.js::syncGarmin`; `public/wahoo-connection.js::takeWahooReturnOutcome`. Tests: `tests/provider-connections.test.cjs::a discarded pending login returns from the MFA step to the login form`; `tests/wahoo-connection.test.cjs::a slow resync is polled, not reported as a failure, even when a single poll fails`; `e2e/wahoo-connection.spec.js::the OAuth return outcome is announced once and removed from the address`.
