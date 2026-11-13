@@ -166,6 +166,20 @@ class GuardHookTests(unittest.TestCase):
             with self.subTest(command):
                 self.assertEqual(self.decide(command), 2)
 
+    def test_the_whole_scripts_tree_is_compared_with_develop(self):
+        # A committed shadowing module (scripts/json.py) must also block.
+        calls = []
+
+        def fake(args, **_kwargs):
+            calls.append(args)
+            return mock.Mock(returncode=0, stdout="")
+
+        with mock.patch.object(guard.subprocess, "run", side_effect=fake):
+            self.assertTrue(guard.unchanged())
+        self.assertIn(
+            ["git", "diff", "--quiet", "origin/develop", "--", "scripts"], calls
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,8 +3,8 @@
 `.claude/settings.json` allows `python scripts/resolve_review_thread.py` without
 a prompt (athlete decision #2629). That rule matches command text, so this hook
 blocks any shell command that names the script unless the whole command is
-exactly `python scripts/resolve_review_thread.py <pr> <PRRT_id>` and the script,
-its `gh_cli.py` helper and `scripts/` hold no change against origin/develop.
+exactly `python scripts/resolve_review_thread.py <pr> <PRRT_id>` and `scripts/`
+holds no change against origin/develop, committed or not.
 Exit code 2 blocks the call.
 """
 
@@ -17,17 +17,10 @@ EXACT = re.compile(r"python scripts/resolve_review_thread\.py \d+ PRRT_[A-Za-z0-
 
 
 def unchanged() -> bool:
-    """No edit of the script or helper, and no added module that could shadow them."""
+    """scripts/ matches origin/develop, committed and in the working tree: no
+    edit and no added module that could shadow an import."""
     diff = subprocess.run(
-        [
-            "git",
-            "diff",
-            "--quiet",
-            "origin/develop",
-            "--",
-            "scripts/resolve_review_thread.py",
-            "scripts/gh_cli.py",
-        ],
+        ["git", "diff", "--quiet", "origin/develop", "--", "scripts"],
         capture_output=True,
         check=False,
     )
