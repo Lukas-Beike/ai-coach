@@ -102,6 +102,8 @@ class FakeProcesses:
             return 0, ""
         if command[:2] == ["docker", "start"]:
             return 0, ""
+        if command[:2] == ["docker", "logs"]:
+            return 0, "Traceback: fixture import failed\n" + runner.FAKE_PASSWORD
         if command[0] == "ip":
             return 0, ""
         if "--version" in command:
@@ -231,7 +233,9 @@ class BrowserRunnerTests(unittest.TestCase):
             for sock in first + second:
                 sock.close()
 
-    def run_main(self, fake, jobs=1, list_only=False, extra_args=(), current=True):
+    def run_main(
+        self, fake, jobs=1, list_only=False, extra_args=(), current=True, ready=None
+    ):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         args = [
@@ -259,7 +263,7 @@ class BrowserRunnerTests(unittest.TestCase):
             mock.patch.object(
                 runner, "verify_browser", return_value={"mode": "native"}
             ),
-            mock.patch.object(runner, "ready"),
+            mock.patch.object(runner, "ready", side_effect=ready),
             mock.patch("sys.stdout", new_callable=io.StringIO),
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
         ):
@@ -790,7 +794,19 @@ class BrowserRunnerTests(unittest.TestCase):
             self.assertEqual(containers.cleanup(), [])
             self.assertFalse(fake.removed)
 
-    def test_failed_tool_command_names_itself_and_its_output(self):
+    def test_fixture_that_never_gets_ready_shows_its_last_log_lines(self):
+        # A fixture that crashes at startup is visible without manual docker logs (#2674).
+        fake = FakeProcesses()
+        refused = runner.RunnerError("Disposable fixture failed bounded readiness")
+        code, value, _path = self.run_main(fake, ready=refused)
+        self.assertNotEqual(code, 0)
+        self.assertIn("failed bounded readiness", value["error"])
+        self.assertIn("Traceback: fixture import failed", value["error"])
+        self.assertNotIn(runner.FAKE_PASSWORD, value["error"])
+        self.assertIn(
+            ["docker", "logs", "--tail", "20"], [c[:4] for c in fake.commands]
+        )
+
         # A failed build or container start shows which command and why (#2656).
         script = (
             "import sys; print('st' + 'ep 1'); "

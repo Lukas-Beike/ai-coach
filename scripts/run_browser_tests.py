@@ -1084,6 +1084,26 @@ class Execution:
                 child, ended_at=stamp(), elapsed_seconds=time.monotonic() - started
             )
 
+    def await_ready(self, slot, cid):
+        """Wait for a fixture; if it never gets ready, show its last log lines,
+        bounded and redacted (#2674)."""
+        try:
+            ready(self.slots[slot][1], self.processes.stop)
+        except RunnerError as error:
+            try:
+                _code, output = self.processes.run(
+                    ["docker", "logs", "--tail", "20", cid], timeout=15
+                )
+            except RunnerError:
+                raise error from None
+            last = getattr(getattr(self.processes, "errors", None), "last", b"") or b""
+            lines = _tail(output, 20) + _tail(
+                last.decode("utf-8", errors="replace"), 20
+            )
+            raise RunnerError(
+                str(error) + "".join(f"\n{line}" for line in lines)
+            ) from None
+
     def lane(self, index, children):
         if not children:
             return
@@ -1092,7 +1112,7 @@ class Execution:
             for offset, child in enumerate(children):
                 slot = index * 2 + offset % 2
                 wait_started = time.monotonic()
-                ready(self.slots[slot][1], self.processes.stop)
+                self.await_ready(slot, current)
                 child["phases"]["readiness_wait_seconds"] = (
                     time.monotonic() - wait_started
                 )
