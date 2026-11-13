@@ -429,6 +429,14 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("verify published tag digest parity", workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
+        # The tag digest is read without a pipe: an early-exiting reader made
+        # inspect fail with SIGPIPE under pipefail (#2600); a mismatch still fails.
+        self.assertIn(
+            """imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')\"""",
+            workflow,
+        )
+        self.assertIn('"$actual_digest" != "$EXPECTED_DIGEST" ]]; then', workflow)
+        self.assertIsNone(re.search(r"\| awk [^\n]*'[^'\n]*\bexit\b", workflow))
         self.assertIn("Verify image signature", workflow)
         self.assertIn("cosign verify", workflow)
 
