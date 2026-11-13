@@ -10,9 +10,10 @@ it is out of date. An unknown route opens the default route.
 
 The router's tables in `public/navigation.js` (`NAV_ROUTES`, `NAV_LINK_ROUTES`,
 the segment lists and `ROUTE_ALIASES`) give the routes. `NAV_VIEWS` holds one
-descriptor per route, for documentation only: `Loads` are the main API reads of
-the view beside the start load (bootstrap with the chat, plan, library,
-performance, feedback, profile and weather areas), `Actions` the German labels
+descriptor per route, for documentation only: `Loads` are the API reads the
+view relies on, the areas of the start load (chat, plan, library, performance,
+feedback, profile) included; the zones of Profil and the GPS tracks of Betrieb &
+Diagnose are read when their section is opened. `Actions` the German labels
 of its main controls as rendered, and `States` the states it can show
 (`loading`, `empty`, `error`, `notConfigured`, `offline`). A test fails when a
 route has no descriptor, a descriptor names no route, or a read path or control

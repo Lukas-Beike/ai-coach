@@ -196,7 +196,10 @@ function contractProblems(routes, views, scripts, markup) {
   for (const [route, view] of Object.entries(views)) {
     if (!Object.hasOwn(routes, route)) problems.push(`${route} is no route`);
     for (const state of view.states) if (!STATE_NAMES.includes(state)) problems.push(`${route}: unknown state ${state}`);
-    for (const load of view.loads) if (!scripts.includes(load)) problems.push(`${route}: no code reads ${load}`);
+    // A path counts only where a string starts with it and it ends or a query follows, so /api/plan is not found
+    // in /api/planned-units.
+    const quoted = (load) => ["`", "\"", "'"].some((open) => ["`", "\"", "'", "?", "$"].some((close) => scripts.includes(`${open}${load}${close}`)));
+    for (const load of view.loads) if (!quoted(load)) problems.push(`${route}: no code reads ${load}`);
     for (const action of view.actions) if (!scripts.includes(action) && !markup.includes(action)) problems.push(`${route}: no control labelled ${action}`);
     if (!view.actions.length || !view.states.length) problems.push(`${route}: empty actions or states`);
   }
@@ -205,7 +208,8 @@ function contractProblems(routes, views, scripts, markup) {
 
 test("every route has one view descriptor that the sources bear out", () => {
   const { routes, views } = loadPublicScript("navigation.js").AppNavigation;
-  const scripts = publicFiles().map(publicSource).join("\n");
+  // The descriptor table names every path and label itself, so it is no evidence for them.
+  const scripts = publicFiles().filter((file) => file !== "navigation.js").map(publicSource).join("\n");
   const markup = publicSource("index.html").replaceAll("&amp;", "&");
   assert.deepEqual(contractProblems(routes, views, scripts, markup), []);
   assert.ok(Object.isFrozen(views) && Object.isFrozen(views.coach) && Object.isFrozen(views.coach.loads));
@@ -213,10 +217,10 @@ test("every route has one view descriptor that the sources bear out", () => {
 
 test("a missing, extra or unfounded view descriptor is a problem", () => {
   const view = { loads: ["/api/a"], actions: ["Los"], states: ["empty"] };
-  assert.deepEqual(contractProblems({ a: "p", b: "p" }, { a: view, c: view }, "/api/a", "Los"), ["b has no view descriptor", "c is no route"]);
-  const broken = { loads: ["/api/x"], actions: ["Weg"], states: ["busy"] };
-  assert.deepEqual(contractProblems({ a: "p" }, { a: broken }, "/api/a", "Los"),
-    ["a: unknown state busy", "a: no code reads /api/x", "a: no control labelled Weg"]);
+  assert.deepEqual(contractProblems({ a: "p", b: "p" }, { a: view, c: view }, 'api("/api/a?x=1")', "Los"), ["b has no view descriptor", "c is no route"]);
+  const broken = { loads: ["/api/x", "/api/a"], actions: ["Weg"], states: ["busy"] };
+  assert.deepEqual(contractProblems({ a: "p" }, { a: broken }, 'api("/api/ab")', "Los"),
+    ["a: unknown state busy", "a: no code reads /api/x", "a: no code reads /api/a", "a: no control labelled Weg"]);
 });
 
 // The state helpers of components.js and the argument positions that carry text.
