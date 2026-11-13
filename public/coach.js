@@ -1799,6 +1799,20 @@ function appendMessageChanges(node, message) {
   appendPlanNotes(node, changes.plan_check_notes);
 }
 
+// One entry per known finding and severity, its dates merged (#2617); a
+// distribution note covers a week, named by its first planned day.
+function groupPlanNotes(planNotes, labels) {
+  const groups = new Map();
+  for (const note of Array.isArray(planNotes) ? planNotes : []) {
+    if (!labels[note?.code]) continue;
+    const key = `${note.code}|${note.severity}`;
+    if (!groups.has(key)) groups.set(key, { code: note.code, severity: note.severity, days: [] });
+    const days = Array.isArray(note.dates) ? note.dates : [];
+    groups.get(key).days.push(...(note.code === "intensity_distribution" ? days.slice(0, 1) : days));
+  }
+  return groups.values();
+}
+
 function appendPlanNotes(node, planNotes) {
   const planNoteLabels = {
     run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
@@ -1815,17 +1829,7 @@ function appendPlanNotes(node, planNotes) {
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
     all_day_event: ["Ganztägiger Termin", "Kalender; weicher Hinweis"],
   };
-  // One line per finding and severity (#2617); a distribution note covers a week,
-  // named by its first planned day.
-  const groups = new Map();
-  for (const note of Array.isArray(planNotes) ? planNotes : []) {
-    if (!planNoteLabels[note?.code]) continue;
-    const key = `${note.code}|${note.severity}`;
-    if (!groups.has(key)) groups.set(key, { code: note.code, severity: note.severity, days: [] });
-    const days = Array.isArray(note.dates) ? note.dates : [];
-    groups.get(key).days.push(...(note.code === "intensity_distribution" ? days.slice(0, 1) : days));
-  }
-  for (const { code, severity, days } of groups.values()) {
+  for (const { code, severity, days } of groupPlanNotes(planNotes, planNoteLabels)) {
     const label = planNoteLabels[code];
     const dates = [...new Set(days)].sort().map((day) => AppFormat.date(day)).filter(Boolean);
     let weeks = "";

@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
-const TURN_RENDERERS = ["appendMessageChanges", "appendPlanNotes", "undoCoachTurn", "appendFailedTurnRetry", "resendChatText", "profileSetupButton"];
+const TURN_RENDERERS = ["appendMessageChanges", "groupPlanNotes", "appendPlanNotes", "undoCoachTurn", "appendFailedTurnRetry", "resendChatText", "profileSetupButton"];
 
 function harness({ confirmed = true, apiResult, apiError } = {}) {
   const calls = { api: [], confirm: [], toasts: [], loads: [], renders: 0 };
