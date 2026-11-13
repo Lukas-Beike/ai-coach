@@ -43,7 +43,11 @@ Regular CI browser jobs SHALL use a prepared, immutable browser environment cont
 - **WHEN** a local run lacks its required locked toolchain or application image
 - **THEN** it reports the missing prerequisite and does not silently use an unrelated cached executable or bypass encrypted application startup.
 
-Evidence: `scripts/browser_environment.json` (version and digest pin), the `Pull immutable prepared browser environment` step of `.github/workflows/publish-container.yml`, `package-lock.json`; `tests/test_browser_runner.py::BrowserRunnerTests.test_missing_or_mismatched_locked_toolchain_fails_without_fallback`, `tests/test_browser_runner.py::BrowserRunnerTests.test_prepared_compatibility_requires_declared_version_and_observed_revision`.
+#### Scenario: Local application image is stale
+- **WHEN** the application image's copy of `requirements.txt`, `server.py`, `backend/` or `public/` differs from the working tree
+- **THEN** the run stops before any fixture starts and names the rebuild command; when the comparison is not possible it warns and runs
+
+Evidence: `scripts/browser_environment.json` (version and digest pin), the `Pull immutable prepared browser environment` step of `.github/workflows/publish-container.yml`, `package-lock.json`; `tests/test_browser_runner.py::BrowserRunnerTests.test_missing_or_mismatched_locked_toolchain_fails_without_fallback`, `tests/test_browser_runner.py::BrowserRunnerTests.test_prepared_compatibility_requires_declared_version_and_observed_revision`, `tests/test_browser_runner.py::BrowserRunnerTests.test_outdated_application_image_stops_before_any_fixture`.
 
 ### Requirement: Concurrent invocations own disjoint resources
 Each concurrent invocation SHALL own distinct container and network names, loopback ports, authentication-state files, result directories, and coverage outputs. A run SHALL NOT read another invocation's session state or stop, overwrite, or remove resources it does not own.

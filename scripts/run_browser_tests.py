@@ -591,11 +591,20 @@ def source_digest(root, names):
     import json
     from pathlib import Path
 
+    # Documentation and OS or editor leftovers do not change the app (#2644).
+    def counts(item):
+        name = item.name
+        return not (
+            "__pycache__" in item.parts
+            or name.endswith((".md", ".swp", "~"))
+            or name in {"Thumbs.db", "desktop.ini", ".DS_Store"}
+        )
+
     files = {}
     for name in names:
         path = Path(root) / name
         for item in sorted(path.rglob("*")) if path.is_dir() else [path]:
-            if item.is_file() and "__pycache__" not in item.parts:
+            if item.is_file() and counts(item):
                 relative = item.relative_to(root).as_posix()
                 files[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
     return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -1310,11 +1319,24 @@ def main(argv=None):
                         current = image_matches_source(
                             processes, containers, image, ROOT
                         )
+                        evidence.update(
+                            images={
+                                "application": image,
+                                "application_matches_source": current,
+                            }
+                        )
+                        # A stale image would run new specs against old app code (#2644).
+                        rebuild = f"docker build -t {args.image} ."
                         if current is False:
+                            raise RunnerError(
+                                f"{args.image} does not match the application source of "
+                                f"this checkout; rebuild it with {rebuild}"
+                            )
+                        if current is None:
                             print(
-                                f"Warning: {args.image} does not contain the current "
-                                "application source; rebuild it with "
-                                f"docker build -t {args.image} .",
+                                f"Warning: could not compare {args.image} with the "
+                                "application source; if public/, backend/, server.py or "
+                                f"requirements.txt changed, rebuild it with {rebuild}",
                                 file=sys.stderr,
                                 flush=True,
                             )
