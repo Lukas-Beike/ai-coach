@@ -42,10 +42,12 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
-    """Safe diagnostics never contain child stdout or provider/environment text.
+    """Diagnostics never contain provider/environment text or credentials.
 
-    The only report text is a failing test's bounded first error line, which CI
-    already publishes with the failure artifacts.
+    Report text is a failing test's bounded first error line and, for a failed
+    required tool/container command, its program and subcommand words plus the
+    last 10 lines of its stdout and stderr, each cut at 300 characters with the
+    fixture password redacted (#2656).
     """
 
 
@@ -225,12 +227,15 @@ class Processes:
         self.stop = stop or threading.Event()
         self.lock = threading.Lock()
         self.active = set()
+        # The last captured error output per thread, for `checked` (#2656).
+        self.errors = threading.local()
 
     def run(
         self, command, *, cwd=ROOT, env=None, timeout=60, capture=True, cleanup=False
     ):
         if self.stop.is_set() and not cleanup:
             raise InterruptedError
+        self.errors.last = b""
         options = (
             {
                 "creationflags": subprocess.CREATE_NO_WINDOW
@@ -245,7 +250,7 @@ class Processes:
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
             **options,
         )
         with self.lock:
@@ -254,7 +259,8 @@ class Processes:
         try:
             while True:
                 try:
-                    output, _ = process.communicate(timeout=0.2)
+                    output, error = process.communicate(timeout=0.2)
+                    self.errors.last = error or b""
                     return process.returncode, (output or b"").decode(
                         "utf-8", errors="replace"
                     )
@@ -305,10 +311,28 @@ class Processes:
                 self.terminate(process)
 
 
+def _tail(text, lines=10):
+    """The last lines of a stream, each cut short, with the fixture password hidden."""
+    text = text.replace(FAKE_PASSWORD, "[redacted]")
+    return [line[:300] for line in text.strip().splitlines()[-lines:]]
+
+
 def checked(processes, command, **kwargs):
     code, output = processes.run(command, **kwargs)
     if code:
-        raise RunnerError(f"Required tool/container command failed (exit {code})")
+        # Name the program and its subcommand words only (no options, paths or
+        # scripts) and show the end of each stream, so a failure is visible (#2656).
+        words = [Path(str(command[0])).name]
+        for word in map(str, command[1:4]):
+            if word.startswith("-") or "/" in word or "\\" in word or "\n" in word:
+                break
+            words.append(word)
+        error = getattr(getattr(processes, "errors", None), "last", b"") or b""
+        tail = _tail(output) + _tail(error.decode("utf-8", errors="replace"))
+        raise RunnerError(
+            f"Required tool/container command failed (exit {code}): {' '.join(words)}"
+            + "".join(f"\n{line}" for line in tail)
+        )
     return output
 
 

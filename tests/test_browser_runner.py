@@ -7,6 +7,7 @@ import json
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -788,6 +789,21 @@ class BrowserRunnerTests(unittest.TestCase):
                 containers.create("collision", ["image"])
             self.assertEqual(containers.cleanup(), [])
             self.assertFalse(fake.removed)
+
+    def test_failed_tool_command_names_itself_and_its_output(self):
+        # A failed build or container start shows which command and why (#2656).
+        script = (
+            "import sys; print('st' + 'ep 1'); "
+            "sys.stderr.write('ERR' + 'OR: no space ' + sys.argv[1] + chr(10)); "
+            "sys.exit(3)"
+        )
+        with self.assertRaises(runner.RunnerError) as raised:
+            runner.checked(
+                runner.Processes(), [sys.executable, "-c", script, runner.FAKE_PASSWORD]
+            )
+        header, *tail = str(raised.exception).splitlines()
+        self.assertRegex(header, r"\(exit 3\): python[\w.]*$")
+        self.assertEqual(tail, ["step 1", "ERROR: no space [redacted]"])
 
     def test_readiness_is_bounded_and_cancelled_without_fallback(self):
         with self.assertRaises(runner.RunnerError):
