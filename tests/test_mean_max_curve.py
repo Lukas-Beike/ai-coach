@@ -392,7 +392,6 @@ class ProfileSelectionTests(unittest.TestCase):
         canonical = SimpleNamespace(
             activity_summary_reader=lambda: SimpleNamespace(
                 activity_summaries=lambda _db, **_bounds: summaries,
-                summary_fingerprints=lambda _db, _keys: {},
             ),
             database_manager=lambda: SimpleNamespace(read_snapshot=read_snapshot),
         )
