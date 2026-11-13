@@ -6,12 +6,6 @@ from unittest.mock import MagicMock, Mock, patch
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.measurements import number
 from backend.errors import AppError
-from backend.planning.assembly import (
-    PlanningDataAssembly,
-    PlanningMutations,
-    PlanningRepositories,
-    PlanningRuntime,
-)
 
 
 class EquipmentDependencyTests(unittest.TestCase):
@@ -35,57 +29,6 @@ class EquipmentDependencyTests(unittest.TestCase):
                 self.assertIsNone(number(value))
         self.assertEqual(number(0), 0.0)
         self.assertEqual(number(12.5), 12.5)
-
-
-class PlanningDataAssemblyTests(unittest.TestCase):
-    def test_factories_retain_shared_revision_and_late_calendar_edge(self) -> None:
-        manager = Mock(name="manager")
-        revisions = Mock(name="revisions")
-        local_date = Mock(name="local_date")
-        conflict_factory = Mock(name="conflict_factory", return_value=Mock())
-        publish = Mock(name="publish")
-        competition_repository = Mock(name="competitions")
-        assembly = PlanningDataAssembly(
-            dependencies=PlanningDataAssembly.Inputs(
-                database_manager=lambda: manager,
-                repositories=PlanningRepositories(
-                    competition=competition_repository,
-                    training_plans=Mock(name="training_plans"),
-                    key_values=Mock(name="key_values"),
-                    plan_adjustments=Mock(name="adjustments"),
-                ),
-                runtime=PlanningRuntime(
-                    revision=revisions,
-                    event_buffer=Mock(name="events"),
-                    utc_now=Mock(name="utc_now"),
-                    local_date=local_date,
-                    uuid_factory=Mock(name="uuid_factory"),
-                    redact=Mock(name="redact"),
-                ),
-                mutations=PlanningMutations(
-                    calendar_conflict_service=conflict_factory,
-                    publish_change=publish,
-                ),
-            )
-        )
-
-        self.assertEqual(conflict_factory.call_count, 0)
-        self.assertEqual(manager.call_count, 0)
-        planned = assembly.planned_unit()
-        library = assembly.workout_library()
-        plan = assembly.training_plan()
-        competition = assembly.competition()
-
-        self.assertEqual(conflict_factory.call_count, 1)
-        self.assertIs(planned._database_manager, manager)
-        self.assertIs(planned._planning_revision_service, revisions)
-        self.assertIs(planned._today, local_date)
-        self.assertIs(library._database_manager, manager)
-        self.assertIs(library._publish_change, publish)
-        self.assertIs(plan._database_manager, manager)
-        self.assertIs(plan._revisions, revisions)
-        self.assertIs(competition._database_manager, manager)
-        self.assertIs(competition._repository, competition_repository)
 
 
 if __name__ == "__main__":

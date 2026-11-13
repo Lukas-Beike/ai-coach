@@ -142,7 +142,6 @@ from backend.db.repositories import (
     ActivityFeedbackRepository,
     ChatRepository,
     CheckinRepository,
-    CompetitionRepository,
     KeyValueRepository,
     PlanAdjustmentRepository,
     PlanningStateRepository,
@@ -218,20 +217,9 @@ from backend.performance.morning_battery_service import (
 )
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
-from backend.planning import adaptive as planning_adaptive
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
-from backend.planning.assembly import (
-    PlanningDataAssembly,
-    PlanningMutations,
-)
-from backend.planning.assembly import (
-    PlanningRepositories as PlanningDataRepositories,
-)
-from backend.planning.assembly import (
-    PlanningRuntime as PlanningDataRuntime,
-)
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
@@ -246,16 +234,8 @@ from backend.planning.plan_guard_service import (
 )
 from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
-from backend.planning.run_hr_cap import profile_run_caps
 from backend.planning.run_lthr import RunLthr
-from backend.planning.workflows_assembly import (
-    DailyPlanningSources,
-    PlanningChangeLimits,
-    PlanningRepositories,
-    PlanningRuntime,
-    PlanningServiceOwners,
-    PlanningWorkflowAssembly,
-)
+from backend.planning.wiring import build_planning_data, build_planning_workflows
 from backend.privacy import build_privacy
 from backend.provider_credentials import (
     GARMIN_SOURCE_DB,
@@ -477,7 +457,6 @@ REDACTOR = observability.Redactor(
 KEY_VALUE_REPOSITORY = KeyValueRepository(runtime_clock.utc_now)
 ATHLETE_SESSION_SERVICE = AthleteSessionService()
 PROFILE_REPOSITORY = ProfileRepository(KEY_VALUE_REPOSITORY)
-COMPETITION_REPOSITORY = CompetitionRepository()
 TRAINING_PLAN_REPOSITORY = TrainingPlanRepository()
 PLANNING_STATE_REPOSITORY = PlanningStateRepository()
 PLANNING_REVISION_SERVICE = PlanningRevisionService(
@@ -667,84 +646,6 @@ ACTIVITY_READS = ActivityReadAssembly(
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
-PLANNING_DATA = PlanningDataAssembly(
-    dependencies=PlanningDataAssembly.Inputs(
-        database_manager=database_manager,
-        repositories=PlanningDataRepositories(
-            competition=COMPETITION_REPOSITORY,
-            training_plans=TRAINING_PLAN_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            plan_adjustments=PLAN_ADJUSTMENT_REPOSITORY,
-        ),
-        runtime=PlanningDataRuntime(
-            revision=PLANNING_REVISION_SERVICE,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            utc_now=runtime_clock.utc_now,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            uuid_factory=uuid.uuid4,
-            redact=REDACTOR.redact_text,
-            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
-        ),
-        mutations=PlanningMutations(
-            calendar_conflict_service=lambda: (
-                PLANNING_WORKFLOWS.calendar_conflict_service()
-            ),
-            publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
-                "coach", {"status": "changed"}
-            ),
-        ),
-    ),
-)
-PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
-    dependencies=PlanningWorkflowAssembly.Inputs(
-        owners=PlanningServiceOwners(
-            database_manager=database_manager,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            workout_library_service=PLANNING_DATA.workout_library,
-            competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
-            checkin_service=lambda: ATHLETE_DATA.checkin(),
-        ),
-        repositories=PlanningRepositories(
-            state_repository=PLANNING_STATE_REPOSITORY,
-            training_plan_repository=TRAINING_PLAN_REPOSITORY,
-            key_values=KEY_VALUE_REPOSITORY,
-            revision_service=PLANNING_REVISION_SERVICE,
-            plan_adjustment_repository=PLAN_ADJUSTMENT_REPOSITORY,
-        ),
-        daily_sources=DailyPlanningSources(
-            activity_feedback_service=ATHLETE_DATA.activity_feedback,
-            external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
-            weather_service=lambda: WEATHER.service(),
-            morning_body_battery_service=morning_body_battery_service,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-            checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
-            observation_reader=lambda: CANONICAL_READ,
-            source_preferences=lambda db: preferences_from_profile(
-                ATHLETE_DATA.profile().get_from_db(db)
-            ),
-            timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
-            run_caps=lambda: profile_run_caps(ATHLETE_DATA.profile().get()),
-        ),
-        runtime=PlanningRuntime(
-            sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
-            coach_artifact_refs=lambda: (
-                COACH_CONVERSATION.dialogue_read_service().artifact_refs
-            ),
-            utc_now=runtime_clock.utc_now,
-            uuid_factory=uuid.uuid4,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            logger=LOGGER,
-        ),
-        limits=PlanningChangeLimits(
-            training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-            default_illness_pause_days=planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
-            weather_adaptive_max_minutes=planning_adaptive.WEATHER_ADAPTIVE_MAX_MINUTES,
-        ),
-    )
-)
-
 # The application context the domain builders read (#2069). Owners whose
 # builder step has not run yet are set as they are created.
 APP = AppContext(
@@ -772,11 +673,14 @@ APP = AppContext(
     provider_state=provider_state_service,
     athlete=ATHLETE_DATA,
     athlete_profile=ATHLETE_PROFILE_SERVICE,
-    planning=PLANNING_DATA,
-    planning_workflows=PLANNING_WORKFLOWS,
     planning_revision=PLANNING_REVISION_SERVICE,
     provider_sync=PROVIDER_SYNC,
+    morning_body_battery_service=morning_body_battery_service,
 )
+PLANNING_DATA = build_planning_data(APP)
+APP.planning = PLANNING_DATA
+PLANNING_WORKFLOWS = build_planning_workflows(APP)
+APP.planning_workflows = PLANNING_WORKFLOWS
 HISTORY = build_history(APP)
 
 
@@ -1241,6 +1145,7 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
     )
 )
 WEATHER: WeatherServices = build_weather(APP)
+APP.weather = WEATHER
 WEATHER_SYNC = build_weather_sync(APP, WEATHER)
 
 COACH_CONTEXT = CoachContextAssembly(
@@ -1595,6 +1500,7 @@ RUN_LTHR = RunLthr(
     today=lambda: ATHLETE_CLOCK.now().date(),
     key_values=KEY_VALUE_REPOSITORY,
 )
+APP.run_lthr = RUN_LTHR
 
 
 def _plan_guard_service() -> PlanGuardService:

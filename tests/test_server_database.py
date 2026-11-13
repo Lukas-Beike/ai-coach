@@ -27,6 +27,7 @@ from support import canonical_backfill_stopped
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
 from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
+from backend.db.repositories import CompetitionRepository
 from backend.db.schema import (
     CURRENT_DATABASE_INDEXES,
     CURRENT_DATABASE_SCHEMA,
@@ -240,7 +241,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "distance": "10 km",
             }
         )
-        repository = server.CompetitionRepository()
+        repository = CompetitionRepository()
         with server.database_manager().unit_of_work() as db:
             rows = repository.list(db)
             row = repository.get(db, saved["competition"]["id"])

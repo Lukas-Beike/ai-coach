@@ -83,3 +83,7 @@ class AppContext:
     workout_library_sync: Any = None
     # The structured Coach dialogue tool definitions; diagnostics lists their names.
     coach_dialogue_tools: Any = None
+    weather: Any = None
+    run_lthr: Any = None
+    # Returns the cached morning body battery service of the active database.
+    morning_body_battery_service: Any = None

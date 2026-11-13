@@ -1450,9 +1450,12 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value=datetime(2026, 9, 2, tzinfo=UTC),
             ),
             patch.object(
-                server.PLANNING_WORKFLOWS,
-                "adaptive_replan_preview_service",
-                return_value=preview_service,
+                server,
+                "PLANNING_WORKFLOWS",
+                replace(
+                    server.PLANNING_WORKFLOWS,
+                    adaptive_replan_preview_service=lambda: preview_service,
+                ),
             ),
         ):
             result = server.EXTERNAL_CALENDAR.sync_service().sync("test")

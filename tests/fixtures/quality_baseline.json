@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "cf20b599a6c1f436a4ece05fe6e7aea4823d6347",
+  "base": "da54f63d76d44a2d958d475a1ca75543e5bb8945",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -455,12 +455,6 @@
       "path": "tests/test_sync_garmin_service.py",
       "code": "arg-type",
       "message_sha256": "51deec515d87f4c4a08dd80c52b09425d53aaf34c13ab33b805610c8cc8151b0"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "arg-type",
-      "message_sha256": "570d1b972c0b2f2550ad42db3eb3936ceda3bf167873fb1c991c7a6af5d78110"
     },
     {
       "tool": "mypy",
@@ -970,12 +964,6 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "4b7e78aca8d7c14e4949c4d2c1e7b5dbe37f97501201f64a1fc21f632e11770d"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
     },
     {
@@ -1000,25 +988,7 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "a6717e30878d2725304d97c5fb32dacd1e9390ad42c1c53805e5ad4228c63498"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "e020f47cf690127bbfb4750cbe0b93f382fe80b2ac32f84d93c47d3cdb2e0192"
     },
     {
       "tool": "mypy",
