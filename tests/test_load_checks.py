@@ -18,6 +18,8 @@ from backend.canonical.vocabulary import (
     ZoneConfigurationMetric,
 )
 from backend.planning import load_checks, plan_checks
+from backend.planning.planned_unit_load import estimate_planned_unit
+from backend.planning.sport import planned_sport_environment
 from tests.canonical_domain_support import provenance, zone_configuration
 
 TODAY = date(2026, 11, 2)
@@ -355,7 +357,104 @@ class WeeklyRiseTests(unittest.TestCase):
         self.assertEqual([], only(check(plan, self.history), "weekly_load_rise"))
 
 
+# Thresholds and planned loads recorded before #2109 removed the unused threshold
+# fields: (ftp, lthr, threshold pace, load, intensity, basis, unknown) per unit.
+_GOLDEN_UNITS = (
+    planned("r1", "2026-11-04", "run", "- 30m Z2 Pace"),
+    planned("r2", "2026-11-04", "run", "- 40m Z2 HR"),
+    planned("r3", "2026-11-04", "run", "- 5km 4:30/km Pace"),
+    planned("b1", "2026-11-04", "ride", "- 60m 90%"),
+    planned("b2", "2026-11-04", "ride", "- 60m 90%", environment="indoor"),
+    planned("b3", "2026-11-02", "ride", "- 60m 90%", environment="indoor"),
+    planned("b4", "2026-11-04", "ride", "- 45m Z2 HR"),
+    planned("s1", "2026-11-04", "strength", "Strength session"),
+)
+_RUN_PACE = (34.1138, 0.826, "relative_pace_speed", ())
+_RUN_HR = (38.0017, 0.755, "relative_lthr", ())
+_RIDE_POWER = (81.0, 0.9, "normalized_power_over_ftp", ())
+_RIDE_HR = (42.7519, 0.755, "relative_lthr", ())
+_ABSOLUTE_PACE = (32.1502, 0.9259, "relative_pace_speed", ())
+_NO_PACE = (None, None, None, ("missing_threshold_pace",))
+_STRENGTH = (None, None, None, ("sport_without_step_targets",))
+_NONE = (None, None, None)
+_GOLDEN_LOADS = {
+    "providers": (
+        ((None, 170.0, 4.0), _RUN_PACE),
+        ((None, 170.0, 4.0), _RUN_HR),
+        ((None, 170.0, 4.0), _ABSOLUTE_PACE),
+        ((250.0, 165.0, None), _RIDE_POWER),
+        ((230.0, 165.0, None), _RIDE_POWER),
+        ((250.0, 165.0, None), _RIDE_POWER),
+        ((250.0, 165.0, None), _RIDE_HR),
+        (_NONE, _STRENGTH),
+    ),
+    "no_pace": (
+        ((None, 170.0, None), _RUN_PACE),
+        ((None, 170.0, None), _RUN_HR),
+        ((None, 170.0, None), _NO_PACE),
+        ((250.0, 165.0, None), _RIDE_POWER),
+        ((250.0, 165.0, None), _RIDE_POWER),
+        ((250.0, 165.0, None), _RIDE_POWER),
+        ((250.0, 165.0, None), _RIDE_HR),
+        (_NONE, _STRENGTH),
+    ),
+    "none": (
+        (_NONE, _RUN_PACE),
+        (_NONE, _RUN_HR),
+        (_NONE, _NO_PACE),
+        (_NONE, _RIDE_POWER),
+        (_NONE, _RIDE_POWER),
+        (_NONE, _RIDE_POWER),
+        (_NONE, _RIDE_HR),
+        (_NONE, _STRENGTH),
+    ),
+}
+
+
+def _rounded(value: float | None) -> float | None:
+    return None if value is None else round(value, 4)
+
+
 class IndoorFtpTests(unittest.TestCase):
+    def test_thresholds_and_planned_loads_match_the_recorded_values(self) -> None:
+        indoor = zone_configuration(
+            metric=ZoneConfigurationMetric.POWER,
+            sport=Sport.RIDE,
+            environment=Environment.INDOOR,
+            provenance=provenance(None, provider=None),
+            threshold=230.0,
+            maximum=None,
+            resting=None,
+            limits=(100.0, 200.0, 300.0, 400.0),
+            valid_from=date(2026, 11, 3),
+        )
+        cases = {
+            "providers": load_checks.load_thresholds(inputs(), TODAY, (indoor,)),
+            "no_pace": load_checks.load_thresholds(inputs(pace=False), TODAY),
+            "none": load_checks.load_thresholds(inputs(present=False), TODAY),
+        }
+        for name, thresholds_ in cases.items():
+            for unit, expected in zip(_GOLDEN_UNITS, _GOLDEN_LOADS[name], strict=True):
+                with self.subTest(case=name, unit=unit["local_id"]):
+                    sport, environment = planned_sport_environment(unit)
+                    resolved = thresholds_.for_sport(
+                        sport, environment, date.fromisoformat(unit["date"])
+                    )
+                    estimate = estimate_planned_unit(unit, resolved)
+                    zones = resolved.zones
+                    self.assertEqual(
+                        expected,
+                        (
+                            (zones.ftp, zones.lthr, zones.threshold_pace),
+                            (
+                                _rounded(estimate.load),
+                                _rounded(estimate.intensity_factor),
+                                estimate.load_basis,
+                                estimate.unknown,
+                            ),
+                        ),
+                    )
+
     def test_a_provider_indoor_ftp_is_not_read(self) -> None:
         result = load_checks.load_thresholds(inputs(), TODAY)
         indoor = result.for_sport(Sport.RIDE, Environment.INDOOR)
