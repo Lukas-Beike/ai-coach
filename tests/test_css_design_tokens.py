@@ -250,10 +250,17 @@ class CssDesignTokenTests(unittest.TestCase):
                 }
             )
             page = _colour(tokens, "--bg", (255, 255, 255))
-            for outside_name in ("--bg", "--surface"):
-                outside = _colour(tokens, outside_name, page)
+            surface = _colour(tokens, "--surface", page)
+            # Page, card and the wide-screen open planned card behind the outline.
+            backdrops = {
+                "--bg": page,
+                "--surface": surface,
+                "--accent-soft": _colour(tokens, "--accent-soft", surface),
+            }
+            for outside_name, outside in backdrops.items():
                 inside = _colour(tokens, "--warning-surface-soft", outside)
-                border = _colour(tokens, "--warning-border", outside)
+                # The element's own tint is painted under its border.
+                border = _colour(tokens, "--warning-border", inside)
                 for side, background in (("outside", outside), ("inside", inside)):
                     with self.subTest(theme=theme, on=outside_name, side=side):
                         self.assertGreaterEqual(_contrast_ratio(border, background), 3)
