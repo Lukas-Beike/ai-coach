@@ -48,6 +48,12 @@ INPUTS = (
     "README.md",
     "docs",
     "openspec",
+    # Repository files that tests read directly (#2553).
+    ".gitattributes",
+    ".gitignore",
+    ".dockerignore",
+    ".githooks",
+    "garmin-fixture.example.json",
     "public",
     "server.py",
     "playwright.config.cjs",
@@ -499,7 +505,8 @@ class Supervisor:
             "--memory=512m",
             "--cpus=1",
             "--tmpfs",
-            "/tmp",
+            # Tests run temporary hook and tool scripts (#2553).
+            "/tmp:rw,exec,nosuid,nodev",
             "--tmpfs",
             "/data",
             "--workdir",
