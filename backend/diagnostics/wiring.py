@@ -13,6 +13,7 @@ from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
 )
+from backend.performance.pace_at_hr import LT1_DAYS, ride_band_coverage
 from backend.runtime import clock as runtime_clock
 
 
@@ -69,6 +70,10 @@ def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
                 canonical_read=ctx.canonical_read,
                 # The Garmin change check's status: counts and times only (#2372).
                 garmin_change_check=lambda: garmin.change_check().status(),
+                lt1_ride_coverage=lambda: ride_band_coverage(
+                    ctx.performance.training_reports().profiles.curve_records(LT1_DAYS),
+                    ctx.clock.now().date(),
+                ),
             )
         )
 

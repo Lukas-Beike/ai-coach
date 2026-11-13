@@ -289,6 +289,7 @@ def _band_totals(
     profile: Mapping[str, Any],
     low: int,
     keys: tuple[str, str] = _SPEED_KEYS,
+    max_cv: float = MAX_SPEED_CV,
 ) -> tuple[float, float, float] | None:
     """Seconds, output total and squared output of a steady session in the band."""
     bins: Mapping[str, Any] = profile.get("bins") or {}
@@ -304,9 +305,51 @@ def _band_totals(
     squares = sum(part[keys[1]] for part in parts)
     mean = distance / seconds
     spread = math.sqrt(max(squares / seconds - mean * mean, 0.0))
-    if mean <= 0 or spread / mean > MAX_SPEED_CV:
+    if mean <= 0 or spread / mean > max_cv:
         return None
     return seconds, distance, squares
+
+
+# Variation limits the ride coverage count compares (#2535).
+RIDE_COVERAGE_CV_LIMITS: Final = (0.15, 0.20, 0.25)
+
+
+def ride_band_coverage(
+    records: Sequence[Mapping[str, Any]], today: date
+) -> dict[str, Any]:
+    """Counts only: rides of the last ``LT1_DAYS`` days with a steady power band.
+
+    A ride counts at a limit when any 10 bpm band holds at least 10 steady
+    minutes whose power varies by at most that limit, so the count is an upper
+    bound of the rides the LT1 power can use (#2535). Split outdoor and indoor.
+    """
+    first = (today - timedelta(days=LT1_DAYS - 1)).isoformat()
+    environments = ("outdoor", "indoor")
+    rides: dict[str, int] = dict.fromkeys(environments, 0)
+    qualifying = {
+        f"{limit:.2f}": dict.fromkeys(environments, 0)
+        for limit in RIDE_COVERAGE_CV_LIMITS
+    }
+    for row in records:
+        environment = row.get("environment")
+        profile = row.get("power_at_hr_profile") or {}
+        if (
+            row.get("sport") != "ride"
+            or environment not in rides
+            or not first <= str(row.get("date") or "") <= today.isoformat()
+            or profile.get("status") != "ok"
+        ):
+            continue
+        rides[environment] += 1
+        lows = {
+            int(low) - step * BIN_BPM
+            for low in profile.get("bins") or {}
+            for step in range(BAND_BINS)
+        }
+        for limit in RIDE_COVERAGE_CV_LIMITS:
+            if any(_band_totals(profile, low, _POWER_KEYS, limit) for low in lows):
+                qualifying[f"{limit:.2f}"][environment] += 1
+    return {"days": LT1_DAYS, "rides": rides, "qualifying": qualifying}
 
 
 def _best_band(
