@@ -15,7 +15,7 @@ import json
 import re
 import sys
 
-CONTINUATION = re.compile(r"(?:\\|`)\r?\n")
+CONTINUATION = re.compile(r"[\\`]\r?\n")
 QUOTES = re.compile(r"[\"'`]")
 SEGMENT = re.compile(r"[;&|\n()]+")
 GIT_NAMES = {"git", "git.exe"}
