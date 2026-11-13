@@ -2,11 +2,17 @@ const { test, expect } = require("@playwright/test");
 
 const stylesheet = "/styles.css";
 
-// The computed colour a custom property resolves to in the current theme.
-const resolvedColour = (page, token) => page.locator("#tokenProbe").evaluate((probe, name) => {
-  probe.style.color = `var(${name})`;
-  return getComputedStyle(probe).color;
-}, token);
+// The computed colour a custom property resolves to in the current theme; an undefined
+// token yields the sentinel instead of an inherited colour, so the check cannot pass vacuously.
+const MISSING_TOKEN = "rgb(1, 2, 3)";
+const resolvedColour = async (page, token) => {
+  const colour = await page.locator("#tokenProbe").evaluate((probe, [name, missing]) => {
+    probe.style.color = `var(${name}, ${missing})`;
+    return getComputedStyle(probe).color;
+  }, [token, MISSING_TOKEN]);
+  expect(colour, `${token} is defined`).not.toBe(MISSING_TOKEN);
+  return colour;
+};
 
 test("visibility, chart variants and reduced motion override component styles", { tag: "@responsive" }, async ({ page }) => {
   await page.route("**/css-cascade-fixture", (route) => route.fulfill({
@@ -39,6 +45,9 @@ test("visibility, chart variants and reduced motion override component styles", 
     // The expected colours are the theme's resolved tokens, so a palette change keeps the cascade check green (#2667).
     const warning = await resolvedColour(page, "--nutrition-warning-border");
     const focusRing = await resolvedColour(page, "--accent-soft");
+    // The warning must differ from the focus and default borders, or the cascade check proves nothing.
+    expect(warning).not.toBe(await resolvedColour(page, "--accent-bright"));
+    expect(warning).not.toBe(await resolvedColour(page, "--line"));
     await expect(page.locator(".nutrition-low-confidence")).toHaveCSS("border-top-color", warning);
     await page.locator(".nutrition-low-confidence").focus();
     await expect(page.locator(".nutrition-low-confidence")).toBeFocused();
