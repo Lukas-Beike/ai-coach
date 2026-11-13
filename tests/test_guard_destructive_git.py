@@ -42,6 +42,30 @@ class GuardDestructiveGitTests(unittest.TestCase):
             "git push origin +feat/x",
             "git status && git reset --hard",
             "git fetch; git push --force origin feat/x",
+            # Forms a shell still runs as the destructive command.
+            "git clean -fdx;git status",
+            "(git clean -fdx)",
+            'bash -c "git push -f origin x"',
+            'powershell -Command "git clean -fdx"',
+            'git reset "--hard"',
+            "git reset '--hard'",
+            "git reset `--hard",
+            "git push origin '+feat/x'",
+            'git checkout -- "."',
+            "git reset \\\n  --hard",
+            "git push `\n  --force origin x",
+            "Git reset --hard",
+            "GIT.exe reset --hard",
+            "git reset --ha",
+            "git branch -d --force x",
+            "git branch -df x",
+            "git branch --delete x --force",
+            "git restore ./",
+            "git checkout .\\",
+            "git restore :/",
+            "git checkout -- *",
+            "git checkout -f",
+            "git switch --discard-changes develop",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run_hook(command), 2)
@@ -63,6 +87,10 @@ class GuardDestructiveGitTests(unittest.TestCase):
             "git worktree remove ../l16-2614",
             "git log --format=%h -5",
             "echo reset --hard",
+            "git restore --staged .",
+            'git stash push -m "wip 2 +3"',
+            "git switch develop",
+            "git -C ../l16-2614 status",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run_hook(command), 0)
