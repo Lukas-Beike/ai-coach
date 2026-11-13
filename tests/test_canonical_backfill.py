@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -60,6 +61,28 @@ from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
+# Every table the canonical stores write (#2121).
+CANONICAL_TABLES = (
+    "provider_records",
+    "activity_records",
+    "activity_sessions",
+    "observations",
+    "sleep_periods",
+    "zone_configurations",
+    "categorical_observations",
+    "gear_items",
+    "gear_activity_links",
+    "power_curve_points",
+    "power_curve_fetches",
+    "activity_detail_sets",
+    "activity_detail_analysis",
+)
+# Row digests after the fixture ingest and after a re-projection at bumped
+# mapper versions, taken on the code before the helpers were shared.
+PINNED_ROW_DIGESTS = [
+    "45918cbe73067d26b14893db23b08829cb5a8975787cebd6bc421e45fd92301e",
+    "5607d8911b08aefc5b27de4d8418545fd9fef62d71cfab5c4f4c2a5b836f2ee2",
+]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
 INTERVALS = ProviderId.INTERVALS.value
@@ -1036,9 +1059,8 @@ class ReprojectionTests(BackfillFixture):
         )
         self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 0)
 
-    def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
-        self,
-    ) -> None:
+    def ingest_fixture_records(self) -> Any:
+        """Ingest every fixture record kind with a mapper and link the sessions."""
         snapshot = intervals_fixture_snapshot()
         # Every Intervals.icu record kind with a mapper, the power curve included.
         snapshot["cycling_power_profile"] = {
@@ -1077,6 +1099,39 @@ class ReprojectionTests(BackfillFixture):
                 zone=ZONE,
                 now=NOW,
             )
+        return backfill
+
+    def test_fixture_ingest_and_reprojection_write_the_pinned_rows(self) -> None:
+        # #2121: the shared store row helpers write exactly these rows.
+        backfill = self.ingest_fixture_records()
+        digests = [self.table_digest()]
+        bumped = {
+            key: value + 1 for key, value in canonical_plans._MAPPER_VERSIONS.items()
+        }
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, bumped):
+            self.run_to_completion(backfill)
+        digests.append(self.table_digest())
+        self.assertEqual(digests, PINNED_ROW_DIGESTS)
+
+    def table_digest(self) -> str:
+        """SHA-256 of every canonical row without generated ids."""
+        snapshot = {
+            table: sorted(
+                json.dumps(
+                    {key: value for key, value in row.items() if key != "activity_id"},
+                    sort_keys=True,
+                    default=str,
+                )
+                for row in self.rows(f"SELECT * FROM {table}")
+            )
+            for table in CANONICAL_TABLES
+        }
+        return hashlib.sha256(json.dumps(snapshot).encode()).hexdigest()
+
+    def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
+        self,
+    ) -> None:
+        backfill = self.ingest_fixture_records()
         original = self.canonical_snapshot()
 
         bumped = {
