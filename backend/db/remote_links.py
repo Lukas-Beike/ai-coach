@@ -344,3 +344,22 @@ class RemoteLinkRepository:
             params += (RemoteEntityKind(entity_kind).value,)
         query += " ORDER BY entity_kind, local_id"
         return [self._link(row) for row in db.execute(query, params).fetchall()]
+
+    def synced_times(
+        self, db: Any, provider: str, entity_kinds: Sequence[RemoteEntityKind]
+    ) -> list[str]:
+        """The stored sync times of a provider's synced links of the given kinds."""
+        marks = ", ".join("?" for _ in entity_kinds)
+        return [
+            row["last_synced_at"]
+            for row in db.execute(
+                "SELECT last_synced_at FROM remote_links WHERE provider=? "
+                "AND sync_state=? AND last_synced_at IS NOT NULL "
+                f"AND entity_kind IN ({marks})",
+                (
+                    provider,
+                    RemoteLinkState.SYNCED.value,
+                    *(RemoteEntityKind(kind).value for kind in entity_kinds),
+                ),
+            ).fetchall()
+        ]

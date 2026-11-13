@@ -18,7 +18,7 @@ def _stamp(value: str | None) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
 
 
-def _latest(*values: str | None) -> str | None:
+def latest_stamp(*values: str | None) -> str | None:
     """The newest readable stamp, as stored."""
     readable = [(parsed, value) for value in values if (parsed := _stamp(value))]
     return max(readable, key=lambda pair: pair[0])[1] if readable else None
@@ -57,7 +57,7 @@ def public_state(
     last_output_failed_at: str | None = None,
 ) -> dict[str, Any]:
     """``last_used_at`` is the last successful export: library push or output job."""
-    used_at = _latest(last_library_sync_at, last_output_ok_at)
+    used_at = latest_stamp(last_library_sync_at, last_output_ok_at)
     return {
         "configured": configured,
         "state": connection_state(

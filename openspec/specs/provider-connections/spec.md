@@ -39,7 +39,7 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_any_job_is_stored`, `tests/test_sync_wiring_matrix.py:test_an_unconfigured_provider_gets_409_before_its_manual_route_stores_a_job`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
 ### Requirement: Intervals.icu connection status from output outcomes
-The system SHALL project the Intervals.icu connection state from durable stamps of the last export success and the last provider failure, and an unreadable stamp SHALL be ignored.
+The system SHALL project the Intervals.icu connection state from durable stamps of the last export success and the last provider failure, adopt once at startup the newest synced plan or competition link time as the success stamp when none exists, and ignore an unreadable stamp.
 
 #### Scenario: Only a round trip counts
 - **WHEN** a plan, competition or nutrition push ends
@@ -49,11 +49,15 @@ The system SHALL project the Intervals.icu connection state from durable stamps 
 - **WHEN** a plan push synced an entry and the server restarts or the page reloads, however long ago the push was
 - **THEN** the Intervals.icu state is connected and `last_used_at` names that push, without a provider request.
 
+#### Scenario: An export from before the stamps
+- **WHEN** the server starts without a success stamp and an Intervals.icu plan or competition link was synced by a release that left no stamp
+- **THEN** the newest readable `last_synced_at` of those synced links is stored once as the success stamp and the state is connected, unless a newer failure stamp makes it error; metric, library, pending, unsynced and other-provider links count for nothing, an existing stamp is never replaced, no failure stamp is written and no provider request is made.
+
 #### Scenario: A provider failure after a success
 - **WHEN** an output job fails with a provider answer or without a response after the last success
 - **THEN** the state is error until a later export succeeds; the state is connected when the newest success is newer, and configured when there is neither.
 
-Evidence: `backend/sync/intervals_state.py::public_state`, `backend/sync/executor.py::IntervalsJobAdapter.execute`, `backend/sync/execution_wiring.py::build_sync_job_execution`; `tests/test_intervals_state.py`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_intervals_output_leaves_a_stamp_only_for_a_real_round_trip`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_only_a_provider_failure_leaves_a_failed_stamp`, `tests/test_server_http.py::ServerHttpTests.test_intervals_public_state_follows_the_output_stamps`.
+Evidence: `backend/sync/intervals_state.py::public_state`, `backend/sync/state.py::SyncStateRepository.adopt_intervals_export_time`, `backend/sync/scheduler.py::StartupSyncScheduler.schedule`, `backend/db/remote_links.py::RemoteLinkRepository.synced_times`, `backend/sync/executor.py::IntervalsJobAdapter.execute`, `backend/sync/execution_wiring.py::build_sync_job_execution`; `tests/test_intervals_state.py`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_intervals_output_leaves_a_stamp_only_for_a_real_round_trip`, `tests/test_sync_executor.py::ProviderJobAdapterTests.test_only_a_provider_failure_leaves_a_failed_stamp`, `tests/test_server_http.py::ServerHttpTests.test_intervals_public_state_follows_the_output_stamps`, `tests/test_server_http.py::ServerHttpTests.test_intervals_public_state_adopts_an_export_from_before_the_stamps`, `tests/test_sync_state.py::SyncStateRepositoryTests.test_a_link_from_before_the_stamps_becomes_the_export_stamp_once`.
 
 ### Requirement: Intervals.icu request contract
 The system SHALL call Intervals.icu only at `https://intervals.icu/api/v1`, with basic authentication (user `API_KEY`, password the stored key), and only for the explicit writes and read-backs of its output role. Collection reads SHALL page with `limit` 500 and an offset, read at most 100 pages, and fail on a page that is no list of objects or that repeats an earlier non-empty page.

@@ -126,6 +126,28 @@ class RemoteLinkRepositoryTests(unittest.TestCase):
             ["2"],
         )
 
+    def test_synced_times_lists_only_synced_unit_and_competition_links(self) -> None:
+        at = "2026-10-02T08:00:00+00:00"
+        unit, competition = RemoteEntityKind.PLANNED_UNIT, RemoteEntityKind.COMPETITION
+        rows = (
+            ("1", {"entity_kind": unit}),
+            ("2", {"entity_kind": competition, "last_synced_at": "kaputt"}),
+            ("3", {"entity_kind": RemoteEntityKind.OBSERVATION}),
+            ("4", {"entity_kind": RemoteEntityKind.LIBRARY_WORKOUT}),
+            ("5", {"entity_kind": unit, "sync_state": RemoteLinkState.PENDING}),
+            ("7", {"entity_kind": unit, "last_synced_at": None}),
+            ("8", {"entity_kind": unit, "provider": OTHER}),
+        )
+        for local_id, values in rows:
+            defaults: dict[str, Any] = {"last_synced_at": at, "remote_id": local_id}
+            self.repository.upsert(self.db, self.link(local_id, **defaults | values))
+        self.assertEqual(
+            sorted(
+                self.repository.synced_times(self.db, INTERVALS, (unit, competition))
+            ),
+            [at, "kaputt"],
+        )
+
     def test_invalid_vocabulary_and_identity_are_rejected_before_storage(self) -> None:
         with self.assertRaises(ValueError):
             RemoteLink(cast(Any, "not-a-kind"), "1", INTERVALS, RemoteLinkState.SYNCED)

@@ -5,7 +5,9 @@ import unittest
 
 from support import temp_database
 
+from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import row_factory
+from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.sync.state import SyncStateRepository
 
@@ -119,6 +121,60 @@ class SyncStateRepositoryTests(unittest.TestCase):
         self.assertEqual(
             self.repository.cursor("garmin", "data")["high_water_mark"], ""
         )
+
+    def link_intervals(self, local_id, synced_at, **values):
+        values.setdefault("entity_kind", RemoteEntityKind.PLANNED_UNIT)
+        values.setdefault("sync_state", RemoteLinkState.SYNCED)
+        with self.database_manager.unit_of_work() as db:
+            RemoteLinkRepository().upsert(
+                db,
+                RemoteLink(
+                    local_id=local_id,
+                    provider="intervals",
+                    remote_id=local_id,
+                    last_synced_at=synced_at,
+                    **values,
+                ),
+            )
+
+    def stamp(self, key="intervals_last_output_ok_at"):
+        with self.database_manager.unit_of_work() as db:
+            return self.key_values.get(db, key)
+
+    def test_a_link_from_before_the_stamps_becomes_the_export_stamp_once(self):
+        self.repository.adopt_intervals_export_time()
+        self.assertFalse(self.stamp())
+        self.link_intervals("old", "2026-10-02T08:00:00+00:00")
+        # Offset and naive forms are compared as times, not as text.
+        self.link_intervals("offset", "2026-10-03T10:00:00+02:00")
+        self.link_intervals(
+            "competition",
+            "2026-10-03T09:00:00",
+            entity_kind=RemoteEntityKind.COMPETITION,
+        )
+        self.link_intervals("malformed", "zzzz")
+        self.repository.adopt_intervals_export_time()
+        self.assertEqual(self.stamp(), "2026-10-03T09:00:00")
+        # A later link never moves the stamp: it is written only once.
+        self.link_intervals("newer", "2026-10-09T08:00:00+00:00")
+        self.repository.adopt_intervals_export_time()
+        self.assertEqual(self.stamp(), "2026-10-03T09:00:00")
+        self.assertFalse(self.stamp("intervals_last_output_failed_at"))
+
+    def test_the_stamp_ignores_other_links_and_keeps_existing_stamps(self):
+        at = "2026-10-02T08:00:00+00:00"
+        self.link_intervals("obs", at, entity_kind=RemoteEntityKind.OBSERVATION)
+        self.link_intervals("pending", at, sync_state=RemoteLinkState.PENDING)
+        self.link_intervals("none", None)
+        self.repository.adopt_intervals_export_time()
+        self.assertFalse(self.stamp())
+        self.link_intervals("unit", at)
+        with self.database_manager.unit_of_work() as db:
+            self.key_values.set(db, "intervals_last_output_ok_at", "2026-01-01")
+            self.key_values.set(db, "intervals_last_output_failed_at", "2026-02-01")
+        self.repository.adopt_intervals_export_time()
+        self.assertEqual(self.stamp(), "2026-01-01")
+        self.assertEqual(self.stamp("intervals_last_output_failed_at"), "2026-02-01")
 
     def test_reads_reuse_outer_unit_of_work_connection(self):
         connect_count = self.backend.connect_count

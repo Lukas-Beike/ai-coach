@@ -58,6 +58,10 @@ class _SyncState:
         self.period = period
         self.cursor_reads = []
         self.period_reads = []
+        self.adopted = 0
+
+    def adopt_intervals_export_time(self):
+        self.adopted += 1
 
     def cursor(self, provider: str, stream: str):
         self.cursor_reads.append((provider, stream))
@@ -90,6 +94,11 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         job = next(job for job in self.queue.jobs if job[:2] == ("garmin", "refresh"))
         self.assertEqual(job[2]["days"], 90)
         self.assertEqual(job[2]["end_date"], "2025-05-29")
+
+    def test_startup_adopts_the_export_time_before_any_provider_work(self):
+        scheduler = self.make_scheduler(calendar_enabled=False)
+        scheduler.schedule()
+        self.assertEqual(self.sync_state.adopted, 1)
 
     def make_scheduler(
         self,

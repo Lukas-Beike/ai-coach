@@ -84,6 +84,9 @@ class _SyncState:
     def cursor(self, provider: str, kind: str) -> dict[str, Any]:
         return {}
 
+    def adopt_intervals_export_time(self) -> None:
+        pass
+
 
 class _Database:
     def __init__(self) -> None:

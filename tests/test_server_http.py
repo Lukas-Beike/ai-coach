@@ -1827,6 +1827,44 @@ class ServerHttpTests(ServerTestCase):
             read_state(ok="kaputt", failed="kaputt")["state"], "configured"
         )
 
+    def test_intervals_public_state_adopts_an_export_from_before_the_stamps(self):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        stamps = ("intervals_last_output_ok_at", "intervals_last_output_failed_at")
+
+        def clear():
+            for key in stamps:
+                server.key_value_service().set(key, "")
+            with server.database_manager().unit_of_work() as db:
+                db.execute("DELETE FROM remote_links WHERE provider = 'intervals'")
+
+        def link(local_id, synced_at):
+            with server.database_manager().unit_of_work() as db:
+                db.execute(
+                    "INSERT INTO remote_links(entity_kind, local_id, provider, "
+                    "remote_id, sync_state, last_synced_at) "
+                    "VALUES ('planned_unit', ?, 'intervals', ?, 'synced', ?)",
+                    (local_id, local_id, synced_at),
+                )
+
+        def read_state():
+            with patch.object(server, "CONFIG", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        clear()
+        self.addCleanup(clear)
+        link("stamp-old", "2026-10-02T08:00:00+00:00")
+        link("stamp-new", "2026-10-03T08:00:00+00:00")
+        self.assertEqual(read_state()["state"], "configured")
+        # The startup adopts the newest export once; a later failure still wins.
+        server.SYNC_PERSISTENCE.state_repository().adopt_intervals_export_time()
+        state = read_state()
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_used_at"], "2026-10-03T08:00:00+00:00")
+        server.key_value_service().set(
+            "intervals_last_output_failed_at", "2026-10-04T08:00:00+00:00"
+        )
+        self.assertEqual(read_state()["state"], "error")
+
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
