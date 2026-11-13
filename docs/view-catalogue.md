@@ -59,9 +59,10 @@ Former routes that open another view:
 
 Every call of the state helpers of `public/components.js` (`createEmptyState`,
 `createLoadingState`, `createErrorState` with its fixed heading and retry
-button, `markValueMissing`) with its text arguments, per file and function. A
-text that is not a literal is listed as `(computed)` with its expression. Texts
-that views write inline are not listed.
+button, `markValueMissing`) and every paragraph drawn with an empty-state class
+(`h(.empty)`, `h(.context-empty)`) with its text arguments, per file and
+function. A text that is not a literal is listed as `(computed)` with its
+expression. Other inline status lines are not listed.
 
 <!-- BEGIN GENERATED STATES -->
 ### `public/activity-analysis.js`
@@ -75,10 +76,12 @@ that views write inline are not listed.
 
 | Function | Helper | Text | Detail |
 | --- | --- | --- | --- |
+| `analysisChart` | `h(.empty)` | Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich. |  |
 | `cyclingPowerProfileTable` | `markValueMissing` | nicht erfasst |  |
 | `showProfileCardsState` | `createErrorState` | (computed) ` error.message ` |  |
 | `showProfileCardsState` | `createLoadingState` | (computed) `` `${title} wird geladen…` `` |  |
 | `renderRunningBestEfforts` | `markValueMissing` | nicht erfasst |  |
+| `renderBodyAnalysis` | `h(.empty)` | Noch keine Körper-Historie verfügbar. |  |
 | `renderTrainingRecords` | `createLoadingState` | Ausrüstung wird geladen… |  |
 | `renderTrainingRecords` | `createErrorState` | (computed) ` error?.message ` |  |
 | `analysisEmptyCard` | `createEmptyState` | (computed) ` ANALYSIS_EMPTY_TITLES[segment] ` | (computed) ` cause ` |
@@ -96,6 +99,19 @@ that views write inline are not listed.
 | `kcalValue` | `markValueMissing` | nicht erfasst |  |
 | `nutritionTotalTile` | `markValueMissing` | nicht erfasst |  |
 | `renderNutritionWeek` | `markValueMissing` | nicht erfasst |  |
+
+### `public/performance-view.js`
+
+| Function | Helper | Text | Detail |
+| --- | --- | --- | --- |
+| `renderCurrentPerformance` | `h(.empty)` | (computed) ` text ` |  |
+
+### `public/plan-views.js`
+
+| Function | Helper | Text | Detail |
+| --- | --- | --- | --- |
+| `renderLibrary` | `h(.context-empty)` | Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst. |  |
+| `renderCompetitions` | `h(.context-empty)` | Noch keine Wettkämpfe gespeichert. |  |
 <!-- END GENERATED STATES -->
 
 ## Copy deck

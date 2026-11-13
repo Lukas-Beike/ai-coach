@@ -221,6 +221,8 @@ test("a missing, extra or unfounded view descriptor is a problem", () => {
 
 // The state helpers of components.js and the argument positions that carry text.
 const STATE_HELPERS = { createEmptyState: [0, 1], createLoadingState: [0], createErrorState: [0], markValueMissing: [1] };
+// CSS classes that public/ uses only for empty-state paragraphs.
+const EMPTY_CLASSES = ["empty", "context-empty"];
 
 function functionName(callPath) {
   const key = (name) => name?.name ?? name?.value;
@@ -263,6 +265,9 @@ function scanPublicTexts() {
         if (callee.type !== "Identifier") return;
         const where = { file, fn: functionName(item) };
         if (callee.name in STATE_HELPERS) states.push({ ...where, helper: callee.name, texts: STATE_HELPERS[callee.name].map((index) => (args[index] ? argumentText(args[index], source) : null)) });
+        // An empty-state paragraph drawn inline with one of the empty-state classes.
+        const className = args[1]?.type === "StringLiteral" ? args[1].value : "";
+        if (callee.name === "h" && EMPTY_CLASSES.includes(className)) states.push({ ...where, helper: `h(.${className})`, texts: args.slice(2).map((node) => argumentText(node, source)) });
         if (callee.name !== "requestConfirmation") return;
         const options = Object.fromEntries((args[1]?.properties || []).map((property) => [property.key.name, argumentText(property.value, source)]));
         confirmations.push({ ...where, message: argumentText(args[0], source), options });
