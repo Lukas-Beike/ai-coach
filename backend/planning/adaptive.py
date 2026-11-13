@@ -476,7 +476,7 @@ class AdaptiveReplanApplyService:
         current = parse_payload(draft["payload"])
         expected_fingerprint = str(change.get("source_fingerprint") or "")
         stale_reason = cls._adaptive_change_stale_reason(current, expected_fingerprint)
-        if stale_reason:
+        if stale_reason or current is None:
             return 0, {"library_workout_id": draft_id, "reason": stale_reason}
         before = {
             **current,
