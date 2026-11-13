@@ -519,10 +519,12 @@ class ServerPerformanceTests(ServerTestCase):
                 ]
 
         config = replace(
-            server.CONFIG, garmin_email="test@example.invalid", garmin_password="test"
+            server.CONFIG_HOLDER.value,
+            garmin_email="test@example.invalid",
+            garmin_password="test",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 garmin_provider.GarminClientFactory, "available", return_value=True
             ),

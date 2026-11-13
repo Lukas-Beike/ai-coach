@@ -50,9 +50,9 @@ class ServerProvidersTests(ServerTestCase):
         self.assertIs(original, server.morning_body_battery_service())
 
         updated_config = replace(
-            server.CONFIG, garmin_email="updated-test@example.invalid"
+            server.CONFIG_HOLDER.value, garmin_email="updated-test@example.invalid"
         )
-        with patch.object(server, "CONFIG", updated_config):
+        with patch.object(server.CONFIG_HOLDER, "value", updated_config):
             updated = server.morning_body_battery_service()
             self.assertIsNot(updated, original)
             self.assertIs(updated, server.morning_body_battery_service())
@@ -100,11 +100,11 @@ class ServerProvidersTests(ServerTestCase):
 
     def test_openai_model_selection_uses_configured_model(self):
         config = replace(
-            server.CONFIG,
+            server.CONFIG_HOLDER.value,
             openai_api_key="test-openai-key",
             openai_model="gpt-6-luna",
         )
-        with patch.object(server, "CONFIG", config):
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             self.assertEqual(server.SETTINGS.selected_model(), "gpt-6-luna")
             self.assertEqual(
                 [
@@ -133,12 +133,12 @@ class ServerProvidersTests(ServerTestCase):
             return {"id": "resp-test", "status": "completed", "usage": {}}
 
         config = replace(
-            server.CONFIG,
+            server.CONFIG_HOLDER.value,
             openai_api_key="test-key",
             openai_base_url="https://foundry.example.invalid/openai/v1",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
                 "request",
@@ -177,12 +177,12 @@ class ServerProvidersTests(ServerTestCase):
                 super().__init__(stream.encode())
 
         config = replace(
-            server.CONFIG,
+            server.CONFIG_HOLDER.value,
             openai_api_key="test-key",
             openai_base_url="https://foundry.example.invalid/openai/v1/",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 provider_http, "urlopen", return_value=FakeResponse()
             ) as urlopen,
@@ -205,9 +205,9 @@ class ServerProvidersTests(ServerTestCase):
             captured.update(payload)
             return {"output_text": "ok", "output": []}
 
-        config = replace(server.CONFIG, openai_api_key="test-key")
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="test-key")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
                 "request",
@@ -281,12 +281,14 @@ class ServerProvidersTests(ServerTestCase):
         email = "Athlete.Redaction@example.invalid"
         calendar_url = "https://calendar.example.invalid/private/FeedSecret-9aB7cD2eF4gH6iJ8kL0mN.ics?accessToken=calendar-query-secret"
         config = replace(
-            server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url
+            server.CONFIG_HOLDER.value,
+            garmin_email=email,
+            calendar_ical_url=calendar_url,
         )
         userinfo_url = "https://calendar-user:calendar-password@calendar.example.invalid/family.ics"
         token_url = "https://calendar.example.invalid/feed.ics?provider=family&ACCESS-TOKEN=query-secret"
         long_path_url = "https://calendar.example.invalid/public/9aB7cD2eF4gH6iJ8kL0mN2pQ4rS6tU8vW0xY.ics"
-        with patch.object(server, "CONFIG", config):
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             samples = " | ".join(
                 (
                     email,
@@ -317,9 +319,11 @@ class ServerProvidersTests(ServerTestCase):
         email = "garmin.fake.person@example.invalid"
         calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
         config = replace(
-            server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url
+            server.CONFIG_HOLDER.value,
+            garmin_email=email,
+            calendar_ical_url=calendar_url,
         )
-        with patch.object(server, "CONFIG", config):
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             with self.assertRaises(AppError) as sdk_error:
                 provider_http.external_call(
                     "garmin",
@@ -366,7 +370,9 @@ class ServerProvidersTests(ServerTestCase):
         email = "fake.garmin@example.invalid"
         calendar_url = "https://calendar.example.invalid/private/fake-calendar-token-1234567890.ics"
         config = replace(
-            server.CONFIG, garmin_email=email, calendar_ical_url=calendar_url
+            server.CONFIG_HOLDER.value,
+            garmin_email=email,
+            calendar_ical_url=calendar_url,
         )
         error_body = json.dumps(
             {"error": {"message": f"rejected {email} {calendar_url}"}}
@@ -382,7 +388,7 @@ class ServerProvidersTests(ServerTestCase):
             server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
                 "opener",
@@ -627,9 +633,9 @@ class ServerProvidersTests(ServerTestCase):
             {"retry-after": "9"},
             BytesIO(error_body),
         )
-        config = replace(server.CONFIG, openai_api_key="openai-test")
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="openai-test")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(provider_http, "urlopen", side_effect=upstream_error),
             self.assertRaises(AppError) as raised,
         ):
@@ -656,9 +662,9 @@ class ServerProvidersTests(ServerTestCase):
             {"x-request-id": "req_test_456"},
             BytesIO(raw_error),
         )
-        config = replace(server.CONFIG, openai_api_key="openai-test")
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="openai-test")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(provider_http, "urlopen", side_effect=upstream_error),
             self.assertRaises(AppError) as raised,
         ):
@@ -923,9 +929,9 @@ class ServerProvidersTests(ServerTestCase):
                 }
             ),
         )
-        config = replace(server.CONFIG, openai_api_key="test-key")
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="test-key")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
                 "request",

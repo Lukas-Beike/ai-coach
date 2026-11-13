@@ -12,6 +12,7 @@ from pathlib import Path
 import backend
 from backend.config import (
     Config,
+    ConfigHolder,
     data_dir_env_warning,
     load_config,
     local_env_defines,
@@ -57,6 +58,37 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             second_config.garmin_tokenstore, str(Path(second) / "garmin_tokens")
         )
+
+    def test_the_holder_serves_the_live_configuration_and_counts_swaps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = load_config(root, root, {"PORT": "8091"})
+        holder = ConfigHolder(first)
+        self.assertIs(holder(), first)
+        self.assertEqual(holder.generation, 0)
+
+        second = replace(first, port=8092)
+        holder.apply(second)
+        self.assertIs(holder(), second)
+        self.assertEqual(holder.generation, 1)
+
+        # Applying the live value again is not a replacement.
+        holder.apply(second)
+        self.assertEqual(holder.generation, 1)
+
+    def test_intervals_export_needs_the_api_key_and_the_athlete_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = load_config(root, root, {})
+        for key, athlete, expected in (
+            ("key", "i1", True),
+            ("", "i1", False),
+            ("key", "", False),
+        ):
+            changed = replace(
+                config, intervals_api_key=key, intervals_athlete_id=athlete
+            )
+            self.assertIs(changed.intervals_export_configured, expected)
 
     def test_process_values_win_over_persisted_values(self):
         with tempfile.TemporaryDirectory() as temporary:

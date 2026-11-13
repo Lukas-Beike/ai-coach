@@ -72,7 +72,7 @@ class ServerHttpTests(ServerTestCase):
         auth = http_auth.SessionAuthService(
             Mock(),
             threading.RLock(),
-            replace(server.CONFIG, app_password="synthetic-password-123"),
+            replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
             True,
             RateLimiter(),
         )
@@ -143,7 +143,9 @@ class ServerHttpTests(ServerTestCase):
         restoring = runtime_maintenance.MaintenanceGate()
         restoring.restoring = True
         maintenance_port = serve(replace(dependencies, maintenance_gate=restoring))
-        config = replace(server.CONFIG, app_password="synthetic-password-123")
+        config = replace(
+            server.CONFIG_HOLDER.value, app_password="synthetic-password-123"
+        )
         without_session = http_auth.SessionAuthService(
             Mock(), threading.RLock(), config, True, RateLimiter()
         )
@@ -248,7 +250,7 @@ class ServerHttpTests(ServerTestCase):
         auth = http_auth.SessionAuthService(
             server.database_manager(),
             server.DB_LOCK,
-            replace(server.CONFIG, app_password="synthetic-password-123"),
+            replace(server.CONFIG_HOLDER.value, app_password="synthetic-password-123"),
             True,
             RateLimiter(),
         )
@@ -530,7 +532,9 @@ class ServerHttpTests(ServerTestCase):
         self.assertIn("HttpOnly", insecure[0])
         self.assertNotIn("HttpOnly", insecure[1])
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, secure_cookies=True)
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, secure_cookies=True),
         ):
             secure = server.session_auth_service().session_cookie_headers(
                 "session-token", "csrf-token"
@@ -702,8 +706,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(state["checkins"][0]["motivation"], 8)
 
     def test_public_states_keep_empty_usage_when_openai_is_not_configured(self):
-        config = replace(server.CONFIG, openai_api_key="")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             bootstrap = server.PUBLIC_STATE.bootstrap_service().read()
 
         self.assertEqual(bootstrap["usage"]["requests"], 0)
@@ -1230,7 +1234,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_intervals_collection_pagination_is_bounded(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(server.CONFIG, intervals_api_key="test-key")
+            replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         )
         first_page = [{"id": f"activity-{index}"} for index in range(500)]
         second_page = [{"id": "activity-500"}]
@@ -1489,10 +1493,10 @@ class ServerHttpTests(ServerTestCase):
         audio = b"fake-webm-audio"
         with (
             patch.object(
-                server,
-                "CONFIG",
+                server.CONFIG_HOLDER,
+                "value",
                 replace(
-                    server.CONFIG,
+                    server.CONFIG_HOLDER.value,
                     openai_api_key="test-key",
                     openai_base_url="https://foundry.example.invalid/openai/v1/",
                 ),
@@ -1521,8 +1525,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
 
     def test_transcribe_audio_rejects_unknown_format_and_oversized_audio(self):
-        config = replace(server.CONFIG, openai_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, openai_api_key="test-key")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             with self.assertRaises(AppError) as unsupported:
                 _transcribe_via_http_route(b"audio", "audio/flac")
             with self.assertRaises(AppError) as oversized:
@@ -1807,8 +1811,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertTrue(response_body.closed)
 
     def test_intervals_public_state_reports_sync_health(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             server.key_value_service().set(
                 "last_library_push_at", "2026-08-31T08:00:00+00:00"
             )
@@ -1821,7 +1825,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertIsNone(state["last_error"])
 
     def test_intervals_public_state_follows_the_output_stamps(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         keys = (
             "intervals_last_output_ok_at",
             "intervals_last_output_failed_at",
@@ -1838,7 +1842,7 @@ class ServerHttpTests(ServerTestCase):
         def read_state(**stamps):
             for key, value in stamps.items():
                 server.key_value_service().set(f"intervals_last_output_{key}_at", value)
-            with patch.object(server, "CONFIG", config):
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
 
         clear()
@@ -1874,7 +1878,7 @@ class ServerHttpTests(ServerTestCase):
         )
 
     def test_intervals_public_state_adopts_an_export_from_before_the_stamps(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         stamps = ("intervals_last_output_ok_at", "intervals_last_output_failed_at")
 
         def clear():
@@ -1893,7 +1897,7 @@ class ServerHttpTests(ServerTestCase):
                 )
 
         def read_state():
-            with patch.object(server, "CONFIG", config):
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
 
         clear()
@@ -1912,8 +1916,8 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(read_state()["state"], "error")
 
     def test_intervals_public_state_reports_library_error(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
+        config = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
+        with patch.object(server.CONFIG_HOLDER, "value", config):
             server.key_value_service().set(
                 "last_library_sync_error",
                 "Intervals.icu weist die Anfrage zurück (422): Invalid workout type",

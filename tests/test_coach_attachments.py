@@ -342,7 +342,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         image = base64.b64encode(b"\xff\xd8\xffsynthetic-image").decode("ascii")
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, openai_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, openai_api_key="test-key"),
             ),
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
@@ -610,7 +612,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         finally:
             archive_path.unlink()
         self.assertEqual(json.loads(exported[0]["attachments"]), saved)
-        server.APP.coach_conversation.message_service().add("assistant", "Synthetic answer")
+        server.APP.coach_conversation.message_service().add(
+            "assistant", "Synthetic answer"
+        )
         server.APP.coach_conversation.message_service().add(
             "user", "What does the chart show?"
         )

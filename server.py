@@ -49,6 +49,7 @@ from backend.coach.wiring import (
 from backend.config import (
     DEFAULT_ANTHROPIC_BASE_URL,
     DEFAULT_OPENAI_BASE_URL,
+    ConfigHolder,
     load_config,
 )
 from backend.db import manager as database_manager_runtime
@@ -61,7 +62,7 @@ from backend.db.manager import (
     DATABASE_LOCK as DB_LOCK,
 )
 from backend.db.manager import (
-    DatabaseManager,
+    DatabaseHolder,
     background_writer,
 )
 from backend.db.repositories import (
@@ -73,8 +74,7 @@ from backend.db.repositories import (
     TrainingPlanRepository,
 )
 from backend.db.schema import configure_cipher
-from backend.diagnostics.logs import RecentLogEntriesService
-from backend.diagnostics.wiring import build_diagnostics
+from backend.diagnostics.wiring import DiagnosticsServices, build_diagnostics
 from backend.history.wiring import build_history
 from backend.http_api import server as http_server
 from backend.http_api.auth import (
@@ -140,8 +140,10 @@ from backend.providers.model_wiring import (
     ModelTransportServices,
     build_model_transport,
 )
-from backend.providers.observed_opener import Opener, observed_opener
-from backend.providers.transport_wiring import build_provider_transport
+from backend.providers.transport_wiring import (
+    ProviderTransportServices,
+    build_provider_transport,
+)
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
@@ -151,7 +153,11 @@ from backend.sync import scheduler as sync_scheduler_runtime
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.canonical_wiring import build_canonical_backfill, build_canonical_read
+from backend.sync.canonical_wiring import (
+    CanonicalBackfillServices,
+    build_canonical_backfill,
+    build_canonical_read,
+)
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_wiring import (
     build_sync_job_execution,
@@ -198,7 +204,11 @@ from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection import WahooSecretRegistry
-from backend.sync.wahoo_wiring import build_wahoo_connection, build_wahoo_sync
+from backend.sync.wahoo_wiring import (
+    WahooConnectionServices,
+    build_wahoo_connection,
+    build_wahoo_sync,
+)
 from backend.sync.weather import build_weather_sync
 from backend.sync.wiring import (
     SyncWindow,
@@ -231,14 +241,11 @@ APP_VERSION = "2.1.10"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 COACH_CONVERSATION_GATE = CoachConversationGate()
-SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
 
 ENV_CONFIG = load_config(ROOT, DATA_DIR)
 # Runtime configuration: environment values overlaid with stored credentials.
-CONFIG = ENV_CONFIG
-# Bumped whenever CONFIG is replaced so cached services rebuild with new values.
-CONFIG_GENERATION = 0
+CONFIG_HOLDER = ConfigHolder(ENV_CONFIG)
 
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -254,7 +261,7 @@ def _nutrition_secret_values() -> tuple[str, ...]:
 
 # Environment secrets stay redacted while a stored credential overrides them.
 REDACTOR = observability.Redactor(
-    lambda: CONFIG,
+    CONFIG_HOLDER,
     extra_secrets=lambda: (
         *GARMIN_SECRET_REGISTRY.values(),
         *WAHOO_SECRET_REGISTRY.values(),
@@ -279,26 +286,16 @@ ACTIVITY_FEEDBACK_REPOSITORY = ActivityFeedbackRepository(runtime_clock.utc_now)
 GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS = 120
 
 
-def database_manager() -> DatabaseManager:
-    """Return the manager for the active path and secure configuration."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    signature = (str(DB_PATH.resolve()), CONFIG.app_password, SQLCIPHER_AVAILABLE)
-    if CONFIG.app_password and not SQLCIPHER_AVAILABLE:
-        database_manager_runtime.DATABASE_MANAGER_CACHE.reset()
-        raise RuntimeError(
-            "SQLCipher ist für eine verschlüsselte Datenbank erforderlich."
-        )
-    return database_manager_runtime.DATABASE_MANAGER_CACHE.get(
-        signature,
-        DB_PATH,
-        sqlite_backend if CONFIG.app_password else sqlite3,
-        password=CONFIG.app_password,
-        configure=configure_cipher,
-        row_factory=database_row_factory,
-        reader_count=4,
-        timeout=20,
-        persist_connections=bool(CONFIG.app_password),
-    )
+database_manager = DatabaseHolder(
+    data_dir=lambda: DATA_DIR,
+    database_path=lambda: DB_PATH,
+    config=CONFIG_HOLDER,
+    sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
+    encrypted_backend=sqlite_backend,
+    plain_backend=sqlite3,
+    configure=configure_cipher,
+    row_factory=database_row_factory,
+)
 
 
 def session_auth_service() -> SessionAuthService:
@@ -306,7 +303,7 @@ def session_auth_service() -> SessionAuthService:
     return get_session_auth_service(
         database_manager(),
         DB_LOCK,
-        CONFIG,
+        CONFIG_HOLDER.value,
         SQLCIPHER_AVAILABLE,
         ATHLETE_SESSION_SERVICE,
     )
@@ -327,8 +324,8 @@ def provider_state_service() -> provider_state.ProviderStateService:
 def morning_body_battery_service() -> MorningBodyBatteryService:
     """Compose morning recovery orchestration from concrete runtime resources."""
     manager = database_manager()
-    # The generation guards against a reused id after CONFIG is replaced.
-    config_id = (id(CONFIG), CONFIG_GENERATION)
+    # The generation guards against a reused id after the configuration is replaced.
+    config_id = (id(CONFIG_HOLDER.value), CONFIG_HOLDER.generation)
     return MORNING_BODY_BATTERY_SERVICE_CACHE.get(
         manager,
         config_id,
@@ -343,7 +340,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
             GarminMorningRemoteReader(
-                CONFIG,
+                CONFIG_HOLDER.value,
                 GARMIN_ASSEMBLY.client_factory(),
                 ATHLETE_DATA.profile(),
                 ATHLETE_CLOCK,
@@ -376,6 +373,12 @@ METRIC_EXPORT_RUNNER: MetricExportRunner
 THRESHOLD_WARNINGS: ThresholdStalenessService
 # Declared ahead of its first lambda reference; assigned after the coach turns.
 PUBLIC_STATE: PublicStateServices
+# Declared ahead of their first lambda reference; assigned by their builders below.
+PROVIDER_TRANSPORT: ProviderTransportServices
+WAHOO_CONNECTION: WahooConnectionServices
+CANONICAL_BACKFILL: CanonicalBackfillServices
+DIAGNOSTICS: DiagnosticsServices
+PROVIDER_CREDENTIAL_SERVICE: ProviderCredentialService
 ATHLETE_DATA = build_athlete_data(
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -387,7 +390,7 @@ ATHLETE_DATA = build_athlete_data(
     activity_rows=lambda: CANONICAL_READ,
     table_reader=CanonicalTableReader,
     run_lthr=lambda: RUN_LTHR,
-    load_inputs_changed=lambda: start_canonical_backfill(),
+    load_inputs_changed=lambda: CANONICAL_BACKFILL.worker.start(),
     thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
     threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
 )
@@ -405,7 +408,7 @@ ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 # The application context the domain builders read (#2069). Owners whose
 # builder step has not run yet are set as they are created.
 APP = AppContext(
-    config=lambda: CONFIG,
+    config=CONFIG_HOLDER,
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
     clock=ATHLETE_CLOCK,
@@ -421,8 +424,8 @@ APP = AppContext(
     sqlite_backend=sqlite_backend,
     profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
     # Defined below; looked up when a provider client is built or on use.
-    refresh_config=lambda: refresh_runtime_config(),
-    observed_opener=lambda service: observed_provider_opener(service),
+    refresh_config=lambda: PROVIDER_CREDENTIAL_SERVICE.refresh(),
+    observed_opener=lambda service: PROVIDER_TRANSPORT.observed_opener(service),
     log_path=lambda: LOG_PATH,
     app_name=APP_NAME,
     app_version=APP_VERSION,
@@ -462,14 +465,6 @@ PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
 
 
-def start_canonical_backfill() -> None:
-    return CANONICAL_BACKFILL.worker.start()
-
-
-def server_log_files() -> RecentLogEntriesService:
-    return DIAGNOSTICS.recent_log_entries_service()
-
-
 PRIVACY = build_privacy(
     database_manager=database_manager,
     profile_service=ATHLETE_DATA.profile,
@@ -481,23 +476,15 @@ PRIVACY = build_privacy(
     openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
     local_now=lambda: ATHLETE_CLOCK.now(),
     diagnostics_suspended=lambda: APP.diagnostic_capture.suspended(),
-    refresh_credentials=lambda: refresh_runtime_config(),
+    refresh_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE.refresh(),
     cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
-    disconnect_wahoo=lambda: disconnect_wahoo_grant(),
+    disconnect_wahoo=lambda: WAHOO_CONNECTION.service().disconnect(),
     cancel_coach_turns=lambda: (
         APP.coach_conversation.reset_service().cancel_running_turns()
     ),
-    log_files=server_log_files,
+    log_files=lambda: DIAGNOSTICS.recent_log_entries_service(),
 )
 BACKUP = build_backup(APP)
-
-
-def sync_job_worker() -> sync_worker_runtime.SyncJobWorker:
-    """Return the one restartable persistent synchronization worker."""
-    global SYNC_JOB_WORKER
-    if SYNC_JOB_WORKER is None:
-        SYNC_JOB_WORKER = SYNC_WORKERS.create()
-    return SYNC_JOB_WORKER
 
 
 def initialise_database() -> None:
@@ -509,9 +496,9 @@ def initialise_database() -> None:
             current_time=datetime.now(UTC),
             default_profile_json=json.dumps(DEFAULT_PROFILE),
             provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
-            retention_days=int(getattr(CONFIG, "data_retention_days", -1)),
+            retention_days=int(getattr(CONFIG_HOLDER.value, "data_retention_days", -1)),
         )
-    refresh_runtime_config()
+    PROVIDER_CREDENTIAL_SERVICE.refresh()
 
 
 def key_value_service() -> KeyValueService:
@@ -521,26 +508,17 @@ def key_value_service() -> KeyValueService:
 SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
 ALL_SYNC_DAYS = -1
 SYNC_CHUNK_DAYS = 90
-SYNC_EARLIEST_DATE = CONFIG.sync_history_earliest_date
+SYNC_EARLIEST_DATE = CONFIG_HOLDER.value.sync_history_earliest_date
 PLANNED_CALENDAR_FUTURE_DAYS = 35
 SYNC_WINDOW = SyncWindow(
     SYNC_PERIOD_DEFAULTS, ALL_SYNC_DAYS, SYNC_CHUNK_DAYS, SYNC_EARLIEST_DATE
 )
 SETTINGS = SettingsService(
-    lambda: CONFIG,
+    CONFIG_HOLDER,
     lambda key: key_value_service().get(key),
     lambda key, value: key_value_service().set(key, value),
     claude_models=lambda: MODEL_TRANSPORT.claude_models().status(),
 )
-
-
-def apply_runtime_config(config: app_config.Config) -> None:
-    """Swap the runtime configuration; lambda readers see the new value at once."""
-    global CONFIG, CONFIG_GENERATION
-    if config is CONFIG:
-        return
-    CONFIG = config
-    CONFIG_GENERATION += 1
 
 
 PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
@@ -548,15 +526,10 @@ PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
     database_manager=database_manager,
     database_lock=lambda: DB_LOCK,
     key_values=KEY_VALUE_REPOSITORY,
-    apply_config=apply_runtime_config,
+    apply_config=CONFIG_HOLDER.apply,
     garmin_connection=lambda: GARMIN_LOGIN.status(),
-    current_config=lambda: CONFIG,
+    current_config=CONFIG_HOLDER,
 )
-
-
-def refresh_runtime_config() -> app_config.Config:
-    """Recompute CONFIG from the environment plus stored credentials."""
-    return PROVIDER_CREDENTIAL_SERVICE.refresh()
 
 
 # Each flush rewrites the whole capture (at most 2 MiB), so captures are merged
@@ -589,12 +562,14 @@ GARMIN_TOKENS = GarminTokenStore(
     database_manager=database_manager,
     database_lock=lambda: DB_LOCK,
     key_values=KEY_VALUE_REPOSITORY,
-    tokenstore_path=lambda: CONFIG.garmin_tokenstore,
+    tokenstore_path=lambda: CONFIG_HOLDER.value.garmin_tokenstore,
     registry=GARMIN_SECRET_REGISTRY,
-    env_credentials=lambda: bool(CONFIG.garmin_email and CONFIG.garmin_password),
+    env_credentials=lambda: bool(
+        CONFIG_HOLDER.value.garmin_email and CONFIG_HOLDER.value.garmin_password
+    ),
 )
 GARMIN_LOGIN: GarminLoginService = GarminLoginService(
-    config=lambda: CONFIG,
+    config=CONFIG_HOLDER,
     client_factory=lambda email, password, **options: (
         GARMIN_ASSEMBLY.client_factory().create(email, password, **options)
     ),
@@ -615,7 +590,9 @@ GARMIN_ASSEMBLY: GarminServices = build_garmin(
     resync_gate=GARMIN_RESYNC_GATE,
     lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
     metric_export=lambda: (
-        METRIC_EXPORT.sync_automatic() if _intervals_export_configured() else None
+        METRIC_EXPORT.sync_automatic()
+        if CONFIG_HOLDER.value.intervals_export_configured
+        else None
     ),
     tokens=GARMIN_TOKENS,
     run_zones=lambda: RUN_LTHR.zones_resolver(),
@@ -639,7 +616,7 @@ PROVIDER_TRANSPORT = build_provider_transport(
     redact_text=REDACTOR.redact_text,
     provider_state=provider_state_service,
     operation_context=sync_observation.operation_context,
-    current_config=lambda: CONFIG,
+    current_config=CONFIG_HOLDER,
     athlete_now=ATHLETE_CLOCK.now,
     intervals_operation=INTERVALS_RESYNC_GATE.operation,
 )
@@ -653,22 +630,6 @@ WAHOO_CONNECTION = build_wahoo_connection(
 )
 
 
-def observed_provider_opener(service: str, *, include_path: bool = True) -> Opener:
-    """Observe a raw provider request in the log and the diagnostic capture."""
-    return observed_opener(
-        service,
-        logger=LOGGER,
-        diagnostic_capture=DIAGNOSTIC_CAPTURE,
-        operation_context=sync_observation.operation_context,
-        include_path=include_path,
-    )
-
-
-def disconnect_wahoo_grant() -> dict[str, object]:
-    """Revoke the Wahoo grant best effort and drop its tokens (privacy purge)."""
-    return WAHOO_CONNECTION.service().disconnect()
-
-
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
 # headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
 EXPORT_THRESHOLDS = build_export_thresholds(APP)
@@ -679,14 +640,14 @@ WAHOO_SYNC = build_wahoo_sync(
     resync_gate=WAHOO_RESYNC_GATE,
     export_thresholds=EXPORT_THRESHOLDS,
     history_earliest_date=SYNC_EARLIEST_DATE,
-    fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
+    fit_opener=lambda: PROVIDER_TRANSPORT.observed_opener(WAHOO_ID, include_path=False),
 )
 APP.wahoo = WAHOO_SYNC
 APP.settings = SETTINGS
 NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)
 APP.nutrition = NUTRITION_SERVICES
 MODEL_TRANSPORT: ModelTransportServices = build_model_transport(
-    config=lambda: CONFIG,
+    config=CONFIG_HOLDER,
     selected_thinking_level=SETTINGS.selected_thinking_level,
     service_tier=SETTINGS.service_tier,
     http_client=PROVIDER_TRANSPORT.json_http_client,
@@ -737,7 +698,7 @@ APP.coach_proposals = COACH_PROPOSALS
 # Derived passes (local load, canonical backfill, Wahoo metric export) after any
 # provider read: a queued job, a Coach request that waits and a full resync.
 DERIVED_PASS_HOOK = chained_after_job(
-    refresh_after_job(lambda: start_canonical_backfill()),
+    refresh_after_job(lambda: CANONICAL_BACKFILL.worker.start()),
     lambda job: METRIC_EXPORT_RUNNER.after_job(job),
 )
 
@@ -890,13 +851,9 @@ METRIC_EXPORT: MetricExportService = build_metric_export(
 )
 
 
-def _intervals_export_configured() -> bool:
-    return bool(CONFIG.intervals_api_key and CONFIG.intervals_athlete_id)
-
-
 METRIC_EXPORT_RUNNER = MetricExportRunner(
     lambda: METRIC_EXPORT,
-    enabled=_intervals_export_configured,
+    enabled=lambda: CONFIG_HOLDER.value.intervals_export_configured,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
 )
 THRESHOLD_WARNINGS = ThresholdStalenessService(
@@ -986,7 +943,7 @@ DIAGNOSTICS = build_diagnostics(APP)
 
 PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
     build_connection_probes(
-        config=lambda: CONFIG,
+        config=CONFIG_HOLDER,
         request=lambda *args, **kwargs: PROVIDER_TRANSPORT.json_http_client().request(
             *args, **kwargs
         ),
@@ -1033,7 +990,7 @@ HTTP_API = build_http_api(
 def main() -> None:
     observability.configure_logging(LOGGER, DATA_DIR, LOG_PATH, REDACTOR)
     configuration_error = app_config.security_configuration_error(
-        CONFIG, sqlcipher_available=SQLCIPHER_AVAILABLE
+        CONFIG_HOLDER.value, sqlcipher_available=SQLCIPHER_AVAILABLE
     )
     if configuration_error:
         LOGGER.critical(
@@ -1053,7 +1010,9 @@ def main() -> None:
                 "context": {"reason": storage_warning},
             },
         )
-    proxy_warning = app_config.proxy_list_warning(CONFIG.invalid_trusted_proxies)
+    proxy_warning = app_config.proxy_list_warning(
+        CONFIG_HOLDER.value.invalid_trusted_proxies
+    )
     if proxy_warning:
         LOGGER.warning(
             "Invalid trusted proxy entries ignored",
@@ -1066,13 +1025,13 @@ def main() -> None:
         f"{APP_NAME} starting",
         extra={
             "event": "server_start",
-            "context": {"version": APP_VERSION, "port": CONFIG.port},
+            "context": {"version": APP_VERSION, "port": CONFIG_HOLDER.value.port},
         },
     )
     initialise_database()
     remove_orphaned_staging_files(DATA_DIR, LOGGER)
     server = http_server.CoachHTTPServer(
-        ("0.0.0.0", CONFIG.port), HTTP_API.request_handler_class()
+        ("0.0.0.0", CONFIG_HOLDER.value.port), HTTP_API.request_handler_class()
     )
     server.allow_reuse_address = True
     sync_worker: sync_worker_runtime.SyncJobWorker | None = None
@@ -1094,7 +1053,7 @@ def main() -> None:
         # the canonical backfill (a finished sync job does): a batch holding the
         # writer must not fail startup with DatabaseBusyError (#2287).
         SYNC_SCHEDULERS.startup_scheduler().schedule()
-        sync_worker = sync_job_worker()
+        sync_worker = SYNC_WORKERS.create()
         sync_worker.start()
         COACH_JOB_WORKER.start(
             COACH_BACKGROUND_JOBS.job_store,
@@ -1110,7 +1069,10 @@ def main() -> None:
         daily_thread.start()
         LOGGER.info(
             f"{APP_NAME} listening",
-            extra={"event": "server_ready", "context": {"port": CONFIG.port}},
+            extra={
+                "event": "server_ready",
+                "context": {"port": CONFIG_HOLDER.value.port},
+            },
         )
         server.serve_forever()  # NOSONAR - HTTP is intentionally LAN-only behind the documented HTTPS proxy.
     except KeyboardInterrupt:

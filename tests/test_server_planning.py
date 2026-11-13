@@ -1012,7 +1012,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_library_update_always_sends_required_folder(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(
-                server.CONFIG,
+                server.CONFIG_HOLDER.value,
                 intervals_api_key="test-key",
                 intervals_athlete_id="athlete-1",
             )
@@ -1049,7 +1049,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(
-                server.CONFIG,
+                server.CONFIG_HOLDER.value,
                 intervals_api_key="test-key",
                 intervals_athlete_id="athlete-1",
             )
@@ -1298,7 +1298,9 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_missing_library_workout_stays_local_until_approval(self):
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
         ):
             entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
                 [
@@ -2982,7 +2984,9 @@ class ServerPlanningTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             server.PROVIDER_RESYNC.competition_sync_service().sync(

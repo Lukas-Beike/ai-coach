@@ -126,7 +126,9 @@ class ServerDatabaseTests(ServerTestCase):
     def test_bootstrap_contract_is_current(self):
         # A Personal API key adds fields to the Garmin state; render without one.
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, garmin_personal_api_key="")
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, garmin_personal_api_key=""),
         ):
             state = server.PUBLIC_STATE.bootstrap_service().read()
         rendered = bootstrap_contract(state)
@@ -157,9 +159,9 @@ class ServerDatabaseTests(ServerTestCase):
         self,
     ):
         manager = server.database_manager()
-        configured = replace(server.CONFIG, app_password=SERVER_PHRASE)
+        configured = replace(server.CONFIG_HOLDER.value, app_password=SERVER_PHRASE)
         with (
-            patch.object(server, "CONFIG", configured),
+            patch.object(server.CONFIG_HOLDER, "value", configured),
             patch.object(server, "SQLCIPHER_AVAILABLE", False),
             self.assertRaisesRegex(RuntimeError, "SQLCipher"),
         ):
@@ -227,10 +229,10 @@ class ServerDatabaseTests(ServerTestCase):
             finally:
                 connection.close()
 
-            config = replace(server.CONFIG, app_password="")
+            config = replace(server.CONFIG_HOLDER.value, app_password="")
             try:
                 with (
-                    patch.object(server, "CONFIG", config),
+                    patch.object(server.CONFIG_HOLDER, "value", config),
                     patch.object(server, "DATA_DIR", Path(temporary)),
                     patch.object(server, "DB_PATH", database_path),
                     self.assertRaises(RuntimeError),
@@ -437,7 +439,9 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_local_public_state_reuses_request_database_connections(self):
         backend = (
-            server.sqlite_backend if server.CONFIG.app_password else server.sqlite3
+            server.sqlite_backend
+            if server.CONFIG_HOLDER.value.app_password
+            else server.sqlite3
         )
         real_connect = backend.connect
         with patch.object(backend, "connect", wraps=real_connect) as connect:
@@ -1308,11 +1312,13 @@ class ServerDatabaseTests(ServerTestCase):
     def test_sqlcipher_database_returns_mapping_rows(self):
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
-            config = replace(server.CONFIG, app_password="test-password-123")
+            config = replace(
+                server.CONFIG_HOLDER.value, app_password="test-password-123"
+            )
             with (
                 patch.object(server, "DATA_DIR", data_dir),
                 patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"),
-                patch.object(server, "CONFIG", config),
+                patch.object(server.CONFIG_HOLDER, "value", config),
             ):
                 server.initialise_database()
                 with server.database_manager().unit_of_work() as db:
@@ -1335,11 +1341,13 @@ class ServerDatabaseTests(ServerTestCase):
 
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
-            config = replace(server.CONFIG, app_password="test-password-123")
+            config = replace(
+                server.CONFIG_HOLDER.value, app_password="test-password-123"
+            )
             with (
                 patch.object(server, "DATA_DIR", data_dir),
                 patch.object(server, "DB_PATH", data_dir / "intervals-coach.db"),
-                patch.object(server, "CONFIG", config),
+                patch.object(server.CONFIG_HOLDER, "value", config),
             ):
                 server.initialise_database()
                 auth = server.session_auth_service()
@@ -1473,12 +1481,14 @@ class ServerDatabaseTests(ServerTestCase):
     def test_restore_accepts_only_exact_schema_and_invalidates_sessions(self):
         with tempfile.TemporaryDirectory() as temp_root:
             data_dir = Path(temp_root) / "data"
-            config = replace(server.CONFIG, app_password="test-password-123")
+            config = replace(
+                server.CONFIG_HOLDER.value, app_password="test-password-123"
+            )
             db_path = data_dir / "intervals-coach.db"
             with (
                 patch.object(server, "DATA_DIR", data_dir),
                 patch.object(server, "DB_PATH", db_path),
-                patch.object(server, "CONFIG", config),
+                patch.object(server.CONFIG_HOLDER, "value", config),
                 canonical_backfill_stopped(server),
             ):
                 server.initialise_database()

@@ -31,13 +31,17 @@ class CoachReviewTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="coach-review-test-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for name, value in (
-            ("CONFIG", replace(server.CONFIG, app_password="")),
-            ("DATA_DIR", root),
-            ("DB_PATH", root / "test.db"),
-            ("LOG_PATH", root / "test.log"),
+        for target, name, value in (
+            (
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, app_password=""),
+            ),
+            (server, "DATA_DIR", root),
+            (server, "DB_PATH", root / "test.db"),
+            (server, "LOG_PATH", root / "test.log"),
         ):
-            context = patch.object(server, name, value)
+            context = patch.object(target, name, value)
             context.start()
             self.addCleanup(context.stop)
         server.initialise_database()

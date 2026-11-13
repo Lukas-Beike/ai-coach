@@ -5,11 +5,15 @@ import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 from support import temp_database
 
+from backend.config import load_config
 from backend.db.manager import (
+    DATABASE_MANAGER_CACHE,
+    DatabaseHolder,
     DatabaseManager,
     DatabaseManagerCache,
     WriterGate,
@@ -836,6 +840,37 @@ class DatabaseBusyErrorTests(unittest.TestCase):
         self.assertEqual(str(error), DATABASE_BUSY_MESSAGE)
         self.assertEqual(error.reason, "database_busy")
         self.assertEqual(error.resource, "writer")
+
+
+class DatabaseHolderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.addCleanup(DATABASE_MANAGER_CACHE.reset)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.config = load_config(self.root, self.root, {})
+        self.password = ""
+        self.available = True
+        self.holder = DatabaseHolder(
+            data_dir=lambda: self.root / "data",
+            database_path=lambda: self.root / "data" / "test.db",
+            config=lambda: replace(self.config, app_password=self.password),
+            sqlcipher_available=lambda: self.available,
+            encrypted_backend=None,
+            plain_backend=sqlite3,
+            configure=configure_cipher,
+            row_factory=sqlite3.Row,
+        )
+
+    def test_the_manager_is_reused_until_the_configuration_changes(self):
+        first = self.holder()
+        self.assertTrue((self.root / "data").is_dir())
+        self.assertIs(self.holder(), first)
+        self.password = "synthetic-password-1"
+        self.available = False
+        with self.assertRaises(RuntimeError):
+            self.holder()
+        self.assertIsNone(DATABASE_MANAGER_CACHE.manager)
 
 
 class CipherConfigurationTests(unittest.TestCase):

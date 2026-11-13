@@ -249,9 +249,13 @@ with patch.object(Path, 'read_text', deny):
     def test_garmin_daily_schedule_is_independent_of_intervals(self):
         with (
             patch.object(
-                server,
-                "CONFIG",
-                replace(server.CONFIG, intervals_api_key="", calendar_ical_url=""),
+                server.CONFIG_HOLDER,
+                "value",
+                replace(
+                    server.CONFIG_HOLDER.value,
+                    intervals_api_key="",
+                    calendar_ical_url="",
+                ),
             ),
             patch.object(
                 garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")
@@ -570,11 +574,12 @@ with patch.object(Path, 'read_text', deny):
     def test_restore_makes_interrupted_sync_job_claimable(self):
         with tempfile.TemporaryDirectory(prefix="audit-encrypted-") as directory:
             root = Path(directory)
+            config = server.CONFIG_HOLDER.value
             with (
                 patch.object(
-                    server,
-                    "CONFIG",
-                    replace(server.CONFIG, app_password="synthetic-encrypted-key"),
+                    server.CONFIG_HOLDER,
+                    "value",
+                    replace(config, app_password="synthetic-password-123"),
                 ),
                 patch.object(server, "DATA_DIR", root),
                 patch.object(server, "DB_PATH", root / "test.db"),

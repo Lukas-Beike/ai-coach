@@ -362,7 +362,7 @@ class CompositionRootTests(ServerTestCase):
         self.assertIs(provider.json_http_client(), http_client)
         self.assertIs(server.APP.provider_transport, provider)
         self.assertIsInstance(provider.intervals_client(), IntervalsClient)
-        explicit = replace(server.CONFIG, intervals_api_key="test-key")
+        explicit = replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         self.assertIs(provider.intervals_client(explicit).config, explicit)
 
         model = server.MODEL_TRANSPORT
@@ -627,8 +627,10 @@ class CompositionRootTests(ServerTestCase):
             self.assertIn("yazio-token", server._nutrition_secret_values())
 
     def test_the_context_reads_the_live_configuration_and_database(self) -> None:
-        replaced = replace(server.CONFIG, calendar_ical_url="https://example.invalid")
-        with patch.object(server, "CONFIG", replaced):
+        replaced = replace(
+            server.CONFIG_HOLDER.value, calendar_ical_url="https://example.invalid"
+        )
+        with patch.object(server.CONFIG_HOLDER, "value", replaced):
             self.assertIs(replaced, server.APP.config())
         self.assertIs(server.database_manager(), server.APP.database())
 

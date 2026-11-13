@@ -274,7 +274,9 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
     """Run application setup against temporary state and restore globals."""
     patches = (
         patch.object(
-            server, "CONFIG", replace(server.CONFIG, app_password=app_password)
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, app_password=app_password),
         ),
         patch.object(server, "DATA_DIR", root),
         patch.object(server, "DB_PATH", root / "test.db"),
@@ -322,7 +324,7 @@ def metric_export_stopped(server, timeout: float = 10.0):
     """
     runner = MetricExportRunner(
         lambda: server.METRIC_EXPORT,
-        enabled=server._intervals_export_configured,
+        enabled=lambda: server.CONFIG_HOLDER.value.intervals_export_configured,
         maintenance_gate=lambda: server.runtime_maintenance.MAINTENANCE_GATE,
     )
     try:
