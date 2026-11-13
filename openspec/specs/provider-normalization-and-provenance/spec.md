@@ -127,12 +127,16 @@ The system SHALL map the terrain and motor assistance a provider activity type n
 - **THEN** it is a ride with assist `electric`; its session stays out of the power and speed best values, CP/CS fits and mean-max and equal-effort trends, and counts in time-based volume, reported again as `electric_assist_hours`.
 
 #### Scenario: Equivalent types across providers
-- **WHEN** the same activity type exists in two provider tables (for example cyclocross, mountain bike, lap or open-water swim, treadmill run)
+- **WHEN** the same activity type that names an environment or a terrain exists in two provider tables (for example cyclocross, mountain bike, lap or open-water swim, treadmill run)
 - **THEN** each provider maps it to the same sport, environment and terrain.
+
+#### Scenario: Generic types
+- **WHEN** a provider reports its generic ride, run, walk or hike
+- **THEN** a Garmin `cycling`, `running`, `walking` or `hiking` has environment `unknown`, which only the words `virtual`, `zwift`, `indoor`, `trainer`, `treadmill` or `laufband` in its type key or name refine, while a Wahoo generic ride (0, 11), run (1, 4, 67), walk (6 to 8) or hike (9, 10) has environment `outdoor`; a session takes its primary record's environment.
 
 Detailed contract: Terrain (road, trail, track, gravel, mountain, treadmill, pool, open water, unknown), assist (none, electric, unknown) and `native_type` (the provider type name or id, at most 64 characters) are stored in the record's details; a type a provider table knows without naming assistance is assist `none`, an unknown type is `unknown`. A session takes its primary record's terrain unless that is unknown and another record knows it; it is electric whenever any record is, since a generic type such as a plain ride maps to assist `none`. The session summary, the session analysis and the Coach activity list carry the terrain when known and `assist` only as `electric`; comparable sessions compare trail runs only with trail runs.
 
-Evidence: `backend/canonical/vocabulary.py:Terrain`, `backend/canonical/vocabulary.py:Assist`, `backend/canonical/records.py:session_terrain`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_QUALIFIERS`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_QUALIFIERS`, `backend/performance/critical_power.py:critical_power_speed`, `backend/performance/load.py:activity_rollup`; `tests/test_activity_qualifiers.py`, `tests/test_mean_max_curve.py:test_e_bike_sessions_stay_out_of_the_bests_and_fits`.
+Evidence: `backend/canonical/vocabulary.py:Terrain`, `backend/canonical/vocabulary.py:Assist`, `backend/canonical/records.py:session_terrain`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_QUALIFIERS`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_QUALIFIERS`, `backend/performance/critical_power.py:critical_power_speed`, `backend/performance/load.py:activity_rollup`; `tests/test_activity_qualifiers.py`, `tests/test_mean_max_curve.py:test_e_bike_sessions_stay_out_of_the_bests_and_fits`, `tests/test_garmin_activity_mapping.py:test_known_key_environment_is_refined_by_name_when_unknown`, `tests/test_garmin_activity_mapping.py:test_every_table_entry_maps_to_its_sport_and_environment`, `tests/test_wahoo_activity_mapping.py:test_each_workout_type_maps_to_its_sport_and_environment`.
 
 ### Requirement: Activity field and load semantics
 The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
