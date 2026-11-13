@@ -138,7 +138,8 @@ def _validate_workout_duration_match(
     )
 
 
-def _as_number(value: Any) -> float | int | None:
+def as_number(value: Any) -> float | int | None:
+    """A finite number, decimal comma allowed, rounded to two places."""
     try:
         number = float(str(value).replace(",", "."))
     except TypeError, ValueError:
@@ -158,11 +159,11 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     seconds, has_distance = _structured_workout_duration(
         description, str(workout.get("target") or "AUTO")
     )
-    expected_minutes = _as_number(workout.get("duration_minutes"))
+    expected_minutes = as_number(workout.get("duration_minutes"))
     expected_seconds = (
         expected_minutes * 60
         if expected_minutes is not None
-        else _as_number(workout.get("planned_duration_s"))
+        else as_number(workout.get("planned_duration_s"))
     )
     _validate_workout_duration_match(seconds, has_distance, expected_seconds)
     return None if has_distance else seconds

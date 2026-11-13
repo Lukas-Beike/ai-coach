@@ -2,12 +2,10 @@
 
 import hashlib
 import json
-import math
 import uuid
 from datetime import date
 from typing import Any
 
-from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.canonical.planning_fields import HR_CAP, TEMPLATE_ID
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
@@ -25,7 +23,6 @@ from backend.planning.workout_export import (
     validated_duration_minutes,
 )
 from backend.providers.intervals_workouts import (
-    DERIVED_WORKOUT_KEYS,
     PLANNING_DURATION_FIELD,
     REMOTE_PLANNED_METRIC_KEYS,
     intervals_fields_from_planning,
@@ -290,63 +287,6 @@ def prepare_planned_workout_date(
     return date_changed
 
 
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
-
-
-def _reconcile_updated_planned_workout_content(
-    normalized: dict[str, Any], values: dict[str, Any]
-) -> None:
-    if "description" in values:
-        normalized["description"] = canonical_workout_zones(
-            normalized["description"],
-            endurance=intervals_record_type(normalized)
-            in planning_workouts.INTERVALS_ENDURANCE_WORKOUT_TYPES,
-        )
-    seconds = planning_workouts.validate_workout_description(normalized)
-    minutes = _as_number(normalized.get("duration_minutes"))
-    if seconds is not None:
-        normalized["planned_duration_s"] = round(seconds)
-    elif minutes is not None:
-        normalized["planned_duration_s"] = round(minutes * 60)
-    if any(
-        key in values
-        for key in (
-            "description",
-            "strength_structure",
-            "duration_minutes",
-            "target",
-            "type",
-            "sport",
-        )
-    ):
-        for key in DERIVED_WORKOUT_KEYS:
-            normalized.pop(key, None)
-
-
-def _preserve_local_planned_workout_metadata(
-    normalized: dict[str, Any], current: dict[str, Any]
-) -> None:
-    for key in (
-        "plan_id",
-        "plan_name",
-        "rationale",
-        "remote_event_id",
-        "remote_event_external_id",
-        "remote_event_category",
-        "private_calendar_adjustment",
-        "local_deleted",
-    ):
-        if current.get(key) is not None:
-            normalized[key] = current[key]
-
-
 def normalized_planned_workout_update(
     candidate: dict[str, Any],
     current: dict[str, Any],
@@ -370,6 +310,21 @@ def normalized_planned_workout_update(
         else current.get("source") or "library"
     )[:40]
     if action == "update":
-        _reconcile_updated_planned_workout_content(normalized, values)
-    _preserve_local_planned_workout_metadata(normalized, current)
+        planning_library.reconcile_updated_workout_content(
+            normalized, values, canonical_zones=True
+        )
+    planning_library.preserve_metadata(
+        normalized,
+        current,
+        (
+            "plan_id",
+            "plan_name",
+            "rationale",
+            "remote_event_id",
+            "remote_event_external_id",
+            "remote_event_category",
+            "private_calendar_adjustment",
+            "local_deleted",
+        ),
+    )
     return normalized

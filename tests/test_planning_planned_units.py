@@ -2,13 +2,16 @@
 
 import copy
 import hashlib
+import json
 import unittest
 from datetime import date
 
 from backend.errors import INVALID_PLANNING_ID_ERROR, AppError
+from backend.planning import library
 from backend.planning.planned_units import (
     normalize_planned_unit,
     normalized_planned_workout_update,
+    plan_push_payload_hash,
     planned_unit_payload_hash,
     planned_workout_update_candidate,
     planned_workout_update_request,
@@ -17,6 +20,138 @@ from backend.planning.planned_units import (
 
 LOCAL_ID = "e8267245-0d20-456f-9c9b-b4bf3fc3c233"
 TODAY = date(2026, 9, 20)
+
+
+_RIDE = {
+    "date": "2026-09-22",
+    "starts_at_local": "2026-09-22T07:30:00+02:00",
+    "sport": "Ride",
+    "name": "Before",
+    "description": "- 40m Z1",
+    "duration_minutes": 40,
+    "target": "AUTO",
+    "source": "coach",
+    "plan_id": "plan-1",
+    "plan_name": "Base",
+    "rationale": "Keep easy",
+    "remote_event_id": "remote-1",
+    "private_calendar_adjustment": {"adjusted_duration_minutes": 40},
+    "workout_doc": {"old": True},
+    "planned_load": 9,
+}
+_LIFT = {
+    "date": "2026-09-22",
+    "sport": "WeightTraining",
+    "name": "Lift",
+    "description": "Strength session",
+    "duration_minutes": 35,
+    "planned_duration_s": 2100,
+}
+_TEMPLATE = {
+    "name": "Alte Einheit",
+    "type": "Cycling",
+    "description": "- 30m Z2 Easy",
+    "duration_minutes": 30,
+    "planned_duration_s": 1800,
+    "target": "AUTO",
+    "source": "coach",
+    "rationale": "Dauerlauf",
+    "plan_id": "plan-1",
+    "plan_name": "Basis",
+    "private_calendar_adjustment": {"reason": "fixture"},
+    "workout_doc": {"derived": True},
+    "planned_load": 42,
+}
+_ZONE_TEXT = "- 5m Zone 2 HR\n- 25m Z2 Easy"
+# (kind, current, action, values) -> (stored text, payload hash, push hash) prefixes,
+# recorded on the code before #2107 merged the two update pipelines. Only the
+# planned path canonicalises zones, so the library rejects the same text.
+_UPDATE_GOLDEN = [
+    (
+        (
+            "planned",
+            _RIDE,
+            "update",
+            {"description": "- 5m Zone 2 HR\n- 35m Z1", "duration_minutes": "40"},
+        ),
+        ("f98d3558673643e4", "e88ec814a67a4c31", "4d67cc082cba45ef"),
+    ),
+    (
+        ("planned", _RIDE, "update", {"name": "Renamed"}),
+        ("4b6520149cfd791a", "60f7405582458d73", "7b5979822848af05"),
+    ),
+    (
+        (
+            "planned",
+            _RIDE,
+            "update",
+            {"sport": "Run", "description": "- 30m Z2", "duration_minutes": 30},
+        ),
+        ("2b979684fb282964", "d2ba7e29acfbb366", "98b60a9168f84b94"),
+    ),
+    (
+        ("planned", _LIFT, "update", {"duration_minutes": "40"}),
+        ("036821cf4584728e", "cf4f34e2aba784f8", "c17d206ac4d8e88f"),
+    ),
+    (
+        ("planned", _RIDE, "archive", {}),
+        ("1b522fdd33dafba4", "58581589690bbc62", "9011571ee73a79bb"),
+    ),
+    (
+        ("planned", {**_LIFT, "local_deleted": True, "archived": True}, "restore", {}),
+        ("9f6cf92243910bee", "7c06aa624c24845c", "9cebf4b0325372cf"),
+    ),
+    (
+        (
+            "library",
+            _TEMPLATE,
+            "update",
+            {"name": "Neu", "description": "- 35m Z2 Steady", "duration_minutes": 35},
+        ),
+        ("4124287d901ed9df", "e6c5994cb2b48796", "3463a9b4ef9699e3"),
+    ),
+    (
+        ("library", _TEMPLATE, "update", {"name": "Only name"}),
+        ("03278e6686e4a618", "4df7039e42f3af65", "61ee25c6f553e048"),
+    ),
+    (("library", _TEMPLATE, "update", {"description": _ZONE_TEXT}), 400),
+    (
+        (
+            "library",
+            {"type": "Strength", "name": "Strength", "planned_duration_s": 600},
+            "update",
+            {"duration_minutes": "15,5"},
+        ),
+        ("91b1ebc2a9b6e22c", "ff1fb20989234c15", "de2a6e26d2de9dd2"),
+    ),
+    (
+        ("library", _TEMPLATE, "archive", {}),
+        ("730c0aec98c7077e", "38bf4ebeb2429160", "448d21e5f807056f"),
+    ),
+    (
+        ("library", {**_TEMPLATE, "archived": True}, "restore", {}),
+        ("585411ff3a9c661a", "79bb07335585ea79", "99fec198351b7f77"),
+    ),
+]
+
+
+def _stored_update(kind, current, action, values):
+    row = {"external_id": "ext"}
+    if kind == "planned":
+        candidate = planned_workout_update_candidate(current, action, values)
+        payload = normalized_planned_workout_update(
+            candidate, current, row, LOCAL_ID, action, values
+        )
+    else:
+        payload = library.updated_workout_library_entry(
+            current, row, LOCAL_ID, action, values
+        )
+    text = json.dumps(payload, ensure_ascii=False)
+    return (
+        hashlib.sha256(text.encode()).hexdigest()[:16],
+        planned_unit_payload_hash(payload)[:16],
+        plan_push_payload_hash(text)[:16],
+    )
 
 
 class PlannedUnitPayloadHashTests(unittest.TestCase):
@@ -313,6 +448,16 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
                 strength, "update", {"duration_minutes": "35,5"}
             )
         self.assertEqual(raised.exception.status, 400)
+
+    def test_update_pipelines_store_the_golden_payloads_and_hashes(self):
+        for case, expected in _UPDATE_GOLDEN:
+            with self.subTest(kind=case[0], action=case[2], values=case[3]):
+                if isinstance(expected, int):
+                    with self.assertRaises(AppError) as raised:
+                        _stored_update(*case)
+                    self.assertEqual(raised.exception.status, expected)
+                else:
+                    self.assertEqual(_stored_update(*case), expected)
 
     def test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved(
         self,
