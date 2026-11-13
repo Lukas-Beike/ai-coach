@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 from session_stream_support import synthetic_session
 
-from backend.activities.workout_load import AthleteThresholds, step_target_range
+from backend.activities.workout_load import step_target_range
 from backend.activities.workout_text import structured_steps
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Sport
@@ -16,10 +16,7 @@ from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.performance.planned_targets import planned_target_execution
 from backend.performance.session_execution import session_execution
 
-THRESHOLDS = AthleteThresholds(
-    zones=ZoneSettings(ftp=250.0, lthr=170.0, max_hr=190.0),
-    threshold_speed_mps=4.0,
-)
+THRESHOLDS = ZoneSettings(ftp=250.0, lthr=170.0, max_hr=190.0, threshold_pace=4.0)
 PLAN = "- 10m Z2 Pace\n\n5x\n- 3m 4:20-4:30/km Pace\n- 90s Z1 Pace\n\n- 5m Z1 Pace"
 
 
@@ -79,7 +76,7 @@ class StepTargetRangeTests(unittest.TestCase):
         self.assertEqual(
             step_target_range(ramp, THRESHOLDS, Sport.RIDE).unknown, "ramp"
         )
-        missing = AthleteThresholds(zones=ZoneSettings())
+        missing = ZoneSettings()
         target = step_target_range(
             structured_steps("- 10m 90%")[0], missing, Sport.RIDE
         )
@@ -150,7 +147,7 @@ class PlannedTargetExecutionTests(unittest.TestCase):
         self.assertNotIn("deviation_pct", result["reps"][0])
 
     def test_absolute_paces_count_without_a_threshold_pace(self) -> None:
-        no_pace = AthleteThresholds(zones=ZoneSettings())
+        no_pace = ZoneSettings()
         result = planned_target_execution(
             session_execution(_run()),
             structured_steps("5x\n- 3m 4:20-4:30/km Pace\n- 90s 6:00-7:00/km Pace"),

@@ -4,11 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from backend.activities.workout_load import (
-    AthleteThresholds,
-    WorkoutEstimate,
-    estimate_workout,
-)
+from backend.activities.workout_load import WorkoutEstimate, estimate_workout
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
@@ -25,7 +21,7 @@ from backend.planning.sport import planned_sport_environment
 
 
 def estimate_planned_unit(
-    unit: Mapping[str, Any], thresholds: AthleteThresholds
+    unit: Mapping[str, Any], thresholds: ZoneSettings
 ) -> WorkoutEstimate:
     """Estimate a planned unit from its ``description`` workout text.
 
@@ -49,29 +45,27 @@ def resolve_thresholds(
     sport: Sport,
     environment: Environment,
     day: date | None,
-) -> AthleteThresholds:
+) -> ZoneSettings:
     """Thresholds and zone limits of a sport on ``day``, as the zones read them.
 
     ``ZoneSettings`` applies the one dated precedence (local configuration, Garmin
-    watch zone set, then the source-policy winners ``sport_thresholds``); the
-    threshold running speed is the zones' own, so absolute pace targets and the
-    pace limits share one threshold.
+    watch zone set, then the source-policy winners ``sport_thresholds``); absolute
+    pace targets and the pace limits share its one threshold running speed.
     """
-    zones = ZoneSettings.from_configurations(
+    return ZoneSettings.from_configurations(
         zone_configurations,
         sport,
         environment,
         day,
         fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
     )
-    return AthleteThresholds(zones=zones, threshold_speed_mps=zones.threshold_pace)
 
 
 def unit_thresholds(
     unit: Mapping[str, Any],
     sport_thresholds: Sequence[Observation],
     zone_configurations: Sequence[ZoneConfiguration],
-) -> AthleteThresholds:
+) -> ZoneSettings:
     """Current thresholds and zone limits of a unit's sport, as the plan profiles use.
 
     The threshold running speed comes from the same current thresholds; without
@@ -128,7 +122,7 @@ class PlannedUnitEstimator:
     def __call__(self, unit: Mapping[str, Any]) -> WorkoutEstimate:
         return estimate_planned_unit(unit, self.thresholds(unit))
 
-    def thresholds(self, unit: Mapping[str, Any]) -> AthleteThresholds:
+    def thresholds(self, unit: Mapping[str, Any]) -> ZoneSettings:
         """The current thresholds of the unit's sport, as its estimate uses."""
         if self._inputs is None:
             self._inputs = self._read_inputs()

@@ -6,7 +6,7 @@ import unittest
 from datetime import date
 from typing import Any
 
-from backend.activities.workout_load import AthleteThresholds
+from backend.activities.zone_settings import ZoneSettings
 from backend.planning import illness_return, plan_checks
 from backend.planning.plan_guard_service import PlanGuardService
 from backend.planning.planned_unit_load import estimate_planned_unit
@@ -277,7 +277,7 @@ class ReturnGuardTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
         ).with_return_stage(lambda: 1)
 
         codes = [item["code"] for item in guard.findings()]

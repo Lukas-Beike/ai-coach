@@ -8,7 +8,6 @@ from datetime import date
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
-from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import (
     Environment,
@@ -48,16 +47,12 @@ def inputs(*, present: bool = True, pace: bool = True) -> SimpleNamespace:
 
 
 def thresholds(*, pace: bool = True, ftp: bool = True) -> load_checks.LoadThresholds:
+    by_sport = {
+        Sport.RUN: ZoneSettings(lthr=170.0, threshold_pace=4.0 if pace else None),
+        Sport.RIDE: ZoneSettings(ftp=250.0 if ftp else None, lthr=165.0),
+    }
     return load_checks.LoadThresholds(
-        {
-            Sport.RUN: AthleteThresholds(
-                zones=ZoneSettings(lthr=170.0),
-                threshold_speed_mps=4.0 if pace else None,
-            ),
-            Sport.RIDE: AthleteThresholds(
-                zones=ZoneSettings(ftp=250.0 if ftp else None, lthr=165.0)
-            ),
-        }
+        resolver=lambda sport, *_: by_sport.get(sport, ZoneSettings())
     )
 
 
@@ -150,17 +145,17 @@ class ThresholdTests(unittest.TestCase):
     def test_fresh_sync_gives_sport_thresholds(self) -> None:
         result = load_checks.load_thresholds(inputs(), TODAY)
         self.assertIsNone(result.unavailable)
-        self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
-        self.assertEqual(4.0, result.for_sport(Sport.RUN).threshold_speed_mps)
+        self.assertEqual(250.0, result.for_sport(Sport.RIDE).ftp)
+        self.assertEqual(4.0, result.for_sport(Sport.RUN).threshold_pace)
 
     def test_missing_pace_stays_unknown(self) -> None:
         result = load_checks.load_thresholds(inputs(pace=False), TODAY)
-        self.assertIsNone(result.for_sport(Sport.RUN).threshold_speed_mps)
+        self.assertIsNone(result.for_sport(Sport.RUN).threshold_pace)
 
     def test_no_provider_threshold_is_unavailable(self) -> None:
         result = load_checks.load_thresholds(inputs(present=False), TODAY)
         self.assertEqual("missing_thresholds", result.unavailable)
-        self.assertEqual({}, dict(result.by_sport))
+        self.assertEqual(ZoneSettings(), result.for_sport(Sport.RIDE))
 
     def test_a_garmin_winner_gives_thresholds_without_any_sync(self) -> None:
         garmin = SimpleNamespace(
@@ -170,7 +165,7 @@ class ThresholdTests(unittest.TestCase):
         )
         result = load_checks.load_thresholds(garmin, TODAY)
         self.assertIsNone(result.unavailable)
-        self.assertEqual(172.0, result.for_sport(Sport.RUN).zones.lthr)
+        self.assertEqual(172.0, result.for_sport(Sport.RUN).lthr)
 
 
 class LocalThresholdPrecedenceTests(unittest.TestCase):
@@ -196,9 +191,9 @@ class LocalThresholdPrecedenceTests(unittest.TestCase):
             self.local(ZoneConfigurationMetric.PACE, sport=Sport.RUN, threshold=5.0),
         ]
         result = load_checks.load_thresholds(inputs(), TODAY, configurations)
-        self.assertEqual(300.0, result.for_sport(Sport.RIDE).zones.ftp)
-        self.assertEqual(5.0, result.for_sport(Sport.RUN).threshold_speed_mps)
-        self.assertEqual(170.0, result.for_sport(Sport.RUN).zones.lthr)
+        self.assertEqual(300.0, result.for_sport(Sport.RIDE).ftp)
+        self.assertEqual(5.0, result.for_sport(Sport.RUN).threshold_pace)
+        self.assertEqual(170.0, result.for_sport(Sport.RUN).lthr)
 
     def test_without_provider_thresholds_local_values_remain(self) -> None:
         configurations = [self.local(ZoneConfigurationMetric.POWER, threshold=300.0)]
@@ -206,8 +201,8 @@ class LocalThresholdPrecedenceTests(unittest.TestCase):
             inputs(present=False), TODAY, configurations
         )
         self.assertIsNone(result.unavailable)
-        self.assertEqual(300.0, result.for_sport(Sport.RIDE).zones.ftp)
-        self.assertIsNone(result.for_sport(Sport.RUN).zones.lthr)
+        self.assertEqual(300.0, result.for_sport(Sport.RIDE).ftp)
+        self.assertIsNone(result.for_sport(Sport.RUN).lthr)
 
     def test_planned_load_follows_the_local_ftp(self) -> None:
         unit = {
@@ -441,7 +436,7 @@ class IndoorFtpTests(unittest.TestCase):
                         sport, environment, date.fromisoformat(unit["date"])
                     )
                     estimate = estimate_planned_unit(unit, resolved)
-                    zones = resolved.zones
+                    zones = resolved
                     self.assertEqual(
                         expected,
                         (
@@ -458,12 +453,18 @@ class IndoorFtpTests(unittest.TestCase):
     def test_a_provider_indoor_ftp_is_not_read(self) -> None:
         result = load_checks.load_thresholds(inputs(), TODAY)
         indoor = result.for_sport(Sport.RIDE, Environment.INDOOR)
-        self.assertEqual(250.0, indoor.zones.ftp)
-        self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(250.0, indoor.ftp)
+        self.assertEqual(250.0, result.for_sport(Sport.RIDE).ftp)
 
     def test_completed_and_planned_indoor_rides_share_the_indoor_ftp(self) -> None:
-        indoor = AthleteThresholds(zones=ZoneSettings(ftp=200.0))
-        thr = load_checks.LoadThresholds(thresholds().by_sport, indoor_ride=indoor)
+        base = thresholds()
+
+        def resolve(sport, environment, day):
+            if sport is Sport.RIDE and environment is Environment.INDOOR:
+                return ZoneSettings(ftp=200.0)
+            return base.for_sport(sport, environment, day)
+
+        thr = load_checks.LoadThresholds(resolver=resolve)
         done = [ride_done("2026-10-28", environment="indoor", **m6(100.0))]
         plan = [planned("a", "2026-11-04", "ride", "- 60m 90%", environment="indoor")]
         found = only(check(plan, done, thr), "load_spike")
@@ -590,7 +591,7 @@ class IndoorConfigurationTests(unittest.TestCase):
         )
         self.assertIsNone(result.unavailable)
         indoor = result.for_sport(Sport.RIDE, Environment.INDOOR)
-        self.assertEqual(280.0, indoor.zones.ftp)
+        self.assertEqual(280.0, indoor.ftp)
 
 
 class ConfigurationValidityTests(unittest.TestCase):
@@ -619,7 +620,7 @@ class ConfigurationValidityTests(unittest.TestCase):
         )
         result = load_checks.load_thresholds(inputs(present=False), TODAY, [garmin])
         self.assertIsNone(result.unavailable)
-        self.assertEqual(300.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(300.0, result.for_sport(Sport.RIDE).ftp)
 
     def test_workout_date_selects_the_valid_configuration(self) -> None:
         later = LocalThresholdPrecedenceTests.local(
@@ -628,9 +629,9 @@ class ConfigurationValidityTests(unittest.TestCase):
             valid_from=date(2026, 11, 10),
         )
         result = load_checks.load_thresholds(inputs(), TODAY, [later])
-        self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(250.0, result.for_sport(Sport.RIDE).ftp)
         self.assertEqual(
-            300.0, result.for_sport(Sport.RIDE, day=date(2026, 11, 12)).zones.ftp
+            300.0, result.for_sport(Sport.RIDE, day=date(2026, 11, 12)).ftp
         )
 
 

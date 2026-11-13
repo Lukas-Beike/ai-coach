@@ -238,9 +238,9 @@ class CoachAndPlanParityTests(unittest.TestCase):
         self.assertEqual(coach["ftp_source"], "Garmin Connect")
         self.assertNotIn("ftp_alternatives", coach)
         self.assertNotIn("w_prime_j", coach)
-        self.assertEqual(plan.for_sport(Sport.RIDE).zones.ftp, coach["ftp_w"])
+        self.assertEqual(plan.for_sport(Sport.RIDE).ftp, coach["ftp_w"])
         self.assertEqual(coach["run_lthr"], 172)
-        self.assertEqual(plan.for_sport(Sport.RUN).zones.lthr, coach["run_lthr"])
+        self.assertEqual(plan.for_sport(Sport.RUN).lthr, coach["run_lthr"])
         self.assertEqual(metrics["run_threshold_hr_bpm"]["source_provider"], "garmin")
 
     def test_a_local_zone_configuration_leads_both(self) -> None:
@@ -251,7 +251,7 @@ class CoachAndPlanParityTests(unittest.TestCase):
 
         self.assertEqual(coach["ftp_w"], 300)
         self.assertEqual(coach["ftp_source"], "Lokal")
-        self.assertEqual(plan.for_sport(Sport.RIDE).zones.ftp, 300.0)
+        self.assertEqual(plan.for_sport(Sport.RIDE).ftp, 300.0)
 
     def test_plan_thresholds_hold_only_provider_winners(self) -> None:
         winners = provider_zone_thresholds(self._observations(), as_of=AS_OF)
@@ -312,16 +312,16 @@ class ReviewGuardTests(unittest.TestCase):
         thresholds = resolve_thresholds(
             (winner,), (garmin_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
         )
-        self.assertEqual(thresholds.threshold_speed_mps, 4.2)
+        self.assertEqual(thresholds.threshold_pace, 4.2)
         thresholds = resolve_thresholds(
             (), (garmin_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
         )
-        self.assertEqual(thresholds.threshold_speed_mps, 4.0)
+        self.assertEqual(thresholds.threshold_pace, 4.0)
         # An Intervals.icu configuration gives its limits, never a pace.
         thresholds = resolve_thresholds(
             (), (intervals_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
         )
-        self.assertIsNone(thresholds.threshold_speed_mps)
+        self.assertIsNone(thresholds.threshold_pace)
 
     def test_no_values_make_the_thresholds_missing(self) -> None:
         inputs = read_current_inputs(StubReader(()), None, as_of=AS_OF)

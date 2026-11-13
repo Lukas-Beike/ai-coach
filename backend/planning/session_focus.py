@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from backend.activities.hr_cap import HR_CAP_KEY, normalize_hr_cap
-from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
+from backend.activities.workout_load import WorkoutEstimate
+from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.measurements import number
 from backend.canonical import planning_fields
 from backend.canonical.planning_fields import (
@@ -461,7 +462,7 @@ def is_hard(unit: Mapping[str, Any], computed: bool | None = None) -> bool:
     if _hard_text(" ".join(str(unit.get(key) or "") for key in _STEP_FIELDS)):
         return True
     if computed is None:
-        computed = computed_hard(estimate_planned_unit(unit, AthleteThresholds()))
+        computed = computed_hard(estimate_planned_unit(unit, ZoneSettings()))
     if computed is not None:
         return computed
     factor = planned_intensity_factor(unit)

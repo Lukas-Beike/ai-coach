@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 from support import temp_database
 
-from backend.activities.workout_load import AthleteThresholds
+from backend.activities.zone_settings import ZoneSettings
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
 from backend.coach.planning_action_tools import CoachPlanningActionToolService
 from backend.coach.proposal_execution import CoachProposalExecutionService
@@ -149,7 +149,7 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: date(2026, 11, 2),
-            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            estimate_unit=lambda unit: estimate_planned_unit(unit, ZoneSettings()),
         )
         preview = Mock()
         preview.latest_preview.return_value = {

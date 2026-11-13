@@ -44,7 +44,7 @@ class RunLthr:
                 return None
             day = _unit_day(unit) or today
             environment = planned_sport_environment(unit)[1]
-            return thresholds.for_sport(Sport.RUN, environment, day).zones
+            return thresholds.for_sport(Sport.RUN, environment, day)
 
         return zones_for
 

@@ -1,21 +1,12 @@
 import unittest
 
-from backend.activities.workout_load import (
-    AthleteThresholds,
-    estimate_workout,
-    zone_band,
-)
+from backend.activities.workout_load import estimate_workout, zone_band
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Sport
 from backend.planning.planned_unit_load import estimate_planned_unit
 
-SOURCES = {"ftp": "Intervals.icu", "lthr": "Garmin", "threshold_pace": "Intervals.icu"}
-FULL = AthleteThresholds(
-    ZoneSettings(ftp=250, lthr=170, max_hr=190),
-    threshold_speed_mps=1000 / 270,
-    sources=SOURCES,
-)
-NONE = AthleteThresholds()
+FULL = ZoneSettings(ftp=250, lthr=170, max_hr=190, threshold_pace=1000 / 270)
+NONE = ZoneSettings()
 INTERVALS = "5x\n- 4m 105%\n- 3m 60%\n"
 
 
@@ -30,7 +21,6 @@ class RideTests(unittest.TestCase):
         self.assertAlmostEqual(58.3, result.load, places=1)
         self.assertEqual("normalized_power_over_ftp", result.load_basis)
         self.assertEqual("derived", result.source)
-        self.assertEqual({"ftp": "Intervals.icu"}, result.threshold_sources)
 
     def test_zone_and_range_targets_need_no_threshold(self):
         result = estimate_workout("- 30m Z2\n- 10m 90-100%\n", Sport.RIDE, NONE)
@@ -83,14 +73,13 @@ class RunTests(unittest.TestCase):
     def test_heart_rate_targets(self):
         lthr = estimate_workout("- 20m 75-80% LTHR\n", Sport.RUN, FULL)
         self.assertAlmostEqual(0.775, lthr.steps[0].intensity)
-        self.assertEqual({"lthr": "Garmin"}, lthr.threshold_sources)
         bpm = estimate_workout("- 20m 150-160bpm\n", Sport.RUN, FULL)
         self.assertAlmostEqual(155 / 170, bpm.steps[0].intensity)
 
     def test_percent_of_max_hr_needs_max_hr(self):
-        missing = estimate_workout("- 20m 80% HR\n", Sport.RUN, AthleteThresholds())
+        missing = estimate_workout("- 20m 80% HR\n", Sport.RUN, ZoneSettings())
         self.assertEqual(("missing_max_hr",), missing.unknown)
-        assumed = AthleteThresholds(ZoneSettings(max_hr=190))
+        assumed = ZoneSettings(max_hr=190)
         step = estimate_workout("- 20m 80% HR\n", Sport.RUN, assumed).steps[0]
         self.assertEqual("percent_of_max_hr_assumed_lthr_share", step.basis)
         exact = estimate_workout("- 20m 80% HR\n", Sport.RUN, FULL).steps[0]
@@ -148,7 +137,7 @@ class UnknownTests(unittest.TestCase):
 
     def test_zone_above_configured_limits_is_unknown(self):
         zones = ZoneSettings(power_limits=(55, 75, 90))
-        result = estimate_workout("- 10m Z6\n", Sport.RIDE, AthleteThresholds(zones))
+        result = estimate_workout("- 10m Z6\n", Sport.RIDE, zones)
         self.assertEqual(("zone_out_of_range",), result.unknown)
 
     def test_band_depends_on_zone_count(self):
