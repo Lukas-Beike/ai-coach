@@ -1150,8 +1150,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
             **parsed_workout_fixture(3600, value=65),
         }
         with patch.object(
-            server,
-            "PROVIDER_TRANSPORT",
+            server.APP,
+            "provider_transport",
             replace(
                 server.PROVIDER_TRANSPORT,
                 intervals_client=Mock(return_value=client),
@@ -1450,8 +1450,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value=datetime(2026, 9, 2, tzinfo=UTC),
             ),
             patch.object(
-                server,
-                "PLANNING_WORKFLOWS",
+                server.APP,
+                "planning_workflows",
                 replace(
                     server.PLANNING_WORKFLOWS,
                     adaptive_replan_preview_service=lambda: preview_service,

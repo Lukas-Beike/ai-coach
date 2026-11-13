@@ -263,16 +263,15 @@ from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.settings import SettingsService
-from backend.sync import external_calendar as external_calendar_runtime
 from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
-from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_read
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
@@ -286,10 +285,14 @@ from backend.sync.execution_assembly import (
     provider_configured_checks,
 )
 from backend.sync.executor import chained_after_job
-from backend.sync.external_calendar_assembly import (
-    ExternalCalendarAssembly,
-    ExternalCalendarSyncOwners,
-    ExternalCalendarSyncRuntime,
+from backend.sync.flow_wiring import (
+    build_export_thresholds,
+    build_external_calendar,
+    build_metric_export,
+    build_planned_calendar_sync,
+    build_planned_unit_sync,
+    build_selected_workout_sync,
+    build_workout_library_sync,
 )
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.garmin_login import (
@@ -310,28 +313,9 @@ from backend.sync.gates import (
     WAHOO_RESYNC_GATE,
 )
 from backend.sync.library import workout_library_sync_running
-from backend.sync.library_assembly import (
-    WorkoutLibraryProvider,
-    WorkoutLibraryState,
-    WorkoutLibrarySyncAssembly,
-)
 from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
-from backend.sync.metric_export_assembly import (
-    build_metric_export_service,
-    export_thresholds_reader,
-)
 from backend.sync.metric_export_runner import MetricExportRunner
-from backend.sync.planned_calendar_assembly import (
-    PlannedCalendarLocalState,
-    PlannedCalendarProvider,
-    PlannedCalendarSyncAssembly,
-)
-from backend.sync.planned_unit_assembly import (
-    PlannedUnitOwners,
-    PlannedUnitRuntime,
-    PlannedUnitSyncAssembly,
-)
 from backend.sync.profile_weekly_plan_removal import ProfileWeeklyPlanRemoval
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_resync_assembly import (
@@ -351,11 +335,6 @@ from backend.sync.scheduler_assembly import (
     SyncSchedulePolicy,
     SyncScheduleProviders,
     SyncSchedulerAssembly,
-)
-from backend.sync.selected_assembly import (
-    SelectedWorkoutControls,
-    SelectedWorkoutProviders,
-    SelectedWorkoutSyncAssembly,
 )
 from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
@@ -752,6 +731,7 @@ DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
 APP.diagnostic_capture = DIAGNOSTIC_CAPTURE
 
 SYNC_PERSISTENCE = build_sync_persistence(APP)
+APP.sync_persistence = SYNC_PERSISTENCE
 
 
 def sync_state_repository() -> SyncStateRepository:
@@ -807,32 +787,7 @@ SYNC_JOB_QUEUE = build_sync_job_queue(
 )
 APP.sync_job_queue = SYNC_JOB_QUEUE
 
-EXTERNAL_CALENDAR = ExternalCalendarAssembly(
-    dependencies=ExternalCalendarAssembly.Inputs(
-        owners=ExternalCalendarSyncOwners(
-            config=lambda: CONFIG,
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            daily_markers=sync_daily_markers,
-            adaptive_preview_service=lambda: (
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service()
-            ),
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-        ),
-        runtime=ExternalCalendarSyncRuntime(
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            logger=LOGGER,
-            redact_text=REDACTOR.redact_text,
-            athlete_clock=lambda: ATHLETE_CLOCK,
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            utc_now=runtime_clock.utc_now,
-            app_version=APP_VERSION,
-            sync_lock=lambda: (
-                external_calendar_runtime.shared_external_calendar_sync_lock()
-            ),
-        ),
-    )
-)
+EXTERNAL_CALENDAR = build_external_calendar(APP)
 APP.external_calendar = EXTERNAL_CALENDAR
 
 
@@ -875,13 +830,7 @@ def disconnect_wahoo_grant() -> dict[str, object]:
 
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
 # headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
-EXPORT_THRESHOLDS = export_thresholds_reader(
-    lambda: CANONICAL_READ,
-    source_preferences=lambda db: preferences_from_profile(
-        ATHLETE_DATA.profile().get_from_db(db)
-    ),
-    today=lambda: ATHLETE_CLOCK.now().date(),
-)
+EXPORT_THRESHOLDS = build_export_thresholds(APP)
 WAHOO_SYNC = build_wahoo_sync(
     APP,
     connection=WAHOO_CONNECTION.service,
@@ -891,6 +840,7 @@ WAHOO_SYNC = build_wahoo_sync(
     history_earliest_date=SYNC_EARLIEST_DATE,
     fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
 )
+APP.wahoo = WAHOO_SYNC
 APP.settings = SETTINGS
 NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)
 APP.nutrition = NUTRITION_SERVICES
@@ -958,73 +908,16 @@ COACH_LOCAL = CoachLocalAssembly(
     )
 )
 APP.coach_local = COACH_LOCAL
-PLANNED_UNIT_SYNC = PlannedUnitSyncAssembly(
-    dependencies=PlannedUnitSyncAssembly.Inputs(
-        owners=PlannedUnitOwners(
-            database_manager=database_manager,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-            planning_revision_service=PLANNING_REVISION_SERVICE,
-        ),
-        runtime=PlannedUnitRuntime(
-            redactor=REDACTOR,
-            utc_now=runtime_clock.utc_now,
-            today=lambda: ATHLETE_CLOCK.now().date(),
-        ),
-    )
+PLANNED_UNIT_SYNC = build_planned_unit_sync(APP)
+PLANNED_CALENDAR_SYNC = build_planned_calendar_sync(
+    APP,
+    state_writer=PLANNED_UNIT_SYNC.state_writer,
+    future_days=PLANNED_CALENDAR_FUTURE_DAYS,
 )
-PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
-    dependencies=PlannedCalendarSyncAssembly.Inputs(
-        provider=PlannedCalendarProvider(
-            config=lambda: CONFIG,
-            database_manager=database_manager,
-            intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-        ),
-        local_state=PlannedCalendarLocalState(
-            state_writer=PLANNED_UNIT_SYNC.state_writer,
-            utc_now=runtime_clock.utc_now,
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            run_lthr_for=lambda unit: RUN_LTHR.resolver()(unit),
-            key_values=KEY_VALUE_REPOSITORY,
-        ),
-        future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-    )
-)
-WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
-    dependencies=WorkoutLibrarySyncAssembly.Inputs(
-        provider=WorkoutLibraryProvider(
-            config=lambda: CONFIG,
-            database_manager=database_manager,
-            intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-            wahoo_export=WAHOO_SYNC.workout_export,
-            workout_library_service=PLANNING_DATA.workout_library,
-            calendar_conflict_service=PLANNING_WORKFLOWS.calendar_conflict_service,
-        ),
-        state=WorkoutLibraryState(
-            key_values=KEY_VALUE_REPOSITORY,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            redactor=REDACTOR,
-            utc_now=runtime_clock.utc_now,
-            local_today=lambda: ATHLETE_CLOCK.now().date(),
-            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
-        ),
-        uuid_factory=uuid.uuid4,
-    )
-)
+WORKOUT_LIBRARY_SYNC = build_workout_library_sync(APP)
 APP.workout_library_sync = WORKOUT_LIBRARY_SYNC
-SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
-    dependencies=SelectedWorkoutSyncAssembly.Inputs(
-        providers=SelectedWorkoutProviders(
-            config=lambda: CONFIG,
-            database_manager=database_manager,
-            workout_library_sync_service=WORKOUT_LIBRARY_SYNC.sync_service,
-            planned_calendar_sync_service=PLANNED_CALENDAR_SYNC.sync_service,
-            planned_calendar_repair_service=PLANNED_CALENDAR_SYNC.repair_service,
-        ),
-        controls=SelectedWorkoutControls(
-            redactor=REDACTOR.redact_text,
-            provider_resync_gate=INTERVALS_RESYNC_GATE,
-        ),
-    )
+SELECTED_WORKOUT_SYNC = build_selected_workout_sync(
+    APP, planned_calendar=PLANNED_CALENDAR_SYNC, resync_gate=INTERVALS_RESYNC_GATE
 )
 WEATHER: WeatherServices = build_weather(APP)
 APP.weather = WEATHER
@@ -1620,14 +1513,8 @@ CANONICAL_READ = build_canonical_read(
     profile=ATHLETE_PROFILE_SERVICE,
 )
 APP.canonical_read = CANONICAL_READ
-METRIC_EXPORT: MetricExportService = build_metric_export_service(
-    database_manager,
-    lambda: CANONICAL_READ,
-    database_lock=DB_LOCK,
-    intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-    thresholds=EXPORT_THRESHOLDS,
-    today=lambda: ATHLETE_CLOCK.now().date(),
-    utc_now=lambda: datetime.now(UTC),
+METRIC_EXPORT: MetricExportService = build_metric_export(
+    APP, thresholds=EXPORT_THRESHOLDS
 )
 
 
