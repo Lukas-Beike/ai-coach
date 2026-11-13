@@ -125,17 +125,20 @@ class GarminReadFixture(CanonicalReadFixture):
             lambda: TODAY,
         )
 
-    def _projection_service(self) -> GarminProjectionService:
+    def _projection_service(self, **changes: Any) -> GarminProjectionService:
         selector = make_selector(self)
         config = make_config(
-            openai_base_url="",
-            openai_model="",
-            intervals_athlete_id="",
-            garmin_password="synthetic-garmin-password",
-            garmin_tokenstore="synthetic-tokenstore",
-            garmin_fixture_path="synthetic-fixture.json",
-            app_password="synthetic-app-password",
-            data_retention_days=30,
+            **{
+                "openai_base_url": "",
+                "openai_model": "",
+                "intervals_athlete_id": "",
+                "garmin_password": "synthetic-garmin-password",
+                "garmin_tokenstore": "synthetic-tokenstore",
+                "garmin_fixture_path": "synthetic-fixture.json",
+                "app_password": "synthetic-app-password",
+                "data_retention_days": 30,
+                **changes,
+            }
         )
         return GarminProjectionService(
             config=config,
@@ -277,6 +280,20 @@ class GarminStateEqualityTests(GarminReadFixture):
 
 
 class GarminServiceEqualityTests(GarminReadFixture):
+    def test_workouts_can_be_written_with_an_sdk_login_only(self) -> None:
+        def can_write(**changes: Any) -> bool:
+            service = self._projection_service(garmin_fixture_path="", **changes)
+            return service.public_state()["can_write_workouts"]
+
+        self.assertFalse(can_write())
+        self.assertTrue(can_write(garmin_email="synthetic@example.test"))
+        self.assertFalse(
+            self._projection_service().public_state()["can_write_workouts"]
+        )
+        skipped = '{"reason":"login_failed","at":"2026-11-06T08:00:00+00:00"}'
+        self.write(lambda db: self.key_values.set(db, "garmin_sdk_skipped", skipped))
+        self.assertFalse(can_write(garmin_email="synthetic@example.test"))
+
     def test_services_read_no_table_values_until_the_backfill_completes(
         self,
     ) -> None:

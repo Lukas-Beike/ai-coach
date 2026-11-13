@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import Mock
 
+from backend.errors import AppError
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.queue import SyncJobQueueService
 
@@ -24,6 +25,18 @@ class PlanPushCommandServiceTests(unittest.TestCase):
             }
             for index in range(count)
         ]
+
+    def test_garmin_needs_an_sdk_login_before_anything_is_queued(self):
+        service = PlanPushCommandService(self.queue, lambda: False)
+
+        with self.assertRaises(AppError) as raised:
+            service.enqueue(self.entries(1), [], reason="r", provider="garmin")
+
+        self.assertEqual("garmin_sdk_required", raised.exception.reason)
+        self.queue.enqueue.assert_not_called()
+        # Other providers are not asked.
+        service.enqueue(self.entries(1), [], reason="r")
+        self.queue.enqueue.assert_called_once()
 
     def test_empty_selection_completes_without_enqueuing(self):
         sync_job_ids = []

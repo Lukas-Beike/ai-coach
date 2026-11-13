@@ -87,11 +87,15 @@ def garmin_baselines(db: Any) -> dict[str, str | None]:
     }
 
 
-def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
+def garmin_fingerprint(
+    payload: dict[str, Any], remembered: Mapping[str, GarminExercise] | None = None
+) -> str | None:
     """Fingerprint of what a Garmin push sends: name, date and the structure.
 
     The workout document version is part of it, so a change in how the document
-    is built marks units sent in the old form as changed.
+    is built marks units sent in the old form as changed. A strength unit also
+    holds the Garmin (category, exercise) pair each exercise resolves to,
+    through ``remembered`` too, so another remembered pick marks it changed.
 
     Intervals.icu syncs and focus edits rewrite other payload fields, so the
     Garmin push state compares only this. A run unit's fingerprint holds its
@@ -128,6 +132,9 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
         "exercises": exercises,
         "payload_version": PAYLOAD_VERSION,
     }
+    pairs = [resolve_exercise(item, remembered) for item in exercises]
+    if all(pairs):
+        content["pairs"] = [[pair.category, pair.exercise] for pair in pairs if pair]
     return _digest(content)
 
 
@@ -150,7 +157,7 @@ def pushable_fingerprint(
     texts the calendar shows for a blocked unit do not fit a run. Problems that
     depend on the athlete's references surface when the push runs.
     """
-    fingerprint = garmin_fingerprint(payload)
+    fingerprint = garmin_fingerprint(payload, remembered)
     sport, _environment = planned_sport_environment(payload)
     if sport is Sport.RUN:
         try:

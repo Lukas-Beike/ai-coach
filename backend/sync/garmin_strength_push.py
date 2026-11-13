@@ -68,9 +68,10 @@ from backend.providers.garmin_strength_workout import (
     NO_STRUCTURE_MESSAGE,
     GarminExercise,
     GarminStrengthMappingError,
+    exercise_steps_match,
     strength_workout,
-    workout_exercise_steps,
 )
+from backend.sync.garmin_personal_status import SDK_REQUIRED_MESSAGE
 from backend.sync.garmin_service import _persist_garmin_tokens, shared_garmin_sync_lock
 from backend.sync.gates import ProviderResyncGate
 
@@ -80,10 +81,6 @@ _KEY_VALUES = KeyValueRepository(lambda: datetime.now(UTC).isoformat())
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
 _LOCK_WAIT_S = 30.0
 _LOGGER = logging.getLogger("intervals_coach")
-SDK_REQUIRED_MESSAGE = (
-    "Garmin-Workouts brauchen die Garmin-Anmeldung (SDK); "
-    "die Personal API kann nicht schreiben."
-)
 # First line of every description, so a workout this app sent can be told apart.
 WORKOUT_MARKER = "Pacecraft"
 # Workouts of past days removed per refresh; the next refresh takes the rest.
@@ -158,7 +155,7 @@ class GarminStrengthPushService:
         run_zones: Callable[[], _ZonesFor] | None = None,
     ) -> None:
         self._configured = configured
-        # False while the latest refresh could not log the SDK in (login, MFA).
+        # False without an SDK login or while the latest refresh could not log it in.
         self._write_ready = write_ready
         self._database_manager = database_manager
         self._sdk_session = sdk_session
@@ -181,6 +178,8 @@ class GarminStrengthPushService:
             raise AppError(
                 409, "Garmin ist nicht konfiguriert.", reason="not_configured"
             )
+        if not self._write_ready():
+            raise AppError(409, SDK_REQUIRED_MESSAGE, reason="garmin_sdk_required")
         requested = _entries(payload.get("entries"))
         operation = self._gate.operation() if self._gate is not None else nullcontext()
         with operation, self._lock:
@@ -483,7 +482,7 @@ class GarminStrengthPushService:
             False,
             plan_date,
             document,
-            garmin_fingerprint(unit),
+            garmin_fingerprint(unit, remembered),
         )
 
     def _document(
@@ -550,15 +549,23 @@ class GarminStrengthPushService:
         self._save_link(unit, workout_id, schedule_id, None)
         if not self._verified(client, workout_id, unit.document):
             self._drop_broken(client, unit, workout_id, schedule_id, created=created)
+        # A schedule an earlier push made without confirming its id is reused.
+        existing = (
+            None
+            if created or schedule_id
+            else _scheduled_on(client, workout_id, unit.plan_date)
+        )
         if schedule_id:
             try:
                 _call(client.unschedule_workout, schedule_id)
             except _Missing:
                 pass
             self._save_link(unit, workout_id, None, None)
-        schedule_id = _schedule_id(
-            _call(client.schedule_workout, workout_id, unit.plan_date)
-        ) or _scheduled_on(client, workout_id, unit.plan_date)
+        schedule_id = (
+            existing
+            or _schedule_id(_call(client.schedule_workout, workout_id, unit.plan_date))
+            or _scheduled_on(client, workout_id, unit.plan_date)
+        )
         if schedule_id is None:
             # Without the id a later push could not move this entry; the push
             # stays incomplete instead of reporting success.
@@ -616,9 +623,11 @@ class GarminStrengthPushService:
     def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
         """Whether the saved workout kept every sent exercise or run step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        running = (document.get("sportType") or {}).get("sportTypeKey") == "running"
-        steps = comparable_steps if running else workout_exercise_steps
-        return isinstance(saved, dict) and steps(saved) == steps(document)
+        if not isinstance(saved, dict):
+            return False
+        if (document.get("sportType") or {}).get("sportTypeKey") == "running":
+            return comparable_steps(saved) == comparable_steps(document)
+        return exercise_steps_match(saved, document)
 
     def _drop_broken(
         self,

@@ -140,6 +140,11 @@ function plannedGarminBlockedText(entry) {
   return "";
 }
 
+// The Personal API key alone cannot write workouts: a unit Garmin would wait for needs the SDK login.
+function plannedGarminSdkRequired(entry, garmin) {
+  return garmin?.configured === true && garmin.can_write_workouts === false && entry?.push_pending?.[providerIds().garmin] === true;
+}
+
 // Providers this planned unit still needs an explicit push to. Past, done,
 // in-flight and unconfigured targets get none.
 function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false } = {}) {
@@ -1160,7 +1165,7 @@ function plannedLeftoverItems(trainingCalendar) {
 
 function plannedProviderConfiguration() {
   const ids = providerIds();
-  return { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured), [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
+  return { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) && state.data.garmin.can_write_workouts !== false, [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
 }
 
 // The week's sync jobs from its calendar entries and leftovers; none when nothing waits. Each job
@@ -1214,14 +1219,18 @@ function plannedConflict(entry, dateKey) {
   return h("span", "planned-conflict", h("span", null, `⚠ Konflikt: ${labels.join(" · ")}`), button);
 }
 
-// Why a strength unit cannot reach the watch, with the action that fixes it:
+// Why a strength or run unit cannot reach the watch, with the action that fixes it:
 // the Coach structures a free-text unit; an unmatched exercise takes one of
 // the catalogue suggestions or goes to the Coach.
 function plannedGarminBlocked(entry, dateKey, todayKey, actual) {
-  const reason = entry.push_blocked?.[providerIds().garmin];
+  const reason = entry.push_blocked?.[providerIds().garmin] || (plannedGarminSdkRequired(entry, state.data?.garmin) ? "sdk_required" : "");
   if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity) return null;
   const block = h("span", "planned-conflict planned-garmin-blocked");
   const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
+  if (reason === "sdk_required") {
+    block.append(h("span", null, "Garmin-Anmeldung nötig"));
+    return block;
+  }
   if (reason !== "unmapped") {
     block.append(h("span", null, plannedGarminBlockedText(entry)), plannedCoachButton("Mit Coach strukturieren", `Strukturiere die Krafteinheit ${unit} für die Uhr: Übungen in Reihenfolge mit Sätzen, Wiederholungen, Last und Garmin-Übung. Frag nach, was fehlt.`));
     return block;

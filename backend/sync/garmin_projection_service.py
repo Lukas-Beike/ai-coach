@@ -33,7 +33,7 @@ from backend.sync.garmin import (
     GarminPayloadService,
     GarminSyncStateService,
 )
-from backend.sync.garmin_personal_status import personal_key_state
+from backend.sync.garmin_personal_status import personal_key_state, sdk_write_ready
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export_consent import enabled_fields, fields_view
@@ -160,6 +160,9 @@ class GarminProjectionService:
                 lambda key: self._key_value_repository.get(db, key),
                 self._config.garmin_tokenstore,
             )
+            can_write_workouts = sdk_write_ready(
+                self._config, lambda key: self._key_value_repository.get(db, key)
+            )
 
         return {
             "available": self._garmin_sync_service.available(),
@@ -185,6 +188,8 @@ class GarminProjectionService:
                 else {}
             ),
             "last_error": parsed_error,
+            # Workouts go out through the SDK login only, never the Personal key.
+            "can_write_workouts": can_write_workouts,
             **self._personal_api_state(today, tokens_connected),
             "pagination": dict(status.pagination),
             "source_freshness": performance_freshness.garmin_source_freshness(
