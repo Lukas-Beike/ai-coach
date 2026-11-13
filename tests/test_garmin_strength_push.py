@@ -313,6 +313,17 @@ class MappingTests(unittest.TestCase):
         for change in different:
             self.assertFalse(mapping.exercise_steps_match(read_back(change), sent))
 
+    def test_a_pound_read_back_of_a_half_step_weight_still_matches(self) -> None:
+        # 2.25 kg read back as 4.9604 lb lies on the other side of a 0.1 kg rounding.
+        sent = mapping.strength_workout(
+            name="Kraft", description="", exercises=[{**SQUAT, "kg": 2.25}]
+        )
+        saved = json.loads(json.dumps(sent))
+        step = saved["workoutSegments"][0]["workoutSteps"][0]["workoutSteps"][0]
+        step.update(weightValue=4.9604, weightUnit={"unitKey": "pound"})
+
+        self.assertTrue(mapping.exercise_steps_match(saved, sent))
+
     def test_an_unresolved_exercise_blocks_the_whole_workout(self) -> None:
         with self.assertRaises(mapping.GarminStrengthMappingError) as raised:
             mapping.strength_workout(

@@ -441,6 +441,9 @@ _EXERCISE_STEP_KEYS: Final = frozenset({"interval", "warmup"})
 _KG_PER_UNIT: Final = {"kilogram": 1.0, "pound": 0.45359237}
 # A weight read back in a unit this code does not know is not compared.
 _UNKNOWN_UNIT: Final = "unknown unit"
+# Weights match within this many kg, so a pound read-back of a .x5 kg weight
+# is not taken for a change.
+_KG_TOLERANCE: Final = 0.05
 
 
 def _number(value: Any) -> float | None:
@@ -450,9 +453,9 @@ def _number(value: Any) -> float | None:
 
 
 def _weight_kg(step: Mapping[str, Any]) -> float | str | None:
-    """The step's weight in kg (0.1), None when dropped, or ``_UNKNOWN_UNIT``."""
-    value = _number(step.get("weightValue"))
-    if value is None:
+    """The step's weight in kg, None when dropped, or ``_UNKNOWN_UNIT``."""
+    value = step.get("weightValue")
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     unit = step.get("weightUnit")
     factor = _KG_PER_UNIT.get(
@@ -460,7 +463,7 @@ def _weight_kg(step: Mapping[str, Any]) -> float | str | None:
     )
     if factor is None:
         return _UNKNOWN_UNIT
-    return round(value * factor, 1) or None
+    return round(float(value) * factor, 3) or None
 
 
 def _exercise_steps(steps: Any, sets: float | None = None) -> list[tuple[Any, ...]]:
@@ -508,6 +511,14 @@ def exercise_steps_match(saved: Mapping[str, Any], sent: Mapping[str, Any]) -> b
     """Whether the read-back kept every sent exercise step, weight in an unknown unit aside."""
     read, wanted = workout_exercise_steps(saved), workout_exercise_steps(sent)
     return len(read) == len(wanted) and all(
-        a == b or (a[-1] == _UNKNOWN_UNIT and a[:-1] == b[:-1])
+        a[:-1] == b[:-1] and _same_weight(a[-1], b[-1])
         for a, b in zip(read, wanted, strict=True)
     )
+
+
+def _same_weight(read: float | str | None, sent: float | str | None) -> bool:
+    if read == _UNKNOWN_UNIT:
+        return True
+    if isinstance(read, float) and isinstance(sent, float):
+        return abs(read - sent) <= _KG_TOLERANCE
+    return read == sent
