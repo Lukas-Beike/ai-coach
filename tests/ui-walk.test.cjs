@@ -135,7 +135,7 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   assert.doesNotMatch(done.stderr, /at .*ui_walk/);
 });
 
-test("ui walk replaces a link or hard link at a fixed name instead of following it (#2661)", async () => {
+test("ui walk refuses a file, link or hard link at a fixed name instead of following it (#2661)", async () => {
   const walk = await load();
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-out-"));
   const victimDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-victim-"));
@@ -143,20 +143,19 @@ test("ui walk replaces a link or hard link at a fixed name instead of following 
   try {
     fs.writeFileSync(victim, "original");
     fs.linkSync(victim, path.join(outDir, "ui-walk.json"));
-    let symlinked = true;
+    assert.throws(() => walk.writeFresh(outDir, "ui-walk.json", "{}"), { code: "EEXIST" });
     try {
       fs.symlinkSync(victim, path.join(outDir, "mobile-coach.png"), "file");
-    } catch {
-      symlinked = false; // Windows without the symlink privilege: the hard link still covers it.
+      assert.throws(() => walk.writeFresh(outDir, "mobile-coach.png", "png"), { code: "EEXIST" });
+    } catch (error) {
+      if (error.code !== "EPERM") throw error; // Windows without the symlink privilege: the hard link covers it.
     }
-    walk.writeFresh(outDir, "ui-walk.json", "{}");
-    if (symlinked) walk.writeFresh(outDir, "mobile-coach.png", "png");
     assert.equal(fs.readFileSync(victim, "utf8"), "original");
-    assert.equal(fs.readFileSync(path.join(outDir, "ui-walk.json"), "utf8"), "{}");
-    assert.equal(fs.lstatSync(path.join(outDir, "ui-walk.json")).nlink, 1);
-    if (symlinked) assert.equal(fs.lstatSync(path.join(outDir, "mobile-coach.png")).isSymbolicLink(), false);
-    // An out-dir outside the temp directory is refused before any write.
+    // A fresh name is written; an out-dir outside the temp directory is refused before any write.
+    walk.writeFresh(outDir, "desktop-coach.png", "png");
+    assert.equal(fs.readFileSync(path.join(outDir, "desktop-coach.png"), "utf8"), "png");
     assert.throws(() => walk.writeFresh(path.join(__dirname, ".."), "ui-walk.json", "{}"), /system temp directory/);
+    assert.match(walk.FRESH_OUT_DIR, /fresh --out-dir/);
   } finally {
     fs.rmSync(outDir, { recursive: true, force: true });
     fs.rmSync(victimDir, { recursive: true, force: true });

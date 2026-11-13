@@ -1,7 +1,7 @@
 // Headless read-only walk through the running app at phone and desktop width.
 //
 //   node scripts/ui_walk.mjs --url <app address> --password-file <secret file>
-//     --out-dir <scratchpad dir> [--compare <previous ui-walk.json>]
+//     --out-dir <new scratchpad dir> [--compare <previous ui-walk.json>]
 //
 // Logs in with the password read from the file (never printed or passed on a
 // command line), opens each main view, switches the calendar between week and
@@ -65,12 +65,12 @@ export function scratchPath(target) {
 }
 
 // Writes one file of the walk by its fixed name (#2661): the out-dir is
-// checked again right before the write, an entry already at the name (a file
-// link or a hard link) is removed instead of followed, and the file is created
-// exclusively, so a link placed in between fails the write.
+// checked again right before the write and the file is created exclusively, so
+// any entry already at the name (a file, a link or a hard link) stops the walk
+// instead of being followed. Each walk needs a fresh --out-dir.
+export const FRESH_OUT_DIR = "the out-dir already holds walk files; use a fresh --out-dir";
 export function writeFresh(outDir, name, data) {
   const file = path.join(scratchPath(outDir), name);
-  fs.rmSync(file, { force: true });
   fs.writeFileSync(scratchPath(file), data, { flag: "wx" });
 }
 
@@ -293,13 +293,13 @@ async function main() {
   try {
     result = await walk({ chromium, url, password, outDir });
   } catch (error) {
-    console.log(`FAIL walk stopped (${error.name})`);
+    console.log(error.code === "EEXIST" ? `FAIL ${FRESH_OUT_DIR}` : `FAIL walk stopped (${error.name})`);
     return 2;
   }
   try {
     writeFresh(outDir, "ui-walk.json", JSON.stringify(result, null, 2));
   } catch (error) {
-    console.log(`FAIL cannot write the walk result (${error.code || error.message})`);
+    console.log(error.code === "EEXIST" ? `FAIL ${FRESH_OUT_DIR}` : `FAIL cannot write the walk result (${error.code})`);
     return 2;
   }
   const lines = [...reportLines(result), ...compareLines(result, previous)];

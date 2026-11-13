@@ -10,7 +10,9 @@ Needs the repository's Playwright install (`npm ci` and
 come from the session at run time. The secret file must lie in the T3 secret
 folder (`~/.t3/userdata/secrets`) or the system temp directory, and is only
 read; the output directory and the previous walk must lie in the system temp
-directory (the session scratchpad). The script refuses any other path.
+directory (the session scratchpad). The script refuses any other path. Each walk
+needs a fresh output directory: a file already at one of its names stops the
+walk with exit 2.
 
 ```powershell
 node scripts/ui_walk.mjs --url <app address> --password-file <secret file> --out-dir <scratchpad>/walk [--compare <previous walk>/ui-walk.json]
