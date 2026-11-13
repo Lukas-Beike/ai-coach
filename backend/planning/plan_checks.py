@@ -680,6 +680,11 @@ def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
         structured_steps(description, target)
     except WorkoutTextError:
         return None
+    return _sections(description, target)
+
+
+def _sections(description: str, target: str) -> list[Any]:
+    """Single steps and repeat blocks in order, each step with its ramp flag."""
     sections: list[Any] = []
     block: list[bool] | None = None
     for raw in description.splitlines():
@@ -691,10 +696,12 @@ def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
             sections.append(("repeat", block))
         elif line.startswith("-"):
             ramp = bool(structured_steps(line, target)[0].get("ramp"))
-            if block is None:
-                sections.append(("step", ramp))
-            else:
+            if block is not None:
                 block.append(ramp)
+            # Consecutive plain steps are one steady section, so a warm-up or
+            # cool-down inside a steady run stays a variant of it.
+            elif sections[-1:] != [("step", ramp)] or ramp:
+                sections.append(("step", ramp))
     return [
         (kind, tuple(value)) if kind == "repeat" else (kind, value)
         for kind, value in sections

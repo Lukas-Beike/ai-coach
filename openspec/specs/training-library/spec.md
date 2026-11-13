@@ -598,7 +598,7 @@ A planned unit that a Coach plan tool creates or whose structure it changes SHAL
 - **THEN** the write is rolled back with a `template_missing` finding that tells the model to plan from `list_workout_library`, or, when no template fits, to create one with `manage_training_templates` before planning: in the same turn for a clearly described unit (athlete decision 2026-11-13, #2512), after asking only when the request leaves the unit unclear; no unit is created without a template.
 
 #### Scenario: Scaled variant
-- **WHEN** a unit keeps its template's exercises in order, or its sections (single steps and repeat blocks with their steps, ramps) in order, and changes only sets, reps, kg, %1RM, RPE, RIR, rest, warm-up, repeat counts, step durations or distances (time and distance are interchangeable), targets including their kind (pace, heart rate, power; athlete decision 2026-11-13, #2513), or the unit duration
+- **WHEN** a unit keeps its template's exercises in order, or its sections (steady parts, where consecutive plain steps count as one, repeat blocks with their steps, and ramps) in order, and changes only sets, reps, kg, %1RM, RPE, RIR, rest, warm-up, repeat counts, step durations or distances (time and distance are interchangeable), targets including their kind (pace, heart rate, power; athlete decision 2026-11-13, #2513), or the unit duration
 - **THEN** the write is saved and the receipt carries a `template_scaled` note naming the unit and its template.
 
 #### Scenario: Different structure

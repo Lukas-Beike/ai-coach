@@ -356,14 +356,26 @@ class PlanCheckRuleTests(unittest.TestCase):
                 "template_scaled",
             ),
             (
-                "an added warm-up section",
+                "warm-up and cool-down inside a steady run",
                 unit(
                     "2",
                     "2026-11-05",
                     "run",
                     45,
                     template_id="T-easy",
-                    description="- 10m Z1 HR\n- 35m Z2 Pace",
+                    description="- 1km Z1 HR\n- 6km Z2 HR\n- 1km Z1 HR",
+                ),
+                "template_scaled",
+            ),
+            (
+                "a repeat block instead of a steady run",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    45,
+                    template_id="T-easy",
+                    description="- 10m Z1 HR\n\n4x\n- 4m Z4 HR\n- 2m Z1 HR",
                 ),
                 "template_mismatch",
             ),
