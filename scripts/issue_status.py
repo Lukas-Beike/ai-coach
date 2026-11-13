@@ -12,26 +12,37 @@ import sys
 
 CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 
+LINE = re.compile(r"^.*$", re.MULTILINE)
+HEADING = re.compile(r"^(#{1,6}) +(.+)$")
 
-HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
 
+def open_boxes(body):
+    """Open box matches split into parts and acceptance criteria.
 
-def is_criterion(body, at):
-    """A box under an acceptance-criteria heading; the closing summary covers it."""
-    headings = HEADING.findall(body, 0, at)
-    return bool(headings) and "acceptance" in headings[-1].lower()
+    A criterion sits under a heading starting with "Acceptance criteria", down to
+    the next heading of the same or a higher level; headings inside code fences
+    do not count. The closing summary covers criteria; parts keep an issue open.
+    """
+    body = body or ""
+    parts, criteria, level, fenced = [], [], 0, False
+    for line in LINE.finditer(body):
+        text = line[0].strip()
+        if text.startswith(("```", "~~~")):
+            fenced = not fenced
+        heading = None if fenced else HEADING.match(text)
+        if heading:
+            depth = len(heading[1])
+            if level and depth <= level:
+                level = 0
+            if heading[2].lower().startswith("acceptance criteria"):
+                level = depth
+        if box := CHECKBOX.match(body, line.start(), line.end()):
+            (criteria if level else parts).append(box)
+    return parts, criteria
 
 
 def open_checkboxes(body):
-    """Open boxes outside acceptance criteria: the parts that keep an issue open."""
-    body = body or ""
-    found = CHECKBOX.finditer(body)
-    return [m[1].strip() for m in found if not is_criterion(body, m.start())]
-
-
-def open_criteria(body):
-    body = body or ""
-    return [m for m in CHECKBOX.finditer(body) if is_criterion(body, m.start())]
+    return [m[1].strip() for m in open_boxes(body)[0]]
 
 
 def gh_json(*args):
@@ -66,7 +77,7 @@ def main(argv):
     print(f"Issue #{number}: {issue['state']}")
     for item in boxes:
         print(f"  open checkbox: {item}")
-    for item in open_criteria(issue["body"]):
+    for item in open_boxes(issue["body"])[1]:
         print(f"  open criterion (issue_update close ticks it): {item[1].strip()}")
     for pull in pulls:
         print(f"  PR #{pull['number']} {pull['state']}: {pull['title']}")

@@ -20,9 +20,10 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from gh_cli import CliError, gh, gh_json, positive_int, read_body
-from issue_status import CHECKBOX, open_checkboxes, open_criteria
+from issue_status import CHECKBOX, open_boxes, open_checkboxes
 
 IN_PROGRESS = "in progress"
 
@@ -60,7 +61,7 @@ def write_ticked(number: int, body: str, boxes: list[re.Match[str]]) -> None:
         edit(number, "--body-file", str(path))
 
 
-def blockers(number: int) -> tuple[dict[str, str], list[str]]:
+def blockers(number: int) -> tuple[dict[str, Any], list[str]]:
     """The issue's state and body, and what keeps it from being done."""
     issue = gh_json("issue", "view", str(number), "--json", "state,body")
     found = [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
@@ -81,10 +82,12 @@ def close(number: int, body_file: str) -> int:
         for item in found:
             print(f"  {item}")
         return 1
+    # The summary carries the evidence for the acceptance criteria still unticked;
+    # ticking first keeps a rerun after a failed edit from posting it twice.
+    body = issue["body"] or ""
+    if criteria := open_boxes(body)[1]:
+        write_ticked(number, body, criteria)
     gh("issue", "comment", str(number), "--body-file", body_file)
-    # The summary carries the evidence for the acceptance criteria still unticked.
-    if criteria := open_criteria(issue["body"] or ""):
-        write_ticked(number, issue["body"], criteria)
     edit(number, "--remove-label", IN_PROGRESS)
     is_open = issue["state"] == "OPEN"
     # A merged "Closes #N" PR has usually closed the issue already.

@@ -210,7 +210,10 @@ class IssueUpdateTests(unittest.TestCase):
             "close", "12", "--body-file", str(self.file), body=body, state="CLOSED"
         )
         self.assertEqual(code, 0)
-        self.assertEqual(len(fake.writes()), 3)
+        self.assertEqual(  # ticks first: a rerun after a failed edit posts once
+            fake.writes(),
+            [["issue", "edit", "12"], ["issue", "comment", "12"], ["issue", "edit", "12"]],
+        )
         self.assertEqual(
             fake.edited_body,
             "- [x] done\n## Acceptance criteria\n- [x] works\r\n* [x] fast\n",
