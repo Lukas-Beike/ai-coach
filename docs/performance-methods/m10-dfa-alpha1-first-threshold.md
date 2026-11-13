@@ -229,3 +229,33 @@ of the run threshold HR, "% LSHF"):
   untested thresholds; real coverage from the athlete's recordings is not yet
   counted.
 - Cycling results are stored but unused: no decision yet on a ride estimate.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METHOD_VERSION` | `2` | `backend/canonical/dfa_alpha1.py` |  |
+| `MIN_RR_MS` | `300.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `MAX_RR_MS` | `2000.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `MAX_BEAT_CHANGE` | `0.2` | `backend/canonical/dfa_alpha1.py` |  |
+| `REANCHOR_AFTER` | `5` | `backend/canonical/dfa_alpha1.py` | After this many beats in a row rejected only for their change, the new level is taken as real: a bad first beat must not reject the whole recording. |
+| `DETREND_LAMBDA` | `500.0` | `backend/canonical/dfa_alpha1.py` | Smoothness priors detrending strength (Kubios and the DFA-a1 studies use 500). |
+| `WINDOW_S` | `120.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `STRIDE_S` | `30.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `MAX_WINDOW_ARTIFACT_SHARE` | `0.05` | `backend/canonical/dfa_alpha1.py` |  |
+| `MIN_WINDOW_BEATS` | `100` | `backend/canonical/dfa_alpha1.py` |  |
+| `MAX_HALF_HR_STEP_BPM` | `8.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `THRESHOLD_ALPHA1` | `0.75` | `backend/canonical/dfa_alpha1.py` |  |
+| `CROSSING_MARGIN` | `0.1` | `backend/canonical/dfa_alpha1.py` | The lowest alpha1 must reach this far below the threshold and the highest this far above it, so a recording that never crosses 0.75 gives no estimate. |
+| `MIN_WINDOWS` | `10` | `backend/canonical/dfa_alpha1.py` |  |
+| `MIN_HR_SPREAD_BPM` | `10.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `GOOD_MIN_WINDOWS` | `20` | `backend/canonical/dfa_alpha1.py` |  |
+| `GOOD_MAX_ARTIFACT_SHARE` | `0.03` | `backend/canonical/dfa_alpha1.py` |  |
+| `GOOD_MIN_R_SQUARED` | `0.5` | `backend/canonical/dfa_alpha1.py` |  |
+| `ESTIMATE_DAYS` | `60` | `backend/performance/first_threshold_estimate.py` |  |
+| `MIN_SESSIONS` | `3` | `backend/performance/first_threshold_estimate.py` |  |
+| `GOOD_MIN_SESSIONS` | `5` | `backend/performance/first_threshold_estimate.py` | The estimate is good with this many sessions that agree within this spread (percentage points of the threshold HR); otherwise it is low. |
+| `GOOD_MAX_SPREAD_PCT` | `5.0` | `backend/performance/first_threshold_estimate.py` |  |
+| `SOURCE_LABEL` | `'Schätzung aus Brustgurt-RR-Intervallen (DFA-α1, Forschungsstand), kein Laborwert'` | `backend/performance/first_threshold_estimate.py` |  |
+<!-- END GENERATED CONSTANTS -->
