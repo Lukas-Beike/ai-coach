@@ -37,7 +37,6 @@ from backend.canonical.vocabulary import (
 from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.canonical_session_analysis import (
-    analysis_records,
     session_analysis,
 )
 from backend.performance.session_metrics_reads import (
@@ -108,9 +107,9 @@ class CanonicalDetailReader:
     def read(self, db: Any, any_id: str) -> dict[str, Any] | None:
         """Return the document, or None when the session has no readable records.
 
-        ``any_id`` is a local session id or an Intervals.icu activity id. Detail
-        sets come from the session's Garmin, Wahoo and local records only; the
-        Intervals.icu copies are never read (#1685).
+        ``any_id`` is a local session id or a provider activity id. Detail sets
+        come from the session's served records; the readers serve no stored
+        Intervals.icu copy, so none of its sets is read (#1685, #2148).
         """
         activity_id = read_reference(db, any_id)
         if activity_id is None:
@@ -118,22 +117,23 @@ class CanonicalDetailReader:
         records = tuple(self._session_records(db, activity_id))
         if not records:
             return None
-        own = analysis_records(records)
         stored = activity_detail_store.detail_sets_for_session(db, activity_id)
-        candidates = detail_candidates(own, stored)
+        candidates = detail_candidates(records, stored)
         sets = [candidate.stored for candidate in candidates]
         merged = merge_details(candidates)
         zone_settings = self._zone_settings
         if zone_settings is not None:
             merged = with_stream_zones(
-                merged, lambda: zone_settings(db, measured_order(own)[0])
+                merged, lambda: zone_settings(db, measured_order(records)[0])
             )
         status = self._status(db, sets)
         stale = any(state.stale for state in status.values())
         analysis = (
             None
-            if stale or not own
-            else session_analysis(own, merged, stored_targets(db, activity_id, records))
+            if stale
+            else session_analysis(
+                records, merged, stored_targets(db, activity_id, records)
+            )
         )
         envelope = None if self._envelope is None else self._envelope(db, activity_id)
         return activity_detail_contract(
@@ -142,8 +142,7 @@ class CanonicalDetailReader:
             merged,
             sets,
             analysis=analysis,
-            # Intervals.icu details are never served, so they are never offered.
-            refreshable=self._refreshable() - {ProviderId.INTERVALS},
+            refreshable=self._refreshable(),
             status=status,
             envelope=envelope,
             summary_metrics=detail_metric_entries(

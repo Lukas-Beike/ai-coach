@@ -13,6 +13,7 @@ from canonical_read_support import (
     store_wahoo_run_copy,
 )
 
+from backend.backup.export import PRIVACY_EXPORT_JSONL_SOURCES
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.canonical_plans import current_observation_mapper_versions
 
@@ -253,6 +254,35 @@ class ActivitySessionReadTests(CanonicalReadFixture):
             value for summary in summaries for value in summary["record_ids"].values()
         }
         self.assertFalse({"910002", WAHOO_RUN_COPY} & shown)
+
+    def test_stored_intervals_copies_are_never_served_but_stay_stored(self) -> None:
+        # Intervals.icu is output only (#2148): no reader serves its copies.
+        populate(self)
+        served = [
+            *self.read(self.table.activities),
+            *(
+                record
+                for _id, records in self.read(self.table.activity_sessions)
+                for record in records
+            ),
+        ]
+        self.assertTrue(served)
+        self.assertNotIn(
+            "intervals", {record.provenance.provider.value for record in served}
+        )
+        for session_id, _records in self.read(self.table.activity_sessions):
+            self.assertNotIn(
+                "intervals",
+                {
+                    record.provenance.provider.value
+                    for record in self.read(self.table.session_activities, session_id)
+                },
+            )
+        exported = dict(PRIVACY_EXPORT_JSONL_SOURCES)["activity_records.jsonl"]
+        stored = {row["provider_activity_id"] for row in self.read(exported)}
+        self.assertTrue(
+            {"i-act-001", "i-act-002", "i-act-003", "i-act-004", "i-act-005"} <= stored
+        )
 
     def test_records_of_an_unknown_provider_are_skipped(self) -> None:
         drop_intervals_activities(self)

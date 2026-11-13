@@ -96,7 +96,7 @@ The system SHALL bundle supported provider copies into canonical sessions using 
 
 #### Scenario: Stored Intervals.icu activity copy
 - **WHEN** a stored Intervals.icu activity record exists (Intervals.icu is output only; the copies were purged, #1848)
-- **THEN** session linking leaves it out: it joins no session, no linking write or split touches it, and it stays stored, exported and purgeable (#2148); until the readers ignore such records too, any that still exists is served as a standalone session.
+- **THEN** session linking leaves it out (it joins no session, no linking write or split touches it), no canonical activity reader serves it, so no list, detail, summary or calculation reads it, and it stays stored, exported and purgeable (#2148).
 
 #### Scenario: Ambiguous nearby activity
 - **WHEN** candidates lack enough comparable data or conflict with matching tolerances

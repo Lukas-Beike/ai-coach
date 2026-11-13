@@ -395,16 +395,16 @@ Evidence: `backend/canonical/vocabulary.py:UNPRODUCED_METRIC_KINDS`, `backend/ca
 The system SHALL give activity consumers one provider-neutral summary per live canonical session, built from the active records of every provider in it. Each value SHALL come from the best-ranked record that has it (measured values from the recording platform's own copy first, derived values by provider rank) and name its source label. Consumers outside the provider adapters, sync and canonical owners SHALL NOT read provider activity field names.
 
 #### Scenario: Copies of one session
-- **WHEN** Wahoo and Garmin Connect (and any stored Intervals.icu copy) report a session that canonical linking bundled
+- **WHEN** Wahoo and Garmin Connect report a session that canonical linking bundled
 - **THEN** consumers receive one summary with the local session id, the canonical sport and environment, and each value's source label.
 
 #### Scenario: Recording relayed through Garmin Connect
 - **WHEN** a Garmin Connect activity names a Wahoo or Zwift manufacturer
 - **THEN** its origin is that manufacturer (any other manufacturer stays a Garmin recording), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides that are not indoor or virtual, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
 
-#### Scenario: Intervals.icu ranks last
-- **WHEN** a Wahoo or Garmin record and a stored Intervals.icu record share a session
-- **THEN** the Wahoo record, else the Garmin record, supplies the session's primary, measured values and laps; Intervals.icu records stay readable as ordinary members.
+#### Scenario: Stored Intervals.icu record
+- **WHEN** a session of a database restored from an earlier release still holds a stored Intervals.icu record
+- **THEN** the readers leave it out (#2148): the Wahoo record, else the Garmin record, supplies the session's primary, measured values and laps, and the Intervals.icu record is no member of the summary.
 
 #### Scenario: Load on different scales
 - **WHEN** a session has only a Garmin training load

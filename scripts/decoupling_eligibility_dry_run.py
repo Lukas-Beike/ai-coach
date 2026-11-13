@@ -56,7 +56,6 @@ from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import configure_cipher
-from backend.performance.canonical_session_analysis import analysis_records
 from backend.performance.session_analysis import (
     _aerobic_output,
     _aerobic_sensor,
@@ -408,8 +407,7 @@ def _with_streams(
     return {
         session_id
         for session_id, own in keys.items()
-        if any(key.provider != _INTERVALS for key in own)
-        and analysis_records(sessions[session_id])
+        if session_id in sessions and any(key.provider != _INTERVALS for key in own)
     }
 
 
