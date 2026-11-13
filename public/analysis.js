@@ -1174,7 +1174,9 @@ async function renderTrainingRecords() { // NOSONAR
     const result = await requestAnalysisReport("/api/analysis/training-records");
     if (generation !== trainingRecordsGeneration || session !== state.sessionGeneration) return;
     const openDetails = new Set([...gear.querySelectorAll("details[open]")].map((details) => details.dataset.key));
-    gear.replaceChildren(heading());
+    // A refresh, such as a background state load, keeps the maintenance receipt and its undo.
+    const receipt = gear.querySelector(":scope > [role='status']");
+    gear.replaceChildren(heading(), ...(receipt ? [receipt] : []));
     const equipment = result.equipment || {};
     const items = equipment.garmin_items || [];
     const tabs = h("div", { className: "segmented-control equipment-tabs", "aria-label": "Ausrüstung nach Sportart" });
@@ -1631,7 +1633,9 @@ function maintenanceButton(item) {
 function showMaintenanceReceipt(change, message = "Wartung erfasst. ") {
   const status = h("p", null, message);
   status.setAttribute("role", "status");
-  document.getElementById("equipmentItems")?.querySelector("h3")?.after(status);
+  const gear = document.getElementById("equipmentItems");
+  gear?.querySelector(":scope > [role='status']")?.remove();
+  gear?.querySelector("h3")?.after(status);
   if (!change?.id) return;
   const undo = h("button", { className: "message-undo", type: "button" }, "Rückgängig");
   undo.addEventListener("click", async () => {

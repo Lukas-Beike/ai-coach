@@ -351,7 +351,10 @@ test("@responsive active local gear offers a maintenance button with receipt and
   await expect(receipt).toContainText("Wartung erfasst.");
   // Recording maintenance re-renders the list; the card the athlete opened stays open.
   await expect(active).toHaveAttribute("open", "");
+  // A background state load re-renders the list (renderPerformance); the receipt and its undo stay (#2614).
+  await page.evaluate(() => renderTrainingRecords());
   await receipt.getByRole("button", { name: "Rückgängig" }).click();
   await expect.poll(() => undone).toEqual({ change_id: "change-a", expected_current_hash: "hash-a" });
-  await expect(page.locator("#equipmentItems [role='status']").filter({ hasText: "Zurückgenommen." })).toBeVisible();
+  await expect(receipt).toHaveCount(1);
+  await expect(receipt).toContainText("Zurückgenommen.");
 });
