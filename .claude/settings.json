@@ -5,7 +5,9 @@
       "mcp__graphify-local__graph_query",
       "mcp__graphify-local__graph_node",
       "mcp__graphify-local__graph_path",
-      "mcp__graphify-local__graph_stats"
+      "mcp__graphify-local__graph_stats",
+      "Bash(python scripts/resolve_review_thread.py:*)",
+      "PowerShell(python scripts/resolve_review_thread.py:*)"
     ],
     "deny": [
       "Read(//**/.env)",

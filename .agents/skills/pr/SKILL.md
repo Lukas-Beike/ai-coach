@@ -114,8 +114,10 @@ yield; otherwise poll about every 30 seconds. On each wake:
 
 - Read the current head, checks, threads and comments with
   [pr-state](../pacecraft-pr-state/SKILL.md). For each open item: fix it if
-  valid, run the affected checks, reply with the result, then resolve the
-  thread; if not actionable, reply with the concrete reason before resolving.
+  valid, run the affected checks, reply naming the fix commit's SHA, then
+  resolve the thread with `python scripts/resolve_review_thread.py <pr> <thread-id>`
+  (only on your own PR, after that reply; athlete decision #2629, no other way).
+  If not actionable, reply with the concrete reason and leave resolving to the user.
   Disable auto-merge as soon as a finding arrives, and re-enable it once
   Gitar has reviewed the repaired head and no feedback is open.
 - Later changes (feedback fixes, CI fixes, conflict resolutions, rebases) need
