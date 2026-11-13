@@ -124,4 +124,41 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the previous walk/);
   assert.doesNotMatch(done.stdout, /fake-login-value/);
+  // An out-dir that cannot be created (a file is in the way) exits 2 without a stack trace (#2661).
+  const blocked = fs.mkdtempSync(path.join(os.tmpdir(), "walk-blocked-"));
+  fs.writeFileSync(path.join(blocked, "file"), "x");
+  fs.writeFileSync(path.join(blocked, "secret"), "fake-login-value");
+  done = run("--url", "http://127.0.0.1:9", "--password-file", path.join(blocked, "secret"), "--out-dir", path.join(blocked, "file", "walk"));
+  fs.rmSync(blocked, { recursive: true, force: true });
+  assert.equal(done.status, 2);
+  assert.match(done.stdout, /cannot create the out-dir/);
+  assert.doesNotMatch(done.stderr, /at .*ui_walk/);
+});
+
+test("ui walk replaces a link or hard link at a fixed name instead of following it (#2661)", async () => {
+  const walk = await load();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-out-"));
+  const victimDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-victim-"));
+  const victim = path.join(victimDir, "kept.txt");
+  try {
+    fs.writeFileSync(victim, "original");
+    fs.linkSync(victim, path.join(outDir, "ui-walk.json"));
+    let symlinked = true;
+    try {
+      fs.symlinkSync(victim, path.join(outDir, "mobile-coach.png"), "file");
+    } catch {
+      symlinked = false; // Windows without the symlink privilege: the hard link still covers it.
+    }
+    walk.writeFresh(outDir, "ui-walk.json", "{}");
+    if (symlinked) walk.writeFresh(outDir, "mobile-coach.png", "png");
+    assert.equal(fs.readFileSync(victim, "utf8"), "original");
+    assert.equal(fs.readFileSync(path.join(outDir, "ui-walk.json"), "utf8"), "{}");
+    assert.equal(fs.lstatSync(path.join(outDir, "ui-walk.json")).nlink, 1);
+    if (symlinked) assert.equal(fs.lstatSync(path.join(outDir, "mobile-coach.png")).isSymbolicLink(), false);
+    // An out-dir outside the temp directory is refused before any write.
+    assert.throws(() => walk.writeFresh(path.join(__dirname, ".."), "ui-walk.json", "{}"), /system temp directory/);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+    fs.rmSync(victimDir, { recursive: true, force: true });
+  }
 });
