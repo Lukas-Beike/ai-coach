@@ -15,8 +15,12 @@ from datetime import date
 from typing import Any, TypeVar
 from unittest.mock import Mock
 
-from activity_row_support import summaries_of_rows
-from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_read_support import (
+    CanonicalReadFixture,
+    drop_intervals_activities,
+    make_selector,
+    populate,
+)
 from intervals_compaction import compact_activity_rows
 from intervals_plan_stub import intervals_snapshot_coverage
 
@@ -89,8 +93,10 @@ class CanonicalContextReadCase(CanonicalReadFixture):
     ) -> tuple[T, T]:
         """Run ``read`` before the first backfill, then against the filled tables.
 
-        ``read`` receives the selector and the stored Intervals snapshot.
+        ``read`` receives the selector and the stored Intervals snapshot. Only
+        the Garmin activities are stored.
         """
+        drop_intervals_activities(self)
         pending = read(make_selector(self), self.intervals)
         populate(self)
         return pending, read(make_selector(self), self.intervals)
@@ -109,56 +115,36 @@ class CanonicalContextReadCase(CanonicalReadFixture):
         }
         return full, read(selector, self.intervals)
 
-    def _snapshot_ids(self) -> list[str]:
-        return sorted(str(row["id"]) for row in self.intervals["recent_activities"])
+    def _garmin_ids(self) -> list[str]:
+        return sorted(str(row["activityId"]) for row in self.garmin["activities"])
 
 
-def _intervals_ids(rows: Sequence[Any]) -> list[str]:
+def _served_garmin_ids(rows: Sequence[Any]) -> list[str]:
     return sorted(
-        str(row["record_ids"]["intervals"])
+        str(row["record_ids"]["garmin"])
         for row in rows
-        if "intervals" in row["record_ids"]
+        if "garmin" in row["record_ids"]
     )
 
 
 class CompactActivityTests(CanonicalContextReadCase):
-    def test_table_rows_compact_to_the_snapshot_recent_activities(self) -> None:
+    def test_table_rows_compact_to_the_stored_activities(self) -> None:
+        drop_intervals_activities(self)
         populate(self)
         compact = self._source(make_selector(self)).compact()
 
-        self.assertTrue(compact)
-        by_intervals_id = {
-            item["record_ids"]["intervals"]: item
-            for item in compact
-            if "intervals" in item["record_ids"]
-        }
-        snapshot_rows = self.intervals["recent_activities"]
-        self.assertEqual(
-            sorted(by_intervals_id), sorted(str(row["id"]) for row in snapshot_rows)
-        )
-        # Summaries replace the compact raw rows: each snapshot row keeps its
-        # local start and, unless a Garmin record was merged in, its mapped values
-        # (the helper maps in UTC, so the aware start is left out).
-        mapped_by_id = {
-            item["record_ids"]["intervals"]: item
-            for item in summaries_of_rows(snapshot_rows)
-        }
-        for key, mapped in mapped_by_id.items():
-            summary = by_intervals_id[key]
-            self.assertEqual(summary["started_at_local"], mapped["started_at_local"])
-            if summary["source"] == "Intervals.icu":
-                self.assertEqual(
-                    {
-                        k: v
-                        for k, v in summary.items()
-                        if k not in ("id", "record_ids", "started_at")
-                    },
-                    {
-                        k: v
-                        for k, v in mapped.items()
-                        if k not in ("id", "record_ids", "started_at")
-                    },
-                )
+        by_garmin_id = {item["record_ids"]["garmin"]: item for item in compact}
+        self.assertEqual(sorted(by_garmin_id), self._garmin_ids())
+        # Each summary keeps the stored activity's local start and mapped values.
+        for row in self.garmin["activities"]:
+            summary = by_garmin_id[str(row["activityId"])]
+            self.assertEqual(summary["source"], "Garmin Connect")
+            self.assertEqual(summary["name"], row["activityName"])
+            self.assertEqual(
+                summary["started_at_local"], row["startTimeLocal"].replace(" ", "T")
+            )
+            self.assertEqual(summary["elapsed_duration_s"], row["duration"])
+            self.assertEqual(summary["distance_m"], row["distance"])
 
     def test_compact_activities_are_empty_until_the_tables_serve(self) -> None:
         pending, tables = self._pending_and_tables(
@@ -166,7 +152,7 @@ class CompactActivityTests(CanonicalContextReadCase):
         )
 
         self.assertEqual(pending, [])
-        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
+        self.assertEqual(_served_garmin_ids(tables), self._garmin_ids())
 
     def test_compaction_is_capped_like_the_snapshot_read_model(self) -> None:
         rows = [{"id": str(index), "name": "x"} for index in range(600)]
@@ -333,7 +319,7 @@ class HttpStateReadTests(CanonicalContextReadCase):
         pending, tables = self._pending_and_tables(self._plan_activities)
 
         self.assertEqual(pending, [])
-        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
+        self.assertEqual(_served_garmin_ids(tables), self._garmin_ids())
 
     def test_plan_does_not_need_the_snapshot_sections(self) -> None:
         full, stripped = self._with_and_without_sections(self._plan_activities)

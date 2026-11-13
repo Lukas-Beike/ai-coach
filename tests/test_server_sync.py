@@ -29,7 +29,7 @@ from support import (
     IntervalsRequestRecorder,
     RecordedIntervalsClient,
     parsed_workout_fixture,
-    store_canonical_snapshot,
+    store_garmin_activities,
 )
 
 from backend.errors import AppError
@@ -1231,34 +1231,27 @@ class ServerSyncTests(ServerTestCase):
             )
         self.assertEqual(too_many.exception.reason, "invalid_job_request")
 
-    def test_build_training_context_uses_compact_intervals_projection(self):
+    def test_build_training_context_uses_compact_activity_projection(self):
         today = server.ATHLETE_CLOCK.now().date()
-        # Canonical reads (#1416): the preview's compacted flag follows the
-        # Intervals.icu sync of the canonical coverage, not a stored snapshot.
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [
+        store_garmin_activities(
+            server,
+            [
                 {
-                    "id": f"ride-{index}",
-                    "type": "Ride",
-                    "name": f"Ride {index}",
-                    "start_date_local": (today - timedelta(days=index)).isoformat()
-                    + "T07:00:00",
+                    "activityId": f"ride-{index}",
+                    "activityName": f"Ride {index}",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": f"{today - timedelta(days=index)} 07:00:00",
                 }
                 for index in range(6)
             ],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        store_canonical_snapshot(server, snapshot)
+        )
         context = server.COACH_CONTEXT.training_context_service().build()
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
         preview = server.COACH_CONTEXT.preview_service().preview()
-        # An Intervals.icu-only snapshot carries no activity sync time (#1728).
+        # Activities of a read not vouched complete carry no sync time (#1728).
         self.assertFalse(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
