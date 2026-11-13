@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from enum import IntEnum
 from pathlib import Path
 
 from backend.activities import calendar_projection, duplicates, matching
@@ -33,6 +34,14 @@ ROOT = Path(__file__).resolve().parents[1]
 # Values recorded before #2110 merged the identical copies, per value:
 # (finite float, provider number, bounded to 10, finite, finite and positive).
 _INF = float("inf")
+
+
+class _Three(IntEnum):
+    """An int subclass: the type()-based finite float rejects it, isinstance does not."""
+
+    THREE = 3
+
+
 _NUMBER_TABLE: tuple[tuple[object, tuple[object, ...]], ...] = (
     (3, (3.0, 3, 3.0, True, True)),
     (2.5, (2.5, 2.5, 2.5, True, True)),
@@ -46,6 +55,7 @@ _NUMBER_TABLE: tuple[tuple[object, tuple[object, ...]], ...] = (
     (None, (None, None, None, False, False)),
     ("x", (None, None, None, False, False)),
     ("1,200", (None, None, None, False, False)),
+    (_Three.THREE, (None, 3, 3.0, True, True)),
 )
 _FINITE_FLOAT = (
     profile_number,
