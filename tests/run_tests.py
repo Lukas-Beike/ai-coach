@@ -269,7 +269,9 @@ def main() -> int:
             write_result(args.result_json, evidence)
 
     save()
-    modules = dict.fromkeys(args.module) if args.module else None
+    modules: dict[str, str] | None = (
+        dict.fromkeys(args.module, "named") if args.module else None
+    )
     if modules:
         evidence["modules"] = sorted(modules)
     skipped: dict[str, str] = {}
