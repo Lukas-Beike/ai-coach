@@ -484,6 +484,9 @@ class BrowserRunnerTests(unittest.TestCase):
             value["error"],
         )
         self.assertFalse(fake.ids)
+        # The manifest still names the rejected image and never reached the browser.
+        self.assertIs(False, value["images"]["application_matches_source"])
+        self.assertNotIn("browser", value["images"])
         # An image that cannot be compared runs with a warning; a current one silently.
         code, _value, _path = self.run_main(FakeProcesses(), current=None)
         self.assertEqual(code, 0)
