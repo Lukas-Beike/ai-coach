@@ -94,6 +94,11 @@ that need the repository checkout, Git or the Sonar CLI report environment failu
 ./tests/run_sqlcipher_tests.ps1 -Workers 1 -ResultsDirectory $env:TEMP\coach-test-results
 ```
 
+For modules that need the image's dependencies (`garminconnect`, SQLCipher),
+`python scripts/run_sqlcipher_tests.py --module <test module>` (repeatable) runs
+only those modules in the same container with the same mounts, including `docs/`
+and `openspec/`; without `--suite` it selects from every module.
+
 The serial default is preserved; `-Workers` accepts 1-4, with two as the first
 benchmark candidate. Each run owns a unique directory below
 `$env:TEMP/ai-coach-tests` (or the supplied parent), with `summary.json`, per-shard

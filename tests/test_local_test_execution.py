@@ -86,7 +86,12 @@ class RunnerEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "durations.json"
             path.write_text("existing")
-            for selection in (["--total", "2"], ["--suite", "container"], ["--list"]):
+            for selection in (
+                ["--total", "2"],
+                ["--suite", "container"],
+                ["--list"],
+                ["--module", "test_db_manager"],
+            ):
                 with (
                     mock.patch.object(
                         sys,
@@ -175,6 +180,23 @@ class SupervisorTests(unittest.TestCase):
         for partial in (
             ["--record-durations-directory", str(self.root)],
             ["--coverage-wheel", str(wheel)],
+            # A module selection is never the complete suite (#2545).
+            [
+                "--suite",
+                "all",
+                "--module",
+                "test_db_manager",
+                "--coverage-wheel",
+                str(wheel),
+            ],
+            [
+                "--suite",
+                "all",
+                "--module",
+                "test_db_manager",
+                "--record-durations-directory",
+                str(self.root),
+            ],
         ):
             with (
                 self.subTest(partial=partial[0]),
@@ -224,6 +246,7 @@ class SupervisorTests(unittest.TestCase):
     def test_complete_static_inputs_and_built_application_mounts(self):
         for relative in (
             "backend",
+            "openspec",
             "requirements-graphify.in",
             "requirements-graphify.txt",
             "run-server.ps1",
@@ -602,9 +625,26 @@ class SupervisorTests(unittest.TestCase):
             {"container"},
         )
         self.assertTrue(all("coverage" not in command for command in tests))
+        self.assertTrue(all("--module" not in command for command in [*lists, *tests]))
         self.assertEqual(
             [shard["status"] for shard in summary["shards"]], ["passed", "passed"]
         )
+
+    def test_module_selection_reaches_every_list_and_test_command(self):
+        # Focused runs keep the mounts and the shard partition check (#2545).
+        self.owner.args.module = ["test_db_manager", "test_config"]
+        code, spawned, _summary = self.run_mocked()
+        self.assertEqual(code, 0)
+        commands = [
+            command for command, name in spawned if name.startswith(("list-", "test-"))
+        ]
+        self.assertEqual(len(commands), 4)
+        for command in commands:
+            runner = command[command.index("/app/tests/run_tests.py") :]
+            self.assertEqual(
+                [runner[i + 1] for i, part in enumerate(runner) if part == "--module"],
+                ["test_db_manager", "test_config"],
+            )
 
     def test_nonzero_missing_and_suite_error_cannot_pass(self):
         for failure in ("nonzero", "missing", "suite_error"):
