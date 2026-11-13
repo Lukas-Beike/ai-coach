@@ -353,8 +353,8 @@ explicit `GET /api/fixture/features` and `GET /api/fixture/activity` test seeds
 add their synthetic activities to the existing snapshot instead of replacing
 it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
-`-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
-container. `-Name` must start with `demo` or `fixture` (optionally after an
+`-Persist` to keep the data in a named volume, `-Port`/`-Name` to adjust the
+container, and `-Stop` to remove it again (never its volume). `-Name` must start with `demo` or `fixture` (optionally after an
 `pacecraft-` or `ai-coach-` prefix); the production container `pacecraft` (formerly `ai-coach`) and every other name are
 refused before anything is built, stopped or removed. The fixture refuses to
 start unless `AI_COACH_DISPOSABLE_FIXTURE=1` is set; only the demo script and the

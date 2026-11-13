@@ -6,12 +6,14 @@ Only fake data is used; providers stay blocked. Password: e2e-fixture-password-1
   .\scripts\demo-container.ps1                # data lives in the container
   .\scripts\demo-container.ps1 -Persist       # data survives recreation (named volume)
   .\scripts\demo-container.ps1 -SkipBuild -Port 8091
+  .\scripts\demo-container.ps1 -Stop            # remove it again (never its volume)
 #>
 param(
     [string]$Name = "pacecraft-demo",
     [int]$Port = 8091,
     [switch]$Persist,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Stop
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -24,7 +26,7 @@ if ($Name -in @("pacecraft", "ai-coach") -or $Name -notmatch '^(pacecraft-|ai-co
 
 # $ErrorActionPreference does not stop on native exit codes in Windows PowerShell 5.1,
 # so every native call is followed by an explicit $LASTEXITCODE check.
-if (-not $SkipBuild) {
+if (-not $SkipBuild -and -not $Stop) {
     docker build -q -t pacecraft:local . | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Image build failed (exit $LASTEXITCODE)." }
 }
@@ -35,6 +37,10 @@ if ($existingContainer) {
     if ($LASTEXITCODE -ne 0) { throw "Stopping container '$Name' failed (exit $LASTEXITCODE)." }
     docker rm $Name | Out-Null   # never -v
     if ($LASTEXITCODE -ne 0) { throw "Removing container '$Name' failed (exit $LASTEXITCODE)." }
+}
+if ($Stop) {
+    if ($existingContainer) { Write-Host "Demo removed: $Name" } else { Write-Host "No container named $Name" }
+    exit 0
 }
 $dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
     "-e", "FIXTURE_AUTO_SEED=1", "-e", "AI_COACH_DISPOSABLE_FIXTURE=1", "-v", "${PWD}\e2e:/app/e2e:ro")
