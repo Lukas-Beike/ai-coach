@@ -73,7 +73,7 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(
             self.service.task_settings(),
             {
-                task: {"model": "gpt-6-sol", "thinking_level": "low"}
+                task: {"model": "gpt-6-sol", "thinking_level": "low", "ready": True}
                 for task in ("conversation", "planning", "nutrition")
             },
         )
@@ -249,6 +249,21 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(service.selected_provider(), "openai")
         self.current_config[0] = replace(self.current_config[0], openai_api_key="")
         self.assertFalse(service.coach_ready())
+        # Each task reports its own provider's key (#2639): planning on Claude
+        # can run while the conversation on GPT cannot, and the reverse.
+        self.values["selected_model_planning"] = "claude-opus"
+        ready = {t: v["ready"] for t, v in service.task_settings().items()}
+        self.assertEqual(
+            ready, {"conversation": False, "planning": True, "nutrition": False}
+        )
+        self.current_config[0] = replace(
+            self.current_config[0],
+            openai_api_key="openai-test-key",
+            anthropic_api_key="",
+        )
+        self.assertTrue(service.coach_ready())
+        self.assertFalse(service.coach_ready("planning"))
+        self.assertEqual(service.selected_provider("planning"), "anthropic")
 
     def test_calendar_defaults_clamping_and_write_keys(self):
         self.assertEqual(

@@ -122,6 +122,18 @@ test("the chat needs the selected model's key; before a load it stays usable", (
   assert.equal(coachConfigured({ openai: false }), false);
 });
 
+test("a quick action needs the planning model's key, the morning check-in the chat's (#2639)", () => {
+  const state = { data: { model: { tasks: { planning: { ready: false } } } } };
+  const { coachConfigured } = extractFunctions("coach.js", ["coachConfigured"], { state });
+  const chatReady = { coach: true };
+  assert.equal(coachConfigured(chatReady, "plan_week"), false);
+  assert.equal(coachConfigured(chatReady, "morning_checkin"), true);
+  assert.equal(coachConfigured(chatReady), true);
+  state.data.model.tasks.planning.ready = true;
+  assert.equal(coachConfigured({ coach: false }, "session_analysis"), true);
+  assert.equal(coachConfigured({ coach: false }), false);
+});
+
 test("the microphone needs a transcription endpoint whichever model answers", () => {
   const button = { disabled: false, classList: { toggle() {} }, setAttribute() {}, title: "", innerHTML: "" };
   const state = { data: { messages: [], configured: { openai: true, transcription: false, coach: true } }, voiceTranscribing: false };

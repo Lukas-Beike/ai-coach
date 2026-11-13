@@ -188,13 +188,13 @@ class SettingsService:
     def selected_model(self, task: str = "conversation") -> str:
         return self._selected_model(self._config_supplier(), task)
 
-    def selected_provider(self) -> str:
+    def selected_provider(self, task: str = "conversation") -> str:
         """anthropic for a Claude family, else openai."""
-        return "anthropic" if setting_family(self.selected_model()) else "openai"
+        return "anthropic" if setting_family(self.selected_model(task)) else "openai"
 
-    def coach_ready(self) -> bool:
-        """The selected model's provider has its key."""
-        return _key_ready(self._config_supplier(), self.selected_provider())
+    def coach_ready(self, task: str = "conversation") -> bool:
+        """The provider of the task's selected model has its key (#2639)."""
+        return _key_ready(self._config_supplier(), self.selected_provider(task))
 
     def save_model(self, model: Any, task: Any = "conversation") -> dict[str, str]:
         task = _task(task)
@@ -235,12 +235,13 @@ class SettingsService:
         self._set_value(_THINKING_KEYS[task], level_id)
         return {"thinking_level": level_id}
 
-    def task_settings(self) -> dict[str, dict[str, str]]:
-        """The model and thinking level each task uses."""
+    def task_settings(self) -> dict[str, dict[str, Any]]:
+        """The model and thinking level each task uses, and whether it can run."""
         return {
             task: {
                 "model": self.selected_model(task),
                 "thinking_level": self.selected_thinking_level(task),
+                "ready": self.coach_ready(task),
             }
             for task in TASKS
         }
