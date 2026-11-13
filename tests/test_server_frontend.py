@@ -917,6 +917,8 @@ class ServerFrontendTests(ServerTestCase):
                 dirs_exist_ok=True,
                 copy_function=shutil.copyfile,
             )
+            # copytree copies the directory mode, and the image's public/ is read-only.
+            public.chmod(0o700)
             (public / ".hidden.js").write_text("secret()", encoding="utf-8")
             (public / "notes.md").write_text("notes", encoding="utf-8")
             service = StaticAssetService(public)
