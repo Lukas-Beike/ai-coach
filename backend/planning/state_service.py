@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -16,6 +15,7 @@ from backend.pagination import (
     encode_page_cursor,
 )
 from backend.planning.planned_units import plan_push_payload_hash
+from backend.planning.repository import parse_payload
 from backend.providers.intervals_workouts import intervals_record_type
 
 
@@ -81,11 +81,8 @@ class StructuredTrainingStateService:
 
     @staticmethod
     def _target_ref(row: Any, *, planned: bool) -> dict[str, Any] | None:
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except TypeError, ValueError:
-            return None
-        if not isinstance(payload, dict):
+        payload = parse_payload(row.get("payload"))
+        if payload is None:
             return None
         return {
             "local_id": str(row.get("local_id") or ""),

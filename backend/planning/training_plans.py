@@ -11,6 +11,7 @@ from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.db import planning_store
 from backend.errors import AppError
+from backend.planning.repository import parse_payload
 
 COACH_PLAN_CONSTRAINTS_PREFIX = "coach_plan_constraints:"
 TRAINING_PLAN_STATUS_ALIASES = {
@@ -31,11 +32,7 @@ def _member_dates(db: Any, plan_id: str) -> list[str]:
     rows = planning_store.active_planned_unit_rows(db, plan_id)
     dates: list[str] = []
     for row in rows:
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError, KeyError:
-            payload = {}
-        if isinstance(payload, dict):
+        if (payload := parse_payload(row["payload"])) is not None:
             try:
                 dates.append(LocalDate.parse(payload.get("date")).isoformat())
             except TypeError, ValueError:

@@ -12,7 +12,6 @@ candidate. The explicit Garmin sync removes the listed orphans.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from datetime import date
 from typing import Any, Final
@@ -22,6 +21,7 @@ from backend.db import planning_store
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.leftovers import MAX_CLEANUP, GarminOrphan, cap, nearest_first
 from backend.planning.push_state import pushable_fingerprint
+from backend.planning.repository import parse_payload
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import GarminExercise
 
@@ -68,10 +68,7 @@ def find_orphans(
     for row in planning_store.garmin_link_rows(
         db, ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value
     ):
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError:
-            payload = None
+        payload = parse_payload(row["payload"])
         if _is_orphan(row, payload, remembered):
             name, day = _label(payload)
             orphans.append(GarminOrphan(row["link_id"], name, day))

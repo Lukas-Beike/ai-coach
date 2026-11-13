@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import builtins
-import json
 from collections.abc import Callable
 from typing import Any
 
@@ -14,6 +13,7 @@ from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
+from backend.planning.repository import parse_payload
 from backend.planning.sport import with_activity_type
 from backend.providers.intervals_workouts import (
     INTERVALS_DEFAULT_WORKOUT_TYPE,
@@ -69,14 +69,11 @@ class WorkoutLibraryService:
             )
             return restored
 
-        try:
-            current_payload = json.loads(current["payload"])
-            if not isinstance(current_payload, dict):
-                raise TypeError("Current workout payload is not an object")
-        except (TypeError, ValueError) as exc:
+        current_payload = parse_payload(current["payload"])
+        if current_payload is None:
             raise AppError(
                 409, "Die Bibliothekseinheit kann nicht wiederhergestellt werden."
-            ) from exc
+            )
 
         restored = library.normalize_library_workout(
             {**current_payload, **target},
@@ -143,11 +140,8 @@ class WorkoutLibraryService:
         row = planning_store.library_row(db, local_id)
         if not row:
             raise AppError(404, "Bibliothekseinheit nicht gefunden.")
-        try:
-            current = json.loads(row["payload"])
-        except (TypeError, ValueError) as exc:
-            raise AppError(500, CORRUPT_LIBRARY_ERROR) from exc
-        if not isinstance(current, dict):
+        current = parse_payload(row["payload"])
+        if current is None:
             raise AppError(500, CORRUPT_LIBRARY_ERROR)
         if current.get("date"):
             raise AppError(
@@ -278,12 +272,8 @@ class WorkoutLibraryService:
             include_archived,
             max(1, min(int(limit) * (2 if include_archived else 1), 1000)),
         )
-        result = []
-        for row in rows:
-            try:
-                payload = json.loads(row["payload"])
-                if isinstance(payload, dict):
-                    result.append(with_activity_type(payload))
-            except TypeError, ValueError:
-                continue
-        return result
+        return [
+            with_activity_type(payload)
+            for row in rows
+            if (payload := parse_payload(row["payload"])) is not None
+        ]

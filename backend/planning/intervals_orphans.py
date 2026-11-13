@@ -10,7 +10,6 @@ ones; past events are skipped, because the sync refuses to delete them.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
@@ -18,6 +17,7 @@ from typing import Any, Final
 from backend.db import planning_store
 from backend.planning.leftovers import MAX_CLEANUP, cap, nearest_first
 from backend.planning.library import library_payload_hash
+from backend.planning.repository import parse_payload
 
 _OPEN_STATES: Final = ("local", "sync_error", "remote_missing")
 
@@ -32,11 +32,8 @@ class IntervalsOrphan:
 
 def _orphan(row: Any, today: date) -> IntervalsOrphan | None:
     """The orphan a stored unit makes, or None for a live, past or unlinked one."""
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except TypeError, ValueError:
-        return None
-    if not isinstance(payload, dict):
+    payload = parse_payload(row["payload"])
+    if payload is None:
         return None
     hidden = payload.get("local_deleted") or payload.get("archived")
     remote_id = payload.get("remote_event_id")

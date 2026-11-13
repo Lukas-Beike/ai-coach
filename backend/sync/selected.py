@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 
@@ -12,6 +11,7 @@ from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.push_state import INTERVALS_INDOOR_RIDES_ONLY, skips_intervals
+from backend.planning.repository import parse_payload
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.planned_calendar import (
@@ -132,15 +132,8 @@ class SelectedWorkoutSyncService:
         self, item: dict[str, Any], row: dict[str, Any]
     ) -> dict[str, Any]:
         local_id = item["library_workout_id"]
-        try:
-            synced = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError:
-            synced = {}
-        if (
-            not isinstance(synced, dict)
-            or not synced.get("date")
-            or synced.get("remote_event_id")
-        ):
+        synced = parse_payload(row["payload"]) or {}
+        if not synced.get("date") or synced.get("remote_event_id"):
             return {"library_workout_id": local_id, "status": "already_synced"}
         try:
             with self._provider_resync_gate.operation():
