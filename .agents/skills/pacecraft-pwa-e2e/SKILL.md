@@ -20,6 +20,7 @@ Use for frontend, HTTP contracts, streaming, responsive layout, or PWA changes.
   assets branch; deleting it later is optional, but delete it at once if an image
   shows anything but fixture data.
 - Run a deliberate mutation check (a source change made to prove a test fails)
-  only in a separate temporary worktree, never in a worktree another build or run
-  uses: a concurrent image build there picks up the mutated file (#2628).
+  only in a separate temporary worktree, built under that worktree's own
+  `--print-image` tag, and remove it afterwards: a concurrent build of the task
+  worktree or a shared tag would pick up the mutated file (#2628).
 - Report passed, failed, blocked, and not run separately. Missing Docker, SQLCipher, browser, or provider access is not success.

@@ -359,11 +359,11 @@
       "prohibited": ["Create an assets branch or capture browser screenshots for a backend change"]
     },
     {
-      "id": "pwa-e2e-mutation-check-worktree", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
+      "id": "pwa-e2e-mutation-check-worktree", "skill": "pacecraft-pwa-e2e", "kind": "positive", "activate": true,
       "prompt": "Prove the contrast sweep catches a too-light muted colour by breaking it on purpose.",
       "setup": "Synthetic UI branch; a second validation run is building the app image from the same task worktree.",
-      "expected": ["Make the deliberate mutation in a separate temporary worktree and build and run the sweep from there", "Remove that worktree afterwards; the task worktree never holds the mutated file"],
-      "prohibited": ["Edit the stylesheet in the task worktree while another build or run uses it"]
+      "expected": ["Make the deliberate mutation in a separate temporary worktree and build it under that worktree's own --print-image tag before running the sweep there", "Remove that worktree afterwards; the task worktree never holds the mutated file"],
+      "prohibited": ["Edit the stylesheet in the task worktree", "Build the mutated source under a shared image tag"]
     },
     {
       "id": "pwa-e2e-normal-spec-run-no-worktree", "skill": "pacecraft-pwa-e2e", "kind": "boundary", "activate": true,
