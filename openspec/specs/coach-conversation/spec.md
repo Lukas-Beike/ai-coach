@@ -67,7 +67,25 @@ The system SHALL retain background turn checkpoints, request unfinished work aga
 - **WHEN** the process starts with open commands, or a turn that is not a background job has been running for more than 15 minutes when its id is requested again
 - **THEN** a running command that is not a background job ends with reason `process_interrupted`, background turns return to `queued` with phase `queued`, and the stale turn is released as `failed` ("Die vorherige Coach-Verarbeitung wurde nach einem Prozessabbruch wieder freigegeben."); a tool call of a released turn is not executed (CA8)
 
-Evidence: `backend/coach/background_job.py:CoachBackgroundJobRunner`; `backend/coach/job_worker.py:CoachJobWorker`; `backend/coach/job_store.py:CoachJobStore`; `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`, `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`; `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`, `tests/test_coach_dialogue.py:test_job_of_an_older_release_is_requested_again_without_its_resume_state`, `tests/test_coach_job_store.py:test_restart_requeues_all_background_jobs`; `backend/coach/job_worker.py:CoachJobWorker.run_forever`, `backend/coach/job_store.py:CoachJobStore.claim`, `backend/coach/job_store.py:CoachJobStore.requeue`, `backend/coach/job_store.py:CoachJobStore.resume_interrupted`, `backend/coach/conversation_gate.py:CoachConversationGate.operation`, `backend/coach/chat_turn.py:CoachChatTurnService._recover_stale_command`; `tests/test_coach_job_store.py:test_requeue_persists_contention_backoff_and_wakes_worker`, `tests/test_coach_job_store.py:test_claim_preserves_the_twenty_row_candidate_limit`, `tests/test_coach_conversation_gate.py:test_full_queue_returns_429_and_queue_full_reason`.
+Evidence:
+- `backend/coach/background_job.py:CoachBackgroundJobRunner`
+- `backend/coach/job_worker.py:CoachJobWorker`
+- `backend/coach/job_store.py:CoachJobStore`
+- `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`
+- `tests/test_coach_background_job.py:test_job_that_keeps_failing_is_ended_with_a_terminal_failure`
+- `tests/test_coach_background_job.py:test_invalidated_generation_never_restores_session_or_writes_failure`
+- `tests/test_coach_dialogue.py:test_interrupted_job_is_requeued_rerequested_and_runs_its_tool_once`
+- `tests/test_coach_dialogue.py:test_job_of_an_older_release_is_requested_again_without_its_resume_state`
+- `tests/test_coach_job_store.py:test_restart_requeues_all_background_jobs`
+- `backend/coach/job_worker.py:CoachJobWorker.run_forever`
+- `backend/coach/job_store.py:CoachJobStore.claim`
+- `backend/coach/job_store.py:CoachJobStore.requeue`
+- `backend/coach/job_store.py:CoachJobStore.resume_interrupted`
+- `backend/coach/conversation_gate.py:CoachConversationGate.operation`
+- `backend/coach/chat_turn.py:CoachChatTurnService._recover_stale_command`
+- `tests/test_coach_job_store.py:test_requeue_persists_contention_backoff_and_wakes_worker`
+- `tests/test_coach_job_store.py:test_claim_preserves_the_twenty_row_candidate_limit`
+- `tests/test_coach_conversation_gate.py:test_full_queue_returns_429_and_queue_full_reason`.
 
 ### Requirement: CC4 Local history and current execution status
 The system SHALL provide authenticated bounded local history pages, chronological display within each page, pagination/search metadata and session-scoped execution status.
@@ -134,7 +152,21 @@ The system SHALL bind clarification to stored athlete messages, persist unresolv
 - **WHEN** a tool round holds `clarify_coach_request` or `cancel_coach_request`
 - **THEN** every other non-read call of that round fails with 409 `request_paused` "Der Auftrag wartet auf deine Antwort oder wurde abgebrochen.", whatever the order, read tools still run, and the next model request is sent with `tool_choice: none`
 
-Evidence: `backend/coach/clarification.py:CoachClarificationService.save_question`; `backend/coach/context_selection.py:_pending_request_is_active`, `backend/coach/context_selection.py:pending_origin_messages`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_clarification_service_persists_valid_user_provenance_and_limits`, `tests/test_coach_dialogue.py:test_clarification_service_rejects_unbound_message_ids_without_writing`, `tests/test_coach_dialogue.py:test_cancel_and_chat_reset_close_pending_request`; `tests/test_coach_context_selection.py:test_concise_freeform_answer_retains_an_active_clarification`; `backend/coach/context_selection.py:request_chain_ids`, `backend/coach/context_selection.py:compact_coach_dialogue`, `backend/coach/turn_write_gate.py:_pending_origin`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._request_is_paused`; `tests/test_coach_turn_outcome.py:test_clarified_request_that_fails_keeps_its_chain_through_a_retry`, `tests/test_coach_tool_preparation.py:test_round_pause_blocks_writes_but_allows_reads_and_dialogue_controls`.
+Evidence:
+- `backend/coach/clarification.py:CoachClarificationService.save_question`
+- `backend/coach/context_selection.py:_pending_request_is_active`
+- `backend/coach/context_selection.py:pending_origin_messages`
+- `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`
+- `tests/test_coach_dialogue.py:test_clarification_service_persists_valid_user_provenance_and_limits`
+- `tests/test_coach_dialogue.py:test_clarification_service_rejects_unbound_message_ids_without_writing`
+- `tests/test_coach_dialogue.py:test_cancel_and_chat_reset_close_pending_request`
+- `tests/test_coach_context_selection.py:test_concise_freeform_answer_retains_an_active_clarification`
+- `backend/coach/context_selection.py:request_chain_ids`
+- `backend/coach/context_selection.py:compact_coach_dialogue`
+- `backend/coach/turn_write_gate.py:_pending_origin`
+- `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._request_is_paused`
+- `tests/test_coach_turn_outcome.py:test_clarified_request_that_fails_keeps_its_chain_through_a_retry`
+- `tests/test_coach_tool_preparation.py:test_round_pause_blocks_writes_but_allows_reads_and_dialogue_controls`.
 
 ### Requirement: CC7 Conversation reset and unavailable remote continuity
 The system SHALL reset local dialogue atomically under a bounded conversation lock, invalidate queued work and pending requests, and keep durable athlete records independent of remote conversation continuity.
@@ -184,7 +216,27 @@ The system SHALL accept only supported bounded image, GPX and FIT attachments, p
 - **WHEN** attachments are validated
 - **THEN** at most 4 files are accepted, each at most 5,000,000 decoded bytes with a name of 1 to 160 characters without `/`, backslash or control characters; the payload sent to the provider may hold at most 28,000,000 bytes (413 `attachment_request_too_large`) and all stored attachments at most 40,000,000 bytes (413 `attachment_storage_quota`); the browser accepts images up to 15,000,000 bytes and reduces them before upload; an OpenAI conversation is kept for the next 3 athlete messages after an upload, later turns get local summaries
 
-Evidence: `backend/coach/attachments.py:validate_attachments`, `backend/coach/attachments.py:model_attachments`, `backend/providers/openai_responses_adapter.py:model_input`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`, `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `backend/coach/conversation.py:CoachConversationProvisionService`; `tests/test_coach_attachments.py:test_attachment_persists_for_worker_without_leaking_into_history`, `tests/test_coach_attachments.py:test_invalid_upload_does_not_create_a_command`, `tests/test_coach_attachments.py:test_attachment_storage_quota_prevents_backup_growth`, `tests/test_coach_attachments.py:test_invalid_attachment_conversation_recovers_gpx_and_future_turns`; `backend/coach/attachment_privacy.py:hidden_position_indexes`, `backend/coach/image_metadata.py:strip_image_metadata`, `backend/coach/attachments.py:MAX_REQUEST_BYTES`, `backend/coach/conversation.py:ATTACHMENT_RETENTION_USER_MESSAGES`, `backend/coach/conversation_recovery.py:CoachConversationRecoveryService.recover_if_invalid`, `public/coach.js:validateChatAttachmentFiles`; `tests/test_coach_attachment_privacy.py:test_first_and_last_500_m_are_hidden`, `tests/test_coach_attachment_privacy.py:test_unparseable_image_is_rejected_not_passed_through`, `tests/test_coach_attachment_context.py:test_retention_window_boundary_at_one_and_three_and_outside_at_four`, `tests/test_coach_conversation_recovery.py`.
+Evidence:
+- `backend/coach/attachments.py:validate_attachments`
+- `backend/coach/attachments.py:model_attachments`
+- `backend/providers/openai_responses_adapter.py:model_input`
+- `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`
+- `backend/coach/job_submission.py:CoachJobSubmissionService._persist`
+- `backend/coach/conversation.py:CoachConversationProvisionService`
+- `tests/test_coach_attachments.py:test_attachment_persists_for_worker_without_leaking_into_history`
+- `tests/test_coach_attachments.py:test_invalid_upload_does_not_create_a_command`
+- `tests/test_coach_attachments.py:test_attachment_storage_quota_prevents_backup_growth`
+- `tests/test_coach_attachments.py:test_invalid_attachment_conversation_recovers_gpx_and_future_turns`
+- `backend/coach/attachment_privacy.py:hidden_position_indexes`
+- `backend/coach/image_metadata.py:strip_image_metadata`
+- `backend/coach/attachments.py:MAX_REQUEST_BYTES`
+- `backend/coach/conversation.py:ATTACHMENT_RETENTION_USER_MESSAGES`
+- `backend/coach/conversation_recovery.py:CoachConversationRecoveryService.recover_if_invalid`
+- `public/coach.js:validateChatAttachmentFiles`
+- `tests/test_coach_attachment_privacy.py:test_first_and_last_500_m_are_hidden`
+- `tests/test_coach_attachment_privacy.py:test_unparseable_image_is_rejected_not_passed_through`
+- `tests/test_coach_attachment_context.py:test_retention_window_boundary_at_one_and_three_and_outside_at_four`
+- `tests/test_coach_conversation_recovery.py`.
 
 ### Requirement: CC9 Athlete-started morning check-in completion
 The system SHALL treat the morning quick action as a stored athlete-started turn, prepare configured Garmin sleep and morning battery data before coaching, and mark it ready for the local day only after a completed answer without clarification.
@@ -201,7 +253,23 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 - **WHEN** the morning turn finishes with a message and no pending clarification
 - **THEN** its ready marker for the local day the turn was prepared for (kept in the job receipt, also when the turn is requested again) and its quick-action receipt are persisted, so a check-in completed after midnight does not mark the next day; a clarification or yesterday's ready marker does not count as today's completed check-in.
 
-Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`, `backend/coach/job_store.py:CoachJobStore.requeue`, `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`, `tests/test_coach_job_store.py:CoachJobStoreTests.test_data_wait_requeues_with_fixed_delay_until_its_cap`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`, `tests/test_coach_morning_completion.py:test_completed_command_gets_compact_unicode_receipt_in_two_transactions`, `tests/test_coach_background_job.py:test_morning_completion_requires_final_message_without_clarification`, `tests/test_coach_background_job.py:test_rerequested_morning_turn_does_not_repeat_the_sync`.
+Evidence:
+- `backend/coach/morning.py:ManualMorningCheckinService.prepare`
+- `backend/coach/morning.py:MorningCheckinStateService.state`
+- `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`
+- `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`
+- `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`
+- `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`
+- `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`
+- `backend/coach/job_store.py:CoachJobStore.requeue`
+- `tests/test_server_coach.py:ServerCoachTests.test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait`
+- `tests/test_coach_job_store.py:CoachJobStoreTests.test_data_wait_requeues_with_fixed_delay_until_its_cap`
+- `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`
+- `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`
+- `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`
+- `tests/test_coach_morning_completion.py:test_completed_command_gets_compact_unicode_receipt_in_two_transactions`
+- `tests/test_coach_background_job.py:test_morning_completion_requires_final_message_without_clarification`
+- `tests/test_coach_background_job.py:test_rerequested_morning_turn_does_not_repeat_the_sync`.
 
 ### Requirement: CC9a Analysis and planning quick actions
 The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `block_review`, `plan_week`, `plan_block` and `adjust_week`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
@@ -258,7 +326,27 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 - **WHEN** a submission names another kind
 - **THEN** it is rejected as an unsupported quick action before any turn is stored.
 
-Evidence: `backend/coach/session_checks.py:matched_focus`, `backend/performance/pace_at_hr.py:session_comparison`, `backend/planning/leg_strength.py:strength_before`, `tests/test_coach_session_checks.py`; `backend/coach/playbooks.py:playbook_for` (`block_review`), `backend/coach/playbooks.py:nutrition_playbook`, `tests/test_coach_playbooks.py:PlaybookBudgetTests`, `tests/test_coach_activity_read_tools.py:CoachActivityReadToolServiceTests.test_detail_of_an_old_session_carries_its_planned_units`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`, `backend/coach/context_selection.py:free_text_review_kind`, `tests/test_coach_playbooks.py:FreeTextReviewKindTests`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_review_kinds_share_the_answer_format_and_plain_language`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_context_budget.py:CoachContextBudgetTests`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_adjust_week_playbook_guards_hard_days_and_writes`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week, plan_block and adjust_week also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
+Evidence:
+- `backend/coach/session_checks.py:matched_focus`
+- `backend/performance/pace_at_hr.py:session_comparison`
+- `backend/planning/leg_strength.py:strength_before`
+- `tests/test_coach_session_checks.py`
+- `backend/coach/playbooks.py:playbook_for` (`block_review`)
+- `backend/coach/playbooks.py:nutrition_playbook`
+- `tests/test_coach_playbooks.py:PlaybookBudgetTests`
+- `tests/test_coach_activity_read_tools.py:CoachActivityReadToolServiceTests.test_detail_of_an_old_session_carries_its_planned_units`
+- `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`
+- `backend/coach/context_selection.py:select_coach_context`
+- `backend/coach/context_selection.py:free_text_review_kind`
+- `tests/test_coach_playbooks.py:FreeTextReviewKindTests`
+- `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_review_kinds_share_the_answer_format_and_plain_language`
+- `backend/coach/request_payload.py:compose_model_instructions`
+- `tests/test_coach_context_budget.py:CoachContextBudgetTests`
+- `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`
+- `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`
+- `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`
+- `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_adjust_week_playbook_guards_hard_days_and_writes`
+- `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week, plan_block and adjust_week also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
 
 ### Requirement: CC9b Chat stream event contract
 `POST /api/chat/stream` SHALL answer one finite `text/event-stream` per submitted turn whose events let a client follow the durable turn without owning it. The request fields, event payloads and error reasons are the route contract in `docs/api-routes.md`, generated from the route handler.
@@ -283,7 +371,19 @@ Evidence: `backend/coach/session_checks.py:matched_focus`, `backend/performance/
 - **WHEN** a turn is accepted
 - **THEN** its command receipt holds `status` (`queued`, then `running` in the worker), `mode` (`background`), `phase` (`queued`, then `preparing`, `waiting_openai`, `executing_tools` and `waiting_final_response` in the worker; `waiting_for_coach_slot` on requeue, `cancelling` on cancel), `operation_id`, `session_key` (SHA-256 of the session's CSRF hash), `user_message_id`, `client_turn_id`, `plan_scope`, `ai_provider`, `model`, `thinking_level` and `request_kind`
 
-Evidence: `backend/http_api/chat_stream.py:CoachChatStreamTransport._stream`, `backend/http_api/chat_stream.py:CoachChatStreamTransport._relay_events`; `backend/coach/background_job.py:CoachBackgroundJobRunner._delta_callback`, `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`; `backend/coach/job_submission.py:CoachJobSubmissionService._persist`; `tests/test_http_chat_stream.py:test_stream_relays_events_and_unregisters_after_terminal_event`, `tests/test_http_chat_stream.py:test_disconnect_does_not_cancel_or_stop_durable_submission`, `tests/test_http_chat_stream.py:test_pending_maintenance_detaches_a_queued_turn_relay`, `tests/test_http_chat_stream.py:test_restart_replay_returns_original_job_as_background`, `tests/test_http_chat_stream.py:test_timeout_heartbeats_while_active_then_reads_final_receipt`, `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`, `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`.
+Evidence:
+- `backend/http_api/chat_stream.py:CoachChatStreamTransport._stream`
+- `backend/http_api/chat_stream.py:CoachChatStreamTransport._relay_events`
+- `backend/coach/background_job.py:CoachBackgroundJobRunner._delta_callback`
+- `backend/coach/background_job.py:CoachBackgroundJobRunner._handle_app_error`
+- `backend/coach/job_submission.py:CoachJobSubmissionService._persist`
+- `tests/test_http_chat_stream.py:test_stream_relays_events_and_unregisters_after_terminal_event`
+- `tests/test_http_chat_stream.py:test_disconnect_does_not_cancel_or_stop_durable_submission`
+- `tests/test_http_chat_stream.py:test_pending_maintenance_detaches_a_queued_turn_relay`
+- `tests/test_http_chat_stream.py:test_restart_replay_returns_original_job_as_background`
+- `tests/test_http_chat_stream.py:test_timeout_heartbeats_while_active_then_reads_final_receipt`
+- `tests/test_coach_background_job.py:test_queue_contention_requeues_and_emits_background_status`
+- `tests/test_coach_background_job.py:test_attached_stream_gets_deltas_until_the_turn_was_requested_once`.
 
 ### Requirement: CC9c Fixed model instructions as normative source
 The fixed Coach instructions SHALL be the normative text of these modules, not restated in specs: the dialogue rules and scope-token vocabulary (`backend/coach/dialogue.py:INSTRUCTIONS`), the coaching rules (`backend/coach/prompt.py:COACH_PROMPT`), the quick-action and nutrition playbooks (`backend/coach/playbooks.py`) and the attachment policy and turn notices (`backend/coach/request_payload.py`).

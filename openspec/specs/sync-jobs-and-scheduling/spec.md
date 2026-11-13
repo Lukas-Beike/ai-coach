@@ -261,7 +261,28 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain. Each backfill chain keeps its own cursor (`historical` for activities, `wellness_history` for the Garmin wellness walk, `stream_history` for the FIT stream walk of Garmin and Wahoo).
 
-Evidence: `backend/sync/executor.py:HistoricalSyncJobOwner`, `backend/sync/garmin_wellness_history.py:GarminWellnessHistoryService`, `backend/providers/garmin_wellness_history.py:collect_wellness_history`; `tests/test_garmin_wellness_history.py`, `backend/sync/stream_backfill.py:StreamBackfillService`, `tests/test_stream_backfill.py`, `backend/sync/backfill_resume.py:BackfillChainResumer`, `backend/sync/executor.py:HistoricalSyncJobOwner.window`, `backend/sync/executor.py:GarminJobAdapter`, `backend/sync/executor.py:WahooJobAdapter`, `tests/test_backfill_resume.py:test_a_chain_is_queued_at_most_once_per_interval`, `tests/test_backfill_resume.py:test_connecting_wahoo_queues_its_stream_backfill_at_once`, `tests/test_sync_executor.py:test_garmin_morning_refresh_is_limited_to_regular_success_or_partial`, `tests/test_sync_executor.py:test_a_chunk_that_hands_over_to_a_next_chunk_skips_the_hook`, `backend/sync/windows.py:split_date_windows`, `backend/sync/jobs.py:SyncJobStore.claim`; `backend/sync/rating_backfill_removal.py:RatingBackfillRemoval`, `tests/test_rating_backfill_removal.py`, `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`, `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`, `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
+Evidence:
+- `backend/sync/executor.py:HistoricalSyncJobOwner`
+- `backend/sync/garmin_wellness_history.py:GarminWellnessHistoryService`
+- `backend/providers/garmin_wellness_history.py:collect_wellness_history`
+- `tests/test_garmin_wellness_history.py`
+- `backend/sync/stream_backfill.py:StreamBackfillService`
+- `tests/test_stream_backfill.py`
+- `backend/sync/backfill_resume.py:BackfillChainResumer`
+- `backend/sync/executor.py:HistoricalSyncJobOwner.window`
+- `backend/sync/executor.py:GarminJobAdapter`
+- `backend/sync/executor.py:WahooJobAdapter`
+- `tests/test_backfill_resume.py:test_a_chain_is_queued_at_most_once_per_interval`
+- `tests/test_backfill_resume.py:test_connecting_wahoo_queues_its_stream_backfill_at_once`
+- `tests/test_sync_executor.py:test_garmin_morning_refresh_is_limited_to_regular_success_or_partial`
+- `tests/test_sync_executor.py:test_a_chunk_that_hands_over_to_a_next_chunk_skips_the_hook`
+- `backend/sync/windows.py:split_date_windows`
+- `backend/sync/jobs.py:SyncJobStore.claim`
+- `backend/sync/rating_backfill_removal.py:RatingBackfillRemoval`
+- `tests/test_rating_backfill_removal.py`
+- `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`
+- `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`
+- `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
 
 ### Requirement: Worker retries and restart recovery
 The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL treat interrupted work as a lost outcome. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.

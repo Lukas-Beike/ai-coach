@@ -81,7 +81,25 @@ Evidence: `scripts/check_push_secrets.py`; `docs/development.md` (secret checks 
 - **WHEN** `node_modules` has no ESLint, as in CI's `quality` job
 - **THEN** the JavaScript step prints that it was skipped and baseline entries of the ESLint tool are ignored, except under the pre-push hook (`PACECRAFT_NODE_MODULES` set), where it fails and asks for `npm ci`
 
-Evidence: `tools/quality_baseline.py`; `tests/fixtures/quality_baseline.json`; `tools/eslint.sonar.config.mjs`; `pyproject.toml`. Tests: `tests/test_quality_baseline.py::CognitiveComplexityTests.test_limit_is_exclusive_at_fifteen`, `tests/test_quality_baseline.py::CognitiveComplexityTests.test_existing_over_limit_function_is_baseline_debt_and_new_ones_fail`, `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`, `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`, `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`, `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`, `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`, `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`, `tests/test_quality_baseline.py::QualityBaselineTests.test_alignment_records_only_the_pinned_tool_versions`, `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`, `tests/test_quality_baseline.py::QualityBaselineTests.test_all_source_boundaries_and_new_files_are_discovered`, `tests/test_quality_baseline.py::QualityBaselineTests.test_complex_function_and_nested_ternary_in_public_js_are_found`, `tests/test_quality_baseline.py::QualityBaselineTests.test_complexity_score_is_not_part_of_the_identity_and_nosonar_suppresses`, `tests/test_quality_baseline.py::QualityBaselineTests.test_skipped_eslint_ignores_its_baseline_entries`. The pre-push hook points `PACECRAFT_NODE_MODULES` at the clone because its export of `HEAD` has no `node_modules`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
+Evidence:
+- `tools/quality_baseline.py`
+- `tests/fixtures/quality_baseline.json`
+- `tools/eslint.sonar.config.mjs`
+- `pyproject.toml`
+- Tests: `tests/test_quality_baseline.py::CognitiveComplexityTests.test_limit_is_exclusive_at_fifteen`
+- `tests/test_quality_baseline.py::CognitiveComplexityTests.test_existing_over_limit_function_is_baseline_debt_and_new_ones_fail`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_line_and_column_shifts_do_not_change_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_new_violation_cannot_replace_one_fixed_violation`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_obsolete_diagnostic_requires_baseline_cleanup`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_duplicate_diagnostics_are_not_collapsed`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_version_drift_is_fatal`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_tool_failure_cannot_become_baseline_debt`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_alignment_records_only_the_pinned_tool_versions`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_formatter_is_not_collected_by_the_quality_gate`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_all_source_boundaries_and_new_files_are_discovered`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_complex_function_and_nested_ternary_in_public_js_are_found`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_complexity_score_is_not_part_of_the_identity_and_nosonar_suppresses`
+- `tests/test_quality_baseline.py::QualityBaselineTests.test_skipped_eslint_ignores_its_baseline_entries`. The pre-push hook points `PACECRAFT_NODE_MODULES` at the clone because its export of `HEAD` has no `node_modules`. CI runs the same command in the `quality` job of `.github/workflows/publish-container.yml`.
 
 ### Requirement: Merged branch coverage has a floor
 CI SHALL combine exactly one coverage file from every Python test shard and fail when the combined branch coverage of `server` and `backend` is below `fail_under` in `pyproject.toml`. The floor SHALL equal the coverage recorded in the quality baseline, rounded down to the configured precision.
@@ -140,7 +158,21 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 - **WHEN** no test module is affected, or the base ref cannot be diffed
 - **THEN** the runner prints "No Python tests are affected." and exits 0, or exits non-zero with a message and no traceback
 
-Evidence: `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`), `tests/run_tests.py`, `tests/AGENTS.md`, `docs/testing.md` (Changed-Test Selection). Tests: `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`, `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`, `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`, `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`, `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`, `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`, `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`, `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`, `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`, `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`.
+Evidence:
+- `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`)
+- `tests/run_tests.py`
+- `tests/AGENTS.md`
+- `docs/testing.md` (Changed-Test Selection)
+- Tests: `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`
+- `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`
+- `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`.
 
 ### Requirement: CI runs the complete sharded suite
 The CI Python test jobs SHALL run every test through `tests/run_tests.py --shard N --total T`, covering the whole suite across the shards, and SHALL NOT use `--changed`. Changed-test selection is a local convenience and never evidence of complete validation.
