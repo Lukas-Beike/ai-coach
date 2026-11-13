@@ -42,7 +42,6 @@ from backend.canonical.sports import is_outdoor_endurance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
     Environment,
-    ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
@@ -80,7 +79,6 @@ RETRY_BASE: Final = timedelta(minutes=30)
 RETRY_MAX: Final = timedelta(hours=24)
 # A session with neither a stored position nor a home location.
 _NO_LOCATION: Final = "none"
-_INTERVALS: Final = ProviderId.INTERVALS.value
 _RANK: Final = {
     provider.value: index for index, provider in enumerate(PROVIDER_PRECEDENCE)
 }
@@ -118,13 +116,7 @@ def _fingerprint(cheap: str, kind: str, home_key: str) -> str:
 def _start_position(db: Any, session_id: str) -> Coordinates | None:
     """The first valid stored position of the session's own streams."""
     sets = sorted(
-        (
-            item
-            for item in activity_detail_store.full_stream_sets_for_session(
-                db, session_id
-            )
-            if item.provider != _INTERVALS
-        ),
+        activity_detail_store.full_stream_sets_for_session(db, session_id),
         key=lambda item: _RANK.get(item.provider, len(_RANK)),
     )
     for item in sets:
@@ -346,11 +338,7 @@ class ActivityWeatherStage:
             session_id = str(summary["id"])
             cheap = _cheap_fingerprint(
                 summary,
-                [
-                    key.content_sha256
-                    for key in keys.get(session_id, ())
-                    if key.provider != _INTERVALS
-                ],
+                [key.content_sha256 for key in keys.get(session_id, ())],
             )
             rows = stored.get(session_id, {})
             if rows:

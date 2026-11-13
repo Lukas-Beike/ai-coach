@@ -49,7 +49,7 @@ from backend.canonical.activity_summary import (
 )
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import ProviderId, Sport
+from backend.canonical.vocabulary import Sport
 from backend.db import activity_detail_store
 from backend.db.activity_detail_store import FullStreamKey
 from backend.db.repositories import KeyValueRepository
@@ -83,7 +83,6 @@ _LOGGER = logging.getLogger("intervals_coach")
 STAGE: Final = "session_analysis"
 STATE_KEY: Final = "session_analysis_state"
 DEFAULT_BATCH_SIZE: Final = 100
-_INTERVALS: Final = ProviderId.INTERVALS.value
 
 PlannedUnits = Callable[[], list[dict[str, Any]]]
 Preferences = Callable[[Any], SourcePreferences]
@@ -345,12 +344,7 @@ class SessionAnalysisStage:
             records_by_id.items(), self._zone_provider() or UTC
         )
         ids = [str(summary["id"]) for summary in summaries]
-        keys = {
-            session_id: tuple(key for key in values if key.provider != _INTERVALS)
-            for session_id, values in activity_detail_store.analysis_set_keys(
-                db, ids
-            ).items()
-        }
+        keys = activity_detail_store.analysis_set_keys(db, ids)
         rows = activity_detail_store.analysis_rows_for(db, ids)
         current = self._reader.summary_fingerprints(
             db,

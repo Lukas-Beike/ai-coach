@@ -34,7 +34,6 @@ from backend.canonical.records import fingerprint_inputs
 from backend.canonical.sports import is_outdoor_endurance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
-    ProviderId,
     StreamChannel,
 )
 from backend.db import activity_detail_store
@@ -52,7 +51,6 @@ STAGE: Final = "activity_routes"
 STATE_KEY: Final = route_store.STATE_KEY
 METHOD_VERSION: Final = 1
 DEFAULT_BATCH_SIZE: Final = 50
-_INTERVALS: Final = ProviderId.INTERVALS.value
 _RANK: Final = {
     provider.value: index for index, provider in enumerate(PROVIDER_PRECEDENCE)
 }
@@ -88,13 +86,7 @@ def _track(
 ) -> routes.Fingerprint | None:
     """The fingerprint of the session's own track; the best provider with one wins."""
     sets = sorted(
-        (
-            item
-            for item in activity_detail_store.full_stream_sets_for_session(
-                db, session_id
-            )
-            if item.provider != _INTERVALS
-        ),
+        activity_detail_store.full_stream_sets_for_session(db, session_id),
         key=lambda item: _RANK.get(item.provider, len(_RANK)),
     )
     for item in sets:
@@ -236,11 +228,7 @@ class ActivityRoutesStage:
         hashes = {
             session_id: _input_hash(
                 summary,
-                [
-                    key.content_sha256
-                    for key in keys.get(session_id, ())
-                    if key.provider != _INTERVALS
-                ],
+                [key.content_sha256 for key in keys.get(session_id, ())],
             )
             for session_id, summary in wanted.items()
         }
