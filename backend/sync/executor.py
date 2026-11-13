@@ -455,7 +455,9 @@ def _output_stamp(job_type: str, result: dict[str, Any]) -> str | None:
         return INTERVALS_OUTPUT_OK_KEY if result.get("status") == "ok" else None
     if result.get("synced_dates") or ("date" in result and not result.get("pending")):
         return INTERVALS_OUTPUT_OK_KEY
-    return INTERVALS_OUTPUT_FAILED_KEY if result.get("failed_dates") else None
+    # failed_dates also holds local errors (changed approval, busy writer), so a
+    # nutrition failure is stamped only from a provider exception, not from here.
+    return None
 
 
 class IntervalsJobAdapter:

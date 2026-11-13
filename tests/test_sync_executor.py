@@ -696,6 +696,18 @@ class ProviderJobAdapterTests(unittest.TestCase):
             self.job, {"date": "2026-09-24"}, "manual", job_type="nutrition_sync"
         )
         self.assertEqual(stamps, [ok])
+        # failed_dates also carries local errors (changed approval, busy writer).
+        local_only = Mock()
+        local_only.sync_pending.return_value = {
+            "synced_dates": [],
+            "pending_dates": [],
+            "failed_dates": {"2026-09-24": "Nutrition data changed after approval"},
+        }
+        stamps = []
+        IntervalsJobAdapter(
+            jobs=Mock(), nutrition_sync_service=local_only, record_output=stamps.append
+        ).execute(self.job, {"pending_limit": 7}, "manual", job_type="nutrition_sync")
+        self.assertEqual(stamps, [])
 
     def test_only_a_provider_failure_leaves_a_failed_stamp(self) -> None:
         cases = [
