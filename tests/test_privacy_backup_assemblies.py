@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import threading
 import unittest
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
+from backend import privacy as privacy_module
 from backend.athlete.profile import DEFAULT_PROFILE
 from backend.backup import wiring as backup_wiring
 from backend.backup.database import (
@@ -19,8 +21,11 @@ from backend.backup.database import (
 from backend.backup.wiring import build_backup
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.db import row_factory
+from backend.db.manager import DATABASE_LOCK
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.privacy import MAX_PRIVACY_EXPORT_BYTES, PrivacyServices, build_privacy
+from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS
 from backend.sync.worker import shared_sync_job_wake_event
@@ -30,19 +35,12 @@ class PrivacyBuilderTests(unittest.TestCase):
     def _build(self, active: dict[str, Mock]) -> tuple[dict[str, Any], PrivacyServices]:
         arguments: dict[str, Any] = {
             "database_manager": Mock(return_value=active["manager"]),
-            "database_lock": lambda: active["lock"],
-            "key_values": Mock(name="key_values"),
-            "maintenance_gate": lambda: active["gate"],
             "profile_service": Mock(return_value=active["profile"]),
             "competition_service": Mock(return_value=active["competition"]),
             "adaptive_preview_service": Mock(return_value=active["preview"]),
             "planning_revision_service": Mock(name="planning_revision"),
             "openai_client": Mock(return_value=Mock(name="openai")),
-            "logger": Mock(name="logger"),
             "local_now": Mock(name="local_now"),
-            "utc_now": Mock(name="utc_now"),
-            "data_dir": Mock(return_value=Path("temporary-data")),
-            "database_path": Mock(return_value=Path("temporary-data/db.sqlite")),
             "diagnostics_suspended": MagicMock(name="diagnostics_suspended"),
             "refresh_credentials": Mock(name="refresh_credentials"),
             "cancel_garmin_login": Mock(name="cancel_garmin_login"),
@@ -53,10 +51,13 @@ class PrivacyBuilderTests(unittest.TestCase):
         return arguments, build_privacy(**arguments)
 
     def _active(self) -> dict[str, Mock]:
-        return {
+        active = {
             name: Mock(name=name)
             for name in ("manager", "lock", "gate", "profile", "competition", "preview")
         }
+        # The database path and its directory come from the live manager.
+        active["manager"].path = Path("temporary-data/db.sqlite")
+        return active
 
     def test_construction_is_inert_and_services_share_manager_and_live_owners(
         self,
@@ -70,8 +71,7 @@ class PrivacyBuilderTests(unittest.TestCase):
             "competition_service",
             "adaptive_preview_service",
             "openai_client",
-            "data_dir",
-            "database_path",
+            "local_now",
             "diagnostics_suspended",
             "refresh_credentials",
             "cancel_garmin_login",
@@ -80,9 +80,6 @@ class PrivacyBuilderTests(unittest.TestCase):
             "log_files",
         ):
             arguments[name].assert_not_called()
-        replacement_lock = Mock(name="replacement_lock")
-        replacement_gate = Mock(name="replacement_gate")
-        active.update(lock=replacement_lock, gate=replacement_gate)
         first = services.archive_export_service()
         second = services.archive_export_service()
 
@@ -92,8 +89,10 @@ class PrivacyBuilderTests(unittest.TestCase):
         self.assertIs(first._profile, active["profile"])
         self.assertIs(first._competitions, active["competition"])
         self.assertIs(first._adaptive_preview, active["preview"])
-        deletion = services.delete_service()
-        self.assertIs(deletion._dependencies.database_lock, replacement_lock)
+        replacement_gate = Mock(name="replacement_gate")
+        with patch.object(runtime_maintenance, "MAINTENANCE_GATE", replacement_gate):
+            deletion = services.delete_service()
+        self.assertIs(deletion._dependencies.database_lock, DATABASE_LOCK)
         self.assertIs(deletion._dependencies.maintenance_gate, replacement_gate)
 
     def test_export_limits_come_from_the_backup_and_privacy_constants(self) -> None:
@@ -104,11 +103,12 @@ class PrivacyBuilderTests(unittest.TestCase):
         self.assertEqual(config.maximum_bytes, MAX_PRIVACY_EXPORT_BYTES)
         self.assertEqual(config.minimum_free_bytes, MIN_EXPORT_FREE_BYTES)
         self.assertEqual(config.time_limit_seconds, EXPORT_TIME_LIMIT_SECONDS)
+        # The data directory is the database's directory.
         self.assertEqual(config.data_dir, Path("temporary-data"))
-        self.assertIs(config.utc_now, arguments["utc_now"])
+        self.assertIs(config.utc_now, runtime_clock.utc_now)
         arguments["local_now"].return_value = datetime(2026, 1, 2, 23, 30, tzinfo=UTC)
         export_day = config.today
-        self.assertEqual(export_day(), date(2026, 1, 2))
+        self.assertEqual(date(2026, 1, 2), export_day())
 
     def test_the_purge_gets_every_dependency_and_reaches_late_owners_only_when_run(
         self,
@@ -119,9 +119,11 @@ class PrivacyBuilderTests(unittest.TestCase):
         dependencies = services.delete_service()._dependencies
 
         self.assertIs(dependencies.database_manager, active["manager"])
-        self.assertIs(dependencies.database_lock, active["lock"])
-        self.assertIs(dependencies.key_value_repository, arguments["key_values"])
-        self.assertIs(dependencies.maintenance_gate, active["gate"])
+        self.assertIs(dependencies.database_lock, DATABASE_LOCK)
+        self.assertIsInstance(dependencies.key_value_repository, KeyValueRepository)
+        self.assertIs(
+            dependencies.maintenance_gate, runtime_maintenance.MAINTENANCE_GATE
+        )
         self.assertIs(
             dependencies.profile_mutation_coordinator,
             active["profile"].mutation_coordinator,
@@ -131,7 +133,7 @@ class PrivacyBuilderTests(unittest.TestCase):
             arguments["planning_revision_service"],
         )
         self.assertIs(dependencies.openai_client, arguments["openai_client"]())
-        self.assertIs(dependencies.logger, arguments["logger"])
+        self.assertIs(dependencies.logger, logging.getLogger("intervals_coach"))
         self.assertIs(
             dependencies.diagnostics_suspended, arguments["diagnostics_suspended"]
         )
@@ -144,7 +146,7 @@ class PrivacyBuilderTests(unittest.TestCase):
         self.assertIs(dependencies.disconnect_wahoo, arguments["disconnect_wahoo"])
         self.assertIs(dependencies.cancel_coach_turns, arguments["cancel_coach_turns"])
         self.assertIs(dependencies.log_files, arguments["log_files"].return_value)
-        self.assertIs(dependencies.utc_now, arguments["utc_now"])
+        self.assertIs(dependencies.utc_now, runtime_clock.utc_now)
         assert dependencies.recovery_copies is not None
         self.assertEqual(dependencies.recovery_copies._data_dir, Path("temporary-data"))
         for name in (
@@ -159,7 +161,6 @@ class PrivacyBuilderTests(unittest.TestCase):
 
 class PrivacyModuleBoundaryTests(unittest.TestCase):
     def test_privacy_module_has_no_server_dependency(self) -> None:
-        import backend.privacy as privacy_module
 
         source = Path(privacy_module.__file__).read_text(encoding="utf-8")
         self.assertNotIn("import server", source)

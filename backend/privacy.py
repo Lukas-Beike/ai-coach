@@ -21,7 +21,7 @@ from backend.backup.export import (
 from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import activity_detail_store
-from backend.db.manager import DatabaseManager, secure_deletion
+from backend.db.manager import DATABASE_LOCK, DatabaseManager, secure_deletion
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import AppError
@@ -33,6 +33,8 @@ from backend.provider_credentials import (
     GARMIN_TOKENSTORE_STATE_KEY,
 )
 from backend.providers.openai_requests import OpenAIResponsesClient
+from backend.runtime import clock as runtime_clock
+from backend.runtime import maintenance as runtime_maintenance
 from backend.runtime.maintenance import MaintenanceGate
 
 MAX_PRIVACY_EXPORT_BYTES = 100_000_000
@@ -458,19 +460,12 @@ class PrivacyServices:
 def build_privacy(
     *,
     database_manager: Callable[[], DatabaseManager],
-    database_lock: Callable[[], AbstractContextManager[Any]],
-    key_values: KeyValueRepository,
-    maintenance_gate: Callable[[], MaintenanceGate],
     profile_service: Callable[[], ProfileService],
     competition_service: Callable[[], CompetitionService],
     adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService],
     planning_revision_service: PlanningRevisionService,
     openai_client: Callable[[], OpenAIResponsesClient],
-    logger: logging.Logger,
     local_now: Callable[[], datetime],
-    utc_now: Callable[[], str],
-    data_dir: Callable[[], Path],
-    database_path: Callable[[], Path],
     diagnostics_suspended: Callable[[], AbstractContextManager[None]],
     refresh_credentials: Callable[[], Any],
     cancel_garmin_login: Callable[[], None],
@@ -480,18 +475,30 @@ def build_privacy(
 ) -> PrivacyServices:
     """The privacy export and the maintenance-gated local data purge.
 
+    The database path and its directory come from the live database manager,
+    and the lock, gate, key-value store and clock are the process-wide owners.
+
     Every owner is read when a service is built, so a restore, a swapped data
     directory or a replaced gate is seen by the next call. The late owners
     (diagnostics, Garmin, Wahoo, Coach) are only reached when the purge runs.
     """
 
+    key_values = KeyValueRepository(runtime_clock.utc_now)
+    logger = logging.getLogger("intervals_coach")
+
+    def database_path() -> Path:
+        return database_manager().path
+
+    def data_dir() -> Path:
+        return database_path().parent
+
     def delete_service() -> PrivacyDeleteService:
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
                 database_manager=database_manager(),
-                database_lock=database_lock(),
+                database_lock=DATABASE_LOCK,
                 key_value_repository=key_values,
-                maintenance_gate=maintenance_gate(),
+                maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
                 profile_mutation_coordinator=profile_service().mutation_coordinator,
                 planning_revision_service=planning_revision_service,
                 openai_client=openai_client(),
@@ -503,7 +510,7 @@ def build_privacy(
                 cancel_coach_turns=cancel_coach_turns,
                 recovery_copies=RecoveryCopies(data_dir(), database_path().name),
                 log_files=log_files(),
-                utc_now=utc_now,
+                utc_now=runtime_clock.utc_now,
             )
         )
 
@@ -518,7 +525,7 @@ def build_privacy(
                 data_dir(),
                 database_path(),
                 lambda: local_now().date(),
-                utc_now,
+                runtime_clock.utc_now,
                 maximum_bytes=MAX_PRIVACY_EXPORT_BYTES,
                 minimum_free_bytes=MIN_EXPORT_FREE_BYTES,
                 time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,

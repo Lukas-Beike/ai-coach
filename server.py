@@ -790,9 +790,6 @@ def server_log_files() -> RecentLogEntriesService:
 
 PRIVACY = build_privacy(
     database_manager=database_manager,
-    database_lock=lambda: DB_LOCK,
-    key_values=KEY_VALUE_REPOSITORY,
-    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
     profile_service=ATHLETE_DATA.profile,
     competition_service=PLANNING_DATA.competition,
     adaptive_preview_service=lambda: (
@@ -800,11 +797,7 @@ PRIVACY = build_privacy(
     ),
     planning_revision_service=PLANNING_REVISION_SERVICE,
     openai_client=lambda: MODEL_TRANSPORT.openai_responses_client(),
-    logger=LOGGER,
     local_now=lambda: ATHLETE_CLOCK.now(),
-    utc_now=runtime_clock.utc_now,
-    data_dir=lambda: DATA_DIR,
-    database_path=lambda: DB_PATH,
     diagnostics_suspended=lambda: APP.diagnostic_capture.suspended(),
     refresh_credentials=lambda: refresh_runtime_config(),
     cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
