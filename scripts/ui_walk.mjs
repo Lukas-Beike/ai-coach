@@ -29,46 +29,45 @@ const realPath = (target) => {
   const resolved = path.resolve(target);
   try {
     return fs.realpathSync.native(resolved);
-  } catch {
+  } catch (error) {
+    // Only a missing path resolves through its parent; a dangling link, a loop or an
+    // unreadable path resolves to nothing, which no guard accepts.
+    if (error.code !== "ENOENT" || fs.lstatSync(resolved, { throwIfNoEntry: false })) return "";
     const parent = path.dirname(resolved);
     return parent === resolved ? resolved : path.join(realPath(parent), path.basename(resolved));
   }
 };
 const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
 
-// Every file the walk reads or writes lives in the system temp directory (the
-// session scratchpad), never in the repository or anywhere else a path could
-// reach; a link must lead there too (#2615).
-export function scratchPath(target) {
-  const scratch = path.resolve(os.tmpdir()) + path.sep;
-  const resolved = path.resolve(scratch, String(target));
-  const refused = new Error("files must be in the system temp directory");
-  if (!resolved.startsWith(scratch) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
-    throw refused;
-  }
-  const linked = folded(realPath(resolved));
-  if (linked.startsWith(folded(realPath(ROOT))) || !linked.startsWith(folded(realPath(os.tmpdir())))) {
-    throw refused;
+// The path as given and the file a link leads to must both lie in one of the
+// roots and outside the repository; a path that does not exist yet is judged
+// through its nearest existing parent (#2615).
+function confined(target, roots, refused) {
+  const resolved = path.resolve(os.tmpdir(), String(target));
+  const repository = [folded(ROOT), folded(realPath(ROOT))];
+  const checks = [
+    [resolved, roots.map((root) => path.resolve(root))],
+    [realPath(resolved), roots.map(realPath)],
+  ];
+  for (const [candidate, bases] of checks) {
+    const where = folded(candidate);
+    if (repository.some((repo) => where.startsWith(repo)) || !bases.some((base) => where.startsWith(folded(base)))) {
+      throw refused;
+    }
   }
   return resolved;
 }
+
+// Every file the walk reads or writes lives in the system temp directory (the
+// session scratchpad), never in the repository or anywhere else a path could reach.
+export function scratchPath(target) {
+  return confined(target, [os.tmpdir()], new Error("files must be in the system temp directory"));
+}
+
 export function secretPath(target, secrets = T3_SECRETS) {
   if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
   const refused = new Error("the password file must be in the system temp directory or the T3 secret folder");
-  // The path as given, checked like scratchPath; this is the one opened.
-  const scratch = path.resolve(os.tmpdir()) + path.sep;
-  const delivered = path.resolve(secrets) + path.sep;
-  const resolved = path.resolve(scratch, String(target));
-  if (!(resolved.startsWith(scratch) || resolved.startsWith(delivered)) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
-    throw refused;
-  }
-  // The file a link leads to must pass the same rule (links followed, Windows without case).
-  const linked = folded(realPath(resolved));
-  const roots = [os.tmpdir(), secrets].map((root) => folded(realPath(root)));
-  if (linked.startsWith(folded(realPath(ROOT))) || !roots.some((root) => linked.startsWith(root))) {
-    throw refused;
-  }
-  return resolved;
+  return confined(target, [os.tmpdir(), secrets], refused);
 }
 
 export function baseUrl(text) {
