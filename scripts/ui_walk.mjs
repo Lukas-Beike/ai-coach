@@ -19,29 +19,39 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const VIEWS = ["coach", "plan", "analysis", "nutrition", "more"];
 export const WIDTHS = { phone: { width: 412, height: 915 }, desktop: { width: 1280, height: 900 } };
 
-// Every file the walk reads or writes lives in the system temp directory (the
-// session scratchpad), never in the repository or anywhere else a path could reach.
-export function scratchPath(target) {
-  const scratch = path.resolve(os.tmpdir()) + path.sep;
-  const resolved = path.resolve(scratch, String(target));
-  if (!resolved.startsWith(scratch) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
-    throw new Error("files must be in the system temp directory");
-  }
-  return resolved;
-}
-
 // The password file is only read: the temp directory or the folder where a T3
 // secret request delivers files, never the repository (#2527).
 export const T3_SECRETS = path.join(os.homedir(), ".t3", "userdata", "secrets");
 // Links are followed and Windows paths compare without case, as in prod_client.py.
+// A path that does not exist yet resolves through its nearest existing parent, so
+// a new directory under a link is judged by where the link leads (#2615).
 const realPath = (target) => {
+  const resolved = path.resolve(target);
   try {
-    return fs.realpathSync.native(target);
+    return fs.realpathSync.native(resolved);
   } catch {
-    return path.resolve(target);
+    const parent = path.dirname(resolved);
+    return parent === resolved ? resolved : path.join(realPath(parent), path.basename(resolved));
   }
 };
 const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
+
+// Every file the walk reads or writes lives in the system temp directory (the
+// session scratchpad), never in the repository or anywhere else a path could
+// reach; a link must lead there too (#2615).
+export function scratchPath(target) {
+  const scratch = path.resolve(os.tmpdir()) + path.sep;
+  const resolved = path.resolve(scratch, String(target));
+  const refused = new Error("files must be in the system temp directory");
+  if (!resolved.startsWith(scratch) || (resolved + path.sep).startsWith(ROOT + path.sep)) {
+    throw refused;
+  }
+  const linked = folded(realPath(resolved));
+  if (linked.startsWith(folded(realPath(ROOT))) || !linked.startsWith(folded(realPath(os.tmpdir())))) {
+    throw refused;
+  }
+  return resolved;
+}
 export function secretPath(target, secrets = T3_SECRETS) {
   if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
   const refused = new Error("the password file must be in the system temp directory or the T3 secret folder");

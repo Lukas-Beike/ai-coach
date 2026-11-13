@@ -29,6 +29,10 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
   fs.symlinkSync(root, link, "junction");
   try {
     assert.throws(() => walk.secretPath(path.join(link, "package.json"), t3), /T3 secret folder/);
+    // The scratch guard follows the link too, also for a directory not created yet (#2615).
+    assert.throws(() => walk.scratchPath(path.join(link, "shots")), /system temp directory/);
+    assert.throws(() => walk.scratchPath(path.join(link, "new", "deeper")), /system temp directory/);
+    assert.equal(walk.scratchPath(path.join(linkDir, "shots")), path.join(linkDir, "shots"));
   } finally {
     // Remove the link itself first so cleanup never descends into the checkout.
     fs.unlinkSync(link);
