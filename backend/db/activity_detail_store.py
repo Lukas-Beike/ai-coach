@@ -64,7 +64,12 @@ from backend.canonical.vocabulary import (
     ZoneBoundarySource,
     ZoneMetric,
 )
-from backend.db.canonical_store import WriteOutcome, canonical_json
+from backend.db.canonical_store import (
+    WriteOutcome,
+    canonical_json,
+    insert_row,
+    update_row,
+)
 
 # Stored blobs are bounded by the schema; decompression never exceeds the
 # declared point count, so a corrupt or hostile blob cannot inflate memory.
@@ -310,45 +315,22 @@ def replace_detail_set(
             (summary_sha256, fetched_at, *key),
         )
         return WriteOutcome.UNCHANGED
-    values = (
-        header["mapper_version"],
-        header["origin"],
-        header["source_kind"],
-        header["recorded_by"],
-        header["source_record_id"],
-        header["resolution"],
-        header["lap_source"],
-        header["zone_boundary_source"],
-        header.get("set_source"),
-        summary_sha256,
-        content_sha256,
-        fetched_at,
-        header.get("hr_source"),
-        header.get("power_source"),
-        header.get("sensors"),
-        header.get("dfa_alpha1"),
-    )
+    row = {
+        **dict.fromkeys(_OPTIONAL_HEADER_KEYS),
+        **{
+            column: value for column, value in header.items() if column != "detail_kind"
+        },
+        "summary_sha256": summary_sha256,
+        "content_sha256": content_sha256,
+        "fetched_at": fetched_at,
+        "updated_at": now,
+    }
+    where = dict(zip(("provider", "provider_activity_id", "detail_kind"), key))
     if existing is None:
-        db.execute(
-            "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
-            "detail_kind, mapper_version, origin, source_kind, recorded_by, "
-            "source_record_id, resolution, lap_source, zone_boundary_source, "
-            "set_source, summary_sha256, content_sha256, fetched_at, hr_source, "
-            "power_source, sensors, dfa_alpha1, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (*key, *values, now, now),
-        )
+        insert_row(db, "activity_detail_sets", {**where, **row, "created_at": now})
     else:
         _delete_children(db, key)
-        db.execute(
-            "UPDATE activity_detail_sets SET mapper_version = ?, origin = ?, "
-            "source_kind = ?, recorded_by = ?, source_record_id = ?, resolution = ?, "
-            "lap_source = ?, zone_boundary_source = ?, set_source = ?, summary_sha256 = ?, "
-            "content_sha256 = ?, fetched_at = ?, hr_source = ?, power_source = ?, "
-            "sensors = ?, dfa_alpha1 = ?, updated_at = ? "
-            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
-            (*values, now, *key),
-        )
+        update_row(db, "activity_detail_sets", row, where)
     _insert_children(db, key, detail, children)
     return WriteOutcome.WRITTEN if existing is None else WriteOutcome.UPDATED
 
@@ -949,19 +931,21 @@ def save_analysis(
         existing["payload"],
     ) == (analysis_version, input_sha256, text):
         return WriteOutcome.UNCHANGED
+    row = {
+        "analysis_version": analysis_version,
+        "input_sha256": input_sha256,
+        "payload": text,
+        "computed_at": now,
+        "updated_at": now,
+    }
     if existing is None:
-        db.execute(
-            "INSERT INTO activity_detail_analysis(activity_id, analysis_version, "
-            "input_sha256, payload, computed_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (activity_id, analysis_version, input_sha256, text, now, now, now),
+        insert_row(
+            db,
+            "activity_detail_analysis",
+            {"activity_id": activity_id, **row, "created_at": now},
         )
         return WriteOutcome.WRITTEN
-    db.execute(
-        "UPDATE activity_detail_analysis SET analysis_version = ?, input_sha256 = ?, "
-        "payload = ?, computed_at = ?, updated_at = ? WHERE activity_id = ?",
-        (analysis_version, input_sha256, text, now, now, activity_id),
-    )
+    update_row(db, "activity_detail_analysis", row, {"activity_id": activity_id})
     return WriteOutcome.UPDATED
 
 
