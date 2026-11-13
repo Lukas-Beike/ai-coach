@@ -18,7 +18,7 @@ with upgrade regression tests; the baseline moves only when production runs a
 newer schema.
 The current schema is version 28. Releases wrote version 21 (1.13.41 to
 1.13.44), 22 (2.0.0), 23 (2.0.1), 24 (2.0.2), 25 (2.0.3 and 2.0.4), 26
-(2.0.5) and 27 (2.1.2 to 2.1.8); version 27 keeps only its shape digest and
+(2.0.5) and 27 (2.1.2 to 2.1.9); version 27 keeps only its shape digest and
 enters the chain after the baseline's product step. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large

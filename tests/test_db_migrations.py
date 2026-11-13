@@ -222,7 +222,7 @@ def populated_baseline_database(db) -> None:
     db.commit()
 
 
-# Schema v27, releases 2.1.2 to 2.1.8, has no fixture of its own: the baseline
+# Schema v27, releases 2.1.2 to 2.1.9, has no fixture of its own: the baseline
 # after its product step is that shape, here with calendar events of a feed.
 V27_CALENDAR_EVENTS = (
     ("event-1", "team@example.test", "Teammeeting", "2026-10-19T09:00:00", 0, 0),

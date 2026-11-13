@@ -14,7 +14,7 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
 - Upgrades start only at the baseline or a later released schema. Production
-  runs v27 (releases 2.1.2 to 2.1.8, the only production instance, confirmed
+  runs v27 (releases 2.1.2 to 2.1.9, the only production instance, confirmed
   from its diagnostics 2026-11-13); the frozen baseline fixture is v26 (release
   2.0.5), and v27 is accepted by its frozen digest. Older schemas are refused
   unchanged, and release 2.0.5 opens a v21 to v25 database or backup first.

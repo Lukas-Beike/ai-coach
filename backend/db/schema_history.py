@@ -22,7 +22,7 @@ type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 # Schema version 26, release 2.0.5: the schema production runs and the only
 # supported baseline; the digest freezes it for its upgrade step.
 SHAPE_SCHEMA_V26: Final = "schema-v26"
-# Schema version 27, releases 2.1.2 to 2.1.8: the result of the baseline's
+# Schema version 27, releases 2.1.2 to 2.1.9: the result of the baseline's
 # product step. Its digest lets a v27 database take the later steps.
 SHAPE_SCHEMA_V27: Final = "schema-v27"
 # The live schema of this build, derived from code rather than frozen.
