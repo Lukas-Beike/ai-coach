@@ -91,6 +91,10 @@ The diagnostic report SHALL include the state of the local method passes as coun
 - **WHEN** the report is generated
 - **THEN** `local_load`, `session_metrics` and `session_analysis` each carry the status, method version and counts of their last pass, never ids, dates, names or values
 
+#### Scenario: LT1 ride coverage
+- **WHEN** the report is generated
+- **THEN** `lt1_ride_coverage` counts the rides of the last 60 days with a power profile, outdoor and indoor, and per power variation limit 0.15, 0.20 and 0.25 how many have a 10 bpm band with at least 10 steady minutes within it; counts only, never dates, values or names (#2535)
+
 #### Scenario: FIT file inventory
 - **WHEN** a Garmin or Wahoo FIT file is read by the detail fetch or the stream backfill
 - **THEN** `fit_inventory` counts it once per recording origin and sport (`files`) with the files holding each unmapped message number, unread field of a mapped message and declared developer field, as numbers only; an unreadable file counts nothing, and no value, name, id, position or file hash is shown

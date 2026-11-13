@@ -30,6 +30,9 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import running_week
 from backend.planning.local_start import known_start
+from backend.planning.running_week import planned_seconds as _seconds
+from backend.planning.running_week import unit_day as _day
+from backend.planning.running_week import unit_week_start as _monday
 from backend.planning.season import target_phase
 from backend.planning.session_focus import (
     SessionFocus,
@@ -155,18 +158,6 @@ def completed_counts(
     )
 
 
-def _day(unit: Mapping[str, Any]) -> str:
-    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-
-
-def _monday(unit: Mapping[str, Any]) -> date | None:
-    try:
-        day = date.fromisoformat(_day(unit))
-    except ValueError:
-        return None
-    return day - timedelta(days=day.weekday())
-
-
 def _by_week(
     units: Iterable[Mapping[str, Any]],
 ) -> dict[date, list[Mapping[str, Any]]]:
@@ -260,14 +251,6 @@ def key_sessions(
         for unit in endurance
         if is_hard(unit) or session_focus(unit).value == "long" or id(unit) in long_ids
     ]
-
-
-def _seconds(unit: Mapping[str, Any]) -> float:
-    seconds = number(unit.get("planned_duration_s"))
-    if seconds is None:
-        minutes = number(unit.get("duration_minutes"))
-        seconds = None if minutes is None else minutes * 60
-    return seconds or 0.0
 
 
 def _gap_hours(strength: Mapping[str, Any], key: Mapping[str, Any]) -> float | None:

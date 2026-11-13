@@ -5,14 +5,13 @@ from the Garmin metrics, and activity values from the canonical activity rows.
 Intervals.icu is never a source. No snapshot section is read.
 """
 
-import math
 from collections.abc import Callable, Iterable, Mapping
 from datetime import date
 from typing import Any, Final
 
 from backend.activities.hr_cap import effective_caps, resolved_range
 from backend.activities.identity import activity_kind
-from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.decimal_text import provider_number as as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_current import CanonicalCurrentInputs
@@ -178,17 +177,6 @@ def first_thresholds(
             values[main_key], values[main_origin_key] = round(main[0]), main[1]
         result[sport] = values
     return result
-
-
-def as_number(value: Any) -> float | int | None:
-    """Return a finite number parsed from a provider value, or None."""
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def metric(

@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from backend.activities.stream_zones import max_step_s
+from backend.athlete.measurements import finite_float as _number
 from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.grade_adjustment import grade_adjusted_speeds, grade_stream
 from backend.providers.source_labels import SESSION_SOURCES_LABEL
@@ -16,12 +17,6 @@ TARGET_BASIS_FTP_KEY = "ftp"
 # v2: Pa:HR of outdoor runs uses grade-adjusted speed (card M8 v2, #1770).
 METHOD = "time-weighted-session-analysis-v2"
 GRADE_ADJUSTED_SPEED = "grade_adjusted_speed"
-
-
-def _number(value: Any) -> float | None:
-    return (
-        float(value) if type(value) in {int, float} and math.isfinite(value) else None
-    )
 
 
 def _samples(

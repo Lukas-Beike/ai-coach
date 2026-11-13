@@ -403,6 +403,34 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **WHEN** the `planning_brief` would exceed 20,000 characters
 - **THEN** whole entries are dropped in this order: the latest all-day-event days, the latest busy-minute days, planned sessions from the end, planned distribution weeks from the end, strength-progress exercises from the end, planned strength weeks from the end, and the oldest completed weeks last, never the JSON text; `lessons` and `season_phase` stay, an `omitted` note names the dropped counts, and its size appears in the context diagnostics. The plan playbook states the precedence illness, competitions and calendar markers, then science defaults, then the athlete's stated availability, and a deviation needs a reason.
 
+#### Scenario: Rule thresholds
+- **WHEN** the checks judge a plan
+- **THEN** a spike is a notice above +10 % and a warning above +30 % of its 30-day reference; a weekly rise needs at least 3 known weeks among the previous 4; `missing_taper` needs an A or B race (an empty priority counts as B) whose final 14 days, completed before today and planned from today, exceed 80 % of the 14 days before; `illness_hard` flags a hard session or one of 90 minutes or more from today to today plus 4 days; `strength_hard_same_day` flags heavy strength and a hard run or ride on one day less than 6 hours apart or without known start times, heavy being a set or structure-derived intensity `heavy`, else a planned intensity of at least 0.85, else the words heavy, schwer or 1-6 RM; `calendar_load` flags a hard unit or one of 90 minutes or more that overlaps an event or lies on a day with 480 or more minutes of timed events, read over 56 days; a planned intensity above 1.5 is read as percent and only finite, non-negative numbers count.
+
+#### Scenario: New or riskier findings
+- **WHEN** the findings before and after a write are compared
+- **THEN** a finding counts when its identity is new or one risk dimension grew (a notice to a warning, a harder or longer illness-time session, more leg or heavy leg sessions, a larger distribution deviation, an overlap or more busy minutes); the identity is the code with its dates and units, except that a taper is one per competition, a weekly rise one per sport and week, a distribution note one per week, a leg-frequency note one per reason and week, `load_unknown` and `no_leg_session` one per plan, and a required finding one per unit content, so an untouched older unit never blocks an unrelated write.
+
+#### Scenario: Failure result, waived and inherited codes
+- **WHEN** a write adds blocking findings
+- **THEN** the answer is 409 `plan_check_failed` "Nicht gespeichert: Der Plan verletzt Planungsregeln (<codes>)." with the findings; a code the caller waives neither blocks nor is reported, and an inherited code passes only for units that already had that finding before the write. Each note carries `code`, `blocking`, `dates`, `message`, `evidence_strength` and `evidence`.
+
+#### Scenario: Illness text source
+- **WHEN** the illness rule reads the reported illness
+- **THEN** it takes, during an approved pause, the newest check-in inside the pause window (the pause text when there is none, none once a check-in reports no complaint), else the newest check-in of the last 2 days up to today; thresholds, illness text, return stage and calendar are read once per write, so before and after compare alike.
+
+#### Scenario: Reference ranges of the training models
+- **WHEN** the planned time of a week is compared with the `training_model`
+- **THEN** the shares of covered time (low, moderate, high) are judged against pyramidal 65-90 %, 8-30 %, 0-12 %; polarized 65-90 %, 0-12 %, 8-30 %; threshold 40-70 %, 25-55 %, 0-15 %; sweet_spot 40-70 %, 30-60 %, 0-12 %; a band counts as deviating only when it lies more than 5 percentage points outside its range, and only a complete week with at least 2 hours of known time, at least 60 % coverage and moderate plus high time of at least 10 % is judged; a unit without steps but with a planned intensity counts as low up to 0.75, moderate up to 1.05 and high above.
+
+#### Scenario: Key sessions and expected strength
+- **WHEN** the leg strength notes look for key sessions
+- **THEN** a key session is a hard run or ride, one with the focus `long`, or the longest run or ride of its sport and week when it lasts at least 90 minutes; a leg session or key session without a known start time counts as close only when the strength unit lies on the day before; strength is expected when the profile field `training_preferences_strength` has text that does not begin with "-", kein, nein, no, none, ohne or nicht, or the phase toward the next A/B race is base or build, and a run of at least 2 consecutive planned weeks from today without a leg or leg-unknown session then gives the `no_leg_session` note once per plan; the session analysis reads the strength sessions of the 48 hours before a start (completed ones first, else planned ones, at most 5, with `hours_before`, `legs` and `intensity`).
+
+#### Scenario: Planning brief contents
+- **WHEN** a planning turn builds the `planning_brief`
+- **THEN** it holds the last 6 non-future weeks, the next 3 competitions, the planned sessions of the next 14 days (at most 40, with focus and origin), the busy minutes and all-day events of the next 35 days, the planned distribution and strength weeks, the strength progress, `season_phase`, the rule summary, `lessons` and `last_tests` (the last test or race per sport within 120 days), within 20,000 characters.
+
 #### Scenario: Acknowledged deviation
 - **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard, the write actually produced a blocking illness_hard finding, and the write gate's classifier confirms that the athlete's current message, or a short confirmation of the Coach's question about exactly this, explicitly asks to train despite the illness
 - **THEN** the write is saved and the result carries the finding in `plan_check_notes`; the receipt persists only its safe structured summary.
@@ -425,16 +453,27 @@ Evidence:
 - `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`
 - `backend/coach/write_gate.py:illness_override_confirmed`
 - `backend/planning/brief_budget.py:fit_brief`
+- `backend/planning/intensity_distribution.py:MODEL_RANGES`
 - `backend/planning/intensity_distribution.py:distribution_findings`
 - `backend/planning/leg_strength.py`
+- `backend/planning/leg_strength.py:key_sessions`
+- `backend/planning/leg_strength.py:strength_before`
+- `backend/planning/leg_strength.py:strength_expected`
 - `backend/planning/load_checks.py:completed_load`
 - `backend/planning/load_checks.py:session_spikes`
 - `backend/planning/load_checks.py:unknown_load`
 - `backend/planning/load_checks.py:weekly_rises`
 - `backend/planning/plan_checks.py:check_plan`
+- `backend/planning/plan_checks.py:finding_key`
+- `backend/planning/plan_checks.py:new_findings`
+- `backend/planning/plan_guard_service.py:PlanCheckError`
+- `backend/planning/plan_guard_service.py:PlanGuardService.brief`
 - `backend/planning/plan_guard_service.py:PlanGuardService.verify`
+- `backend/planning/plan_guard_service.py:build_planning_brief`
+- `backend/planning/plan_guard_service.py:recent_illness`
 - `backend/planning/running_week.py`
 - `backend/planning/session_focus.py:is_hard`
+- `backend/planning/unit_intensity.py:intensity_band`
 - `backend/planning/unit_intensity.py:unit_band`
 - `public/coach.js:appendMessageChanges`
 - `tests/coach-turn-undo.test.cjs`
@@ -442,17 +481,30 @@ Evidence:
 - `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`
 - `tests/test_coach_write_gate.py:IllnessOverrideTests`
 - `tests/test_intensity_distribution.py:RunningWeekTests`
+- `tests/test_intensity_distribution.py:test_easy_and_partial_weeks_are_not_judged`
 - `tests/test_intensity_distribution.py:UnitFallbackTests`
 - `tests/test_intensity_distribution.py`
 - `tests/test_leg_strength.py:RunningWeekTests`
+- `tests/test_leg_strength.py:test_completed_midnight_start_and_the_48_hour_edge`
+- `tests/test_leg_strength.py:test_date_only_plan_counts_only_for_the_day_before`
+- `tests/test_leg_strength.py:test_long_ride_counts_as_key_session`
 - `tests/test_leg_strength.py`
 - `tests/test_load_checks.py:LocalThresholdPrecedenceTests`
 - `tests/test_load_checks.py:SessionSpikeTests.test_reference_is_the_stored_m6_load_not_the_raw_power`
 - `tests/test_load_checks.py`
+- `tests/test_plan_checks.py:test_illness_window_is_the_shared_pause_window`
+- `tests/test_plan_checks.py:test_missing_taper`
+- `tests/test_plan_checks.py:test_strength_hard_same_day`
 - `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_finding_without_confirmation_rolls_back`
 - `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_listing_without_a_finding_does_not_ask`
 - `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`
 - `tests/test_plan_guard_service.py:test_all_day_events_are_listed_per_date_and_trimmed_last_day_first`
+- `tests/test_plan_guard_service.py:test_approved_pause_window_keeps_illness_on_days_three_to_five`
+- `tests/test_plan_guard_service.py:test_brief_is_bounded_and_labelled`
+- `tests/test_plan_guard_service.py:test_harder_session_during_illness_blocks_again`
+- `tests/test_plan_guard_service.py:test_inherited_gaps_pass_only_for_units_that_already_had_them`
+- `tests/test_plan_guard_service.py:test_last_completed_test_or_race_per_sport`
+- `tests/test_plan_guard_service.py:test_waived_codes_neither_block_nor_report`
 - `tests/test_session_focus.py:HardRuleTests`
 
 ### Requirement: Coach sets the session focus

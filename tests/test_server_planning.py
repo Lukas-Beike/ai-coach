@@ -2975,8 +2975,8 @@ class ServerPlanningTests(ServerTestCase):
 
         with (
             patch.object(
-                server,
-                "PROVIDER_TRANSPORT",
+                server.APP,
+                "provider_transport",
                 replace(
                     server.PROVIDER_TRANSPORT, intervals_client=FakeIntervalsClient
                 ),

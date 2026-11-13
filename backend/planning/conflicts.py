@@ -5,19 +5,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.activities.matching import first_present as _first_present
 from backend.athlete.local_date import iso_date_prefix
 
 _UTC_OFFSET_SUFFIX = "+00:00"
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _naive_calendar_datetime(value: Any) -> datetime | None:

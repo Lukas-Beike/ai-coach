@@ -31,8 +31,8 @@ from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
 )
-from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_read
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"

@@ -190,6 +190,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_provider_composition",
                 "local_load",
                 "garmin_change_check",
+                "lt1_ride_coverage",
                 "stream_backfill",
                 "fit_inventory",
                 "session_metrics",

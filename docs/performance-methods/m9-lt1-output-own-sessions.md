@@ -147,6 +147,7 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
   step test with lactate or a DFA-α1 ramp would check it.
 - The 0.15 variation limit, decided for both sports, may reject many outdoor
   rides over rolling terrain (60 s power varies more than running speed); to
-  be checked against real coverage.
+  be checked against real coverage: the diagnostic report's `lt1_ride_coverage`
+  counts qualifying rides at 0.15, 0.20 and 0.25 (#2535).
 - The session curve memo is held twice (public state and training reports)
   until the composition shares one reader.

@@ -31,6 +31,7 @@ from backend.planning import (
     season,
 )
 from backend.planning.load_checks import LoadThresholds, load_thresholds
+from backend.planning.running_week import unit_day as _unit_day
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 from backend.planning.strength_progress import strength_progress
@@ -270,10 +271,6 @@ def planned_focus(
             }
         )
     return rows[:BRIEF_FOCUS_UNITS]
-
-
-def _unit_day(unit: Mapping[str, Any]) -> str:
-    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
 
 
 def _focus_estimate(

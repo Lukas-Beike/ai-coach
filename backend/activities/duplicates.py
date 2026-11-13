@@ -4,17 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.activities.matching import first_present as _first_present
+
 __all__ = ["deduplicate_api_records"]
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def deduplicate_api_records(records: list[Any]) -> list[Any]:

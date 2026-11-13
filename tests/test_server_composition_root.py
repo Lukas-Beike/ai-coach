@@ -19,6 +19,7 @@ from backend.backup.database import DatabaseBackupService
 from backend.backup.export import PrivacyArchiveExportService
 from backend.backup.restore import DatabaseRestoreService
 from backend.backup.restore_validation import DatabaseRestoreValidationService
+from backend.calendar.external import ExternalCalendarReader
 from backend.coach.job_store import CoachJobStore
 from backend.coach.turn_failures import CoachTurnFailureService
 from backend.diagnostics.history import CoachDiagnosticHistoryService
@@ -66,6 +67,7 @@ from backend.sync.authority import PlanningAuthorityService
 from backend.sync.commands import ProviderRefreshCommandService
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.garmin import (
     GarminFixtureLoader,
     GarminPayloadService,
@@ -81,10 +83,21 @@ from backend.sync.garmin_service import (
     GarminSyncService,
 )
 from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
+from backend.sync.library import (
+    WorkoutLibrarySyncService,
+    WorkoutLibrarySyncStateService,
+)
+from backend.sync.metric_export import MetricExportService
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_repair import PlanRepairManifestService
 from backend.sync.plan_selection import StructuredPlanSyncService
+from backend.sync.planned_calendar import (
+    PlannedCalendarRepairService,
+    PlannedCalendarSyncService,
+)
 from backend.sync.queue import SyncJobQueueService
+from backend.sync.reconcile import PlannedUnitSyncStateWriter
+from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.stream_backfill import StreamBackfillService
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
@@ -95,6 +108,7 @@ from backend.sync.wahoo_sync import WahooSyncService
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker
+from backend.sync.workout_export import WorkoutLibraryExportPort
 from backend.weather.service import WeatherService
 
 
@@ -365,6 +379,37 @@ class CompositionRootTests(ServerTestCase):
                 self.assertIsInstance(fresh(), made)
                 self.assertIsNot(fresh(), fresh())
         self.assertTrue(callable(wahoo.fit_download()))
+
+    def test_output_flow_services_resolve_through_the_root(self) -> None:
+        server_flows = (
+            (server.PLANNED_UNIT_SYNC.state_writer, PlannedUnitSyncStateWriter),
+            (server.PLANNED_CALENDAR_SYNC.sync_service, PlannedCalendarSyncService),
+            (
+                server.PLANNED_CALENDAR_SYNC.repair_service,
+                PlannedCalendarRepairService,
+            ),
+            (
+                server.WORKOUT_LIBRARY_SYNC.sync_state_service,
+                WorkoutLibrarySyncStateService,
+            ),
+            (server.WORKOUT_LIBRARY_SYNC.sync_service, WorkoutLibrarySyncService),
+            (server.SELECTED_WORKOUT_SYNC.service, SelectedWorkoutSyncService),
+            (server.EXTERNAL_CALENDAR.reader, ExternalCalendarReader),
+            (server.EXTERNAL_CALENDAR.sync_service, ExternalCalendarSyncService),
+        )
+
+        self.assertIs(server.APP.workout_library_sync, server.WORKOUT_LIBRARY_SYNC)
+        self.assertIs(server.APP.external_calendar, server.EXTERNAL_CALENDAR)
+        self.assertIs(server.APP.wahoo, server.WAHOO_SYNC)
+        self.assertIs(server.APP.sync_persistence, server.SYNC_PERSISTENCE)
+        for factory, kind in server_flows:
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
+        self.assertIsInstance(
+            server.WORKOUT_LIBRARY_SYNC.export_port(), WorkoutLibraryExportPort
+        )
+        self.assertIsInstance(server.METRIC_EXPORT, MetricExportService)
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.

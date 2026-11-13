@@ -18,6 +18,8 @@ import statistics
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
+from backend.athlete.measurements import finite_float as _number
+
 METHOD: Final = "session-execution-v1"
 SCOPE: Final = (
     "Descriptive execution of this one session from its own streams and laps. "
@@ -672,12 +674,6 @@ def _change_pct(earlier: float | None, later: float | None) -> float | None:
     if earlier is None or later is None or earlier <= 0:
         return None
     return round((later - earlier) / earlier * 100, 1)
-
-
-def _number(value: Any) -> float | None:
-    if type(value) in {int, float} and math.isfinite(value):
-        return float(value)
-    return None
 
 
 def _drop_none(item: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,5 +1,8 @@
 """The running week as completed days plus the remaining planned days.
 
+Also the day, week and planned duration of one planned unit, read the same way
+by every planning check.
+
 Planned units are future-only, so the days of the current ISO week before today
 exist only as completed activities. Checks that judge a whole week combine both
 and label it ``RUNNING_WEEK_BASIS``. No I/O.
@@ -13,6 +16,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import number
 from backend.planning.sport import planned_sport_environment
 
 RUNNING_WEEK_BASIS = "running week: completed + planned"
@@ -20,6 +24,32 @@ RUNNING_WEEK_BASIS = "running week: completed + planned"
 
 def week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
+
+
+def unit_day(unit: Mapping[str, Any]) -> str:
+    """A planned unit's day as ISO text: its date, else its start; empty without."""
+    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+
+
+def unit_date(unit: Mapping[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(unit_day(unit))
+    except ValueError:
+        return None
+
+
+def unit_week_start(unit: Mapping[str, Any]) -> date | None:
+    day = unit_date(unit)
+    return None if day is None else week_start(day)
+
+
+def planned_seconds(unit: Mapping[str, Any]) -> float:
+    """Planned seconds, else the planned minutes in seconds; 0 without either."""
+    seconds = number(unit.get("planned_duration_s"))
+    if seconds is None:
+        minutes = number(unit.get("duration_minutes"))
+        seconds = None if minutes is None else minutes * 60
+    return seconds or 0.0
 
 
 def _day(row: Mapping[str, Any]) -> str:

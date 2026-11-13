@@ -76,6 +76,21 @@ class DiagnosticsBuilderTests(unittest.TestCase):
 
         self.assertIs(change_check(), self.ctx.garmin.change_check().status())
 
+    def test_the_lt1_ride_coverage_is_counted_when_the_report_asks(self) -> None:
+        with patch.object(diagnostics_wiring, "DiagnosticReportService") as service:
+            self.services.report_service()
+        coverage = service.call_args.args[0].lt1_ride_coverage
+        reports = self.ctx.performance.training_reports
+        reports.assert_not_called()
+
+        with patch.object(diagnostics_wiring, "ride_band_coverage") as count:
+            self.assertIs(coverage(), count.return_value)
+        records = reports.return_value.profiles.curve_records
+        records.assert_called_once_with(60)
+        count.assert_called_once_with(
+            records.return_value, self.ctx.clock.now.return_value.date.return_value
+        )
+
     def test_services_are_fresh_and_log_reader_keeps_shared_redactor(self) -> None:
         first = self.services.recent_log_entries_service()
         second = self.services.recent_log_entries_service()

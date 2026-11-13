@@ -38,6 +38,8 @@ from backend.canonical.vocabulary import (
 from backend.performance.local_tss import METHOD_ID as LOCAL_LOAD_METHOD_ID
 from backend.performance.local_tss import PACE_BRANCH, POWER_BRANCH
 from backend.planning.planned_unit_load import estimate_planned_unit, resolve_thresholds
+from backend.planning.running_week import unit_date as _unit_date
+from backend.planning.running_week import unit_day as _day
 from backend.planning.sport import planned_sport_environment
 
 LOAD_EVIDENCE = "extrapolated from distance/volume studies, not directly validated"
@@ -134,17 +136,6 @@ def load_thresholds(
         )
 
     return LoadThresholds(resolver=resolve)
-
-
-def _day(unit: Mapping[str, Any]) -> str:
-    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-
-
-def _unit_date(unit: Mapping[str, Any]) -> date | None:
-    try:
-        return date.fromisoformat(_day(unit))
-    except ValueError:
-        return None
 
 
 def plan_sessions(

@@ -15,7 +15,7 @@ from typing import Any
 
 from test_feedback_session_identity import (
     GARMIN_ID,
-    INTERVALS_ID,
+    WAHOO_ID,
     FeedbackSessionFixture,
     merged_session_id,
     stored_rows,
@@ -136,9 +136,7 @@ class FeedbackPurposeTests(FeedbackSessionFixture):
     def test_the_marking_applies_to_every_row_of_a_merged_group(self) -> None:
         # One row per provider copy of the session; the newer one is shown.
         session = merged_session_id(self)
-        self.store_legacy(
-            INTERVALS_ID, "Old", "2026-09-20T10:00:00+00:00", session=session
-        )
+        self.store_legacy(WAHOO_ID, "Old", "2026-09-20T10:00:00+00:00", session=session)
         self.store_legacy(
             GARMIN_ID, "New", "2026-09-20T11:00:00+00:00", session=session
         )
@@ -157,16 +155,14 @@ class FeedbackPurposeTests(FeedbackSessionFixture):
 
     def test_a_hidden_older_marking_never_wins_over_the_shown_row(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(
-            INTERVALS_ID, "Old", "2026-09-20T10:00:00+00:00", session=session
-        )
+        self.store_legacy(WAHOO_ID, "Old", "2026-09-20T10:00:00+00:00", session=session)
         self.store_legacy(
             GARMIN_ID, "New", "2026-09-20T11:00:00+00:00", session=session
         )
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_feedback SET purpose = 'race' WHERE activity_id = ?",
-                (INTERVALS_ID,),
+                (WAHOO_ID,),
             )
 
         self.assertEqual(self.marks(), {})
@@ -184,16 +180,14 @@ class FeedbackPurposeTests(FeedbackSessionFixture):
 
     def test_a_stale_hidden_marking_is_cleared_with_the_next_edit(self) -> None:
         session = merged_session_id(self)
-        self.store_legacy(
-            INTERVALS_ID, "Old", "2026-09-20T10:00:00+00:00", session=session
-        )
+        self.store_legacy(WAHOO_ID, "Old", "2026-09-20T10:00:00+00:00", session=session)
         self.store_legacy(
             GARMIN_ID, "New", "2026-09-20T11:00:00+00:00", session=session
         )
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_feedback SET purpose = 'race' WHERE activity_id = ?",
-                (INTERVALS_ID,),
+                (WAHOO_ID,),
             )
 
         self.service.save(GARMIN_ID, {"notes": "Edited"})

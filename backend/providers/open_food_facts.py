@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import http.client
-import math
 import re
 import threading
 import time
@@ -21,22 +20,11 @@ from backend.providers.http import (
     request_json,
     urlopen,
 )
+from backend.providers.yazio import bounded_number as _number
 
 BASE_URL = "https://world.openfoodfacts.org"
 FIELDS = "code,product_name,product_name_de,brands,nutrition,nutriments,nutrition_data_per,last_modified_t"
 UNAVAILABLE = "Open Food Facts ist momentan nicht verfügbar. Verpackungswerte verwenden oder Schätzung kennzeichnen."
-
-
-def _number(value: Any, maximum: float) -> float | None:
-    if isinstance(value, bool):
-        return None
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return (
-        round(number, 4) if math.isfinite(number) and 0 <= number <= maximum else None
-    )
 
 
 def _nutrition_values(

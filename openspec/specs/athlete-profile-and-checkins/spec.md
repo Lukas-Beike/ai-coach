@@ -29,23 +29,52 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 - **WHEN** a stored profile, or a database restored from an older backup, still carries the retired `weekly_plan` field
 - **THEN** profile reads and saves ignore it, and a one-time versioned stage of the canonical backfill worker deletes that one key from the stored profile (status only in diagnostics); a restored older backup runs the stage again.
 
+#### Scenario: Default values
+- **WHEN** no profile is stored
+- **THEN** every field is empty except `sports` "Cycling", `training_model` "pyramidal", `coaching_style` "Supportive, direct, and evidence-aware" and `timezone` (the `TZ` environment variable read at start, else "Europe/Berlin"); a null value is stored as empty text. The field list is in docs/api-routes.md under `PUT /api/profile`.
+
+#### Scenario: Number fields
+- **WHEN** an explicit save changes `weight_kg`, `height_cm`, `body_fat_pct` or `sleep_target_hours`
+- **THEN** the value (decimal comma allowed) must be finite and within 20 to 300 kg, 50 to 250 cm, 1 to 70 % or 4 to 12 hours, else the save fails with 400 and the German bound message; it is stored as the shortest decimal text, and a stored value that the save does not change is kept unvalidated.
+
+#### Scenario: Local clock
+- **WHEN** the athlete's "today" or "now" is needed
+- **THEN** it is computed at that moment in the saved timezone (Europe/Berlin when the stored one is invalid, the system's local time when the timezone database cannot supply the zone), so the local date changes only at local midnight and a local time inside a daylight-saving gap is never produced.
+
+#### Scenario: Calendar date parsing
+- **WHEN** a stored or provider value is read as a calendar date
+- **THEN** `YYYY-MM-DD` and ISO timestamps are accepted (the timestamp's own date is taken, no conversion) and other text is rejected; a tolerant read of legacy text falls back to its first ten characters.
+
 Evidence:
 - `backend/athlete/clock.py:AthleteLocalClock`
+- `backend/athlete/local_date.py:LocalDate.parse`
+- `backend/athlete/local_date.py:iso_date_prefix`
+- `backend/athlete/profile.py:_normalize_numbers`
 - `backend/athlete/profile.py:_normalize_preferred_sources`
 - `backend/athlete/profile.py:_normalize_sex`
+- `backend/athlete/profile.py:DEFAULT_PROFILE`
 - `backend/athlete/profile.py:normalize_profile`
 - `backend/athlete/profile.py:ProfileService.get_from_db`
 - `backend/athlete/profile.py:timezone_name`
 - `backend/performance/local_tss.py:trimp_sex`
 - `backend/sync/profile_weekly_plan_removal.py`
+- `tests/test_athlete_clock.py:test_invalid_profile_timezone_uses_existing_default`
+- `tests/test_athlete_clock.py:test_local_date_advances_across_dst_midnight`
+- `tests/test_athlete_clock.py:test_local_date_is_stable_across_utc_midnight`
+- `tests/test_athlete_clock.py:test_local_time_skips_dst_gap`
+- `tests/test_athlete_clock.py:test_timezone_lookup_failure_falls_back_to_system_local_time`
+- `tests/test_athlete_profile.py:test_defaults_preserve_profile_contract_and_import_time_timezone_fallback`
 - `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`
 - `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`
+- `tests/test_athlete_profile.py:test_reads_keep_legacy_number_text_and_strict_keeps_unchanged_values`
 - `tests/test_athlete_profile.py:test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict`
+- `tests/test_athlete_profile.py:test_strict_number_fields_reject_text_and_out_of_range_values`
 - `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`
 - `tests/test_athlete_profile.py:test_training_model_defaults_and_rejects_unknown_only_when_strict`
 - `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`
 - `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`
 - `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`
+- `tests/test_local_date.py:test_iso_date_prefix_parses_dates_timestamps_and_legacy_values`
 - `tests/test_local_tss.py:test_unknown_sex_takes_the_assumed_male_constants`
 - `tests/test_profile_weekly_plan_removal.py`
 
@@ -94,7 +123,15 @@ The system SHALL store a check-in for an explicit nonfuture calendar date or ath
 - **WHEN** check-in scores reach the Coach
 - **THEN** soreness and stress read 0–10 with higher worse, motivation 0–10 with higher better and session RPE 0–10 with higher harder, labelled as the local check-in scale and never mixed with a provider rating on another scale.
 
-Evidence: `backend/athlete/checkins.py:normalize_checkin`, `backend/athlete/checkins.py:CheckinService.save`, `backend/athlete/checkins.py:CheckinService.context`; `tests/test_athlete_checkins.py:test_normalize_checkin_defaults_date_and_normalizes_values`, `tests/test_athlete_checkins.py:test_normalize_checkin_rejects_invalid_and_future_dates`, `tests/test_athlete_checkins.py:test_bounded_score_rejects_non_integer_and_out_of_range_values`, `tests/test_athlete_checkins.py:test_context_limits_recent_and_uses_today`; `backend/canonical/rating_scales.py:LOCAL_CHECKIN_SCALES`, `backend/coach/prompt.py` (rating-scale rule).
+#### Scenario: Text limits and storage
+- **WHEN** a check-in is saved
+- **THEN** `day_form` and `availability_notes` are cut to 2000 characters, `illness` and `pain` to 1000 and `notes` to 4000; there is at most one check-in per calendar day in `athlete_checkins` (primary key `checkin_date`), and the tag answers and the day status live beside the row under the keys `checkin_tags:<date>` and `checkin_day_status:<date>`.
+
+#### Scenario: Who writes and what is read
+- **WHEN** a check-in changes
+- **THEN** it was written by the Coach save (which merges, see AP5), by the approval of an illness pause (TP11 of training-plans-and-adaptation) or by an undo; `GET /api/feedback` returns `checkins` (the 30 newest), `local_feedback` and `activity_feedback`, and a check-in list is never longer than 365 days.
+
+Evidence: `backend/athlete/checkins.py:CHECKIN_TEXT_LIMITS`, `backend/athlete/checkins.py:CheckinService.list`, `backend/athlete/checkins.py:normalize_checkin`, `backend/athlete/checkins.py:CheckinService.save`, `backend/athlete/checkins.py:CheckinService.context`; `tests/test_athlete_checkins.py:test_normalize_checkin_defaults_date_and_normalizes_values`, `tests/test_athlete_checkins.py:test_normalize_checkin_rejects_invalid_and_future_dates`, `tests/test_athlete_checkins.py:test_bounded_score_rejects_non_integer_and_out_of_range_values`, `tests/test_athlete_checkins.py:test_context_limits_recent_and_uses_today`, `tests/test_athlete_checkins.py:test_list_clamps_limit`, `tests/test_athlete_checkins.py:test_normalize_checkin_trims_and_limits_all_text_fields`; `backend/canonical/rating_scales.py:LOCAL_CHECKIN_SCALES`, `backend/coach/prompt.py` (rating-scale rule).
 
 ### Requirement: AP5 Coach check-in merging and explicit clearing
 The system SHALL preserve existing daily scores/text/minutes when Coach updates omit or leave them empty, and SHALL clear only fields explicitly listed in a validated nonconflicting clear-fields list.
@@ -162,7 +199,25 @@ The system SHALL save explicitly entered main equipment/components with validate
 - **WHEN** a current nonempty Garmin inventory is first available
 - **THEN** supported gear is imported once; later syncs refresh Garmin-owned mileage rather than overwriting athlete-owned fields, while an empty initial inventory leaves import recoverable.
 
-Evidence: `backend/athlete/equipment.py:EquipmentService.save`, `backend/athlete/equipment.py:EquipmentService.sync_garmin_snapshot`; `backend/coach/tool_schemas.py:build_structured_tool_schemas` (equipment fields); `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_training_record_features.py:test_empty_initial_gear_snapshot_does_not_finalize_import`, `tests/test_training_record_features.py:test_legacy_empty_import_recovers_once_and_preserves_local_equipment`; `tests/test_coach_write_gate.py:test_archiving_equipment_is_a_delete`.
+#### Scenario: Field bounds
+- **WHEN** an item is saved
+- **THEN** only the known fields are accepted (an unknown key is 400 "Ungültige Ausrüstung."): the name has 1 to 200 characters, `kind` is `shoes`, `bike`, `component` or `other`, `status` is `active` (default) or `archived`, `start_date` lies between 2010-01-01 and today, `id` is a UUID, `initial_distance_km` (0 to 1,000,000) and `initial_hours` (0 to 100,000) are required numbers, and the optional `maintenance_km`, `maintenance_hours` and `lifetime_target_km` use the same ranges, the lifetime target being above 0.
+
+#### Scenario: Components
+- **WHEN** a component is saved
+- **THEN** it needs an existing parent that is no component, has no parent itself, is not the item and has the same sport and environment; only a component may have a parent.
+
+#### Scenario: Unknown or stale item
+- **WHEN** the id is unknown or `expected_revision` differs from the stored revision
+- **THEN** the answer is 404 "Ausrüstung nicht gefunden." or 409 "Ausrüstung geändert; neu lesen.".
+
+#### Scenario: Open sport
+- **WHEN** a main item that is still as imported from Garmin has an open sport and neither a parent nor components
+- **THEN** it takes the sport that at least 3 of its linked activities and at least 75 % of all of them share (unknown and other types count in the total); an item the athlete saved keeps its sport.
+
+Detailed contract: the records are JSON values under the keys `equipment:<uuid>`, `equipment_assignment:<session id>`, `equipment_maintenance:<uuid>` and `sensor_equipment:<sensor key>`, and `garmin_equipment_initialized` marks the one-time import; a read returns `items` (at most 100), `garmin_items`, `sensors`, `garmin_synced_at`, `garmin_freshness`, `assignments` (at most 2000, maintenance events at most 1000) and `scope`.
+
+Evidence: `backend/athlete/equipment.py:_equipment_amounts`, `backend/athlete/equipment.py:_equipment_identity`, `backend/athlete/equipment.py:_equipment_parent`, `backend/athlete/equipment.py:EquipmentService.read`, `backend/athlete/equipment.py:EquipmentService.save`, `backend/athlete/equipment.py:EquipmentService.sync_garmin_snapshot`; `backend/coach/tool_schemas.py:build_structured_tool_schemas` (equipment fields); `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_training_record_features.py:test_empty_initial_gear_snapshot_does_not_finalize_import`, `tests/test_training_record_features.py:test_equipment_requires_initial_values_and_prevents_component_cycles`, `tests/test_training_record_features.py:test_open_sport_is_derived_at_three_quarters_with_three_activities`, `tests/test_training_record_features.py:test_legacy_empty_import_recovers_once_and_preserves_local_equipment`; `tests/test_coach_write_gate.py:test_archiving_equipment_is_a_delete`.
 
 ### Requirement: Estimated first threshold from chest-strap RR intervals
 The system SHALL show an estimated first threshold heart rate, derived from stored chest-strap RR results, as an estimate and SHALL store it only when the athlete explicitly adopts it. The Coach SHALL have no tool that adopts it.
@@ -205,10 +260,21 @@ The system SHALL assign only resolved canonical completed activities to compatib
 - **WHEN** a Garmin- or Wahoo-only session is assigned or linked by a Garmin gear item, and a session bundled from several providers is assigned
 - **THEN** each counts once in usage, hours, distance and maintenance; a new assignment is stored under the session it was made for, and an earlier assignment stored under a provider record id or an alias session id still applies (the session-id assignment wins over it, else the newest).
 
+#### Scenario: Usage totals
+- **WHEN** usage is read
+- **THEN** it counts the sessions whose effective assignment names the item (for a component its parent) from the item's start date to today, and a main item linked to Garmin gear counts every session Garmin lists; `distance_km` is Garmin's total for a Garmin-linked item (unknown when Garmin gave none), else the initial distance plus the session distances, and `hours` is the initial hours plus the session durations.
+
+#### Scenario: Lifetime target
+- **WHEN** no local lifetime target is saved
+- **THEN** Garmin's maximum is the target and follows Garmin; a saved positive local target is kept.
+
 Evidence:
 - `backend/athlete/equipment.py:_assignment_list`
+- `backend/athlete/equipment.py:_counts_for`
 - `backend/athlete/equipment.py:_effective_assignments`
 - `backend/athlete/equipment.py:_session_assignments`
+- `backend/athlete/equipment.py:_update_garmin_lifetime_target`
+- `backend/athlete/equipment.py:_update_usage`
 - `backend/athlete/equipment.py:EquipmentService.assign`
 - `backend/athlete/equipment.py:EquipmentService.read`
 - `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`
@@ -237,7 +303,11 @@ The system SHALL record explicitly completed equipment maintenance within the it
 - **WHEN** a service interval depends on session history with same-day ordering unknown or a stale/truncated Garmin activity list
 - **THEN** maintenance counters use the implemented later-calendar-day rule and mark incomplete coverage rather than diagnosing wear or replacement need.
 
-Evidence: `backend/athlete/equipment.py:EquipmentService.maintain`, `backend/athlete/equipment.py:_maintenance_usage`, `backend/athlete/equipment.py:_lifetime_projection`; `tests/test_training_record_features.py:test_garmin_linked_sessions_feed_maintenance_usage`, `tests/test_training_record_features.py:test_truncated_or_stale_garmin_list_makes_session_maintenance_partial`; `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_equipment_post_route.py:test_maintenance_post_delegates_to_equipment_service`.
+#### Scenario: Maintenance interval
+- **WHEN** a maintenance event exists
+- **THEN** only sessions on a later calendar day count after it; `maintenance_due` is true when distance or hours reached the interval, null when they did not but a same-day session, a missing measure, an unknown Garmin distance or a partial Garmin list leaves it uncertain, else false; `maintenance_coverage` is `partial` or `known_assignments`.
+
+Evidence: `backend/athlete/equipment.py:_maintenance_uncertain`, `backend/athlete/equipment.py:EquipmentService.maintain`, `backend/athlete/equipment.py:_maintenance_usage`, `backend/athlete/equipment.py:_lifetime_projection`; `tests/test_training_record_features.py:test_garmin_linked_sessions_feed_maintenance_usage`, `tests/test_training_record_features.py:test_truncated_or_stale_garmin_list_makes_session_maintenance_partial`; `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_equipment_post_route.py:test_maintenance_post_delegates_to_equipment_service`.
 
 ### Requirement: Authoritative local zone edits and undo
 The athlete SHALL be able to read and explicitly edit local zones and thresholds for riding, running and swimming (power, heart rate or pace) through Profil → Zonen & Schwellen, one page per sport. Saves SHALL validate units, three to seven ascending boundaries and the required threshold, preserve provider alternatives and record change history with undo. Confirmed local configuration SHALL remain authoritative across provider refresh and restart.
@@ -262,6 +332,16 @@ The athlete SHALL be able to read and explicitly edit local zones and thresholds
 - **WHEN** a saved local zone edit is undone after a provider refresh
 - **THEN** the previous local state is restored and effective selection follows local authority or the applicable provider alternative when no local configuration remains.
 
+#### Scenario: Dating of a local configuration
+- **WHEN** a local configuration is saved
+- **THEN** it applies from `valid_from` (default today, never a future day) and earlier days keep their old value; `from_beginning: true` stores it undated.
+
+#### Scenario: Undo keeps the age of the value
+- **WHEN** a zone change is undone
+- **THEN** the restored value keeps the save date it had, so an old threshold does not look freshly confirmed.
+
+Detailed contract: the payload, response and error contract of `GET /api/zones`, `PUT /api/zones` and `PUT /api/zones/remove` is in docs/api-routes.md.
+
 Evidence:
 - `backend/activities/zone_settings.py`
 - `backend/athlete/zones.py:local_configuration`
@@ -280,6 +360,8 @@ Evidence:
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_a_future_start_is_rejected`
+- `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_save_date_of_the_restored_value`
 - `tests/test_zone_settings.py`
 - `tests/zone-warnings.test.cjs`
 
@@ -341,3 +423,51 @@ The zone editor SHALL save local zones with `PUT /api/zones` for a sport (ride, 
 - **THEN** "Lokale Zonen gespeichert" or "Lokale Zonen entfernt" is shown with "Rückgängig"; removal first asks "Lokale Zonen entfernen? Danach gelten wieder die Zonen des Anbieters."
 
 Evidence: `public/settings.js::saveZones`; `public/settings.js::removeZones`; `public/settings.js::openZoneEditor`; `public/settings.js::showZoneReceipt`. Tests: `e2e/canonical-extensions.spec.js::local zones save with provider alternatives and undo`; `tests/zone-warnings.test.cjs::a stale threshold names value, source and age`.
+
+### Requirement: Check-in change history and undo
+Every check-in save that changes the day SHALL record one change of entity `checkin` keyed by the date (`create` for the first check-in of a day, else `update`), and undo SHALL restore the day including tag answers and day status.
+
+#### Scenario: Unchanged save
+- **WHEN** a save leaves the stored day unchanged
+- **THEN** no change is recorded.
+
+#### Scenario: Undo of the first check-in
+- **WHEN** the change that created a day's check-in is undone
+- **THEN** the row, its tag answers and its day status are removed.
+
+#### Scenario: Undo of an overwrite
+- **WHEN** a later save, a Coach clear or an illness-pause marker is undone
+- **THEN** the cleared and overwritten fields return, and tags and day status are restored when the recorded state had them; an undo after the day changed again is refused.
+
+Evidence:
+- `backend/athlete/checkins.py:CheckinService._write`
+- `backend/athlete/checkins.py:CheckinService.add_illness_in_transaction`
+- `backend/athlete/checkins.py:CheckinService.restore_in_transaction`
+- `tests/test_athlete_checkins.py:test_coach_receipt_offers_undo_for_a_saved_check_in`
+- `tests/test_athlete_checkins.py:test_create_update_and_clear_each_record_one_change`
+- `tests/test_athlete_checkins.py:test_undo_is_rejected_when_the_day_changed_since`
+- `tests/test_athlete_checkins.py:test_undo_of_a_coach_overwrite_restores_cleared_fields_and_tags`
+- `tests/test_athlete_checkins.py:test_undo_of_a_first_check_in_removes_it_with_status_and_tags`
+- `tests/test_athlete_checkins.py:test_unchanged_save_records_nothing`
+
+### Requirement: Undo of equipment changes
+Item saves, assignments and maintenance entries SHALL be undoable from the change history, and an undo SHALL be refused when a later state stands in its way.
+
+#### Scenario: Item
+- **WHEN** the creation of an item is undone
+- **THEN** it is removed unless it is in use (409 "Die Ausrüstung wird bereits verwendet und bleibt erhalten."); undoing an edit restores the recorded fields, validates them like a save and stores the revision plus 1, and is refused after a later edit or when a parent no longer fits.
+
+#### Scenario: Assignment and maintenance
+- **WHEN** an assignment is undone
+- **THEN** the earlier gear returns unless it no longer fits the activity (409 "Die frühere Ausrüstung passt nicht mehr zu dieser Aktivität (archiviert, unvollständig oder andere Sportart)."); undoing a maintenance entry removes it, and bringing one back needs its item (409 "Die Ausrüstung dieser Wartung ist nicht mehr vorhanden.").
+
+Evidence:
+- `backend/athlete/equipment_history.py:EquipmentAssignmentHistory.restore_in_transaction`
+- `backend/athlete/equipment_history.py:EquipmentItemHistory.restore_in_transaction`
+- `backend/athlete/equipment_history.py:EquipmentMaintenanceHistory.restore_in_transaction`
+- `tests/test_equipment_history.py:test_maintenance_is_recorded_and_its_undo_removes_the_entry`
+- `tests/test_equipment_history.py:test_undo_is_refused_after_a_later_edit`
+- `tests/test_equipment_history.py:test_undo_of_a_created_item_is_refused_once_it_is_used`
+- `tests/test_equipment_history.py:test_undo_of_a_reassignment_is_refused_when_the_old_gear_is_archived`
+- `tests/test_equipment_history.py:test_undo_of_a_removed_maintenance_entry_restores_it`
+- `tests/test_equipment_history.py:test_undo_of_an_edit_restores_values_and_advances_the_revision`

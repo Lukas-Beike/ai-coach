@@ -97,6 +97,8 @@ class DiagnosticReportDependencies:
     canonical_read: CanonicalReadStatusReader | None = None
     # The Garmin change check's counts and times (#2372).
     garmin_change_check: Callable[[], dict[str, Any]] | None = None
+    # Rides with a steady power band per variation limit, counts only (#2535).
+    lt1_ride_coverage: Callable[[], dict[str, Any]] | None = None
 
 
 # Large kv values whose stored size the report shows: the Garmin state, the
@@ -307,6 +309,10 @@ class DiagnosticReportService:
                 "garmin_change_check": section(
                     "garmin_change_check",
                     deps.garmin_change_check or (lambda: {"active": False}),
+                ),
+                "lt1_ride_coverage": section(
+                    "lt1_ride_coverage",
+                    deps.lt1_ride_coverage or (lambda: {"available": False}),
                 ),
                 "stream_backfill": section(
                     "stream_backfill",

@@ -67,6 +67,8 @@ from backend.planning import (
     strength_structure,
 )
 from backend.planning.local_start import known_start
+from backend.planning.running_week import planned_seconds as _duration_s
+from backend.planning.running_week import unit_day as _day
 from backend.planning.session_focus import (
     FOCUS_KEY,
     HARD_INTENSITY,
@@ -189,18 +191,6 @@ def _text(unit: Mapping[str, Any]) -> str:
 
 def _sport(unit: Mapping[str, Any]) -> Sport:
     return planned_sport_environment(unit)[0]
-
-
-def _day(unit: Mapping[str, Any]) -> str:
-    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-
-
-def _duration_s(unit: Mapping[str, Any]) -> float:
-    seconds = number(unit.get("planned_duration_s"))
-    if seconds is None:
-        minutes = number(unit.get("duration_minutes"))
-        seconds = None if minutes is None else minutes * 60
-    return seconds or 0.0
 
 
 def is_hard(unit: Mapping[str, Any]) -> bool:
@@ -644,43 +634,70 @@ def _mismatch_evidence(
 
 
 def _readable_structure(unit: Mapping[str, Any]) -> list[str]:
-    """``_structure_of`` as short labels: exercise names, or step kind and basis."""
+    """``_structure_of`` as short labels: exercise names, or the sections."""
     labels = []
     structure = _structure_of(unit) or []
     for item in structure[:8]:
         if isinstance(item, str):
             labels.append(item)
             continue
-        kind, ramp, distance = item
-        labels.append(
-            f"{kind}{' ramp' if ramp else ''} {'distance' if distance else 'time'}"
-        )
+        kind, value = item
+        if kind == "repeat":
+            labels.append(f"repeat of {len(value)} steps")
+        else:
+            labels.append("ramp step" if value else "step")
     if len(structure) > 8:
         labels.append(f"+{len(structure) - 8} more")
     return labels
 
 
-def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
-    """The part of a unit a variant keeps: exercise names, or step kinds in order.
+_REPEAT_HEADER = re.compile(r"\b\d+x$")
 
-    Repeats may change (5x4 or 4x4 min is load), so each step kind counts once,
-    in the order it first appears. None when the unit has no readable structure.
+
+def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
+    """The part of a unit a variant keeps: exercise names, or its sections.
+
+    Athlete decision 2026-11-13 (#2513): an endurance unit's structure is the
+    order of its sections, single steps and repeat blocks with their steps, and
+    whether a step ramps. Repeat counts, durations or distances and the target
+    kind (pace, heart rate, power) are load and intensity. None when the unit
+    has no readable structure.
     """
     exercises = _strength_content(unit)
     if exercises:
         return [str(item.get("name") or "").strip().casefold() for item in exercises]
+    description = str(unit.get("description") or "")
+    target = str(unit.get("target") or "AUTO")
     try:
-        steps = structured_steps(
-            str(unit.get("description") or ""), str(unit.get("target") or "AUTO")
-        )
+        structured_steps(description, target)
     except WorkoutTextError:
         return None
-    kinds: list[Any] = []
-    for step in steps:
-        signature = (step.get("kind"), bool(step.get("ramp")), "distance" in step)
-        if signature not in kinds:
-            kinds.append(signature)
-    return kinds
+    return _sections(description, target)
+
+
+def _sections(description: str, target: str) -> list[Any]:
+    """Single steps and repeat blocks in order, each step with its ramp flag."""
+    sections: list[Any] = []
+    block: list[bool] | None = None
+    for raw in description.splitlines():
+        line = raw.strip()
+        if not line:
+            block = None
+        elif line.startswith("-"):
+            ramp = any(step.get("ramp") for step in structured_steps(line, target))
+            if block is not None:
+                block.append(ramp)
+            # Consecutive plain steps are one steady section, so a warm-up or
+            # cool-down inside a steady run stays a variant of it.
+            elif sections[-1:] != [("step", ramp)] or ramp:
+                sections.append(("step", ramp))
+        elif _REPEAT_HEADER.search(line):
+            block = []
+            sections.append(("repeat", block))
+    return [
+        (kind, tuple(value)) if kind == "repeat" else (kind, value)
+        for kind, value in sections
+    ]
 
 
 def _steps(unit: Mapping[str, Any]) -> list[dict] | str:

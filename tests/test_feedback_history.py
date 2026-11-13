@@ -1,7 +1,7 @@
 """Feedback saves and clears record receipts whose undo restores every row.
 
 Built on the two-provider session of ``test_feedback_session_identity``: one ride
-from Intervals.icu and Garmin. Undo restores the stored rows exactly, hidden
+from Wahoo and Garmin. Undo restores the stored rows exactly, hidden
 conflicting originals and full-length notes included, keeps one effective
 feedback, and works after a restart. Deleting the surviving provider copy keeps
 the feedback. Temporary database and synthetic rows only.
@@ -20,8 +20,8 @@ from unittest.mock import Mock
 from support import temp_database
 from test_feedback_session_identity import (
     GARMIN_ID,
-    INTERVALS_ID,
     SYNCED,
+    WAHOO_ID,
     FeedbackSessionFixture,
     stored_rows,
 )
@@ -65,16 +65,16 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
     def test_changes_recorded_before_schema_v18_keep_their_undo(self) -> None:
         # A v17 build recorded each row without the rating time; such a row
         # (here: notes only, so no rating time) still matches its hash.
-        created = self.service.save(INTERVALS_ID, {"notes": "Before the upgrade"})
+        created = self.service.save(WAHOO_ID, {"notes": "Before the upgrade"})
         with self.manager.reader() as db:
-            session = self.sessions["intervals"]
+            session = self.sessions["wahoo"]
             entity = "session:" + canonical_store.effective_session_ids(
                 db, [session]
             ).get(session, session)
             recorded, _projection = self.service.current(db, entity)
         assert recorded is not None
         self.assertNotIn("session_rpe_rated_at", recorded["rows"][0])
-        rated = self.service.save(INTERVALS_ID, {"session_rpe": 6})
+        rated = self.service.save(WAHOO_ID, {"session_rpe": 6})
         with self.manager.reader() as db:
             recorded, _projection = self.service.current(db, entity)
         assert recorded is not None
@@ -87,7 +87,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.assertEqual(stored_rows(self), [])
 
     def test_undo_restores_the_previous_feedback(self) -> None:
-        created = self.service.save(INTERVALS_ID, {"notes": "First", "session_rpe": 6})
+        created = self.service.save(WAHOO_ID, {"notes": "First", "session_rpe": 6})
         before = stored_rows(self)
         updated = self.service.save(GARMIN_ID, {"session_rpe": 4})
         self.undo(updated["change"])
@@ -98,7 +98,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
     def test_undoing_a_clear_restores_hidden_originals_and_long_notes(self) -> None:
         with self.manager.unit_of_work() as db:
             for key, session, notes, updated in (
-                (INTERVALS_ID, self.sessions["intervals"], LONG_NOTES, "2026-09-19"),
+                (WAHOO_ID, self.sessions["wahoo"], LONG_NOTES, "2026-09-19"),
                 (GARMIN_ID, self.sessions["garmin"], "newer", "2026-09-20"),
             ):
                 db.execute(
@@ -107,20 +107,20 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                     (key, notes, updated, updated, session),
                 )
         before = stored_rows(self)
-        cleared = self.service.save(INTERVALS_ID, {"notes": ""})
+        cleared = self.service.save(WAHOO_ID, {"notes": ""})
         self.assertEqual(stored_rows(self), [])
         self.undo(cleared["change"])
 
         self.assertEqual(stored_rows(self), before)
         (original,) = [
-            row for row in stored_rows(self) if row["activity_id"] == INTERVALS_ID
+            row for row in stored_rows(self) if row["activity_id"] == WAHOO_ID
         ]
         self.assertEqual(original["notes"], LONG_NOTES)
         (effective,) = self.service.list()
         self.assertEqual(effective["notes"], "newer")
 
     def test_history_keeps_no_feedback_text_in_its_public_view(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "Private note"})
+        self.service.save(WAHOO_ID, {"notes": "Private note"})
         with self.manager.reader() as db:
             (row,) = db.execute("SELECT * FROM change_history").fetchall()
         public = change_history.public_view(dict(row))
@@ -128,7 +128,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.assertNotIn("Private note", str(public))
 
     def test_feedback_and_its_undo_survive_a_restart(self) -> None:
-        saved = self.service.save(INTERVALS_ID, {"notes": "Before restart"})
+        saved = self.service.save(WAHOO_ID, {"notes": "Before restart"})
         path = Path(self.manager.path)
         self.manager.close()
         self.reopen(path)
@@ -158,7 +158,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                     self.sessions["garmin"],
                 ),
             )
-        saved = self.service.save(INTERVALS_ID, {"notes": "Newest"})
+        saved = self.service.save(WAHOO_ID, {"notes": "Newest"})
         before = stored_rows(self)
         path = Path(self.manager.path)
         backup = DatabaseBackupService(
@@ -201,17 +201,17 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.assertEqual(original["notes"], LONG_NOTES)
 
     def test_undo_follows_a_session_merged_after_the_edit(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "First"})
-        updated = self.service.save(INTERVALS_ID, {"notes": "Second"})["change"]
+        self.service.save(WAHOO_ID, {"notes": "First"})
+        updated = self.service.save(WAHOO_ID, {"notes": "Second"})["change"]
         with self.manager.reader() as db:
             effective = canonical_store.effective_session_ids(
-                db, [self.sessions["intervals"]]
-            )[self.sessions["intervals"]]
+                db, [self.sessions["wahoo"]]
+            )[self.sessions["wahoo"]]
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO activity_sessions(activity_id, primary_provider, "
                 "primary_provider_activity_id, started_at, created_at, updated_at) "
-                "VALUES ('act_survivor', 'intervals', 'survivor', ?, ?, ?)",
+                "VALUES ('act_survivor', 'wahoo', 'survivor', ?, ?, ?)",
                 (SYNCED, SYNCED, SYNCED),
             )
             db.execute(
@@ -224,14 +224,14 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.assertEqual(feedback["notes"], "First")
 
     def test_deleting_the_surviving_copy_keeps_the_feedback(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "On the survivor"})
+        self.service.save(WAHOO_ID, {"notes": "On the survivor"})
         with self.manager.unit_of_work() as db:
             self.assertTrue(
                 canonical_store.mark_activity_deleted(
                     db,
-                    "intervals",
+                    "wahoo",
                     record_kind="activity",
-                    provider_activity_id=INTERVALS_ID,
+                    provider_activity_id=WAHOO_ID,
                     now=SYNCED,
                 )
             )
