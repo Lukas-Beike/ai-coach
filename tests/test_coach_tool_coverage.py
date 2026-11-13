@@ -2396,7 +2396,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     def test_garmin_strength_push_is_bound_to_the_stored_units(self):
         # The queued push needs an SDK login; the test configures none.
         self.enterContext(
-            patch("backend.sync.command_assembly.sdk_write_ready", return_value=True)
+            patch("backend.sync.wiring.sdk_write_ready", return_value=True)
         )
         unit = {
             **self.workout("2026-09-10", "Synthetic strength"),

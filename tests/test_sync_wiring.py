@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, MagicMock, Mock, patch
 
 from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
@@ -259,7 +259,17 @@ class SyncCommandBuilderTests(unittest.TestCase):
             self.services.plan_push()
 
         conflicts.assert_called_once_with(ctx.planning.competition.return_value, queue)
-        push.assert_called_once_with(queue)
+        self.assertIs(queue, push.call_args.args[0])
+        # The Garmin push needs an SDK login: the second argument checks it (#2522).
+        garmin_writable = push.call_args.args[1]
+        reader = MagicMock()
+        reader.__enter__.return_value = "db"
+        ctx.database.return_value.reader.return_value = reader
+        with patch.object(wiring, "sdk_write_ready", return_value=True) as ready:
+            self.assertTrue(garmin_writable())
+        self.assertIs(ctx.config.return_value, ready.call_args.args[0])
+        ready.call_args.args[1]("key")
+        ctx.key_values.get.assert_called_once_with("db", "key")
 
     def test_plan_sync_and_repair_share_a_fresh_authority(self) -> None:
         ctx = self.ctx
