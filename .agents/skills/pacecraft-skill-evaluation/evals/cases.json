@@ -67,9 +67,9 @@
     {
       "id": "deliver-issue-design-note-risky-path", "skill": "deliver-issue", "kind": "boundary", "activate": true,
       "prompt": "Deliver issue 42: store each state area separately on the device.",
-      "setup": "Synthetic issue changes the device state snapshot that the app start restores before the bootstrap load.",
-      "expected": ["Deliver a short design note with the risks (stale snapshot values, lost post-load changes, update loss) before any code", "Start the code only after the note is approved"],
-      "prohibited": ["Implement the storage redesign before the design note is approved"]
+      "setup": "Synthetic issue changes the device state snapshot that the app start shows before the bootstrap load replaces it; an orchestrator coordinates and the work suits an implementer subagent.",
+      "expected": ["Write a short design note naming risks such as snapshot values overriding fresh bootstrap values before any code or delegation", "Record the note and the orchestrator's approval as an issue comment and hand the approved note to the implementer"],
+      "prohibited": ["Implement or delegate the storage redesign before the design note is approved"]
     },
     {
       "id": "deliver-issue-design-note-dom-only", "skill": "deliver-issue", "kind": "boundary", "activate": true,
