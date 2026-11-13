@@ -504,13 +504,24 @@ function taskSelectId(task, name) {
 
 function renderModel(model) {
   for (const task of COACH_TASKS) {
-    renderModelChoice(model && { ...model, selected: model.tasks?.[task]?.model ?? model.selected }, taskSelectId(task, "Model"));
+    const taskModel = model && { ...model, selected: model.tasks?.[task]?.model ?? model.selected };
+    renderModelChoice(taskModel, taskSelectId(task, "Model"));
+    // Each task block names its own rejected Claude model (#2639).
+    const notice = $(task === "conversation" ? "#modelNotice" : `#${task}ModelNotice`);
+    if (notice) {
+      notice.textContent = modelNoticeText(taskModel);
+      notice.hidden = !notice.textContent;
+    }
   }
-  const notice = $("#modelNotice");
-  if (notice) {
-    notice.textContent = modelNoticeText(model);
-    notice.hidden = !notice.textContent;
-  }
+  // A task whose provider has no key disables only its own entry points.
+  // Every quick-action kind but the morning check-in runs on the planning model,
+  // in the "Analyse & Plan" menu and its copies in the composer's "+" menu.
+  const planningOff = model?.tasks?.planning?.ready === false;
+  const planning = $("#quickAnalysisButton");
+  if (planning) planning.disabled = planningOff;
+  document.querySelectorAll("[data-request-kind]:not([data-request-kind=morning_checkin])").forEach((button) => { button.disabled = planningOff; });
+  const label = $("#nutritionLabelButton");
+  if (label) label.disabled = model?.tasks?.nutrition?.ready === false;
   // Speed modes exist only at OpenAI.
   const tierRow = $("#serviceTierRow");
   const provider = (id) => (model?.options || []).find((option) => option.id === id)?.provider;

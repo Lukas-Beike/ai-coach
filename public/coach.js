@@ -670,7 +670,7 @@ function setupQuickActionMenu(button = $("#quickAnalysisButton"), menu = $("#qui
 
 async function sendMessage(event) {
   event.preventDefault();
-  if (!coachConfigured(state.data?.configured)) {
+  if (!coachConfigured(state.data?.configured, $("#messageInput")?.dataset.requestKind)) {
     toast("Für das gewählte Coach-Modell fehlt der API-Schlüssel unter Mehr › Anbindungen.", true);
     return;
   }
@@ -822,13 +822,16 @@ function updateVoiceButton() {
   updateChatControls();
 }
 
-// The selected model's provider has its key (before the first load: assume yes).
-function coachConfigured(configured) {
+// The provider of the model that answers has its key (before the first load:
+// assume yes). Every quick-action kind but the morning check-in runs on the
+// planning model (#2639), so it needs that task's key instead.
+function coachConfigured(configured, requestKind = null) {
+  if (requestKind && requestKind !== "morning_checkin") return state.data?.model?.tasks?.planning?.ready !== false;
   return !configured || Boolean(configured.coach ?? configured.openai);
 }
 
 function chatControlState(input) {
-  const aiConfigured = coachConfigured(state.data?.configured);
+  const aiConfigured = coachConfigured(state.data?.configured, input?.dataset.requestKind);
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages) && aiConfigured);
   const hasDraft = Boolean((state.chatAttachments || []).length || input?.value.trim());
   const inputAvailable = !voiceIsRecording() && !state.voiceTranscribing;

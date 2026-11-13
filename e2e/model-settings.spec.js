@@ -23,3 +23,30 @@ test("model and speed selection persist with capability checks @responsive", asy
   await expect(speed).toHaveValue("fast");
   await expect(speed.locator("option")).toHaveCount(2);
 });
+
+test("each task names its rejected model and a keyless planning model locks only its quick actions @responsive", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(() => {
+    const options = [
+      { id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai" },
+      { id: "claude-opus", label: "Opus", provider: "anthropic", model: "claude-opus-5-5", rejected: "claude-opus-5-6" },
+    ];
+    state.data.model = { ...state.data.model, selected: "gpt-6-luna", options, tasks: {
+      conversation: { model: "gpt-6-luna", thinking_level: "medium", ready: true },
+      planning: { model: "claude-opus", thinking_level: "medium", ready: false },
+      nutrition: { model: "gpt-6-luna", thinking_level: "medium", ready: true },
+    } };
+    renderModel(state.data.model);
+    updateChatControls();
+  });
+  await expect(page.locator("#planningModelNotice")).toHaveText("claude-opus-5-6 abgelehnt – Coach nutzt claude-opus-5-5.");
+  await expect(page.locator("#modelNotice")).toBeHidden();
+  await expect(page.locator("#nutritionModelNotice")).toBeHidden();
+  await expect(page.locator("#quickAnalysisButton")).toBeDisabled();
+  // The copies in the composer's "+" menu are locked as well.
+  await expect(page.locator('#composerPlusMenu [data-request-kind="plan_week"]')).toBeDisabled();
+  await expect(page.locator("#quickMorningCheckinButton")).toBeEnabled();
+  await page.locator("#messageInput").fill("Wie war mein Schlaf?");
+  await expect(page.locator("#sendButton")).toBeEnabled();
+});
