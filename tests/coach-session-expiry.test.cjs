@@ -53,7 +53,6 @@ async function sendChatIntoExpiredSession({ inputValue = "", beforeResponse = ()
       state.chatAttachments = [];
     },
     renderChatAttachments() { counts.renderChatAttachments += 1; },
-    resizeChatInput() {},
     renderMessages() {},
     updateChatControls() {},
     rememberChatTurn() {},

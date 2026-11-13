@@ -2396,8 +2396,6 @@ function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposi
   return shiftKey ? "newline" : "send";
 }
 
-// Grows the draft up to the CSS max-height; the scrollbar appears only once the
-// content no longer fits.
 function setupCoachEvents() {
   publishComposerHeight();
   $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");

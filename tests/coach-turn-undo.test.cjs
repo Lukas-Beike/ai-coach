@@ -172,7 +172,6 @@ function retryHarness(messages, { draft = "", attachments = [] } = {}) {
     } }),
     Event: class { constructor(type) { this.type = type; } },
     renderChatAttachments() {},
-    resizeChatInput() {},
     updateChatControls() {},
   });
   return { context, state, input, submitted };
