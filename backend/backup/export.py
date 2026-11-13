@@ -80,7 +80,9 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 18 drops food_database_entries.jsonl: foods saved from a database
 # lookup are rows of nutrition_products.jsonl with their origin, fetch time and
 # details (schema v27).
-PRIVACY_EXPORT_FORMAT_VERSION = 18
+# Version 19 adds external_calendar_decisions.jsonl, the athlete's training
+# impact per calendar event (schema v28).
+PRIVACY_EXPORT_FORMAT_VERSION = 19
 
 
 class PrivacyArchiveExportService:
