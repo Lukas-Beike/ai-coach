@@ -151,3 +151,37 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
   counts qualifying rides at 0.15, 0.20 and 0.25 (#2535).
 - The session curve memo is held twice (public state and training reports)
   until the composition shares one reader.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `VO2MAX_UNIT` | `'ml/kg/min'` | `backend/performance/current_metrics.py` |  |
+| `LOCAL_SOURCE_LABEL` | `'Lokal'` | `backend/performance/current_metrics.py` | The label of a locally confirmed zone configuration's value. |
+| `PROFILE_SOURCE_LABEL` | `'Manuell'` | `backend/performance/current_metrics.py` | The label of a profile value. |
+| `LT1_HR_SHARE` | `0.85` | `backend/performance/current_metrics.py` | LT1 as a fixed share of LT2 when no measured or adopted value and no zone 2 of that kind exists (athlete decisions 2026-11-12, #2427): heart rate of the threshold HR, cycling power of the FTP and running speed of the threshold speed. Change them here only. |
+| `LT1_POWER_SHARE` | `0.75` | `backend/performance/current_metrics.py` |  |
+| `LT1_RUN_SPEED_SHARE` | `0.88` | `backend/performance/current_metrics.py` |  |
+| `LT1_OWN_SESSIONS` | `'own_sessions'` | `backend/performance/current_metrics.py` | Where an LT1 value comes from: the profile value (measured, or the adopted DFA-a1 estimate), the athlete's own steady sessions at the LT1 heart rate (pace and power only), the top of the zone 2 in effect, or a fixed share of LT2. |
+| `LT1_ZONE_TWO` | `'zone_2'` | `backend/performance/current_metrics.py` |  |
+| `LT1_FIXED_SHARE` | `'fixed_share'` | `backend/performance/current_metrics.py` |  |
+| `METHOD` | `'pace-at-heart-rate-v2'` | `backend/performance/pace_at_hr.py` | v2: treadmill and virtual runs are flat and never grade-adjusted. |
+| `WARMUP_S` | `600` | `backend/performance/pace_at_hr.py` |  |
+| `MIN_DURATION_S` | `1800` | `backend/performance/pace_at_hr.py` |  |
+| `BIN_BPM` | `5` | `backend/performance/pace_at_hr.py` |  |
+| `BAND_BINS` | `2` | `backend/performance/pace_at_hr.py` |  |
+| `FLAT_GRADE_PCT` | `3.0` | `backend/performance/pace_at_hr.py` |  |
+| `MIN_FLAT_SHARE` | `0.8` | `backend/performance/pace_at_hr.py` |  |
+| `MIN_BAND_S` | `600` | `backend/performance/pace_at_hr.py` |  |
+| `MAX_SPEED_CV` | `0.15` | `backend/performance/pace_at_hr.py` |  |
+| `MIN_SESSIONS` | `2` | `backend/performance/pace_at_hr.py` |  |
+| `SCOPE` | `'Pace in a fixed heart-rate band on steady, flat-ish outdoor or indoor runs after a 10-minute war... (sha256 7624bc98)` | `backend/performance/pace_at_hr.py` |  |
+| `POWER_METHOD` | `'power-at-heart-rate-v1'` | `backend/performance/pace_at_hr.py` |  |
+| `POWER_SMOOTH_S` | `60` | `backend/performance/pace_at_hr.py` | The heart rate trails power by up to a minute: each heart-rate sample is paired with the mean power of the minute before it. |
+| `LT1_DAYS` | `60` | `backend/performance/pace_at_hr.py` |  |
+| `LT1_MIN_SESSIONS` | `3` | `backend/performance/pace_at_hr.py` |  |
+| `RIDE_COVERAGE_CV_LIMITS` | `(0.15, 0.2, 0.25)` | `backend/performance/pace_at_hr.py` | Variation limits the ride coverage count compares (#2535). |
+| `COMPARE_DAYS` | `42` | `backend/performance/pace_at_hr.py` |  |
+| `MIN_COMPARABLE` | `3` | `backend/performance/pace_at_hr.py` |  |
+<!-- END GENERATED CONSTANTS -->

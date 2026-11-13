@@ -190,6 +190,29 @@ The system SHALL validate quantity-first machine-readable endurance steps, consi
 
 Evidence: `backend/providers/intervals_workouts.py:INTERVALS_ENDURANCE_WORKOUT_TYPES`, `backend/providers/intervals_workouts.py:intervals_workout_type`, `backend/planning/workout_validation.py:validate_workout_description`, `backend/planning/workout_validation.py:_validate_endurance_workout_steps`, `backend/planning/workout_validation.py:_validate_workout_duration_match`; `backend/planning/workouts.py:normalize_workout`; `tests/test_canonical_workout_sports.py`, `tests/test_workout_text.py:test_all_endurance_families_still_require_executable_steps`, `tests/test_planning_workouts.py:test_ambiguous_steps_keep_german_message_and_reason`, `tests/test_planning_workouts.py:test_endurance_parser_preserves_missing_step_and_target_reasons`, `tests/test_planning_workouts.py:test_composite_time_and_thirty_second_tolerance`, `tests/test_planning_workouts.py:test_distance_steps_allow_estimated_total_but_preserve_timed_subtotal`, `tests/test_planning_workouts.py:test_normalize_canonicalizes_endurance_zones_and_keeps_non_endurance_prose`.
 
+### Requirement: Workout text grammar and provider read-back tolerances
+The system SHALL read Intervals.icu workout text only as quantity-first dash steps with one intensity target each, never inferring from prose, and SHALL compare the provider's parsed reply with the same parse using fixed tolerances. `m` in a quantity means minutes; metres are written `mtr`.
+
+#### Scenario: Quantities and units
+- **WHEN** a step quantity is written
+- **THEN** a duration is one or more decimal-number parts of `h`, `m` (minutes), `s`, `'` (minutes) or `"` (seconds), such as `1h2m30s`, and a distance is a number with `km`, `mtr` (metres), `mi` (1609.344 m) or `yd` (0.9144 m); a zero amount, another unit or a missing quantity is `invalid_workout_step`, and a distance step keeps its distance while its time is left to the provider.
+
+#### Scenario: Intensity targets
+- **WHEN** a step carries its target after an optional `ramp`
+- **THEN** it is a zone (`Z2`, `Z1-Z2`, optionally `HR` or `Pace`), a percent or percent range (optionally `HR`, `LTHR`, `Pace` or `FTP`), watts or bpm (`200-240w`, `120bpm`), or a pace `m:ss` with an optional per-distance unit (`/km`, `/mi`, `/100m`, `/100y`, `/500m`, `/400m`, `/250m`) followed by `Pace`; no target is `missing_workout_target`, a second target in the same step `ambiguous_workout_target`, and a target kind (power, HR, pace) other than the unit's non-`AUTO` target `workout_target_mismatch`.
+
+#### Scenario: Repeats and step limit
+- **WHEN** a text line ends in `Nx`
+- **THEN** N must be 1 to 100 and the dash steps must follow directly and end at a blank line, each step repeating in order; a repeat header followed by a blank line, another header or no steps, a text line directly after steps without a blank line, or more than 5000 expanded steps is `invalid_workout_repeat`.
+
+#### Scenario: Read-back tolerances
+- **WHEN** the provider's `workout_doc` is checked against the expanded parse
+- **THEN** groups carry an integer `reps` of 1 to 100, are nested at most 3 deep and expand to at most 5000 steps; each step matches in order with its duration (s) or distance (m) within 1, the same ramp flag, the written units (`<kind>_zone`, `%ftp`, `%hr`, `%pace`, `%lthr`, `w`, `bpm` or one `secs/<unit>`) and its value, or start and end, within 0.01; every step duration is positive, the document duration and the reported moving time are within max(1, number of steps) seconds of their sum, and the training load is positive, else `intervals_workout_verification_failed`.
+
+Detailed contract: examples and the user-facing syntax are in docs/workout-export-format.md; the stated minutes against the step sum keep the thirty-second tolerance of TL7.
+
+Evidence: `backend/activities/workout_text.py:structured_blocks`, `backend/activities/workout_text.py:_workout_amount`, `backend/activities/workout_text.py:_workout_target`, `backend/activities/workout_text.py:_repeat_header`, `backend/activities/workout_text.py:verify_workout_readback`, `backend/activities/workout_text.py:_flatten_steps`, `backend/activities/workout_text.py:_verify_step`, `backend/activities/workout_text.py:_verify_totals`; `tests/test_workout_text.py:test_composite_and_second_durations_export_exact_seconds`, `tests/test_workout_text.py:test_supported_power_hr_and_pace_targets`, `tests/test_workout_text.py:test_incompatible_workout_target_is_rejected`, `tests/test_workout_text.py:test_repeat_without_steps_or_separator_is_rejected`, `tests/test_workout_text.py:test_reported_inline_repeat_and_competing_watts_are_rejected`, `tests/test_workout_text.py:test_provider_readback_must_confirm_every_step_target_and_calculated_load`, `tests/test_workout_text.py:test_provider_repeat_reply_is_compared_in_execution_order`.
+
 ### Requirement: TL8 Local export preparation and explicit provider write boundary
 The system SHALL build validated provider-neutral planned workout exports and provider payloads without contacting providers, and SHALL reach outbound create/update/plan/delete (Intervals.icu) and plan pushes (Wahoo, Garmin strength) only through an explicit synchronization use case or job. Intervals.icu is an output target: nothing in the library or the plan is read back from it.
 
@@ -217,7 +240,7 @@ The system SHALL build validated provider-neutral planned workout exports and pr
 - **WHEN** a check fails
 - **THEN** the error is 502 with the reason `intervals_workout_sport_mismatch`, `intervals_workout_category_mismatch` or the workout-text reason; local validation errors are 400 with `ambiguous_workout_step`, `workout_duration_mismatch` or `invalid_workout_start_date`.
 
-Detailed contract: the text grammar and the tolerances are documented in docs/workout-export-format.md.
+Detailed contract: the text grammar and the read-back tolerances are specified in the requirement "Workout text grammar and provider read-back tolerances".
 
 Evidence: `backend/activities/workout_text.py:verify_workout_readback`, `backend/planning/workout_export.py:build_planned_workout_export`, `backend/planning/workouts.py:validate_intervals_workout_result`; `backend/sync/workout_export.py:WorkoutExportPort`, `backend/sync/workout_export.py:WorkoutLibraryExportPort`; `tests/test_workout_library_export.py:test_serialize_and_readback_never_open_the_transport`, `tests/test_workout_library_export.py:test_serialize_library_matches_the_planning_payload`; `tests/test_workout_export_parity.py:test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_planning_workouts.py:test_event_date_boundary_and_duration_limits`.
 
@@ -604,6 +627,32 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 
 Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`.
 
+### Requirement: Planned workout estimate from steps
+The system SHALL estimate a planned run or ride at read time from its workout steps and the athlete's thresholds on the unit's day (method `workout-steps-v1`, source `derived`), SHALL store nothing, and SHALL leave every value that depends on an unresolved step unknown with its reason.
+
+#### Scenario: Step intensity
+- **WHEN** a step target is resolved
+- **THEN** its intensity is the fraction of the threshold: percent of FTP, of threshold pace or of LTHR as written, watts over FTP, bpm over LTHR, pace speed over threshold speed; a zone is the midpoint of its limits (the lower limit for the open top zone), a range or ramp the mean of both ends, and a percent of the maximum heart rate is `value × max_hr / lthr`, or `value / 0.9` without an LTHR.
+
+#### Scenario: Unit values
+- **WHEN** every step has a duration and an intensity
+- **THEN** the intensity factor is the time-weighted 4th-power mean when every step is a power step, else the quadratic mean, and the load is `hours × IF² × 100`; the band seconds are low, moderate and high (with 6 or more zones Z1-2, Z3-4 and Z5 upward, with up to 5 zones Z1-2, Z3 and Z4 upward); `load_basis` is `normalized_power_over_ftp`, `relative_pace_speed`, `relative_lthr` or `mixed_step_intensity`.
+
+#### Scenario: Unknown values
+- **WHEN** a value cannot be resolved
+- **THEN** `unknown` names the reasons (`zone_out_of_range`, `missing_max_hr`, `missing_ftp`, `missing_lthr`, `pace_unit_unknown`, `invalid_pace`, `missing_threshold_pace`, `ambiguous_run_target` for a run target without `W`, `FTP`, `HR` or `Pace`, `unsupported_target`, `missing_pace_for_distance_step`, `sport_without_step_targets` or the workout-text reason) and only the load, intensity factor or band seconds that depend on it stay null.
+
+Detailed contract: a distance step gets its duration from its pace speed and a timed pace step its distance; clock paces are read per km or mile only. The estimate feeds the derived session focus, the hard-session rule, the intensity distribution and the load plan checks.
+
+Evidence:
+- `backend/activities/workout_load.py:estimate_workout`
+- `backend/planning/planned_unit_load.py:estimate_planned_unit`
+- `tests/test_workout_load.py:test_bare_run_target_is_ambiguous_but_watts_are_not`
+- `tests/test_workout_load.py:test_mixed_steps_use_quadratic_mean`
+- `tests/test_workout_load.py:test_one_unknown_step_keeps_duration_but_not_load`
+- `tests/test_workout_load.py:test_percent_of_max_hr_needs_max_hr`
+- `tests/test_workout_load.py:test_repeats_percent_bands_and_load`
+
 ### Requirement: Session focus of planned units and templates
 Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes. A Coach write that creates, moves or changes a strength unit without a strength structure, focus and strength intensity SHALL be blocked by the plan check `strength_incomplete`, which the Coach cannot accept away.
 
@@ -673,6 +722,18 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **WHEN** the athlete adopts the first threshold estimate from chest-strap RR intervals (`POST /api/profile/first-threshold/adopt`, never by the Coach)
 - **THEN** it is stored as `first_threshold_pct` with the origin `estimated` (`first_threshold_origin`) through the profile save path with change receipt and undo, the caps follow it like a measured value, the cap source is `estimated` (label `geschätzt`), a stored measured value is replaced only when the request says so, and a later manual entry sets the origin back to `measured`.
 
+#### Scenario: Cap values
+- **WHEN** a cap is derived
+- **THEN** the default is 80 % of the run threshold HR for recovery units and 87 % for easy and long units; from a measured or adopted first threshold the easy and long cap is that percent minus 3.0 points and the recovery cap the lower of 80 and the easy cap minus 7.0 points, each rounded down to one decimal, and the defaults apply (source `default`) when the easy cap would exceed 100 or a cap or its exported lower bound would fall below 20; the exported lower bound `low_percent_lthr` is the lower of 65 and the cap minus 15 points, rounded down to one decimal.
+
+#### Scenario: Stored cap
+- **WHEN** a cap is validated or resolved
+- **THEN** it holds exactly `percent_lthr`, `low_percent_lthr` and `source` (`default`, `measured` or `estimated`, labelled "Standard", "gemessen" and "geschätzt"), both percentages within 20 to 120 and the lower one below the cap; the bpm is the percent of the threshold HR rounded half up; a cap stored for another focus does not apply.
+
+#### Scenario: Cap verdict
+- **WHEN** a run's heart rate is judged against its unit's cap (method `heart-rate-cap-execution-v1`)
+- **THEN** the verdict is `above_cap` when the time-weighted mean is above the cap or more than 10 % of the time is above it, `upper_edge` when the mean is at least 95 % of the cap, else `within_target`, with `mean_bpm`, `mean_percent_of_cap`, `time_above_cap_pct`, `cap_bpm`, `cap_percent_lthr`, `cap_source` and `cap_label`; without a threshold HR or a heart-rate stream it is `not_covered`.
+
 #### Scenario: Export to Wahoo
 - **WHEN** a run unit with a cap becomes a Wahoo plan
 - **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
@@ -685,7 +746,7 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **WHEN** a unit has a cap
 - **THEN** its card shows the percent first, then the currently resolved bpm and the source (the form "≤ <percent> % LSHF · <bpm> bpm · <source>"), and the post-session analysis judges the run's heart rate against the stored cap resolved for the unit's date (`planned_targets.heart_rate_cap`: mean, time above the cap, verdict within_target, upper_edge or above_cap), not against the zones.
 
-Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/run_lthr.py:RunLthr.resync`, `backend/planning/push_state.py:run_document_digest`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
+Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/run_lthr.py:RunLthr.resync`, `backend/planning/push_state.py:run_document_digest`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`. Added evidence: `backend/activities/hr_cap.py:cap_percents`, `tests/test_run_hr_cap.py:test_a_measured_threshold_that_no_cap_can_satisfy_falls_back_to_the_defaults`, `tests/test_run_hr_cap.py:test_time_above_the_cap_counts_even_with_a_low_mean`.
 
 ### Requirement: Structured strength units
 Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.

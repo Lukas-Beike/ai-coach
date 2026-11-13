@@ -46,9 +46,37 @@ Evidence: `backend/activities/detail_contract.py:rating_order`, `backend/canonic
 - **WHEN** the id is empty, longer than 200 characters, unknown, or resolves to a session without active records
 - **THEN** the read fails with the existing `invalid_activity_request` or `activity_details_not_found` error and a provider-neutral message, and no provider request or write occurs.
 
+#### Scenario: Reference resolution
+- **WHEN** a detail read gets a local session id or a provider activity id
+- **THEN** the id of exactly one provider record resolves to its session and a merged session to the session that retained it, also after that session's deletion; an id that names records of several sessions is unknown.
+
 Detailed contract: Derived metrics SHALL identify source and load model. Every `source` object SHALL carry an additive `recorded_by` field naming the recording device from the record provenance, and the response `data_scope` SHALL name the contributing provider(s) and the recording device instead of a fixed provider. A local session id of any provider session, including Garmin-only and Wahoo-only sessions, SHALL resolve through the same read path. Detail status SHALL expose available kinds, refreshability, stale/load-error metadata, and coverage. The PWA SHALL render only from the served document and SHALL derive its refresh offer from `detail_data.providers[]` entries rather than from an Intervals-only activity check. Frontend asset query versions and the service-worker cache name SHALL change together with the contract.
 
-Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/http_api/activity_assembly.py`; `tests/test_detail_envelope.py:test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all three Playwright projects.
+Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/http_api/activity_assembly.py`; `tests/test_detail_envelope.py:test_envelope_is_filled_for_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all three Playwright projects. Added evidence: `backend/performance/canonical_detail.py:read_reference`, `tests/test_canonical_detail_reader.py:test_a_deleted_alias_resolves_to_the_session_it_retained`, `tests/test_canonical_detail_reader.py:test_an_id_of_records_in_several_sessions_is_not_a_reference`.
+
+### Requirement: Executed strength set selection and comparison
+A session SHALL use exactly one stored strength set list: Garmin's exercise sets (with the athlete's corrections) first, else a file set list in the order Garmin, Wahoo, then output-only Intervals.icu. Set lists SHALL never be merged set by set.
+
+#### Scenario: Summary
+- **WHEN** the list is summarised
+- **THEN** it reports `source`, `provider`, `active_sets`, `total_reps`, `volume_kg` (reps times kg, one decimal), `leg`, `by_category`, `unrecognized_sets` and at most 20 exercises in order of first appearance (`omitted_exercises` for the rest), each with `sets`, `top_kg` and `top_reps`.
+
+#### Scenario: Leg session
+- **WHEN** an exercise has the category squat, deadlift, lunge, leg curl, calf raise, hip raise, hip swing, olympic lift, plyo or total body
+- **THEN** the session is a leg session; it is not one only when every exercise has a known non-leg category, and the categories other, cardio, warm-up and run decide nothing.
+
+#### Scenario: Plan comparison
+- **WHEN** planned exercises are compared with the executed sets
+- **THEN** the executed sets of a category go to the planned exercises of that category in plan order, a set counts as done at or above the planned reps or without reported reps, executed sets are skipped as warm-up only as far as they exceed the planned working sets (at most the planned warm-up sets), and the percentage is the done sets over the planned sets of the matched exercises, rounded.
+
+Evidence:
+- `backend/activities/strength_sets.py:plan_comparison`
+- `backend/activities/strength_sets.py:strength_rank`
+- `backend/activities/strength_sets.py:strength_summary`
+- `tests/test_strength_consumers.py:test_exercise_sets_win_over_file_sets_in_a_stable_order`
+- `tests/test_strength_consumers.py:test_executed_warmup_sets_are_not_working_sets`
+- `tests/test_strength_consumers.py:test_total_body_is_leg_and_neutral_categories_decide_nothing`
+- `tests/test_strength_consumers.py:test_twelve_planned_and_nine_done_is_75_percent`
 
 ### Requirement: Sample provenance and clock-aware detail merging
 The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution over downsampled streams, choose channels by device and source quality, and align them to a common clock only when supported. Provider ties follow Wahoo, Garmin, Intervals.icu; laps prefer device laps, then provider intervals, then splits; zones keep sensor and boundary-source identity. Downsampling keeps aligned equal-length channels and is flagged.
@@ -110,13 +138,35 @@ The system SHALL read local details without implicit provider refresh, serve onl
 - **WHEN** a stored detail set has no summary fingerprint
 - **THEN** it is never reported stale.
 
+#### Scenario: Staleness scope
+- **WHEN** staleness decides whether the analysis is withheld
+- **THEN** only stream, lap and zone sets count; a strength set list never withholds the analysis.
+
+#### Scenario: Analysis sections
+- **WHEN** the analysis is served
+- **THEN** it has `interval_quality`, `sensors` (`heart_rate`, `power`), `execution`, `aerobic`, `power_profile` and `running_profile` (each with `stream_resolution` `full` or `downsampled`) and, for non-trail runs only, `form_drift`; with an optical heart rate and an `ok` or `partial` interval quality it adds `heart_rate_reliability` "Optisch am Handgelenk gemessen: in Intervallen weniger zuverlässig.".
+
+#### Scenario: Counting rule of stream zones
+- **WHEN** zone times are counted from streams
+- **THEN** each sample credits the time to the next sample; the last sample and a sample before a step longer than `max(30 s, 3 × the median step)` count nothing, so a stream recorded every 8 s with one 5-minute pause counts its 8 s steps and not the pause; a power of 0 W counts in the lowest zone and a heart rate or speed of 0 is no reading.
+
+#### Scenario: Stored zone times and bounds
+- **WHEN** zone times are stored for reports
+- **THEN** each sensor lists `{"id": "Z<n>", "secs": <seconds, one decimal>}` per zone, and a sensor without its stream, its threshold or any counted second is left out, as is one whose zone set has more zones than the canonical maximum; in the detail document a zone bound outside the canonical boundary range is left open.
+
 Detailed contract: A session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the canonical activity records and the local session metrics (card M8); no provider summary row is read. Analysis aggregation for reports and calendar profiles SHALL read only version-3 canonical analysis rows of live sessions, keyed by session id, except the best-effort curve, which reads full-resolution canonical stream sets; Intervals.icu-path rows and kv records are never read. The recorded profile colors power by the FTP and heart rate by the threshold HR resolved locally (local, Garmin, Wahoo) for the session day. Existing target snapshots, also those kept under a session merged into another, carry over unchanged; a session without one freezes its matched planned targets at its first computation when it started within the last seven days, and a legacy kv copy hands its frozen targets to a canonical row without one. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
 
 Evidence:
+- `backend/activities/stream_zones.py:max_step_s`
+- `backend/activities/stream_zones.py:zone_times`
 - `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`
+- `backend/performance/canonical_session_analysis.py:session_analysis`
 - `backend/performance/report_service.py:TrainingRecordsService.observations`
 - `backend/performance/canonical_detail.py:CanonicalDetailReader.read`
 - `backend/activities/stream_zones.py:with_stream_zones`
+- `tests/test_canonical_detail_reader.py:test_long_streams_are_reported_as_display_sampled`
+- `tests/test_stream_zones.py:test_a_high_threshold_leaves_bounds_beyond_the_range_open`
+- `tests/test_stream_zones.py:test_coasting_counts_in_the_lowest_power_zone`
 - `tests/test_stream_zones.py`
 - `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`
 - `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`
@@ -142,7 +192,27 @@ The system SHALL describe how one run or ride was executed from its own merged s
 - **WHEN** heart rate jumps by more than 20 bpm within 2 s in over 2 % of samples, a run's heart rate follows its step cadence, or speed jumps by more than 2.5 m/s within 2 s in over 1 % of samples
 - **THEN** `data_quality` names `spikes`, `possible_cadence_lock` or `jumps`, so the Coach can doubt the reading before calling it fatigue.
 
-Evidence: `backend/performance/session_execution.py:session_execution`, `backend/performance/canonical_session_analysis.py`, `backend/performance/analysis_input.py:analysis_input`; `tests/test_session_execution.py`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`.
+#### Scenario: Input limits
+- **WHEN** a run or ride is described
+- **THEN** its streams must span at least 600 s, samples count with a step of at most 5 s, laps shorter than 5 s are ignored, at most 40 reps are listed (`reps_listed` gives the count when more exist) and the first 30 s of a rep are compared with the rest only for reps of at least 90 s; another sport is `not_applicable` ("Nur Lauf und Rad.") and too short or missing streams, or streams without speed or power, are `insufficient_data` ("Zu kurze oder fehlende Messreihe.", "Tempo oder Leistung fehlt.").
+
+#### Scenario: Structure from lap outputs
+- **WHEN** laps carry no work or recovery labels
+- **THEN** they split into work and recovery only with at least 3 laps whose largest gap between the sorted lap outputs is at least 15 % of the faster side.
+
+#### Scenario: Cadence lock
+- **WHEN** a run has at least 60 paired samples with a step rate of at least 140 spm, at least half of them with a heart rate within 4 bpm of the step rate, a step-rate standard deviation of at least 3 spm and a correlation of at least 0.8
+- **THEN** `data_quality.heart_rate` is `possible_cadence_lock`.
+
+#### Scenario: Recovery and closing heart rate
+- **WHEN** a recovery after a work lap lasts at least 65 s
+- **THEN** `heart_rate_drop_60s` is the highest heart rate of its first 15 s minus the mean of seconds 55 to 65, consecutive recovery laps count as one recovery and a shorter recovery reports no drop; `heart_rate_end` of a work lap or recovery is the mean of its last 10 s, a run's cadence is reported in steps per minute (twice the recorded cadence) and its stride length is speed over that step rate (two decimals).
+
+#### Scenario: Continuous main part
+- **WHEN** a session has no work laps
+- **THEN** the main part starts after the provider's warm-up laps, else after the first 600 s when the session spans at least 1800 s, and ends before the provider's cool-down laps; it needs at least 600 s, else `halves` is `insufficient_data` ("Hauptteil zu kurz.").
+
+Evidence: `backend/performance/session_execution.py:session_execution`, `backend/performance/canonical_session_analysis.py`, `backend/performance/analysis_input.py:analysis_input`; `tests/test_session_execution.py`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`. Added evidence: `tests/test_session_execution.py:test_a_recovery_split_into_laps_counts_as_one`, `tests/test_session_execution.py:test_easy_run_reports_heart_rate_drift_in_the_main_part`.
 
 ### Requirement: Work laps against planned targets
 The system SHALL pair the executed work laps of a run or ride in order with the planned work steps of its matched local planned unit, without requiring matching durations, and describe each rep against its target from the athlete's current thresholds; ramps and unresolved targets stay unscored.
@@ -159,7 +229,19 @@ The system SHALL pair the executed work laps of a run or ride in order with the 
 - **WHEN** the session is continuous, no planned unit matches, or no planned step has a resolvable target
 - **THEN** no comparison is invented: the result is absent or `not_covered` with the reason and any unknown target reasons.
 
-Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`.
+#### Scenario: Pairing and rep fields
+- **WHEN** the work steps are chosen and a rep is compared
+- **THEN** as many of the hardest steps as laps were executed (the real lap count, not the 40 listed reps) are chosen only when the next easier step is more than 10 % easier than the easiest chosen one; heart-rate targets are read over the second half of the lap; a rep reports `rep`, `planned_target`, `duration_s`, the planned duration or distance, the target range (`target_pace_s_per_km` fastest and slowest, `target_kmh`, `target_watts` or `target_bpm`, null for the open upper bound), `deviation_pct` (one decimal, 0 inside the range), `time_in_target_pct` (whole percent; display samples more than 15 s apart count nothing), `planned_recovery_s` and `recovery_s`, and an unscored rep carries `target_unknown` (`short_rep_heart_rate`, `missing_measurement` or the target's own reason).
+
+#### Scenario: Target levels
+- **WHEN** the levels of the planned steps are compared
+- **THEN** a level is the target's middle as a fraction of its threshold (FTP, threshold speed, LTHR or 90 % of the maximum heart rate), the open top zone counts from its lower bound, a pace target without a threshold pace is levelled against the fastest pace target of the plan, and a ride shown in watts with a speed target takes its speed from the displayed stream.
+
+#### Scenario: Not covered
+- **WHEN** the execution is not `ok`, is not an interval session, the sport is unknown or no planned step resolves
+- **THEN** the status is `not_covered` with "Ausführung unbekannt.", "Keine Intervalle in der Aufzeichnung erkannt.", "Sportart unbekannt." or "Keine auswertbaren Zielschritte im Plan." (the last with `unknown_targets`).
+
+Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`. Added evidence: `tests/test_planned_targets.py:test_absolute_paces_count_without_a_threshold_pace`, `tests/test_planned_targets.py:test_heart_rate_targets_use_the_second_half`, `tests/test_planned_targets.py:test_progressions_pair_every_rep_with_its_own_step`.
 
 ### Requirement: Comparable earlier sessions
 The system SHALL set a run's or ride's execution against comparable earlier sessions of the last 84 days, read from each session's execution in the curve window, and report this session, the peers' median and the difference with peer count and temperatures; nothing is scored.
@@ -208,7 +290,19 @@ Evidence: `backend/activities/matching.py:match_planned_workouts`; `tests/test_a
 - **WHEN** several completed activities could match a local plan, lap duration does not match, or the percentage basis is missing
 - **THEN** no confident frozen target/score is invented.
 
-Evidence: `backend/activities/matching.py:match_planned_workouts`, `backend/performance/session_analysis.py:interval_quality`, `backend/planning/target_snapshot.py:freeze_targets`; `tests/test_session_analysis.py:test_only_unique_local_match_can_freeze_targets`, `tests/test_session_analysis.py:test_target_uses_frozen_ftp_and_partial_completion_is_partial`, `tests/test_session_analysis.py:test_measured_duration_does_not_imply_target_achievement`.
+#### Scenario: Alignment of laps and steps
+- **WHEN** the recorded laps are aligned with the frozen timed steps
+- **THEN** there must be at least one lap and not more laps than steps, every step must have a duration, and each lap must last within `max(5 s, 10 %)` of its step and not start before the previous lap ended; otherwise the result is `insufficient_data`.
+
+#### Scenario: Target and score of a step
+- **WHEN** a step has a power target in watts or percent of the frozen FTP, a heart-rate target in bpm or a pace target (per km, mile, 100 m, 100 yd, 500 m, 400 m or 250 m)
+- **THEN** a single value counts as plus or minus 5 %, a range as written, and the step is `ok` when measured samples cover at least 80 % of the lap, then reporting `mean`, `seconds_in_target` and `average_deviation_percent` against the range midpoint; zone targets and ramps stay unscored, and at least two `ok` steps with one target and durations within 10 % of each other form a repeat group with `repetitions` and `fade_percent` from the first to the last mean.
+
+#### Scenario: Two tolerances for a single-value target
+- **WHEN** one lap has a single-value target
+- **THEN** interval quality scores it within plus or minus 5 % of the frozen target, while the planned-target execution of the Coach uses plus or minus 2.5 % of today's thresholds and also scores zone targets, so the two results for one rep can differ.
+
+Evidence: `backend/activities/matching.py:match_planned_workouts`, `backend/performance/session_analysis.py:interval_quality`, `backend/planning/target_snapshot.py:freeze_targets`; `tests/test_session_analysis.py:test_only_unique_local_match_can_freeze_targets`, `tests/test_session_analysis.py:test_target_uses_frozen_ftp_and_partial_completion_is_partial`, `tests/test_session_analysis.py:test_measured_duration_does_not_imply_target_achievement`. Added evidence: `backend/performance/session_analysis.py:_interval_steps`.
 
 ### Requirement: Measured aerobic observations
 The system SHALL calculate aerobic efficiency/drift only from sufficiently continuous, moving, appropriate original pulse/output samples and use time weighting for irregular sample intervals. Missing pulse, stopped recordings, excessive gaps, or highly variable interval output SHALL produce insufficient data. Aggregated endurance reads SHALL label results as individual observations with comparability limits rather than inferring a fitness trend from unsuitable sessions.
@@ -221,7 +315,49 @@ The system SHALL calculate aerobic efficiency/drift only from sufficiently conti
 - **WHEN** pulse is absent, samples have large gaps, the recording is stopped, or output is highly variable
 - **THEN** the analysis reports insufficient data instead of a confident drift value.
 
+#### Scenario: Decoupling eligibility
+- **WHEN** a ride with power or a non-trail run with speed is analysed (`time-weighted-session-analysis-v2`)
+- **THEN** the recording must span at least 1800 s, the first 600 s are excluded and the rest is split at its midpoint, and each half needs paired output and heart-rate time of at least 85 % of the half, an output coefficient of variation of at most 15 % and mean outputs within 10 % of each other; samples need a heart rate of 30 to 240 bpm, an output above 0 and a step of at most `max(30 s, 3 × the median step)`; the drift is `(EF1 − EF2) / EF1 × 100` to 0.01 with `long_session` from 5400 s, and an outdoor run uses grade-adjusted speed.
+
 Evidence: `backend/performance/session_analysis.py:aerobic_analysis`, `backend/performance/report_service.py:TrainingRecordsService.endurance`; `tests/test_session_analysis.py:test_irregular_time_spacing_preserves_time_weighted_result`, `tests/test_session_analysis.py:test_missing_pulse_stops_and_variable_intervals_stay_open`, `tests/test_session_analysis.py:test_source_label_names_the_stream_provider`.
+
+### Requirement: Running form drift of long steady runs
+The system SHALL compare the first and the last third of a non-trail run (method `running-form-drift-v1`) and flag the run "Laufstil lässt nach" only when the ground contact time rose. The thresholds are heuristics of this app, not validated limits, and SHALL NOT be presented as an injury-risk score.
+
+#### Scenario: Eligible run
+- **WHEN** a run lasts at least 45 minutes, its first and last third differ in speed by at most 5 % and each third holds running dynamics for at least half of its time (sample steps of at most 5 s)
+- **THEN** the result is `ok` with `third_seconds`, `pace_change_percent` and per metric (`contact_time`, `vertical_oscillation`, `step_length`) the change in percent and `exceeds`; a contact time rise of 5 % sets `flagged` and the label, a vertical oscillation rise of 10 % and a step length fall of 5 % are reported as exceeded without flagging.
+
+#### Scenario: Not eligible
+- **WHEN** the run is too short, its thirds are not comparable or the running dynamics are missing
+- **THEN** the result is `insufficient_data` with the reason, and other sports and trail runs carry no `form_drift` key at all.
+
+Evidence:
+- `backend/performance/canonical_session_analysis.py:session_analysis`
+- `backend/performance/form_drift.py:form_drift`
+- `public/activity-details.js::formDriftLines`
+- `tests/test_running_dynamics.py:test_a_trail_run_or_other_sport_has_no_drift_key_at_all`
+- `tests/test_running_dynamics.py:test_only_a_run_analysis_carries_the_drift_key`
+
+### Requirement: Pace at heart rate
+The system SHALL derive per run with full-resolution streams the time and distance per 5 bpm heart-rate bin (method `pace-at-heart-rate-v2`) and compare runs in one fixed 10 bpm band; it SHALL make no fitness claim from it. The LT1 pace of M9 reads the same bins.
+
+#### Scenario: Eligible run
+- **WHEN** a non-trail run lasts at least 1800 s
+- **THEN** only moving, gap-free samples after the first 600 s with a heart rate of 30 to 240 bpm and a speed above 0 count, a bin starts at the heart rate rounded down to a multiple of 5, outdoor speed is grade-adjusted and only samples within 3 % slope count, treadmill and virtual runs are flat and not adjusted, an outdoor run without a slope or altitude stream is unknown terrain, and the run needs a flat share of at least 80 %.
+
+#### Scenario: Band, trend and peers
+- **WHEN** a block trend or a session comparison is built
+- **THEN** a band needs at least 600 s at a speed variation of at most 15 %; the block trend chooses per environment the 10 bpm band with the most qualifying sessions in the weaker half, then the most sessions, then the most time, then the lower heart rate, and is `ok` only when the earlier and the later half each hold a session and at least 2 sessions have a value; a session comparison uses the runs of the 42 days before it with the same environment and grade handling and the band that qualifies the most of them and holds this run, needs at least 3 and is otherwise `not_covered` ("Nur n vergleichbare Läufe, mindestens 3 nötig.").
+
+Evidence:
+- `backend/performance/pace_at_hr.py:_best_band`
+- `backend/performance/pace_at_hr.py:pace_at_heart_rate`
+- `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`
+- `backend/performance/pace_at_hr.py:session_comparison`
+- `tests/test_pace_at_hr.py:test_band_is_chosen_so_both_halves_have_sessions`
+- `tests/test_pace_at_hr.py:test_compares_with_the_median_of_comparable_runs`
+- `tests/test_pace_at_hr.py:test_runs_older_than_42_days_and_other_environments_do_not_count`
 
 ### Requirement: Original-stream best efforts and validation evidence
 The system SHALL compute observed power-duration and running speed/distance efforts from original time-weighted streams, preserve unknown windows across gaps, keep measured zeros, and keep display downsampling separate from calculations. Latest-activity validation SHALL expose bounded sport-specific direct evidence alongside provider references without claiming a laboratory threshold, VO2max, Zone-2, or race-prediction validation from one activity.
@@ -234,7 +370,15 @@ The system SHALL compute observed power-duration and running speed/distance effo
 - **WHEN** no usable completed activity exists, the sport lacks a specific validation path, or required samples contain gaps
 - **THEN** validation states the relevant no-data/unsupported scope and effort windows remain unknown.
 
-Evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/power_profile.py:running_profile`, `backend/performance/activity_validation.py:activity_performance_validation`; `tests/test_power_profile.py:test_sprint_is_not_lost_to_display_downsampling`, `tests/test_power_profile.py:test_missing_or_stopped_recording_never_yields_peak`, `tests/test_activity_performance_validation.py:test_unknown_sport_and_no_activity_are_explicit`.
+#### Scenario: Latest-activity validation result
+- **WHEN** the latest-activity validation takes the newest session with a readable start (ties by id)
+- **THEN** the result has `available: true`, `status` `needs_coach_interpretation`, `activity`, `provider_references` (`metric`, `value`, `unit`, `source`, `observed_at`, `historical_comparison`), `direct_activity_estimates`, `interpretation_boundary`, `validation_outcome_enum` (`direct_support`, `plausible_corroboration`, `conflict`, `insufficient_evidence`) and the scope "Vergleich der analysierten abgeschlossenen Einheit mit Provider-Leistungswerten; keine Laborvalidierung.", and states no outcome itself; without such a session it is `available: false` with status `no_completed_activity`, and a sport other than running or cycling gets no references and the boundary "Für diese Sportart ist keine sportartspezifische Leistungsvalidierung hinterlegt.".
+
+#### Scenario: Evidence bounds
+- **WHEN** the activity evidence is built
+- **THEN** a value outside its bounds is left out: duration 1 to 604800 s, distance 0 to 1,000,000 m, elevation gain 0 to 100,000 m, load 0 to 100,000, heart rates 30 to 230 bpm, power 0 to 5000 W, RPE 0 to 10, intensity 0 to 200 (a value above 0 up to 2 is a fraction and is multiplied by 100) and pace 120 to 1800 s/km; cycling adds `power_as_percent_of_current_ftp` (weighted, else average, power over the current FTP) when it lies within 0 to 500; running references the running VO2max, threshold pace, threshold heart rate and the four race predictions, cycling the cycling VO2max and FTP.
+
+Evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/power_profile.py:running_profile`, `backend/performance/activity_validation.py:activity_performance_validation`; `tests/test_power_profile.py:test_sprint_is_not_lost_to_display_downsampling`, `tests/test_power_profile.py:test_missing_or_stopped_recording_never_yields_peak`, `tests/test_activity_performance_validation.py:test_unknown_sport_and_no_activity_are_explicit`. Added evidence: `tests/test_activity_performance_validation.py`, `tests/test_server_performance.py:test_activity_validation_omits_implausible_measured_evidence`.
 
 ### Requirement: Canonical mean-maximal curve
 The analysis power and running best-effort curve (`mean-max-curve` version 2, windows including 180, 420, 720 and 1200 s) SHALL be computed at read time only from full-resolution canonical stream sets, count each canonical session once, give overlapping bests of one session the same effort group, and carry the method, version and an input fingerprint. The stored Intervals.icu power curve is not read by any view.
@@ -247,7 +391,19 @@ The analysis power and running best-effort curve (`mean-max-curve` version 2, wi
 - **WHEN** a session has only downsampled streams, a duplicate session is merged into another, a stream set was fetched for an older provider summary, or a session's stored streams change
 - **THEN** the downsampled session gives no best value and its activity detail profile is labelled `downsampled`, the merged pair counts once, the outdated set is left out, and the changed session is recomputed under a new fingerprint without provider access.
 
-Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_session_analysis.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`.
+#### Scenario: Windows
+- **WHEN** a session curve is computed
+- **THEN** cycling has the windows 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800 and 3600 s, running 60, 180, 300, 420, 720 and 1200 s and 1000 and 5000 m.
+
+#### Scenario: Valid samples
+- **WHEN** samples are read
+- **THEN** a sample counts with a step above 0 and at most 5 s, the moving flag when a moving stream exists, and a power of 0 W or more, or a running speed above 0 (from the `velocity`, `speed` or `velocity_smooth` stream, else from the distance difference) with a non-decreasing distance; a window counts only when valid samples cover it completely; power is rounded to 0.01 W, speed to 0.001 m/s and time to 0.01 s.
+
+#### Scenario: Selection
+- **WHEN** the best values are selected
+- **THEN** windows of 28 and 90 days ending today are served from ride and run sessions without e-bike assistance, commutes, warm-ups and cool-downs; cycling bests are chosen per outdoor and indoor environment, running bests over all runs (fastest speed, shortest time); `best` lists the 5, 60, 300 and 1200 s cycling bests of the 90 days per environment; each window reports `cache_coverage` with `records`, `usable_records`, `unknown_records`, `power_records` and `power_unknown_records`.
+
+Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_session_analysis.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`. Added evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/report_service.py:TrainingProfileSelectionService.curve_records`, `tests/test_mean_max_curve.py:test_window_reads_canonical_sessions_and_counts_missing_streams`.
 
 ### Requirement: Critical Power and Critical Speed model estimate
 The power profile SHALL carry `critical-power-speed` version 2 (card M4) as an experimental model estimate: least squares of work or distance on time over the best 180, 420, 720 and 1200 s efforts (cycling) or 180, 420 and 720 s efforts (running) of the last 28 days, each effort from another session or at least 30 minutes apart in one session. It SHALL apply the card's stop rules and never set FTP, thresholds or zones.
@@ -264,7 +420,27 @@ The power profile SHALL carry `critical-power-speed` version 2 (card M4) as an e
 - **WHEN** the bests overlap in one session, fewer efforts than the protocol lists remain, a parameter or leave-one-out fit is not positive, a residual exceeds 3 %, or values fall outside CP 50–600 W, W′ 1–50 kJ, CS 1.5–7 m/s or D′ 10–500 m
 - **THEN** the fit reports `insufficient_data` or `withheld` with its reason and no parameter.
 
-Evidence: `backend/performance/critical_power.py:critical_power_speed`; `tests/test_critical_power.py`, `tests/test_performance_coach_ui_parity.py:test_mean_max_curve_is_the_analysis_route_payload`, `e2e/performance-values.spec.js`.
+#### Scenario: Effort selection and stop-rule order
+- **WHEN** efforts are selected and a fit is checked
+- **THEN** durations are filled longest first, candidates are ordered by value, then earlier date, then activity id, and the first independent one is taken; a fit with all efforts is checked in this order: a non-positive slope or intercept ("Nicht positiver Modellparameter."), a relative residual above 3 % ("Modellabweichung über 3 %."), a non-positive leave-one-out parameter ("Ohne eine Belastung ergibt sich ein nicht positiver Parameter.") and the plausibility ranges ("Parameter außerhalb des Plausibilitätsbereichs."); too few efforts give `insufficient_data` with "Keine unabhängigen …-Minuten-Belastungen in 28 Tagen.".
+
+#### Scenario: Result fields
+- **WHEN** a fit is `ok`
+- **THEN** it reports `cp_watts` (one decimal) and `w_prime_joules` (whole), or `cs_mps` (three decimals) and `d_prime_meters` (one decimal), `residuals` (four decimals), `data_age_days` (the age of the oldest effort), `intercept_reliability` `low`, for rides `power_source` `unchecked`, and `sensitivity` with `inverse_time`, `leave_one_out` and, for rides, `three_point`.
+
+Evidence: `backend/performance/critical_power.py:critical_power_speed`; `tests/test_critical_power.py`, `tests/test_performance_coach_ui_parity.py:test_mean_max_curve_is_the_analysis_route_payload`, `e2e/performance-values.spec.js`. Added evidence: `tests/test_critical_power.py:test_data_age_is_the_oldest_effort`, `tests/test_critical_power.py:test_lower_effort_from_another_session_replaces_an_overlap`.
+
+### Requirement: Recurring training comparisons
+Recurring comparisons (method `identical-observed-targets-v1`, served through the Coach `get_training_report` section `comparisons`) SHALL group only stored analyses whose interval quality is `ok` and whose sport, frozen target steps, target basis and device label are identical, SHALL report a group only with at least two recordings, ordered by date, and SHALL derive no improvement score.
+
+#### Scenario: Result
+- **WHEN** at least one group exists
+- **THEN** the status is `observations` and each group has `target_sha256`, `sport`, `device` and `observations`; otherwise the status is `insufficient_data`; at most the 100 newest stored analyses are read.
+
+Evidence:
+- `backend/performance/comparisons.py:recurring_training_comparisons`
+- `backend/performance/session_analysis_reads.py:analysis_summaries`
+- `tests/test_training_record_features.py:test_recurring_comparison_keeps_historical_targets_and_device_provenance_separate`
 
 ### Requirement: Durable athlete feedback separate from provider values
 The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason under the local session the activity reference names. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
@@ -281,9 +457,33 @@ The system SHALL normalize and persist local notes, session RPE from 0 through 1
 - **WHEN** a Coach feedback save names an activity absent from local canonical reads
 - **THEN** it fails without inventing an activity or writing feedback to an unrelated record.
 
+#### Scenario: Feedback route
+- **WHEN** `POST /api/activities/{id}/feedback` carries notes, an RPE, a deviation reason or a purpose and the id leads to no live session
+- **THEN** the answer is 404 "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden."; a body without content clears the feedback without that check, `session_rpe` is any number from 0 to 10 or null (half steps are a UI rule only), and a group of more than 32 feedback rows is refused with 409 and nothing is written; fields, limits and the response are in `docs/api-routes.md`.
+
 Detailed contract: Feedback SHALL remain separate from provider measurements and daily check-ins, attach by exact activity identity, and survive unrelated provider reads. The activity feedback save response and the change-history undo response for an activity feedback change that names `activity_id` SHALL carry `session_rpe_load` under the same rules as the detail document, so the PWA updates the load line without refetching the detail.
 
-Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_a_live_canonical_session`, `tests/test_activity_feedback.py:test_for_activity_ids_queries_in_bounded_chunks`. Served load: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.session_rpe_load`; `tests/test_detail_envelope.py:test_save_response_load_matches_the_served_detail_load`, `tests/test_http_feedback_post.py:test_activity_feedback_save_returns_the_session_load`, `tests/test_http_history_undo_post_routes.py:test_feedback_undo_returns_the_session_load_of_the_named_activity`, and `e2e/activity-details.spec.js`.
+Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_a_live_canonical_session`, `tests/test_activity_feedback.py:test_for_activity_ids_queries_in_bounded_chunks`. Served load: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.session_rpe_load`; `tests/test_detail_envelope.py:test_save_response_load_matches_the_served_detail_load`, `tests/test_http_feedback_post.py:test_activity_feedback_save_returns_the_session_load`, `tests/test_http_history_undo_post_routes.py:test_feedback_undo_returns_the_session_load_of_the_named_activity`, and `e2e/activity-details.spec.js`. Added evidence: `tests/test_http_feedback_post.py:test_marking_a_purpose_needs_a_live_session`, `tests/test_http_feedback_post.py:test_removing_a_purpose_needs_no_live_session`.
+
+### Requirement: Calendar workout profiles
+A calendar entry SHALL carry a compact `workout_profile`: for a planned unit from its parsed steps, for a completed session from its stored analysis row.
+
+#### Scenario: Planned profile
+- **WHEN** a unit's text has at most 20000 characters and parses into steps that are all timed or all distance-based and none of which has a clock-pace target
+- **THEN** the profile has `source` `planned`, `axis`, `unit` and one segment per step (`duration` or `distance`, `value`, `end_value`, `zone`, `label` and, where the athlete's zones or a threshold resolve it, `range` with `unit`, `min` and `max`); a ramp runs from its lower to its upper value, steps of one kind with mixed units share the zone axis, and absolute watt or bpm targets are coloured from the FTP or threshold heart rate in effect and mark the profile `estimated`.
+
+#### Scenario: Recorded profile
+- **WHEN** a session has a power stream, else a heart-rate stream, of 2 to 200000 samples spanning more than 0 and at most 86400 s
+- **THEN** the profile has `source` `recorded`, unit `W` or `bpm` and 60 equal segments; a sample counts with a step of at most 10 s and a value of 0 to 3000 W or 20 to 230 bpm, a segment with under 80 % coverage has value null and the label "Missing", and the colours follow the thresholds and zone limits resolved for the session's day, as for its zone times, so a Garmin watch zone set or local zones colour the profile like the zone distribution.
+
+Detailed contract: only the 100 newest stored analyses supply recorded profiles to the calendar.
+
+Evidence:
+- `backend/activities/workout_profile.py:planned_profile`
+- `backend/activities/workout_profile.py:recorded_profile`
+- `backend/performance/canonical_session_analysis.py:calendar_profile`
+- `backend/performance/session_analysis_reads.py:calendar_profiles`
+- `tests/test_workout_profile.py`
 
 ### Requirement: Athlete marking of the session purpose
 The system SHALL let the athlete mark a completed session as training, race, commute, warm-up or cool-down in the activity details and through the Coach tool `save_activity_feedback` (`purpose`, null removes it). The marking SHALL be stored with the feedback rows of the session, so receipts, undo and merge groups apply, and SHALL win over the provider event type and the competition hint on every read of the activity summaries.
@@ -319,6 +519,14 @@ The system SHALL require authentication for local activity/analysis reads, inclu
 #### Scenario: Selected recovery refresh
 - **WHEN** the athlete refreshes recovery for a supported period
 - **THEN** only the selected analysis sources/windows are refreshed and partial source results are reported honestly.
+
+#### Scenario: Refresh windows
+- **WHEN** an area is refreshed
+- **THEN** the window ends today: Garmin reads 42 days for `sessions`, 90 days for `performance`, the requested 14 or 84 days (default 14) for `recovery` and the requested days (default 84) for `load`; Wahoo reads 42 days for `sessions` and 90 days for `performance`.
+
+#### Scenario: Refresh result
+- **WHEN** the refresh returns (body in `docs/api-routes.md`)
+- **THEN** every configured source is reported by name ("Garmin-Belastungswerte", "Garmin-Leistungswerte", "Garmin-Erholungswerte", "Garmin-Aktivitätsübersicht", "Wahoo-Aktivitätsübersicht", "Wahoo-Leistungswerte"), and `status` is `ok` when every source was read completely, `partial` when at least one was read and another was incomplete or not refreshed, `already_running` when none was read and one is pending, else `failed`.
 
 #### Scenario: Unauthorized or invalid area
 - **WHEN** the caller lacks authentication or submits an unknown analysis area/unsupported period
@@ -407,6 +615,10 @@ The system SHALL store when the athlete last set a feedback row's session RPE, k
 #### Scenario: Detail shows the load
 - **WHEN** the activity detail of a session with local RPE 6.5 and 62 elapsed minutes is opened or its feedback is saved
 - **THEN** it shows `Session-RPE-Last: 403 AU · RPE 6,5 (Athletenfeedback) × 62 min`; a session without a summary shows no load line.
+
+#### Scenario: Open or interrupted load line
+- **WHEN** a session's load has no value or a long interruption
+- **THEN** the line reads "Session-RPE-Last: offen · <reason>" with "widersprüchliche Provider-RPE", "keine Gesamtdauer" or "ungültige Dauer", nothing is shown for `no_rating`, and a marked session adds " · lange Unterbrechung, <min> min in Bewegung".
 
 Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_activity_feedback.py::test_rating_time_is_recorded_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.
 

@@ -18,7 +18,7 @@ from backend.planning.planned_unit_load import estimate_planned_unit
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
+from backend.sync.canonical_wiring import build_canonical_backfill
 from backend.sync.session_focus_backfill import (
     STATE_KEY,
     SessionFocusBackfill,

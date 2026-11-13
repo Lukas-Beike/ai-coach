@@ -1,6 +1,7 @@
 "use strict";
 
 const { expect } = require("@playwright/test");
+const { waitForSettledState } = require("./settled-state");
 
 async function openCalendar(page, request) {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
@@ -8,6 +9,15 @@ async function openCalendar(page, request) {
   await page.waitForFunction(() => state.initialStateLoaded);
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
   await expect(page.locator(".planned-day.is-today")).toHaveCount(1);
+  // A late state load renders the fixture calendar again and would replace a synthetic one.
+  await waitForSettledState(page);
+}
+
+// A month or week before the configured ones asks for older sessions and re-renders the
+// calendar when they arrive, detaching every shown cell. Justified internal probe: the
+// pending request shows nothing in the DOM.
+async function waitForOlderSessions(page) {
+  await expect.poll(() => page.evaluate(() => !olderSessions.loading)).toBe(true);
 }
 
 // A deterministic calendar around today: collapsible past day, a missed day, repeated extras, a profile and a conflict.
@@ -36,4 +46,4 @@ async function renderSyntheticCalendar(page) {
   });
 }
 
-module.exports = { openCalendar, renderSyntheticCalendar };
+module.exports = { openCalendar, renderSyntheticCalendar, waitForOlderSessions };

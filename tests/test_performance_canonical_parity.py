@@ -377,7 +377,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         sessions = open_manager(directory.name)
         self.addCleanup(sessions.close)
-        add_session_record(sessions, ProviderId.INTERVALS, "a1", "act_a1")
+        add_session_record(sessions, ProviderId.GARMIN, "a1", "act_a1")
         manager = RecordingManager()
         reader = StubObservationReader(_observations(snapshot))
         snapshot_reader = Mock()

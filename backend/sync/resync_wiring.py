@@ -1,19 +1,22 @@
-"""Composition for competition synchronization and provider resync."""
+"""Build the competition sync and the full provider resync (#2101).
+
+Every service reads the live configuration, database and domain owners from the
+application context when it is built.
+"""
 
 from __future__ import annotations
 
-import logging
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from backend.app.context import AppContext
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
-from backend.config import Config
-from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.runtime.events import StateEventBuffer
+from backend.runtime import clock as runtime_clock
+from backend.runtime import events as runtime_events
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 from backend.sync.full_resync import (
     FULL_RESYNC_LABEL,
@@ -32,40 +35,6 @@ from backend.sync.provider_table import (
     WAHOO_NOT_CONFIGURED_MESSAGE,
 )
 from backend.sync.wahoo_sync import WahooSyncService
-
-
-@dataclass(frozen=True)
-class CompetitionSyncOwners:
-    config: Callable[[], Config]
-    intervals_client: Callable[[], Any]
-    competition_service: Callable[[], Any]
-
-
-@dataclass(frozen=True)
-class ResyncProviderOwners:
-    garmin_sync_service: Callable[[], Any]
-    garmin_resync_gate: ProviderResyncGate
-    wahoo_sync_service: Callable[[], Any]
-    wahoo_resync_gate: ProviderResyncGate
-    all_sync_days: int
-
-
-@dataclass(frozen=True)
-class ProviderResyncPersistence:
-    database_manager: Callable[[], DatabaseManager]
-    key_values: KeyValueRepository
-    event_buffer: StateEventBuffer
-    redactor: Any
-
-
-@dataclass(frozen=True)
-class ProviderResyncRuntime:
-    logger: logging.Logger
-    utc_now: Callable[[], str]
-    uuid_factory: Callable[[], str]
-    monotonic: Callable[[], float]
-    operation_observer: Callable[[], SyncOperationObserver]
-    after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None
 
 
 class GarminFullResync:
@@ -170,92 +139,76 @@ def full_resync_handlers(
     }
 
 
-class ProviderResyncAssembly:
-    """Create the competition sync and full provider resync use cases."""
+@dataclass(frozen=True)
+class ProviderResyncServices:
+    competition_reconciler: Callable[[], CompetitionSyncReconciler]
+    competition_sync_service: Callable[[], CompetitionSyncService]
+    full_resync_service: Callable[[], FullProviderResyncService]
 
-    @dataclass(frozen=True)
-    class Inputs:
-        competition: CompetitionSyncOwners
-        resync: ResyncProviderOwners
-        persistence: ProviderResyncPersistence
-        runtime: ProviderResyncRuntime
 
-    def __init__(
-        self,
-        *,
-        dependencies: ProviderResyncAssembly.Inputs,
-    ) -> None:
-        competition = dependencies.competition
-        resync = dependencies.resync
-        persistence = dependencies.persistence
-        runtime = dependencies.runtime
-        self._competition_config = competition.config
-        self._intervals_client = competition.intervals_client
-        self._competition_service = competition.competition_service
-        self._garmin_sync_service = resync.garmin_sync_service
-        self._garmin_resync_gate = resync.garmin_resync_gate
-        self._wahoo_sync_service = resync.wahoo_sync_service
-        self._wahoo_resync_gate = resync.wahoo_resync_gate
-        self._all_sync_days = resync.all_sync_days
-        self._database_manager = persistence.database_manager
-        self._key_values = persistence.key_values
-        self._event_buffer = persistence.event_buffer
-        self._redactor = persistence.redactor
-        self._logger = runtime.logger
-        self._utc_now = runtime.utc_now
-        self._uuid_factory = runtime.uuid_factory
-        self._monotonic = runtime.monotonic
-        self._operation_observer = runtime.operation_observer
-        self._after_resync = runtime.after_resync
-        self._resync_runs = FullResyncRuns()
+def build_provider_resync(
+    ctx: AppContext,
+    *,
+    garmin_resync_gate: ProviderResyncGate,
+    wahoo_resync_gate: ProviderResyncGate,
+    all_sync_days: int,
+    after_resync: Callable[[Mapping[str, Any]], None],
+) -> ProviderResyncServices:
+    """Competition sync and full provider resync over the live owners.
 
-    def competition_reconciler(self) -> CompetitionSyncReconciler:
-        """Create local persistence for remote competition reconciliation."""
-        return CompetitionSyncReconciler(self._database_manager(), uuid.uuid4)
+    The composition root passes the Garmin and Wahoo resync gates, the length of
+    the full sync window and the derived-data hook that runs after a resync. The
+    run registry is shared, so every full resync service sees the runs in flight.
+    """
+    resync_runs = FullResyncRuns()
 
-    def competition_sync_service(self) -> CompetitionSyncService:
-        """Create the authorized competition synchronization use case."""
+    def competition_reconciler() -> CompetitionSyncReconciler:
+        """Local persistence for remote competition reconciliation."""
+        return CompetitionSyncReconciler(ctx.database(), uuid.uuid4)
+
+    def competition_sync_service() -> CompetitionSyncService:
+        """The authorized competition synchronization use case."""
         return CompetitionSyncService(
-            self._competition_config(),
-            self._intervals_client,
-            self.competition_reconciler(),
-            self._competition_service(),
-            self._database_manager(),
-            self._key_values,
-            self._event_buffer,
-            self._redactor,
-            self._logger,
-            self._utc_now,
+            ctx.config(),
+            lambda: ctx.provider_transport.intervals_client(),
+            competition_reconciler(),
+            ctx.planning.competition(),
+            ctx.database(),
+            ctx.key_values,
+            runtime_events.STATE_EVENT_BUFFER,
+            ctx.redactor,
+            ctx.logger,
+            runtime_clock.utc_now,
         )
 
-    def full_resync_service(self) -> FullProviderResyncService:
-        """Create full provider resynchronization over current service owners."""
-        observer = self._operation_observer()
+    def full_resync_service() -> FullProviderResyncService:
+        """Full provider resynchronization over the current service owners."""
+        observer = ctx.provider_sync.operation_observer()
         gates: dict[str, ProviderResyncGate] = {
-            GARMIN_ID: self._garmin_resync_gate,
-            WAHOO_ID: self._wahoo_resync_gate,
+            GARMIN_ID: garmin_resync_gate,
+            WAHOO_ID: wahoo_resync_gate,
         }
         handlers = full_resync_handlers(
-            garmin_service=self._garmin_sync_service(),
-            wahoo_service=self._wahoo_sync_service(),
-            all_sync_days=self._all_sync_days,
+            garmin_service=ctx.garmin.sync_service(),
+            wahoo_service=ctx.wahoo.sync_service(),
+            all_sync_days=all_sync_days,
         )
         return FullProviderResyncService(
             handlers,
-            FullResyncStateStore(
-                self._database_manager(),
-                self._key_values,
-                PROVIDER_RESYNC_KEYS,
-            ),
+            FullResyncStateStore(ctx.database(), ctx.key_values, PROVIDER_RESYNC_KEYS),
             FullResyncOperationJournal(
                 observer,
-                self._logger,
-                self._redactor.redact_text,
-                self._utc_now,
-                self._monotonic,
-                self._uuid_factory,
+                ctx.logger,
+                ctx.redactor.redact_text,
+                runtime_clock.utc_now,
+                time.perf_counter,
+                lambda: uuid.uuid4().hex,
             ),
             gates=gates,
-            after_resync=self._after_resync,
-            runs=self._resync_runs,
+            after_resync=after_resync,
+            runs=resync_runs,
         )
+
+    return ProviderResyncServices(
+        competition_reconciler, competition_sync_service, full_resync_service
+    )

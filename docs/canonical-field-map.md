@@ -810,16 +810,13 @@ Purpose and competition link: `with_competitions` (`session_purpose.py`) links e
 
 ### Session bundling of the records (who is in a session)
 
-`bundle_sessions` (`canonical_sessions.py`) assigns records one to one; `link_activity_sessions` / `split_unmatched_sessions` (`session_linking.py`) persist and undo it. Keys the mappers supply: `activity_id` and `provenance.provider`; `started_at` (compared on the athlete wall clock); `sport` (legacy family: cycling, running, swimming, strength, else other); `duration_s`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`; `provenance.recorded_by`; `external_ref` (Intervals only). Rules:
+`bundle_sessions` (`canonical_sessions.py`) assigns records one to one; `link_activity_sessions` / `split_unmatched_sessions` (`session_linking.py`) persist and undo it. Keys the mappers supply: `activity_id` and `provenance.provider`; `started_at` (compared on the athlete wall clock); `sport`; `duration_s`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`; `provenance.recorded_by`. A stored Intervals.icu activity record is never bundled (#2148). Rules:
 
 | Rule | Condition |
 |---|---|
-| exact link (`_assign_exact`) | an Intervals.icu record whose `external_ref` names a stored Garmin or Wahoo record joins it whatever the times say; one record per provider per session; link kind `exact` |
-| Garmin or Wahoo vs Intervals.icu | starts within 30 min, same sport family (or either `other`), every comparable measurement agrees: duration within max(120 s, 10 % of the Intervals value) against `duration_s` or the Garmin `moving_duration_s` (elapsed pass: elapsed against elapsed), distance within max(500 m, 10 % of the Intervals value) when both are non-zero; a Wahoo record only joins a Wahoo-recorded Intervals copy |
-| Intervals.icu Garmin-recorded ride vs Wahoo-recorded ride (`_wahoo_copy_cost`, legacy copies) | both `ride`, starts within 30 min, `duration_s` and `distance_m` present and positive on both and within max(120 s, 10 % of the larger) and max(500 m, 10 % of the larger); link kind `heuristic` |
 | Garmin vs Wahoo record, any sport (`_provider_copy_cost`) | the same `sport`, or either `other`; starts within 30 min, and within 10 min unless both `distance_m` are positive and agree within max(500 m, 10 % of the larger); some duration pair agrees within max(120 s, 10 % of the larger): `duration_s` or `moving_duration_s` on either side, or elapsed against elapsed; a missing or zero distance is not compared; a session takes one Garmin record per `recorded_by` (a watch recording and a relayed Wahoo copy both join); link kind `heuristic` |
 
-Each pass is a one-to-one minimum-cost assignment (cost = mean of the start gap as a share of the window and each compared gap as a share of its tolerance); the primary is the Wahoo record, else the Garmin record, else the Intervals.icu record. Athlete corrections (confirm, split, merge) override these rules.
+Each recording origin's pass is a one-to-one minimum-cost assignment (cost = mean of the start gap as a share of the window and each compared gap as a share of its tolerance); the primary is the Wahoo record, else the Garmin record. Athlete corrections (confirm, split, merge) override these rules.
 
 ### `ActivitySummary` keys
 
@@ -2328,7 +2325,7 @@ Stored extras: row column `mapper_version` = the module's method version, column
 
 ### `local_load.py`
 
-Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_backfill_assembly.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
+Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_wiring.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
 Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **7** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
 Inputs: per session the merged summary (`normalized_power`, `avg_hr`, `grade_adjusted_speed_mps`, `avg_speed_mps`, `moving_duration_s` else `elapsed_duration_s` via `summary_duration_s`, `sport`, `environment`, `id`, `started_at`, `recorded_by`); thresholds at the session day (`DatedThresholds`); resting heart rate observations; the profile sex (`athlete_sex`); the stored per-session heart-rate histogram (`stored_heart_rate_histogram`, analysis row `hr_histogram`, read only for sessions that reach the heart-rate branch); local session feedback and the Garmin RPE for strength (`feedback_by_session`, `session_load` of `session_rpe_load.py`). A provider load or intensity (Garmin `activityTrainingLoad`, Wahoo TSS, Intervals.icu) is never an input.
 

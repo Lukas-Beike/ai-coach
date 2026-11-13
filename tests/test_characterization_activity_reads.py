@@ -20,6 +20,7 @@ from activity_row_support import (
     canonical_source,
 )
 from canonical_detail_support import NOW, seed_intervals_activity
+from test_feedback_session_identity import ingest_wahoo, wahoo_row
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.canonical.activity_detail import ActivityStreamSet
@@ -178,7 +179,10 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         )
 
     def _detail(
-        self, raw: list[dict[str, Any]], read_equipment: Any = None
+        self,
+        raw: list[dict[str, Any]],
+        read_equipment: Any = None,
+        activity_id: str = "ride-1",
     ) -> dict[str, Any]:
         service = _detail_service(
             self.database,
@@ -186,7 +190,7 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             **({} if read_equipment is None else {"read_equipment": read_equipment}),
         )
         return service.detail(
-            "ride-1", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
+            activity_id, garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
 
     def test_detail_reads_the_equipment_of_its_own_activity(self) -> None:
@@ -202,7 +206,9 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
                 ],
             }
 
-        result = self._detail([self.RAW], read_equipment)
+        with cast(DatabaseManager, self.database).unit_of_work() as db:
+            ingest_wahoo(db, [wahoo_row("601")])
+        result = self._detail([self.RAW], read_equipment, "601")
         self.assertEqual([result["session"]["activity_id"]], requested)
         self.assertTrue(requested[0].startswith("act_"))
         self.assertEqual(["bike", "meter"], [row["id"] for row in result["equipment"]])

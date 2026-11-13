@@ -125,13 +125,13 @@ The system SHALL fill the activity duration by one rule for every provider: movi
 
 #### Scenario: Garmin moving time beside its timer time
 - **WHEN** a Garmin activity has `movingDuration` and a longer timer `duration`
-- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Wahoo, and session bundling compares the Garmin elapsed time with the elapsed time of a stored Intervals.icu copy in its elapsed pass.
+- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Wahoo, and session bundling also compares the two elapsed times of a Garmin and a Wahoo record.
 
 #### Scenario: Strength session from any provider
 - **WHEN** a Wahoo or Garmin strength session has a moving or timer time shorter than its elapsed time
 - **THEN** the activity duration is the elapsed time, so rest between sets counts.
 
-Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
+Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_duration_gap`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_wahoo_sessions.py:test_moving_and_elapsed_durations_are_candidates`.
 
 ### Requirement: Garmin activity summary values
 The system SHALL map the Garmin activity list's zone times, training-effect values, altitude extremes, elevation loss, temperature range, estimated sweat loss, lap count and average cadence onto the canonical activity record, so Garmin-only sessions carry them with the Garmin Connect source label.
@@ -223,9 +223,21 @@ The system SHALL apply per-metric source rules rather than a universal provider 
 - **WHEN** Intervals.icu wellness holds today's weight and Garmin's newest weight is three days old
 - **THEN** the current weight is Garmin's; the Intervals.icu weight is neither current nor an alternative.
 
+#### Scenario: Plausibility bounds
+- **WHEN** a value is a candidate for the current or the daily selection
+- **THEN** it must lie within its kind's inclusive bounds before ranking: FTP 50 to 700 W (Garmin and Wahoo), threshold heart rate 80 to 230 bpm, maximum heart rate 80 to 260 bpm, resting heart rate 30 to 230 bpm, RMSSD and weekly HRV 1 to 300 ms, sleep score 0 to 100 and VO2max 20 to 100; the chart series, the power-to-weight series and the Garmin readers apply the same bound per kind, with a threshold pace of 120 to 900 s/km, run threshold power as FTP, Garmin weight of 30 to 300 kg and body fat of 2 to 70 %.
+
+#### Scenario: Ranking inside one provider
+- **WHEN** one provider has several values of a kind
+- **THEN** weight takes the newest day, then the latest time, then the last record; other dated kinds take the newest day, then the last Garmin record or the first record of another provider; FTP, thresholds, maximum heart rate and VO2max ignore the day and take the last Garmin record or the first record of another provider; a per-day selection takes the first record of the day.
+
+#### Scenario: Age counting and weight conflict
+- **WHEN** a value is exactly at its age limit (180 days for a Garmin threshold, 90 days for a Wahoo FTP or weight), or two sources' current weights differ by more than 1.5 kg
+- **THEN** the age counts whole days, so a value exactly at its limit is still current; Garmin weight has no age limit and without a day no limit applies; the alternative weight carries the conflict flag.
+
 Detailed contract: Only Garmin weight and body-fat values are dated, so a Garmin weigh-in of any age precedes a profile value entered later. Within one day of the newest weight or body fat, a device measurement precedes a provider report, which precedes a local entry; the manual profile value and Wahoo's profile weight are fallbacks in that order. Body fat follows the weight rule with a 2-percentage-point conflict tolerance; readiness, sleep, RMSSD, and resting HR are Garmin's (performance-and-readiness); CTL, ATL and form are local (M7) and have no source rule. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. The PWA display preference of weight, body fat, sleep, HRV, resting HR, threshold pace and VO2max is the first provider of that metric's rule; FTP and W/kg charts keep Garmin, whose FTP history they draw. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
 
-Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:resolve_candidates`, `backend/performance/current_thresholds.py:resolve_current_thresholds`, `backend/performance/display_sources.py:preferred_providers`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_current_thresholds.py`, `tests/test_source_policy.py:RecencyResolutionTests`, `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_wahoo_ftp_and_intervals_is_ignored`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_performance_display_sources.py`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
+Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:resolve_candidates`, `backend/performance/current_thresholds.py:resolve_current_thresholds`, `backend/performance/display_sources.py:preferred_providers`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_current_thresholds.py`, `tests/test_source_policy.py:RecencyResolutionTests`, `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_wahoo_ftp_and_intervals_is_ignored`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_performance_display_sources.py`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`. Added evidence: `backend/performance/activity_validation.py:PERFORMANCE_METRIC_BOUNDS`, `tests/test_source_policy.py:test_garmin_thresholds_tie_keeps_the_last_input`, `tests/test_source_policy.py:test_garmin_weight_is_not_age_limited`, `tests/test_source_policy.py:test_resting_hr_bounds_are_inclusive_at_30_and_230`, `tests/test_source_policy.py:test_wahoo_ftp_at_89_and_90_days_is_current_but_91_days_is_not`, `tests/test_source_policy.py:test_wahoo_thresholds_tie_keeps_the_first_input`.
 
 ### Requirement: Correction and reprojection continuity
 The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before the first successful canonical backfill, canonical reads SHALL return no values and consumers SHALL report a pending state; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or becoming pending again.

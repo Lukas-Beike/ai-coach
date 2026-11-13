@@ -39,10 +39,15 @@ FILES = {
     "tests/test_lazy.py": "def load():\n    from backend.app import old\n",
     "tests/fixtures/providers/demo/day.json": "{}",
     "tests/fixtures/other.json": "{}",
+    "tests/fixtures/golden/chart.txt": "",
     "tests/fixture_loader.py": "from pathlib import Path\n"
     "ROOT = Path(__file__).parent / 'fixtures' / 'providers'\n",
     "tests/test_fixture_reader.py": "import fixture_loader\n",
     "tests/test_baseline.py": "BASELINE = 'tests/fixtures/other.json'\n",
+    "tests/test_fixture_scan.py": "from pathlib import Path\n"
+    "FILES = Path('tests/fixtures').rglob('*')\n",
+    "tests/fixture_walker.py": "import os\ndef names(root):\n    return os.listdir(root)\n",
+    "tests/test_fixture_helper_scan.py": "import fixture_walker\nROOT = 'tests/fixtures'\n",
     "tests/test_prose.py": "NOTE = 'Shared fixtures for this test.'\n",
     "tests/test_line_endings.py": "",
     "tests/test_ai_docs_contract.py": "",
@@ -149,14 +154,26 @@ class SelectModulesTests(unittest.TestCase):
     def test_fixture_selects_modules_naming_the_fixtures_directory(self):
         # Loaders build fixture paths from parts, so the directory segment counts
         # wherever it appears; prose does not, and the repository-wide check runs.
-        for fixture in (
-            "tests/fixtures/providers/demo/day.json",
-            "tests/fixtures/other.json",
+        # A fixture in a subdirectory needs that segment too, or a scan (#2516).
+        # A scan in an imported helper counts too, and a top-level fixture keeps the
+        # broad rule when it changes together with a subdirectory one.
+        scanners = {"test_fixture_scan", "test_fixture_helper_scan"}
+        everyone = {"test_fixture_reader", "test_baseline"} | scanners
+        for fixtures, expected in (
+            (
+                ("tests/fixtures/providers/demo/day.json",),
+                {"test_fixture_reader"} | scanners,
+            ),
+            (("tests/fixtures/other.json",), everyone),
+            (("tests/fixtures/golden/chart.txt",), scanners),
+            (
+                ("tests/fixtures/other.json", "tests/fixtures/golden/chart.txt"),
+                everyone,
+            ),
         ):
-            with self.subTest(fixture=fixture):
+            with self.subTest(fixtures=fixtures):
                 self.assertEqual(
-                    set(self.select(fixture)),
-                    {"test_fixture_reader", "test_baseline"} | REPOSITORY_WIDE,
+                    set(self.select(*fixtures)), expected | REPOSITORY_WIDE
                 )
 
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
@@ -203,6 +220,21 @@ class SelectModulesTests(unittest.TestCase):
         )
         self.assertIn("test_nutrition_macro_ranges", modules)
         self.assertNotIn("test_fixture_standard_data", modules)
+        # A frontend-only change with Node tests and their golden fixtures (#2516)
+        # keeps the Python readers of the changed files and the repository checks.
+        modules, _reason = changed_tests.select_modules(
+            [
+                "public/coach.js",
+                "tests/frontend-harness.cjs",
+                "tests/chart-golden.test.cjs",
+                "tests/fixtures/chart-golden/activity-analysis.txt",
+            ]
+        )
+        self.assertIsNotNone(modules)
+        self.assertLessEqual(
+            {"test_server_frontend", *changed_tests.REPOSITORY_WIDE}, set(modules)
+        )
+        self.assertNotIn("test_coach_dialogue", modules)
 
 
 class ChangedPathsTests(unittest.TestCase):

@@ -24,8 +24,8 @@ from backend.sync.full_resync import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import OPERATION_CONTEXT
-from backend.sync.provider_resync_assembly import full_resync_handlers
 from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
+from backend.sync.resync_wiring import full_resync_handlers
 
 NOW = "2026-09-20T12:00:00+00:00"
 

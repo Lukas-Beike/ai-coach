@@ -532,6 +532,18 @@ The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholun
 - **WHEN** one sport has no current values, charts, best efforts or estimates, or the athlete opens `#analysis/performance`
 - **THEN** that sport's segment shows its one empty card while the other sport keeps its content, and the old link opens Laufen.
 
+#### Scenario: Empty card
+- **WHEN** every container of the active segment is empty
+- **THEN** one empty card shows the title "Noch keine Laufdaten", "Noch keine Raddaten", "Noch keine Belastungsdaten" or "Noch keine Erholungsdaten"; with a connected source and the 14-day period of Belastung or Erholung the cause is "Keine Daten in den letzten 14 Tagen." with the action "12 Wochen anzeigen", with a connected source otherwise "Noch keine Daten abgeglichen." with "Jetzt abgleichen", and without a source "Garmin oder Wahoo ist nicht verbunden." with "Anbindung einrichten".
+
+#### Scenario: Slow or failed read
+- **WHEN** an Analyse report or detail read takes longer than 15 seconds or fails
+- **THEN** the view shows an error with "Erneut versuchen" instead of a loading state.
+
+#### Scenario: Power table and estimate line
+- **WHEN** the power profile and the critical-power estimate are shown
+- **THEN** the table lists 5 s, 1 min, 5 min, 20 min and 1 h from the 90-day window, and the line "Experimentell · CP (28 Tage): …" (CS for running) names per fit CP and W′ (kJ) or CS and D′ with "(unsicher)", the count of race efforts, or "—" for a fit that is not `ok`.
+
 Evidence: `public/analysis.js::renderAnalysisSegments`, `public/analysis.js::renderRunningBestEfforts`, `public/analysis.js::criticalPowerLine`, `public/analysis.js::renderAnalysisHistory`, `public/performance-view.js::renderCurrentPerformance`, `public/navigation.js::routeFromHash`; `tests/analysis-presentation.test.cjs::an analysis segment is empty only when every content container reports no data`, `tests/analysis-presentation.test.cjs::current performance shows the status lines below its heading`, `e2e/performance-values.spec.js::@responsive Laufen and Radfahren each show only their sport`.
 
 ### Requirement: Calendar display range setting

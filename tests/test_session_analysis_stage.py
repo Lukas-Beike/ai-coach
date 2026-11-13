@@ -47,9 +47,9 @@ from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import canonical_backfill, session_analysis_stage
 from backend.sync.canonical_backfill import BatchReport
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_backfill
 from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
     summarize_session_analysis,
@@ -65,6 +65,7 @@ from tests.canonical_domain_support import local_zone_configuration
 
 GARMIN = ProviderId.GARMIN
 INTERVALS = ProviderId.INTERVALS
+WAHOO = ProviderId.WAHOO
 SECONDS = 3000
 TIME = tuple(float(second) for second in range(SECONDS + 1))
 WATTS = tuple(200.0 for _ in TIME)
@@ -623,14 +624,12 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual("b" * 64, row["payload"]["summary_sha256"])
 
     def test_snapshot_of_a_merged_session_carries_over(self) -> None:
-        add_session_record(
-            self.manager, INTERVALS, "i3", "act_i3", merged_into="act_g1"
-        )
+        add_session_record(self.manager, WAHOO, "w3", "act_w3", merged_into="act_g1")
         self._write(
             lambda db: _streams(db, GARMIN, "g1"),
             lambda db: save_analysis(
                 db,
-                "act_i3",
+                "act_w3",
                 analysis_version=2,
                 input_sha256="0" * 64,
                 payload={"target_snapshot": TARGETS},

@@ -63,8 +63,8 @@ from backend.performance.session_rpe_load import feedback_by_session, session_rp
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
-INTERVALS = ProviderId.INTERVALS.value
 GARMIN = ProviderId.GARMIN.value
+WAHOO = ProviderId.WAHOO.value
 TODAY = date(2026, 10, 2)
 CP_W = 250.0
 W_PRIME_J = 18_000.0
@@ -97,43 +97,38 @@ class M1SessionRpeInputs(linking.LinkingCase):
             rows = ActivityFeedbackRepository(lambda: "").all(db)
         return [row for row in rows if row["activity_id"] == activity_id]
 
-    def _ingest_ride(self, **intervals_fields: Any) -> None:
-        self._ingest_intervals(
-            [
-                linking.intervals_ride(
-                    moving_time=3300,
-                    elapsed_time=3600,
-                    device_name="Garmin Edge 530",
-                    **intervals_fields,
-                )
-            ],
-            linking.FIRST,
+    def _garmin_ride(self, **garmin_fields: Any) -> dict[str, Any]:
+        return linking.garmin_ride(
+            duration=3600.0, movingDuration=3300.0, **garmin_fields
         )
-        self._ingest_garmin(
-            [linking.garmin_ride(duration=3600.0, movingDuration=3300.0)],
-            linking.SECOND,
+
+    def _ingest_ride(self, **garmin_fields: Any) -> None:
+        workout = linking.wahoo_workout()
+        workout["workout_summary"].update(
+            duration_active_accum="3300", duration_total_accum="3600"
         )
+        self._ingest_wahoo([workout], linking.FIRST)
+        self._ingest_garmin([self._garmin_ride(**garmin_fields)], linking.SECOND)
 
     def test_complete(self) -> None:
         self._ingest_ride()
         sessions = self._sessions()
-        survivor, alias = sessions[linking.INTERVALS_ID], sessions[linking.GARMIN_ID]
+        survivor, alias = sessions[linking.WAHOO_ID], sessions[linking.GARMIN_ID]
         self.assertEqual(
             sorted(row["state"] for row in sessions.values()), ["active", "duplicate"]
         )
         self.assertEqual(alias["merged_into"], survivor["activity_id"])
 
-        intervals = self._record(INTERVALS, linking.INTERVALS_ID)
+        wahoo = self._record(WAHOO, linking.WAHOO_ID)
         garmin = self._record(GARMIN, linking.GARMIN_ID)
         self.assertEqual(
             (
-                intervals["duration_s"],
-                intervals["moving_duration_s"],
-                canonical_store.activity_elapsed_duration(intervals["details"]),
+                wahoo["duration_s"],
+                wahoo["moving_duration_s"],
+                canonical_store.activity_elapsed_duration(wahoo["details"]),
             ),
             (3300.0, 3300.0, 3600.0),
-            msg="#1445: Intervals keeps its elapsed time in the one elapsed field; "
-            "the Intervals.icu mapper (v6) also maps moving_time to moving_duration_s",
+            msg="#1445: the Wahoo total survives in the one elapsed field",
         )
         self.assertEqual(
             (
@@ -143,16 +138,9 @@ class M1SessionRpeInputs(linking.LinkingCase):
             ),
             (3300.0, 3300.0, 3600.0),
             msg="#1445: Garmin stores its elapsed duration in the one elapsed field; "
-            "#1672: its duration is moving time first, like Intervals.icu",
+            "#1672: its duration is moving time first",
         )
-        self.assertEqual(
-            (intervals["recorded_by"], garmin["recorded_by"]),
-            (RecordingOrigin.GARMIN.value, RecordingOrigin.GARMIN.value),
-        )
-        self.assertEqual(
-            canonical_store.activity_device_type(intervals["details"]).value,  # type: ignore[union-attr]
-            "bike_computer",
-        )
+        self.assertEqual(wahoo["recorded_by"], RecordingOrigin.WAHOO.value)
         self.assertIsNone(canonical_store.activity_device_type(garmin["details"]))
 
         saved = self._feedback().save(alias["activity_id"], {"session_rpe": 5})
@@ -165,7 +153,7 @@ class M1SessionRpeInputs(linking.LinkingCase):
             self._stored_feedback(alias["activity_id"])[0]["session_rpe"], 5
         )
         self.assertEqual(self._stored_feedback(survivor["activity_id"]), [])
-        self.assertEqual(self._stored_feedback(linking.INTERVALS_ID), [])
+        self.assertEqual(self._stored_feedback(linking.WAHOO_ID), [])
         self.assertEqual(self._stored_feedback(linking.GARMIN_ID), [])
 
     def test_incomplete(self) -> None:
@@ -202,20 +190,10 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 service.save(linking.WAHOO_ID, {"session_rpe": invalid})
 
     def test_contradictory(self) -> None:
-        self._ingest_ride(icu_rpe=7)
-        self._feedback().save(linking.INTERVALS_ID, {"session_rpe": 5})
-        self._ingest_intervals(
-            [
-                linking.intervals_ride(
-                    moving_time=3300,
-                    elapsed_time=3600,
-                    device_name="Garmin Edge 530",
-                    icu_rpe=7,
-                )
-            ],
-            linking.THIRD,
-        )
-        session = self._sessions()[linking.INTERVALS_ID]["activity_id"]
+        self._ingest_ride(directWorkoutRpe=70)
+        self._feedback().save(linking.WAHOO_ID, {"session_rpe": 5})
+        self._ingest_garmin([self._garmin_ride(directWorkoutRpe=70)], linking.THIRD)
+        session = self._sessions()[linking.WAHOO_ID]["activity_id"]
         self.assertEqual(self._stored_feedback(session)[0]["session_rpe"], 5)
         with self.manager.reader() as db:
             payloads = [
@@ -223,23 +201,25 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 for row in db.execute(
                     "SELECT payload FROM provider_records WHERE provider = ? "
                     "AND record_kind = ? AND state = 'active'",
-                    (INTERVALS, ACTIVITY_RECORD_KIND),
+                    (GARMIN, ACTIVITY_RECORD_KIND),
                 )
             ]
             columns = [
                 row["name"] for row in db.execute("PRAGMA table_info(activity_records)")
             ]
-        self.assertEqual([json.loads(text)["icu_rpe"] for text in payloads], [7])
+        self.assertEqual(
+            [json.loads(text)["directWorkoutRpe"] for text in payloads], [70]
+        )
         self.assertEqual(
             [name for name in columns if "rpe" in name],
             [],
             msg="the provider RPE lives in the record details, not in a column",
         )
-        intervals = self._record(INTERVALS, linking.INTERVALS_ID)
+        garmin = self._record(GARMIN, linking.GARMIN_ID)
         self.assertEqual(
-            json.loads(intervals["details"])["rpe"],
+            json.loads(garmin["details"])["rpe"],
             7,
-            msg="#1446: the canonical record keeps icu_rpe with its provenance",
+            msg="#1446: the canonical record keeps the provider RPE with its provenance",
         )
         with self.manager.reader() as db:
             summaries = activity_summaries(
@@ -259,7 +239,7 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertEqual(
             (session["value"], session["rpe"], session["rpe_source"]),
             (300.0, 5, "athlete_feedback"),
-            msg="#1427/D3: the local rating wins over icu_rpe, never averaged",
+            msg="#1427/D3: the local rating wins over the provider RPE, never averaged",
         )
 
 
@@ -592,11 +572,11 @@ class M4BestEffortInputs(linking.LinkingCase):
             )
             return detail_sets_for(db, provider.value, detail.provider_activity_id)[0]
 
-    def _full_intervals(self) -> tuple[StoredDetailSet, list[tuple[int, int]]]:
+    def _full_wahoo(self) -> tuple[StoredDetailSet, list[tuple[int, int]]]:
         watts, spans = _effort_watts()
         detail = self._stream(
-            ProviderId.INTERVALS,
-            linking.INTERVALS_ID,
+            ProviderId.WAHOO,
+            linking.WAHOO_ID,
             [float(second) for second in range(len(watts))],
             watts,
             StreamResolution.FULL,
@@ -616,8 +596,8 @@ class M4BestEffortInputs(linking.LinkingCase):
         )
 
     def test_complete(self) -> None:
-        self._ingest_intervals([linking.intervals_ride()], linking.FIRST)
-        stored, spans = self._full_intervals()
+        self._ingest_wahoo([linking.wahoo_workout()], linking.FIRST)
+        stored, spans = self._full_wahoo()
         detail = stored.detail
         assert isinstance(detail, ActivityStreamSet)
         self.assertEqual(detail.resolution, StreamResolution.FULL)
@@ -670,11 +650,11 @@ class M4BestEffortInputs(linking.LinkingCase):
         )
 
     def test_contradictory(self) -> None:
-        self._ingest_intervals([linking.intervals_ride()], linking.FIRST)
+        self._ingest_wahoo([linking.wahoo_workout()], linking.FIRST)
         self._ingest_garmin([linking.garmin_ride()], linking.SECOND)
-        full, _ = self._full_intervals()
+        full, _ = self._full_wahoo()
         downsampled = self._garmin_downsampled()
-        survivor = self._sessions()[linking.INTERVALS_ID]["activity_id"]
+        survivor = self._sessions()[linking.WAHOO_ID]["activity_id"]
         with self.manager.reader() as db:
             stored = detail_sets_for_session(db, survivor)
         self.assertEqual(
@@ -683,19 +663,19 @@ class M4BestEffortInputs(linking.LinkingCase):
                 for item in stored
                 if isinstance(item.detail, ActivityStreamSet)
             },
-            {INTERVALS: StreamResolution.FULL, GARMIN: StreamResolution.DOWNSAMPLED},
+            {WAHOO: StreamResolution.FULL, GARMIN: StreamResolution.DOWNSAMPLED},
         )
         started_at = datetime(2026, 9, 10, 5, 0, tzinfo=UTC)
         merged = merge_details(
             DetailCandidate(item, started_at, None) for item in reversed(stored)
         )
         assert merged.streams is not None
-        self.assertEqual(merged.streams.primary.stored.provider, INTERVALS)
+        self.assertEqual(merged.streams.primary.stored.provider, WAHOO)
         self.assertEqual(
             [item.stored.provider for item in merged.streams.alternatives], [GARMIN]
         )
         choice = merged.streams.channels[StreamChannel.POWER_W]
-        self.assertEqual(choice.source.stored.provider, INTERVALS)
+        self.assertEqual(choice.source.stored.provider, WAHOO)
         assert isinstance(full.detail, ActivityStreamSet)
         self.assertEqual(choice.values, full.detail.channels[StreamChannel.POWER_W])
         self.assertNotEqual(downsampled.provider, choice.source.stored.provider)

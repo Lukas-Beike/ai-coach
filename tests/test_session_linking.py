@@ -19,6 +19,7 @@ import intervals_compaction as intervals_fixture
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.session_linking import link_activity_sessions
+from backend.backup.export import PRIVACY_EXPORT_JSONL_SOURCES
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import initialize_schema
@@ -749,74 +750,34 @@ class ConfirmedBundleRevivalTests(LinkingCase):
         )
 
 
-class ExactLinkTests(LinkingCase):
-    def _garmin_copy(self, external_id: str, **fields: Any) -> dict[str, Any]:
-        return intervals_ride(
-            device_name="Garmin Edge 840",
-            source="GARMIN_CONNECT",
-            external_id=external_id,
-            **fields,
-        )
+class IgnoredIntervalsCopyTests(LinkingCase):
+    """A stored Intervals.icu activity copy joins no session and stays stored (#2148)."""
 
-    def test_a_trimmed_copy_links_exactly_to_its_garmin_activity(self) -> None:
+    def test_a_stored_intervals_copy_is_never_linked_and_stays_stored(self) -> None:
         self._ingest_garmin([garmin_ride()], FIRST)
         counters = self._ingest_intervals(
-            [self._garmin_copy(GARMIN_ID, distance=21000.0)], SECOND
+            [intervals_ride(start_date_local="2026-09-10T07:05:00")], SECOND
         )
-        self.assertEqual(counters.linked, 1)
+        self.assertEqual(counters.linked, 0)
         sessions = self._sessions()
-        self.assertEqual(sessions[GARMIN_ID]["link_kind"], "exact")
         self.assertEqual(
-            sessions[INTERVALS_ID]["merged_into"], sessions[GARMIN_ID]["activity_id"]
+            (sessions[GARMIN_ID]["state"], sessions[INTERVALS_ID]["state"]),
+            ("active", "active"),
         )
-
-    def test_an_exact_reference_upgrades_a_heuristic_merge(self) -> None:
-        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
-        self._ingest_garmin([garmin_ride()], SECOND)
-        self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "heuristic")
-
-        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
-
-        sessions = self._sessions()
-        self.assertEqual(sessions[INTERVALS_ID]["link_kind"], "exact")
-        self.assertEqual(
-            sessions[GARMIN_ID]["merged_into"], sessions[INTERVALS_ID]["activity_id"]
-        )
-
-    def test_a_hidden_upstream_keeps_its_copy_from_the_heuristics(self) -> None:
-        self._ingest_garmin([garmin_ride()], FIRST)
-        self._set_session(GARMIN_ID, state="hidden")
-        # A second Garmin recording of the ride, within every tolerance.
-        self._ingest_garmin([garmin_ride("9002")], SECOND)
-        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
-
-        sessions = self._sessions()
-        self.assertEqual(sessions["9002"]["state"], "active")
-        self.assertEqual(sessions[INTERVALS_ID]["state"], "active")
-        self.assertEqual(sessions[GARMIN_ID]["state"], "hidden")
-
-    def test_a_contradicted_heuristic_merge_is_not_changed(self) -> None:
-        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
-        self._ingest_garmin(
-            [garmin_ride(), garmin_ride("9002", startTimeLocal="2026-09-10 12:00:00")],
-            SECOND,
-        )
-        before = self._sessions()
-
-        self._ingest_intervals([self._garmin_copy("9002")], THIRD)
-
-        after = self._sessions()
-        for provider_activity_id in (INTERVALS_ID, GARMIN_ID, "9002"):
-            self.assertEqual(
-                (
-                    after[provider_activity_id]["state"],
-                    after[provider_activity_id]["merged_into"],
-                ),
-                (
-                    before[provider_activity_id]["state"],
-                    before[provider_activity_id]["merged_into"],
-                ),
+        self.assertIsNone(sessions[GARMIN_ID]["merged_into"])
+        with self.manager.reader() as db:
+            providers = sorted(
+                row["provider"] for row in canonical_store.active_activity_rows(db)
             )
+        self.assertEqual(
+            providers, [ProviderId.GARMIN.value, ProviderId.INTERVALS.value]
+        )
+        exported = dict(PRIVACY_EXPORT_JSONL_SOURCES)["activity_records.jsonl"]
+        with self.manager.reader() as db:
+            rows = [
+                (row["provider"], row["provider_activity_id"]) for row in exported(db)
+            ]
+        self.assertIn((ProviderId.INTERVALS.value, INTERVALS_ID), rows)
 
 
 class AliasResolutionTests(LinkingCase):

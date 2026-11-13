@@ -12,7 +12,8 @@ import server_test_support as fixtures
 import snapshot_seed
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
-from support import store_canonical_snapshot
+from support import mark_tables_serving
+from test_feedback_session_identity import ingest_wahoo, wahoo_row
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
@@ -529,16 +530,17 @@ class ProviderReviewTests(unittest.TestCase):
             "distance": 30000,
             "garmin_specific": {"sample": "preserved"},
         }
-        intervals = {
-            "id": "canonical",
-            "start_date_local": "2026-09-04T10:00:00",
-            "type": "Ride",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        store_canonical_snapshot(
-            server, {"synced_at": "synthetic", "recent_activities": [intervals]}
-        )
+        # The Wahoo recording of the ride; the Garmin copy joins its session.
+        mark_tables_serving(server)
+        with server.database_manager().unit_of_work() as db:
+            ingest_wahoo(
+                db,
+                [
+                    wahoo_row(
+                        "8001", starts="2026-09-04T08:00:00.000Z", distance="30000"
+                    )
+                ],
+            )
         for fixture in (False, True):
             with self.subTest(fixture=fixture):
                 payload = {
@@ -580,11 +582,12 @@ class ProviderReviewTests(unittest.TestCase):
                     read_garmin()["activities"],
                     [original],
                 )
+                # The Garmin copy shares the Wahoo session: one Garmin activity.
                 self.assertEqual(
                     server.GARMIN_ASSEMBLY.projection_service().public_state()[
                         "activities"
                     ],
-                    0,
+                    1,
                 )
                 # Canonical reads (#1416): the sync stores no activity matches;
                 # equipment pairs canonical activity records at read time.

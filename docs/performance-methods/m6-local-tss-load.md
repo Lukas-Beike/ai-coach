@@ -451,3 +451,35 @@ hour, or a mix of branches on one scale.
   - The funding and interest statements of the IJSPP papers are known only
     from abstracts.
   - Running-power TSS has no peer-reviewed validation.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METHOD_ID` | `'local-tss-load'` | `backend/performance/local_tss.py` |  |
+| `METHOD_VERSION` | `7` | `backend/performance/local_tss.py` |  |
+| `CARD` | `'M6'` | `backend/performance/local_tss.py` |  |
+| `POWER_BRANCH` | `'power'` | `backend/performance/local_tss.py` |  |
+| `PACE_BRANCH` | `'pace'` | `backend/performance/local_tss.py` |  |
+| `HEART_RATE_BRANCH` | `'heart_rate'` | `backend/performance/local_tss.py` |  |
+| `SESSION_RPE_BRANCH` | `'session_rpe'` | `backend/performance/local_tss.py` |  |
+| `MALE` | `'male'` | `backend/performance/local_tss.py` | Banister TRIMP prefactor and coefficient by profile sex (card M6 v3); an unset sex takes the male constants and marks the value sex_assumed. |
+| `FEMALE` | `'female'` | `backend/performance/local_tss.py` |  |
+| `MAX_INTENSITY_FACTOR` | `2.0` | `backend/performance/local_tss.py` |  |
+| `HR_COVERAGE_MIN` | `0.8` | `backend/performance/local_tss.py` | The histogram must cover this share of the TSS duration (card M6 v5). |
+| `HR_BASIS_DISTRIBUTION` | `'distribution'` | `backend/performance/local_tss.py` |  |
+| `HR_BASIS_AVERAGE` | `'average'` | `backend/performance/local_tss.py` |  |
+| `LATER_STAND_IN_MAX_DAYS` | `90` | `backend/performance/local_tss.py` | A later threshold stands in only when observed within this many days after the session day (card M6 v5). |
+| `RESTING_HR_LOOKBACK_DAYS` | `7` | `backend/performance/local_tss.py` |  |
+| `CALIBRATION_WINDOW_DAYS` | `365` | `backend/performance/local_tss.py` |  |
+| `CALIBRATION_MIN_PAIRS` | `20` | `backend/performance/local_tss.py` |  |
+| `CALIBRATION_RPE_BANDS` | `(1, 2)` | `backend/performance/local_tss.py` | The RPE distances of the calibration bands, tried in order (card M6 v4). |
+| `CALIBRATION_TABLE_RPES` | `tuple(range(1, 11))` | `backend/performance/local_tss.py` | The RPE values of the detail table (factor per RPE of its +-1 band). |
+| `LOCAL_SOURCE` | `'local'` | `backend/performance/local_tss.py` |  |
+| `LOCAL_INDOOR_SOURCE` | `'local_indoor'` | `backend/performance/local_tss.py` |  |
+| `STAGE` | `'local_load'` | `backend/sync/local_load.py` |  |
+| `STATE_KEY` | `'local_load_state'` | `backend/sync/local_load.py` |  |
+| `DERIVED_LABEL` | `'derived'` | `backend/sync/local_load.py` |  |
+| `SEX_ASSUMED_LABEL` | `'Geschlecht nicht gesetzt, männliche Konstanten angenommen'` | `backend/sync/local_load.py` | Card M6 v3: a heart-rate value computed without a saved profile sex. |
+<!-- END GENERATED CONSTANTS -->

@@ -225,7 +225,9 @@ class ActivityDetailRouteTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.manager = open_manager(directory.name)
         self.addCleanup(self.manager.close)
-        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_i")
+        add_session_record(
+            self.manager, ProviderId.WAHOO, "w1", "act_w", recorded_by="wahoo"
+        )
         add_session_record(
             self.manager, ProviderId.GARMIN, "g1", "act_g", duration_s=3600.0
         )
@@ -259,11 +261,11 @@ class ActivityDetailRouteTests(unittest.TestCase):
         return payload
 
     def test_detail_body_is_the_v1_document_without_validation(self) -> None:
-        for requested in ("act_i", "i1"):
+        for requested in ("act_w", "w1"):
             with self.subTest(requested):
                 body = self.get(requested)
                 self.assertEqual("activity_detail.v1", body["contract"])
-                self.assertEqual("act_i", body["session"]["activity_id"])
+                self.assertEqual("act_w", body["session"]["activity_id"])
                 # No Intervals.icu summary-row metric is served (#1685).
                 self.assertNotIn("avg_speed_mps", body["metrics"])
                 self.assertEqual(
@@ -272,7 +274,7 @@ class ActivityDetailRouteTests(unittest.TestCase):
                     & set(body),
                 )
                 self.assertTrue(body["ok"])
-                self.assertIn("providers: Intervals.icu", body["data_scope"])
+                self.assertIn("providers: Wahoo", body["data_scope"])
                 self.assertNotIn("activity", body)
 
     def test_garmin_only_session_is_served(self) -> None:

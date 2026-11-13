@@ -23,59 +23,26 @@ from backend.sync import freshness as sync_freshness
 from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_service
 from backend.sync import observation as sync_observation
-from backend.sync.execution_assembly import (
-    CalendarWeatherJobDependencies,
-    GarminJobDependencies,
-    HistoricalSyncDependencies,
-    IntervalsJobDependencies,
-    SyncJobExecutionAssembly,
-    SyncJobStateDependencies,
-    WahooJobDependencies,
-)
+from backend.sync.execution_wiring import build_sync_job_execution
+from backend.sync.wiring import SyncWindow
 
 
 class ServerProvidersTests(ServerTestCase):
-    def test_sync_job_execution_assembly_keeps_factories_lazy(self):
-        deferred = Mock(side_effect=AssertionError("factory resolved during assembly"))
-        assembly = SyncJobExecutionAssembly(
-            dependencies=SyncJobExecutionAssembly.Inputs(
-                historical=HistoricalSyncDependencies(
-                    local_now=deferred,
-                    sync_period_defaults={},
-                    all_sync_days=365,
-                    sync_chunk_days=30,
-                    sync_earliest_date=datetime(2020, 1, 1, tzinfo=UTC).date(),
-                ),
-                state=SyncJobStateDependencies(
-                    sync_state_repository=deferred,
-                    queue_service=deferred,
-                    outcome_service=deferred,
-                ),
-                intervals=IntervalsJobDependencies(
-                    selected_workout_sync_service=deferred,
-                    competition_sync_service=deferred,
-                    nutrition_sync_service=deferred,
-                    operation_observer=deferred,
-                    resync_gate=object(),
-                ),
-                garmin=GarminJobDependencies(
-                    sync_service=deferred,
-                    morning_body_battery_service=deferred,
-                    fixture_loader=deferred,
-                ),
-                calendar_weather=CalendarWeatherJobDependencies(
-                    calendar_sync_service=deferred,
-                    weather_sync_service=deferred,
-                ),
-                wahoo=WahooJobDependencies(
-                    sync_service=deferred,
-                    plan_push_service=deferred,
-                    resync_gate=object(),
-                ),
-            )
+    def test_sync_job_execution_builder_keeps_factories_lazy(self):
+        ctx = Mock(name="context")
+        deferred = Mock(side_effect=AssertionError("factory resolved during build"))
+        build_sync_job_execution(
+            ctx,
+            window=SyncWindow({}, 365, 30, datetime(2020, 1, 1, tzinfo=UTC).date()),
+            selected_workout_sync_service=deferred,
+            competition_sync_service=deferred,
+            weather_sync_service=deferred,
+            intervals_resync_gate=object(),
+            after_job=deferred,
         )
-        self.assertIsNotNone(assembly)
         deferred.assert_not_called()
+        for owner in (ctx.garmin, ctx.wahoo, ctx.sync_persistence, ctx.sync_job_queue):
+            self.assertEqual([], owner.method_calls)
 
     def test_morning_recovery_service_is_shared_and_recomposed_for_config(self):
         original = server.morning_body_battery_service()

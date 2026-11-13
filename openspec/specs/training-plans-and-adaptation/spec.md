@@ -342,6 +342,31 @@ Evidence:
 - `tests/test_illness_return_preview.py:test_new_illness_report_outranks_the_return`
 - `tests/test_illness_return_preview.py:test_preview_stays_local_and_leaves_drafts_untouched`
 
+### Requirement: Plan compliance of units and weeks
+Every planned workout in the calendar SHALL carry a `compliance` block with status `completed` (matched to a session), `missed` (its day is before today) or `planned`, and the calendar SHALL carry one compliance row per Monday-to-Sunday week.
+
+#### Scenario: Unit basis
+- **WHEN** a unit is completed
+- **THEN** the basis is `training_load` when a planned load above 0 and the session's local load exist, else `duration` when a planned duration above 0 and the session's leading duration exist, else `unavailable` (100 %) when the unit has neither a planned load nor a planned duration; matched executed strength sets replace the basis with `strength_sets`; the percentage is actual over planned, rounded and not capped, and a missed unit has 0 %.
+
+#### Scenario: Week row
+- **WHEN** a week is summarised
+- **THEN** the row reports `week_start`, `week_end`, `planned_units`, `completed_units`, `unit_percentage`, `basis`, `planned_value`, `actual_value` and a `percentage` on the load basis only when every unit has a planned load above 0 and every completed one a load, else on the duration basis under the same rule, else none; missed units count 0.
+
+Detailed contract: a planned load of 0 with no planned duration gives no basis and no percentage, and a unit without a readable date is `missed` and belongs to no week. The block also carries `planned_value`, `actual_value`, `planned_duration`, `actual_duration`, `planned_load`, `actual_load` and, when completed, `activity_id`, `activity_name` (default "Absolvierte Einheit", at most 200 characters), `activity_start` and `actual_activity`. A completed session that matches no unit is its own calendar row (`category` `ACTIVITY`, `calendar_entry_type` `completed_activity`); rows are ordered by start, name and id.
+
+Evidence:
+- `backend/activities/calendar_projection.py:_weekly_compliance_values`
+- `backend/activities/calendar_projection.py:training_calendar_items`
+- `backend/activities/calendar_projection.py:workout_compliance`
+- `tests/test_activity_calendar_projection.py:test_calendar_keeps_unmatched_activity_without_repeating_match`
+- `tests/test_activity_calendar_projection.py:test_duration_and_unavailable_fallbacks`
+- `tests/test_activity_calendar_projection.py:test_paired_match_rolls_up_weekly_training_load`
+- `tests/test_characterization_activity_identity.py:test_undated_unit_is_reported_missed_and_left_out_of_weeks`
+- `tests/test_characterization_activity_identity.py:test_weekly_basis_falls_back_to_duration_when_any_unit_lacks_load`
+- `tests/test_characterization_activity_identity.py:test_weekly_score_is_none_without_a_shared_basis`
+- `tests/test_characterization_activity_identity.py:test_zero_planned_load_is_neither_unavailable_nor_scored`
+
 ### Requirement: TP14 Planning revision and payload hashes
 The system SHALL keep one planning revision counter and SHALL identify a unit's content by a SHA-256 hash that does not change when only local-only or sync-written fields change.
 

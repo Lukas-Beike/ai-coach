@@ -52,10 +52,10 @@ from backend.sync.canonical_backfill import (
     _write_reprojection,
     completed_observation_versions,
 )
-from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.canonical_wiring import build_canonical_backfill
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -1189,14 +1189,32 @@ class ReprojectionTests(BackfillFixture):
     def test_reprojection_links_a_garmin_walk_its_moving_time_now_matches(
         self,
     ) -> None:
-        # Garmin duration is elapsed time; only the moving time matches Intervals.icu.
-        walk = {
-            "id": "w1",
-            "type": "Walk",
-            "start_date_local": "2026-09-10T07:00:00",
-            "moving_time": 3620,
-            "distance": 5000.0,
+        # Garmin duration is elapsed time; only the moving time matches Wahoo.
+        payload = {
+            "synced_at": NOW,
+            "workouts": [
+                {
+                    "id": 31,
+                    "starts": "2026-09-10T05:00:00Z",
+                    "workout_type_id": 6,
+                    "workout_summary": {
+                        "duration_active_accum": "3620",
+                        "distance_accum": "5000",
+                    },
+                }
+            ],
         }
+        with self.manager.unit_of_work() as db:
+            ingest_plan(
+                db,
+                wahoo_ingest_plan(payload, zone=ZONE),
+                retrieved_at=canonical_plans.wahoo_payload_retrieved_at(
+                    payload, zone=ZONE
+                )
+                or self.fail("retrieval time"),
+                deletion_window=None,
+                zone=ZONE,
+            )
         garmin_walk = {
             "activityId": 77,
             "activityType": {"typeKey": "walking"},
@@ -1205,7 +1223,6 @@ class ReprojectionTests(BackfillFixture):
             "movingDuration": 3600.0,
             "distance": 5000.0,
         }
-        self.insert_snapshot(self.manager, intervals_snapshot([walk]))
         self.set_garmin(self.manager, garmin_payload(activities=[garmin_walk]))
         backfill = self.make_backfill()
         self.run_to_completion(backfill)
@@ -1229,75 +1246,15 @@ class ReprojectionTests(BackfillFixture):
         ):
             self.run_to_completion(backfill)
 
-        garmin, intervals = self.rows(query)
-        self.assertEqual(
-            (garmin["provider"], intervals["provider"]), (GARMIN, INTERVALS)
-        )
-        survivor, alias = (
-            (garmin, intervals) if intervals["merged_into"] else (intervals, garmin)
-        )
+        garmin, wahoo = self.rows(query)
+        self.assertEqual((garmin["provider"], wahoo["provider"]), (GARMIN, WAHOO))
+        survivor, alias = (garmin, wahoo) if wahoo["merged_into"] else (wahoo, garmin)
         self.assertEqual((survivor["state"], survivor["merged_into"]), ("active", None))
         self.assertEqual(
             (alias["state"], alias["merged_into"]),
             ("duplicate", survivor["activity_id"]),
         )
         self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
-
-    def test_reprojection_links_a_garmin_walk_by_the_intervals_elapsed_time(
-        self,
-    ) -> None:
-        # Garmin sends no moving time; only the Intervals.icu elapsed time matches.
-        walk = {
-            "id": "w1",
-            "type": "Walk",
-            "start_date_local": "2026-09-10T07:00:00",
-            "moving_time": 2400,
-            "elapsed_time": 4520,
-            "distance": 5000.0,
-        }
-        garmin_walk = {
-            "activityId": 77,
-            "activityType": {"typeKey": "walking"},
-            "startTimeLocal": "2026-09-10 07:00:00",
-            "duration": 4500.0,
-            "distance": 5000.0,
-        }
-        self.insert_snapshot(self.manager, intervals_snapshot([walk]))
-        self.set_garmin(self.manager, garmin_payload(activities=[garmin_walk]))
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-        query = (
-            "SELECT r.provider, s.activity_id, s.state, s.merged_into "
-            "FROM activity_records AS r JOIN activity_sessions AS s "
-            "ON s.activity_id = r.activity_id ORDER BY r.provider"
-        )
-        with self.manager.unit_of_work() as db:
-            # The state the first Intervals.icu mapper left: no elapsed time.
-            db.execute(
-                "UPDATE activity_records SET details = '{}' WHERE provider = ?",
-                (INTERVALS,),
-            )
-            _unlink_sessions(db)
-        self.assertEqual({row["state"] for row in self.rows(query)}, {"active"})
-        key = (INTERVALS, ACTIVITY_KIND)
-        with patch.dict(
-            canonical_plans._MAPPER_VERSIONS,
-            {key: canonical_plans._MAPPER_VERSIONS[key] + 1},
-        ):
-            self.run_to_completion(backfill)
-
-        garmin, intervals = self.rows(query)
-        survivor, alias = (
-            (garmin, intervals) if intervals["merged_into"] else (intervals, garmin)
-        )
-        self.assertEqual((survivor["state"], survivor["merged_into"]), ("active", None))
-        self.assertEqual(
-            (alias["state"], alias["merged_into"]),
-            ("duplicate", survivor["activity_id"]),
-        )
-        self.assertEqual(
-            self.summary(backfill)["providers"][INTERVALS]["reprojected"], 1
-        )
 
     def test_reprojection_keeps_a_deleted_activity_and_its_session_deleted(
         self,
