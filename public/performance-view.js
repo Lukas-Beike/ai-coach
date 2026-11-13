@@ -161,17 +161,17 @@ function renderCurrentPerformance(metrics, history, status = [], thresholds = nu
   for (const text of status) root.append(h("p", "empty", text));
   const groups = [
     ["Laufen", "run", [
-      ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
-      ["run_threshold_watts", "Schwellenleistung"],
-      ["run_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
+      ["run_threshold_pace_seconds_per_km", "Anaerobe Schwelle (LT2) · Pace"],
+      ["run_threshold_watts", "Anaerobe Schwelle (LT2) · Leistung"],
+      ["run_threshold_hr_bpm", "Anaerobe Schwelle (LT2) · Puls"],
       ["run_lt1_pace_seconds_per_km", "Aerobe Schwelle (LT1) · Pace"],
       ["run_lt1_hr_bpm", "Aerobe Schwelle (LT1) · Puls"],
       ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
     ["Radfahren", "ride", [
-      ["cycling_ftp_watts", "FTP"],
+      ["cycling_ftp_watts", "Anaerobe Schwelle (LT2) · FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
-      ["bike_threshold_hr_bpm", "Schwellenpuls (LSHF)"],
+      ["bike_threshold_hr_bpm", "Anaerobe Schwelle (LT2) · Puls"],
       ["cycling_lt1_watts", "Aerobe Schwelle (LT1) · Leistung"],
       ["cycling_lt1_hr_bpm", "Aerobe Schwelle (LT1) · Puls"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
