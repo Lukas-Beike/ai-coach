@@ -8,11 +8,13 @@ description: Plan, implement, or review SQLCipher schema migrations and released
 1. Read root and `backend/AGENTS.md`, then locate the schema owner in
    `backend/db/schema.py`, `schema_history.py`, and `migrations.py`. Trace changed
    readers, writers, restore validation, and startup before choosing a migration.
-   Record the current version and the baseline from code: the schema
-   production runs, v26 (release 2.0.5, the only production instance), with its
-   frozen fixture. It is the oldest schema the code opens; new changes need
-   evidence from it. Move the baseline only after the athlete confirms a newer
-   production schema from the diagnostics report.
+   Record the current version and the baseline from code: the frozen fixture
+   is v26 (release 2.0.5), the oldest schema the code opens. Production runs
+   v27 (releases 2.1.2 to 2.1.8, the only production instance), accepted by its
+   frozen digest. New changes need evidence from both: populated upgrade,
+   rollback and restart from the v26 fixture and from a v27 database. Move the
+   baseline only after the athlete confirms a newer production schema from the
+   diagnostics report.
    Before choosing a number, fetch `develop` and record its `CURRENT_SCHEMA_VERSION`
    and any open schema PRs; take the next free version and rebase on conflict.
 2. Plan the before/after records, version transition, transaction boundary,
