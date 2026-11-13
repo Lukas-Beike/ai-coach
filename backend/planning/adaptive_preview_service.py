@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -15,6 +14,7 @@ from backend.errors import AppError
 from backend.planning import adaptive, calendar, illness_return, plan_checks
 from backend.planning.context import external_calendar_event_dates
 from backend.planning.session_focus import is_hard
+from backend.planning.workout_validation import as_number as _as_number
 from backend.weather.adaptive import weather_adaptive_reason
 
 MAX_PREVIEW_PLANNED_UNITS = 500
@@ -30,16 +30,6 @@ class AdaptivePreviewLimits:
     illness_text_limit: int
     illness_pause_default_days: int
     weather_adaptive_max_minutes: int
-
-
-def _as_number(value: Any) -> float | int | None:
-    try:
-        number = float(str(value).replace(",", "."))
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _forecast_freshness(weather: dict[str, Any]) -> dict[str, Any]:

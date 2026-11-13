@@ -4,8 +4,19 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from typing import Any
 
-from backend.planning import adaptive, plan_checks
+from backend.planning import (
+    adaptive,
+    adaptive_preview_service,
+    intensity_distribution,
+    leg_strength,
+    load_checks,
+    plan_checks,
+    plan_guard_service,
+    run_lthr,
+    season_preparation,
+)
 
 TODAY = date(2026, 11, 2)
 
@@ -47,6 +58,74 @@ def check(units, completed=(), competitions=(), illness=""):
 
 def codes(findings):
     return [item["code"] for item in findings]
+
+
+# The planning day, week, duration and number helpers, recorded before #2110
+# merged the identical copies: every copy must give these values.
+_DAY_TEXT = (
+    load_checks._day,
+    plan_checks._day,
+    leg_strength._day,
+    plan_guard_service._unit_day,
+)
+_DAY_DATE = (load_checks._unit_date, run_lthr._unit_day)
+_MONDAY = (leg_strength._monday, intensity_distribution._monday)
+_SECONDS = (leg_strength._seconds, plan_checks._duration_s)
+_DAYS: tuple[tuple[dict[str, Any], str], ...] = (
+    ({"date": "2026-11-12", "starts_at_local": "2026-11-13T07:00:00"}, "2026-11-12"),
+    ({"starts_at_local": "2026-11-13T07:00:00+01:00"}, "2026-11-13"),
+    ({"date": "2026-11-15T18:30:00"}, "2026-11-15"),
+    ({"date": date(2026, 11, 16)}, "2026-11-16"),
+    ({"date": ""}, ""),
+    ({}, ""),
+    ({"date": "kein Datum"}, "kein Datum"),
+)
+_SECONDS_CASES: tuple[tuple[dict[str, Any], float], ...] = (
+    ({"planned_duration_s": 1800, "duration_minutes": 45}, 1800.0),
+    ({"duration_minutes": 45}, 2700.0),
+    ({"planned_duration_s": "x", "duration_minutes": "45"}, 0.0),
+    ({"duration_minutes": 0}, 0.0),
+    ({}, 0.0),
+)
+_NUMBERS = (
+    ("4,5", 4.5),
+    ("12", 12),
+    (3.333, 3.33),
+    ("inf", None),
+    (None, None),
+    (True, None),
+    ("x", None),
+    (7.0, 7),
+)
+
+
+class PlanningHelperTests(unittest.TestCase):
+    def test_day_week_duration_and_number_helpers_keep_their_values(self) -> None:
+        for unit, text in _DAYS:
+            day = date.fromisoformat(text) if text[:4].isdigit() else None
+            monday = None if day is None else day - timedelta(days=day.weekday())
+            checks: tuple[tuple[tuple[Any, ...], Any], ...] = (
+                (_DAY_TEXT, text),
+                (_DAY_DATE, day),
+                (_MONDAY, monday),
+            )
+            for helpers, expected in checks:
+                for helper in helpers:
+                    with self.subTest(helper=helper.__qualname__, unit=unit):
+                        self.assertEqual(expected, helper(unit))
+        for unit, seconds in _SECONDS_CASES:
+            for helper in _SECONDS:
+                with self.subTest(helper=helper.__qualname__, unit=unit):
+                    self.assertEqual(seconds, helper(unit))
+        for value, number in _NUMBERS:
+            with self.subTest(value=value):
+                self.assertEqual(number, adaptive_preview_service._as_number(value))
+        self.assertEqual(
+            date(2026, 11, 9), season_preparation._week_start(date(2026, 11, 15))
+        )
+        self.assertEqual(
+            date(2026, 11, 16), season_preparation._week_start(date(2026, 11, 16))
+        )
 
 
 class PlanCheckRuleTests(unittest.TestCase):
