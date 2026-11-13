@@ -75,7 +75,6 @@ MIN_COVERAGE = 0.85
 MAX_HALF_DIFFERENCE = 0.10
 WINDOWS_S = (1, 30, 60)
 PERCENTILES = (25, 50, 75, 90)
-_INTERVALS = "intervals"
 _GATES = ("not_road_run", "short", "terrain_unknown", "coverage")
 
 # (timestamp, weight in seconds, output) of one half; heart rate is paired away.
@@ -404,11 +403,7 @@ def _with_streams(
     keys = activity_detail_store.full_stream_keys(
         db, [str(summary["id"]) for summary in summaries]
     )
-    return {
-        session_id
-        for session_id, own in keys.items()
-        if session_id in sessions and any(key.provider != _INTERVALS for key in own)
-    }
+    return {session_id for session_id in keys if session_id in sessions}
 
 
 def _tally(db: Any, zone: ZoneInfo, cutoff: date) -> dict[str, GroupTally]:

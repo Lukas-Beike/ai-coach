@@ -25,6 +25,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import row_factory
 from backend.db.activity_detail_store import (
+    detail_sets_for,
     full_stream_keys,
     lap_set_keys,
     lap_sets_for_session,
@@ -290,8 +291,10 @@ class SessionCurveReaderTests(unittest.TestCase):
         )
 
         self.assertEqual({}, self.reader.curves(self.db, ["act_1"]))
-        stored = full_stream_keys(self.db, ["act_1"])["act_1"]
-        self.assertEqual(["i-1"], [key.provider_activity_id for key in stored])
+        # Since #2650 the detail store serves it as no key, yet keeps it.
+        self.assertEqual({}, full_stream_keys(self.db, ["act_1"]))
+        stored = detail_sets_for(self.db, INTERVALS.value, "i-1")
+        self.assertEqual(["i-1"], [item.provider_activity_id for item in stored])
 
     def test_a_set_fetched_for_an_older_summary_is_left_out(self):
         add_session(self.db, "act_1")

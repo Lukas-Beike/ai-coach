@@ -24,7 +24,6 @@ from typing import Any, Final
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_merge import merge_details
 from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import FullStreamKey
 from backend.performance.analysis_input import analysis_input, analysis_sport
@@ -156,15 +155,8 @@ def input_fingerprint(parts: Iterable[object]) -> str:
 
 
 def _current(db: Any, keys: Iterable[FullStreamKey]) -> list[FullStreamKey]:
-    """The keys whose sets still belong to the provider's current summary.
-
-    A stored Intervals.icu set is never read: such copies count nowhere (#2148).
-    """
-    return [
-        key
-        for key in keys
-        if key.provider != ProviderId.INTERVALS.value and not _stale(db, key)
-    ]
+    """The keys whose sets still belong to the provider's current summary."""
+    return [key for key in keys if not _stale(db, key)]
 
 
 def _stale(db: Any, key: FullStreamKey) -> bool:

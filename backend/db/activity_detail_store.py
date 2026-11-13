@@ -508,6 +508,8 @@ def full_stream_keys(
     Like ``detail_sets_for_session``, records of sessions merged into a session
     count as its own. Sessions without such a set are absent. No sensor data is
     decoded, so a caller can tell whether a computed curve is still current.
+    A stored Intervals.icu set is never a key: Intervals.icu is output only
+    (#1685, #2148), as for every key read here and ``full_stream_sets_for_session``.
     """
     return _set_keys(db, activity_ids, *_FULL_STREAMS)
 
@@ -630,8 +632,8 @@ def _set_keys(
         "d.fetched_at",
         _SET_SOURCE,
         (),
-        f"r.state = ? AND ({kind_clause})",
-        (ActivityRecordState.ACTIVE.value, *kind_values),
+        f"r.state = ? AND d.provider != ? AND ({kind_clause})",
+        (ActivityRecordState.ACTIVE.value, ProviderId.INTERVALS.value, *kind_values),
     ):
         keys.setdefault(row["owner"], set()).add(
             FullStreamKey(
@@ -649,16 +651,20 @@ def _set_keys(
 
 
 def full_stream_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
-    """Return only the full-resolution stream sets of ``detail_sets_for_session``."""
+    """Return the full-resolution stream sets of ``detail_sets_for_session``.
+
+    Without Intervals.icu sets, as ``full_stream_keys``.
+    """
     return _read_sets(
         db,
-        "d.detail_kind = ? AND d.resolution = ? "
+        "d.detail_kind = ? AND d.resolution = ? AND d.provider != ? "
         "AND (s.activity_id = ? OR (s.state = ? AND s.merged_into = ?)) "
         "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS owner "
         "WHERE owner.activity_id = ? AND owner.state = ?)",
         (
             ActivityDetailKind.STREAMS.value,
             StreamResolution.FULL.value,
+            ProviderId.INTERVALS.value,
             activity_id,
             ActivitySessionState.DUPLICATE.value,
             activity_id,
