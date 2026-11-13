@@ -740,6 +740,41 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 reopened.close()
             self.assertNotEqual(path.read_bytes()[:16], b"SQLite format 3\x00")
 
+    @unittest.skipIf(
+        cipher_backend is None, "SQLCipher requires the Docker runtime on Windows"
+    )
+    def test_encrypted_v27_database_upgrades_and_restarts_with_its_rows(self):
+        password = "synthetic-migration-test-key"
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "encrypted-v27.db"
+            db = cipher_backend.connect(str(path))
+            db.row_factory = cipher_backend.Row
+            try:
+                configure_cipher(db, password)
+                populated_v27_database(db)
+                tables = self.user_tables(db)
+                before = self.table_rows(db, tables)
+            finally:
+                db.close()
+            options = {
+                "backend": cipher_backend,
+                "password": password,
+                "configure": configure_cipher,
+            }
+            for _start in range(2):
+                manager = temp_database(self, path=path, **options)
+                try:
+                    with manager.unit_of_work() as db:
+                        migrate_schema(db)
+                        self.assertTrue(database_schema_is_current(db))
+                        self.assertEqual(self.table_rows(db, tables), before)
+                        self.assertEqual(
+                            db.execute("PRAGMA cipher_integrity_check").fetchall(), []
+                        )
+                finally:
+                    manager.close()
+            self.assertNotEqual(path.read_bytes()[:16], b"SQLite format 3\x00")
+
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
