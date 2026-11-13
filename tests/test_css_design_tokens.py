@@ -236,6 +236,28 @@ class CssDesignTokenTests(unittest.TestCase):
                         _contrast_ratio(foreground, background), 4.5
                     )
 
+    def test_warning_boundaries_reach_three_to_one_in_both_themes(self):
+        # --warning-border outlines the warning status strip and the planned-unit
+        # conflict marker; both outlines mark a state, so WCAG 1.4.11 applies.
+        declarations = _declarations(CSS_PATH.read_text(encoding="utf-8"))
+        tokens = {}
+        for theme in (":root", ':root[data-theme="light"]'):
+            tokens.update(
+                {
+                    name: value
+                    for selector, name, value in declarations
+                    if selector == theme
+                }
+            )
+            page = _colour(tokens, "--bg", (255, 255, 255))
+            for outside_name in ("--bg", "--surface"):
+                outside = _colour(tokens, outside_name, page)
+                inside = _colour(tokens, "--warning-surface-soft", outside)
+                border = _colour(tokens, "--warning-border", outside)
+                for side, background in (("outside", outside), ("inside", inside)):
+                    with self.subTest(theme=theme, on=outside_name, side=side):
+                        self.assertGreaterEqual(_contrast_ratio(border, background), 3)
+
     def test_training_focus_percentages_use_neutral_text_in_both_themes(self):
         declarations = _declarations(CSS_PATH.read_text(encoding="utf-8"))
         # The zone colour sits on the swatch and the bar; the number stays neutral.

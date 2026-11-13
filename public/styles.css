@@ -60,7 +60,7 @@
   --accent-border: rgba(52, 207, 161, .28);
   --accent-wash: rgba(52, 207, 161, .06);
   --warning-ink: #201900;
-  --warning-border: rgba(255, 179, 64, .45);
+  --warning-border: rgba(255, 179, 64, .6);
   --warning-surface-soft: rgba(255, 179, 64, .1);
   --danger-soft-ink: #ffd1cd;
   --action-error-border: rgba(255, 132, 121, .4);
@@ -139,6 +139,7 @@
 }
 
 :root[data-theme="light"] {
+  --warning-border: var(--orange);
   color-scheme: light;
   --bg: #f4f5f6;
   --surface: #ffffff;
