@@ -9,18 +9,21 @@
     python scripts/issue_update.py close <n> --body-file F
 
 Exit 0: done; 1: refused (ambiguous or missing checkbox, open checkboxes or an
-open PR on close); 2: bad input or a failed gh call.
+open PR on close); 2: bad input or a failed gh call. Close ticks the open boxes
+under an acceptance-criteria heading and accepts an issue a merge already closed.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from gh_cli import CliError, gh, gh_json, positive_int, read_body
-from issue_status import CHECKBOX, open_checkboxes
+from issue_status import CHECKBOX, open_boxes, open_checkboxes
 
 IN_PROGRESS = "in progress"
 
@@ -43,18 +46,23 @@ def tick(number: int, part: str) -> int:
         for hit in hits:
             print(f"  open checkbox: {hit[1].strip()}")
         return 1
-    box = hits[0].start(1) - 4  # the "[ ] " before the text
-    updated = body[:box] + "[x] " + body[box + 4 :]
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "body.md"
-        path.write_text(updated, encoding="utf-8", newline="")
-        edit(number, "--body-file", str(path))
+    write_ticked(number, body, hits)
     print(f"ticked #{number}: {hits[0][1].strip()}")
     return 0
 
 
-def blockers(number: int) -> tuple[bool, list[str]]:
-    """Whether the issue is still open, and what keeps it from being done."""
+def write_ticked(number: int, body: str, boxes: list[re.Match[str]]) -> None:
+    for match in boxes:  # "[x] " replaces the same-length "[ ] " before the text
+        box = match.start(1) - 4
+        body = body[:box] + "[x] " + body[box + 4 :]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "body.md"
+        path.write_text(body, encoding="utf-8", newline="")
+        edit(number, "--body-file", str(path))
+
+
+def blockers(number: int) -> tuple[dict[str, Any], list[str]]:
+    """The issue's state and body, and what keeps it from being done."""
     issue = gh_json("issue", "view", str(number), "--json", "state,body")
     found = [f"open checkbox: {item}" for item in open_checkboxes(issue["body"])]
     for pull in gh_json(
@@ -63,19 +71,25 @@ def blockers(number: int) -> tuple[bool, list[str]]:
     ):  # fmt: skip
         if pull["state"] == "OPEN":
             found.append(f"open PR #{pull['number']}: {pull['title']}")
-    return issue["state"] == "OPEN", found
+    return issue, found
 
 
 def close(number: int, body_file: str) -> int:
     read_body(body_file)
-    is_open, found = blockers(number)
+    issue, found = blockers(number)
     if found:
         print(f"refused: #{number} is not done")
         for item in found:
             print(f"  {item}")
         return 1
+    # The summary carries the evidence for the acceptance criteria still unticked;
+    # ticking first keeps a rerun after a failed edit from posting it twice.
+    body = issue["body"] or ""
+    if criteria := open_boxes(body)[1]:
+        write_ticked(number, body, criteria)
     gh("issue", "comment", str(number), "--body-file", body_file)
     edit(number, "--remove-label", IN_PROGRESS)
+    is_open = issue["state"] == "OPEN"
     # A merged "Closes #N" PR has usually closed the issue already.
     if is_open:
         gh("issue", "close", str(number))
