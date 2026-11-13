@@ -5,8 +5,9 @@ still needs Intervals.icu when it is an indoor or virtual ride (for Zwift, the
 only units that go there, #2419) that was never synced, failed or went missing
 remotely; it needs Garmin when it is a strength unit with a valid structure or
 a run unit with parseable step text whose Garmin fingerprint differs from the
-pushed one. The payload hash is the one the ``plan_push`` jobs check, so the
-browser can send it back unchanged.
+pushed one, or whose run steps resolve differently from the pushed ones now
+(``run_document_digest``, #2546). The payload hash is the one the ``plan_push``
+jobs check, so the browser can send it back unchanged.
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ from datetime import date
 from typing import TYPE_CHECKING, Any, Final
 
 from backend.activities.hr_cap import stored_cap
+from backend.activities.hr_cap_export import capped_description
 from backend.activities.workout_text import structured_blocks
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import (
     WAHOO_ID,
@@ -56,6 +59,8 @@ if TYPE_CHECKING:
 # its way.
 _INTERVALS_PENDING: Final = frozenset({"local", "sync_error"})
 _REMOTE_LINKS = RemoteLinkRepository()
+# First line of every Garmin workout description, so one this app sent can be told apart.
+WORKOUT_MARKER: Final = "Pacecraft"
 INTERVALS_INDOOR_RIDES_ONLY: Final = (
     "Geht nicht an Intervals.icu: nur Indoor-Radeinheiten"
 )
@@ -102,6 +107,47 @@ def intervals_event_outdated(payload: Mapping[str, Any]) -> bool:
     sport, _environment = planned_sport_environment(payload)
     sent = str(payload.get("remote_event_category") or INTERVALS_EVENT_CATEGORY)
     return sent != intervals_event_category(sport)
+
+
+def run_document(unit: Mapping[str, Any], zones: ZoneSettings | None) -> dict[str, Any]:
+    """The Garmin running workout of a run unit; relative targets need ``zones``."""
+    description = str(unit.get("description") or "")
+    lthr = zones.lthr if zones else None
+    if stored_cap(unit) is not None and not lthr:
+        # The cap is percent of the threshold HR; without it the cap would be lost.
+        raise garmin_run_workout.GarminRunMappingError(
+            "Die Pulsobergrenze braucht den Schwellenpuls, der nicht vorliegt."
+        )
+    capped = capped_description(description, unit, lthr=lthr)
+    return garmin_run_workout.run_workout(
+        name=str(unit.get("name") or ""),
+        description=f"{WORKOUT_MARKER}\n{description}",
+        blocks=structured_blocks(capped, str(unit.get("target") or "AUTO")),
+        targets=None
+        if zones is None
+        else garmin_run_workout.GarminRunTargets(
+            ftp=zones.ftp,
+            threshold_hr=zones.lthr,
+            max_hr=zones.max_hr,
+            threshold_speed=zones.threshold_pace,
+            hr_zone_basis=zones.hr_zone_reference,
+            power_limits=zones.power_limits,
+            hr_limits=zones.hr_limits,
+            pace_limits=zones.pace_limits,
+        ),
+    )
+
+
+def run_sent_key(local_id: str) -> str:
+    """Key-value key of the digest of the run steps the last Garmin push sent (#2546)."""
+    return f"garmin_run_sent:{local_id}"
+
+
+def run_document_digest(document: Mapping[str, Any]) -> str | None:
+    """Digest of what Garmin acts on in a run document, or ``None`` for another sport."""
+    if (document.get("sportType") or {}).get("sportTypeKey") != "running":
+        return None
+    return _digest({"steps": garmin_run_workout.comparable_steps(document)})
 
 
 def garmin_baselines(db: Any) -> dict[str, str | None]:
@@ -302,9 +348,10 @@ def attach_push_state(
     unit waits to carry (no pending unit, and Wahoo never has one) go on the
     unit nearest to ``today``, so the calendar can always offer their removal.
 
-    ``resync`` holds the local ids of synced units whose exported heart-rate range
-    moved only with the threshold HR. ``push_blocked`` names why a strength or run unit cannot reach Garmin, so the
-    calendar says so instead of offering only Intervals.icu silently.
+    ``resync`` holds the local ids of run units whose pushed Garmin steps differ
+    from what the athlete's thresholds resolve them to now; they wait for Garmin
+    again. ``push_blocked`` names why a strength or run unit cannot reach Garmin,
+    so the calendar says so instead of offering only Intervals.icu silently.
     """
     lists = _cleanup_lists(orphans, intervals_orphans, wahoo_orphans)
     payloads: list[dict[str, Any]] = []
@@ -312,12 +359,13 @@ def attach_push_state(
         payloads.append(payload)
         digest = plan_push_payload_hash(row["payload"])
         pending: dict[str, bool] = {
-            ProviderId.INTERVALS.value: _intervals_pending(row, payload, resync)
+            ProviderId.INTERVALS.value: _intervals_pending(row, payload)
         }
         fingerprint, blocked = pushable_fingerprint(payload, remembered or {})
         if fingerprint is not None:
+            local_id = str(row["local_id"])
             pending[ProviderId.GARMIN.value] = (
-                baselines.get(str(row["local_id"])) != fingerprint
+                baselines.get(local_id) != fingerprint or local_id in resync
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
@@ -335,18 +383,14 @@ def attach_push_state(
     _carry_unclaimed_cleanup(lists, payloads, today)
 
 
-def _intervals_pending(
-    row: Any, payload: dict[str, Any], resync: Iterable[str]
-) -> bool:
+def _intervals_pending(row: Any, payload: dict[str, Any]) -> bool:
     """Whether Intervals.icu waits for this unit.
 
-    A synced run unit whose heart-rate range moved with the threshold HR (the bpm
-    path of the cap export) is changed too, and so is a unit whose event has
-    another category than it gets now. A unit Intervals.icu skips never waits.
+    A unit whose event has another category than it gets now is changed too. A
+    unit Intervals.icu skips never waits.
     """
     return not skips_intervals(payload) and (
         str(row["sync_state"] or "local") in _INTERVALS_PENDING
-        or str(row["local_id"]) in resync
         or intervals_event_outdated(payload)
     )
 
