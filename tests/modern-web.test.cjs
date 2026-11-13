@@ -39,18 +39,18 @@ test("modern-web-guidance runs pinned, with telemetry off, and only read-only co
   }
 });
 
-test("a node_modules older than package-lock.json is named with its fix before any test runs (#2690)", () => {
+test("a node_modules older than package-lock.json is named with its fix before any test runs (#2690)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pacecraft-install-"));
-  const write = (relative, data) => {
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (relative, packages) => {
     fs.mkdirSync(path.dirname(path.join(root, relative)), { recursive: true });
-    fs.writeFileSync(path.join(root, relative), JSON.stringify(data));
+    fs.writeFileSync(path.join(root, relative), JSON.stringify({ packages }));
   };
-  write("package-lock.json", { packages: { "": { devDependencies: { a: "2.0.0", b: "1.0.0" } }, "node_modules/a": { version: "2.0.0" }, "node_modules/b": { version: "1.0.0" } } });
-  write("node_modules/a/package.json", { version: "1.0.0" });
-  assert.deepEqual(staleInstall(root), ["a", "b"]);
-  write("node_modules/a/package.json", { version: "2.0.0" });
-  write("node_modules/b/package.json", { version: "1.0.0" });
+  const lock = { "": {}, "node_modules/a": { version: "2.0.0" }, "node_modules/a/node_modules/b": { version: "1.0.0" }, "node_modules/c": { version: "1.0.0", optional: true } };
+  write("package-lock.json", lock);
+  assert.deepEqual(staleInstall(root), ["node_modules/a", "node_modules/a/node_modules/b"]);
+  write("node_modules/.package-lock.json", { ...lock, "node_modules/a": { version: "1.0.0" }, "node_modules/c": undefined });
+  assert.deepEqual(staleInstall(root), ["node_modules/a"]);
+  write("node_modules/.package-lock.json", { ...lock, "node_modules/c": undefined });
   assert.deepEqual(staleInstall(root), []);
-  assert.deepEqual(staleInstall(), []);
-  fs.rmSync(root, { recursive: true });
 });

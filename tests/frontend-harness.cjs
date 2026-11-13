@@ -4,16 +4,25 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 // A node_modules installed before package-lock.json changed (a rebase onto a new dependency)
-// stops here with the fix, not later with an ENOENT inside a test (#2690).
+// stops here with the fix, not later with an ENOENT inside a test (#2690). npm records what it
+// installed in node_modules/.package-lock.json; an optional package for another platform is absent.
 function staleInstall(root = path.join(__dirname, "..")) {
-  const locked = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8")).packages;
-  return Object.keys(locked[""].devDependencies).filter((name) => {
-    const installed = path.join(root, "node_modules", name, "package.json");
-    return !fs.existsSync(installed) || JSON.parse(fs.readFileSync(installed, "utf8")).version !== locked[`node_modules/${name}`].version;
-  });
+  const packages = (file) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(root, file), "utf8")).packages ?? {};
+    } catch {
+      return {};
+    }
+  };
+  const [locked, installed] = [packages("package-lock.json"), packages("node_modules/.package-lock.json")];
+  return Object.keys(locked)
+    .filter((key) => key.startsWith("node_modules/") && installed[key]?.version !== locked[key].version)
+    .filter((key) => installed[key] || !locked[key].optional);
 }
 const stale = staleInstall();
-if (stale.length) throw new Error(`node_modules does not match package-lock.json (${stale.join(", ")}): run npm ci`);
+if (stale.length) {
+  throw new Error(`node_modules does not match package-lock.json (${stale.slice(0, 3).join(", ")}${stale.length > 3 ? ", ..." : ""}): run npm ci --ignore-scripts`);
+}
 const { babelParse, traverse } = require("../node_modules/playwright/lib/transform/babelBundle.js"); // NOSONAR: issue #2090 asks for the Babel parser Playwright bundles; no other parser is installed.
 
 function readPublic(file) {
