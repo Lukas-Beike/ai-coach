@@ -227,25 +227,28 @@ def upsert_provider_record(
     """
     text = canonical_json(payload)
     digest = payload_hash(text)
+    key = {
+        "provider": provider,
+        "record_kind": record_kind,
+        "source_record_id": source_record_id,
+    }
+    row = {
+        "payload": text,
+        "payload_hash": digest,
+        "fetched_at": fetched_at,
+        "mapped_version": mapper_version,
+        "state": ProviderRecordState.ACTIVE.value,
+        "updated_at": now,
+        "observed_on": observed_on,
+    }
     existing = _fetch_row(
         db,
         "SELECT payload_hash, mapped_version, state, observed_on FROM provider_records "
         "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
-        (provider, record_kind, source_record_id),
+        tuple(key.values()),
     )
     if existing is None:
-        _insert_provider_record(
-            db,
-            provider=provider,
-            record_kind=record_kind,
-            source_record_id=source_record_id,
-            text=text,
-            digest=digest,
-            mapper_version=mapper_version,
-            fetched_at=fetched_at,
-            now=now,
-            observed_on=observed_on,
-        )
+        insert_row(db, "provider_records", {**key, **row, "created_at": now})
         return WriteOutcome.WRITTEN
     if (
         existing["payload_hash"] == digest
@@ -254,23 +257,7 @@ def upsert_provider_record(
         and existing["observed_on"] == observed_on
     ):
         return WriteOutcome.UNCHANGED
-    db.execute(
-        "UPDATE provider_records SET payload = ?, payload_hash = ?, fetched_at = ?, "
-        "mapped_version = ?, state = ?, updated_at = ?, observed_on = ? "
-        "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
-        (
-            text,
-            digest,
-            fetched_at,
-            mapper_version,
-            ProviderRecordState.ACTIVE.value,
-            now,
-            observed_on,
-            provider,
-            record_kind,
-            source_record_id,
-        ),
-    )
+    update_row(db, "provider_records", row, key)
     return WriteOutcome.UPDATED
 
 
@@ -946,7 +933,16 @@ def upsert_observation(
         (natural_key,),
     )
     if existing is None:
-        _insert_observation(db, natural_key=natural_key, values=values, now=now)
+        insert_row(
+            db,
+            "observations",
+            {
+                "natural_key": natural_key,
+                **{column: values[column] for column in _OBSERVATION_COLUMNS},
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
         return WriteOutcome.WRITTEN
     if (
         fill_only
@@ -959,14 +955,14 @@ def upsert_observation(
         values["owner_record_id"] = existing["owner_record_id"]
     if all(existing[column] == values[column] for column in _OBSERVATION_COLUMNS):
         return WriteOutcome.UNCHANGED
-    assignments = ", ".join(f"{column} = ?" for column in _OBSERVATION_COLUMNS)
-    db.execute(
-        f"UPDATE observations SET {assignments}, updated_at = ? WHERE natural_key = ?",
-        (
-            *(values[column] for column in _OBSERVATION_COLUMNS),
-            now,
-            natural_key,
-        ),
+    update_row(
+        db,
+        "observations",
+        {
+            **{column: values[column] for column in _OBSERVATION_COLUMNS},
+            "updated_at": now,
+        },
+        {"natural_key": natural_key},
     )
     return WriteOutcome.UPDATED
 
@@ -1342,39 +1338,6 @@ def _repoint_aliases(db: Any, deleted_id: str, *, now: str) -> None:
     )
 
 
-def _insert_provider_record(
-    db: Any,
-    *,
-    provider: str,
-    record_kind: str,
-    source_record_id: str,
-    text: str,
-    digest: str,
-    mapper_version: int,
-    fetched_at: str,
-    now: str,
-    observed_on: str | None = None,
-) -> None:
-    db.execute(
-        "INSERT INTO provider_records (provider, record_kind, source_record_id, "
-        "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
-        "updated_at, observed_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            provider,
-            record_kind,
-            source_record_id,
-            text,
-            digest,
-            fetched_at,
-            mapper_version,
-            ProviderRecordState.ACTIVE.value,
-            now,
-            now,
-            observed_on,
-        ),
-    )
-
-
 def _insert_activity(
     db: Any,
     *,
@@ -1386,46 +1349,34 @@ def _insert_activity(
 ) -> None:
     """Insert an activity with a new single-link session. The caller checked absence."""
     activity_id = ACTIVITY_ID_PREFIX + uuid.uuid4().hex
-    db.execute(
-        "INSERT INTO activity_sessions (activity_id, primary_provider, "
-        "primary_provider_activity_id, link_kind, athlete_confirmed, state, "
-        "started_at, local_date, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-        (
-            activity_id,
-            provider,
-            provider_activity_id,
-            ActivityLinkKind.SINGLE.value,
-            ActivitySessionState.ACTIVE.value,
-            values["started_at"],
-            values["local_date"],
-            now,
-            now,
-        ),
+    stamps = {"created_at": now, "updated_at": now}
+    insert_row(
+        db,
+        "activity_sessions",
+        {
+            "activity_id": activity_id,
+            "primary_provider": provider,
+            "primary_provider_activity_id": provider_activity_id,
+            "link_kind": ActivityLinkKind.SINGLE.value,
+            "athlete_confirmed": 0,
+            "state": ActivitySessionState.ACTIVE.value,
+            "started_at": values["started_at"],
+            "local_date": values["local_date"],
+            **stamps,
+        },
     )
-    columns = (
-        "provider",
-        "provider_activity_id",
-        "activity_id",
-        "state",
-        *_ACTIVITY_COLUMNS,
-        "fetched_at",
-        "created_at",
-        "updated_at",
-    )
-    db.execute(
-        f"INSERT INTO activity_records ({', '.join(columns)}) "
-        f"VALUES ({', '.join('?' * len(columns))})",
-        (
-            provider,
-            provider_activity_id,
-            activity_id,
-            ActivityRecordState.ACTIVE.value,
-            *(values[column] for column in _ACTIVITY_COLUMNS),
-            fetched_at,
-            now,
-            now,
-        ),
+    insert_row(
+        db,
+        "activity_records",
+        {
+            "provider": provider,
+            "provider_activity_id": provider_activity_id,
+            "activity_id": activity_id,
+            "state": ActivityRecordState.ACTIVE.value,
+            **{column: values[column] for column in _ACTIVITY_COLUMNS},
+            "fetched_at": fetched_at,
+            **stamps,
+        },
     )
 
 
@@ -1450,39 +1401,43 @@ def _update_activity_columns(
     now: str,
 ) -> None:
     """Overwrite an activity's projected columns and make the record active again."""
-    assignments = ", ".join(f"{column} = ?" for column in _ACTIVITY_COLUMNS)
-    db.execute(
-        f"UPDATE activity_records SET {assignments}, fetched_at = ?, state = ?, "
-        "updated_at = ? WHERE provider = ? AND provider_activity_id = ?",
-        (
-            *(values[column] for column in _ACTIVITY_COLUMNS),
-            fetched_at,
-            ActivityRecordState.ACTIVE.value,
-            now,
-            provider,
-            provider_activity_id,
-        ),
+    update_row(
+        db,
+        "activity_records",
+        {
+            **{column: values[column] for column in _ACTIVITY_COLUMNS},
+            "fetched_at": fetched_at,
+            "state": ActivityRecordState.ACTIVE.value,
+            "updated_at": now,
+        },
+        {"provider": provider, "provider_activity_id": provider_activity_id},
     )
 
 
-def _insert_observation(
-    db: Any, *, natural_key: str, values: dict[str, Any], now: str
+def insert_row(db: Any, table: str, row: Mapping[str, object]) -> None:
+    """Insert one full row; the mapping's keys are the column names.
+
+    Table and column names are written into the statement: pass only the
+    stores' own trusted identifiers, never keys taken from a payload.
+    """
+    values = tuple(row.values())
+    db.execute(
+        f"INSERT INTO {table} ({', '.join(row)}) VALUES ({_placeholders(values)})",
+        values,
+    )
+
+
+def update_row(
+    db: Any, table: str, row: Mapping[str, object], key: Mapping[str, object]
 ) -> None:
-    columns = (
-        "natural_key",
-        *_OBSERVATION_COLUMNS,
-        "created_at",
-        "updated_at",
-    )
+    """Overwrite ``row``'s columns of the row that matches every ``key`` column.
+
+    Names are trusted identifiers, as for ``insert_row``.
+    """
     db.execute(
-        f"INSERT INTO observations ({', '.join(columns)}) "
-        f"VALUES ({', '.join('?' * len(columns))})",
-        (
-            natural_key,
-            *(values[column] for column in _OBSERVATION_COLUMNS),
-            now,
-            now,
-        ),
+        f"UPDATE {table} SET {', '.join(f'{column} = ?' for column in row)} "
+        f"WHERE {' AND '.join(f'{column} = ?' for column in key)}",
+        (*row.values(), *key.values()),
     )
 
 
