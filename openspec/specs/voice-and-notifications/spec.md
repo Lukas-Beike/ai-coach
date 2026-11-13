@@ -75,7 +75,7 @@ The system SHALL process transcription through the authenticated CSRF-protected 
 Evidence: `backend/http_api/handler.py::RequestHandler._post`, `backend/http_api/requests.py::read_audio_body`, `backend/http_api/transcribe_post.py::TranscribePostRoutes.routes`, `server.py::MAX_AUDIO_BODY_BYTES`; `tests/test_http_transcribe_post.py::TranscribePostRoutesTests.test_success_dispatches_audio_to_transcription_client`, `tests/test_http_transcribe_post.py::TranscribePostRoutesTests.test_body_validation_error_stops_before_provider_dispatch`, `tests/test_provider_audio.py::AudioProviderTests.test_validation_precedes_provider_io_and_keeps_order`. Shared auth/maintenance behavior is source-inspected; the route-unit tests do not exercise socket authentication.
 
 ### Requirement: Audio provider requests retain only validated transcript output
-The system SHALL validate nonempty bounded audio and supported type before contacting the configured transcription provider, use the configured model and compatible base endpoint, and return only trimmed nonempty transcript text. It SHALL not persist audio or expose the raw provider payload through this use case.
+The system SHALL validate nonempty bounded audio and supported type before contacting the configured transcription provider, use the configured model and compatible base endpoint, and return only trimmed nonempty transcript text. The provider is OpenAI unless `TRANSCRIPTION_BASE_URL` names a separate OpenAI-compatible server; then audio goes only there. It SHALL not persist audio or expose the raw provider payload through this use case.
 
 #### Scenario: Configured compatible endpoint
 - **WHEN** a valid recording is transcribed
@@ -84,6 +84,10 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 #### Scenario: Wire contract
 - **WHEN** audio of the type `audio/webm`, `audio/mp4`, `audio/ogg`, `audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/mpga` or `audio/m4a` (parameters after `;` ignored, case-insensitive) is transcribed (the HTTP errors are in `docs/api-routes.md`, generated)
 - **THEN** it is sent as multipart to `{base}/audio/transcriptions` with the model `gpt-transcribe` by default, the field `languages[]` set to `de`, a fixed German prompt of sport terms (`AudioTranscriptionClient.transcribe`) and the file name `voice` plus the type's suffix, with a 90-second timeout; an empty body fails with 400, one over 8,000,000 bytes with 413, another type with 415, a missing key with 503 `not_configured` and a reply without transcript with 502
+
+#### Scenario: Local transcription server
+- **WHEN** `TRANSCRIPTION_BASE_URL` is set (HTTPS, or HTTP on loopback) and a valid recording is transcribed
+- **THEN** the request goes only to `{TRANSCRIPTION_BASE_URL}/audio/transcriptions` with `TRANSCRIPTION_MODEL` (required there; without it the microphone stays off and the route answers 503 `not_configured`), the field `language` set to `de` and the optional `TRANSCRIPTION_API_KEY` as Bearer key, never the OpenAI key; it needs no OpenAI key, keeps the size, type and 90-second limits, records no OpenAI usage and reports failures in German as "Der Transkriptionsserver"; the microphone is enabled by the bootstrap flag `configured.transcription`
 
 #### Scenario: Usage only
 - **WHEN** a transcription succeeds
@@ -97,7 +101,7 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 - **WHEN** provider output is missing text, nonobject, or contains only whitespace
 - **THEN** the service returns a transcription failure instead of claiming success; valid text is trimmed and returned as `transcript`.
 
-Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `backend/providers/audio.py::VOICE_AUDIO_TYPES`, `backend/providers/model_wiring.py::build_model_transport`, `server.py` (`build_model_transport` with `max_audio_bytes`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`.
+Evidence: `backend/providers/audio.py::AudioTranscriptionClient.transcribe`, `backend/providers/audio.py::normalized_audio_type`, `backend/providers/audio.py::VOICE_AUDIO_TYPES`, `backend/providers/model_wiring.py::build_model_transport`, `server.py` (`build_model_transport` with `max_audio_bytes`); `tests/test_provider_audio.py::AudioProviderTests.test_openai_transcription_preserves_input_and_wire_contract`, `tests/test_provider_audio.py::AudioProviderTests.test_key_errors_are_checked_after_local_validation`, `tests/test_provider_audio.py::AudioProviderTests.test_empty_or_invalid_provider_responses_are_rejected`, `tests/test_provider_audio.py::AudioProviderTests.test_local_endpoint_sends_language_without_openai_usage_or_key`, `tests/test_provider_audio.py::LocalTranscriptionServerTests.test_audio_goes_only_to_the_local_server`, `tests/test_model_transport_wiring.py::ModelTransportWiringTests.test_local_transcription_endpoint_never_gets_the_openai_key`.
 
 ### Requirement: Notification permission is opt-in and capability-aware
 The client SHALL show whether browser notifications are granted, denied, unsupported, or not enabled, and SHALL request permission only after the athlete explicitly activates the enable control.
@@ -154,18 +158,18 @@ The client SHALL suppress duplicate successfully delivered notification keys, al
 
 Evidence: `public/notifications.js::reserveNotificationAttempt`, `public/notifications.js::showPwaNotification`, `public/service-worker.js` (notificationclick listener); `tests/notifications-retry.test.cjs::a persistently rejecting notification is retried at most three times`, `tests/notifications-retry.test.cjs::renders inside the retry delay do not resend a rejected notification`, `tests/notifications-retry.test.cjs::a transient failure followed by success is delivered once`. Click handling is inspected source only; duplicate suppression is in-memory and does not promise cross-tab/restart delivery deduplication.
 
-### Requirement: Transcription stays with OpenAI
-The system SHALL transcribe voice input with OpenAI whichever model provider answers the Coach, and SHALL offer the microphone only while an OpenAI key is configured.
+### Requirement: Transcription uses its own configured endpoint
+The system SHALL transcribe voice input with OpenAI, or with the server in `TRANSCRIPTION_BASE_URL` when one is set, whichever model provider answers the Coach, and SHALL offer the microphone only while that endpoint is usable: an OpenAI key, or a transcription server with its model.
 
 #### Scenario: Claude selected
 - **WHEN** a Claude family is the Coach model and an OpenAI key is configured
 - **THEN** recording and transcription work as before through OpenAI.
 
 #### Scenario: No OpenAI key
-- **WHEN** no OpenAI key is configured
+- **WHEN** no OpenAI key and no `TRANSCRIPTION_BASE_URL` are configured
 - **THEN** the microphone control is disabled while the chat itself stays usable with a configured Claude key.
 
-Evidence: `backend/providers/model_wiring.py:build_model_transport`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).
+Evidence: `backend/providers/model_wiring.py:build_model_transport`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs a transcription endpoint), `backend/http_api/bootstrap_state.py` (`configured.transcription`).
 
 ### Requirement: Recording format and status
 

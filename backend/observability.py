@@ -167,6 +167,7 @@ def config_secret_values(config: Any) -> tuple[str, ...]:
         for name in (
             "openai_api_key",
             "anthropic_api_key",
+            "transcription_api_key",
             "intervals_api_key",
             "garmin_email",
             "garmin_password",
@@ -493,6 +494,7 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
     attributes = (
         "openai_api_key",
         "anthropic_api_key",
+        "transcription_api_key",
         "intervals_api_key",
         "garmin_email",
         "garmin_password",

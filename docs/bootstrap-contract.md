@@ -51,7 +51,7 @@ when its marker changes. Each marker is built from local durable state
 | `checkins` | list | always empty here; its area route loads it |
 | `coach_quick_actions` | object | `adjust_plan`, `analyze_latest_activity`, `horizon_days`, `morning_checkin`, `plan_blockers` |
 | `competitions` | list |  |
-| `configured` | object | `anthropic`, `coach`, `external_calendar`, `intervals`, `openai`, `weather` |
+| `configured` | object | `anthropic`, `coach`, `external_calendar`, `intervals`, `openai`, `transcription`, `weather` |
 | `credentials` | object | `anthropic_configured`, `fields`, `garmin_connected`, `garmin_connection`, `garmin_connection_source`, `intervals_configured`, `openai_configured`, `wahoo_configured`, `yazio_configured` |
 | `daily_planning_context` | list | always empty here; its area route loads it |
 | `diagnostic_capture` | object | `active`, `bytes`, `entries`, `maximum_age_days`, `maximum_bytes`, `maximum_entries`, `maximum_entry_bytes` |

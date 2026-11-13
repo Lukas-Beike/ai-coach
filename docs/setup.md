@@ -121,6 +121,18 @@ server {
 ```
 *When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the address the app sees as the proxy's connection peer so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy. That is the proxy host's LAN address for a separate proxy (for example `TRUSTED_PROXY_IPS=192.168.1.6`), the proxy container's address for a proxy on the same Docker network, or `127.0.0.1` or the Docker bridge gateway for a same-host proxy like the nginx example above.*
 
+## Local voice transcription
+
+Voice notes can be transcribed by a Whisper server on the LAN instead of OpenAI (#2596). [LocalAI](https://localai.io/) offers the OpenAI-compatible `/v1/audio/transcriptions` endpoint with whisper.cpp; the Community Applications template ships Nvidia flags and outdated tags, so add the container by hand. Unraid **Add Container**:
+
+- **Repository**: `localai/localai:v4.12.1` (CPU), **Network Type**: `Bridge`, **Port**: `8080` -> `8080`, reachable on the LAN only.
+- **Paths** (Read/Write; the container paths are fixed): `/mnt/user/appdata/localai/models` -> `/models`, `.../backends` -> `/backends`, `.../configuration` -> `/configuration`, `.../data` -> `/data`.
+- **Variables**: `LOCALAI_API_KEY` (a long random value), `LOCALAI_THREADS` (physical cores), `LOCALAI_FORCE_META_BACKEND_CAPABILITY` = `default` (CPU whisper backend).
+- **Intel iGPU comparison**: `localai/localai:v4.12.1-gpu-intel` with `--device=/dev/dri` and without the capability variable; only worth it if the measurement shows it faster.
+- **Model**: German needs a multilingual model, never `.en`: install it once with `curl http://<unraid-ip>:8080/models/apply -H "Authorization: Bearer <key>" -H "Content-Type: application/json" -d '{"id":"localai@whisper-large-turbo-q5_0"}'` (or `whisper-medium-q5_0`, `whisper-small-q5_1`); `GET /v1/models` lists the name to use.
+
+Pacecraft accepts only HTTPS here, like the Coach endpoints: add a LAN-only host to the reverse proxy above that forwards to `localai:8080`, with a certificate the Pacecraft container trusts. Then set `TRANSCRIPTION_BASE_URL=https://<that-host>/v1`, `TRANSCRIPTION_MODEL` to the installed model name and `TRANSCRIPTION_API_KEY` to the LocalAI key. Leave all three empty to keep voice on OpenAI. `python scripts/measure_transcription.py --help` measures word error rate and latency per model on public German samples.
+
 ## Provider credentials in the app
 
 Intervals.icu, OpenAI, Claude (Anthropic), Garmin Personal API key (with its expiry date), Wahoo and Yazio credentials can be entered in each provider's card under **Mehr > Anbindungen** instead of in `.env`:

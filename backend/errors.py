@@ -141,6 +141,7 @@ def provider_error(
     label = {
         **PROVIDER_ERROR_LABELS,
         "openai": "OpenAI",
+        "transcription": "Der Transkriptionsserver",
         "calendar": "Der externe Kalender",
     }.get(service_key, "Der externe Dienst")
     if category == "network":

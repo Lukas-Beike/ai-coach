@@ -112,7 +112,8 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   and configuration. Only OpenAI Responses (including compatible
   `OPENAI_BASE_URL` endpoints) or the Anthropic Messages API, explicitly
   selected; no Chat Completions and no cross-provider fallback; voice
-  transcription stays OpenAI.
+  transcription uses an explicitly configured OpenAI-compatible endpoint,
+  OpenAI by default or a LAN-local server over HTTPS (#2596).
 - `APP_VERSION` in `server.py` must match the release tag. Daily release version
   changes require a PR, never a direct protected-`main` push; publishing rejects
   version mismatches.

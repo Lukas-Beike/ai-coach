@@ -799,8 +799,8 @@ function updateVoiceButton() {
   const recording = voiceIsRecording();
   const transcribing = state.voiceTranscribing;
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
-  // Transcription always uses OpenAI, whichever model answers.
-  const voiceConfigured = Boolean(state.data?.configured?.openai ?? true);
+  // Transcription uses its own endpoint (OpenAI by default), whichever model answers.
+  const voiceConfigured = Boolean(state.data?.configured?.transcription ?? true);
   // Recording stays available while the Coach works; the transcript is queued like a typed follow-up.
   button.disabled = !chatReady || transcribing || (!voiceConfigured && !recording);
   button.classList.toggle("recording", recording);
@@ -950,7 +950,7 @@ async function transcribeVoice(blob) {
     const result = await apiAudio("/api/transcribe", blob);
     if (generation !== state.sessionGeneration) return;
     const transcript = String(result.transcript || "").trim();
-    if (!transcript) throw new Error("OpenAI hat kein Transkript zurückgegeben.");
+    if (!transcript) throw new Error("Kein Transkript erhalten.");
     const input = $("#messageInput");
     const current = input.value.trim();
     input.value = current ? `${current}\n${transcript}` : transcript;

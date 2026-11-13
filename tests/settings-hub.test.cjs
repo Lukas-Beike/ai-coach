@@ -114,9 +114,9 @@ test("the chat needs the selected model's key; before a load it stays usable", (
   assert.equal(coachConfigured({ openai: false }), false);
 });
 
-test("the microphone needs the OpenAI key whichever model answers", () => {
+test("the microphone needs a transcription endpoint whichever model answers", () => {
   const button = { disabled: false, classList: { toggle() {} }, setAttribute() {}, title: "", innerHTML: "" };
-  const state = { data: { messages: [], configured: { openai: false, coach: true } }, voiceTranscribing: false };
+  const state = { data: { messages: [], configured: { openai: true, transcription: false, coach: true } }, voiceTranscribing: false };
   const { updateVoiceButton } = extractFunctions("coach.js", ["voiceIsRecording", "setVoiceButtonIcon", "updateVoiceButton"], {
     $: () => button,
     state,
@@ -124,7 +124,7 @@ test("the microphone needs the OpenAI key whichever model answers", () => {
   });
   updateVoiceButton();
   assert.equal(button.disabled, true);
-  state.data.configured.openai = true;
+  state.data.configured.transcription = true;
   updateVoiceButton();
   assert.equal(button.disabled, false);
 });

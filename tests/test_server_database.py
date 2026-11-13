@@ -489,6 +489,7 @@ class ServerDatabaseTests(ServerTestCase):
                     intervals_api_key="",
                     openai_api_key="",
                     anthropic_api_key="",
+                    transcription_base_url="",
                     calendar_ical_url="",
                     wahoo_configured=False,
                 ),
