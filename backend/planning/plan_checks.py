@@ -644,43 +644,61 @@ def _mismatch_evidence(
 
 
 def _readable_structure(unit: Mapping[str, Any]) -> list[str]:
-    """``_structure_of`` as short labels: exercise names, or step kind and basis."""
+    """``_structure_of`` as short labels: exercise names, or the sections."""
     labels = []
     structure = _structure_of(unit) or []
     for item in structure[:8]:
         if isinstance(item, str):
             labels.append(item)
-            continue
-        kind, ramp, distance = item
-        labels.append(
-            f"{kind}{' ramp' if ramp else ''} {'distance' if distance else 'time'}"
-        )
+        elif item[0] == "repeat":
+            labels.append(f"repeat of {len(item[1])} steps")
+        else:
+            labels.append("ramp step" if item[1] else "step")
     if len(structure) > 8:
         labels.append(f"+{len(structure) - 8} more")
     return labels
 
 
-def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
-    """The part of a unit a variant keeps: exercise names, or step kinds in order.
+_REPEAT_HEADER = re.compile(r"\b\d+x$")
 
-    Repeats may change (5x4 or 4x4 min is load), so each step kind counts once,
-    in the order it first appears. None when the unit has no readable structure.
+
+def _structure_of(unit: Mapping[str, Any]) -> list[Any] | None:
+    """The part of a unit a variant keeps: exercise names, or its sections.
+
+    Athlete decision 2026-11-13 (#2513): an endurance unit's structure is the
+    order of its sections, single steps and repeat blocks with their steps, and
+    whether a step ramps. Repeat counts, durations or distances and the target
+    kind (pace, heart rate, power) are load and intensity. None when the unit
+    has no readable structure.
     """
     exercises = _strength_content(unit)
     if exercises:
         return [str(item.get("name") or "").strip().casefold() for item in exercises]
+    description = str(unit.get("description") or "")
+    target = str(unit.get("target") or "AUTO")
     try:
-        steps = structured_steps(
-            str(unit.get("description") or ""), str(unit.get("target") or "AUTO")
-        )
+        structured_steps(description, target)
     except WorkoutTextError:
         return None
-    kinds: list[Any] = []
-    for step in steps:
-        signature = (step.get("kind"), bool(step.get("ramp")), "distance" in step)
-        if signature not in kinds:
-            kinds.append(signature)
-    return kinds
+    sections: list[Any] = []
+    block: list[bool] | None = None
+    for raw in description.splitlines():
+        line = raw.strip()
+        if not line:
+            block = None
+        elif _REPEAT_HEADER.search(line):
+            block = []
+            sections.append(("repeat", block))
+        elif line.startswith("-"):
+            ramp = bool(structured_steps(line, target)[0].get("ramp"))
+            if block is None:
+                sections.append(("step", ramp))
+            else:
+                block.append(ramp)
+    return [
+        (kind, tuple(value)) if kind == "repeat" else (kind, value)
+        for kind, value in sections
+    ]
 
 
 def _steps(unit: Mapping[str, Any]) -> list[dict] | str:
