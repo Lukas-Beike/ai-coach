@@ -5,7 +5,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.canonical.activity_detail import (
     ActivityLap,
@@ -60,7 +60,9 @@ def add_session(db, activity_id, state="active", merged_into=None):
     )
 
 
-def add_record(db, provider, provider_activity_id, activity_id, sport="ride"):
+def add_record(
+    db, provider, provider_activity_id, activity_id, sport="ride", started_at=STAMP
+):
     db.execute(
         "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
         "state, mapper_version, source_kind, recorded_by, sport, environment, "
@@ -72,7 +74,7 @@ def add_record(db, provider, provider_activity_id, activity_id, sport="ride"):
             provider_activity_id,
             activity_id,
             sport,
-            STAMP,
+            started_at,
             STAMP,
             STAMP,
             STAMP,
@@ -383,6 +385,8 @@ class ProfileSelectionTests(unittest.TestCase):
         self.db.row_factory = row_factory
         self.addCleanup(self.db.close)
         initialize_schema(self.db)
+        self.session_records = Mock(wraps=CanonicalTableReader().session_activities)
+        self.day = date(2026, 10, 18)
 
     def service(self, summaries):
         @contextmanager
@@ -396,9 +400,27 @@ class ProfileSelectionTests(unittest.TestCase):
             database_manager=lambda: SimpleNamespace(read_snapshot=read_snapshot),
         )
         return TrainingProfileSelectionService(
-            lambda: date(2026, 10, 18),
+            lambda: self.day,
             canonical=canonical,
-            curves=SessionCurveReader(CanonicalTableReader().session_activities),
+            curves=SessionCurveReader(self.session_records),
+        )
+
+    def add_ride(self, summaries, activity_id, day="2026-10-10", peak=350.0):
+        add_session(self.db, activity_id)
+        add_record(self.db, GARMIN, f"g-{activity_id}", activity_id)
+        store_streams(
+            self.db, GARMIN, f"g-{activity_id}", ride_power(peak), StreamResolution.FULL
+        )
+        summaries.append(
+            {
+                "id": activity_id,
+                "sport": "ride",
+                "environment": "outdoor",
+                "started_at": f"{day}T08:00:00+00:00",
+                "started_at_local": f"{day}T10:00:00",
+                "record_ids": {"garmin": f"g-{activity_id}"},
+                "source": "Garmin",
+            }
         )
 
     def test_window_reads_canonical_sessions_and_counts_missing_streams(self):
@@ -450,6 +472,189 @@ class ProfileSelectionTests(unittest.TestCase):
             ("mean-max-curve", 2), (result["method"], result["method_version"])
         )
         self.assertRegex(window["input_fingerprint"], r"^[0-9a-f]{64}$")
+
+    def test_a_shared_read_queries_no_session_while_the_inputs_are_unchanged(self):
+        summaries = []
+        for activity_id in ("act_1", "act_2", "act_3"):
+            self.add_ride(summaries, activity_id)
+        service = self.service(summaries)
+
+        with patch.object(
+            mean_max_curve.activity_detail_store,
+            "full_stream_keys",
+            wraps=full_stream_keys,
+        ) as stream_keys:
+            first = service.curve_records(60, shared=True)
+            self.assertEqual((1, 3), (stream_keys.call_count, len(first)))
+            self.assertEqual(3, self.session_records.call_count)
+            again = service.curve_records(60, shared=True)
+
+        # The second read of the day touches no stream key and no session.
+        self.assertEqual(1, stream_keys.call_count)
+        self.assertEqual(3, self.session_records.call_count)
+        self.assertIs(first, again)
+        self.assertEqual(list(first), service.curve_records(60))
+        # One tuple of read-only records: a caller cannot change what others read.
+        self.assertIsInstance(first, tuple)
+        with self.assertRaises(TypeError):
+            first[0]["date"] = "2000-01-01"
+
+    def test_a_shared_read_is_built_again_on_a_new_day_or_window(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        service = self.service(summaries)
+        service.curve_records(60, shared=True)
+
+        for day, days in ((date(2026, 10, 19), 60), (date(2026, 10, 19), 30)):
+            self.day = day
+            with self.subTest(day=day, days=days):
+                before = self.session_records.call_count
+                service.curve_records(days, shared=True)
+                self.assertEqual(before + 1, self.session_records.call_count)
+                service.curve_records(days, shared=True)
+                self.assertEqual(before + 1, self.session_records.call_count)
+
+    def test_a_shared_read_follows_a_changed_session_stream_or_summary(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        service = self.service(summaries)
+        store_summary(self.db, "g-act_1", "a" * 64)
+        store_streams(
+            self.db,
+            GARMIN,
+            "g-act_1",
+            ride_power(350.0),
+            StreamResolution.FULL,
+            summary_sha256="a" * 64,
+        )
+
+        def peaks():
+            return [
+                row["power_profile"].get("duration_curve")
+                and next(
+                    point["watts"]
+                    for point in row["power_profile"]["duration_curve"]
+                    if point["duration_seconds"] == 180
+                )
+                for row in service.curve_records(60, shared=True)
+            ]
+
+        self.assertEqual([350.0], peaks())
+        store_streams(
+            self.db,
+            GARMIN,
+            "g-act_1",
+            ride_power(380.0),
+            StreamResolution.FULL,
+            summary_sha256="a" * 64,
+        )
+        self.assertEqual([380.0], peaks())
+        self.add_ride(summaries, "act_2", peak=300.0)
+        self.assertEqual([380.0, 300.0], peaks())
+        # A newer provider summary makes the set stale: the profile is empty.
+        store_summary(self.db, "g-act_1", "b" * 64)
+        self.assertEqual([None, 300.0], peaks())
+        # A change of the session's own summary (the athlete marks it a
+        # commute) leaves the records and sets alone and still counts.
+        summaries[1]["purpose"] = "commute"
+        self.assertEqual([None], peaks())
+
+    def test_a_shared_read_follows_a_linked_record_with_a_wrong_device_clock(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        # The session's streams come from a linked record that starts months
+        # before the window: only the session link, not its date, ties it in.
+        add_record(
+            self.db,
+            WAHOO,
+            "w-act_1",
+            "act_1",
+            started_at="2026-01-01T08:00:00+00:00",
+        )
+        store_streams(
+            self.db, WAHOO, "w-act_1", ride_power(330.0), StreamResolution.FULL
+        )
+        self.db.execute("DELETE FROM activity_detail_sets WHERE provider = 'garmin'")
+        service = self.service(summaries)
+
+        def peak():
+            (row,) = service.curve_records(60, shared=True)
+            return next(
+                point["watts"]
+                for point in row["power_profile"]["duration_curve"]
+                if point["duration_seconds"] == 180
+            )
+
+        self.assertEqual(330.0, peak())
+        store_streams(
+            self.db, WAHOO, "w-act_1", ride_power(360.0), StreamResolution.FULL
+        )
+        self.assertEqual(360.0, peak())
+
+    def test_a_shared_read_ignores_changes_the_records_do_not_show(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        service = self.service(summaries)
+        service.curve_records(60, shared=True)
+        calls = self.session_records.call_count
+
+        summaries[0].update(load=99.0, zone_times={"z2": 600}, notes="x")
+        service.curve_records(60, shared=True)
+        self.assertEqual(calls, self.session_records.call_count)
+        # A field the records show is read again.
+        summaries[0]["name"] = "Morning ride"
+        (row,) = service.curve_records(60, shared=True)
+        self.assertEqual(
+            (calls + 1, "Morning ride"), (self.session_records.call_count, row["name"])
+        )
+
+    def test_a_shared_read_follows_a_merge_a_lap_set_and_a_record_update(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        add_session(self.db, "act_2")
+        add_record(self.db, WAHOO, "w-act_2", "act_2")
+        store_streams(
+            self.db, WAHOO, "w-act_2", ride_power(400.0), StreamResolution.FULL
+        )
+        service = self.service(summaries)
+        service.curve_records(60, shared=True)
+        changes = {
+            "merge": lambda: self.db.execute(
+                "UPDATE activity_sessions SET state = 'duplicate', "
+                "merged_into = 'act_1' WHERE activity_id = 'act_2'"
+            ),
+            "lap set": lambda: store_laps(self.db, GARMIN, "g-act_1", INTERVAL_LAPS),
+            "record update": lambda: self.db.execute(
+                "UPDATE activity_records SET updated_at = '2026-10-17T00:00:00+00:00' "
+                "WHERE provider_activity_id = 'g-act_1'"
+            ),
+        }
+        for name, change in changes.items():
+            with self.subTest(name):
+                calls = self.session_records.call_count
+                change()
+                service.curve_records(60, shared=True)
+                self.assertEqual(calls + 1, self.session_records.call_count)
+
+    def test_a_concurrent_build_finishing_later_keeps_the_first_result(self):
+        self.add_ride([], "act_1")
+        reader = SessionCurveReader(self.session_records)
+        builds = []
+
+        def build(name):
+            builds.append(name)
+            return [{"build": name}]
+
+        def older():
+            # A newer read finishes while this build is still running.
+            reader.shared_records(self.db, ["act_1"], "newer", lambda: build("newer"))
+            return build("older")
+
+        reader.shared_records(self.db, ["act_1"], "older", older)
+        self.assertEqual(["newer", "older"], builds)
+        (kept,) = reader.shared_records(self.db, ["act_1"], "newer", lambda: build("x"))
+        self.assertEqual("newer", kept["build"])
+        self.assertEqual(["newer", "older"], builds)
 
     def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
         summaries = []

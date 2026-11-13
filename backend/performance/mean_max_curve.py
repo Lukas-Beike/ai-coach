@@ -16,8 +16,9 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Final
 
 from backend.activities.detail_contract import measured_order
@@ -80,6 +81,7 @@ class SessionCurveReader:
         self._session_records = session_records
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
+        self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._lock = threading.Lock()
 
     def curves(self, db: Any, activity_ids: Iterable[str]) -> dict[str, SessionCurve]:
@@ -109,6 +111,43 @@ class SessionCurveReader:
                         self._memo.popitem(last=False)
             curves[activity_id] = cached
         return curves
+
+    def shared_records(
+        self,
+        db: Any,
+        activity_ids: Sequence[str],
+        key: object,
+        build: Callable[[], Iterable[Mapping[str, Any]]],
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return the last built session records while their inputs are unchanged.
+
+        The stamp is ``key`` (what the caller's records show of the sessions) with
+        the stored records and detail sets of ``activity_ids`` that ``curves``
+        reads, so a new day, session or merge, or a changed stream, lap set or
+        provider summary builds the records again, and an unchanged read queries no
+        session. Callers share one tuple of read-only records. Of concurrent
+        builds the first to finish is kept: a build stores its result only if the
+        slot still holds what it held when the call started, and the next read
+        rebuilds if that result is no longer current. Concurrent misses each build
+        once; the per-session memo makes the repeat cheap.
+        """
+        stamp = _sha256(
+            [
+                key,
+                activity_detail_store.session_curve_inputs(
+                    db, activity_ids, ACTIVITY_RECORD_KIND
+                ),
+            ]
+        )
+        with self._lock:
+            held = self._shared[0] if self._shared else None
+            if self._shared and held == stamp:
+                return self._shared[1]
+        records = tuple(MappingProxyType(record) for record in build())
+        with self._lock:
+            if (self._shared[0] if self._shared else None) == held:
+                self._shared = (stamp, records)
+        return records
 
 
 def input_fingerprint(parts: Iterable[object]) -> str:

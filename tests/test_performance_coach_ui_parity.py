@@ -98,7 +98,7 @@ def _feedback(keys: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-def _curve_records(days: int = 90) -> list[dict[str, Any]]:
+def _curve_records(days: int = 90, *, shared: bool = False) -> list[dict[str, Any]]:
     def ride(activity_id: str, curve: list[tuple[int, float, float]]) -> dict:
         return {
             "activity_id": activity_id,
@@ -158,7 +158,7 @@ class CoachUiParityTests(unittest.TestCase):
         # The real curve owner over synthetic session curves; only the stream
         # read is replaced (`tests/test_mean_max_curve.py` covers it).
         profiles = TrainingProfileSelectionService(lambda: TODAY)
-        profiles.curve_records = _curve_records  # type: ignore[method-assign]
+        profiles.curve_records = _curve_records  # type: ignore[assignment]
         # Wired as `backend/performance/wiring.py` does: the Coach report sections
         # read the services the analysis routes and the public state use.
         self.reports = TrainingReportServices(

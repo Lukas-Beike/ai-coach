@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,8 +22,9 @@ from backend.performance.report_service import (
 @dataclass(frozen=True)
 class PerformanceServices:
     training_reports: Callable[[], TrainingReportServices]
-    # The session curve records over the one reader, without the report bundle.
-    curve_records: Callable[[int], Any]
+    # The session curve records over the one reader, without the report bundle;
+    # the last read is shared while its inputs are unchanged, as read-only records.
+    curve_records: Callable[[int], Sequence[Mapping[str, Any]]]
 
 
 def build_performance(
@@ -124,9 +125,9 @@ def build_performance(
             timezone=timezone,
         )
 
-    def curve_records(days: int) -> Any:
+    def curve_records(days: int) -> Sequence[Mapping[str, Any]]:
         return TrainingProfileSelectionService(
             local_today, canonical=canonical_performance_source(), curves=power_curves
-        ).curve_records(days)
+        ).curve_records(days, shared=True)
 
     return PerformanceServices(training_reports, curve_records)
