@@ -195,6 +195,14 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** `get_training_report` requests the `progress` section alone, for `days` 7, 28, 42, 56 or 84
 - **THEN** it receives per-ISO-week run, ride and strength buckets (sessions, duration, load, session-RPE AU, 3-zone approximation, plan compliance) with the local fitness (M7, key `ctl`) and mean-max ride power and run speed change per environment (canonical full-resolution curves); the running week and weeks without records are incomplete or unknown, never rest, and window metrics follow the sport filter.
 
+#### Scenario: Week status and zone bands
+- **WHEN** a progress week is listed
+- **THEN** its status is `future`, `recorded`, `incomplete_current_week`, `incomplete_current_week_no_records` or `no_records_unknown`; a week with sessions lists the buckets `all`, `run`, `ride` and `strength` (or only the filtered sport) and names commutes as `commute_sessions` and `commute_duration_s`; a session's 3-zone approximation uses its power zones, else its heart-rate zones, only in the local zone model, with 6 or more zones Z1-2 low, Z3-4 moderate and Z5 upward high and with up to 5 zones Z1-2, Z3 and Z4 upward.
+
+#### Scenario: Mean-maximal change in progress
+- **WHEN** the mean-max change of a progress window is built
+- **THEN** it compares the best value at 60, 300 and 1200 s of the earlier and the later half per environment, the halves splitting at the middle of the weeks that have started; with fewer than two started weeks the window metrics are `insufficient_data` and outside the curve window `outside_curve_window`.
+
 #### Scenario: Invalid report or missing owner
 - **WHEN** unsupported sections (including the retired section name `sleep_regularity`), invalid list parameters or unavailable report services are requested
 - **THEN** the system returns a validation/unavailable error rather than a misleading empty successful report.
@@ -240,6 +248,7 @@ Evidence:
 - `tests/test_performance_coach_ui_parity.py`
 - `tests/test_personal_recovery_coach_cases.py`
 - `tests/test_weekly_progress.py`
+- `tests/test_zone_time_reads.py:test_three_zone_intensity_counts_local_zones_only`
 
 ### Requirement: CP8 External text is evidence only
 The system SHALL isolate provider, calendar, attachment and stored product text as untrusted context data, prevent it from reproducing context fence delimiters, and keep credentials and raw transport payloads out of the Coach projection.

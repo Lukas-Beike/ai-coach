@@ -627,6 +627,32 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 
 Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`.
 
+### Requirement: Planned workout estimate from steps
+The system SHALL estimate a planned run or ride at read time from its workout steps and the athlete's thresholds on the unit's day (method `workout-steps-v1`, source `derived`), SHALL store nothing, and SHALL leave every value that depends on an unresolved step unknown with its reason.
+
+#### Scenario: Step intensity
+- **WHEN** a step target is resolved
+- **THEN** its intensity is the fraction of the threshold: percent of FTP, of threshold pace or of LTHR as written, watts over FTP, bpm over LTHR, pace speed over threshold speed; a zone is the midpoint of its limits (the lower limit for the open top zone), a range or ramp the mean of both ends, and a percent of the maximum heart rate is `value × max_hr / lthr`, or `value / 0.9` without an LTHR.
+
+#### Scenario: Unit values
+- **WHEN** every step has a duration and an intensity
+- **THEN** the intensity factor is the time-weighted 4th-power mean when every step is a power step, else the quadratic mean, and the load is `hours × IF² × 100`; the band seconds are low, moderate and high (with 6 or more zones Z1-2, Z3-4 and Z5 upward, with up to 5 zones Z1-2, Z3 and Z4 upward); `load_basis` is `normalized_power_over_ftp`, `relative_pace_speed`, `relative_lthr` or `mixed_step_intensity`.
+
+#### Scenario: Unknown values
+- **WHEN** a value cannot be resolved
+- **THEN** `unknown` names the reasons (`zone_out_of_range`, `missing_max_hr`, `missing_ftp`, `missing_lthr`, `pace_unit_unknown`, `invalid_pace`, `missing_threshold_pace`, `ambiguous_run_target` for a run target without `W`, `FTP`, `HR` or `Pace`, `unsupported_target`, `missing_pace_for_distance_step`, `sport_without_step_targets` or the workout-text reason) and only the load, intensity factor or band seconds that depend on it stay null.
+
+Detailed contract: a distance step gets its duration from its pace speed and a timed pace step its distance; clock paces are read per km or mile only. The estimate feeds the derived session focus, the hard-session rule, the intensity distribution and the load plan checks.
+
+Evidence:
+- `backend/activities/workout_load.py:estimate_workout`
+- `backend/planning/planned_unit_load.py:estimate_planned_unit`
+- `tests/test_workout_load.py:test_bare_run_target_is_ambiguous_but_watts_are_not`
+- `tests/test_workout_load.py:test_mixed_steps_use_quadratic_mean`
+- `tests/test_workout_load.py:test_one_unknown_step_keeps_duration_but_not_load`
+- `tests/test_workout_load.py:test_percent_of_max_hr_needs_max_hr`
+- `tests/test_workout_load.py:test_repeats_percent_bands_and_load`
+
 ### Requirement: Session focus of planned units and templates
 Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes. A Coach write that creates, moves or changes a strength unit without a strength structure, focus and strength intensity SHALL be blocked by the plan check `strength_incomplete`, which the Coach cannot accept away.
 
@@ -696,6 +722,18 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **WHEN** the athlete adopts the first threshold estimate from chest-strap RR intervals (`POST /api/profile/first-threshold/adopt`, never by the Coach)
 - **THEN** it is stored as `first_threshold_pct` with the origin `estimated` (`first_threshold_origin`) through the profile save path with change receipt and undo, the caps follow it like a measured value, the cap source is `estimated` (label `geschätzt`), a stored measured value is replaced only when the request says so, and a later manual entry sets the origin back to `measured`.
 
+#### Scenario: Cap values
+- **WHEN** a cap is derived
+- **THEN** the default is 80 % of the run threshold HR for recovery units and 87 % for easy and long units; from a measured or adopted first threshold the easy and long cap is that percent minus 3.0 points and the recovery cap the lower of 80 and the easy cap minus 7.0 points, each rounded down to one decimal, and the defaults apply (source `default`) when the easy cap would exceed 100 or a cap or its exported lower bound would fall below 20; the exported lower bound `low_percent_lthr` is the lower of 65 and the cap minus 15 points, rounded down to one decimal.
+
+#### Scenario: Stored cap
+- **WHEN** a cap is validated or resolved
+- **THEN** it holds exactly `percent_lthr`, `low_percent_lthr` and `source` (`default`, `measured` or `estimated`, labelled "Standard", "gemessen" and "geschätzt"), both percentages within 20 to 120 and the lower one below the cap; the bpm is the percent of the threshold HR rounded half up; a cap stored for another focus does not apply.
+
+#### Scenario: Cap verdict
+- **WHEN** a run's heart rate is judged against its unit's cap (method `heart-rate-cap-execution-v1`)
+- **THEN** the verdict is `above_cap` when the time-weighted mean is above the cap or more than 10 % of the time is above it, `upper_edge` when the mean is at least 95 % of the cap, else `within_target`, with `mean_bpm`, `mean_percent_of_cap`, `time_above_cap_pct`, `cap_bpm`, `cap_percent_lthr`, `cap_source` and `cap_label`; without a threshold HR or a heart-rate stream it is `not_covered`.
+
 #### Scenario: Export to Wahoo
 - **WHEN** a run unit with a cap becomes a Wahoo plan
 - **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
@@ -708,7 +746,7 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **WHEN** a unit has a cap
 - **THEN** its card shows the percent first, then the currently resolved bpm and the source (the form "≤ <percent> % LSHF · <bpm> bpm · <source>"), and the post-session analysis judges the run's heart rate against the stored cap resolved for the unit's date (`planned_targets.heart_rate_cap`: mean, time above the cap, verdict within_target, upper_edge or above_cap), not against the zones.
 
-Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/run_lthr.py:RunLthr.resync`, `backend/planning/push_state.py:run_document_digest`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
+Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/run_lthr.py:RunLthr.resync`, `backend/planning/push_state.py:run_document_digest`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`. Added evidence: `backend/activities/hr_cap.py:cap_percents`, `tests/test_run_hr_cap.py:test_a_measured_threshold_that_no_cap_can_satisfy_falls_back_to_the_defaults`, `tests/test_run_hr_cap.py:test_time_above_the_cap_counts_even_with_a_low_mean`.
 
 ### Requirement: Structured strength units
 Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.

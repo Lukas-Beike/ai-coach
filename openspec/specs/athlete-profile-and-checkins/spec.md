@@ -230,7 +230,15 @@ The system SHALL show an estimated first threshold heart rate, derived from stor
 - **WHEN** the athlete adopts the shown estimate
 - **THEN** the profile stores the percent with the origin `estimated` as one change with receipt and undo; an estimate that changed since it was shown, or a missing one, is refused, and a measured value is replaced only when the request says so.
 
-Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
+#### Scenario: Quality and shown values
+- **WHEN** the estimate is served
+- **THEN** it is the median rounded to 0.1 percent and `good` only from at least 5 qualifying sessions whose values span at most 5 percentage points, else `low`, and carries `percent_lthr`, `bpm` (with today's run threshold heart rate, rounded half up, or null), `sessions`, `quality`, `from`, `to`, `spread_pct` and the source text "Schätzung aus Brustgurt-RR-Intervallen (DFA-α1, Forschungsstand), kein Laborwert".
+
+#### Scenario: Estimate already adopted
+- **WHEN** the athlete adopts an estimate whose percent is already stored with the origin `estimated`
+- **THEN** nothing is written, no change is recorded and the answer is `{profile, first_threshold_estimate, adopted: false}`, while a stored adoption answers `adopted: true` (refusals and their texts in `docs/api-routes.md`).
+
+Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`. Added evidence: `tests/first-threshold-estimate.test.cjs`, `tests/test_first_threshold_estimate.py:test_a_stale_or_missing_shown_value_is_refused`, `tests/test_first_threshold_estimate.py:test_adopting_the_value_already_stored_writes_nothing`.
 
 ### Requirement: Recorded sensors linked to equipment
 The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL show the active main equipment item that an earlier release's stored link names for a sensor; no route or Coach tool sets or removes a link. A serial number SHALL never be stored or shown.
@@ -340,28 +348,61 @@ The athlete SHALL be able to read and explicitly edit local zones and thresholds
 - **WHEN** a zone change is undone
 - **THEN** the restored value keeps the save date it had, so an old threshold does not look freshly confirmed.
 
+#### Scenario: Effective configuration of a day
+- **WHEN** the zone configuration of one metric, sport and day is chosen
+- **THEN** a local configuration precedes Garmin's, then Wahoo's; within a source the sport's own configuration precedes Garmin's sport-less set, an indoor configuration (indoor and virtual sessions only) precedes an environment-free one and the latest start wins; a day before every provider configuration is stood in for by the earliest one that starts at most 90 days later.
+
+#### Scenario: Thresholds of a day
+- **WHEN** the threshold of a day is resolved
+- **THEN** a local configuration's threshold leads every kind, a Garmin watch zone set valid on that day leads the threshold heart rate only, and any other provider configuration only fills a threshold that no source-policy value supplies.
+
+#### Scenario: Standard limits and source labels
+- **WHEN** no local or provider zone configuration applies to a sport and metric
+- **THEN** the fixed standard limits apply and the source reads "Standardzonen": power zones end at 55, 75, 90, 105, 120 and 150 % of the FTP, heart-rate zones at 68, 83, 94 and 105 % of the threshold heart rate and pace zones at 77.5, 87.7, 94.3, 100, 103.4 and 111.5 % of the threshold speed; the other sources read "lokale Zonen", "Garmin-Zonen" and "Wahoo-Zonen".
+
+#### Scenario: Converting limits
+- **WHEN** limits are converted to zone numbers
+- **THEN** percent limits count only with the threshold as their basis; absolute limits are divided by the threshold the settings carry, Garmin's after adding 0.5 to each; absolute heart-rate limits without a threshold heart rate use 90 % of the maximum heart rate as reference and the source then reads "… (Bezug 90 % der Max-HF)"; a configuration with fewer than two limits is ignored; a value exactly on a limit belongs to the lower zone and everything above the last limit to the top zone.
+
+#### Scenario: Warning payload and dating
+- **WHEN** `GET /api/zones` carries `threshold_warnings`
+- **THEN** it is `{stale_after_days: 56, sdk_failure, items}`, `sdk_failure` being set only when a checked value is Garmin's, and each item names `metric`, `sport`, `label` ("FTP Rad", "FTP Laufen", "Schwellenpuls (LSHF) Rad", "Schwellenpuls (LSHF) Laufen", "Schwellenpace" or "Indoor-FTP" with metric `indoor_ftp`), `value`, `value_text` (a pace as "m:ss /km"), `source`, `source_label`, `dated_on`, `age_days` and `reason` (`stale`, `expired` or `sdk_failed`).
+
+#### Scenario: Dating of a threshold
+- **WHEN** an active threshold is dated
+- **THEN** a local value counts from its `valid_from`, else from its last save, a Garmin watch zone set from its start or, when later, from the day Garmin last reported the same value, and a provider observation from its observed day; a local value without any date is not judged and hides an expired provider value, and a failed read gives no warning and logs `threshold_staleness_failed`.
+
 Detailed contract: the payload, response and error contract of `GET /api/zones`, `PUT /api/zones` and `PUT /api/zones/remove` is in docs/api-routes.md.
 
 Evidence:
+- `backend/activities/zone_settings.py:effective_zone_configuration`
 - `backend/activities/zone_settings.py`
 - `backend/athlete/zones.py:local_configuration`
 - `backend/athlete/zones.py:ZoneConfigurationService.remove`
 - `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`
 - `backend/athlete/zones.py:ZoneConfigurationService.save`
 - `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`
+- `backend/performance/threshold_staleness.py:assess_thresholds`
 - `backend/performance/threshold_staleness.py`
 - `public/settings.js::removeZones`
 - `public/settings.js::saveZones`
 - `public/settings.js::zoneWarningLine`
+- `tests/test_dated_threshold_parity.py:test_a_sport_specific_value_of_the_same_day_wins`
+- `tests/test_dated_threshold_parity.py:test_local_configuration_leads_the_watch_everywhere`
+- `tests/test_dated_threshold_parity.py:test_only_garmin_values_are_carried_over`
 - `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`
 - `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`
 - `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`
+- `tests/test_threshold_staleness.py:test_a_failing_read_gives_none`
+- `tests/test_threshold_staleness.py:test_local_value_dates_by_valid_from_else_last_save`
+- `tests/test_threshold_staleness.py:test_undated_local_value_hides_the_expired_provider_value`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_a_future_start_is_rejected`
 - `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_save_date_of_the_restored_value`
+- `tests/test_zone_settings.py:test_zone_models_with_fewer_zones_keep_their_own_limits`
 - `tests/test_zone_settings.py`
 - `tests/zone-warnings.test.cjs`
 
