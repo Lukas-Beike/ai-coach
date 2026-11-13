@@ -122,7 +122,7 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
 | Minimum sessions | 3 | product assumption | Same minimum as the DFA-α1 estimate and the session comparison of pace at heart rate. |
 | Band width | 10 bpm (two 5 bpm bins) | product assumption | `pace_at_hr.py:BIN_BPM`, `BAND_BINS`; athlete decision 2026-11-12. |
 | Minimum time in band per session | 600 s | product assumption | `pace_at_hr.py:MIN_BAND_S`. |
-| Maximum output variation in band | coefficient of variation 0.15 | product assumption | `pace_at_hr.py:MAX_SPEED_CV`, also applied to power. |
+| Maximum output variation in band | coefficient of variation 0.15 | product assumption; for power confirmed 2026-11-13 (#2535: 6 of 7 outdoor and 2 of 2 indoor rides of 60 days qualify, a looser limit adds at most one) | `pace_at_hr.py:MAX_SPEED_CV`, also applied to power. |
 | Warm-up exclusion | 600 s | source | Drift starts 10-20 min into exercise (R32, R34). |
 | Power smoothing before pairing with heart rate | 60 s | product assumption | Heart rate trails a power change by up to about a minute; `pace_at_hr.py:POWER_SMOOTH_S`. |
 | Flat-ground limit for runs | 3 % grade | product assumption | `pace_at_hr.py:FLAT_GRADE_PCT`; grade adjustment from R44. |
@@ -145,10 +145,6 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
 
 - No comparison with a laboratory or field LT1 test of this athlete yet; a
   step test with lactate or a DFA-α1 ramp would check it.
-- The 0.15 variation limit, decided for both sports, may reject many outdoor
-  rides over rolling terrain (60 s power varies more than running speed); to
-  be checked against real coverage: the diagnostic report's `lt1_ride_coverage`
-  counts qualifying rides at 0.15, 0.20 and 0.25 (#2535).
 - The session curve memo is held twice (public state and training reports)
   until the composition shares one reader.
 
