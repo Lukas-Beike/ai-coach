@@ -495,6 +495,7 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
             "athlete_checkins",
             "activity_feedback",
             "external_calendar_events",
+            "external_calendar_decisions",
             "public_event_sources",
             "public_event_candidates",
             "nutrition_logs",

@@ -112,6 +112,7 @@ EXPORTED_TABLE_MEMBERS: dict[str, tuple[str, ...]] = {
     "athlete_checkins": ("athlete_checkins.jsonl",),
     "activity_feedback": ("activity_feedback.jsonl",),
     "external_calendar_events": ("external_calendar_events.jsonl",),
+    "external_calendar_decisions": ("external_calendar_decisions.jsonl",),
     "public_event_sources": ("public_event_sources.jsonl",),
     "public_event_candidates": ("public_event_candidates.jsonl",),
     "competitions": ("competitions.jsonl",),

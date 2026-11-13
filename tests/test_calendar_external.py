@@ -1,9 +1,11 @@
 import sqlite3
 import unittest
 from datetime import date, timedelta
+from unittest import mock
 
 from support import FakeManager
 
+from backend.calendar.decisions import ExternalCalendarDecisionService
 from backend.calendar.external import (
     ExternalCalendarReader,
     event_counts,
@@ -11,6 +13,8 @@ from backend.calendar.external import (
     list_events_in_window,
     state,
 )
+from backend.db.schema import CALENDAR_DECISIONS_DDL, execute_ddl
+from backend.errors import AppError
 from backend.planning.context import build_daily_planning_context
 
 
@@ -42,6 +46,7 @@ class ExternalCalendarTests(unittest.TestCase):
             );
             """
         )
+        execute_ddl(self.db, CALENDAR_DECISIONS_DDL)
         self.today = date(2026, 9, 20)
 
     def tearDown(self):
@@ -54,12 +59,13 @@ class ExternalCalendarTests(unittest.TestCase):
         start="2026-09-21T09:00:00",
         end="2026-09-21T10:00:00",
         relevant=1,
+        uid=None,
     ):
         self.db.execute(
             "INSERT INTO external_calendar_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 event_id,
-                f"uid-{event_id}",
+                uid or f"uid-{event_id}",
                 f"Event {event_id}",
                 start[:10],
                 start,
@@ -112,6 +118,9 @@ class ExternalCalendarTests(unittest.TestCase):
                 "no_training",
                 "no_intensity",
                 "short_only",
+                "impact",
+                "decision_scope",
+                "recurring",
                 "updated_at",
             },
             set(events[0]),
@@ -245,6 +254,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "last_error",
                 "skipped_events",
                 "events",
+                "undecided_upcoming",
                 "window_days",
             },
             set(result),
@@ -259,6 +269,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "last_error": None,
                 "skipped_events": 0,
                 "events": list_events(self.db, today=self.today),
+                "undecided_upcoming": 1,
                 "window_days": 56,
             },
             result,
@@ -325,6 +336,171 @@ class ExternalCalendarTests(unittest.TestCase):
         projected = reader.state(configured=True, running=False, window_days=56)
         self.assertEqual(projected["events"][0]["id"], "event")
         self.assertEqual(projected["last_sync_at"], "2026-09-20T12:00:00+00:00")
+
+    def decide(self, uid, start, impact, stamp="2026-09-20T08:00:00+00:00"):
+        self.db.execute(
+            "INSERT OR REPLACE INTO external_calendar_decisions VALUES (?, ?, ?, ?)",
+            (uid, start, impact, stamp),
+        )
+
+    def impacts(self, **kwargs):
+        return {
+            event["id"]: (event["impact"], event["decision_scope"])
+            for event in list_events(self.db, today=self.today, **kwargs)
+        }
+
+    def test_decisions_override_markers_and_survive_a_feed_refresh(self):
+        for index, day in enumerate(("2026-09-21", "2026-09-22", "2026-09-23")):
+            self.add_event(
+                f"team-{index}",
+                start=f"{day}T09:00:00",
+                end=f"{day}T10:00:00",
+                uid="team",
+            )
+        self.add_event("marked", start="2026-09-24T09:00:00", end="2026-09-24T10:00:00")
+        self.db.execute(
+            "UPDATE external_calendar_events SET short_only=1 WHERE id='marked'"
+        )
+        self.add_event(
+            "plain", start="2026-09-25T09:00:00", end="2026-09-25T10:00:00", relevant=0
+        )
+        self.decide("team", "", "none")
+        self.decide("team", "2026-09-22T09:00:00", "block")
+        expected = {
+            "team-0": ("none", "series"),
+            "team-1": ("block", "event"),
+            "team-2": ("none", "series"),
+            "marked": ("short", None),
+            "plain": ("open", None),
+        }
+        self.assertEqual(expected, self.impacts())
+        # The sync deletes and re-inserts every event; decisions stay apart.
+        rows = [
+            dict(row)
+            for row in self.db.execute("SELECT * FROM external_calendar_events")
+        ]
+        self.db.execute("DELETE FROM external_calendar_events")
+        for row in rows:
+            self.db.execute(
+                f"INSERT INTO external_calendar_events ({', '.join(row)}) "
+                f"VALUES ({', '.join('?' for _ in row)})",
+                tuple(row.values()),
+            )
+        self.assertEqual(expected, self.impacts())
+        self.assertEqual(
+            {"team-1": ("block", "event"), "marked": ("short", None)},
+            self.impacts(training_relevant_only=True),
+        )
+        blocked = next(
+            event
+            for event in list_events(self.db, today=self.today)
+            if event["id"] == "team-1"
+        )
+        self.assertEqual(
+            (1, 0, 0, 1, 1),
+            tuple(
+                blocked[key]
+                for key in (
+                    "no_training",
+                    "no_intensity",
+                    "short_only",
+                    "training_relevant",
+                    "recurring",
+                )
+            ),
+        )
+        # A moved occurrence is a new event; only the series decision covers it.
+        self.db.execute(
+            "UPDATE external_calendar_events SET start_local='2026-09-22T11:00:00' "
+            "WHERE id='team-1'"
+        )
+        self.assertEqual(("none", "series"), self.impacts()["team-1"])
+
+    def test_undecided_count_covers_open_events_of_the_next_fourteen_days(self):
+        for offset in (-1, 0, 14, 15):
+            day = (self.today + timedelta(days=offset)).isoformat()
+            self.add_event(
+                f"day-{offset}", start=f"{day}T09:00:00", end=f"{day}T10:00:00"
+            )
+        self.add_event("decided", uid="decided")
+        self.decide("decided", "2026-09-21T09:00:00", "none")
+        self.add_event("marked")
+        self.db.execute(
+            "UPDATE external_calendar_events SET no_training=1 WHERE id='marked'"
+        )
+        result = state(
+            self.db, configured=True, running=False, today=self.today, window_days=56
+        )
+        self.assertEqual(2, result["undecided_upcoming"])
+
+    def service(self):
+        followup = mock.Mock()
+        followup.check.return_value = {"needs_replan": False, "replan_changes": 0}
+        events = mock.Mock()
+        service = ExternalCalendarDecisionService(
+            FakeManager(self.db), followup, events, lambda: "2026-09-20T08:00:00Z"
+        )
+        return service, followup, events
+
+    def stored_decisions(self):
+        return [
+            tuple(row)
+            for row in self.db.execute(
+                "SELECT uid, occurrence_start, impact FROM external_calendar_decisions "
+                "ORDER BY uid, occurrence_start"
+            )
+        ]
+
+    def test_decision_service_sets_replaces_and_removes_decisions(self):
+        self.add_event("one", uid="team")
+        self.add_event(
+            "two", uid="team", start="2026-09-28T09:00:00", end="2026-09-28T10:00:00"
+        )
+        service, followup, events = self.service()
+
+        result = service.decide("team", "2026-09-21T09:00:00", "short")
+
+        self.assertEqual(
+            {
+                "uid": "team",
+                "occurrence_start": "2026-09-21T09:00:00",
+                "impact": "short",
+                "needs_replan": False,
+                "replan_changes": 0,
+            },
+            result,
+        )
+        followup.check.assert_called_once()
+        events.publish.assert_called_once_with("coach", {"status": "changed"})
+        service.decide("team", "2026-09-21T09:00:00", "easy")
+        self.assertEqual(
+            [("team", "2026-09-21T09:00:00", "easy")], self.stored_decisions()
+        )
+        service.decide("team", None, "block")
+        self.assertEqual([("team", "", "block")], self.stored_decisions())
+        service.decide("team", "2026-09-28T09:00:00", "none")
+        service.decide("team", None, None)
+        self.assertEqual([], self.stored_decisions())
+
+    def test_decision_service_rejects_unknown_events_and_values(self):
+        self.add_event("one", uid="team")
+        service, followup, _events = self.service()
+        cases = (
+            (("other", None, "block"), 404),
+            (("team", "2026-09-22T09:00:00", "block"), 404),
+            (("team", None, "maybe"), 400),
+            (("", None, "block"), 400),
+            ((["team"], None, "block"), 400),
+            (("team", 5, "block"), 400),
+            (("x" * 501, None, "block"), 400),
+        )
+        for arguments, status in cases:
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(AppError) as error:
+                    service.decide(*arguments)
+                self.assertEqual(status, error.exception.status)
+        self.assertEqual([], self.stored_decisions())
+        followup.check.assert_not_called()
 
 
 if __name__ == "__main__":

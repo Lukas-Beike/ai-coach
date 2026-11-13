@@ -78,9 +78,24 @@ The system SHALL derive training constraints from recognized NO_TRAINING, NO_INT
 - **WHEN** an event has a title only and no marker
 - **THEN** it is stored with `training_relevant` 0 and is left out of reads that ask for relevant events, while window reads without that filter still return it.
 
-Detailed contract: an event is training-relevant only with a non-empty description and no NO_TRAINING marker in title or description. The stored flags are `training_relevant`, `no_training`, `no_intensity` and `short_only`. A relevant-only read returns events with `training_relevant = 1`, any marker flag, or a title containing `[NO_TRAINING]`.
+Detailed contract: an event is training-relevant only with a non-empty description and no NO_TRAINING marker in title or description. The stored flags are `training_relevant`, `no_training`, `no_intensity` and `short_only`. A relevant-only read returns events with `training_relevant = 1` or any marker flag, after the athlete's decision is applied.
 
 Evidence: `backend/calendar/markers.py:has_marker`, `backend/calendar/ical_mapping.py:calendar_event_constraints`, `backend/calendar/local.py:local_calendar_events`; `tests/test_calendar_markers.py:test_variants_match`, `tests/test_calendar_markers.py:test_bare_or_other_marker_does_not_match`, `tests/test_calendar_external.py:test_training_relevance_filter_keeps_no_training_blockers`, `tests/test_calendar_external.py:test_training_relevance_filter_keeps_title_only_no_intensity_markers`, `tests/test_provider_calendar.py:test_timing_default_relevance_and_description_markers`, `tests/test_provider_calendar.py:test_training_markers_are_contains_matched_in_title_and_description`, `tests/test_server_weather_calendar.py:test_non_relevant_external_events_are_stored_but_not_in_canonical_calendar_or_coach`.
+
+### Requirement: Athlete decision per event
+The system SHALL let the athlete set the training impact of a stored external event, `block`, `short`, `easy` or `none`, for one occurrence (UID and local start) or for every occurrence of its UID, and SHALL keep decisions apart from the feed rows so a feed refresh does not remove them. An occurrence decision SHALL win over a series decision, which wins over the description markers; a decision SHALL replace the marker flags (`block` sets `no_training`, `short` `short_only`, `easy` `no_intensity`, `none` clears all and the relevance). Event reads SHALL carry `impact` (`open` without decision or marker), `decision_scope` and `recurring`, and the status read SHALL carry `undecided_upcoming`, the count of `open` events from today through 14 days ahead. Decisions SHALL store no event text and come only from the explicit route.
+
+#### Scenario: Feed refresh after a decision
+- **WHEN** the sync replaces every stored event and a decided UID and start come back
+- **THEN** the event keeps its decision; an occurrence whose start moved keeps only a series decision and otherwise counts as open again.
+
+#### Scenario: Series decision
+- **WHEN** the athlete decides for every occurrence
+- **THEN** the single-occurrence decisions of that UID are replaced and the adaptive preview is recalculated.
+
+Detailed contract: `POST /api/external-calendar/decisions` (contract in `docs/api-routes.md`); `impact` `null` removes the decision, and a series removal removes the occurrence decisions too. Decisions are in the export and the local data purge.
+
+Evidence: `backend/calendar/external.py:list_events`, `backend/calendar/external.py:undecided_upcoming`, `backend/calendar/decisions.py:ExternalCalendarDecisionService.decide`; `tests/test_calendar_external.py:test_decisions_override_markers_and_survive_a_feed_refresh`, `tests/test_calendar_external.py:test_undecided_count_covers_open_events_of_the_next_fourteen_days`, `tests/test_calendar_external.py:test_decision_service_sets_replaces_and_removes_decisions`, `tests/test_calendar_external.py:test_decision_service_rejects_unknown_events_and_values`, `tests/test_db_migrations.py:test_populated_v27_database_gains_the_decision_table_with_every_row`.
 
 ### Requirement: Atomic connected-feed replacement and recovery
 The system SHALL serialize configured external-calendar refresh, parse the future import window, and atomically replace stored feed events with success timestamp, daily marker, and cleared error/constraint-refresh state. A fetch, parse, insert, or marker failure SHALL preserve the last-good event set. Success SHALL publish changed state and request an adaptive preview/status projection without applying a replan or writing remote calendar events.

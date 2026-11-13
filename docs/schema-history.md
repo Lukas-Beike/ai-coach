@@ -16,9 +16,10 @@ required when the athlete explicitly chooses to start over. Future schema
 changes add explicit, versioned and transactional migrations from the baseline
 with upgrade regression tests; the baseline moves only when production runs a
 newer schema.
-The current schema is version 27. Releases wrote version 21 (1.13.41 to
-1.13.44), 22 (2.0.0), 23 (2.0.1), 24 (2.0.2), 25 (2.0.3 and 2.0.4) and 26
-(2.0.5). Version 10 adds canonical activity detail
+The current schema is version 28. Releases wrote version 21 (1.13.41 to
+1.13.44), 22 (2.0.0), 23 (2.0.1), 24 (2.0.2), 25 (2.0.3 and 2.0.4), 26
+(2.0.5) and 27 (2.1.2 to 2.1.8); version 27 keeps only its shape digest and
+enters the chain after the baseline's product step. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -45,7 +46,10 @@ products one canonical table: own products and foods saved from a database
 lookup are rows of `nutrition_products` with an origin (`own` or the
 database), the database's fetch time and its further fields; the upgrade moves
 every `food_database_entries` row into it and fills only the empty fields of
-an own product that holds a food's EAN or id. Release
+an own product that holds a food's EAN or id. Version 28 adds
+`external_calendar_decisions`, the athlete's training impact per external
+calendar event (UID and occurrence start, or the whole UID) apart from the
+feed rows the sync replaces; the upgrade only creates the empty table. Release
 2.0.5 upgrades a version 21 to 25 database or backup to it in place within one
 transaction, and a failed upgrade leaves it unchanged. Change-history entries
 written before version 16 still name the former fields and can no longer be

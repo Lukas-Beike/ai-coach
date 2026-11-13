@@ -35,6 +35,7 @@ from backend.db.schema import (
 from backend.db.schema_history import (
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V26,
+    SHAPE_SCHEMA_V27,
     released_shape,
     signature_digest,
 )
@@ -218,6 +219,31 @@ def populated_baseline_database(db) -> None:
         (STAMP,),
     )
     add_baseline_nutrition_rows(db)
+    db.commit()
+
+
+# Schema v27, releases 2.1.2 to 2.1.8, has no fixture of its own: the baseline
+# after its product step is that shape, here with calendar events of a feed.
+V27_CALENDAR_EVENTS = (
+    ("event-1", "team@example.test", "Teammeeting", "2026-10-19T09:00:00", 0, 0),
+    ("event-2", "team@example.test", "Teammeeting", "2026-10-26T09:00:00", 0, 0),
+    ("event-3", "trip@example.test", "Dienstreise", "2026-10-21T00:00:00", 1, 1),
+)
+
+
+def populated_v27_database(db) -> None:
+    populated_baseline_database(db)
+    migrations._canonical_products(db)
+    db.execute("PRAGMA user_version = 27")
+    db.executemany(
+        "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, "
+        "end_local, duration_minutes, all_day, training_relevant, no_training, "
+        "updated_at) VALUES (?, ?, ?, substr(?, 1, 10), ?, ?, 60, ?, 1, ?, ?)",
+        [
+            (event_id, uid, name, start, start, start, all_day, blocked, STAMP)
+            for event_id, uid, name, start, all_day, blocked in V27_CALENDAR_EVENTS
+        ],
+    )
     db.commit()
 
 
@@ -582,28 +608,95 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 )
 
     def test_upgraded_database_restarts_with_the_same_build_unchanged(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "upgrade.db"
-            db = sqlite3.connect(path)
-            db.row_factory = sqlite3.Row
-            try:
-                populated_baseline_database(db)
-                migrate_schema(db)
-                db.commit()
-                upgraded = list(db.iterdump())
-            finally:
-                db.close()
-            reopened = sqlite3.connect(path)
-            reopened.row_factory = sqlite3.Row
-            try:
-                migrate_schema(reopened)
-                self.assertEqual(list(reopened.iterdump()), upgraded)
-                self.assertEqual(
-                    reopened.execute("PRAGMA user_version").fetchone()[0],
-                    CURRENT_SCHEMA_VERSION,
-                )
-            finally:
-                reopened.close()
+        for populate in (populated_baseline_database, populated_v27_database):
+            with (
+                self.subTest(populate=populate.__name__),
+                tempfile.TemporaryDirectory() as root,
+            ):
+                path = Path(root) / "upgrade.db"
+                db = sqlite3.connect(path)
+                db.row_factory = sqlite3.Row
+                try:
+                    populate(db)
+                    migrate_schema(db)
+                    db.commit()
+                    upgraded = list(db.iterdump())
+                finally:
+                    db.close()
+                reopened = sqlite3.connect(path)
+                reopened.row_factory = sqlite3.Row
+                try:
+                    migrate_schema(reopened)
+                    self.assertEqual(list(reopened.iterdump()), upgraded)
+                    self.assertEqual(
+                        reopened.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+                finally:
+                    reopened.close()
+
+    def test_frozen_v27_shape_is_the_baseline_after_its_product_step(self):
+        db = self.connect()
+        db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
+        migrations._canonical_products(db)
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V27
+        )
+
+    def test_populated_v27_database_gains_the_decision_table_with_every_row(self):
+        db = self.connect()
+        populated_v27_database(db)
+        tables = self.user_tables(db)
+        before = self.table_rows(db, tables)
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(self.table_rows(db, tables), before)
+        self.assertEqual(
+            self.user_tables(db), sorted([*tables, "external_calendar_decisions"])
+        )
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM external_calendar_decisions").fetchone()[
+                0
+            ],
+            0,
+        )
+        insert = "INSERT INTO external_calendar_decisions VALUES (?, ?, ?, ?)"
+        db.execute(insert, ("team@example.test", "", "none", STAMP))
+        for row in (
+            ("team@example.test", "", "block", STAMP),
+            ("team@example.test", "2026-10-19T09:00:00", "maybe", STAMP),
+            ("", "", "none", STAMP),
+        ):
+            with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
+                db.execute(insert, row)
+
+    def test_failing_v28_step_rolls_back_the_v27_database_and_a_retry_succeeds(self):
+        db = self.connect()
+        populated_v27_database(db)
+        before = list(db.iterdump())
+
+        def failing_step(connection):
+            migrations._calendar_decisions(connection)
+            raise RuntimeError("injected migration failure")
+
+        with (
+            mock.patch.dict(
+                migrations.UPGRADE_STEPS,
+                {SHAPE_SCHEMA_V27: (SHAPE_CURRENT, failing_step)},
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 27)
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
 
     def test_version_and_shape_must_belong_together(self):
         previous = self.connect()
