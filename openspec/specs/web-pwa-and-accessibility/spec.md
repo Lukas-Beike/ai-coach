@@ -155,11 +155,15 @@ The client SHALL show the settings areas under the fixed title "Mehr" as one swi
 - **WHEN** a configured Intervals.icu or Claude card shows "Nicht geprüft" and the athlete runs "Verbindung prüfen"
 - **THEN** its chip shows "Verbunden" after a successful check and "Fehler" after a failed one, also after a reload while the server keeps the result.
 
+#### Scenario: A reload keeps a connected chip
+- **WHEN** the page is reloaded and the server reports that the last check or the last use of a configured Intervals.icu or Yazio card succeeded or failed
+- **THEN** the chip shows "Verbunden" after a success and "Fehler" after a failure, and "Nicht geprüft" only while the server knows neither; loading the card sends no provider request.
+
 #### Scenario: Unsaved profile
 - **WHEN** a profile field changes
 - **THEN** the save bar shows "Ungespeichert" until the profile is saved, then "Gespeichert"; a closed section opens when it holds an invalid value.
 
-Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`, `tests/provider-checks.test.cjs::Intervals.icu and Claude chips follow the last explicit check, also after a reload`.
+Evidence: `public/connection-status.js::openConnectionCard`, `public/connection-status.js::garminSourceLines`, `public/sync-status.js::renderProviderFreshness`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `e2e/settings-hub.spec.js::@responsive the seven connections start collapsed and name their status in words`, `e2e/settings-hub.spec.js::@responsive an open card holds only its own provider's status, access, settings and actions`, `e2e/provider-actions.spec.js::@responsive the setup line is shown on every tab and Jetzt einrichten opens the Intervals.icu card`, `tests/provider-checks.test.cjs::Intervals.icu and Claude chips follow the last explicit check, also after a reload`, `tests/settings-hub.test.cjs::the Intervals.icu detail names the last export, also one that was no library push`, `e2e/provider-checks.spec.js::@responsive Intervals.icu shows the server's last export after a reload and checks nothing`, `e2e/yazio-connection.spec.js::@responsive Yazio shows the server's last check or lookup after a reload without checking`.
 
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.

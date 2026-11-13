@@ -576,10 +576,11 @@ function intervalsConnectionDetail(intervals) {
   const librarySync = intervals.library_sync || {};
   if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
   if (intervals.state === "syncing") return "Intervals.icu wird synchronisiert.";
-  if (intervals.last_error) return intervals.last_error;
+  if (intervals.state === "error") return intervals.last_error || "Letzter Export fehlgeschlagen";
   if (intervals.state === "configured") return "Noch nicht getestet";
-  if (!librarySync.last_sync_at) return "Noch keine Synchronisierung durchgeführt";
-  const updated = formatTime(librarySync.last_sync_at);
+  const usedAt = intervals.last_used_at || librarySync.last_sync_at;
+  if (!usedAt) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(usedAt);
   const libraryCount = Number(librarySync.state?.synced || 0);
   const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
   return "Letzte Aktualisierung: " + updated + counts;
@@ -590,7 +591,7 @@ function renderIntervalsConnection(data, configured) {
   setConnectionChip("#intervalsConnectionStatus", intervalsConnectionKind(intervals));
   const detail = $("#intervalsConnectionDetail");
   if (detail) {
-    detail.classList.toggle("error", Boolean(intervals.last_error));
+    detail.classList.toggle("error", intervals.state === "error");
     detail.textContent = intervalsConnectionDetail(intervals);
   }
 }

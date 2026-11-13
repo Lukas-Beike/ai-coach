@@ -12,6 +12,10 @@ from backend.coach.receipt_reads import monthly_turn_usage
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
+from backend.sync.intervals_state import (
+    INTERVALS_OUTPUT_FAILED_KEY,
+    INTERVALS_OUTPUT_OK_KEY,
+)
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.wahoo_connection import connection_status
 
@@ -147,6 +151,14 @@ class PublicBootstrapService:
                     )
                     or None,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
+                    last_output_ok_at=deps.key_values.get_in_transaction(
+                        db, INTERVALS_OUTPUT_OK_KEY
+                    )
+                    or None,
+                    last_output_failed_at=deps.key_values.get_in_transaction(
+                        db, INTERVALS_OUTPUT_FAILED_KEY
+                    )
+                    or None,
                 ),
                 "provider_freshness": freshness,
                 "provider_ids": {

@@ -20,6 +20,10 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.intervals_state import (
+    INTERVALS_OUTPUT_FAILED_KEY,
+    INTERVALS_OUTPUT_OK_KEY,
+)
 from backend.sync.job_outcomes import CONTENDED_STATUS, SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
@@ -424,14 +428,55 @@ def _reject_plan_push(job_type: str) -> None:
         )
 
 
+# Reasons of a provider failure that carries no upstream status (no response).
+_PROVIDER_FAILURE_REASONS = frozenset({"provider_network_error", "provider_http_error"})
+
+
+def _provider_failure(error: Exception) -> bool:
+    """Whether an exception is the provider's answer or silence, not a local fault."""
+    return isinstance(error, AppError) and (
+        error.upstream_status is not None or error.reason in _PROVIDER_FAILURE_REASONS
+    )
+
+
+def _output_stamp(job_type: str, result: dict[str, Any]) -> str | None:
+    """The stamp key an output result earns, None when nothing reached Intervals.icu.
+
+    A skipped entry, an already synced one, a conflict with local edits and a
+    contended run are local outcomes; only a synced entry, a completed
+    competition run or a synced nutrition day proves the connection.
+    """
+    if job_type == "plan_push":
+        entries = [item.get("status") for item in result.get("results") or []]
+        if "synced" in entries:
+            return INTERVALS_OUTPUT_OK_KEY
+        return INTERVALS_OUTPUT_FAILED_KEY if "error" in entries else None
+    if job_type == "competition_push":
+        return INTERVALS_OUTPUT_OK_KEY if result.get("status") == "ok" else None
+    if result.get("synced_dates") or ("date" in result and not result.get("pending")):
+        return INTERVALS_OUTPUT_OK_KEY
+    # failed_dates also holds local errors (changed approval, busy writer), so a
+    # nutrition failure is stamped only from a provider exception, not from here.
+    return None
+
+
 class IntervalsJobAdapter:
-    """Route Intervals jobs: nutrition inline, then the plan and competition pushes."""
+    """Route Intervals jobs: nutrition inline, then the plan and competition pushes.
+
+    A job that reached Intervals.icu leaves the stamp of its outcome through
+    ``record_output``; the connection chip reads it after a reload.
+    """
 
     def __init__(
-        self, *, jobs: IntervalsSyncJobOwner, nutrition_sync_service: Any
+        self,
+        *,
+        jobs: IntervalsSyncJobOwner,
+        nutrition_sync_service: Any,
+        record_output: Callable[[str], None] = lambda _key: None,
     ) -> None:
         self._jobs = jobs
         self._nutrition_sync_service = nutrition_sync_service
+        self._record_output = record_output
 
     def execute(
         self,
@@ -439,6 +484,33 @@ class IntervalsJobAdapter:
         payload: dict[str, Any],
         reason: str,
         *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        try:
+            result = self._run(job, payload, reason, job_type)
+        except Exception as error:
+            if _provider_failure(error):
+                self._stamp(INTERVALS_OUTPUT_FAILED_KEY)
+            raise
+        if key := _output_stamp(job_type, result):
+            self._stamp(key)
+        return result
+
+    def _stamp(self, key: str) -> None:
+        """A stamp that cannot be written never changes the job's outcome."""
+        try:
+            self._record_output(key)
+        except Exception:  # noqa: BLE001 - the push already happened
+            _LOGGER.warning(
+                "Intervals.icu output stamp not stored",
+                extra={"event": "intervals_output_stamp_failed"},
+            )
+
+    def _run(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
         job_type: str,
     ) -> dict[str, Any]:
         if job_type == "nutrition_sync":
