@@ -1,6 +1,6 @@
 # Architecture
 
-`server.py` is the composition root. Business logic lives in `backend/`; the import contract is layered. `canonical` imports only the standard library and itself, `athlete` imports no other domain package, `providers` may import only `canonical`, configuration, errors, observability and the runtime clock, ports and socket deadline, and package import cycles are not allowed. `http_api` owns HTTP transport and route assembly, `coach` owns Coach workflows, `sync` owns synchronization and scheduling, `providers` owns external adapters, and `db` owns persistence. AST layer tests enforce a permitted-import map per layer, the empty cycle baseline and these rules.
+`server.py` is the composition root: it reads the configuration, builds the one application context (`backend/app/context.py`, typed, with live `config` and `database` holders that a credential save or a restore replaces) and runs the lifecycle (startup, workers, shutdown). Each domain's builder (`backend/<domain>/wiring.py`) constructs that domain's services from the context; the HTTP server class is `backend/http_api/server.py`. Business logic lives in `backend/`; the import contract is layered. `canonical` imports only the standard library and itself, `athlete` imports no other domain package, `providers` may import only `canonical`, configuration, errors, observability and the runtime clock, ports and socket deadline, and package import cycles are not allowed. `http_api` owns HTTP transport and route assembly, `coach` owns Coach workflows, `sync` owns synchronization and scheduling, `providers` owns external adapters, and `db` owns persistence; only the domain packages (activities, athlete, backup, calendar, coach, diagnostics, history, nutrition, performance, planning, sync, weather) may import `backend.app` to read the context; `http_api` receives it as an untyped parameter, and `providers`, `db`, `runtime`, `canonical` and the shared modules never import it. AST layer tests enforce a permitted-import map per layer, the empty cycle baseline and these rules.
 
 ```text
                +-------------------------------------------------------------+
@@ -19,13 +19,14 @@
 | Pacecraft Container (/app)                                                          |
 |                                                                                           |
 |  +-------------------------------------------------------------------------------------+  |
-|  | server.py (Composition Root & HTTP Server)                                          |  |
+|  | server.py (Composition Root: configuration, application context, lifecycle)         |  |
 |  +-------------------------------------------+-----------------------------------------+  |
 |                                              |                                            |
 |                                              v                                            |
 |  +-------------------------------------------------------------------------------------+  |
 |  | backend/ Domain Layer                                                               |  |
-|  |   - backend.http_api  : HTTP routing and request/response transport                 |  |
+|  |   - backend.app       : Shared application context (domain builders read it)        |  |
+|  |   - backend.http_api  : HTTP server, routing and request/response transport         |  |
 |  |   - backend.coach     : Coach conversations, context, tools, jobs and SSE           |  |
 |  |   - backend.sync      : Provider synchronization, scheduling and durable jobs       |  |
 |  |   - backend.providers : External provider adapters and response handling            |  |
