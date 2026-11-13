@@ -38,13 +38,14 @@ test("@responsive an opened completed session shows its time in zones as one bar
   await openCalendar(page, request);
   // The session read of "Details" carries the zones (#2195); routed before the cards render.
   const reads = [];
+  let z4 = 1620;
   await page.route("**/api/activities/*", async (route) => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1));
     reads.push(id);
     if (id === "past-run") return route.fulfill({ status: 500, json: { error: "Fehler" } });
     const zones = id === "today-ride" ? {
       power: { source: { label: "Garmin Connect" }, buckets: [
-        { index: 1, label: "Z1", seconds: 360 }, { index: 2, label: "Z2", seconds: 840 }, { index: 3, label: "Z3", seconds: 0 }, { index: 4, label: "Z4", seconds: 1620 },
+        { index: 1, label: "Z1", seconds: 360 }, { index: 2, label: "Z2", seconds: 840 }, { index: 3, label: "Z3", seconds: 0 }, { index: 4, label: "Z4", seconds: z4 },
       ] },
       heart_rate: { source: { label: "Garmin Connect" }, buckets: [{ index: 2, label: "Z2", seconds: 2820 }] },
     } : {};
@@ -68,6 +69,27 @@ test("@responsive an opened completed session shows its time in zones as one bar
     await expect.poll(() => reads.includes(name === "Vergangene Ausfahrt" ? "past-ride" : "past-run")).toBe(true);
     await expect(card.locator(".planned-zone-time")).toHaveCount(0);
   }
+  // "Details" reuses the bar's read of the same session (#2478); a failed read is not shared.
+  const failed = page.locator(`.planned-day[data-date="${days.past}"] .planned-entry`).filter({ hasText: "Vergangener Lauf" });
+  await failed.locator(".planned-activity-more > summary").click();
+  await expect.poll(() => reads.filter((id) => id === "past-run").length).toBe(2);
+  await showCalendarDay(page, days.today);
+  if (!await ride.evaluate((element) => element.open)) await ride.locator(":scope > summary").click();
+  await ride.locator(".planned-activity-more > summary").click();
+  const panel = ride.locator(".activity-analysis-panel");
+  await expect(panel.locator(":scope > *").first()).toBeAttached();
+  await expect(panel).not.toContainText("Details werden geladen");
+  expect(reads.filter((id) => id === "today-ride")).toHaveLength(1);
+  // A detail refresh in "Details" reads the document fresh; a rebuild then shows that one, without another read.
+  z4 = 1800;
+  await panel.evaluate(async (element) => {
+    await ActivityAnalysis.loadPanel(element, state.data.training_calendar.find((item) => item.id === "today-ride"), undefined, true);
+    // A full rebuild with the same data, as after a week switch.
+    plannedRenderSnapshot = null;
+    renderPlanned(state.data.training_calendar);
+  });
+  await expect(ride.locator(".planned-zone-time-legend span").nth(3)).toHaveText("Z4 30′");
+  expect(reads.filter((id) => id === "today-ride")).toHaveLength(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
 });
 
