@@ -560,21 +560,7 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
 
     def test_assignment_stored_under_a_provider_id_still_applies(self) -> None:
         bike = self.local_bike()
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
-                (
-                    "equipment_assignment:i1",
-                    json.dumps(
-                        {
-                            "activity_id": "601",
-                            "equipment_id": bike["id"],
-                            "observed_at": SYNCED,
-                        }
-                    ),
-                    SYNCED,
-                ),
-            )
+        self.store_assignment("601", bike["id"], SYNCED)
         usage = self.usage("Local bike")
         self.assertEqual(usage["assigned_sessions"], 1)
         self.assertEqual(usage["distance_km"], 20)
