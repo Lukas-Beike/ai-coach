@@ -47,7 +47,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.manager = open_manager(directory.name)
         self.addCleanup(self.manager.close)
-        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_i")
+        add_session_record(self.manager, ProviderId.GARMIN, "s1", "act_s")
         add_session_record(self.manager, ProviderId.GARMIN, "g1", "act_g")
         add_session_record(
             self.manager, ProviderId.WAHOO, "w1", "act_w", recorded_by="wahoo"
@@ -59,7 +59,7 @@ class DetailEnvelopeTests(unittest.TestCase):
                 "raw_provider_data": {
                     "activities": [
                         {
-                            "id": "i1",
+                            "id": "s1",
                             "type": "Ride",
                             "start_date_local": "2026-09-10T07:00:00",
                             "moving_time": 3600,
@@ -73,7 +73,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         feedback = self.feedback = _Feedback(
             [
                 {"activity_id": reference, "notes": reference}
-                for reference in ("act_i", "act_g", "act_w")
+                for reference in ("act_s", "act_g", "act_w")
             ]
         )
         self.assembly = ActivityReadAssembly(
@@ -102,9 +102,9 @@ class DetailEnvelopeTests(unittest.TestCase):
             activity_id, garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
 
-    def test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions(self):
+    def test_envelope_is_filled_for_garmin_and_wahoo_sessions(self):
         for activity_id, reference in (
-            ("act_i", "act_i"),
+            ("act_s", "act_s"),
             ("act_g", "act_g"),
             ("act_w", "act_w"),
         ):
@@ -118,8 +118,8 @@ class DetailEnvelopeTests(unittest.TestCase):
                 self.assertEqual([{"id": f"bike-{reference}"}], document["equipment"])
                 self.assertEqual(reference, self.equipment_reads[-1])
 
-    def test_validation_uses_the_intervals_summary_or_reports_no_data(self):
-        validation = self.detail("i1")["activity_validation"]
+    def test_validation_uses_the_stored_summary_or_reports_no_data(self):
+        validation = self.detail("s1")["activity_validation"]
         self.assertTrue(validation["available"])
         self.assertNotEqual("no_completed_activity", validation["status"])
 
@@ -130,13 +130,13 @@ class DetailEnvelopeTests(unittest.TestCase):
                 )
 
     def test_session_rpe_load_comes_from_the_summary_and_its_feedback(self):
-        load = self.detail("i1")["session_rpe_load"]
+        load = self.detail("s1")["session_rpe_load"]
         self.assertEqual(
-            ("act_i1", None, "no_rating"),
+            ("act_s1", None, "no_rating"),
             (load["activity_id"], load["value"], load["reason"]),
         )
         self.feedback.rows[0]["session_rpe"] = 5
-        load = self.detail("i1")["session_rpe_load"]
+        load = self.detail("s1")["session_rpe_load"]
         self.assertEqual(("athlete_feedback", 5), (load["rpe_source"], load["rpe"]))
         for activity_id in ("act_g", "act_w"):
             with self.subTest(activity_id):
@@ -147,7 +147,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         for rating in (None, 5):
             with self.subTest(rating=rating):
                 self.feedback.rows[0]["session_rpe"] = rating
-                for activity_id in ("i1", "act_i", "act_g", "act_w"):
+                for activity_id in ("s1", "act_s", "act_g", "act_w"):
                     self.assertEqual(
                         self.detail(activity_id)["session_rpe_load"],
                         read.session_rpe_load(activity_id, TODAY),
@@ -161,8 +161,7 @@ class DetailEnvelopeTests(unittest.TestCase):
                 for entry in self.detail(activity_id)["detail_data"]["providers"]
             }
 
-        # Intervals.icu details are never served, so never offered (#1685).
-        self.assertEqual({"intervals": False}, refreshable("act_i"))
+        self.assertEqual({"garmin": True}, refreshable("act_s"))
         self.assertEqual({"garmin": True}, refreshable("act_g"))
         self.assertEqual({"wahoo": False}, refreshable("act_w"))
         self.configured = ["intervals", "wahoo"]

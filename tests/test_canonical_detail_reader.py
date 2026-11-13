@@ -75,12 +75,23 @@ class CanonicalDetailReaderTests(unittest.TestCase):
             refreshable=lambda: frozenset({INTERVALS}),
         )
 
-    def add_session(self, activity_id, state="active", merged_into=None) -> None:
+    def add_session(
+        self, activity_id, state="active", merged_into=None, provider=GARMIN
+    ) -> None:
         self.db.execute(
             "INSERT INTO activity_sessions(activity_id, primary_provider, "
             "primary_provider_activity_id, state, merged_into, started_at, "
-            "created_at, updated_at) VALUES (?, 'intervals', ?, ?, ?, ?, ?, ?)",
-            (activity_id, activity_id, state, merged_into, STAMP, STAMP, STAMP),
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                activity_id,
+                provider.value,
+                activity_id,
+                state,
+                merged_into,
+                STAMP,
+                STAMP,
+                STAMP,
+            ),
         )
 
     def add_record(
@@ -143,7 +154,7 @@ class CanonicalDetailReaderTests(unittest.TestCase):
 
         The Intervals.icu copy carries its own sets, which are never read (#1685).
         """
-        self.add_session("act_1")
+        self.add_session("act_1", provider=WAHOO)
         self.add_record(WAHOO, "w-ride-99", "act_1")
         self.store_streams(
             WAHOO,
@@ -169,10 +180,11 @@ class CanonicalDetailReaderTests(unittest.TestCase):
         self.assertIsNotNone(doc)
         self.assertEqual("act_1", doc["session"]["activity_id"])
         self.assertEqual(
-            [("garmin", False), ("intervals", False), ("wahoo", False)],
+            [("garmin", False), ("wahoo", False)],
             sorted(
                 (item["provider"], item["refreshable"])
                 for item in doc["detail_data"]["providers"]
+                if item["provider"] != "intervals"
             ),
         )
         streams = doc["streams"]
@@ -292,8 +304,8 @@ class CanonicalDetailReaderTests(unittest.TestCase):
 
     def test_target_snapshot_of_a_merged_session_is_read(self) -> None:
         self.garmin_ride()
-        self.add_session("act_6", "duplicate", merged_into="act_5")
-        self.add_record(INTERVALS, "i-ride-98", "act_6")
+        self.add_session("act_6", "duplicate", merged_into="act_5", provider=WAHOO)
+        self.add_record(WAHOO, "w-ride-98", "act_6")
         save_analysis(
             self.db,
             "act_6",

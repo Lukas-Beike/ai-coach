@@ -214,7 +214,7 @@ class ActivityReferenceResolverTests(_Fixture):
 
 class ActivityCallerResolutionTests(_Fixture):
     def test_detail_resolves_local_id_and_reports_it(self) -> None:
-        local = self.seed("ride-1")
+        local = self.seed("ride-1", provider=ProviderId.GARMIN)
         raw = {
             "id": "ride-1",
             "start_date_local": "2026-06-01T07:00:00",
