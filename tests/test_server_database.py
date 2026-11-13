@@ -1,10 +1,12 @@
 """Server integration tests for database."""
 
+import ast
 import dataclasses
 import http.client
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,9 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+# The repository root, for running this file as a script with --write.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import remote_reconcilers
 import snapshot_seed
@@ -37,6 +42,7 @@ from backend.db.schema import (
     database_table_names,
 )
 from backend.errors import AppError
+from backend.http_api import bootstrap_state as bootstrap_state_module
 from backend.http_api import server as http_server_module
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -55,7 +61,89 @@ from backend.weather import cache as weather_cache
 SERVER_PHRASE = "synthetic server phrase"
 
 
+BOOTSTRAP_CONTRACT = (
+    Path(__file__).resolve().parents[1] / "docs" / "bootstrap-contract.md"
+)
+CONTRACT_BEGIN = "<!-- BEGIN GENERATED BOOTSTRAP -->\n"
+CONTRACT_END = "<!-- END GENERATED BOOTSTRAP -->\n"
+WRITE_DOCS = "--write" in sys.argv
+
+
+def _bootstrap_placeholders() -> set[str]:
+    """Keys that ``PublicBootstrapService.read`` always fills with an empty literal."""
+    # The module as imported: in the container image it is not under the tests mount.
+    source = Path(bootstrap_state_module.__file__)
+    return {
+        str(key.value)
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant)
+        and isinstance(value, ast.List | ast.Dict)
+        and not (value.elts if isinstance(value, ast.List) else value.keys)
+    }
+
+
+def _json_type(value) -> str:
+    return {
+        type(None): "null",
+        bool: "boolean",
+        int: "number",
+        float: "number",
+        str: "string",
+        list: "list",
+        dict: "object",
+    }[type(value)]
+
+
+def bootstrap_contract(state: dict) -> str:
+    """The top-level shape of ``GET /api/bootstrap`` on an empty database."""
+    placeholders = _bootstrap_placeholders()
+    lines = ["| Field | Type | Fields or note |", "| --- | --- | --- |"]
+    for key in sorted(state):
+        value = state[key]
+        if key in placeholders and value in ([], {}):
+            note = "always empty here; its area route loads it"
+        elif isinstance(value, dict):
+            note = ", ".join(f"`{name}`" for name in sorted(value))
+        else:
+            note = ""
+        lines.append(f"| `{key}` | {_json_type(value)} | {note} |")
+    lines += [
+        "",
+        "`state_versions` markers: "
+        + ", ".join(f"`{name}`" for name in sorted(state["state_versions"]))
+        + ".",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 class ServerDatabaseTests(ServerTestCase):
+    def test_bootstrap_contract_is_current(self):
+        # A Personal API key adds fields to the Garmin state; render without one.
+        with patch.object(
+            server, "CONFIG", replace(server.CONFIG, garmin_personal_api_key="")
+        ):
+            state = server.PUBLIC_STATE.bootstrap_service().read()
+        rendered = bootstrap_contract(state)
+        document = BOOTSTRAP_CONTRACT.read_text(encoding="utf-8")
+        before, rest = document.split(CONTRACT_BEGIN, 1)
+        if WRITE_DOCS:
+            document = (
+                before
+                + CONTRACT_BEGIN
+                + rendered
+                + CONTRACT_END
+                + rest.split(CONTRACT_END, 1)[1]
+            )
+            BOOTSTRAP_CONTRACT.write_text(document, encoding="utf-8", newline="\n")
+        self.assertEqual(
+            document.split(CONTRACT_BEGIN, 1)[1].split(CONTRACT_END, 1)[0],
+            rendered,
+            "Regenerate with: python tests/test_server_database.py --write "
+            "ServerDatabaseTests.test_bootstrap_contract_is_current",
+        )
+
     def test_shared_database_resources_have_one_backend_owner(self):
         self.assertIs(server.DB_LOCK, DATABASE_LOCK)
         self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
@@ -1389,9 +1477,7 @@ class ServerDatabaseTests(ServerTestCase):
                         ("token", "csrf", 9999999999, "now", "now"),
                     )
                 valid_backup = server.BACKUP.backup_service().read_bytes()
-                restored = server.BACKUP.restore_service().restore(
-                    valid_backup
-                )
+                restored = server.BACKUP.restore_service().restore(valid_backup)
                 self.assertEqual(restored["status"], "ok")
                 self.assertEqual(
                     server.key_value_service().get("restore-marker"), "preserved"
@@ -1491,4 +1577,6 @@ class ServerDatabaseTests(ServerTestCase):
 
 
 if __name__ == "__main__":
+    if WRITE_DOCS:
+        sys.argv.remove("--write")
     unittest.main()
