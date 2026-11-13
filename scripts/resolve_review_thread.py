@@ -39,8 +39,8 @@ SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 def refusal(thread: dict | None, pr: int, viewer: str) -> str | None:
     """Why this thread may not be resolved, or None when it may."""
-    pull = (thread or {}).get("pullRequest")
-    if not pull or pull["number"] != pr:
+    pull = thread.get("pullRequest") if thread else None
+    if not thread or not pull or pull["number"] != pr:
         return "the thread does not belong to this pull request"
     if (pull.get("author") or {}).get("login") != viewer:
         return "the pull request was not authored by the authenticated user"

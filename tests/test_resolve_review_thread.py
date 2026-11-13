@@ -18,6 +18,7 @@ import resolve_review_thread
 _spec = importlib.util.spec_from_file_location(
     "guard_resolve_thread", ROOT / "scripts/hooks/guard_resolve_thread.py"
 )
+assert _spec is not None and _spec.loader is not None
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
