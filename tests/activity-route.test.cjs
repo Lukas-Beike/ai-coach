@@ -3,8 +3,7 @@ const { test } = require("node:test");
 const { extractFunctions, fakeDocument, FakeElement } = require("./frontend-harness.cjs");
 
 function text(item) {
-  if (typeof item === "string") return item;
-  return [item.textContent, ...item.children.map(text)].join("");
+  return typeof item === "string" ? item : item.textContent;
 }
 
 function loadRenderRoute() {

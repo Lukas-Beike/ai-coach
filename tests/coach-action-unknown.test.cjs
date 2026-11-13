@@ -12,13 +12,13 @@ function harness() {
   });
 }
 
-// The text a textContent assignment leaves as a string child is read through textContent itself.
+// A leaf's text; the whole card is read through its own textContent.
 function elements(node) {
   return node.children.filter((child) => typeof child !== "string");
 }
 
 function texts(node) {
-  return [node.textContent, ...elements(node).flatMap(texts)];
+  return elements(node).length ? elements(node).flatMap(texts) : [node.textContent];
 }
 
 function tagNames(node) {
@@ -28,10 +28,10 @@ function tagNames(node) {
 test("an unknown proposal action type renders a neutral error card without buttons", () => {
   const card = harness().coachActionCard({ id: "proposal-x", status: "ready", action_type: "delete_everything" });
 
-  assert.deepEqual(texts(card).filter(Boolean), ["Unbekannte Aktion"]);
+  assert.equal(card.textContent, "Unbekannte Aktion");
   assert.equal(card.dataset.proposalStatus, "unknown");
   assert.equal(tagNames(card).includes("button"), false);
-  assert.doesNotMatch(texts(card).join(" "), /löschen|Garmin|Intervals/i);
+  assert.doesNotMatch(card.textContent, /löschen|Garmin|Intervals/i);
 });
 
 test("a known proposal action type keeps its confirm button", () => {

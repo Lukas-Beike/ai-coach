@@ -5,7 +5,6 @@
     "Testlauf"
   <div>
     <p>
-      ""
     <section class="activity-series">
       <h3>
         "Leistung (W)"
@@ -264,7 +263,6 @@
         <button type="submit">
           "Feedback speichern"
       <p class="muted" role="status">
-        ""
   <p class="muted" role="status">
   <div>
     <div class="dialog-actions">
