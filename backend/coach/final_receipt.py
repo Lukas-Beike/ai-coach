@@ -9,6 +9,7 @@ from typing import Any
 from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
 from backend.coach.receipt_compaction import compact_receipt
+from backend.coach.response_transport import turn_usage
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -71,6 +72,8 @@ class CoachFinalReceiptService:
             "change_summary": change_summary(command_receipts),
         }
         final_receipt.pop("pending_tool_calls", None)
+        if (usage := turn_usage()) is not None:
+            final_receipt["usage"] = usage
         return final_receipt
 
     def persist(

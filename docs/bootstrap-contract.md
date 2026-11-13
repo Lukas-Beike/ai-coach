@@ -83,6 +83,7 @@ when its marker changes. Each marker is built from local durable state
 | `thinking_level` | object | `options`, `selected` |
 | `threshold_warnings` | null |  |
 | `usage` | object | `date`, `input_tokens`, `output_tokens`, `rate_limits`, `requests`, `status`, `total_tokens` |
+| `usage_month` | object | `models`, `month` |
 | `wahoo` | object | `configured`, `connected`, `connected_at`, `scope` |
 | `weather` | object | always empty here; its area route loads it |
 

@@ -690,6 +690,37 @@ function renderSettingsUsage(data) {
   }
 }
 
+function renderUsageMonth(data) {
+  const usageMonth = data.usage_month || {};
+  const models = Array.isArray(usageMonth.models) ? usageMonth.models : [];
+  const section = document.getElementById("usageMonth");
+  const rows = document.getElementById("usageMonthRows");
+  if (!section || !rows) return;
+  section.hidden = models.length === 0;
+  const [year, month] = String(usageMonth.month || "").split("-").map(Number);
+  const title = document.getElementById("usageMonthTitle");
+  if (title && year && month) title.textContent = new Date(year, month - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const labels = new Map((data.model?.options || []).map((option) => [option.id, option.label]));
+  const tokens = new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 });
+  rows.replaceChildren(...models.map((entry) => {
+    const row = document.createElement("tr");
+    const cells = [
+      labels.get(entry.model) || entry.model || "Unbekannt",
+      Number(entry.answers || 0).toLocaleString("de-DE"),
+      tokens.format(Number(entry.input_tokens || 0)),
+      tokens.format(Number(entry.cached_input_tokens || 0)),
+      tokens.format(Number(entry.output_tokens || 0)),
+    ];
+    row.replaceChildren(...cells.map((text, index) => {
+      const cell = document.createElement(index === 0 ? "th" : "td");
+      if (index === 0) cell.scope = "row";
+      cell.textContent = text;
+      return cell;
+    }));
+    return row;
+  }));
+}
+
 function renderGarminConnection(data) {
   const garmin = data.garmin || {};
   setConnectionChip("#garminConnectionStatus", garminConnectionKind(garmin));
@@ -715,6 +746,7 @@ function renderSettings(data) {
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
   renderSettingsUsage(data);
+  renderUsageMonth(data);
   renderNotificationStatus();
   renderProviderAttention(data);
   renderConnectionsSyncProgress(data);

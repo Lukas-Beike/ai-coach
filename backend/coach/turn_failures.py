@@ -19,6 +19,7 @@ from backend.coach.outcomes import (
     unresolved_coach_steps,
 )
 from backend.coach.receipt_compaction import compact_receipt
+from backend.coach.response_transport import turn_usage
 from backend.coach.service import command_receipt
 from backend.coach.tool_specs import ACTION_LABELS
 from backend.db.manager import DatabaseManager
@@ -132,6 +133,8 @@ class CoachTurnFailureService:
                     ],
                 }
             )
+            if (usage := turn_usage()) is not None:
+                receipt["usage"] = usage
             # Keep applied local writes undoable, as a successful turn does.
             summary = change_summary(commands)
             if summary:

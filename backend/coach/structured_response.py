@@ -15,6 +15,7 @@ from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.response_transport import (
     CoachResponseTransport,
     raise_if_chat_cancelled,
+    turn_usage,
 )
 from backend.errors import AppError
 from backend.providers.model_seam import ModelRequest, ModelTurn
@@ -117,6 +118,10 @@ class CoachStructuredResponseService:
                     )
                 attempt += 1
                 continue
+            usage = turn_usage()
+            if background_owned and usage is not None:
+                # A restart resumes the turn with the usage spent so far.
+                self._jobs.merge_receipt(client_turn_id, {"usage": usage})
             if not self._spent_on_reasoning(turn, request, state):
                 return turn
             # Reasoning used the whole budget before any text or tool call, so

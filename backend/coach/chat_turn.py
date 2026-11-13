@@ -11,7 +11,7 @@ from backend.coach.conversation import CoachConversationProvisionService
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.receipt_reads import CoachCommandReceiptService
-from backend.coach.response_transport import raise_if_chat_cancelled
+from backend.coach.response_transport import metered_turn, raise_if_chat_cancelled
 from backend.coach.service import command_receipt
 from backend.coach.structured_turn import CoachStructuredTurnService
 from backend.db.manager import DatabaseManager
@@ -260,15 +260,17 @@ class CoachChatTurnService:
         self._resume_background_command(
             background_owned, conversation_id, structured_intent, client_turn_id
         )
-        return self._structured_turn().run(
-            message,
-            intent=structured_intent,
-            conversation_id=conversation_id,
-            client_turn_id=client_turn_id,
-            session_csrf_hash=session_csrf_hash,
-            on_text_delta=on_text_delta,
-            cancel_event=cancel_event,
-            background_job=background_job,
-            model=model,
-            thinking_level=thinking_level,
-        )
+        # A resumed background turn continues the usage its receipt kept.
+        with metered_turn(background_receipt.get("usage")):
+            return self._structured_turn().run(
+                message,
+                intent=structured_intent,
+                conversation_id=conversation_id,
+                client_turn_id=client_turn_id,
+                session_csrf_hash=session_csrf_hash,
+                on_text_delta=on_text_delta,
+                cancel_event=cancel_event,
+                background_job=background_job,
+                model=model,
+                thinking_level=thinking_level,
+            )

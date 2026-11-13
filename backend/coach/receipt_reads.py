@@ -12,6 +12,40 @@ from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
+_MONTHLY_USAGE_SQL = """
+SELECT json_extract(receipt, '$.model') AS model, COUNT(*) AS answers,
+       SUM(json_extract(receipt, '$.usage.input_tokens')) AS input_tokens,
+       SUM(json_extract(receipt, '$.usage.cached_input_tokens')) AS cached_input_tokens,
+       SUM(json_extract(receipt, '$.usage.output_tokens')) AS output_tokens
+FROM coach_commands
+WHERE status = 'completed' AND substr(created_at, 1, 7) = ?
+  AND json_valid(receipt) AND json_type(receipt, '$.usage') = 'object'
+GROUP BY model ORDER BY answers DESC, model
+"""
+
+
+def monthly_turn_usage(db: Any, month: str) -> dict[str, Any]:
+    """Answers and tokens per model of the turns started in ``month`` (YYYY-MM)."""
+    rows = db.execute(_MONTHLY_USAGE_SQL, (month,)).fetchall()
+    return {
+        "month": month,
+        "models": [
+            {
+                "model": str(row["model"] or ""),
+                **{
+                    key: int(row[key] or 0)
+                    for key in (
+                        "answers",
+                        "input_tokens",
+                        "cached_input_tokens",
+                        "output_tokens",
+                    )
+                },
+            }
+            for row in rows
+        ],
+    }
+
 
 class CoachCommandReceiptService:
     def __init__(

@@ -6,11 +6,14 @@ import json
 import sqlite3
 import threading
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 from support import temp_database
 
 from backend.coach.final_receipt import CoachFinalReceiptService
+from backend.coach.receipt_reads import monthly_turn_usage
+from backend.coach.response_transport import metered_turn
 from backend.db.repositories import ChatRepository, KeyValueRepository
 from backend.providers.model_seam import ModelTurn
 from backend.runtime.events import StateEventBuffer
@@ -80,6 +83,31 @@ class CoachFinalReceiptTests(unittest.TestCase):
         self.assertIn("pending_tool_calls", receipt)
         # A re-requested turn keeps the attachment window anchor it had.
         self.assertIs(final["openai_reached"], True)
+        self.assertNotIn("usage", final)
+
+    def test_build_keeps_the_usage_of_the_metered_turn(self) -> None:
+        options: dict[str, Any] = {
+            "status": "completed",
+            "turn": ModelTurn(),
+            "client_turn_id": "turn-1",
+            "command_receipts": [],
+            "sync_job_ids": [],
+            "intent": {},
+            "rounds": 1,
+            "failures": [],
+            "awaiting_clarification": False,
+        }
+        with metered_turn({"requests": 3, "input_tokens": 9000}):
+            final = self.service.build({"model": "claude-opus"}, **options)
+        self.assertEqual(
+            final["usage"],
+            {
+                "requests": 3,
+                "input_tokens": 9000,
+                "cached_input_tokens": 0,
+                "output_tokens": 0,
+            },
+        )
 
     def test_completed_command_returns_stored_receipt_without_duplicate_effect(
         self,
@@ -347,6 +375,61 @@ class CoachFinalReceiptTests(unittest.TestCase):
                 "running",
             )
         self.assertEqual(events.since()["events"], [])
+
+
+class MonthlyTurnUsageTests(unittest.TestCase):
+    def test_month_sums_completed_turns_with_usage_per_model(self) -> None:
+        manager = temp_database(self, "usage.sqlite3", schema=True)
+        usage = {
+            "requests": 2,
+            "input_tokens": 1000,
+            "cached_input_tokens": 600,
+            "output_tokens": 50,
+        }
+        rows = (
+            ("a", "completed", {"model": "claude-opus", "usage": usage}, "2026-11-02"),
+            ("b", "completed", {"model": "claude-opus", "usage": usage}, "2026-11-30"),
+            ("c", "completed", {"model": "gpt-6-luna", "usage": usage}, "2026-11-05"),
+            # Older turns without usage, other months and open turns are left out.
+            ("d", "completed", {"model": "gpt-6-luna"}, "2026-11-05"),
+            ("e", "completed", {"model": "claude-opus", "usage": usage}, "2026-10-31"),
+            ("f", "running", {"model": "claude-opus", "usage": usage}, "2026-11-06"),
+        )
+        with manager.unit_of_work() as db:
+            for turn_id, status, receipt, day in rows:
+                db.execute(
+                    "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
+                    "status, receipt, created_at, updated_at) VALUES (?, ?, '{}', 'local', ?, ?, ?, ?)",
+                    (
+                        turn_id,
+                        turn_id,
+                        status,
+                        json.dumps(receipt),
+                        f"{day}T08:00:00Z",
+                        day,
+                    ),
+                )
+            db.execute(
+                "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
+                "status, receipt, created_at, updated_at) VALUES ('g', 'g', '{}', 'local', "
+                "'completed', 'not json', '2026-11-07T08:00:00Z', '')"
+            )
+            result = monthly_turn_usage(db, "2026-11")
+        totals = {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 50}
+        self.assertEqual(
+            result,
+            {
+                "month": "2026-11",
+                "models": [
+                    {
+                        "model": "claude-opus",
+                        "answers": 2,
+                        **{key: value * 2 for key, value in totals.items()},
+                    },
+                    {"model": "gpt-6-luna", "answers": 1, **totals},
+                ],
+            },
+        )
 
 
 if __name__ == "__main__":

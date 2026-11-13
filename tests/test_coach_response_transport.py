@@ -7,9 +7,12 @@ from unittest.mock import Mock
 
 from backend.coach.response_transport import (
     CoachResponseTransport,
+    metered_turn,
     raise_if_chat_cancelled,
+    turn_usage,
 )
 from backend.errors import AppError
+from backend.providers import claude_messages_adapter
 from backend.providers import openai_responses_adapter as responses_adapter
 from backend.providers.model_seam import ModelRequest, ModelStep, ModelTurn
 
@@ -47,6 +50,47 @@ class CoachResponseTransportTests(unittest.TestCase):
             cancel_event=cancel_event,
             on_response_id=on_response_id,
         )
+
+    def test_metered_turn_sums_every_call_of_both_providers(self) -> None:
+        openai = {
+            "input_tokens": 1200,
+            "output_tokens": 80,
+            "input_tokens_details": {"cached_tokens": 1024},
+        }
+        claude = claude_messages_adapter.neutral_usage(
+            {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 300,
+                "cache_read_input_tokens": 2000,
+                "output_tokens": 40,
+            }
+        )
+        self.stream.side_effect = [ModelTurn(usage=openai), ModelTurn(usage=claude)]
+        self.complete.return_value = ModelTurn(usage={"output_tokens": True})
+        request = ModelRequest(model="m")
+
+        self.assertIsNone(turn_usage())
+        # A resumed turn continues the usage its receipt kept; junk counts as zero.
+        stored = {"requests": 2, "input_tokens": 500, "output_tokens": "x"}
+        with metered_turn(stored):
+            # Two tool rounds and the write-impact classifier of one turn.
+            self.transport.stream_request(request, Mock())
+            self.transport.stream_request(request, Mock())
+            self.transport.request(request)
+            usage = turn_usage()
+        self.assertEqual(
+            usage,
+            {
+                "requests": 5,
+                "input_tokens": 500 + 1200 + 2310,
+                "cached_input_tokens": 1024 + 2000,
+                "output_tokens": 80 + 40,
+            },
+        )
+        self.assertIsNone(turn_usage())
+        # Outside a turn nothing is metered.
+        self.transport.request(request)
+        self.assertIsNone(turn_usage())
 
     def test_cancel_helper_is_noop_without_cancel_and_raises_when_set(self) -> None:
         raise_if_chat_cancelled(None)
