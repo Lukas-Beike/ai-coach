@@ -121,7 +121,7 @@
   --planned-session-strength: #e0a35c;
   --planned-session-strength-on: var(--on-session);
   --planned-session-strength-surface: #e0a35c26;
-  --sharing-warning-border: rgba(255, 193, 7, .3);
+  --sharing-warning-border: rgba(255, 193, 7, .45);
   --sharing-warning-surface: rgba(255, 193, 7, .06);
   --sync-progress-border: rgba(52, 207, 161, .38);
   --sync-progress-surface: rgba(52, 207, 161, .07);
@@ -140,6 +140,8 @@
 
 :root[data-theme="light"] {
   --warning-border: var(--orange);
+  --sharing-warning-border: var(--orange);
+  --nutrition-warning-border: var(--orange);
   color-scheme: light;
   --bg: #f4f5f6;
   --surface: #ffffff;
