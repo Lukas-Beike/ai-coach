@@ -33,9 +33,19 @@ export function scratchPath(target) {
 // The password file is only read: the temp directory or the folder where a T3
 // secret request delivers files, never the repository (#2527).
 export const T3_SECRETS = path.join(os.homedir(), ".t3", "userdata", "secrets");
+// Links are followed and Windows paths compare without case, as in prod_client.py.
+const realPath = (target) => {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return path.resolve(target);
+  }
+};
+const folded = (target) => (process.platform === "win32" ? target.toLowerCase() : target) + path.sep;
 export function secretPath(target, secrets = T3_SECRETS) {
-  const resolved = path.resolve(os.tmpdir(), String(target));
-  const within = (root) => (resolved + path.sep).startsWith(path.resolve(root) + path.sep);
+  if (!path.isAbsolute(String(target))) throw new Error("the password file path must be absolute");
+  const resolved = realPath(String(target));
+  const within = (root) => folded(resolved).startsWith(folded(realPath(root)));
   if (within(ROOT) || !(within(os.tmpdir()) || within(secrets))) {
     throw new Error("the password file must be in the system temp directory or the T3 secret folder");
   }
@@ -188,7 +198,8 @@ async function main() {
     password = fs.readFileSync(secretPath(values["password-file"]), "utf8").trim();
     if (!password) throw new Error("the secret file is empty");
   } catch (error) {
-    console.log(`FAIL ${error.code === "ENOENT" ? "cannot read the secret file" : error.message}`);
+    // A file-system error names the secret file's path; never print it.
+    console.log(`FAIL ${error.code ? "cannot read the secret file" : error.message}`);
     return 2;
   }
   fs.mkdirSync(outDir, { recursive: true });

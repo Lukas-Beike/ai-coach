@@ -49,6 +49,8 @@ def scratch_path(path: str) -> Path:
 def secret_path(path: str) -> Path:
     """The password file is only read: the system temp directory or the folder
     where a T3 secret request delivers files, never the repository (#2527)."""
+    if not Path(path).is_absolute():
+        raise ProdError("the password file path must be absolute")
     target = Path(path).resolve()
     roots = (Path(tempfile.gettempdir()).resolve(), T3_SECRETS.resolve())
     if target.is_relative_to(ROOT) or not any(target.is_relative_to(r) for r in roots):

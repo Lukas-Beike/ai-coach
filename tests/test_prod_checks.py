@@ -194,11 +194,21 @@ class ProdChecksTests(unittest.TestCase):
         with mock.patch.object(prod_client, "T3_SECRETS", t3):
             secret = t3 / "app-password"
             self.assertEqual(prod_client.secret_path(str(secret)), secret.resolve())
-            for path in (prod_client.ROOT / ".env", t3.parent / "other"):
+            for path in (
+                prod_client.ROOT / ".env",
+                t3.parent / "other",
+                "app-password",
+            ):
                 with self.subTest(path=path), self.assertRaises(prod_client.ProdError):
                     prod_client.secret_path(str(path))
             with self.assertRaisesRegex(prod_client.ProdError, "system temp directory"):
                 prod_client.scratch_path(str(t3 / "result.json"))
+        # The repository stays excluded even inside an allowed folder.
+        with (
+            mock.patch.object(prod_client, "T3_SECRETS", prod_client.ROOT.parent),
+            self.assertRaises(prod_client.ProdError),
+        ):
+            prod_client.secret_path(str(prod_client.ROOT / ".env"))
 
     def test_guards_hold_and_detect_a_missing_csrf_check(self):
         code, text = self.run_main(
