@@ -148,8 +148,12 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 - **WHEN** a module is reached only through `server.py`
 - **THEN** it selects tests only if `server.py`, `backend/http_api/` or `backend/runtime/` changed
 
+#### Scenario: Changed fixture
+- **WHEN** only files under `tests/fixtures/` changed
+- **THEN** the selection holds every test module whose sources or imported modules name `fixtures` as a path segment, and `test_line_endings`, instead of the whole suite
+
 #### Scenario: Full-suite fallback
-- **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, `tests/fixtures/`, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
+- **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
 - **THEN** the whole suite runs and the reason is printed
 
 #### Scenario: Heavy tooling modules
@@ -163,13 +167,14 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 Evidence:
 - `docs/testing.md` (Changed-Test Selection)
 - `tests/AGENTS.md`
-- `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`)
+- `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FIXTURES`, `REPOSITORY_WIDE`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`)
 - `tests/run_tests.py`
 - `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`
 - `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`
 - `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`
 - `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`
 - `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_fixture_selects_modules_naming_the_fixtures_directory`
 - `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`
 - `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`
 - `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`
