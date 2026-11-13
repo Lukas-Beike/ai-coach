@@ -360,10 +360,6 @@ class CompetitionSyncService:
             return {"status": "already_running"}
 
         try:
-            self._set_kv("competition_sync_running", "1")
-            self._set_kv(
-                "competition_sync_status", "Zielwettkämpfe werden synchronisiert…"
-            )
             client = self._client_factory()
             tombstones, local_rows = self._reconciler.records(expected_manifest)
             linked_ids = {
@@ -440,11 +436,7 @@ class CompetitionSyncService:
             )
             raise
         finally:
-            try:
-                self._set_kv("competition_sync_running", "0")
-                self._set_kv("competition_sync_status", "")
-            finally:
-                self._competition_lock.release()
+            self._competition_lock.release()
 
     def _checked_deletions(
         self,

@@ -111,15 +111,9 @@ class ExternalCalendarSyncService:
                 scope.result = result
                 return result
             finally:
-                try:
-                    self._set_value("external_calendar_sync_status", "")
-                finally:
-                    self._lock.release()
+                self._lock.release()
 
     def _sync_locked(self) -> dict[str, Any]:
-        self._set_value(
-            "external_calendar_sync_status", "Kalender: Synchronisierung läuft…"
-        )
         url = calendar_provider.external_calendar_url(self._config.calendar_ical_url)
         payload = calendar_provider.fetch_calendar_feed(
             url, app_version=self._app_version

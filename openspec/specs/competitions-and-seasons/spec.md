@@ -102,7 +102,7 @@ The system SHALL keep remote pushes explicit and output-only (Intervals.icu rece
 
 #### Scenario: One sync at a time
 - **WHEN** a sync starts while another holds the lock
-- **THEN** it returns `{"status": "already_running"}` without side effects; otherwise `competition_sync_running` is `1` and `competition_sync_status` is "Zielwettkämpfe werden synchronisiert…" during the run, and `last_competition_sync_at` or the redacted `last_competition_sync_error` is stored afterwards.
+- **THEN** it returns `{"status": "already_running"}` without side effects; otherwise the lock is held during the run and released afterwards, also after a failure, and `last_competition_sync_at` or the redacted `last_competition_sync_error` is stored afterwards.
 
 #### Scenario: Result and tombstones
 - **WHEN** a run succeeds
