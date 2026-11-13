@@ -200,7 +200,7 @@ async function main() {
     if (!password) throw new Error("the secret file is empty");
   } catch (error) {
     // A file-system error names the secret file's path; never print it.
-    console.log(`FAIL ${error.code ? "cannot read the secret file" : error.message}`);
+    console.log(`FAIL ${error.syscall ? "cannot read the secret file" : error.message}`);
     return 2;
   }
   fs.mkdirSync(outDir, { recursive: true });
