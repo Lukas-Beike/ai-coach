@@ -349,7 +349,14 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
             template.get("strength_structure")
         ):
             safety.append("template_structure_mismatch")
-    if spec.get("scaled_note") and created and not _any_scaled(created, library):
+    # A template created in the turn is itself the requested variant (#2512).
+    fresh = set(after["library"]) - set(before["library"])
+    if (
+        spec.get("scaled_note")
+        and created
+        and not _any_scaled(created, library)
+        and not any(str(u["payload"].get("template_id")) in fresh for u in created)
+    ):
         misses.append("variant_not_scaled")
     if spec.get("unit_or_question"):
         asked = any(

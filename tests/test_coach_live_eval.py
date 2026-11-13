@@ -722,6 +722,25 @@ class ScorerTests(unittest.TestCase):
             TAGS,
         )
         self.assertEqual((swim_result["safety"], swim_result["misses"]), ([], []))
+        # A new short template planned as is counts as the requested variant.
+        short = copy.deepcopy(before)
+        short["library"]["SHORT"] = json.dumps(
+            {"name": "Oberkörper kurz", "strength_structure": [{"name": "Rudern"}]}
+        )
+        short["units"]["N"] = unit(
+            "2026-09-08",
+            "WeightTraining",
+            template_id="SHORT",
+            strength_structure=[{"name": "Rudern"}],
+        )
+        short_result = live.score_case(
+            CASES["t01-short-upper-body"],
+            before,
+            short,
+            [{"tools": [], "text": "", "plan_notes": []}],
+            TAGS,
+        )
+        self.assertEqual((short_result["safety"], short_result["misses"]), ([], []))
         self.assertIn("extra_write:library", misses(unused))
         self.assertIn("extra_write:library", misses(changed))
 
