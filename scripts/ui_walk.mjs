@@ -70,6 +70,21 @@ export function secretPath(target, secrets = T3_SECRETS) {
   return confined(target, [os.tmpdir(), secrets], refused);
 }
 
+// The out-dir is created, then checked again where it now resolves (#2661).
+export function prepareOutDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  return scratchPath(dir);
+}
+
+// A fixed output name inside the out-dir: the directory is checked again and an
+// existing entry is removed, so a link or hard link placed there is replaced,
+// never written through (#2661).
+export function freshFile(dir, name) {
+  const target = path.join(scratchPath(dir), name);
+  fs.rmSync(target, { force: true });
+  return target;
+}
+
 export function baseUrl(text) {
   const url = new URL(text);
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("the app address must be an http(s) URL");
@@ -197,7 +212,7 @@ async function walk({ chromium, url, password, outDir }) {
       // Every error counts against a step: login, a view (with its calendar walk), or the rest.
       result.errors[`${name} login`] = errors.length;
       let counted = errors.length;
-      const shot = (label) => page.screenshot({ path: path.join(outDir, `${name}-${label}.png`), fullPage: false });
+      const shot = (label) => page.screenshot({ path: freshFile(outDir, `${name}-${label}.png`), fullPage: false });
       for (const route of VIEWS) {
         const view = await rendered(page, route, open);
         result.loadMs[`${name} ${route}`] = view.ms;
@@ -264,7 +279,12 @@ async function main() {
     console.log(`FAIL ${error.syscall ? "cannot read the secret file" : error.message}`);
     return 2;
   }
-  fs.mkdirSync(outDir, { recursive: true });
+  try {
+    outDir = prepareOutDir(outDir);
+  } catch {
+    console.log("FAIL cannot create the out-dir in the system temp directory");
+    return 2;
+  }
   let previous = null;
   try {
     previous = values.compare ? JSON.parse(fs.readFileSync(scratchPath(values.compare), "utf8")) : null;
@@ -281,7 +301,7 @@ async function main() {
     console.log(`FAIL walk stopped (${error.name})`);
     return 2;
   }
-  fs.writeFileSync(path.join(outDir, "ui-walk.json"), JSON.stringify(result, null, 2));
+  fs.writeFileSync(freshFile(outDir, "ui-walk.json"), JSON.stringify(result, null, 2), { flag: "wx" });
   const lines = [...reportLines(result), ...compareLines(result, previous)];
   for (const line of lines) console.log(line);
   return lines.some((line) => line.startsWith("FAIL")) ? 1 : 0;

@@ -49,6 +49,17 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
     const other = path.join(linkDir, "shots");
     const swapped = other[0] === other[0].toLowerCase() ? other[0].toUpperCase() : other[0].toLowerCase();
     assert.equal(walk.scratchPath(swapped + other.slice(1)).toLowerCase(), other.toLowerCase());
+    // An output file replaces a hard link placed at its name instead of writing through it,
+    // and an out-dir that cannot be created is refused (#2661).
+    const victim = path.join(linkDir, "victim.txt");
+    fs.writeFileSync(victim, "keep");
+    fs.linkSync(victim, path.join(linkDir, "ui-walk.json"));
+    fs.writeFileSync(walk.freshFile(linkDir, "ui-walk.json"), "new", { flag: "wx" });
+    assert.equal(fs.readFileSync(victim, "utf8"), "keep");
+    assert.equal(fs.readFileSync(path.join(linkDir, "ui-walk.json"), "utf8"), "new");
+    assert.throws(() => walk.prepareOutDir(path.join(victim, "walk")));
+    assert.equal(walk.prepareOutDir(path.join(linkDir, "walk")), path.join(linkDir, "walk"));
+    for (const name of ["victim.txt", "ui-walk.json", "walk"]) fs.rmSync(path.join(linkDir, name), { recursive: true });
   } finally {
     // Remove the link itself first so cleanup never descends into the checkout.
     fs.unlinkSync(link);
