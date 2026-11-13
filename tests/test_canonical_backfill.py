@@ -69,19 +69,21 @@ CANONICAL_TABLES = (
     "activity_sessions",
     "observations",
 )
+# Columns holding generated session ids, which differ on every run.
+GENERATED_IDS = frozenset({"activity_id", "merged_into", "merged_into_retained"})
 # Row digests per table after the fixture ingest and after a re-projection at
 # bumped mapper versions, taken on the code before the helpers were shared.
 PINNED_ROW_DIGESTS = [
     {
         "provider_records": "48cd921ba14bafbbb3736ed987ca126497a9728f235880efb63400ce598dbbee",
         "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
-        "activity_sessions": "2265a7cb2643b650e02394225a8423b5143516071e36e0640b2b6d28d0776014",
+        "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
         "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
     },
     {
         "provider_records": "5aae914b346d01814e28bf563a7f0a913cb0bca0ca0be57216849a3a0af71e52",
         "activity_records": "b3490140813867886fe9a5c127151fd651b6c1c6186e86504ec4e99eae056a0c",
-        "activity_sessions": "2265a7cb2643b650e02394225a8423b5143516071e36e0640b2b6d28d0776014",
+        "activity_sessions": "95a5fcc0408cfc6f43b3f624f801dfc383ff14196b98eac887eb3f00743c06c3",
         "observations": "5bfa5424749c9c4c93f17f52baa65de47bf8c57685a4e42441e88c414718ddee",
     },
 ]
@@ -1116,13 +1118,13 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(digests, PINNED_ROW_DIGESTS)
 
     def table_digest(self) -> dict[str, str]:
-        """SHA-256 per table of its rows without generated ids."""
+        """SHA-256 per table of its rows without generated session ids."""
         return {
             table: hashlib.sha256(
                 json.dumps(
                     sorted(
                         json.dumps(
-                            {k: v for k, v in row.items() if k != "activity_id"},
+                            {k: v for k, v in row.items() if k not in GENERATED_IDS},
                             sort_keys=True,
                         )
                         for row in self.rows(f"SELECT * FROM {table}")
