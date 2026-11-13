@@ -81,7 +81,17 @@ test("single-line draft shows no textarea scrollbar @responsive", async ({ page 
     clientHeight: element.clientHeight,
   }));
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+  // The field grows with its content up to max-height, scrolls only beyond it, and shrinks back.
+  const height = () => input.evaluate((element) => element.getBoundingClientRect().height);
+  const single = await height();
+  await input.fill(["Zeile 1", "Zeile 2", "Zeile 3"].join(String.fromCharCode(10)));
+  expect(await height()).toBeGreaterThan(single);
+  await input.fill(Array.from({ length: 60 }, (_, index) => `Zeile ${index + 1}`).join(String.fromCharCode(10)));
+  const full = await input.evaluate((element) => ({ scrolls: element.scrollHeight > element.clientHeight, overflow: getComputedStyle(element).overflowY, height: element.getBoundingClientRect().height, max: Number.parseFloat(getComputedStyle(element).maxHeight) }));
+  expect(full).toMatchObject({ scrolls: true, overflow: "auto" });
+  expect(full.height).toBeLessThanOrEqual(full.max + 1);
   await input.fill("");
+  expect(await height()).toBeLessThanOrEqual(single + 1);
 });
 
 test("analysis and plan menu sends the chosen period with its request kind @responsive", async ({ page }) => {

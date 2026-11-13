@@ -253,7 +253,6 @@ function queueChatMessage(message, mode, requestKind = null, attachments = []) {
   const input = $("#messageInput");
   input.value = "";
   state.chatDraftDirty = false;
-  input.style.height = "auto";
   renderMessages(state.data?.messages || [], true);
   updateChatControls();
   return true;
@@ -325,7 +324,7 @@ function rejectChatStreamResponse(error, context) {
     renderChatAttachments();
     const input = $("#messageInput");
     if (input.value.trim()) state.rejectedMessages.push({ role: "user", content: message, client_turn_id: clientTurnId, error: "Bitte erneut anmelden." });
-    else { input.value = message; resizeChatInput(input); }
+    else input.value = message;
     state.chatDraftDirty = true;
   }
   throw error;
@@ -495,7 +494,6 @@ async function recoverChatRequestFailure(error, context) {
     } else {
       state.data.messages = (state.data.messages || []).filter((entry) => !(entry.optimistic && entry.client_turn_id === clientTurnId));
       input.value = message;
-      resizeChatInput(input);
       state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
       renderChatAttachments();
     }
@@ -693,7 +691,6 @@ async function sendMessage(event) {
   input.value = "";
   delete input.dataset.requestKind;
   state.chatDraftDirty = false;
-  input.style.height = "auto";
   updateChatControls();
   updateVoiceButton();
   try {
@@ -1723,7 +1720,6 @@ function restoreRejectedMessage(message) {
   const input = $("#messageInput");
   if (input.value.trim() || (state.chatAttachments || []).length) return toast("Bitte zuerst den aktuellen Entwurf bearbeiten.", true);
   input.value = message.content;
-  resizeChatInput(input);
   state.chatAttachments = message.attachments || [];
   renderChatAttachments();
   state.chatDraftDirty = true;
@@ -1901,7 +1897,6 @@ function resendChatText(text, requestKind = null) {
   else delete input.dataset.requestKind;
   state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
   renderChatAttachments();
-  resizeChatInput(input);
   state.chatDraftDirty = Boolean(draft.trim()) || state.chatAttachments.length > 0;
   updateChatControls();
 }
@@ -2401,15 +2396,6 @@ function chatEnterAction({ key, shiftKey = false, modifierKey = false, isComposi
   return shiftKey ? "newline" : "send";
 }
 
-// Grows the draft up to the CSS max-height; the scrollbar appears only once the
-// content no longer fits.
-function resizeChatInput(input) {
-  input.style.overflowY = "hidden";
-  input.style.height = "auto";
-  input.style.height = `${input.scrollHeight}px`;
-  if (input.scrollHeight > input.clientHeight + 1) input.style.overflowY = "auto";
-}
-
 function setupCoachEvents() {
   publishComposerHeight();
   $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");
@@ -2474,7 +2460,6 @@ function setupCoachEvents() {
     // A typed edit makes the draft the athlete's own request, not a quick action.
     if (event.isTrusted) delete event.target.dataset.requestKind;
     state.chatDraftDirty = Boolean(event.target.value.trim());
-    resizeChatInput(event.target);
     updateChatControls();
     if (keepLatestVisible) scrollChatToLatest();
   });

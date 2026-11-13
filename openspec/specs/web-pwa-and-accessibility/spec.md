@@ -180,7 +180,7 @@ The client SHALL support editable multiline Coach drafts, sending with the expli
 - **WHEN** the draft grows, the Coach becomes busy, or voice status appears
 - **THEN** the composer resizes within its bounds and keeps the existing control layout and bottom-edge behavior without a busy-state height jump.
 
-Evidence: `public/coach.js::chatEnterAction`, `public/coach.js::resizeChatInput`, `public/coach.js::publishComposerHeight`, `public/shared.js::hasTouchFirstInput`; `tests/coach-enter.test.cjs::desktop Enter sends the draft`, `tests/coach-enter.test.cjs::IME composition never triggers an action`, `tests/coach-enter.test.cjs::touch Ctrl/Cmd+Enter sends from a physical keyboard`, `e2e/coach-composer.spec.js::composer height does not change while busy @responsive`.
+Evidence: `public/coach.js::chatEnterAction`, `public/styles.css` (`.composer textarea` field-sizing), `public/coach.js::publishComposerHeight`, `public/shared.js::hasTouchFirstInput`; `tests/coach-enter.test.cjs::desktop Enter sends the draft`, `tests/coach-enter.test.cjs::IME composition never triggers an action`, `tests/coach-enter.test.cjs::touch Ctrl/Cmd+Enter sends from a physical keyboard`, `e2e/coach-composer.spec.js::composer height does not change while busy @responsive`.
 
 ### Requirement: Streamed Coach responses preserve recoverable turn state
 The client SHALL display incremental response text and distinguish started, background, completed, rejected, recovering, and cancelled turns. A transport failure SHALL not silently resend an already accepted turn or erase its draft/recovery path.
