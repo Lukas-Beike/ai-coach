@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from backend.canonical.vocabulary import WAHOO_ID, RemoteEntityKind
+from backend.db import planning_store
 from backend.planning.leftovers import MAX_CLEANUP, cap
 
 # The plan's name is not stored once the entry is deleted.
@@ -32,12 +33,8 @@ def find_wahoo_orphans(
     """Return up to ``limit`` orphans and the total count."""
     orphans = [
         WahooOrphan(row["local_id"])
-        for row in db.execute(
-            "SELECT l.local_id FROM remote_links l "
-            "LEFT JOIN workout_library w ON w.local_id = l.local_id "
-            "WHERE l.provider=? AND l.entity_kind=? AND w.local_id IS NULL "
-            "ORDER BY l.local_id",
-            (WAHOO_ID, RemoteEntityKind.LIBRARY_WORKOUT.value),
-        ).fetchall()
+        for row in planning_store.wahoo_links_without_template(
+            db, WAHOO_ID, RemoteEntityKind.LIBRARY_WORKOUT.value
+        )
     ]
     return cap(orphans, limit), len(orphans)

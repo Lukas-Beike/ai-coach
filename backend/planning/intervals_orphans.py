@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
 
+from backend.db import planning_store
 from backend.planning.leftovers import MAX_CLEANUP, cap, nearest_first
 from backend.planning.library import library_payload_hash
 
@@ -57,13 +58,10 @@ def find_intervals_orphans(
     db: Any, today: date, *, limit: int | None = MAX_CLEANUP
 ) -> tuple[list[IntervalsOrphan], int]:
     """Return up to ``limit`` orphans, nearest day first, and the total count."""
-    marks = ", ".join("?" for _ in _OPEN_STATES)
-    rows = db.execute(
-        "SELECT local_id, payload FROM planned_units "
-        f"WHERE tombstone=0 AND sync_state IN ({marks})",
-        _OPEN_STATES,
-    ).fetchall()
-    orphans = [item for row in rows if (item := _orphan(row, today))]
+    rows = planning_store.planned_unit_rows_in_states(db, _OPEN_STATES)
+    orphans = [
+        item for row in rows if not row["tombstone"] and (item := _orphan(row, today))
+    ]
     ordered = nearest_first(orphans, today, lambda item: item.date)
     return cap(ordered, limit), len(ordered)
 
@@ -76,13 +74,12 @@ def leftover_ids(db: Any, local_ids: set[str]) -> set[str]:
     """
     if not local_ids:
         return set()
-    marks = ", ".join("?" for _ in local_ids)
-    rows = db.execute(
-        f"SELECT local_id, payload FROM planned_units WHERE local_id IN ({marks}) "
-        "AND tombstone=0",
-        tuple(sorted(local_ids)),
-    ).fetchall()
-    return {row["local_id"] for row in rows if _orphan(row, date.min)}
+    rows = planning_store.planned_unit_rows_by_ids(db, sorted(local_ids))
+    return {
+        row["local_id"]
+        for row in rows
+        if not row["tombstone"] and _orphan(row, date.min)
+    }
 
 
 def sync_entries(orphans: list[IntervalsOrphan]) -> list[dict[str, Any]]:

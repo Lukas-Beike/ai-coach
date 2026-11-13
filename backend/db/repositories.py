@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
+from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 
 
@@ -852,27 +853,6 @@ class SessionRepository:
         return db.execute("SELECT csrf_hash, expires_at FROM sessions").fetchall()
 
 
-class LibraryPageRepository:
-    """Read deterministic pages of active, undated library templates."""
-
-    def page(self, db: Any, cursor: list[str] | None, limit: int) -> list[Any]:
-        after_clause = ""
-        params: list[Any] = []
-        if cursor is not None:
-            after_clause = "WHERE (sport_key, name_key, id) > (?, ?, ?)"
-            params.extend(cursor)
-        return db.execute(
-            "WITH templates AS ("
-            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
-            "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
-            "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
-            "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
-            "ORDER BY sport_key, name_key, id LIMIT ?",
-            (*params, limit),
-        ).fetchall()
-
-
 class ReadinessRepository:
     """Provide the minimal persistence probe used by readiness checks."""
 
@@ -884,18 +864,13 @@ class StateVersionRepository:
     """Read compact counters used to version public state projections."""
 
     def counters(self, db: Any) -> dict[str, Any]:
+        library, planned = planning_store.version_counters(db)
         return {
             "message": db.execute(
                 "SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS latest FROM messages"
             ).fetchone(),
-            "library": db.execute(
-                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
-                "FROM workout_library WHERE json_extract(payload, '$.date') IS NULL"
-            ).fetchone(),
-            "planned": db.execute(
-                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
-                "FROM planned_units"
-            ).fetchone(),
+            "library": library,
+            "planned": planned,
             "checkins": db.execute(
                 "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
                 "FROM athlete_checkins"

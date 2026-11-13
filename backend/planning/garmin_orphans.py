@@ -18,6 +18,7 @@ from datetime import date
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
+from backend.db import planning_store
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.leftovers import MAX_CLEANUP, GarminOrphan, cap, nearest_first
 from backend.planning.push_state import pushable_fingerprint
@@ -64,12 +65,9 @@ def find_orphans(
     """Return up to ``limit`` orphans, nearest day first, and the total count."""
     orphans: list[GarminOrphan] = []
     remembered = remembered_exercises(db)
-    for row in db.execute(
-        "SELECT l.local_id AS link_id, p.local_id AS unit_id, p.payload, p.tombstone "
-        "FROM remote_links l LEFT JOIN planned_units p ON p.local_id = l.local_id "
-        "WHERE l.provider=? AND l.entity_kind=?",
-        (ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value),
-    ).fetchall():
+    for row in planning_store.garmin_link_rows(
+        db, ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value
+    ):
         try:
             payload = json.loads(row["payload"] or "{}")
         except TypeError, ValueError:

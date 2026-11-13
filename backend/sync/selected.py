@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.config import Config
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
@@ -80,16 +80,10 @@ class SelectedWorkoutSyncService:
 
     def _selected_row(self, local_id: str) -> tuple[dict[str, Any] | None, bool]:
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.library_row(db, local_id)
             if row:
                 return row, False
-            row = db.execute(
-                "SELECT payload, sync_state FROM planned_units WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, local_id)
         return row, bool(row)
 
     def _error(self, local_id: str, error: Exception) -> dict[str, Any]:

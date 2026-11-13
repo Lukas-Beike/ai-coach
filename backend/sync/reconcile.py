@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db import planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.observability import Redactor
 from backend.planning.planned_units import planned_unit_payload_hash
@@ -78,10 +79,7 @@ class PlannedUnitSyncStateWriter:
         clear_remote_event: bool = False,
     ) -> bool:
         """Persist one state; ``clear_remote_event`` drops a removed event's ids."""
-        row = db.execute(
-            "SELECT payload, sync_conflict FROM planned_units WHERE local_id = ?",
-            (local_id,),
-        ).fetchone()
+        row = planning_store.planned_unit_row(db, local_id)
         state_values = self._state_values(
             row, state, remote_event, expected_payload, clear_remote_event
         )
@@ -144,22 +142,18 @@ class PlannedUnitSyncStateWriter:
         payload, remote_external_id, persisted_state, _changed, baseline_hash = values
         error_detail = self._redactor.redact_text(str(error))[:1000] if error else None
         last_synced_at = now if state == "synced" else None
-        db.execute(
-            "INSERT INTO planned_units(id, local_id, external_id, payload, sync_dirty, "
-            "sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?, '', ?, ?, ?, ?)",
-            (
-                local_id,
-                local_id,
-                remote_external_id or None,
-                json.dumps(payload, ensure_ascii=False),
-                persisted_state,
-                error_detail,
-                baseline_hash,
-                last_synced_at,
-                now,
-                now,
-            ),
+        planning_store.insert_planned_unit(
+            db,
+            payload,
+            local_id=local_id,
+            external_id=remote_external_id or None,
+            sync_dirty=1,
+            sync_state=persisted_state,
+            sync_error=error_detail,
+            sync_conflict="",
+            baseline_hash=baseline_hash,
+            last_synced_at=last_synced_at,
+            now=now,
         )
 
     def _update_row(
@@ -182,22 +176,18 @@ class PlannedUnitSyncStateWriter:
             sync_conflict = ""
         error_detail = self._redactor.redact_text(str(error))[:1000] if error else None
         last_synced_at = now if state == "synced" else None
-        db.execute(
-            "UPDATE planned_units SET payload=?, sync_dirty=?, sync_state=?, sync_error=?, "
-            "sync_conflict=?, external_id=COALESCE(?, external_id), baseline_hash=COALESCE(?, baseline_hash), "
-            "last_synced_at=COALESCE(?, last_synced_at), updated_at=? WHERE local_id=?",
-            (
-                json.dumps(payload, ensure_ascii=False),
-                sync_dirty,
-                persisted_state,
-                error_detail,
-                sync_conflict,
-                remote_external_id or None,
-                baseline_hash,
-                last_synced_at,
-                now,
-                local_id,
-            ),
+        planning_store.store_planned_unit_sync(
+            db,
+            local_id,
+            payload,
+            sync_dirty=sync_dirty,
+            sync_state=persisted_state,
+            sync_error=error_detail,
+            sync_conflict=sync_conflict,
+            external_id=remote_external_id or None,
+            baseline_hash=baseline_hash,
+            last_synced_at=last_synced_at,
+            now=now,
         )
 
 

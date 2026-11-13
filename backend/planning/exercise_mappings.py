@@ -14,24 +14,11 @@ import json
 from typing import Any
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
+from backend.db import planning_store
 from backend.providers.garmin_strength_workout import (
     GarminExercise,
     name_key,
     stored_pair,
-)
-
-# Deleted and archived units and templates do not count, as in the other
-# planning readers.
-_ACTIVE = (
-    "COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
-    "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
-)
-_ROWS_SQL = (
-    "SELECT payload, updated_at FROM planned_units "
-    f"WHERE tombstone=0 AND {_ACTIVE} AND payload LIKE '%garmin_exercise%' "
-    "UNION ALL SELECT payload, updated_at FROM workout_library "
-    f"WHERE {_ACTIVE} AND payload LIKE '%garmin_exercise%' "
-    "ORDER BY updated_at"
 )
 
 
@@ -48,7 +35,7 @@ def _structure(raw: Any) -> list[Any]:
 def remembered_exercises(db: Any) -> dict[str, GarminExercise]:
     """Confirmed Garmin exercise per exercise-name key; the newest wins."""
     remembered: dict[str, GarminExercise] = {}
-    for row in db.execute(_ROWS_SQL).fetchall():
+    for row in planning_store.garmin_exercise_rows(db):
         for item in _structure(row["payload"]):
             if not isinstance(item, dict):
                 continue

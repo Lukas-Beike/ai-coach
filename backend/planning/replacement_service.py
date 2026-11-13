@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any
 
 from backend import change_history
+from backend.db import planning_store
 from backend.errors import STALE_PLANNING_REVISION_ERROR, AppError
 from backend.planning import replacement
 from backend.planning.training_plans import COACH_PLAN_CONSTRAINTS_PREFIX
@@ -46,31 +47,13 @@ class StructuredTrainingPlanReplacementService:
         selected_plan_id: str | None,
         period: dict[str, str],
     ) -> list[dict[str, Any]]:
-        return db.execute(
-            "SELECT local_id, payload FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
-            "AND COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
-            "AND (? = '' OR json_extract(payload, '$.plan_id') = ?) "
-            "AND (? <> '' OR COALESCE(json_extract(payload, '$.source'), 'coach') IN ('coach', 'library', 'intervals')) "
-            "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ?",
-            (
-                selected_plan_id or "",
-                selected_plan_id or "",
-                selected_plan_id or "",
-                period["start"],
-                period["end"],
-            ),
-        ).fetchall()
+        return planning_store.replaceable_planned_unit_rows(
+            db, selected_plan_id or "", period["start"], period["end"]
+        )
 
     @staticmethod
     def _archived_or_deleted_unit_ids(db: Any) -> set[str]:
-        rows = db.execute(
-            "SELECT local_id FROM planned_units "
-            "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 1 "
-            "OR (COALESCE(json_extract(payload, '$.archived'), 0) = 1 "
-            "AND (external_id IS NULL OR external_id = ''))"
-        ).fetchall()
-        return {str(row.get("local_id") or "") for row in rows if row.get("local_id")}
+        return planning_store.hidden_planned_unit_ids(db)
 
     @staticmethod
     def _superseded_plan_ids(
@@ -171,11 +154,7 @@ class StructuredTrainingPlanReplacementService:
             current.update(
                 {"local_deleted": True, "archived": True, "sync_status": "local"}
             )
-            db.execute(
-                "UPDATE planned_units SET payload=?, sync_state='local', sync_dirty=1, "
-                "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?",
-                (json.dumps(current, ensure_ascii=False), now, row["local_id"]),
-            )
+            planning_store.update_planned_unit(db, row["local_id"], current, now)
             change_history.record_change(
                 db,
                 "planned_unit",
@@ -189,12 +168,7 @@ class StructuredTrainingPlanReplacementService:
     def _archive_superseded_plans(self, db: Any, plan_ids: set[str], now: str) -> None:
         for plan_id in plan_ids:
             plan = self._training_plan_repository.get(db, plan_id)
-            remaining = db.execute(
-                "SELECT 1 FROM planned_units WHERE json_extract(payload, '$.plan_id')=? "
-                "AND COALESCE(json_extract(payload, '$.archived'), 0)=0 "
-                "AND COALESCE(json_extract(payload, '$.local_deleted'), 0)=0 LIMIT 1",
-                (plan_id,),
-            ).fetchone()
+            remaining = planning_store.active_planned_unit_rows(db, plan_id)
             if remaining or not plan or plan.get("status") == "archived":
                 continue
             archived_plan = {**plan, "status": "archived"}

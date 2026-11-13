@@ -15,6 +15,7 @@ from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
 from backend.config import DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, Config
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.canonical_backfill import (
@@ -115,7 +116,6 @@ class DiagnosticReportService:
     def _database_counts(self, db: Any) -> dict[str, int]:
         queries = {
             "messages": "SELECT COUNT(*) AS count FROM messages",
-            "workout_library": "SELECT COUNT(*) AS count FROM workout_library",
             "competitions": "SELECT COUNT(*) AS count FROM competitions",
             "athlete_checkins": "SELECT COUNT(*) AS count FROM athlete_checkins",
             "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
@@ -125,6 +125,7 @@ class DiagnosticReportService:
             name: db.execute(query).fetchone()["count"]
             for name, query in queries.items()
         }
+        counts["workout_library"] = planning_store.library_count(db)
         counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
         return counts
 

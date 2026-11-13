@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from backend import change_history
 from backend.canonical import garmin_payload
-from backend.db import garmin_store
+from backend.db import garmin_store, planning_store
 from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
 from backend.db.canonical_domain_store import zone_configuration_export_rows
 from backend.errors import AppError
@@ -299,11 +299,7 @@ def iter_workout_library(
     db: Any, *, decode: PayloadDecoder = decode_payload
 ) -> Iterable[dict[str, Any]]:
     """Yield every workout-library row with its sync bookkeeping in the established order."""
-    for row in db.execute(
-        "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at "
-        "FROM workout_library "
-        "ORDER BY lower(json_extract(payload, '$.sport')), lower(json_extract(payload, '$.name'))"
-    ):
+    for row in planning_store.library_export_rows(db):
         yield {**dict(row), "payload": decode(row["payload"])}
 
 
@@ -455,11 +451,7 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
     ("workout_library.jsonl", iter_workout_library),
     (
         "planned_units.jsonl",
-        _select(
-            "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
-            "FROM planned_units ORDER BY updated_at",
-            _with_payload,
-        ),
+        lambda db: map(_with_payload, planning_store.planned_unit_export_rows(db)),
     ),
     (
         "training_plans.jsonl",
