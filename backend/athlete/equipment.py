@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from backend import change_history
 from backend.athlete.local_date import iso_date_prefix
+from backend.athlete.measurements import is_positive_number as _valid_positive_number
 from backend.athlete.measurements import number
 from backend.canonical import sensor_registry
 from backend.canonical.activity_summary import (
@@ -696,15 +697,6 @@ def _garmin_maximum_meters(gear: GearItem) -> float | None:
 def _garmin_lifetime_target_km(gear: GearItem) -> float | None:
     maximum_meters = _garmin_maximum_meters(gear)
     return round(maximum_meters / 1000, 2) if maximum_meters is not None else None
-
-
-def _valid_positive_number(value: Any) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value > 0
-    )
 
 
 def _lifetime_projection(usage_km: Any, target_km: Any) -> dict[str, float] | None:

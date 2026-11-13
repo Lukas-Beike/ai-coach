@@ -9,14 +9,9 @@ from backend.activities.zone_settings import (
     DEFAULT_ZONE_SOURCE,
     ZoneSettings,
 )
+from backend.athlete.measurements import finite_float as _number
 
 _ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
-
-
-def _number(value: Any) -> float | None:
-    return (
-        float(value) if type(value) in {int, float} and math.isfinite(value) else None
-    )
 
 
 def planned_profile(

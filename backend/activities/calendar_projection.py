@@ -11,6 +11,7 @@ from backend.activities.matching import (
     is_planned_workout_event,
     match_planned_workouts,
 )
+from backend.activities.matching import first_present as _first_present
 from backend.activities.strength_sets import STRENGTH_KEY, plan_comparison
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.activity_summary import summary_leading_duration_s
@@ -45,16 +46,6 @@ CALENDAR_ACTIVITY_FIELDS = (
     "heart_rate_zone_times",
     "pace_zone_times",
 )
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
