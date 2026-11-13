@@ -124,14 +124,15 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the previous walk/);
   assert.doesNotMatch(done.stdout, /fake-login-value/);
-  // An out-dir that cannot be created (a file is in the way) exits 2 without a stack trace (#2661).
+  // An out-dir that cannot be created (a file is in the way) exits 2 without a stack trace (#2661);
+  // Linux refuses the path in the confinement check already (ENOTDIR), Windows at mkdir.
   const blocked = fs.mkdtempSync(path.join(os.tmpdir(), "walk-blocked-"));
   fs.writeFileSync(path.join(blocked, "file"), "x");
   fs.writeFileSync(path.join(blocked, "secret"), "fake-login-value");
   done = run("--url", "http://127.0.0.1:9", "--password-file", path.join(blocked, "secret"), "--out-dir", path.join(blocked, "file", "walk"));
   fs.rmSync(blocked, { recursive: true, force: true });
   assert.equal(done.status, 2);
-  assert.match(done.stdout, /cannot create the out-dir/);
+  assert.match(done.stdout, /^FAIL (cannot create the out-dir|files must be in the system temp directory)$/m);
   assert.doesNotMatch(done.stderr, /at .*ui_walk/);
 });
 
