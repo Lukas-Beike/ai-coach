@@ -308,14 +308,15 @@
     }), status);
   }
 
-  async function loadPanel(panel, summary) {
+  // `read` is the calendar card's shared read of the same document; a retry reads again.
+  async function loadPanel(panel, summary, read) {
     const token = {};
     panelLoads.set(panel, token);
     const current = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.replaceChildren(createLoadingState("Details werden geladen …"));
     let payload;
     try {
-      payload = await api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
+      payload = await (read || api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }));
     } catch (error) {
       if (!current()) return;
       // The card's summary values still render when the detail document cannot be read.

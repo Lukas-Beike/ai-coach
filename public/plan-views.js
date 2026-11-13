@@ -680,6 +680,19 @@ function plannedEntryKey(entry, dateKey) {
 let openPlannedEntries = new Set();
 // Calendar cards whose "Details" are open, so a re-render keeps them open (#2258).
 const openActivityDetails = new Set();
+// One read of a session's detail document per calendar data, shared by the zone bar and "Details" (#2478).
+const plannedSessionReads = new Map();
+
+function plannedSessionRead(activityId) {
+  let read = plannedSessionReads.get(activityId);
+  if (!read) {
+    read = api(`/api/activities/${encodeURIComponent(activityId)}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
+    // A failed read is not shared: the next opening or retry reads again.
+    read.catch(() => { if (plannedSessionReads.get(activityId) === read) plannedSessionReads.delete(activityId); });
+    plannedSessionReads.set(activityId, read);
+  }
+  return read;
+}
 
 function completedSessionIds(calendar) {
   return new Set(calendar.map((item) => calendarActualActivity(item)).filter(Boolean).map((actual) => String(actual.activity_id || actual.id)));
@@ -1252,10 +1265,10 @@ function plannedActivityActions(actual, dateKey, title, entryKey) {
   more.addEventListener("toggle", () => {
     if (entryKey && more.open) openActivityDetails.add(entryKey);
     else if (entryKey) openActivityDetails.delete(entryKey);
-    if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual);
+    if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual, id && plannedSessionRead(id));
   });
-  more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
   const id = String(actual.activity_id || actual.id || "");
+  more.open = Boolean(entryKey && openActivityDetails.has(entryKey));
   const prompt = `Analysiere meine Einheit vom ${dateLabel(dateKey)} (${[
     activitySportLabel(calendarSportType(actual)),
     calendarStartTime(actual.started_at_local),
@@ -1368,7 +1381,7 @@ async function appendPlannedZoneTime(details, activityId, ride) {
   if (!box.isConnected) details.append(box);
   let zones;
   try {
-    zones = (await api(`/api/activities/${encodeURIComponent(activityId)}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }))?.zones;
+    zones = (await plannedSessionRead(activityId))?.zones;
   } catch {
     box.remove();
     return;
@@ -1792,7 +1805,10 @@ function loadOlderSessions(calendar, shownStartKey, configuredStartKey) {
 function renderPlanned(trainingCalendar) {
   const root = $("#plannedCalendar");
   if (!root) return;
-  if (trainingCalendar !== renderedCalendar) resetOlderSessions();
+  if (trainingCalendar !== renderedCalendar) {
+    resetOlderSessions();
+    plannedSessionReads.clear();
+  }
   renderedCalendar = trainingCalendar;
   const calendar = withOlderSessions(Array.isArray(trainingCalendar) ? trainingCalendar : []);
   const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
