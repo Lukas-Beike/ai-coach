@@ -244,7 +244,7 @@
       "prompt": "pr",
       "setup": "Synthetic branch adds a structure test that forbids table queries outside their store; one open PR adds such a query in a service module.",
       "expected": ["Before enabling auto-merge, match the new rule against the open PRs' diffs", "Report the matching open PR to its owner or the orchestrator before merging"],
-      "prohibited": ["Enable auto-merge without checking open PRs against the new guard"]
+      "prohibited": ["Enable auto-merge without checking open PRs against the new guard", "Enable auto-merge while the matching open PR is unfixed and unmerged"]
     },
     {
       "id": "pr-no-guard-no-open-pr-scan", "skill": "pr", "kind": "boundary", "activate": true,
