@@ -161,20 +161,20 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 - **THEN** the runner prints "No Python tests are affected." and exits 0, or exits non-zero with a message and no traceback
 
 Evidence:
+- `docs/testing.md` (Changed-Test Selection)
+- `tests/AGENTS.md`
 - `tests/changed_tests.py` (`FULL_SUITE_PATHS`, `HEAVY_MODULES`, `FULL_SUITE_SHARE`, `SERVER_WIRED_PATHS`, `select_modules`, `heavy_skips`)
 - `tests/run_tests.py`
-- `tests/AGENTS.md`
-- `docs/testing.md` (Changed-Test Selection)
-- Tests: `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`
-- `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`
-- `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`
-- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`
-- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`
-- `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`
-- `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`
+- `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`
 - `tests/test_changed_tests.py::ChangedPathsTests.test_runner_reports_an_unknown_base_instead_of_a_traceback`
 - `tests/test_changed_tests.py::ChangedPathsTests.test_runner_treats_a_suite_without_affected_tests_as_empty`
-- `tests/test_changed_tests.py::ChangedPathsTests.test_reports_committed_uncommitted_and_untracked_paths`.
+- `tests/test_changed_tests.py::SelectModulesTests.test_a_selection_covering_most_modules_falls_back_with_a_reason`
+- `tests/test_changed_tests.py::SelectModulesTests.test_app_wide_tests_need_a_composition_root_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_and_unparsable_sources_select_everything`
+- `tests/test_changed_tests.py::SelectModulesTests.test_full_suite_paths_name_existing_repository_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_heavy_tooling_modules_run_only_when_their_inputs_change`
+- `tests/test_changed_tests.py::SelectModulesTests.test_literals_select_patch_targets_and_named_paths`
+- `tests/test_changed_tests.py::SelectModulesTests.test_transitive_imports_and_support_modules_select_importers`
 
 ### Requirement: CI runs the complete sharded suite
 The CI Python test jobs SHALL run every test through `tests/run_tests.py --shard N --total T`, covering the whole suite across the shards, and SHALL NOT use `--changed`. Changed-test selection is a local convenience and never evidence of complete validation.

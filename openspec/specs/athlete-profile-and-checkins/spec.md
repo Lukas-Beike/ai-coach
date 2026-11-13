@@ -30,24 +30,24 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 - **THEN** profile reads and saves ignore it, and a one-time versioned stage of the canonical backfill worker deletes that one key from the stored profile (status only in diagnostics); a restored older backup runs the stage again.
 
 Evidence:
-- `backend/athlete/profile.py:normalize_profile`
-- `backend/athlete/profile.py:timezone_name`
-- `backend/athlete/profile.py:_normalize_sex`
-- `backend/athlete/profile.py:_normalize_preferred_sources`
-- `backend/performance/local_tss.py:trimp_sex`
-- `backend/athlete/profile.py:ProfileService.get_from_db`
-- `backend/sync/profile_weekly_plan_removal.py`
-- `tests/test_profile_weekly_plan_removal.py`
 - `backend/athlete/clock.py:AthleteLocalClock`
+- `backend/athlete/profile.py:_normalize_preferred_sources`
+- `backend/athlete/profile.py:_normalize_sex`
+- `backend/athlete/profile.py:normalize_profile`
+- `backend/athlete/profile.py:ProfileService.get_from_db`
+- `backend/athlete/profile.py:timezone_name`
+- `backend/performance/local_tss.py:trimp_sex`
+- `backend/sync/profile_weekly_plan_removal.py`
 - `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`
-- `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`
+- `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`
+- `tests/test_athlete_profile.py:test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict`
 - `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`
 - `tests/test_athlete_profile.py:test_training_model_defaults_and_rejects_unknown_only_when_strict`
-- `tests/test_athlete_profile.py:test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict`
-- `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`
-- `tests/test_local_tss.py:test_unknown_sex_takes_the_assumed_male_constants`
+- `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`
 - `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`
-- `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`.
+- `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`
+- `tests/test_local_tss.py:test_unknown_sex_takes_the_assumed_male_constants`
+- `tests/test_profile_weekly_plan_removal.py`
 
 ### Requirement: AP2 Partial profile edits and optimistic Coach conflicts
 The system SHALL preserve unsubmitted profile fields on the profile patch API and require exact expected field values for a Coach batch, with atomic rejection of stale or invalid batches.
@@ -206,21 +206,21 @@ The system SHALL assign only resolved canonical completed activities to compatib
 - **THEN** each counts once in usage, hours, distance and maintenance; a new assignment is stored under the session it was made for, and an earlier assignment stored under a provider record id or an alias session id still applies (the session-id assignment wins over it, else the newest).
 
 Evidence:
+- `backend/athlete/equipment.py:_assignment_list`
+- `backend/athlete/equipment.py:_effective_assignments`
+- `backend/athlete/equipment.py:_session_assignments`
 - `backend/athlete/equipment.py:EquipmentService.assign`
 - `backend/athlete/equipment.py:EquipmentService.read`
-- `backend/athlete/equipment.py:_effective_assignments`
-- `backend/athlete/equipment.py:_assignment_list`
+- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`
+- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_the_session_id_wins_over_a_legacy_one`
+- `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_an_intervals_id_still_applies`
+- `tests/test_equipment_canonical_sessions.py:test_bundled_session_counts_once_under_its_session_id`
+- `tests/test_equipment_canonical_sessions.py:test_garmin_gear_links_the_garmin_only_session_and_the_bundled_one`
+- `tests/test_equipment_canonical_sessions.py:test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance`
+- `tests/test_training_record_features.py:test_assignment_list_is_bounded_but_usage_counts_every_link`
+- `tests/test_training_record_features.py:test_assignment_list_limit_keeps_activities_whole`
 - `tests/test_training_record_features.py:test_equipment_assignment_is_explicit_and_unassignable`
 - `tests/test_training_record_features.py:test_explicit_assignment_and_unassignment_beat_the_garmin_link`
-- `tests/test_training_record_features.py:test_assignment_list_limit_keeps_activities_whole`
-- `tests/test_training_record_features.py:test_assignment_list_is_bounded_but_usage_counts_every_link`
-- `tests/test_equipment_canonical_sessions.py:test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance`
-- `tests/test_equipment_canonical_sessions.py:test_garmin_gear_links_the_garmin_only_session_and_the_bundled_one`
-- `tests/test_equipment_canonical_sessions.py:test_bundled_session_counts_once_under_its_session_id`
-- `tests/test_equipment_canonical_sessions.py:test_assignment_stored_under_an_intervals_id_still_applies`
-- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_the_session_id_wins_over_a_legacy_one`
-- `tests/test_equipment_canonical_sessions.py:test_an_assignment_under_an_alias_session_id_applies_and_newest_wins`
-- `backend/athlete/equipment.py:_session_assignments`.
 
 ### Requirement: AP10 Maintenance events without invented material diagnosis
 The system SHALL record explicitly completed equipment maintenance within the item's valid date range, preserve lifetime usage/history, and report personal interval progress with unknown or partial measurements honestly.

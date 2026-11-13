@@ -98,18 +98,18 @@ The system SHALL keep dated local planned units distinct from templates, preserv
 - **THEN** mutation fails with the applicable not-found, corrupt-data or forbidden-target response.
 
 Evidence:
-- `backend/planning/planned_unit_service.py:PlannedUnitService.update`
-- `backend/planning/planned_unit_service.py:PlannedUnitService.move`
 - `backend/http_api/planned_unit_focus_post.py`
 - `backend/planning/planned_unit_service.py:PlannedUnitService._load_for_update`
 - `backend/planning/planned_unit_service.py:PlannedUnitService._save_update`
+- `backend/planning/planned_unit_service.py:PlannedUnitService.move`
+- `backend/planning/planned_unit_service.py:PlannedUnitService.update`
 - `backend/planning/planned_units.py:planned_workout_update_candidate`
 - `tests/test_coach_tool_coverage.py:test_planned_unit_lifecycle_keeps_identity_until_deleted`
+- `tests/test_http_planned_unit_focus_post.py:test_date_route_moves_the_unit_and_returns_the_undo_reference`
+- `tests/test_planned_unit_service.py:test_athlete_moves_a_sent_unit_to_another_day_from_today_on`
+- `tests/test_planning_planned_mutations.py:test_corrupt_json_and_non_object_payloads_are_rejected`
 - `tests/test_planning_planned_units.py:test_candidate_supports_update_archive_and_restore`
 - `tests/test_planning_planned_units.py:test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved`
-- `tests/test_planning_planned_mutations.py:test_corrupt_json_and_non_object_payloads_are_rejected`
-- `tests/test_planned_unit_service.py:test_athlete_moves_a_sent_unit_to_another_day_from_today_on`
-- `tests/test_http_planned_unit_focus_post.py:test_date_route_moves_the_unit_and_returns_the_undo_reference`.
 
 ### Requirement: TL6 Bounded library browsing and revision-bound plan enumeration
 The system SHALL expose active undated library pages and separately enumerate future planned-unit references with current hashes, inactive flags and revision-bound cursors.

@@ -121,15 +121,15 @@ Detailed contract: the routes, request fields, bounds (name 200 characters, bran
 Evidence:
 - `backend/http_api/nutrition.py::NutritionPostRoutes._save_product`
 - `backend/http_api/nutrition.py::NutritionPutRoutes.routes`
-- `backend/nutrition/catalog.py::ProductCatalogService.save_product`
 - `backend/nutrition/catalog.py::ProductCatalogService.archive_product`
-- `tests/test_nutrition_products.py::NutritionProductContractTests.test_confirmed_product_is_persistent_and_can_be_archived`
-- `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_unconfirmed_product_save_is_rejected_before_persistence`
-- `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_archived_products_cannot_be_calculated_or_logged`
-- `tests/test_nutrition_products.py::test_product_edit_keeps_extraction_confidence`
+- `backend/nutrition/catalog.py::ProductCatalogService.save_product`
 - `tests/test_nutrition_photo_extraction.py::test_grouped_thousands_become_unknown_while_other_fields_extract`
+- `tests/test_nutrition_product_history.py::test_create_update_and_archive_each_record_one_change`
+- `tests/test_nutrition_product_http_contract.py::NutritionProductHttpContractTests.test_unconfirmed_product_save_is_rejected_before_persistence`
 - `tests/test_nutrition_product_http_contract.py::test_favorite_and_add_to_meal_target_explicit_ids`
-- `tests/test_nutrition_product_history.py::test_create_update_and_archive_each_record_one_change`.
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_confirmed_product_is_persistent_and_can_be_archived`
+- `tests/test_nutrition_products.py::test_product_edit_keeps_extraction_confidence`
+- `tests/test_nutrition_review_regressions.py::NutritionReviewRegressionTests.test_archived_products_cannot_be_calculated_or_logged`
 
 ### Requirement: Product portions freeze consumed definitions
 The system SHALL scale a product portion against its saved basis amount in the same unit and freeze the definition and consumed quantity with the meal. Later catalog edits SHALL not recalculate historical intake.
@@ -231,18 +231,18 @@ The client SHALL present product and label candidates for review and explicit lo
 - **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations, and a component from a database product is labelled as such.
 
 Evidence:
-- `public/nutrition.js::useNutritionProduct`
+- `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`
+- `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`
+- `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`
+- `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`
+- `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`
 - `public/nutrition.js::addNutritionProductToCoachDraft`
 - `public/nutrition.js::addNutritionProductToMeal`
-- `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`
-- `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`
-- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`
-- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`
 - `public/nutrition.js::nutritionComponentDetails`
 - `public/nutrition.js::saveNutritionProduct`
-- `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`
-- `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`
-- `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`.
+- `public/nutrition.js::useNutritionProduct`
+- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`
+- `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`
 
 ### Requirement: Coach food reads preserve explicit source and batch results
 The system SHALL support explicit database source selection and bounded batched ingredient lookup through the Coach read interface. Source selection SHALL retain separately labelled matching saved products rather than hiding them or silently replacing the chosen database.
@@ -537,21 +537,21 @@ The Coach SHALL list own products and stored database foods with empty core fiel
 - **THEN** that item is rejected without writing it.
 
 Evidence:
-- `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`
-- `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`
-- `backend/nutrition/food_database.py::FoodDatabaseService.found_value`
-- `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`
-- `backend/db/repositories.py::fill_empty_nutrients`
-- `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`
 - `backend/coach/change_receipts.py::change_summary`
+- `backend/db/repositories.py::fill_empty_nutrients`
+- `backend/nutrition/catalog.py::ProductCatalogService._gap_rejection`
+- `backend/nutrition/catalog.py::ProductCatalogService.fill_product_gaps`
+- `backend/nutrition/catalog.py::ProductCatalogService.list_incomplete_products`
+- `backend/nutrition/food_database.py::FoodDatabaseService.found_value`
+- `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`
+- `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`
+- `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`
+- `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`
 - `tests/test_nutrition_products.py::NutritionProductContractTests.test_incomplete_products_are_listed_and_only_their_empty_fields_filled`
 - `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_gap_fills_are_rejected_without_a_write`
-- `tests/test_nutrition_products.py::NutritionProductContractTests.test_a_gap_fill_origin_needs_a_lookup_that_returned_the_value`
-- `tests/test_food_lookup_chain.py::LookupChainTests.test_returned_values_back_a_gap_fill_origin_for_an_hour`
 - `tests/test_nutrition_web_search.py::NutritionWebSearchCatalogTests.test_a_web_fill_needs_the_value_of_a_search_from_its_own_page`
 - `tests/test_server_coach_turn_undo.py::CoachTurnUndoTests.test_a_product_gap_fill_names_its_products_and_undoes_to_empty_fields`
-- `tests/test_coach_change_receipts.py::ChangeSummaryTests.test_applied_tracked_writes_are_listed_once_and_undoable`
-- `tests/test_coach_tool_coverage.py::CoachToolCoverageTests.test_incomplete_products_are_listed_and_filled_by_authorized_coach_turn`.
 
 ### Requirement: Coach web search for missing product values
 The Coach SHALL be able to search the web for the still-empty core values of up to five named products through one Responses API request with the `web_search` tool, sending only product name, brand, EAN, basis and missing field names. Only finite, plausible values whose source page the search read or cited SHALL be returned, with origin `web`, the source page and an untrusted-data notice.
@@ -603,19 +603,19 @@ The product API SHALL list own products and stored database foods together, sort
 
 Evidence:
 - `backend/db/repositories.py::NutritionProductRepository.list_all`
-- `backend/nutrition/catalog.py::ProductCatalogService.update_product`
+- `backend/http_api/nutrition.py` (`scope=all`)
 - `backend/nutrition/catalog.py::ProductCatalogService.refresh_product`
+- `backend/nutrition/catalog.py::ProductCatalogService.update_product`
+- `backend/nutrition/components.py`
 - `backend/nutrition/food_database.py::FoodDatabaseService.refresh_barcode`
 - `backend/nutrition/food_mirror.py::FoodDatabaseMirror.restore_in_transaction`
-- `backend/nutrition/components.py`
-- `backend/http_api/nutrition.py` (`scope=all`)
-- `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`
+- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`
+- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`
+- `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite)
+- `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`
 - `tests/test_nutrition_products.py::NutritionProductContractTests.test_editing_a_stored_database_food_marks_its_values_as_the_athletes_own`
 - `tests/test_nutrition_products.py::NutritionProductContractTests.test_invalid_edits_of_a_stored_database_food_change_nothing`
-- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_an_own_product_re_check_needs_an_ean_and_a_working_lookup`
-- `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_a_re_check_by_ean_falls_back_from_an_unavailable_source`
-- `tests/test_nutrition_product_history.py::NutritionProductHistoryTests.test_undo_of_an_edit_restores_the_food_and_of_a_re_check_the_product`
-- `tests/test_nutrition_favorites_and_meal_additions.py` (database food used and favourite).
+- `tests/test_nutrition_products.py::NutritionProductContractTests.test_the_merged_list_holds_own_products_and_stored_foods_by_name`
 
 ### Requirement: One product list with sections and incomplete markers
 The product page SHALL show "Favoriten (n)" and "Alle Produkte (n)" as collapsible sections, both collapsed when the page opens, each total followed by the number of incomplete entries. Every card SHALL show its origin and, when incomplete, the names of its missing fields, and SHALL offer Verwenden, Bearbeiten, Aktualisieren and Löschen.

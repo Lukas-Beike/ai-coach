@@ -54,25 +54,25 @@ The system SHALL preserve explicit instants, date each activity on the day it wa
 Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC. The offset is stored as `local_offset_minutes` in the activity record's details; a session uses its primary record's offset, else that of the first record reporting one. A summary carrying an offset keeps its own `started_at_local` date even when a reader converts to the athlete zone.
 
 Evidence:
-- `backend/canonical/local_time.py:localize_wall_time`
-- `backend/canonical/local_time.py:wall_time`
-- `backend/canonical/local_time.py:wall_clock_offset_minutes`
-- `backend/canonical/local_time.py:zone_offset_minutes`
-- `backend/providers/garmin_activity_mapping.py:map_garmin_activities`
-- `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`
-- `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`
 - `backend/activities/detail_contract.py:session_local_start`
 - `backend/canonical/activity_summary.py:summary_local_date`
+- `backend/canonical/local_time.py:localize_wall_time`
+- `backend/canonical/local_time.py:wall_clock_offset_minutes`
+- `backend/canonical/local_time.py:wall_time`
+- `backend/canonical/local_time.py:zone_offset_minutes`
 - `backend/performance/analysis_input.py:analysis_sport`
 - `backend/performance/pace_at_hr.py:pace_at_heart_rate`
+- `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`
+- `backend/providers/garmin_activity_mapping.py:map_garmin_activities`
+- `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`
 - `tests/test_activity_local_offset.py`
+- `tests/test_analysis_input.py:test_a_trail_terrain_marks_a_trail_run_for_every_provider`
 - `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`
 - `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`
-- `tests/test_analysis_input.py:test_a_trail_terrain_marks_a_trail_run_for_every_provider`
 - `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`
-- `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`
 - `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`
-- `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`.
+- `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`
+- `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`
 
 ### Requirement: Activity terrain, motor assistance and native type
 The system SHALL map the terrain and motor assistance a provider activity type names into provider-neutral qualifiers, keep the provider's native type, and filter analyses by these qualifiers, never by provider identity.

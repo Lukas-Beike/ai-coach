@@ -106,19 +106,19 @@ The system SHALL record every diary create, correction, added product and deleti
 - **THEN** its change summary is marked undoable.
 
 Evidence:
+- `backend/coach/change_receipts.py::_FULLY_TRACKED_TOOLS`
+- `backend/history/undo_service.py::HistoryUndoService`
 - `backend/nutrition/diary.py::NutritionDiaryService._create`
 - `backend/nutrition/diary.py::NutritionDiaryService._update`
 - `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`
 - `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`
 - `backend/nutrition/diary.py::NutritionDiaryService.restore_in_transaction`
-- `backend/history/undo_service.py::HistoryUndoService`
-- `backend/coach/change_receipts.py::_FULLY_TRACKED_TOOLS`
-- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_logged_meal_removes_it`
-- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_correction_restores_the_previous_values`
-- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`
-- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_delete_brings_the_entry_back_after_a_sync`
+- `tests/test_nutrition_history.py::NutritionHistoryTests.test_a_coach_turn_that_logs_meals_is_undoable`
 - `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_is_refused_after_a_later_edit`
-- `tests/test_nutrition_history.py::NutritionHistoryTests.test_a_coach_turn_that_logs_meals_is_undoable`.
+- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_correction_restores_the_previous_values`
+- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_delete_brings_the_entry_back_after_a_sync`
+- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_logged_meal_removes_it`
+- `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`
 
 ### Requirement: Daily macro completeness is distinct from known subtotals
 The system SHALL sum calories and counts for recorded meals while preserving unknown macronutrients as unknown. It SHALL expose known macro subtotals and the number of entries with incomplete macros rather than treating omitted values as zero.

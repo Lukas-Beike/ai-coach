@@ -473,21 +473,21 @@ The calendar card of a completed session SHALL carry its single-session analysis
 - **THEN** the calendar loads the older completed sessions page by page from the session list, newest first, adds only sessions older than the loaded ones, and shows them with Details and Feedback like any other session.
 
 Evidence:
-- `public/plan-views.js::plannedActivityActions`
-- `public/plan-views.js::appendPlannedZoneTime`
-- `public/plan-views.js::loadOlderSessions`
-- `public/activity-analysis.js::loadPanel`
-- `public/navigation.js::routeFromHash`
 - `backend/activities/detail_contract.py:activity_detail_contract`
 - `backend/coach/activity_read_tools.py:CoachActivityReadToolService`
-- `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`
 - `e2e/activity-details.spec.js::@responsive calendar details chart running dynamics per second and retry a failed read`
+- `e2e/activity-details.spec.js::@responsive calendar details expand Garmin-style charts`
 - `e2e/activity-details.spec.js::@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar`
 - `e2e/activity-details.spec.js::@responsive the calendar pages back past the loaded weeks and loads older sessions`
+- `e2e/calendar-detail-pane.spec.js::@responsive an opened completed session shows its time in zones as one bar with the source`
 - `e2e/ux-polish.spec.js::a session's calendar details keep a flat series as a line on a real axis @responsive`
+- `public/activity-analysis.js::loadPanel`
+- `public/navigation.js::routeFromHash`
+- `public/plan-views.js::appendPlannedZoneTime`
+- `public/plan-views.js::loadOlderSessions`
+- `public/plan-views.js::plannedActivityActions`
 - `tests/test_activity_detail_contract.py:StreamTests.test_streams_are_downsampled_with_aligned_equal_length_channels`
 - `tests/test_coach_activity_read_tools.py:test_activity_detail_exposes_the_session_bundle_for_corrections`
-- `e2e/calendar-detail-pane.spec.js::@responsive an opened completed session shows its time in zones as one bar with the source`.
 
 ### Requirement: Analyse is split by sport
 The Analyse tab SHALL show the segments Laufen, Radfahren, Belastung and Erholung in this order, without a Leistung segment. Laufen and Radfahren SHALL each show only their sport's current values, best efforts, development charts and estimates; Belastung and Erholung SHALL stay sport-independent. Every value and chart of the former Leistung segment SHALL appear in exactly one segment, and an old Leistung link SHALL open Laufen.
