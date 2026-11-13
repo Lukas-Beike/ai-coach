@@ -264,7 +264,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await settingsNav.getByRole("link", { name: "Profil", exact: true }).click();
     await expect(page).toHaveURL(/#more\/profile$/);
     await expect(page.locator("#profilePanel")).toHaveClass(/active/);
-    await expect(page.locator("#profileContextNotice")).toHaveCount(0);
+    await expect(page.locator("#profileForm")).toBeVisible();
 
     await page.getByRole("link", { name: "Kalender", exact: true }).click();
     await expect(page).toHaveURL(/#plan\/overview$/);
