@@ -270,3 +270,28 @@ uncontrolled outdoor sessions.
   offered; it would need a card of its own with a comparability rule.
 - **Funding and interests:** declared "no competing interests" for R37-R40;
   not checked for the others.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METHOD_ID` | `'local-session-metrics'` | `backend/performance/session_metrics.py` |  |
+| `METHOD_VERSION` | `4` | `backend/performance/session_metrics.py` | v2: grade-adjusted Pa:HR of outdoor runs (#1770). v3: the decoupling's output per heartbeat is named apart from the session EF, and run work names Garmin's running-power model (card M8 v3, #1773). v4: positive duration fallback; stream work counts moving samples only (#1950). |
+| `CARD` | `'M8'` | `backend/performance/session_metrics.py` |  |
+| `MAX_SAMPLE_GAP_S` | `5.0` | `backend/performance/session_metrics.py` | A stream sample longer than this is a gap, as in the session analysis. |
+| `MIN_WORK_COVERAGE` | `0.85` | `backend/performance/session_metrics.py` | Share of the moving duration the power stream must cover for a work value. |
+| `VARIABILITY_BOUNDS` | `(0.5, 5.0)` | `backend/performance/session_metrics.py` |  |
+| `HEART_RATE_RANGE` | `(30.0, 240.0)` | `backend/performance/session_metrics.py` |  |
+| `SECONDS_PER_MINUTE` | `60.0` | `backend/performance/session_metrics.py` |  |
+| `JOULES_PER_KJ` | `1000.0` | `backend/performance/session_metrics.py` |  |
+| `EF_POWER_BASIS` | `'normalized_power'` | `backend/performance/session_metrics.py` |  |
+| `EF_GAP_BASIS` | `'grade_adjusted_speed'` | `backend/performance/session_metrics.py` |  |
+| `EF_SPEED_BASIS` | `'average_speed'` | `backend/performance/session_metrics.py` |  |
+| `WORK_DEVICE_BASIS` | `'device_total'` | `backend/performance/session_metrics.py` |  |
+| `WORK_STREAM_BASIS` | `'power_stream'` | `backend/performance/session_metrics.py` |  |
+| `RUN_POWER_MODEL` | `'running_power_model'` | `backend/performance/session_metrics.py` | Run power is the output of the device's running-power model, not a measured force. |
+| `STAGE` | `'session_metrics'` | `backend/sync/session_metrics.py` |  |
+| `STATE_KEY` | `'session_metrics_state'` | `backend/sync/session_metrics.py` |  |
+| `DEFAULT_BATCH_SIZE` | `100` | `backend/sync/session_metrics.py` |  |
+<!-- END GENERATED CONSTANTS -->

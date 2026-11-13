@@ -190,6 +190,29 @@ The system SHALL validate quantity-first machine-readable endurance steps, consi
 
 Evidence: `backend/providers/intervals_workouts.py:INTERVALS_ENDURANCE_WORKOUT_TYPES`, `backend/providers/intervals_workouts.py:intervals_workout_type`, `backend/planning/workout_validation.py:validate_workout_description`, `backend/planning/workout_validation.py:_validate_endurance_workout_steps`, `backend/planning/workout_validation.py:_validate_workout_duration_match`; `backend/planning/workouts.py:normalize_workout`; `tests/test_canonical_workout_sports.py`, `tests/test_workout_text.py:test_all_endurance_families_still_require_executable_steps`, `tests/test_planning_workouts.py:test_ambiguous_steps_keep_german_message_and_reason`, `tests/test_planning_workouts.py:test_endurance_parser_preserves_missing_step_and_target_reasons`, `tests/test_planning_workouts.py:test_composite_time_and_thirty_second_tolerance`, `tests/test_planning_workouts.py:test_distance_steps_allow_estimated_total_but_preserve_timed_subtotal`, `tests/test_planning_workouts.py:test_normalize_canonicalizes_endurance_zones_and_keeps_non_endurance_prose`.
 
+### Requirement: Workout text grammar and provider read-back tolerances
+The system SHALL read Intervals.icu workout text only as quantity-first dash steps with one intensity target each, never inferring from prose, and SHALL compare the provider's parsed reply with the same parse using fixed tolerances. `m` in a quantity means minutes; metres are written `mtr`.
+
+#### Scenario: Quantities and units
+- **WHEN** a step quantity is written
+- **THEN** a duration is one or more decimal-number parts of `h`, `m` (minutes), `s`, `'` (minutes) or `"` (seconds), such as `1h2m30s`, and a distance is a number with `km`, `mtr` (metres), `mi` (1609.344 m) or `yd` (0.9144 m); a zero amount, another unit or a missing quantity is `invalid_workout_step`, and a distance step keeps its distance while its time is left to the provider.
+
+#### Scenario: Intensity targets
+- **WHEN** a step carries its target after an optional `ramp`
+- **THEN** it is a zone (`Z2`, `Z1-Z2`, optionally `HR` or `Pace`), a percent or percent range (optionally `HR`, `LTHR`, `Pace` or `FTP`), watts or bpm (`200-240w`, `120bpm`), or a pace `m:ss` with an optional per-distance unit (`/km`, `/mi`, `/100m`, `/100y`, `/500m`, `/400m`, `/250m`) followed by `Pace`; no target is `missing_workout_target`, a second target in the same step `ambiguous_workout_target`, and a target kind (power, HR, pace) other than the unit's non-`AUTO` target `workout_target_mismatch`.
+
+#### Scenario: Repeats and step limit
+- **WHEN** a text line ends in `Nx`
+- **THEN** N must be 1 to 100 and the dash steps must follow directly and end at a blank line, each step repeating in order; a repeat header followed by a blank line, another header or no steps, a text line directly after steps without a blank line, or more than 5000 expanded steps is `invalid_workout_repeat`.
+
+#### Scenario: Read-back tolerances
+- **WHEN** the provider's `workout_doc` is checked against the expanded parse
+- **THEN** groups carry an integer `reps` of 1 to 100, are nested at most 3 deep and expand to at most 5000 steps; each step matches in order with its duration (s) or distance (m) within 1, the same ramp flag, the written units (`<kind>_zone`, `%ftp`, `%hr`, `%pace`, `%lthr`, `w`, `bpm` or one `secs/<unit>`) and its value, or start and end, within 0.01; every step duration is positive, the document duration and the reported moving time are within max(1, number of steps) seconds of their sum, and the training load is positive, else `intervals_workout_verification_failed`.
+
+Detailed contract: examples and the user-facing syntax are in docs/workout-export-format.md; the stated minutes against the step sum keep the thirty-second tolerance of TL7.
+
+Evidence: `backend/activities/workout_text.py:structured_blocks`, `backend/activities/workout_text.py:_workout_amount`, `backend/activities/workout_text.py:_workout_target`, `backend/activities/workout_text.py:_repeat_header`, `backend/activities/workout_text.py:verify_workout_readback`, `backend/activities/workout_text.py:_flatten_steps`, `backend/activities/workout_text.py:_verify_step`, `backend/activities/workout_text.py:_verify_totals`; `tests/test_workout_text.py:test_composite_and_second_durations_export_exact_seconds`, `tests/test_workout_text.py:test_supported_power_hr_and_pace_targets`, `tests/test_workout_text.py:test_incompatible_workout_target_is_rejected`, `tests/test_workout_text.py:test_repeat_without_steps_or_separator_is_rejected`, `tests/test_workout_text.py:test_reported_inline_repeat_and_competing_watts_are_rejected`, `tests/test_workout_text.py:test_provider_readback_must_confirm_every_step_target_and_calculated_load`, `tests/test_workout_text.py:test_provider_repeat_reply_is_compared_in_execution_order`.
+
 ### Requirement: TL8 Local export preparation and explicit provider write boundary
 The system SHALL build validated provider-neutral planned workout exports and provider payloads without contacting providers, and SHALL reach outbound create/update/plan/delete (Intervals.icu) and plan pushes (Wahoo, Garmin strength) only through an explicit synchronization use case or job. Intervals.icu is an output target: nothing in the library or the plan is read back from it.
 
@@ -217,7 +240,7 @@ The system SHALL build validated provider-neutral planned workout exports and pr
 - **WHEN** a check fails
 - **THEN** the error is 502 with the reason `intervals_workout_sport_mismatch`, `intervals_workout_category_mismatch` or the workout-text reason; local validation errors are 400 with `ambiguous_workout_step`, `workout_duration_mismatch` or `invalid_workout_start_date`.
 
-Detailed contract: the text grammar and the tolerances are documented in docs/workout-export-format.md.
+Detailed contract: the text grammar and the read-back tolerances are specified in the requirement "Workout text grammar and provider read-back tolerances".
 
 Evidence: `backend/activities/workout_text.py:verify_workout_readback`, `backend/planning/workout_export.py:build_planned_workout_export`, `backend/planning/workouts.py:validate_intervals_workout_result`; `backend/sync/workout_export.py:WorkoutExportPort`, `backend/sync/workout_export.py:WorkoutLibraryExportPort`; `tests/test_workout_library_export.py:test_serialize_and_readback_never_open_the_transport`, `tests/test_workout_library_export.py:test_serialize_library_matches_the_planning_payload`; `tests/test_workout_export_parity.py:test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_planning_workouts.py:test_event_date_boundary_and_duration_limits`.
 
