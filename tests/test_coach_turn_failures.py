@@ -235,7 +235,9 @@ class CoachTurnFailureTests(unittest.TestCase):
                 self._seed({"user_message_id": user["id"]})
                 with metered_turn(usage):
                     self.service.persist("turn-1", {}, error)
-                self.assertEqual(self._stored()[1]["usage"], usage)
+                self.assertEqual(
+                    self._stored()[1]["usage"], {**usage, "by_model": {"": usage}}
+                )
 
     def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(
         self,

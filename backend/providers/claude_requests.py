@@ -343,7 +343,9 @@ class ClaudeMessagesClient:
         """Bill the usage the stream reported (none when it never started)."""
         message = assembler.message or {}
         usage = neutral_usage(message.get("usage"))
-        self.provider_state.record_usage("anthropic", {"usage": usage}, operation)
+        self.provider_state.record_usage(
+            "anthropic", {"usage": usage}, operation, str(context.get("model") or "")
+        )
         details = {
             **context,
             "operation": operation,

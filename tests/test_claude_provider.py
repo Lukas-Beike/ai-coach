@@ -76,7 +76,7 @@ class FakeProviderState:
 
         self.status = []
 
-    def record_usage(self, provider, response, operation):
+    def record_usage(self, provider, response, operation, model=""):
         self.usage.append((provider, response, operation))
 
     def record_success(self, provider):
