@@ -19,6 +19,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+# Where T3's request_secret file delivery stores the password file.
+T3_SECRETS = Path.home() / ".t3" / "userdata" / "secrets"
 CSRF_COOKIE = "ic_csrf"
 TIMEOUT = 30
 
@@ -41,6 +43,20 @@ def scratch_path(path: str) -> Path:
     scratch = Path(tempfile.gettempdir()).resolve()
     if not target.is_relative_to(scratch) or target.is_relative_to(ROOT):
         raise ProdError("result and log files must be in the system temp directory")
+    return target
+
+
+def secret_path(path: str) -> Path:
+    """The password file is only read: the system temp directory or the folder
+    where a T3 secret request delivers files, never the repository (#2527)."""
+    if not Path(path).is_absolute():
+        raise ProdError("the password file path must be absolute")
+    target = Path(path).resolve()
+    roots = (Path(tempfile.gettempdir()).resolve(), T3_SECRETS.resolve())
+    if target.is_relative_to(ROOT) or not any(target.is_relative_to(r) for r in roots):
+        raise ProdError(
+            "the password file must be in the system temp directory or the T3 secret folder"
+        )
     return target
 
 
@@ -112,7 +128,7 @@ class Session:
 
     def login(self, password_file: str) -> None:
         try:
-            password = scratch_path(password_file).read_text(encoding="utf-8").strip()
+            password = secret_path(password_file).read_text(encoding="utf-8").strip()
         except OSError:
             raise ProdError("cannot read the secret file") from None
         if not password:

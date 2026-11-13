@@ -14,6 +14,27 @@ test("ui walk keeps files in the temp directory and needs an http(s) address", a
   assert.throws(() => walk.scratchPath(path.join(__dirname, "..")), /system temp directory/);
   assert.throws(() => walk.scratchPath(path.join(os.tmpdir(), "..", "elsewhere")), /system temp directory/);
   assert.equal(walk.scratchPath(path.join(os.tmpdir(), "walk")), path.resolve(os.tmpdir(), "walk"));
+  // The password file may come from the T3 secret folder, read only (#2527).
+  const t3 = path.join(os.homedir(), "t3-folder-for-a-test", "secrets");
+  assert.equal(walk.secretPath(path.join(t3, "app-password"), t3), path.join(t3, "app-password"));
+  assert.equal(walk.secretPath(path.join(os.tmpdir(), "secret"), t3), path.resolve(os.tmpdir(), "secret"));
+  assert.throws(() => walk.secretPath(path.join(__dirname, "..", ".env"), t3), /T3 secret folder/);
+  assert.throws(() => walk.secretPath(path.join(t3, "..", "other"), t3), /T3 secret folder/);
+  assert.throws(() => walk.secretPath("app-password", t3), /must be absolute/);
+  const root = path.resolve(__dirname, "..");
+  assert.throws(() => walk.secretPath(path.join(root, ".env"), path.dirname(root)), /T3 secret folder/);
+  // A link in the temp directory that leads into the repository is refused.
+  const linkDir = fs.mkdtempSync(path.join(os.tmpdir(), "walk-link-"));
+  const link = path.join(linkDir, "checkout");
+  fs.symlinkSync(root, link, "junction");
+  try {
+    assert.throws(() => walk.secretPath(path.join(link, "package.json"), t3), /T3 secret folder/);
+  } finally {
+    // Remove the link itself first so cleanup never descends into the checkout.
+    fs.unlinkSync(link);
+    fs.rmdirSync(linkDir);
+  }
+  assert.throws(() => walk.scratchPath(path.join(t3, "shots")), /system temp directory/);
   assert.equal(walk.baseUrl("https://app.example.test:8090/some/path"), "https://app.example.test:8090");
   assert.throws(() => walk.baseUrl("file:///etc/passwd"), /http\(s\) URL/);
 });
@@ -54,6 +75,10 @@ test("ui walk refuses missing arguments and an unreadable secret file without a 
   let done = run("--url", "http://127.0.0.1:9");
   assert.equal(done.status, 2);
   assert.match(done.stdout, /required/);
+  // A malformed address keeps its own message, not the secret-file one.
+  done = run("--url", "not a url", "--password-file", path.join(os.tmpdir(), "missing-secret-file"), "--out-dir", path.join(os.tmpdir(), "walk"));
+  assert.equal(done.status, 2);
+  assert.doesNotMatch(done.stdout, /secret file/);
   done = run("--url", "http://127.0.0.1:9", "--password-file", path.join(os.tmpdir(), "missing-secret-file"), "--out-dir", path.join(os.tmpdir(), "walk"));
   assert.equal(done.status, 2);
   assert.match(done.stdout, /cannot read the secret file/);

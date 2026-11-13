@@ -12,9 +12,12 @@ restart. Report one short line per step: `ok` or the finding.
 **Inputs at run time only:** the app address (the athlete's private notes) and
 the app password as a secret file delivered to the session (`request_secret`
 with file delivery). Never write either into the repository, a tracked file,
-a command line, a tool argument, or output. The secret file, result files,
-saved logs and screenshots stay in the session scratchpad (the system temp
-directory; the scripts refuse other paths) and are never committed. The
+a command line, a tool argument, or output. T3 stores the delivered secret
+file under `~/.t3/userdata/secrets`; pass that path as `--password-file` and
+never copy the file. The scripts read the password file only from there or
+the system temp directory. Result files, saved logs and screenshots stay in
+the session scratchpad (the system temp directory; the scripts refuse other
+paths) and are never committed. The
 previous release's results come from the session notes.
 
 **Stop rule:** on an unexpected effect (a dropped record count, a failed
