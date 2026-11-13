@@ -67,6 +67,7 @@ class AppContext:
     planning: Any = None
     planning_workflows: Any = None
     planning_revision: Any = None
+    performance: Any = None
     nutrition: Any = None
     provider_transport: Any = None
     provider_sync: Any = None

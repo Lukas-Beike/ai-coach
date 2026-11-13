@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
@@ -27,11 +28,23 @@ from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
 from backend.planning.illness_return_signals import overnight_reader
+from backend.planning.leg_strength import strength_expected
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.local_plan_creation_service import (
     LocalTrainingPlanCreationService,
 )
+from backend.planning.plan_guard_service import (
+    LAST_TEST_DAYS,
+    BriefHistory,
+    PlanGuardService,
+    read_completed,
+    read_lessons,
+    read_load_thresholds,
+    read_progress,
+    recent_illness,
+)
+from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
@@ -70,6 +83,12 @@ class PlanningWorkflowServices:
         [], StructuredTrainingPlanReplacementService
     ]
     adaptive_replan_preview_service: Callable[[], AdaptiveReplanPreviewService]
+
+
+@dataclass(frozen=True)
+class PlanGuardServices:
+    plan_guard_service: Callable[[], PlanGuardService]
+    planned_unit_estimator: Callable[[], PlannedUnitEstimator]
 
 
 def _publish_changed(topic: str) -> None:
@@ -279,3 +298,104 @@ def build_planning_workflows(ctx: AppContext) -> PlanningWorkflowServices:
         structured_training_plan_replacement_service,
         adaptive_replan_preview_service,
     )
+
+
+def build_plan_guard(ctx: AppContext) -> PlanGuardServices:
+    """Plan checks and planning brief over the current local state, fresh per call."""
+
+    def local_date() -> Any:
+        return ctx.clock.now().date()
+
+    def source_preferences(db: Any) -> Any:
+        return preferences_from_profile(ctx.athlete.profile().get_from_db(db))
+
+    def thresholds() -> Any:
+        return read_load_thresholds(
+            ctx.database(),
+            ctx.canonical_read,
+            local_date(),
+            ctx.athlete.zones().configurations(),
+            source_preferences,
+        )
+
+    def planned_unit_estimator() -> PlannedUnitEstimator:
+        return PlannedUnitEstimator(
+            database_manager=ctx.database,
+            observation_reader=lambda: ctx.canonical_read,
+            zone_configurations=lambda: ctx.athlete.zones().configurations(),
+            today=local_date,
+            source_preferences=source_preferences,
+        )
+
+    def block_lessons() -> list[dict[str, object]]:
+        """Lessons of the last 4 whole weeks for the planning brief."""
+        reports = ctx.performance.training_reports()
+        return reports.report.block_review(
+            {}, reports.timezone(), with_curves=False
+        ).get("lessons", [])
+
+    def plan_guard_service() -> PlanGuardService:
+        guard = PlanGuardService(
+            estimate_unit=planned_unit_estimator(),
+            planned_units=lambda: ctx.planning.planned_unit().list(
+                1000, future_only=True
+            ),
+            completed_activities=lambda: read_completed(
+                ctx.database(), ctx.canonical_read, local_date()
+            ),
+            competitions=lambda: ctx.planning.competition().list(),
+            illness=lambda: recent_illness(
+                ctx.athlete.checkin().list(10),
+                local_date(),
+                (
+                    ctx.planning_workflows.adaptive_replan_preview_service().latest_illness_pause()
+                    or (None, None)
+                )[1],
+            ),
+            progress=lambda: read_progress(ctx.performance.training_reports()),
+            training_model=lambda: str(
+                ctx.athlete.profile().get().get("training_model") or ""
+            ),
+            profile=lambda: ctx.athlete.profile().get(),
+            today=local_date,
+            thresholds=thresholds,
+            expects_strength=lambda: strength_expected(
+                str(
+                    ctx.athlete.profile().get().get("training_preferences_strength")
+                    or ""
+                ),
+                ctx.planning.competition().list(),
+                local_date(),
+            ),
+            calendar_events=lambda: (
+                ctx.external_calendar.reader().list_events_in_window(56)
+            ),
+            history=BriefHistory(
+                lessons=lambda: read_lessons(block_lessons),
+                recent_units=lambda: ctx.planning.planned_unit().list(
+                    1000,
+                    future_only=True,
+                    since=local_date() - timedelta(days=LAST_TEST_DAYS),
+                ),
+                recent_completed=lambda: read_completed(
+                    ctx.database(),
+                    ctx.canonical_read,
+                    local_date(),
+                    days=LAST_TEST_DAYS,
+                ),
+            ),
+        ).with_return_stage(
+            lambda: (
+                ctx.planning_workflows.adaptive_replan_preview_service().enforced_return_stage()
+            )
+        )
+        # Units come only from the athlete's library templates (#2379).
+        return guard.with_templates(
+            lambda: {
+                str(item["id"]): item
+                for item in ctx.planning.workout_library().list(1000)
+                if not item.get("date")
+            }
+        )
+
+    return PlanGuardServices(plan_guard_service, planned_unit_estimator)

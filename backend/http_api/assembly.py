@@ -63,21 +63,8 @@ from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
 from backend.nutrition.macro_context import macro_context
-from backend.performance.mean_max_curve import SessionCurveReader
-from backend.performance.report_service import (
-    BlockReviewSource,
-    TrainingDerivedReadService,
-    TrainingProfileSelectionService,
-    TrainingRecordsService,
-    TrainingReportReadService,
-    TrainingReportServices,
-    TrainingSeasonReadService,
-)
-from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.race_results import with_race_results
-from backend.planning.season_preparation import season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
-from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
@@ -185,8 +172,6 @@ class HttpPublicServices:
     performance_state: Callable[[], Any]
     feedback_state: Callable[[], Any]
     sync_state: Callable[[], Any]
-    canonical_performance_source: Callable[[], Any]
-    season_source: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -194,7 +179,6 @@ class HttpAthleteServices:
     profile: Callable[[], Any]
     competition: Callable[[], Any]
     activity_read: Callable[[], Any]
-    checkin: Callable[[], Any]
     clock: Any
     local_today: Callable[[], Any]
     state_event_buffer: Any
@@ -269,6 +253,7 @@ class HttpReadRouteServices:
     diagnostics: HttpDiagnosticsServices
     workout_library: Callable[[], Any]
     planned_unit: Callable[[], Any]
+    training_reports: Callable[[], Any]
     # Read-only Wahoo state of exported library workouts; absent without Wahoo.
     wahoo_library_state: Callable[[], Any] | None = None
 
@@ -306,11 +291,6 @@ def _provider_connection_routes(
     )
 
 
-def _profile_text(profile_service: Any, key: str) -> str:
-    """A text field of the saved profile; empty when unset."""
-    return str(profile_service().get().get(key) or "")
-
-
 class HttpApiAssembly:
     """Own eager HTTP route composition and lazy request-handler creation."""
 
@@ -338,6 +318,7 @@ class HttpApiAssembly:
         workout_library = dependencies.reads.workout_library
         self._wahoo_library_state = dependencies.reads.wahoo_library_state
         planned_unit_service = dependencies.reads.planned_unit
+        training_reports = dependencies.reads.training_reports
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
@@ -377,7 +358,6 @@ class HttpApiAssembly:
         profile_service = athlete.profile
         competition_service = athlete.competition
         activity_read_service = athlete.activity_read
-        checkin_service = athlete.checkin
         athlete_clock = athlete.clock
         local_today = athlete.local_today
         state_event_buffer = athlete.state_event_buffer
@@ -458,86 +438,8 @@ class HttpApiAssembly:
             full_provider_resync_service,
             dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes()),
         )
-        report_plan = lambda: public_plan_state_service().read(local_only=True)
-        report_checkins = lambda: checkin_service().list(365)
-        report_feedback = lambda keys: (
-            athlete.activity_feedback().for_activity_ids(keys)
-            if athlete.activity_feedback
-            else []
-        )
-        report_timezone = lambda: str(profile_service().get().get("timezone") or "UTC")
-        report_recovery = lambda: (
-            public_performance_state_service()
-            .performance_state()["performance"]
-            .get("personal_recovery", {})
-        )
-        report_performance = lambda: (
-            public_performance_state_service().performance_state()["performance"]
-        )
-
-        # One reader keeps the session curves across requests.
-        power_curves = SessionCurveReader(CanonicalTableReader().session_activities)
-
-        def training_report_services() -> TrainingReportServices:
-            canonical = public.canonical_performance_source()
-            records = TrainingRecordsService(
-                database_manager=database_manager(),
-                read_equipment=lambda: (
-                    athlete.equipment().read() if athlete.equipment else {}
-                ),
-                read_record=lambda kind, record_id: (
-                    {
-                        "record_type": kind,
-                        "record": athlete.equipment().read(record_id)["items"][0],
-                    }
-                    if kind == "equipment" and athlete.equipment
-                    else {}
-                ),
-                canonical=canonical,
-            )
-            profiles = TrainingProfileSelectionService(
-                local_today, canonical=canonical, curves=power_curves
-            )
-            report_read = TrainingReportReadService(
-                read_plan=report_plan,
-                read_checkins=report_checkins,
-                read_feedback=report_feedback,
-                today=local_today,
-                canonical=canonical,
-                session_feedback=_session_feedback_lookup(athlete),
-                now=athlete_clock.now,
-                curve_records=profiles.curve_records,
-                block_review=BlockReviewSource(
-                    review=block_review, last_test=last_completed_test
-                ),
-                training_model=partial(
-                    _profile_text, profile_service, "training_model"
-                ),
-            )
-            return TrainingReportServices(
-                records=records,
-                profiles=profiles,
-                report=report_read,
-                derived=TrainingDerivedReadService(
-                    read_checkins=report_checkins,
-                    read_recovery=report_recovery,
-                    read_performance=report_performance,
-                    today=local_today,
-                    canonical=canonical,
-                ),
-                season=TrainingSeasonReadService(
-                    read_competitions=lambda: competition_service().list(100),
-                    read_observations=records.observations,
-                    today=local_today,
-                    season_preparation=season_preparation,
-                    season_source=public.season_source(),
-                ),
-                timezone=report_timezone,
-            )
-
-        self.training_reports = training_report_services
         self.analysis_routes = AnalysisRoutes(
-            self.training_reports,
+            training_reports,
             lambda: AnalysisRefreshService(
                 garmin_analysis_refresh_service,
                 local_today,
@@ -768,12 +670,3 @@ class HttpApiAssembly:
                 static_asset_service=StaticAssetService(handler.public_dir),
             )
         )
-
-
-def _session_feedback_lookup(athlete: Any) -> Any:
-    """The session-aware feedback lookup of the session-RPE load, if feedback exists."""
-    if not athlete.activity_feedback:
-        return None
-    return lambda keys: athlete.activity_feedback().for_activity_ids(
-        keys, sessions_only=True
-    )
