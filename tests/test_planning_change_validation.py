@@ -262,6 +262,40 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             [("2031-06-03", {"move-me"})],
         )
 
+    def test_repeated_changes_to_one_unit_fold_before_the_final_schedule_check(
+        self,
+    ) -> None:
+        payload = json.dumps(
+            {
+                "date": "2031-06-03",
+                "starts_at_local": "2031-06-03T08:00:00",
+                "duration_minutes": 60,
+            }
+        )
+        overlapping_create = {
+            "action": "create",
+            "date": "2031-06-03",
+            "starts_at_local": "2031-06-03T08:30:00",
+            "duration_minutes": 30,
+        }
+        for changes in (
+            [
+                {"action": "update", "local_id": "unit", "name": "Renamed"},
+                {"action": "update", "local_id": "unit", "date": "2031-06-04"},
+            ],
+            [
+                {"action": "archive", "local_id": "unit"},
+                {"action": "update", "local_id": "unit", "name": "Still archived"},
+            ],
+        ):
+            with self.subTest(changes=changes):
+                self._add_unit("unit", raw_payload=payload)
+                revision = self.validator.validate(
+                    [*changes, overlapping_create], {}, self.db, False
+                )
+                self.assertEqual(revision, 7)
+                self.db.execute("DELETE FROM planned_units")
+
     def test_every_active_candidate_in_moved_batch_is_checked(self) -> None:
         self._add_unit("move-me", date="2031-06-01")
 

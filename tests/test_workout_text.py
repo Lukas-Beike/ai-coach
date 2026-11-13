@@ -38,14 +38,9 @@ class WorkoutTextTests(ServerTestCase):
             planning_workouts.validate_workout_description(workout)
         self.assertEqual(raised.exception.reason, reason)
 
-    def test_screenshot_prose_is_rejected_before_any_provider_write(self):
-        workout = self.workout(
-            "15 min Einrollen bei 50–70 % FTP. 2x15 min bei 88–92 % FTP "
-            "(261–273 W), dazwischen 6 min bei 50–60 % FTP. 10 min Ausrollen.",
-            65,
-        )
-        self.assert_invalid(workout, "missing_workout_steps")
+    def assert_every_export_path_rejects_before_any_write(self, workout):
         client = server.PROVIDER_TRANSPORT.intervals_client()
+        today = server.ATHLETE_CLOCK.now().date()
         with (
             patch.object(client, "get_or_create_workout_folder") as folder,
             patch.object(client, "post") as post,
@@ -54,10 +49,26 @@ class WorkoutTextTests(ServerTestCase):
             for operation in (
                 lambda: planning_workouts.library_workout_payload(workout),
                 lambda: planning_workouts.library_workout_event_payload(
-                    "synthetic",
-                    workout,
-                    workout["date"],
-                    today=server.ATHLETE_CLOCK.now().date(),
+                    "synthetic", workout, workout["date"], today=today
+                ),
+                lambda: client.create_library_workouts(
+                    [
+                        planning_workouts.library_workout_payload(
+                            {"type": "Run", "description": "- 6km Z1 HR"}
+                        ),
+                        planning_workouts.library_workout_payload(workout),
+                    ]
+                ),
+                lambda: client.update_library_workout(
+                    "synthetic", planning_workouts.library_workout_payload(workout)
+                ),
+                lambda: client.plan_library_workout(
+                    planning_workouts.library_workout_event_payload(
+                        "synthetic", workout, workout["date"], today=today
+                    )
+                ),
+                lambda: planning_workouts.workout_event_payload(
+                    "synthetic", workout, today=today
                 ),
             ):
                 with self.assertRaises(AppError):
@@ -65,6 +76,20 @@ class WorkoutTextTests(ServerTestCase):
             folder.assert_not_called()
             post.assert_not_called()
             put.assert_not_called()
+
+    def test_screenshot_prose_is_rejected_before_any_provider_write(self):
+        workout = self.workout(
+            "15 min Einrollen bei 50–70 % FTP. 2x15 min bei 88–92 % FTP "
+            "(261–273 W), dazwischen 6 min bei 50–60 % FTP. 10 min Ausrollen.",
+            65,
+        )
+        self.assert_invalid(workout, "missing_workout_steps")
+        self.assert_every_export_path_rejects_before_any_write(workout)
+
+    def test_ambiguous_description_blocks_all_workout_export_paths_before_writes(self):
+        self.assert_every_export_path_rejects_before_any_write(
+            self.workout("- 6km Z1 HR\n- Optional bis insgesamt 8km", 40, sport="Run")
+        )
 
     def test_sweetspot_counts_recovery_only_between_efforts(self):
         description = (
@@ -346,6 +371,53 @@ class WorkoutTextTests(ServerTestCase):
             )
             client.plan_library_workout(event_payload)
             self.assertEqual(post.call_args.args[1][0]["moving_time"], 1800)
+
+    def test_library_update_always_sends_required_folder(self):
+        client = server.PROVIDER_TRANSPORT.intervals_client()
+        with (
+            patch.object(
+                client, "get_or_create_workout_folder", return_value=12345
+            ) as folder,
+            patch.object(client, "put", return_value={"id": "remote-1"}) as put,
+        ):
+            client.update_library_workout(
+                "remote-1",
+                planning_workouts.library_workout_payload(
+                    {"name": "Easy", "description": "- 30m Z2", "type": "Ride"}
+                ),
+            )
+        folder.assert_called_once_with()
+        self.assertEqual(
+            put.call_args.args[1],
+            {
+                "name": "Easy",
+                "description": "- 30m Z2",
+                "type": "Ride",
+                "folder_id": 12345,
+                "target": "AUTO",
+            },
+        )
+
+    def test_unknown_workout_sport_falls_back_to_provider_other_type(self):
+        client = server.PROVIDER_TRANSPORT.intervals_client()
+        with (
+            patch.object(client, "get", return_value=[]),
+            patch.object(
+                client, "post", side_effect=[{"id": 12345}, {"id": "remote-1"}]
+            ) as post,
+        ):
+            client.create_library_workouts(
+                [
+                    planning_workouts.library_workout_payload(
+                        {
+                            "name": "Regeneration",
+                            "description": "- 30m Z1 HR Locker bewegen",
+                            "sport": "Recovery Session",
+                        }
+                    )
+                ]
+            )
+        self.assertEqual(post.call_args_list[1].args[1]["type"], "Other")
 
     def test_provider_readback_must_confirm_every_step_target_and_calculated_load(self):
         workout = self.workout("- 30m 85%", 30)

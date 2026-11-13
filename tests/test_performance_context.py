@@ -190,6 +190,39 @@ class PerformanceContextTests(unittest.TestCase):
             result["recovery"]["source_freshness"]["sleep_hours"]["freshness"], "fresh"
         )
 
+    def test_current_performance_includes_health_and_training_comparisons(self):
+        today = date(2026, 9, 20)
+        days = [(today - timedelta(days=offset)).isoformat() for offset in range(7)]
+        garmin = {
+            "sleep": [
+                {
+                    "calendarDate": day,
+                    "sleepTimeSeconds": 28800 if index == 0 else 25200,
+                }
+                for index, day in enumerate(days)
+            ],
+            "resting_hr": [
+                {"calendarDate": day, "restingHeartRate": 55 if index == 0 else 60}
+                for index, day in enumerate(days)
+            ],
+            "hrv": [
+                {"calendarDate": day, "lastNightAvg": 60 if index == 0 else 50}
+                for index, day in enumerate(days)
+            ],
+        }
+        comparisons = current_performance_context(
+            GarminSyncStatus.from_state(garmin),
+            {},
+            today,
+            canonical=recovery_only_inputs(garmin),
+        )["comparisons"]
+        self.assertEqual(comparisons["sleep_hours"]["days"], 7)
+        self.assertEqual(comparisons["sleep_hours"]["color"], "good")
+        self.assertEqual(comparisons["resting_hr_bpm"]["color"], "good")
+        # Fitness compares the local curve only (#1726); the rows' Intervals.icu
+        # CTL never feeds it, and no local load is stored here.
+        self.assertIsNone(comparisons["fitness_ctl"])
+
     def test_rolling_training_and_input_nonmutation(self):
         today = date(2026, 9, 20)
         snapshot = {
