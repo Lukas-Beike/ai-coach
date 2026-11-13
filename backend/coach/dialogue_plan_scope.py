@@ -7,10 +7,10 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.coach.authorization import require_coach_scope
+from backend.db import planning_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
-SELECT_PLANNED_PAYLOAD_SQL = "SELECT payload FROM planned_units WHERE local_id=?"
 SELECT_USER_MESSAGE_SQL = (
     "SELECT id FROM messages WHERE client_turn_id=? AND role='user'"
 )
@@ -38,7 +38,7 @@ class CoachDialoguePlanScopeService:
             for change in arguments.get("changes", []):
                 local_id = str(change.get("local_id") or "")
                 require_coach_scope(action, f"planned_unit:{local_id}")
-                row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
+                row = planning_store.planned_unit_row(db, local_id)
                 if not row:
                     raise AppError(
                         404,

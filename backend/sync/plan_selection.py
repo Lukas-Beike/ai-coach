@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlite3 import Connection
 from typing import Any
 
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
@@ -34,12 +34,6 @@ _STALE_PLAN_ERROR = (
     "Die ausgewählte Planung wurde geändert. Lies den aktuellen Stand erneut."
 )
 _ALL_PENDING_MAX_ENTRIES = 5000
-
-
-def _query_rows(
-    connection: Connection, query: str, params: tuple[str, ...]
-) -> list[Any]:
-    return connection.execute(query, params).fetchall()
 
 
 @dataclass
@@ -242,10 +236,7 @@ class StructuredPlanSyncService:
             if planned_ids:
                 self._authority.mark_planning_authoritative(planned_ids)
             for entry in entries:
-                row = db.execute(
-                    "SELECT payload FROM planned_units WHERE local_id=?",
-                    (entry["library_workout_id"],),
-                ).fetchone()
+                row = planning_store.planned_unit_row(db, entry["library_workout_id"])
                 if row:
                     entry["expected_payload_hash"] = (
                         planned_units.plan_push_payload_hash(row["payload"])
@@ -256,30 +247,17 @@ class StructuredPlanSyncService:
     def _validate_selected_entry(db: Connection, entry: dict[str, Any]) -> str:
         local_id = str(entry["library_workout_id"])
         entity = entry.get("entity")
-        if entity == "planned_unit":
-            rows = _query_rows(
-                db,
-                "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=?",
-                (local_id,),
-            )
-        elif entity == "workout_library":
-            rows = _query_rows(
-                db,
-                "SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
-                (local_id,),
-            )
-        else:
-            rows = _query_rows(
-                db,
-                "SELECT payload, 'planned_unit' AS entity FROM planned_units WHERE local_id=? "
-                "UNION ALL SELECT payload, 'workout_library' AS entity FROM workout_library WHERE local_id=?",
-                (local_id, local_id),
-            )
+        rows = []
+        if entity != "workout_library":
+            rows.append(("planned_unit", planning_store.planned_unit_row(db, local_id)))
+        if entity != "planned_unit":
+            rows.append(("workout_library", planning_store.library_row(db, local_id)))
         matching = next(
             (
-                row
-                for row in rows
-                if planned_units.plan_push_hash_matches(
+                kind
+                for kind, row in rows
+                if row
+                and planned_units.plan_push_hash_matches(
                     row["payload"], entry["expected_payload_hash"]
                 )
             ),
@@ -287,4 +265,4 @@ class StructuredPlanSyncService:
         )
         if not matching:
             raise AppError(409, _STALE_PLAN_ERROR, reason="planning_revision_conflict")
-        return matching["entity"]
+        return matching

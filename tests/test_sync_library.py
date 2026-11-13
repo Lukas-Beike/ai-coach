@@ -16,12 +16,11 @@ from support import temp_database
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.config import Config
-from backend.db import row_factory
+from backend.db import planning_store, row_factory
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
-from backend.planning.library_service import UPDATE_LIBRARY_SQL
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers.http import ProviderHTTPError
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
@@ -945,9 +944,8 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
     def commit_local_edit(self, name):
         """Commit a template edit the way the library service does."""
         with self.database_manager.unit_of_work() as db:
-            db.execute(
-                UPDATE_LIBRARY_SQL,
-                (json.dumps(self.workout(name), ensure_ascii=False), NOW, LIBRARY_ID),
+            planning_store.set_library_sync_state(
+                db, LIBRARY_ID, self.workout(name), NOW, state="local", dirty=1
             )
 
     def test_create_response_keeps_a_local_edit_made_during_upload(self):

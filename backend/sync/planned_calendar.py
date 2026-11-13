@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 
 from backend.activities.hr_cap import resolved_range, stored_cap
 from backend.config import Config
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
     INTERVALS_API_KEY_ERROR,
@@ -32,9 +32,6 @@ from backend.sync.workout_export import WorkoutExportPort
 
 _PLANNED_UNIT_SYNCS: set[str] = set()
 _PLANNED_UNIT_SYNC_LOCK = threading.Lock()
-_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
-    "SELECT payload FROM planned_units WHERE local_id=?"
-)
 
 
 @contextmanager
@@ -89,10 +86,7 @@ class PlannedCalendarSyncService:
         except (ValueError, AttributeError) as exc:
             raise AppError(400, INVALID_PLANNING_ID_ERROR) from exc
         with self._database_manager.reader() as db:
-            row = db.execute(
-                "SELECT payload, sync_state FROM planned_units WHERE local_id=?",
-                (normalized_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, normalized_id)
         if not row:
             raise AppError(404, "Lokale Planung nicht gefunden.")
         try:
@@ -105,9 +99,7 @@ class PlannedCalendarSyncService:
 
     def _recheck(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.reader() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, normalized_id)
         self._require_unchanged(current, original_payload)
 
     @staticmethod
@@ -175,9 +167,7 @@ class PlannedCalendarSyncService:
 
     def _mark_removed(self, normalized_id: str, original_payload: str) -> None:
         with self._database_manager.unit_of_work() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (normalized_id,)
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, normalized_id)
             self._require_unchanged(current, original_payload)
             self._state_writer.persist(
                 db,
@@ -411,14 +401,8 @@ class PlannedCalendarRepairBatch:
         local_ids = [str(item["library_workout_id"]) for item in requested]
         newest = ""
         if local_ids:
-            placeholders = ",".join("?" for _ in local_ids)
             with database_manager.reader() as db:
-                row = db.execute(
-                    "SELECT MAX(json_extract(payload, '$.date')) AS newest "
-                    f"FROM planned_units WHERE local_id IN ({placeholders})",
-                    local_ids,
-                ).fetchone()
-            newest = str((row or {}).get("newest") or "")
+                newest = planning_store.newest_planned_date(db, local_ids)
         self.oldest = today.isoformat()
         self.newest = max(newest, (today + timedelta(days=future_days)).isoformat())
         self.events: dict[str, dict[str, Any]] | None = None
@@ -550,15 +534,8 @@ class PlannedCalendarRepairService:
         batch: PlannedCalendarRepairBatch | None,
     ) -> _PlannedCalendarRepairContext:
         with self._database_manager.reader() as db:
-            row = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)
-            ).fetchone()
-            others = db.execute(
-                "SELECT local_id, json_extract(payload, '$.remote_event_id') AS remote_id, "
-                "json_extract(payload, '$.remote_event_external_id') AS remote_external_id "
-                "FROM planned_units WHERE local_id<>?",
-                (local_id,),
-            ).fetchall()
+            row = planning_store.planned_unit_row(db, local_id)
+            others = planning_store.other_planned_event_ids(db, local_id)
         if not row or not planned_units.plan_push_hash_matches(
             row["payload"], expected_hash
         ):
@@ -622,10 +599,7 @@ class PlannedCalendarRepairService:
 
     def _recheck(self, context: _PlannedCalendarRepairContext, message: str) -> None:
         with self._database_manager.reader() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                (context.local_id,),
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, context.local_id)
         if not current or not planned_units.plan_push_hash_matches(
             current["payload"], context.expected_hash
         ):
@@ -784,10 +758,7 @@ class PlannedCalendarRepairService:
             context.batch.remember(saved_event)
         conflict = None
         with self._database_manager.unit_of_work() as db:
-            current = db.execute(
-                _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                (context.local_id,),
-            ).fetchone()
+            current = planning_store.planned_unit_row(db, context.local_id)
             if not current or not planned_units.plan_push_hash_matches(
                 current["payload"], context.expected_hash
             ):
@@ -813,10 +784,7 @@ class PlannedCalendarRepairService:
                     saved_event,
                     now=self._now(),
                 )
-                current = db.execute(
-                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                    (context.local_id,),
-                ).fetchone()
+                current = planning_store.planned_unit_row(db, context.local_id)
                 context.expected_hash = planned_units.plan_push_payload_hash(
                     current["payload"]
                 )
@@ -890,10 +858,7 @@ class PlannedCalendarRepairService:
                 context.export.verify_readback(context.readback_workout, event)
                 verified = event
             with self._database_manager.unit_of_work() as db:
-                current = db.execute(
-                    _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
-                    (context.local_id,),
-                ).fetchone()
+                current = planning_store.planned_unit_row(db, context.local_id)
                 if not current or not planned_units.plan_push_hash_matches(
                     current["payload"], context.expected_hash
                 ):

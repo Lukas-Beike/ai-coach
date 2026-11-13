@@ -48,7 +48,7 @@ from backend.canonical.vocabulary import (
     RemoteLinkState,
     Sport,
 )
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -289,20 +289,13 @@ class GarminStrengthPushService:
     def _past_links(self) -> list[tuple[str, str | None, str | None]]:
         """(unit id, workout id, schedule id) of linked units before today, oldest first."""
         with self._database_manager().unit_of_work() as db:
-            rows = db.execute(
-                "SELECT l.local_id, l.remote_id, l.remote_external_id FROM remote_links l "
-                "JOIN planned_units p ON p.local_id = l.local_id "
-                "WHERE l.provider=? AND l.entity_kind=? AND json_valid(p.payload) "
-                "AND substr(json_extract(p.payload, '$.date'), 1, 10) "
-                "BETWEEN '0001-01-01' AND ? "
-                "ORDER BY substr(json_extract(p.payload, '$.date'), 1, 10), l.local_id",
-                (
-                    GARMIN,
-                    RemoteEntityKind.PLANNED_UNIT.value,
-                    # BETWEEN is inclusive: the day before today is the last one.
-                    (self._today() - timedelta(days=1)).isoformat(),
-                ),
-            ).fetchall()
+            rows = planning_store.garmin_links_until(
+                db,
+                GARMIN,
+                RemoteEntityKind.PLANNED_UNIT.value,
+                # Inclusive: the day before today is the last one.
+                (self._today() - timedelta(days=1)).isoformat(),
+            )
         return [
             (str(row["local_id"]), row["remote_id"], row["remote_external_id"])
             for row in rows
@@ -388,15 +381,9 @@ class GarminStrengthPushService:
     def _upcoming_workout_ids(self, today: date) -> set[str]:
         """Workouts linked to a stored unit dated today or later."""
         with self._database_manager().unit_of_work() as db:
-            rows = db.execute(
-                "SELECT l.remote_id FROM remote_links l "
-                "JOIN planned_units p ON p.local_id = l.local_id "
-                "WHERE l.provider=? AND l.entity_kind=? AND l.remote_id IS NOT NULL "
-                "AND json_valid(p.payload) "
-                "AND substr(json_extract(p.payload, '$.date'), 1, 10) >= ?",
-                (GARMIN, RemoteEntityKind.PLANNED_UNIT.value, today.isoformat()),
-            ).fetchall()
-        return {str(row["remote_id"]) for row in rows}
+            return planning_store.garmin_remote_ids_from(
+                db, GARMIN, RemoteEntityKind.PLANNED_UNIT.value, today.isoformat()
+            )
 
     def _cleanup_state(self) -> dict[str, Any]:
         with self._database_manager().unit_of_work() as db:
@@ -477,10 +464,7 @@ class GarminStrengthPushService:
                 return _already_removed(local_id)
             return _Prepared(local_id, None, True)
         with self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload, tombstone FROM planned_units WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, local_id)
             remembered = remembered_exercises(db)
         if not row or row["tombstone"]:
             return _error_result(local_id, "Einheit nicht gefunden", "conflict")

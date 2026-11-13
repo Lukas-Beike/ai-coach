@@ -12,6 +12,7 @@ from backend.canonical.vocabulary import (
     RemoteEntityKind,
     RemoteLinkState,
 )
+from backend.db import planning_store
 
 _MAX_PROVIDER_LENGTH = 64
 
@@ -266,17 +267,9 @@ class RemoteLinkRepository:
                 (local_id,),
             ).fetchone()
         elif entity_kind is RemoteEntityKind.PLANNED_UNIT:
-            row = db.execute(
-                "SELECT NULL AS remote_id, external_id, baseline_hash, "
-                "last_synced_at, payload FROM planned_units WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.planned_unit_row(db, local_id)
         else:
-            row = db.execute(
-                "SELECT NULL AS remote_id, external_id, NULL AS baseline_hash, "
-                "last_synced_at, payload FROM workout_library WHERE local_id=?",
-                (local_id,),
-            ).fetchone()
+            row = planning_store.library_row(db, local_id)
         if row is None:
             return None
         remote_id = (
@@ -287,7 +280,9 @@ class RemoteLinkRepository:
         return _Slots(
             remote_id=remote_id,
             external_id=_slot_text(row["external_id"]),
-            baseline_hash=row["baseline_hash"],
+            baseline_hash=row["baseline_hash"]
+            if entity_kind is RemoteEntityKind.PLANNED_UNIT
+            else None,
             last_synced_at=row["last_synced_at"],
         )
 

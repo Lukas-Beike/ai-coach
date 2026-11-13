@@ -14,7 +14,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import (
@@ -32,7 +32,6 @@ from backend.sync.workout_export import WorkoutLibraryExportPort
 
 _REMOTE_LINKS = RemoteLinkRepository()
 _OPEN_SYNC_STATES = ("local", "sync_error", "remote_missing", "conflict")
-_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id=?"
 _WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 _REMOTE_LIBRARY_METADATA_FIELDS = (
     "date",
@@ -85,30 +84,17 @@ class WorkoutLibrarySyncStateService:
         "syncing" is written before the remote call and is no open state, so a
         unit stranded in it would never be offered for a push again.
         """
-        now = self._now()
-        reset = 0
         with self._database_manager.unit_of_work() as db:
-            for table in ("planned_units", "workout_library"):
-                reset += db.execute(
-                    f"UPDATE {table} SET sync_state='sync_error', "
-                    "sync_error='Die Übertragung wurde unterbrochen.', updated_at=? "
-                    "WHERE sync_state='syncing'",
-                    (now,),
-                ).rowcount
-        return reset
+            return planning_store.reset_interrupted_syncs(
+                db, self._now(), "Die Übertragung wurde unterbrochen."
+            )
 
     def preview(self) -> tuple[dict[str, int], list[dict[str, Any]], str]:
         with self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT local_id, external_id, sync_state, payload FROM workout_library "
-                "WHERE sync_state IN (?, ?, ?, ?) ORDER BY local_id",
-                _OPEN_SYNC_STATES,
-            ).fetchall()
-            planned_rows = db.execute(
-                "SELECT local_id, external_id, sync_state, payload FROM planned_units "
-                "WHERE sync_state IN (?, ?, ?, ?) ORDER BY local_id",
-                _OPEN_SYNC_STATES,
-            ).fetchall()
+            rows = planning_store.library_rows_in_states(db, _OPEN_SYNC_STATES)
+            planned_rows = planning_store.planned_unit_rows_in_states(
+                db, _OPEN_SYNC_STATES
+            )
             planned_rows = sorted(
                 [*planned_rows, *self._resync_planned_rows(db)],
                 key=lambda row: str(row.get("local_id") or ""),
@@ -123,11 +109,7 @@ class WorkoutLibrarySyncStateService:
 
     def _resync_planned_rows(self, db: Any) -> list[Any]:
         """Synced capped units the calendar offers again after a threshold move."""
-        rows = db.execute(
-            "SELECT local_id, external_id, sync_state, payload FROM planned_units "
-            "WHERE sync_state='synced' AND json_extract(payload, '$.hr_cap') IS NOT NULL "
-            "ORDER BY local_id"
-        ).fetchall()
+        rows = planning_store.synced_capped_planned_unit_rows(db)
         payloads = [
             {**payload, "local_id": row["local_id"], "sync_status": row["sync_state"]}
             for row in rows
@@ -164,48 +146,37 @@ class WorkoutLibrarySyncStateService:
 
     def update(self, local_id: str, state: str, error: str | None = None) -> bool:
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
+            row = planning_store.library_row(db, local_id)
             if row is None:
                 return False
             payload = self._object_payload(row["payload"])
             payload["sync_status"] = state
-            db.execute(
-                "UPDATE workout_library SET payload=?, sync_dirty=?, sync_state=?, "
-                "sync_error=?, updated_at=? WHERE local_id=?",
-                (
-                    json.dumps(payload, ensure_ascii=False),
-                    0 if state in {"synced", "remote_missing"} else 1,
-                    state,
-                    self._redactor.redact_text(str(error))[:1000] if error else None,
-                    self._now(),
-                    local_id,
-                ),
+            planning_store.set_library_sync_state(
+                db,
+                local_id,
+                payload,
+                self._now(),
+                state=state,
+                dirty=0 if state in {"synced", "remote_missing"} else 1,
+                error=self._redactor.redact_text(str(error))[:1000] if error else None,
             )
         return True
 
     def mark_remote_missing(self, local_id: str) -> None:
         """Record a remote deletion found mid-sync; the local edit stays dirty."""
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
+            row = planning_store.library_row(db, local_id)
             if row is None:
                 return
             payload = self._object_payload(row["payload"])
             payload["sync_status"] = "remote_missing"
-            db.execute(
-                "UPDATE workout_library SET payload=?, sync_dirty=1, "
-                "sync_state='remote_missing', sync_error=NULL, updated_at=? "
-                "WHERE local_id=?",
-                (json.dumps(payload, ensure_ascii=False), self._now(), local_id),
+            planning_store.set_library_sync_state(
+                db, local_id, payload, self._now(), state="remote_missing", dirty=1
             )
 
     def summary(self) -> dict[str, int]:
         with self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT sync_state, COUNT(*) AS count FROM workout_library GROUP BY sync_state"
-            ).fetchall()
-            planned_rows = db.execute(
-                "SELECT sync_state, COUNT(*) AS count FROM planned_units GROUP BY sync_state"
-            ).fetchall()
+            rows, planned_rows = planning_store.sync_state_counts(db)
         summary = {
             "local": 0,
             "syncing": 0,
@@ -234,11 +205,7 @@ class WorkoutLibrarySyncStateService:
         except (ValueError, AttributeError) as exc:
             raise AppError(400, INVALID_LIBRARY_ID_ERROR) from exc
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT id, local_id, external_id, sync_state, payload "
-                "FROM workout_library WHERE local_id = ?",
-                (normalized_id,),
-            ).fetchone()
+            row = planning_store.library_row(db, normalized_id)
             if row:
                 # Prefer the remote link; the legacy slot is the fallback.
                 row = {
@@ -275,13 +242,6 @@ class WorkoutLibrarySyncStateService:
         }
 
     @staticmethod
-    def _stored_row(db: Any, local_id: str) -> Any | None:
-        return db.execute(
-            "SELECT payload, sync_state FROM workout_library WHERE local_id=?",
-            (local_id,),
-        ).fetchone()
-
-    @staticmethod
     def _persist_remote_identity(
         db: Any,
         local_id: str,
@@ -289,16 +249,8 @@ class WorkoutLibrarySyncStateService:
         external_id: str,
     ) -> None:
         """Store only the remote identity on top of the current payload."""
-        db.execute(
-            "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
-            (
-                external_id,
-                json.dumps(
-                    {**(current or {}), "external_id": external_id},
-                    ensure_ascii=False,
-                ),
-                local_id,
-            ),
+        planning_store.set_library_external_id(
+            db, local_id, external_id, {**(current or {}), "external_id": external_id}
         )
         _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
 
@@ -315,19 +267,14 @@ class WorkoutLibrarySyncStateService:
                 "Die Bibliothekseinheit konnte nicht zu Intervals.icu übertragen werden.",
             )
         with self._database_manager.unit_of_work() as db:
-            row = self._stored_row(db, local_id)
+            row = planning_store.library_row(db, local_id)
             current = self._object_payload(row["payload"]) if row else None
             if self._uploaded_payload_is_current(current, local_workout):
-                db.execute(
-                    "UPDATE workout_library SET external_id=?, payload=? WHERE local_id=?",
-                    (
-                        external_id,
-                        json.dumps(
-                            {**local_workout, "external_id": external_id},
-                            ensure_ascii=False,
-                        ),
-                        local_id,
-                    ),
+                planning_store.set_library_external_id(
+                    db,
+                    local_id,
+                    external_id,
+                    {**local_workout, "external_id": external_id},
                 )
                 _REMOTE_LINKS.refresh_from_slots(
                     db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
@@ -348,7 +295,7 @@ class WorkoutLibrarySyncStateService:
         verify_readback(local_workout, remote_workout)
         now = self._now()
         with self._database_manager.unit_of_work() as db:
-            row = self._stored_row(db, local_id)
+            row = planning_store.library_row(db, local_id)
             if row is None:
                 raise AppError(404, "Lokale Bibliothekseinheit nicht gefunden.")
             current = self._object_payload(row["payload"])
@@ -368,18 +315,7 @@ class WorkoutLibrarySyncStateService:
                 external_id=external_id,
                 sync_status="synced",
             )
-            db.execute(
-                "UPDATE workout_library SET external_id=?, payload=?, sync_dirty=0, "
-                "sync_state='synced', sync_error=NULL, last_synced_at=?, updated_at=? "
-                "WHERE local_id=?",
-                (
-                    external_id,
-                    json.dumps(synced, ensure_ascii=False),
-                    now,
-                    now,
-                    local_id,
-                ),
-            )
+            planning_store.mark_library_synced(db, local_id, external_id, synced, now)
             _REMOTE_LINKS.refresh_from_slots(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )
@@ -389,7 +325,7 @@ class WorkoutLibrarySyncStateService:
 
     def persist_calendar_identity(self, local_id: str, event: dict[str, Any]) -> bool:
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
+            row = planning_store.library_row(db, local_id)
             if row is None:
                 return False
             payload = self._parse_payload(row["payload"])
@@ -399,10 +335,7 @@ class WorkoutLibrarySyncStateService:
             external_id = str(event.get("external_id") or "").strip()
             if external_id:
                 payload["remote_event_external_id"] = external_id
-            db.execute(
-                "UPDATE workout_library SET payload=?, updated_at=? WHERE local_id=?",
-                (json.dumps(payload, ensure_ascii=False), self._now(), local_id),
-            )
+            planning_store.set_library_payload(db, local_id, payload, self._now())
             _REMOTE_LINKS.refresh_from_slots(
                 db, RemoteEntityKind.LIBRARY_WORKOUT, local_id
             )

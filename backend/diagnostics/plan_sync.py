@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.db import planning_store
 from backend.db.repositories import KeyValueRepository
 from backend.sync.garmin_strength_push import APP_WORKOUT_CLEANUP_KEY
 from backend.sync.jobs import job_dto, read_job
@@ -28,17 +29,7 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
         (_JOB_LIMIT,),
     ).fetchall()
     jobs = [job_dto(*read_job(db, row["id"])) for row in job_rows]
-    unsynced = "FROM planned_units WHERE tombstone=0 AND sync_state<>'synced'"
-    total = db.execute(f"SELECT COUNT(*) AS count {unsynced}").fetchone()["count"]
-    # Upcoming units first: past units must not hide the ones still to be pushed.
-    units = db.execute(
-        "SELECT local_id, sync_state, sync_error, "
-        # A payload that is not valid JSON has no date instead of failing the report.
-        "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.date') "
-        f"END AS date {unsynced} "
-        "ORDER BY date < date('now'), date LIMIT ?",
-        (_UNIT_LIMIT,),
-    ).fetchall()
+    total, units = planning_store.unsynced_planned_units(db, _UNIT_LIMIT)
     return {
         "recent_jobs": [
             {

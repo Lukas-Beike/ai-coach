@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import markers
+from backend.db import planning_store
 from backend.planning import calendar, context
 from backend.planning.conflicts import (
     calendar_conflicts_for_items,
@@ -62,12 +63,7 @@ class CalendarConflictService:
     ) -> list[dict[str, Any]]:
         with self._database_manager.unit_of_work() as db:
             library_rows = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT local_id, payload FROM planned_units "
-                    "WHERE COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
-                    "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
-                ).fetchall()
+                dict(row) for row in planning_store.active_planned_unit_rows(db)
             ]
             competitions = [
                 dict(row)

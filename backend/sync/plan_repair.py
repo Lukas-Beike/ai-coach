@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from backend.db import DatabaseManager
+from backend.db import DatabaseManager, planning_store
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
@@ -68,12 +68,9 @@ class PlanRepairManifestService:
 
     @staticmethod
     def _rows(db: Any, period: dict[str, str]) -> list[dict[str, Any]]:
-        return db.execute(
-            "SELECT local_id, payload FROM planned_units "
-            "WHERE substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) BETWEEN ? AND ? "
-            "ORDER BY local_id",
-            (period["start"], period["end"]),
-        ).fetchall()
+        return planning_store.planned_unit_rows_in_period(
+            db, period["start"], period["end"]
+        )
 
     @staticmethod
     def _entries(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -180,10 +177,7 @@ class PlanRepairManifestService:
                 )
             refreshed = []
             for entry in prepared.entries:
-                row = db.execute(
-                    "SELECT payload FROM planned_units WHERE local_id=?",
-                    (entry["library_workout_id"],),
-                ).fetchone()
+                row = planning_store.planned_unit_row(db, entry["library_workout_id"])
                 if not row:
                     raise AppError(
                         409, _STALE_SELECTION, reason="planning_revision_conflict"

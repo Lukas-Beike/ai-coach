@@ -24,12 +24,12 @@ from backend.canonical.planning_fields import (
     TEMPLATE_ID,
 )
 from backend.canonical.vocabulary import Sport
+from backend.db import planning_store
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import workouts as planning_workouts
 from backend.planning.plan_checks import ILLNESS_DAYS
-from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
 from backend.planning.sport import planned_activity_type, planned_sport_environment
 
 DEFAULT_ILLNESS_PAUSE_DAYS = ILLNESS_DAYS
@@ -469,10 +469,7 @@ class AdaptiveReplanApplyService:
         replacement = change.get("payload")
         if not draft_id or not isinstance(replacement, dict):
             return 0, None
-        draft = db.execute(
-            "SELECT id, payload, sync_state FROM planned_units WHERE local_id=?",
-            (draft_id,),
-        ).fetchone()
+        draft = planning_store.planned_unit_row(db, draft_id)
         if not draft:
             return 0, {"library_workout_id": draft_id, "reason": "missing"}
         draft = dict(draft)
@@ -508,10 +505,7 @@ class AdaptiveReplanApplyService:
             planning_workouts.validate_workout_description(replacement)
             for key in planning_workouts.DERIVED_WORKOUT_KEYS:
                 replacement.pop(key, None)
-        db.execute(
-            PLANNED_UNIT_UPDATE_SQL,
-            (json.dumps(replacement, ensure_ascii=False), now, draft_id),
-        )
+        planning_store.update_planned_unit(db, draft_id, replacement, now)
         change_history.record_change(
             db,
             "planned_unit",
