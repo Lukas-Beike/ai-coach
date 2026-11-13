@@ -1204,8 +1204,15 @@ class ServerDatabaseTests(ServerTestCase):
             lock_states.append(server.DB_LOCK._is_owned())
             return real_manager()
 
-        with patch.object(server, "database_manager", side_effect=manager_factory):
+        # The bootstrap opens its snapshot through the context; the provider state
+        # and key values still look the server global up.
+        with (
+            patch.object(server, "database_manager", side_effect=manager_factory),
+            patch.object(server.APP, "database", side_effect=manager_factory) as app,
+        ):
             server.PUBLIC_STATE.bootstrap_service().read()
+
+        app.assert_called()
 
         self.assertTrue(lock_states)
         self.assertFalse(any(lock_states))

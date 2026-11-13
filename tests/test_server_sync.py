@@ -35,6 +35,7 @@ from support import (
 
 from backend.errors import AppError
 from backend.http_api import server as http_server_module
+from backend.http_api import wiring as http_wiring
 from backend.http_api.static_assets import StaticAssetService
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
@@ -594,7 +595,7 @@ class ServerSyncTests(ServerTestCase):
         server.key_value_service().set(
             "sync_operation_message", "Daten werden gelesen…"
         )
-        with patch.object(server.PUBLIC_STATE, "state_version_service") as versions:
+        with patch.object(http_wiring, "StateVersionService") as versions:
             versions.return_value.versions.return_value = {"activities": "v1"}
             status = server.PUBLIC_STATE.sync_public_state_service().state()
         self.assertEqual(status["operation_id"], "operation-test")

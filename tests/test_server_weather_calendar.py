@@ -1341,7 +1341,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         enriched = weather_history.add_to_planned(
             planned,
             weather,
-            default_name=server.PLANNED_WORKOUT_LABEL,
+            default_name=weather_recommendations.PLANNED_WORKOUT_LABEL,
         )
         self.assertIn("weather_recommendation", enriched[0])
         self.assertNotIn("weather_recommendation", enriched[1])

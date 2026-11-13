@@ -29,7 +29,6 @@ from backend.backup.database import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.backup.wiring import build_backup
-from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.coach import attachments as coach_attachments
 from backend.coach import limits as coach_limits
@@ -115,15 +114,8 @@ from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
 )
-from backend.http_api.public_state_assembly import (
-    PublicStateAssembly,
-    PublicStateCalendarSettings,
-    PublicStateCoreInputs,
-    PublicStateOperationalServices,
-    PublicStateOwnerAssemblies,
-    PublicStateProjectionOwners,
-)
 from backend.http_api.response_transport import HttpResponseTransport
+from backend.http_api.wiring import PublicStateServices, build_public_state
 from backend.nutrition.wiring import NutritionServices, build_nutrition
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
@@ -143,7 +135,6 @@ from backend.performance.wiring import (
     build_performance,
 )
 from backend.planning import library as planning_library
-from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
 from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.plan_guard_service import (
@@ -185,11 +176,9 @@ from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.settings import SettingsService
-from backend.sync import intervals_state
 from backend.sync import observation as sync_observation
 from backend.sync import scheduler as sync_scheduler_runtime
 from backend.sync import worker as sync_worker_runtime
-from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.canonical_wiring import build_canonical_backfill, build_canonical_read
@@ -226,7 +215,6 @@ from backend.sync.gates import (
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
 )
-from backend.sync.library import workout_library_sync_running
 from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
 from backend.sync.metric_export_runner import MetricExportRunner
@@ -252,7 +240,6 @@ from backend.sync.wiring import (
     coach_synchronous_refreshes,
 )
 from backend.weather.activity_weather_store import home_coordinates
-from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
 from backend.weather.wiring import WeatherServices, build_weather
 
 try:
@@ -417,6 +404,8 @@ RUN_LTHR: RunLthr
 METRIC_EXPORT_RUNNER: MetricExportRunner
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
 THRESHOLD_WARNINGS: ThresholdStalenessService
+# Declared ahead of its first lambda reference; assigned after the coach turns.
+PUBLIC_STATE: PublicStateServices
 ATHLETE_DATA = build_athlete_data(
     database_manager=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -908,67 +897,17 @@ COACH_TURNS = build_coach_turns(
 APP.coach_turns = COACH_TURNS
 
 
-PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
-    dependencies=PublicStateAssembly.Inputs(
-        core=PublicStateCoreInputs(
-            database_manager=lambda: database_manager(),
-            database_lock=lambda: DB_LOCK,
-            config=lambda: CONFIG,
-            settings=lambda: SETTINGS,
-            maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
-            app_name=APP_NAME,
-            app_version=APP_VERSION,
-            key_values=lambda: KEY_VALUE_REPOSITORY,
-            key_value_service=key_value_service,
-            observation_reader=lambda: CANONICAL_READ,
-            canonical_serving=lambda: CANONICAL_READ,
-            activity_summary_reader=lambda: CANONICAL_READ,
-            coverage=lambda: CANONICAL_READ,
-            lt1_session_records=lambda days: PERFORMANCE.curve_records(days),
-        ),
-        owners=PublicStateOwnerAssemblies(
-            sync_persistence=lambda: SYNC_PERSISTENCE,
-            planning_data=lambda: PLANNING_DATA,
-            athlete_data=lambda: ATHLETE_DATA,
-            external_calendar=lambda: EXTERNAL_CALENDAR,
-            provider_sync=lambda: PROVIDER_SYNC,
-            garmin=lambda: GARMIN_ASSEMBLY,
-            sync_job_queue=lambda: SYNC_JOB_QUEUE,
-        ),
-        projections=PublicStateProjectionOwners(
-            weather=lambda: WEATHER,
-            workout_library_sync=lambda: WORKOUT_LIBRARY_SYNC,
-            provider_resync=lambda: PROVIDER_RESYNC,
-            coach_conversation=lambda: APP.coach_conversation,
-            calendar_local=lambda: calendar_local,
-            planning_season=lambda: planning_season,
-            intervals_state=lambda: intervals_state,
-            diagnostic_capture=lambda: DIAGNOSTIC_CAPTURE,
-        ),
-        operations=PublicStateOperationalServices(
-            workout_library_sync_running=lambda: workout_library_sync_running,
-            daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
-            adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(
-                PLANNING_WORKFLOWS.adaptive_replan_preview_service(), LOGGER
-            ),
-            adaptive_replan_preview_service=PLANNING_WORKFLOWS.adaptive_replan_preview_service,
-            morning_checkin_state_service=COACH_LOCAL.morning_checkin_state_service,
-            coach_quick_actions_service=COACH_LOCAL.quick_actions_service,
-            provider_state_service=provider_state_service,
-        ),
-        calendar=PublicStateCalendarSettings(
-            local_date=lambda: ATHLETE_CLOCK.now().date(),
-            local_now=lambda: ATHLETE_CLOCK.now,
-            external_calendar_window_days=lambda: (
-                calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
-            ),
-            sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
-            all_sync_days=lambda: ALL_SYNC_DAYS,
-            planned_workout_label=lambda: PLANNED_WORKOUT_LABEL,
-        ),
-    ),
+PUBLIC_STATE = build_public_state(
+    APP,
+    key_value_service=key_value_service,
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
+    provider_resync=lambda: PROVIDER_RESYNC,
     running_probes={WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running()},
+    sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    external_calendar_window_days=lambda: (
+        calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
+    ),
 )
 
 CANONICAL_READ = build_canonical_read(

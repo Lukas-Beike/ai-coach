@@ -544,7 +544,7 @@ class RunningProbeWiringTests(unittest.TestCase):
             keyword.value
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and getattr(node.func, "id", "") == "PublicStateAssembly"
+            and getattr(node.func, "id", "") == "build_public_state"
             for keyword in node.keywords
             if keyword.arg == "running_probes"
         ]
