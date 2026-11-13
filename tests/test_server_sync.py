@@ -1733,8 +1733,8 @@ class ServerSyncTests(ServerTestCase):
             with self.subTest(key=bool(key)), patch.object(server, "CONFIG", config):
                 self.assertEqual(active, check.active())
                 self.assertIs(
-                    server.GARMIN_ASSEMBLY._change_personal_client(),
-                    server.GARMIN_ASSEMBLY._change_personal_client(),
+                    server.GARMIN_ASSEMBLY.change_personal_client(),
+                    server.GARMIN_ASSEMBLY.change_personal_client(),
                 )
 
     def test_daily_sync_markers_are_separate_per_provider(self):

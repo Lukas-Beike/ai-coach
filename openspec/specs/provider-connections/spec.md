@@ -447,7 +447,7 @@ Evidence:
 - `backend/providers/connection_check_probes.py:build_probes`
 - `backend/providers/connection_checks.py:classify_failure`
 - `backend/providers/connection_checks.py:ProviderConnectionChecks`
-- `backend/sync/garmin_assembly.py:GarminAssembly.check_stored_login`
+- `backend/sync/garmin_wiring.py:build_garmin`
 - `backend/sync/garmin_service.py:GarminRemoteReader.check_stored_login`
 - `tests/provider-connections.test.cjs`
 - `tests/test_provider_connection_checks.py:test_a_check_past_its_deadline_reports_checking_and_still_stores_its_result`
