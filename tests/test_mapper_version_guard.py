@@ -6,6 +6,7 @@ the mapper that calls them. This guard pins a fingerprint of every mapping
 module's code, and of every provider helper module a replayed mapper imports
 (directly or through another helper), together with the versions that replay
 it. Changing the code without bumping one of those versions fails here.
+Modules outside backend/providers, such as backend/canonical, are not covered.
 
 The fingerprint ignores comments, docstrings and layout, so documentation edits
 pass. When a code change does not alter any mapped output (a pure refactor),
@@ -180,17 +181,18 @@ def provider_imports(module: str) -> set[str]:
 
 
 def helper_replayed_by() -> dict[str, tuple[str, ...]]:
-    """Helper module -> the versions replaying every mapper that reaches it."""
+    """Helper module -> the versions replaying every mapper that reaches it,
+    also through a sub-mapper it calls."""
     owners: dict[str, set[str]] = {}
     for mapping, replaying in REPLAYED_BY.items():
-        pending, seen = [mapping], set()
+        pending, seen = [mapping], {mapping}
         while pending:
-            for name in provider_imports(pending.pop()):
-                if not name.endswith("_mapping") and name not in seen:
-                    seen.add(name)
-                    pending.append(name)
+            for name in provider_imports(pending.pop()) - seen:
+                seen.add(name)
+                pending.append(name)
         for helper in seen:
-            owners.setdefault(helper, set()).update(replaying)
+            if not helper.endswith("_mapping"):
+                owners.setdefault(helper, set()).update(replaying)
     return {helper: tuple(sorted(found)) for helper, found in owners.items()}
 
 
