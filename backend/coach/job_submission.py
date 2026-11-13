@@ -178,6 +178,7 @@ class CoachJobSubmissionService:
                 client_turn_id,
                 {"cancel_requested": True, "phase": "cancelling"},
                 self._utc_now(),
+                repair=False,
             )
 
     def _validate_submission(

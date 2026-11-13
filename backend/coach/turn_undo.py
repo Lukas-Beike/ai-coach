@@ -62,7 +62,7 @@ class CoachTurnUndoService:
             now = self._now()
             summary = {**summary, "undone_at": now}
             coach_store.merge_command_receipt(
-                db, turn_id, {"change_summary": summary}, now, only=("completed",)
+                db, turn_id, {"change_summary": summary}, now, only=(), repair=False
             )
         return {
             "status": "undone",

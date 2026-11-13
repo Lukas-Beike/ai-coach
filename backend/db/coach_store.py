@@ -9,12 +9,21 @@ are dictionaries stored as JSON; rows come back unparsed.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 ACTIVE = ("queued", "running")
-# Status and role literals are written into the statement text; only these pass.
-_LITERALS = frozenset({"queued", "running", "completed", "user", "assistant"})
+# Statuses, roles and column lists are written into the statement text; only
+# these values and plain column names pass.
+_STATUSES = frozenset({"queued", "running", "completed"})
+_ROLES = frozenset({"user", "assistant"})
+_COLUMNS = re.compile(r"(\*|1|\w+(, \w+)*)")
+_ORDER = {
+    "": "",
+    "oldest": " ORDER BY created_at",
+    "newest": " ORDER BY created_at DESC",
+}
 _RECEIPT = "CASE WHEN json_valid(receipt) THEN receipt END"
 
 
@@ -26,8 +35,14 @@ def _marks(values: Sequence[Any]) -> str:
     return ",".join("?" for _ in values)
 
 
+def _columns(columns: str) -> str:
+    if not _COLUMNS.fullmatch(columns):
+        raise ValueError("invalid column list")
+    return columns
+
+
 def _status(statuses: Sequence[str]) -> str:
-    if not statuses or not set(statuses) <= _LITERALS:
+    if not statuses or not set(statuses) <= _STATUSES:
         raise ValueError("unknown Coach command status")
     if len(statuses) == 1:
         return f"status='{statuses[0]}'"
@@ -39,7 +54,7 @@ def _status(statuses: Sequence[str]) -> str:
 
 def command_row(db: Any, client_turn_id: str, columns: str = "receipt") -> Any:
     return db.execute(
-        f"SELECT {columns} FROM coach_commands WHERE client_turn_id=?",
+        f"SELECT {_columns(columns)} FROM coach_commands WHERE client_turn_id=?",
         (client_turn_id,),
     ).fetchone()
 
@@ -53,11 +68,9 @@ def command_rows(
     limit: int | None = None,
 ) -> list[Any]:
     """Commands in ``statuses``; ``order`` is "oldest", "newest" or unordered."""
-    order_by = {"": "", "oldest": " ORDER BY created_at"}.get(
-        order, " ORDER BY created_at DESC"
-    )
     return db.execute(
-        f"SELECT {columns} FROM coach_commands WHERE {_status(statuses)}{order_by}"
+        f"SELECT {_columns(columns)} FROM coach_commands "
+        f"WHERE {_status(statuses)}{_ORDER[order]}"
         + (f" LIMIT {int(limit)}" if limit is not None else "")
     ).fetchall()
 
@@ -212,40 +225,53 @@ def merge_command_receipt(
     now: str,
     *,
     only: Sequence[str] = ACTIVE,
+    repair: bool = True,
 ) -> None:
-    """Write only the given top-level receipt keys while the status is in ``only``.
+    """Write only the given top-level receipt keys while the status is in ``only``
+    (any status when empty).
 
     ``json_set`` stores each key in place, so a progress step does not decode
-    and re-encode the receipt's other, possibly large, values.
+    and re-encode the receipt's other, possibly large, values. ``repair`` starts
+    a malformed receipt from ``{}``; without it SQLite refuses malformed JSON.
     """
+    if not updates:
+        return
     values: list[str] = []
     for key, value in updates.items():
         values += ["$." + json.dumps(str(key)), _json(value)]
-    db.execute(
-        "UPDATE coach_commands SET receipt=json_set("
+    base = (
         "CASE WHEN json_valid(receipt) AND json_type(receipt)='object' "
-        f"THEN receipt ELSE '{{}}' END, {', '.join('?, json(?)' for _ in updates)}), "
-        f"updated_at=? WHERE client_turn_id=? AND {_status(only)}",
+        "THEN receipt ELSE '{}' END"
+        if repair
+        else "receipt"
+    )
+    db.execute(
+        f"UPDATE coach_commands SET receipt=json_set({base}, "
+        f"{', '.join('?, json(?)' for _ in updates)}), updated_at=? "
+        "WHERE client_turn_id=?" + (f" AND {_status(only)}" if only else ""),
         (*values, now, client_turn_id),
     )
 
 
+_ROTATED = "receipt=json_set(receipt, '$.openai_conversation_rotated', json('true'))"
+
+
 def bind_conversation(
-    db: Any,
-    client_turn_id: str,
-    conversation_id: str | None = None,
-    *,
-    rotated: bool = False,
+    db: Any, client_turn_id: str, conversation_id: Any, *, rotated: bool = False
 ) -> None:
-    """Bind the turn to ``conversation_id`` and/or flag its conversation rotated."""
-    sets = ["conversation_id=?"] if conversation_id is not None else []
-    if rotated:
-        sets.append(
-            "receipt=json_set(receipt, '$.openai_conversation_rotated', json('true'))"
-        )
+    """Bind the turn to ``conversation_id``, flagging the conversation rotated."""
     db.execute(
-        f"UPDATE coach_commands SET {', '.join(sets)} WHERE client_turn_id=?",
-        (*((conversation_id,) if conversation_id is not None else ()), client_turn_id),
+        "UPDATE coach_commands SET conversation_id=?"
+        + (f", {_ROTATED}" if rotated else "")
+        + " WHERE client_turn_id=?",
+        (conversation_id, client_turn_id),
+    )
+
+
+def mark_conversation_rotated(db: Any, client_turn_id: str) -> None:
+    db.execute(
+        f"UPDATE coach_commands SET {_ROTATED} WHERE client_turn_id=?",
+        (client_turn_id,),
     )
 
 
@@ -260,18 +286,19 @@ def message_by_id(
     client_turn_id: str | None = None,
 ) -> Any:
     """The message with this id and role, and of this turn when one is given."""
-    if role not in _LITERALS:
+    if role not in _ROLES:
         raise ValueError("unknown message role")
     turn = " AND client_turn_id=?" if client_turn_id is not None else ""
     return db.execute(
-        f"SELECT {columns} FROM messages WHERE id=? AND role='{role}'{turn}",
+        f"SELECT {_columns(columns)} FROM messages WHERE id=? AND role='{role}'{turn}",
         (message_id, *((client_turn_id,) if turn else ())),
     ).fetchone()
 
 
 def user_message_for_turn(db: Any, client_turn_id: str, columns: str = "id") -> Any:
     return db.execute(
-        f"SELECT {columns} FROM messages WHERE client_turn_id=? AND role='user'",
+        f"SELECT {_columns(columns)} FROM messages "
+        "WHERE client_turn_id=? AND role='user'",
         (client_turn_id,),
     ).fetchone()
 

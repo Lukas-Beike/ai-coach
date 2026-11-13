@@ -249,7 +249,7 @@ class CoachConversationProvisionService:
             if not coach_store.conversation_in_use(
                 db, current_conversation_id, client_turn_id
             ):
-                coach_store.bind_conversation(db, client_turn_id, rotated=True)
+                coach_store.mark_conversation_rotated(db, client_turn_id)
                 return current_conversation_id
         rotated_id = self._create_remote()
         with self._db_lock, self._database_manager.unit_of_work() as db:

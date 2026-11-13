@@ -685,17 +685,23 @@ class BackendLayerContractTests(unittest.TestCase):
     def test_tables_are_queried_only_in_their_store(self) -> None:
         # #2118 and #2119: one column change touches the persistence owner only.
         self._assert_only_in(
-            r"planned_units|workout_library",
+            r"(?i:planned_units|workout_library)",
             {"backend/db/planning_store.py", "backend/db/schema.py"},
         )
-        db_files = (REPOSITORY_ROOT / "backend/db").glob("*.py")
+        # ChatRepository and StateVersionRepository keep their message reads and
+        # writes; the retention purge stays with the startup invariants.
         self._assert_only_in(
-            r"coach_commands|messages",
-            {path.relative_to(REPOSITORY_ROOT).as_posix() for path in db_files},
+            r"(?i:coach_commands)|messages",
+            {
+                "backend/db/coach_store.py",
+                "backend/db/repositories.py",
+                "backend/db/bootstrap.py",
+                "backend/db/schema.py",
+            },
         )
 
     def _assert_only_in(self, tables: str, owners: set[str]) -> None:
-        # Any keyword case; a lower-case table name keeps prose such as
+        # ``messages`` matches in lower case only, which keeps prose such as
         # "from Messages SSE events" out.
         statement = re.compile(rf"\b(?i:FROM|INTO|UPDATE|JOIN)\s+({tables})\b")
         outside = [
