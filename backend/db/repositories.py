@@ -911,12 +911,11 @@ class StateVersionRepository:
             "observations": db.execute(
                 "SELECT COUNT(*) AS count FROM observations"
             ).fetchone(),
-            # A save, removal or undo dates its row, so other devices reload the
-            # thresholds derived from the zones (#2479).
+            # Every zone row, so any save, removal or undo (which can restore an
+            # older date) changes the marker other devices reload LT1/LT2 on (#2479).
             "zones": db.execute(
-                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
-                "FROM zone_configurations"
-            ).fetchone(),
+                "SELECT * FROM zone_configurations ORDER BY config_key"
+            ).fetchall(),
         }
 
 

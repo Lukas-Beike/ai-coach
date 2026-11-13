@@ -35,14 +35,18 @@ class StateVersionService:
         provider_syncs = (
             f"{state['last_garmin_sync'] or ''}:{state['last_wahoo_sync'] or ''}"
         )
+        zones_hash = hashlib.sha256(
+            json.dumps(
+                [dict(row) for row in counters["zones"]], sort_keys=True, default=str
+            ).encode("utf-8")
+        ).hexdigest()[:16]
         profile_hash = hashlib.sha256(
             json.dumps(profile, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()[:16]
         return {
             "activities": f"{provider_syncs}:{counters['activities']['count']}",
             "performance": (
-                f"{provider_syncs}:{counters['observations']['count']}:"
-                f"{counters['zones']['latest']}:{counters['zones']['count']}"
+                f"{provider_syncs}:{counters['observations']['count']}:{zones_hash}"
             ),
             ProviderId.GARMIN.value: f"{state['last_garmin_sync'] or ''}",
             "chat": f"{counters['message']['latest']}:{counters['message']['count']}",
