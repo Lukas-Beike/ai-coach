@@ -203,6 +203,10 @@ class PublicBootstrapService:
                 "configured": {
                     "openai": bool(deps.config.openai_api_key),
                     "anthropic": bool(deps.config.anthropic_api_key),
+                    # Voice: a local transcription server needs no OpenAI key.
+                    "transcription": bool(
+                        deps.config.transcription_base_url or deps.config.openai_api_key
+                    ),
                     # The selected model's provider has its key.
                     "coach": deps.settings.coach_ready(),
                     ProviderId.INTERVALS.value: bool(deps.config.intervals_api_key),

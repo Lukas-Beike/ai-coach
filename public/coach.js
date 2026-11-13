@@ -799,8 +799,8 @@ function updateVoiceButton() {
   const recording = voiceIsRecording();
   const transcribing = state.voiceTranscribing;
   const chatReady = Boolean(state.data && Array.isArray(state.data.messages));
-  // Transcription always uses OpenAI, whichever model answers.
-  const voiceConfigured = Boolean(state.data?.configured?.openai ?? true);
+  // Transcription uses its own endpoint (OpenAI by default), whichever model answers.
+  const voiceConfigured = Boolean(state.data?.configured?.transcription ?? true);
   // Recording stays available while the Coach works; the transcript is queued like a typed follow-up.
   button.disabled = !chatReady || transcribing || (!voiceConfigured && !recording);
   button.classList.toggle("recording", recording);

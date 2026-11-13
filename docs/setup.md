@@ -121,6 +121,17 @@ server {
 ```
 *When deploying behind HTTPS, remember to set `COOKIE_SECURE=true` in your `.env`. Set `TRUSTED_PROXY_IPS` to the address the app sees as the proxy's connection peer so rate limits apply per real client instead of to the proxy; without it, every request is attributed to the proxy. That is the proxy host's LAN address for a separate proxy (for example `TRUSTED_PROXY_IPS=192.168.1.6`), the proxy container's address for a proxy on the same Docker network, or `127.0.0.1` or the Docker bridge gateway for a same-host proxy like the nginx example above.*
 
+## Local voice transcription
+
+Voice notes can be transcribed by a Whisper server on the LAN instead of OpenAI (#2596). [Speaches](https://speaches.ai/) offers the OpenAI-compatible `/v1/audio/transcriptions` endpoint; it runs on the CPU (there is no Intel iGPU/OpenVINO image). Unraid **Add Container**:
+
+- **Repository**: `ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu`, **Network Type**: `Bridge`, **Port**: `8000` -> `8000`, reachable on the LAN only.
+- **Path**: `/mnt/user/appdata/speaches` -> `/home/ubuntu/.cache/huggingface/hub` (Read/Write); the container runs as UID 1000, so run `chown -R 1000:1000 /mnt/user/appdata/speaches` first.
+- **Variables**: `PRELOAD_MODELS` = `["Systran/faster-whisper-small"]` (German needs a multilingual id, never `.en`), `WHISPER__COMPUTE_TYPE` = `int8`, `STT_MODEL_TTL` = `-1`, `ENABLE_UI` = `False`, `LOG_LEVEL` = `info`, optional `API_KEY`.
+- **Extra Parameters**: `--health-cmd="curl -fs http://localhost:8000/health" --health-interval=30s`.
+
+Pacecraft accepts only HTTPS here, like the Coach endpoints: add a LAN-only host to the reverse proxy above that forwards to `speaches:8000`, with a certificate the Pacecraft container trusts. Then set `TRANSCRIPTION_BASE_URL=https://<that-host>/v1`, `TRANSCRIPTION_MODEL` to the loaded model id and, if set, `TRANSCRIPTION_API_KEY`. Leave all three empty to keep voice on OpenAI. `python scripts/measure_transcription.py --help` measures word error rate and latency per model on public German samples.
+
 ## Provider credentials in the app
 
 Intervals.icu, OpenAI, Claude (Anthropic), Garmin Personal API key (with its expiry date), Wahoo and Yazio credentials can be entered in each provider's card under **Mehr > Anbindungen** instead of in `.env`:

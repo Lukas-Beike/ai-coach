@@ -36,7 +36,9 @@ class TranscribePostRoutes:
         Anbindungen hinterlegen."; 502 "OpenAI hat kein Transkript
         zurückgegeben." when the provider returns no text; 502 `network_error`,
         `http_error` or `client_error` when the OpenAI request fails ("OpenAI ist
-        nicht erreichbar." and similar).
+        nicht erreichbar." and similar). With `TRANSCRIPTION_BASE_URL` set, no key
+        is required, the label is "Der Transkriptionsserver" and failures use the
+        `provider_*` reasons.
         """
         content_type = handler.headers.get("Content-Type", "")
         audio = handler.read_audio_body()

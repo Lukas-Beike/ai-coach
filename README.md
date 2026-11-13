@@ -45,6 +45,7 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Responses-compatible endpoint (HTTPS, or loopback HTTP). |
 | `ANTHROPIC_API_KEY` | none | Claude API access; also settable in the app. |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Messages-compatible endpoint (HTTPS, or loopback HTTP). |
+| `TRANSCRIPTION_BASE_URL`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_API_KEY` | none | Optional OpenAI-compatible voice transcription server, e.g. local Whisper ([setup](docs/setup.md#local-voice-transcription)). |
 | `INTERVALS_API_KEY`, `INTERVALS_ATHLETE_ID` | none, `0` | Intervals.icu output target. |
 | `GARMIN_PERSONAL_API_KEY` | none | Official read-only Garmin Personal API key. |
 | `GARMIN_PERSONAL_API_KEY_EXPIRES` | none | Key expiry date (`YYYY-MM-DD`) for the renewal warning. |
@@ -71,7 +72,7 @@ Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ`
 | Garmin | Input: activities, details, sleep, HRV, daily health, thresholds. Personal API key plus optional login for the rest; planned strength and run workouts can be sent to the watch. | [Garmin](docs/setup.md#garmin-authentication--mfa-setup) |
 | Wahoo | Input: activities and FIT files, cycling FTP, weight; plan export on request. | [Wahoo](docs/setup.md#wahoo-connection) |
 | Intervals.icu | Output target only, on explicit synchronization. | [Credentials](docs/setup.md#provider-credentials-in-the-app) |
-| OpenAI | Coach (Responses API) and voice transcription. | [Configuration](docs/configuration.md) |
+| OpenAI | Coach (Responses API) and voice transcription unless a local server is configured. | [Configuration](docs/configuration.md) |
 | Claude (Anthropic) | Coach as the selected alternative (Messages API). | [Configuration](docs/configuration.md) |
 | Open-Meteo, DWD, ICS feeds | Weather, air quality, pollen, calendar constraints. | [Synchronization](docs/synchronization.md) |
 

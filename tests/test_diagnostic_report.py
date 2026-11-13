@@ -120,6 +120,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     openai_base_url="https://proxy.invalid/fake-base-secret/v1",
                     anthropic_api_key="fake-claude-secret",
                     anthropic_base_url="https://claude-proxy.invalid/fake-claude-base",
+                    transcription_base_url="https://stt.invalid/fake-stt-base/v1",
                     wahoo_configured=False,
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
@@ -432,11 +433,13 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertIs(report["configuration"]["openai_base_url_custom"], True)
         self.assertIs(report["configuration"]["anthropic_configured"], True)
         self.assertIs(report["configuration"]["anthropic_base_url_custom"], True)
+        self.assertIs(report["configuration"]["transcription_endpoint_custom"], True)
         serialized = json.dumps(report)
         for private in (
             "fake-claude-secret",
             "fake-claude-base",
             "claude-proxy.invalid",
+            "stt.invalid",
             "fake-wahoo-access-secret",
             "fake-wahoo-refresh-secret",
             "fake-base-secret",
@@ -448,11 +451,13 @@ class DiagnosticReportServiceTests(unittest.TestCase):
     def test_default_openai_endpoint_is_not_custom(self):
         self.service._deps.config.openai_base_url = DEFAULT_OPENAI_BASE_URL
         self.service._deps.config.anthropic_base_url = "https://api.anthropic.com"
+        self.service._deps.config.transcription_base_url = ""
 
         report = self.service.report()
 
         self.assertIs(report["configuration"]["openai_base_url_custom"], False)
         self.assertIs(report["configuration"]["anthropic_base_url_custom"], False)
+        self.assertIs(report["configuration"]["transcription_endpoint_custom"], False)
         self.assertEqual(report["configuration"]["model_provider"], "openai")
         self.assertEqual(
             report["wahoo"],
