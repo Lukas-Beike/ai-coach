@@ -165,17 +165,21 @@ class TrainingProfileSelectionService:
         self._curves = curves
 
     def curve_records(
-        self, days: int = PROFILE_WINDOW_DAYS[-1]
+        self, days: int = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
     ) -> list[dict[str, Any]]:
         """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
         ``effort_context`` "race".
+        ``shared`` returns the list of the last read while the day, the sessions
+        and their streams are unchanged, one list for every such caller: it must
+        only be read.
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
-        if self._canonical is None or self._curves is None:
+        curve_reader = self._curves
+        if self._canonical is None or curve_reader is None:
             raise RuntimeError("power profiles need the canonical source and curves")
         reader = self._canonical.activity_summary_reader()
         if reader is None:
@@ -199,13 +203,25 @@ class TrainingProfileSelectionService:
                 <= today.isoformat()
             ]
             session_ids = [str(summary.get("id") or "") for summary in sessions]
-            curves = self._curves.curves(db, session_ids)
-        records = [
-            _curve_record(summary, curves.get(str(summary.get("id") or "")))
-            for summary in sessions
-        ]
-        records.sort(key=lambda row: row["date"], reverse=True)
-        return records
+
+            def build() -> list[dict[str, Any]]:
+                curves = curve_reader.curves(db, session_ids)
+                records = [
+                    _curve_record(summary, curves.get(str(summary.get("id") or "")))
+                    for summary in sessions
+                ]
+                records.sort(key=lambda row: row["date"], reverse=True)
+                return records
+
+            if not shared:
+                return build()
+            # The stored dates run a day wider than the local window above.
+            return curve_reader.shared_records(
+                db,
+                (first - timedelta(days=1)).isoformat(),
+                (today.isoformat(), days, sessions),
+                build,
+            )
 
     def power_profiles(
         self, records: list[dict[str, Any]] | None = None

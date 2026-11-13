@@ -22,7 +22,8 @@ from backend.performance.report_service import (
 @dataclass(frozen=True)
 class PerformanceServices:
     training_reports: Callable[[], TrainingReportServices]
-    # The session curve records over the one reader, without the report bundle.
+    # The session curve records over the one reader, without the report bundle;
+    # the last read is shared while its inputs are unchanged, so only read it.
     curve_records: Callable[[int], Any]
 
 
@@ -127,6 +128,6 @@ def build_performance(
     def curve_records(days: int) -> Any:
         return TrainingProfileSelectionService(
             local_today, canonical=canonical_performance_source(), curves=power_curves
-        ).curve_records(days)
+        ).curve_records(days, shared=True)
 
     return PerformanceServices(training_reports, curve_records)

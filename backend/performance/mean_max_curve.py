@@ -16,7 +16,7 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -80,6 +80,7 @@ class SessionCurveReader:
         self._session_records = session_records
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
+        self._shared: tuple[str, list[dict[str, Any]]] | None = None
         self._lock = threading.Lock()
 
     def curves(self, db: Any, activity_ids: Iterable[str]) -> dict[str, SessionCurve]:
@@ -109,6 +110,37 @@ class SessionCurveReader:
                         self._memo.popitem(last=False)
             curves[activity_id] = cached
         return curves
+
+    def shared_records(
+        self,
+        db: Any,
+        since: str,
+        key: object,
+        build: Callable[[], list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        """Return the last built session records while their inputs are unchanged.
+
+        The stamp is ``key`` (the caller's day, window and session list) with the
+        stored records and detail sets read from ``since`` on, so a new day or a
+        changed session, stream, lap set or provider summary builds the records
+        again, and an unchanged read queries no session. Callers share the one
+        list and only read it.
+        """
+        stamp = _sha256(
+            [
+                key,
+                canonical_store.session_curve_input_rows(
+                    db, since, ACTIVITY_RECORD_KIND
+                ),
+            ]
+        )
+        with self._lock:
+            if self._shared is not None and self._shared[0] == stamp:
+                return self._shared[1]
+        records = build()
+        with self._lock:
+            self._shared = (stamp, records)
+        return records
 
 
 def input_fingerprint(parts: Iterable[object]) -> str:

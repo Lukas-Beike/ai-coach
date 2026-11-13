@@ -5,7 +5,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.canonical.activity_detail import (
     ActivityLap,
@@ -383,6 +383,8 @@ class ProfileSelectionTests(unittest.TestCase):
         self.db.row_factory = row_factory
         self.addCleanup(self.db.close)
         initialize_schema(self.db)
+        self.session_records = Mock(wraps=CanonicalTableReader().session_activities)
+        self.day = date(2026, 10, 18)
 
     def service(self, summaries):
         @contextmanager
@@ -396,9 +398,27 @@ class ProfileSelectionTests(unittest.TestCase):
             database_manager=lambda: SimpleNamespace(read_snapshot=read_snapshot),
         )
         return TrainingProfileSelectionService(
-            lambda: date(2026, 10, 18),
+            lambda: self.day,
             canonical=canonical,
-            curves=SessionCurveReader(CanonicalTableReader().session_activities),
+            curves=SessionCurveReader(self.session_records),
+        )
+
+    def add_ride(self, summaries, activity_id, day="2026-10-10", peak=350.0):
+        add_session(self.db, activity_id)
+        add_record(self.db, GARMIN, f"g-{activity_id}", activity_id)
+        store_streams(
+            self.db, GARMIN, f"g-{activity_id}", ride_power(peak), StreamResolution.FULL
+        )
+        summaries.append(
+            {
+                "id": activity_id,
+                "sport": "ride",
+                "environment": "outdoor",
+                "started_at": f"{day}T08:00:00+00:00",
+                "started_at_local": f"{day}T10:00:00",
+                "record_ids": {"garmin": f"g-{activity_id}"},
+                "source": "Garmin",
+            }
         )
 
     def test_window_reads_canonical_sessions_and_counts_missing_streams(self):
@@ -450,6 +470,88 @@ class ProfileSelectionTests(unittest.TestCase):
             ("mean-max-curve", 2), (result["method"], result["method_version"])
         )
         self.assertRegex(window["input_fingerprint"], r"^[0-9a-f]{64}$")
+
+    def test_a_shared_read_queries_no_session_while_the_inputs_are_unchanged(self):
+        summaries = []
+        for activity_id in ("act_1", "act_2", "act_3"):
+            self.add_ride(summaries, activity_id)
+        service = self.service(summaries)
+
+        with patch.object(
+            mean_max_curve.activity_detail_store,
+            "full_stream_keys",
+            wraps=full_stream_keys,
+        ) as stream_keys:
+            first = service.curve_records(60, shared=True)
+            self.assertEqual((1, 3), (stream_keys.call_count, len(first)))
+            self.assertEqual(3, self.session_records.call_count)
+            again = service.curve_records(60, shared=True)
+
+        # The second read of the day touches no stream key and no session.
+        self.assertEqual(1, stream_keys.call_count)
+        self.assertEqual(3, self.session_records.call_count)
+        self.assertIs(first, again)
+        self.assertEqual(first, service.curve_records(60))
+
+    def test_a_shared_read_is_built_again_on_a_new_day_or_window(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        service = self.service(summaries)
+        service.curve_records(60, shared=True)
+
+        for day, days in ((date(2026, 10, 19), 60), (date(2026, 10, 19), 30)):
+            self.day = day
+            with self.subTest(day=day, days=days):
+                before = self.session_records.call_count
+                service.curve_records(days, shared=True)
+                self.assertEqual(before + 1, self.session_records.call_count)
+                service.curve_records(days, shared=True)
+                self.assertEqual(before + 1, self.session_records.call_count)
+
+    def test_a_shared_read_follows_a_changed_session_stream_or_summary(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        service = self.service(summaries)
+        store_summary(self.db, "g-act_1", "a" * 64)
+        store_streams(
+            self.db,
+            GARMIN,
+            "g-act_1",
+            ride_power(350.0),
+            StreamResolution.FULL,
+            summary_sha256="a" * 64,
+        )
+
+        def peaks():
+            return [
+                row["power_profile"].get("duration_curve")
+                and next(
+                    point["watts"]
+                    for point in row["power_profile"]["duration_curve"]
+                    if point["duration_seconds"] == 180
+                )
+                for row in service.curve_records(60, shared=True)
+            ]
+
+        self.assertEqual([350.0], peaks())
+        store_streams(
+            self.db,
+            GARMIN,
+            "g-act_1",
+            ride_power(380.0),
+            StreamResolution.FULL,
+            summary_sha256="a" * 64,
+        )
+        self.assertEqual([380.0], peaks())
+        self.add_ride(summaries, "act_2", peak=300.0)
+        self.assertEqual([380.0, 300.0], peaks())
+        # A newer provider summary makes the set stale: the profile is empty.
+        store_summary(self.db, "g-act_1", "b" * 64)
+        self.assertEqual([None, 300.0], peaks())
+        # A change of the session's own summary (the athlete marks it a
+        # commute) leaves the records and sets alone and still counts.
+        summaries[1]["purpose"] = "commute"
+        self.assertEqual([None], peaks())
 
     def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
         summaries = []

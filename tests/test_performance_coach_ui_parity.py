@@ -98,7 +98,7 @@ def _feedback(keys: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-def _curve_records(days: int = 90) -> list[dict[str, Any]]:
+def _curve_records(days: int = 90, *, shared: bool = False) -> list[dict[str, Any]]:
     def ride(activity_id: str, curve: list[tuple[int, float, float]]) -> dict:
         return {
             "activity_id": activity_id,
