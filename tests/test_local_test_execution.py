@@ -79,6 +79,7 @@ class RunnerEvidenceTests(unittest.TestCase):
         code, result = self.run_fixture(Skipped)
         self.assertEqual(code, 0)
         self.assertEqual(result["skips"], 1)
+        self.assertEqual(result["skip_reasons"], {"synthetic skip": 1})
         self.assertEqual(result["tests_run"], 1)
         self.assertEqual(result["executed_ids"], result["selected_ids"])
 
