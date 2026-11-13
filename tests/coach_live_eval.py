@@ -353,19 +353,15 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
     return misses, safety
 
 
-_SCALED_FIELDS = (
-    "strength_structure",
-    "description",
-    "duration_minutes",
-    "planned_duration_s",
-)
-
-
 def _scaled_from(payload: dict[str, Any], template: dict[str, Any] | None) -> bool:
-    """Whether a unit changes its template's sets, reps, loads, steps or duration."""
-    return template is not None and any(
-        payload.get(field) != template.get(field) for field in _SCALED_FIELDS
-    )
+    """Whether a unit scales its template, by the app's own rule (#2429).
+
+    Reworded text alone is no scaling; the app compares durations, the strength
+    content and the parsed steps.
+    """
+    from backend.planning import plan_checks
+
+    return template is not None and plan_checks._scaled(payload, template)
 
 
 def _any_scaled(created: list[dict], library: dict[str, dict]) -> bool:

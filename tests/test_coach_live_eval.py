@@ -743,6 +743,13 @@ class ScorerTests(unittest.TestCase):
 
         scaled = check(lighter)
         self.assertEqual((scaled["safety"], scaled["misses"]), ([], []))
+
+        def reworded(after):
+            created("T", ["Rudern", "Kniebeuge"])(after)
+            after["units"]["N"]["payload"]["description"] = "Neu formuliert"
+
+        # Rewording the text alone changes no load.
+        self.assertIn("variant_not_scaled", check(reworded)["misses"])
         # A plain copy of the template (all apply_workout_library_plan can do)
         # is not the requested variant.
         self.assertIn(
