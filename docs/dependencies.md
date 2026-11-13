@@ -16,9 +16,11 @@ pip-compile --allow-unsafe --generate-hashes --strip-extras --output-file=requir
 
 Compile the Graphify pair on Windows/Python 3.14 instead: a Linux resolution
 drops the Windows-only `pywin32` pin that `mcp` needs, and a hash-only Windows
-setup then fails. Dependabot regenerates on Linux, so its Graphify PRs fail the
-lock contract test until someone runs the Graphify command above on Windows and
-pushes the regenerated lock to the PR.
+setup then fails. Dependabot therefore ignores `graphifyy` (#2554): when
+`python scripts/prepare_worktree.py` reports a newer version, raise the pin in
+`requirements-graphify.in` and run the Graphify command above on Windows. The
+lock contract test accepts the options in any order, as pip-tools releases
+differ, but requires exactly the options shown.
 
 The incremental quality check also records the `ruff` and `mypy` versions in
 `tests/fixtures/quality_baseline.json`. After changing either pin, record the new
