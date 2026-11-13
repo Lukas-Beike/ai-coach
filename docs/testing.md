@@ -279,7 +279,7 @@ the aggregate was a desktop shard in four runs and a mobile shard in one; the
 largest queue of any job was 0.1 to 1.1 min and the 18 jobs queued 0.6 to 6.8 min
 in sum (before: up to 4.8 min per job and 11.4 to 39.0 min in sum, under heavier
 load, so part of the gain is lighter queueing); execution summed 40.7 to 45.4
-runner-minutes, within the before range of 41.2 to 45.3. The
+runner-minutes, about the same as the 41.2 to 45.3 before. The
 native chain ended at 2.8 to 6.0 min. The next lever would be a third desktop
 shard; six minutes stays missed while source, image and one browser shard take
 about seven.
