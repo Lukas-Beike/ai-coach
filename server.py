@@ -361,11 +361,7 @@ from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.session_rebundle import SessionRebundle
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection import WahooSecretRegistry
-from backend.sync.wahoo_connection_assembly import (
-    WahooConnectionAssembly,
-    WahooConnectionInputs,
-)
-from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
+from backend.sync.wahoo_wiring import build_wahoo_connection, build_wahoo_sync
 from backend.sync.weather import build_weather_sync
 from backend.sync.wiring import (
     build_provider_sync,
@@ -852,19 +848,12 @@ PROVIDER_TRANSPORT = build_provider_transport(
     intervals_operation=INTERVALS_RESYNC_GATE.operation,
 )
 APP.provider_transport = PROVIDER_TRANSPORT
-WAHOO_CONNECTION = WahooConnectionAssembly(
-    WahooConnectionInputs(
-        config=lambda: CONFIG,
-        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-        database_manager=database_manager,
-        database_lock=lambda: DB_LOCK,
-        key_values=KEY_VALUE_REPOSITORY,
-        utc_now=runtime_clock.utc_now,
-        secret_registry=WAHOO_SECRET_REGISTRY,
-        on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
-            WAHOO_ID, requested_by="connection"
-        ),
-    )
+WAHOO_CONNECTION = build_wahoo_connection(
+    APP,
+    secret_registry=WAHOO_SECRET_REGISTRY,
+    on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
+        WAHOO_ID, requested_by="connection"
+    ),
 )
 
 
@@ -893,25 +882,14 @@ EXPORT_THRESHOLDS = export_thresholds_reader(
     ),
     today=lambda: ATHLETE_CLOCK.now().date(),
 )
-WAHOO_SYNC = WahooSyncAssembly(
-    WahooSyncInputs(
-        config=lambda: CONFIG,
-        connection=WAHOO_CONNECTION.service,
-        json_request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-        database_manager=database_manager,
-        database_lock=DB_LOCK,
-        key_values=KEY_VALUE_REPOSITORY,
-        daily_markers=sync_daily_markers,
-        observer=lambda: PROVIDER_SYNC.operation_observer(),
-        zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
-        now=lambda: datetime.now(UTC),
-        logger=LOGGER,
-        redactor=REDACTOR.redact_text,
-        resync_gate=WAHOO_RESYNC_GATE,
-        export_thresholds=EXPORT_THRESHOLDS,
-        history_earliest_date=SYNC_EARLIEST_DATE,
-        fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
-    )
+WAHOO_SYNC = build_wahoo_sync(
+    APP,
+    connection=WAHOO_CONNECTION.service,
+    daily_markers=sync_daily_markers,
+    resync_gate=WAHOO_RESYNC_GATE,
+    export_thresholds=EXPORT_THRESHOLDS,
+    history_earliest_date=SYNC_EARLIEST_DATE,
+    fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
 )
 APP.settings = SETTINGS
 NUTRITION_SERVICES: NutritionServices = build_nutrition(APP)

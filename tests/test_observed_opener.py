@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
+from datetime import date
 from unittest.mock import Mock
 from urllib.error import HTTPError, URLError
 
@@ -16,7 +17,7 @@ from backend.providers.wahoo_fit_download import (
     download_wahoo_fit,
 )
 from backend.providers.yazio import YazioClient
-from backend.sync.wahoo_sync_assembly import WahooSyncAssembly
+from backend.sync.wahoo_wiring import build_wahoo_sync
 from tests.test_yazio import config
 
 SIGNED = "https://cdn.wahooligan.com/private/fake-signed-path/w.fit?Signature=fake-sig"
@@ -133,14 +134,22 @@ class ObservedClientsTests(unittest.TestCase):
         for private in ("fake-signed-path", "fake-sig", "fake-body-secret"):
             self.assertNotIn(private, serialized)
 
-    def test_the_wahoo_assembly_downloads_through_the_observed_opener(self):
+    def test_the_wahoo_download_goes_through_the_observed_opener(self):
         opener, _logger, capture = observe(
             "wahoo", Mock(side_effect=URLError("down")), include_path=False
         )
-        assembly = WahooSyncAssembly(Mock(fit_opener=lambda: opener))
+        services = build_wahoo_sync(
+            Mock(),
+            connection=Mock(),
+            daily_markers=Mock(),
+            resync_gate=Mock(),
+            export_thresholds=Mock(),
+            history_earliest_date=date(2020, 1, 1),
+            fit_opener=lambda: opener,
+        )
 
         with self.assertRaises(WahooFitUnavailable):
-            assembly.fit_download()(SIGNED)
+            services.fit_download()(SIGNED)
 
         self.assertIn("external_http_failed", events(capture))
 

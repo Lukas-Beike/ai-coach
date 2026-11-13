@@ -1440,7 +1440,7 @@ Not mapped: the hrv timestamps (the message has none), RR values outside 300 to 
 
 ### `wahoo_fit_download.py`
 
-Status: Live. Transport only: `download_wahoo_fit` is injected into `WahooActivityDetailImport` by `wahoo_sync_assembly.py` and runs after a committed Wahoo sync. It maps nothing.
+Status: Live. Transport only: `download_wahoo_fit` is injected into `WahooActivityDetailImport` by `wahoo_wiring.py` and runs after a committed Wahoo sync. It maps nothing.
 Inputs: the Wahoo workout row's `workout_summary.file.url` (`wahoo_fit_url`), the signed download link of the workout's original FIT file. Decoding and mapping are done by `fit_activity_detail_mapping.py` (at its current `MAPPER_VERSION`) with Wahoo provenance (`device_measured`, `recorded_by` `wahoo`, label `Wahoo`); the sets are stored per Wahoo workout id with the summary hash of the active record. Result for Wahoo detail: `streams` (`full`), `laps` (`device_laps`) and `strength_sets` (`fit_set_messages`); no zone distribution (derived zones are added at read time).
 Evidence: documented only (`tests/test_wahoo_fit_download.py`, `tests/test_wahoo_activity_details.py`); there is no Wahoo payload in the payload files.
 
@@ -2225,7 +2225,7 @@ Not mapped: the rest of a power-zone row (zone boundaries, zone names and any ot
 
 ### `wahoo_plan_mapping.py`
 
-Status: Live, outbound only. There is no inbound mapping; the module builds the Wahoo plan file for a local library workout. Caller: `WahooWorkoutExport.serialize_library` (`backend/sync/wahoo_workout_export.py`), created by `WahooSyncAssembly.workout_export` (`backend/sync/wahoo_sync_assembly.py`) for the plan push (`WahooPlanPushService`); `plan_references` (same file) builds the `WahooPlanReferences`. `tests/test_mapper_version_guard.py` lists it in `NOT_REPLAYED`; it has no `MAPPER_VERSION`.
+Status: Live, outbound only. There is no inbound mapping; the module builds the Wahoo plan file for a local library workout. Caller: `WahooWorkoutExport.serialize_library` (`backend/sync/wahoo_workout_export.py`), created by `build_wahoo_sync` (`backend/sync/wahoo_wiring.py`) for the plan push (`WahooPlanPushService`); `plan_references` (same file) builds the `WahooPlanReferences`. `tests/test_mapper_version_guard.py` lists it in `NOT_REPLAYED`; it has no `MAPPER_VERSION`.
 Mapper version: none (nothing stored is replayed).
 Inputs: a local library workout dict plus the expanded steps from `structured_steps(description, target)` (`backend/activities/workout_text.py`). Output: the plan document `{"header": ..., "intervals": [...]}` (version `PLAN_SCHEMA_VERSION` = `1.0.0`). `WahooClient.create_plan` / `update_plan` send it as the base64 data URI form field `plan[file]` with `plan[filename]` (`<external_id>.json`) and `plan[provider_updated_at]`; create also sends `plan[external_id]` = `coach-library-<local id>` (`wahoo_external_id`). These form fields are not part of the plan JSON.
 Evidence: documented only (`tests/test_wahoo_plan_mapping.py`, `tests/test_wahoo_plan_push.py`, `tests/test_wahoo_plan_push_e2e.py`, `tests/test_wahoo_client_plans.py`). The plan JSON key semantics (for example that `ftp`-type targets are fractions of the header `ftp`) follow the Wahoo plan format PDF named in the module docstring; the PDF was not checked here, so that reading is **unverified** beyond what the code emits.

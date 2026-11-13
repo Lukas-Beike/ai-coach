@@ -59,6 +59,7 @@ from backend.providers.http import JsonHttpClient
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.providers.openai_stream import OpenAIStreamClient
+from backend.providers.wahoo_client import WahooClient
 from backend.sync import freshness, job_outcomes, jobs, observation, refresh
 from backend.sync.adaptive import IllnessPauseSyncService
 from backend.sync.authority import PlanningAuthorityService
@@ -86,6 +87,12 @@ from backend.sync.plan_selection import StructuredPlanSyncService
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 from backend.sync.stream_backfill import StreamBackfillService
+from backend.sync.wahoo_activity_details import WahooActivityDetailImport
+from backend.sync.wahoo_connection import WahooConnectionService
+from backend.sync.wahoo_library_state import WahooLibraryState
+from backend.sync.wahoo_plan_push import WahooPlanPushService
+from backend.sync.wahoo_sync import WahooSyncService
+from backend.sync.wahoo_workout_export import WahooWorkoutExport
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import SyncJobWorker
 from backend.weather.service import WeatherService
@@ -334,6 +341,30 @@ class CompositionRootTests(ServerTestCase):
         self.assertIsNotNone(garmin.body_export(server.ATHLETE_DATA.profile()))
         self.assertIsInstance(garmin.change_check(), GarminChangeCheck)
         self.assertIs(garmin.change_check(), garmin.change_check())
+
+    def test_wahoo_services_resolve_through_the_root(self) -> None:
+        connection, wahoo = server.WAHOO_CONNECTION, server.WAHOO_SYNC
+
+        # The connection, sync, detail and plan-push services are shared.
+        for shared, kind in (
+            (connection.service, WahooConnectionService),
+            (wahoo.sync_service, WahooSyncService),
+            (wahoo.activity_detail_import, WahooActivityDetailImport),
+            (wahoo.plan_push_service, WahooPlanPushService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(shared(), kind)
+                self.assertIs(shared(), shared())
+        for fresh, made in (
+            (wahoo.client, WahooClient),
+            (wahoo.stream_backfill_service, StreamBackfillService),
+            (wahoo.workout_export, WahooWorkoutExport),
+            (wahoo.library_state, WahooLibraryState),
+        ):
+            with self.subTest(kind=made.__name__):
+                self.assertIsInstance(fresh(), made)
+                self.assertIsNot(fresh(), fresh())
+        self.assertTrue(callable(wahoo.fit_download()))
 
     def test_the_redactor_reads_the_nutrition_secrets(self) -> None:
         # The log redactor looks the nutrition services up by name.
