@@ -30,6 +30,23 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.planning import changes as planning_changes
+from backend.planning.adaptive import AdaptiveReplanApplyService
+from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.calendar_service import CalendarConflictService
+from backend.planning.competition_service import CompetitionService
+from backend.planning.daily_context_service import DailyPlanningContextService
+from backend.planning.library_plan_service import WorkoutLibraryPlanService
+from backend.planning.library_service import WorkoutLibraryService
+from backend.planning.local_plan_creation_service import (
+    LocalTrainingPlanCreationService,
+)
+from backend.planning.planned_unit_service import PlannedUnitService
+from backend.planning.replacement_service import (
+    StructuredTrainingPlanReplacementService,
+)
+from backend.planning.state_service import StructuredTrainingStateService
+from backend.planning.training_plans import TrainingPlanService
 from backend.privacy import PrivacyDeleteService
 from backend.providers import audio as audio_provider
 from backend.providers.claude_models import ClaudeModelResolver
@@ -49,6 +66,54 @@ class CompositionRootTests(ServerTestCase):
 
         self.assertIsInstance(history.change_history_service(), ChangeHistoryService)
         self.assertIsInstance(history.undo_service(), HistoryUndoService)
+
+    def test_planning_data_services_resolve_and_are_fresh(self) -> None:
+        data = server.PLANNING_DATA
+
+        self.assertIs(server.APP.planning, data)
+        for factory, kind in (
+            (data.competition, CompetitionService),
+            (data.training_plan, TrainingPlanService),
+            (data.planned_unit, PlannedUnitService),
+            (data.workout_library, WorkoutLibraryService),
+            (data.adaptive_apply, AdaptiveReplanApplyService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
+                self.assertIsNot(factory(), factory())
+
+    def test_planning_workflows_resolve_through_the_late_owners(self) -> None:
+        workflows = server.PLANNING_WORKFLOWS
+
+        self.assertIs(server.APP.planning_workflows, workflows)
+        for factory, kind in (
+            (workflows.calendar_conflict_service, CalendarConflictService),
+            (workflows.workout_library_plan_service, WorkoutLibraryPlanService),
+            (
+                workflows.local_plan_creation_service,
+                LocalTrainingPlanCreationService,
+            ),
+            (workflows.daily_planning_context_service, DailyPlanningContextService),
+            (
+                workflows.structured_training_state_service,
+                StructuredTrainingStateService,
+            ),
+            (
+                workflows.structured_training_change_validator,
+                planning_changes.StructuredTrainingChangeValidator,
+            ),
+            (
+                workflows.structured_training_change_service,
+                planning_changes.StructuredTrainingChangeService,
+            ),
+            (
+                workflows.structured_training_plan_replacement_service,
+                StructuredTrainingPlanReplacementService,
+            ),
+            (workflows.adaptive_replan_preview_service, AdaptiveReplanPreviewService),
+        ):
+            with self.subTest(kind=kind.__name__):
+                self.assertIsInstance(factory(), kind)
 
     def test_weather_services_resolve(self) -> None:
         self.assertIsInstance(server.WEATHER.service(), WeatherService)
