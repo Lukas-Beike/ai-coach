@@ -60,10 +60,7 @@ class GraphifyHookTests(unittest.TestCase):
 
         # The only other allow rule is the review-thread resolve script (athlete
         # decision #2629); anything else added here still fails.
-        resolve = [
-            f"{shell}(python scripts/resolve_review_thread.py:*)"
-            for shell in ("Bash", "PowerShell")
-        ]
+        resolve = ["Bash(python scripts/resolve_review_thread.py:*)"]
         self.assertEqual(claude["permissions"]["allow"], tools + resolve)
         self.assertIn(f"tools: Read, Grep, Glob, {', '.join(tools)}\n", explorer)
         self.assertIn("  - graphify-local:\n", explorer)

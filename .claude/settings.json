@@ -6,8 +6,7 @@
       "mcp__graphify-local__graph_node",
       "mcp__graphify-local__graph_path",
       "mcp__graphify-local__graph_stats",
-      "Bash(python scripts/resolve_review_thread.py:*)",
-      "PowerShell(python scripts/resolve_review_thread.py:*)"
+      "Bash(python scripts/resolve_review_thread.py:*)"
     ],
     "deny": [
       "Read(//**/.env)",
@@ -62,6 +61,13 @@
           {
             "type": "command",
             "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_destructive_git.py\"",
+            "shell": "powershell",
+            "timeout": 10,
+            "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_resolve_thread.py\"",
             "shell": "powershell",
             "timeout": 10,
             "onFailure": "block"
