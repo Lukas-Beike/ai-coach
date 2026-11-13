@@ -37,6 +37,11 @@ TRANSCRIPTION_PROMPT = (
 )
 
 
+TRANSCRIPTION_MODEL_ERROR = (
+    "Für den Transkriptionsserver fehlt TRANSCRIPTION_MODEL in der Konfiguration."
+)
+
+
 class AudioTranscriptionClient:
     """Validate one transient voice note and send it to the transcription endpoint.
 
@@ -81,6 +86,8 @@ class AudioTranscriptionClient:
                 "Nicht unterstütztes Audioformat. Erlaubt sind WebM, MP4, OGG, MP3 und WAV.",
             )
 
+        if self.local_endpoint and not self.model:
+            raise AppError(503, TRANSCRIPTION_MODEL_ERROR, reason="not_configured")
         if not self.api_key and not self.local_endpoint:
             raise AppError(503, OPENAI_API_KEY_ERROR, reason="not_configured")
         # Whisper servers take the single `language` field; OpenAI keeps `languages[]`.

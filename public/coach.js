@@ -950,7 +950,7 @@ async function transcribeVoice(blob) {
     const result = await apiAudio("/api/transcribe", blob);
     if (generation !== state.sessionGeneration) return;
     const transcript = String(result.transcript || "").trim();
-    if (!transcript) throw new Error("OpenAI hat kein Transkript zurückgegeben.");
+    if (!transcript) throw new Error("Kein Transkript erhalten.");
     const input = $("#messageInput");
     const current = input.value.trim();
     input.value = current ? `${current}\n${transcript}` : transcript;

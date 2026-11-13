@@ -9,7 +9,7 @@ Run from a LAN machine against an OpenAI-compatible server such as Speaches:
 The samples are public German read speech from Google FLEURS (dev split,
 CC BY 4.0), streamed until enough clips are cached; never the athlete's
 recordings. An optional server key comes from TRANSCRIPTION_API_KEY. The
-request matches the app's: multipart `file`, `model`, `language=de`. Prints a
+request matches the app's: multipart `file`, `model`, `language=de`, `prompt`. Prints a
 Markdown table for the issue.
 """
 
@@ -22,12 +22,16 @@ import json
 import os
 import re
 import statistics
+import sys
 import tarfile
 import tempfile
 import time
 import urllib.request
-import uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.providers.audio import TRANSCRIPTION_PROMPT
+from backend.providers.http import multipart_form_data
 
 FLEURS = "https://huggingface.co/datasets/google/fleurs/resolve/main/data/de_de/"
 
@@ -94,22 +98,18 @@ def fetch_samples(cache: Path, count: int) -> list[tuple[Path, str]]:
 
 
 def transcribe(base_url: str, key: str, model: str, audio: Path) -> str:
-    boundary = uuid.uuid4().hex
-    parts = [
-        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-        for name, value in (("model", model), ("language", "de"))
-    ]
-    parts.append(
-        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
-        f'filename="{audio.name}"\r\nContent-Type: audio/wav\r\n\r\n'.encode()
-        + audio.read_bytes()
-        + f"\r\n--{boundary}--\r\n".encode()
+    body, content_type = multipart_form_data(
+        [("model", model), ("language", "de"), ("prompt", TRANSCRIPTION_PROMPT)],
+        "file",
+        audio.name,
+        "audio/wav",
+        audio.read_bytes(),
     )
     request = urllib.request.Request(
         base_url.rstrip("/") + "/audio/transcriptions",
-        data=b"".join(parts),
+        data=body,
         headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Type": content_type,
             **({"Authorization": f"Bearer {key}"} if key else {}),
         },
         method="POST",
@@ -153,9 +153,9 @@ def measure(
     latencies.sort()
     p90 = latencies[min(len(latencies) - 1, int(0.9 * len(latencies)))]
     return (
-        f"| `{model}` | {len(samples)} | {100 * errors / words:.1f} % "
+        f"| `{model}` | {len(samples)} | {100 * errors / max(words, 1):.1f} % "
         f"| {statistics.median(latencies):.2f} s | {p90:.2f} s "
-        f"| {sum(latencies) / audio_seconds:.2f} |"
+        f"| {sum(latencies) / audio_seconds if audio_seconds else 0:.2f} |"
     )
 
 
@@ -172,7 +172,11 @@ def main() -> None:
         default=Path(tempfile.gettempdir()) / "pacecraft-fleurs-de",
     )
     args = parser.parse_args()
+    if args.samples < 1:
+        parser.error("--samples must be at least 1")
     samples = fetch_samples(args.cache, args.samples)
+    if not samples:
+        parser.error("no FLEURS samples could be fetched")
     key = os.environ.get("TRANSCRIPTION_API_KEY", "")
     total = sum(seconds(audio) for audio, _ in samples)
     print(

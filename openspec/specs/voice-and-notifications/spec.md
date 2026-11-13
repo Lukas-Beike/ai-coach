@@ -87,7 +87,7 @@ The system SHALL validate nonempty bounded audio and supported type before conta
 
 #### Scenario: Local transcription server
 - **WHEN** `TRANSCRIPTION_BASE_URL` is set (HTTPS, or HTTP on loopback) and a valid recording is transcribed
-- **THEN** the request goes only to `{TRANSCRIPTION_BASE_URL}/audio/transcriptions` with `TRANSCRIPTION_MODEL`, the field `language` set to `de` and the optional `TRANSCRIPTION_API_KEY` as Bearer key, never the OpenAI key; it needs no OpenAI key, keeps the size, type and 90-second limits, records no OpenAI usage and reports failures in German as "Der Transkriptionsserver"; the microphone is enabled by the bootstrap flag `configured.transcription`
+- **THEN** the request goes only to `{TRANSCRIPTION_BASE_URL}/audio/transcriptions` with `TRANSCRIPTION_MODEL` (required there; without it the microphone stays off and the route answers 503 `not_configured`), the field `language` set to `de` and the optional `TRANSCRIPTION_API_KEY` as Bearer key, never the OpenAI key; it needs no OpenAI key, keeps the size, type and 90-second limits, records no OpenAI usage and reports failures in German as "Der Transkriptionsserver"; the microphone is enabled by the bootstrap flag `configured.transcription`
 
 #### Scenario: Usage only
 - **WHEN** a transcription succeeds
@@ -159,7 +159,7 @@ The client SHALL suppress duplicate successfully delivered notification keys, al
 Evidence: `public/notifications.js::reserveNotificationAttempt`, `public/notifications.js::showPwaNotification`, `public/service-worker.js` (notificationclick listener); `tests/notifications-retry.test.cjs::a persistently rejecting notification is retried at most three times`, `tests/notifications-retry.test.cjs::renders inside the retry delay do not resend a rejected notification`, `tests/notifications-retry.test.cjs::a transient failure followed by success is delivered once`. Click handling is inspected source only; duplicate suppression is in-memory and does not promise cross-tab/restart delivery deduplication.
 
 ### Requirement: Transcription uses its own configured endpoint
-The system SHALL transcribe voice input with OpenAI, or with the server in `TRANSCRIPTION_BASE_URL` when one is set, whichever model provider answers the Coach, and SHALL offer the microphone only while that endpoint is usable: an OpenAI key, or a configured transcription server.
+The system SHALL transcribe voice input with OpenAI, or with the server in `TRANSCRIPTION_BASE_URL` when one is set, whichever model provider answers the Coach, and SHALL offer the microphone only while that endpoint is usable: an OpenAI key, or a transcription server with its model.
 
 #### Scenario: Claude selected
 - **WHEN** a Claude family is the Coach model and an OpenAI key is configured

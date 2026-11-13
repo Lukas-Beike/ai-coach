@@ -186,6 +186,17 @@ class AudioProviderTests(unittest.TestCase):
         with self.assertRaises(AppError) as invalid:
             openai.transcribe(b"audio", "audio/flac")
         self.assertEqual(invalid.exception.status, 415)
+        local = self.client(local_endpoint=True, api_key="", model="")
+        with self.assertRaises(AppError) as missing_model:
+            local.transcribe(b"audio", "audio/webm")
+        self.assertEqual(
+            (missing_model.exception.status, missing_model.exception.message),
+            (
+                503,
+                "Für den Transkriptionsserver fehlt TRANSCRIPTION_MODEL in der Konfiguration.",
+            ),
+        )
+        self.assertEqual(self.http.calls, [])
 
     def test_empty_or_invalid_provider_responses_are_rejected(self):
         for response in ({}, {"text": "   "}, None):

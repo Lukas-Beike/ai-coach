@@ -176,7 +176,8 @@ class Config:
     garmin_personal_api_key: str = ""
     anthropic_api_key: str = ""
     anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
-    # Voice transcription only; empty means OpenAI with the Coach's endpoint and key.
+    # Voice only; an empty base URL means OpenAI with the Coach's endpoint and key,
+    # and the other two are then ignored.
     transcription_base_url: str = ""
     transcription_api_key: str = ""
     transcription_model: str = ""

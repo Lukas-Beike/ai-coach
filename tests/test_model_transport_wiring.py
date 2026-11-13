@@ -155,7 +155,11 @@ class ModelTransportWiringTests(unittest.TestCase):
         )
 
     def test_audio_client_transcribes_through_openai_with_its_own_limits(self):
-        services = self.make_services()
+        # Without a local endpoint, a leftover Whisper model id is ignored.
+        services = self.make_services(
+            transcription_model="Systran/faster-whisper-small",
+            transcription_api_key="stt-key",
+        )
         with patch.object(
             audio_provider, "AudioTranscriptionClient", return_value="audio"
         ) as factory:

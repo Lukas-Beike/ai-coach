@@ -37,8 +37,12 @@ class TranscribePostRoutes:
         zurückgegeben." when the provider returns no text; 502 `network_error`,
         `http_error` or `client_error` when the OpenAI request fails ("OpenAI ist
         nicht erreichbar." and similar). With `TRANSCRIPTION_BASE_URL` set, no key
-        is required, the label is "Der Transkriptionsserver" and failures use the
-        `provider_*` reasons.
+        is required; 503 `not_configured` "Für den Transkriptionsserver fehlt
+        TRANSCRIPTION_MODEL in der Konfiguration." without a model; 502 "Der
+        Transkriptionsserver hat kein Transkript zurückgegeben." or "Der
+        Transkriptionsserver ist nicht erreichbar." with the `provider_*` reasons;
+        an HTTP error status gives "Anfrage an externen Dienst fehlgeschlagen
+        (status).".
         """
         content_type = handler.headers.get("Content-Type", "")
         audio = handler.read_audio_body()

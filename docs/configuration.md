@@ -17,8 +17,8 @@ Coach settings offer one grouped model list. OpenAI: GPT-6 Luna (default), GPT-6
 | `ANTHROPIC_API_KEY` | *None* | No | Server-side API key for the Claude API (Anthropic Messages API). Can also be set in the Claude (Anthropic) card under **Mehr > Anbindungen**. |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | No | Optional Messages-compatible API base URL without the `/v1` path (the app appends `/v1/...`), validated like `OPENAI_BASE_URL`. An empty value counts as unset. |
 | `TRANSCRIPTION_BASE_URL` | *None* | No | Voice transcription only: base URL of an OpenAI-compatible server (the app appends `/audio/transcriptions`), validated like `OPENAI_BASE_URL`. Unset, voice uses OpenAI with `OPENAI_BASE_URL` and the OpenAI key. Set, voice goes only there, never with the OpenAI key; see [local voice transcription](setup.md#local-voice-transcription). |
-| `TRANSCRIPTION_MODEL` | `gpt-transcribe` | No | Transcription model; for a Whisper server its model id, e.g. `Systran/faster-whisper-small`. |
-| `TRANSCRIPTION_API_KEY` | *None* | No | Optional Bearer key of the server in `TRANSCRIPTION_BASE_URL`. |
+| `TRANSCRIPTION_MODEL` | *None* | With `TRANSCRIPTION_BASE_URL` | Model id on that server, e.g. `Systran/faster-whisper-small`; without it the microphone stays off. OpenAI always uses `gpt-transcribe`. |
+| `TRANSCRIPTION_API_KEY` | *None* | No | Optional Bearer key of the server in `TRANSCRIPTION_BASE_URL`; ignored without it. |
 | `INTERVALS_API_KEY` | *None* | No | Personal API key of Intervals.icu, the output target. Needed only to synchronize workouts, competitions, nutrition and sport settings. Can also be set in its card under **Mehr > Anbindungen**. |
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |

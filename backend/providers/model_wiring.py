@@ -169,7 +169,7 @@ def build_model_transport(
             api_key=active.transcription_api_key if local else active.openai_api_key,
             base_url=active.transcription_base_url or active.openai_base_url,
             default_base_url=DEFAULT_OPENAI_BASE_URL,
-            model=active.transcription_model or TRANSCRIPTION_MODEL,
+            model=active.transcription_model if local else TRANSCRIPTION_MODEL,
             response_timeout_seconds=TRANSCRIPTION_TIMEOUT_SECONDS,
             http_client=http_client(),
             provider_state=provider_state(),
