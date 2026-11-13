@@ -110,12 +110,19 @@ class ValidateConventionsWorkflowTests(unittest.TestCase):
 
 
 # GitHub's parsed closing references for the issue-link step, one number per line.
-FAKE_CLOSING_GH = 'gh() { printf "%s" "${FAKE_CLOSING:-}"; }\n'
+FAKE_CLOSING_GH = (
+    "gh() {\n"
+    '  [[ "$*" == *owner=example\\ * && "$*" == *closingIssuesReferences* ]] \\\n'
+    '    || { echo "bad gh call" >&2; return 1; }\n'
+    '  [[ "${FAKE_GH_MODE:-ok}" == fail ]] && { echo "synthetic gh api failure" >&2; return 1; }\n'
+    '  printf "%s" "${FAKE_CLOSING:-}"\n'
+    "}\n"
+)
 
 
 @unittest.skipUnless(BASH, "a working bash is required to run the workflow step")
 class IssueLinkStepTests(unittest.TestCase):
-    def run_step(self, body, closing=""):
+    def run_step(self, body, closing="", base="develop", mode="ok"):
         with tempfile.TemporaryDirectory() as temp:
             script = Path(temp) / "link.sh"
             script.write_text(
@@ -132,8 +139,12 @@ class IssueLinkStepTests(unittest.TestCase):
                     **os.environ,
                     "PR_BODY": body,
                     "FAKE_CLOSING": closing,
+                    "FAKE_GH_MODE": mode,
                     "REPOSITORY": "example/ai-coach",
                     "PR_NUMBER": "7",
+                    "BASE_REF": base,
+                    "DEFAULT_BRANCH": "develop",
+                    "CLOSING_RETRY_SECONDS": "0",
                 },
                 timeout=60,
             )
@@ -148,18 +159,32 @@ class IssueLinkStepTests(unittest.TestCase):
                 result = self.run_step(body, closing)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_part_of_issue_that_github_would_close_fails(self):
+    def test_issue_github_would_close_without_closes_fails(self):
         # #2578 said "This PR does not close #2148", and GitHub closed #2148 (#2648).
-        body = "Part of #2148\n\nThis PR does not close #2148."
-        result = self.run_step(body, "2148\n")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("#2148 is named as 'Part of #2148'", result.stdout)
-        self.assertIn("close #2148", result.stdout)
+        for body in (
+            "Part of #2148\n\nThis PR does not close #2148.",
+            "Closes #10\n\nThis does not fix #11 (follow-up).",
+        ):
+            with self.subTest(body=body):
+                closing = "2148\n" if "2148" in body else "10\n11\n"
+                result = self.run_step(body, closing)
+                self.assertNotEqual(result.returncode, 0)
+                issue = "2148" if "2148" in body else "11"
+                self.assertIn(f"GitHub will close #{issue}", result.stdout)
+        self.assertIn(
+            "close #2148",
+            self.run_step(
+                "Part of #2148\n\nThis PR does not close #2148.", "2148\n"
+            ).stdout,
+        )
 
-    def test_closes_that_github_does_not_parse_fails(self):
-        result = self.run_step("`Closes #12`", "")
+    def test_other_base_branches_and_gh_failures(self):
+        # Closing references exist only for PRs into the default branch.
+        body = "Part of #5\n\nThis does not close #5."
+        self.assertEqual(self.run_step(body, "5\n", base="feat/x").returncode, 0)
+        result = self.run_step("Closes #5", "5\n", mode="fail")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not list #12", result.stdout)
+        self.assertIn("synthetic gh api failure", result.stderr)
 
     def test_body_without_issue_link_fails(self):
         for body in ("", "Refs #12", "See issue 12", "Closes#12", "PreCloses #12"):
