@@ -115,6 +115,7 @@ test("@responsive Analyse shows LT1 like the zones page", async ({ page }) => {
   await expect(cycling.locator('[data-metric="cycling_lt1_hr_bpm"] .estimate-chip')).toHaveCount(0);
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"] th')).toContainText("Aerobe Schwelle (LT1) · Leistung");
   await expect(cycling.locator('[data-metric="cycling_ftp_watts"] th')).toContainText("Anaerobe Schwelle (LT2) · FTP");
+  await expect(cycling.locator('[data-metric="bike_threshold_hr_bpm"] th')).toContainText("Anaerobe Schwelle (LT2) · Puls");
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"] td')).toHaveText("214 W");
   await expect(cycling.locator('[data-metric="cycling_lt1_watts"] .estimate-chip')).toHaveText("Schätzung");
 });

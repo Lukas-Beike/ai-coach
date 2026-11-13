@@ -170,8 +170,8 @@ function renderCurrentPerformance(metrics, history, status = [], thresholds = nu
     ]],
     ["Radfahren", "ride", [
       ["cycling_ftp_watts", "Anaerobe Schwelle (LT2) · FTP"],
-      ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Anaerobe Schwelle (LT2) · Puls"],
+      ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["cycling_lt1_watts", "Aerobe Schwelle (LT1) · Leistung"],
       ["cycling_lt1_hr_bpm", "Aerobe Schwelle (LT1) · Puls"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
