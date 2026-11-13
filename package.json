@@ -2,6 +2,7 @@
   "name": "ai-coach-browser-tests",
   "private": true,
   "scripts": {
+    "modern-web": "node scripts/modern_web.mjs",
     "openspec": "node scripts/openspec.mjs",
     "test:e2e": "playwright test"
   },
@@ -10,6 +11,7 @@
     "@fission-ai/openspec": "1.17.0",
     "@playwright/test": "1.65.0",
     "eslint": "10.14.0",
-    "eslint-plugin-sonarjs": "4.2.2"
+    "eslint-plugin-sonarjs": "4.2.2",
+    "modern-web-guidance": "1.0.0"
   }
 }
