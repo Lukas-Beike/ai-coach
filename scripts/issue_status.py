@@ -12,7 +12,6 @@ import sys
 
 CHECKBOX = re.compile(r"^\s*[-*] \[ \] (.+)$", re.MULTILINE)
 
-LINE = re.compile(r"^.*$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,6}) +(.+)$")
 
 
@@ -24,16 +23,17 @@ def open_boxes(body):
     do not count. The closing summary covers criteria; parts keep an issue open.
     """
     body = body or ""
-    parts, criteria, level, fenced = [], [], 0, False
-    for line in LINE.finditer(body):
-        text = line[0].strip()
+    parts, criteria, level, fenced, start = [], [], 0, False, 0
+    for line in body.split("\n"):
+        text, end = line.strip(), start + len(line)
         fenced ^= text.startswith(("```", "~~~"))
         if (heading := HEADING.match(text)) and not fenced:
             depth = len(heading[1])  # a deeper heading stays inside the section
             starts = heading[2].lower().startswith("acceptance criteria")
             level = depth if starts else level * (depth > level)
-        if box := CHECKBOX.match(body, line.start(), line.end()):
+        if box := CHECKBOX.match(body, start, end):
             (criteria if level else parts).append(box)
+        start = end + 1
     return parts, criteria
 
 
