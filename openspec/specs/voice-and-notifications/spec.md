@@ -166,3 +166,13 @@ The system SHALL transcribe voice input with OpenAI whichever model provider ans
 - **THEN** the microphone control is disabled while the chat itself stays usable with a configured Claude key.
 
 Evidence: `backend/providers/model_wiring.py:build_model_transport`, `public/coach.js:updateVoiceButton`; `tests/test_provider_audio.py`, `tests/settings-hub.test.cjs` (microphone needs the OpenAI key).
+
+### Requirement: Recording format and status
+
+The client SHALL record with the first supported type of `audio/webm;codecs=opus`, `audio/webm`, `audio/mp4` and `audio/ogg;codecs=opus`, with echo cancellation, noise suppression and automatic gain, and SHALL show "Aufnahme läuft · NN s / 60 s", updated four times per second.
+
+#### Scenario: Status texts
+- **WHEN** capture starts, transcription runs, a transcript arrives, nothing was recorded, access is denied or unsupported
+- **THEN** the status reads "Mikrofon wird aktiviert …", "Aufnahme wird transkribiert …", "Transkript eingefügt. Bitte prüfen und anschließend senden.", "Es wurde keine Sprache aufgenommen.", "Der Mikrofonzugriff wurde nicht erlaubt." or "Spracheingabe benötigt eine HTTPS-Verbindung und einen unterstützten Browser."
+
+Evidence: `public/coach.js::VOICE_MIME_TYPES`; `public/coach.js::toggleVoiceInput`; `public/coach.js::transcribeVoice`; `public/coach.js::formatVoiceDuration`. Tests: `e2e/contracts.spec.js::voice input records a follow-up while the Coach is working`.

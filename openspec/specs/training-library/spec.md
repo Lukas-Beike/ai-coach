@@ -492,6 +492,10 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **WHEN** a unit or template sets a focus allowed for its sport (run and ride: recovery, easy, endurance, long, tempo, threshold, vo2max, anaerobic, race, test; ride also sweet_spot; strength: legs, upper, full_body, core, plyometrics, mobility with an optional light, moderate or heavy strength intensity)
 - **THEN** it is stored in the unit payload, shown as a chip, editable per unit and recorded in change history and backups.
 
+#### Scenario: Focus control in the calendar
+- **WHEN** the athlete opens a local planned run, ride or strength unit
+- **THEN** the card offers "Art der Einheit" (and "Intensität" for strength) and saves a change at once with `POST /api/planned-units/{id}/focus {session_focus, strength_intensity}`, showing "Gespeichert" and the new chip, or restoring the previous selection with the error; a derived value is prefixed "≈" and a button "≈ <label> übernehmen" sets it
+
 #### Scenario: Invalid focus
 - **WHEN** a focus or strength intensity does not exist for the unit's sport
 - **THEN** the write fails with `invalid_session_focus`; changing a unit's sport drops its previous focus unless the request sets one.
@@ -513,7 +517,7 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
 - **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics); a second run changes nothing.
 
-Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
+Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`, `public/plan-views.js:plannedFocusForm`, `public/plan-views.js:focusChipSpec`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js:@responsive session focus chip and select on a planned unit`.
 
 ### Requirement: Heart-rate caps of easy run units
 A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap.py`) SHALL carry a local `hr_cap` of percentages only (cap, exported lower bound, source). Bpm SHALL be resolved from the threshold HR on the unit's date wherever it is read, checked or exported, and never stored. A Coach write with a wrong cap SHALL be blocked by the plan check `hr_cap_invalid`; planned units are never rewritten.
@@ -618,3 +622,13 @@ A planned unit that a Coach plan tool creates or whose structure it changes SHAL
 - **THEN** one line "Vorlage: <template name>" appears under its title; the calendar tile is unchanged.
 
 Evidence: `backend/planning/plan_checks.py:template_conformance`, `backend/planning/plan_guard_service.py:PlanGuardService.findings`, `backend/planning/library_plan_service.py`, `backend/planning/adaptive.py:adaptive_recovery_replacement`, `public/plan-views.js`; `tests/test_plan_checks.py`, `tests/test_plan_guard_service.py`, `tests/test_coach_tool_coverage.py`, `tests/test_adaptive_replan_apply_service.py`.
+
+### Requirement: Library view
+
+The Bibliothek SHALL list the undated, non-archived workouts grouped by sport in closed groups with their count, 100 per page with "Weitere Bibliothekseinheiten laden", and SHALL offer no create, edit, move or delete control; such changes go through the Coach. Without a workout it SHALL read "Noch keine Einheiten in der Bibliothek. Der Coach legt hier Einheiten ab, wenn du sie planst."
+
+#### Scenario: Paging
+- **WHEN** "Weitere Bibliothekseinheiten laden" is pressed
+- **THEN** the next page is appended to the list without duplicates by id
+
+Evidence: `public/plan-views.js:renderLibrary`; `public/coach.js:appendHistoryPageButton`; `e2e/ux-polish.spec.js:the calendar has a refresh button and the library rows show a count and a chevron @responsive`.

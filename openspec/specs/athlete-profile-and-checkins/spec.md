@@ -313,3 +313,31 @@ Profil SHALL order its closed sections Person, Ziele & Woche, Zonen & Schwellen,
 - **THEN** every section starts closed.
 
 Evidence: `public/settings.js::renderZoneOverview`, `public/settings.js::openZoneEditor`, `public/settings.js::renderZoneWarnings`, `public/settings.js::thresholdRows`, `public/performance-view.js::withFirstThresholds`, `public/index.html`; `tests/zone-overview.test.cjs`, `tests/analysis-presentation.test.cjs`, `e2e/zones-thresholds.spec.js`.
+
+### Requirement: Profile form save contract
+
+A profile save SHALL send only the fields whose text differs from the values the form was rendered with, SHALL refuse to save before those values exist, and SHALL treat the save as confirmed only when every sent field comes back as text; otherwise the draft stays dirty with "Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.".
+
+#### Scenario: Form bounds
+- **WHEN** the form validates a value
+- **THEN** height is 50 to 250 cm, weight 20 to 300 kg, body fat 1 to 70 %, the first threshold 60 to 220 bpm or 40 to 100 %, and the sleep target 4 to 12 hours in quarter hours
+
+#### Scenario: Body values
+- **WHEN** weight or body fat changed
+- **THEN** the save asks for the Garmin export and reports its outcome (sent, invalid, unavailable, superseded, rejected, uncertain); "Körperwerte erneut an Garmin senden" is offered only after invalid, unavailable or rejected, never after a lost response
+
+#### Scenario: First threshold
+- **WHEN** a measured value is saved, or an estimate is adopted with "Übernehmen"
+- **THEN** the entry fields are cleared and the stored percent is shown; adopting over a measured value asks "Gemessenen Wert ersetzen?"
+
+Evidence: `public/settings.js::determineChangedProfileFields`; `public/settings.js::profileSaveConfirmed`; `public/settings.js::handleProfileSaveOutcome`; `public/settings.js::retryBodyGarmin`; `public/settings.js::adoptFirstThreshold`; `public/index.html` (profile form). Tests: `tests/frontend-write-safety.test.cjs::profile save sends only the fields the athlete edited`; `tests/frontend-write-safety.test.cjs::known failed body export offers explicit retry; unknown outcome does not`; `tests/first-threshold-estimate.test.cjs::the form is clean again when the adopted value was its only edit`.
+
+### Requirement: Zone save and removal
+
+The zone editor SHALL save local zones with `PUT /api/zones` for a sport (ride, run, swim), a metric (power, heart rate, pace) and an environment (all or indoor), sending the threshold (not for pace), the maximum (heart rate only) and the upper limits as a list, from a valid-from date that is not in the future; "Gilt von Anfang an" is offered only for the first configuration. Removal SHALL send `PUT /api/zones/remove {key, confirmed: true}`.
+
+#### Scenario: Receipt
+- **WHEN** zones are saved or removed
+- **THEN** "Lokale Zonen gespeichert" or "Lokale Zonen entfernt" is shown with "Rückgängig"; removal first asks "Lokale Zonen entfernen? Danach gelten wieder die Zonen des Anbieters."
+
+Evidence: `public/settings.js::saveZones`; `public/settings.js::removeZones`; `public/settings.js::openZoneEditor`; `public/settings.js::showZoneReceipt`. Tests: `e2e/canonical-extensions.spec.js::local zones save with provider alternatives and undo`; `tests/zone-warnings.test.cjs::a stale threshold names value, source and age`.

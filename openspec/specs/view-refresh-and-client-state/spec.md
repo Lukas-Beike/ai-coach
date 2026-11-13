@@ -191,3 +191,85 @@ The client SHALL defer nonessential automatic area reloads during an active Coac
 - **THEN** deferred work runs once under the current session or is cancelled when the session ends.
 
 Evidence: `public/state-loader.js::requestBackgroundLoad`, `public/state-loader.js::deferBackgroundLoad`, `public/state-loader.js::flushDeferredLoads`, `public/auth.js::showLogin`; `tests/reload-coalescing.test.cjs::background reloads wait while the Coach works and run once after 60 seconds`, `tests/reload-coalescing.test.cjs::athlete actions and the live transcript do not wait for a busy Coach`, `tests/reload-coalescing.test.cjs::leaving the session drops the waiting background reloads`.
+
+### Requirement: Request deadlines and error reasons
+
+The client SHALL abort a request after 25 seconds unless its call sets another deadline: 10 seconds for the start session check, 15 for a report or activity read, 55 for a Coach action execution or Garmin login, 60 for a connection check, 90 for the start data, 100 for a transcription and 130 for the backup, privacy export, log and diagnostics downloads. An ordinary request's abort SHALL read "Der Server antwortet nicht innerhalb von N Sekunden.".
+
+#### Scenario: Abort text of a transcription or download
+- **WHEN** a transcription or a 130-second download exceeds its deadline
+- **THEN** it reads "Die Transkription antwortet nicht innerhalb von 100 Sekunden." or "Der Download konnte nicht innerhalb von zwei Minuten bestätigt werden."
+
+#### Scenario: No response
+- **WHEN** the request fails without a response
+- **THEN** the error has status 0, reason `network_error` and the text "Keine Verbindung zum Coach-Server. Prüfe dein Netzwerk und versuche es erneut."
+
+#### Scenario: Malformed success
+- **WHEN** a success is not JSON, not an object, or an empty object for a mutation
+- **THEN** the reasons are `invalid_json`, `invalid_shape` and `empty_confirmation` and the write is not treated as confirmed
+
+#### Scenario: Retry hint and upstream reasons
+- **WHEN** the response has `Retry-After` (seconds or a date) or `retry_after_seconds`, or a reason starting with `upstream_`
+- **THEN** the header wins and " Bitte in N Sekunden erneut versuchen." is appended, and a fixed German text replaces the server text of an upstream reason
+
+Evidence: `public/api.js` (`REQUEST_TIMEOUT_MS`, `REMOTE_ACTION_TIMEOUT_MS`, `TRANSCRIPTION_TIMEOUT_MS`, `request`, `responseError`, `safeErrorMessage`); `public/state-loader.js::loadState`; `public/auth.js::bootstrapAuth`; `public/components.js` (`DATA_LOAD_TIMEOUT_MS`); `public/shared.js::downloadRequest`. Tests: `e2e/contracts.spec.js::JSON and audio errors retain status, reason and retry delay`; `e2e/coach.spec.js::provider-backed API calls outlast their server deadlines`; `tests/test_server_frontend.py::test_frontend_api_errors_and_live_status_contracts`.
+
+### Requirement: Device storage keys and privacy
+
+Device data SHALL live in `localStorage` under `coach-state-snapshot`, `coach-chat-cache` and `coach-view-cache` and SHALL never contain credentials, session tokens or the CSRF token. The snapshot SHALL carry its asset set, a contract number (currently 2) and its save time; a snapshot of another contract is neither shown nor reused.
+
+#### Scenario: Save timing
+- **WHEN** loaded data is rendered
+- **THEN** the snapshot is saved one second later, once per burst, and at once when the page is hidden or left; placeholder data is never saved
+
+#### Scenario: Keys that survive logout
+- **WHEN** the device data is cleared
+- **THEN** only the three keys above are removed; the appearance choice and the last activity time stay
+
+Evidence: `public/state-loader.js` (`STATE_SNAPSHOT_KEY`, `CHAT_CACHE_KEY`, `VIEW_CACHE_KEY`, `STATE_SNAPSHOT_CONTRACT`); `public/state-loader.js::saveStateSnapshot`; `public/state-loader.js::clearStateSnapshot`; `public/app.js` (visibility and `pagehide` listeners). Tests: `tests/state-loader-startup.test.cjs::a snapshot of an older key shape is neither shown nor reused for a failed area`; `tests/state-loader-startup.test.cjs::a completed load schedules one coalesced snapshot save`; `tests/state-loader-startup.test.cjs::placeholder data is never saved and only a bootstrap load replaces it`; `tests/state-loader-startup.test.cjs::the typed password, the session and the CSRF token never reach device storage`; `tests/state-loader-startup.test.cjs::an unauthenticated start clears the stored data that it showed, an unreachable server keeps it`.
+
+### Requirement: State areas and their reads
+
+The client SHALL load state in the areas chat (`/api/chat/history?limit=100`), plan (`/api/plan`), weather (`/api/weather`, only when plan is not loaded), library (`/api/library?limit=100`), performance (`/api/performance`), feedback (`/api/feedback`) and profile (`/api/profile`). A load whose path contains `local=1` SHALL pass `?local=1` to plan and weather so that no provider is contacted.
+
+#### Scenario: Start
+- **WHEN** the session is confirmed
+- **THEN** chat, performance, feedback, profile, plan and library are loaded locally, then weather (plan on the calendar route) is refreshed live when a weather location is set
+
+#### Scenario: Changed version markers
+- **WHEN** a sync status reports new `state_versions` markers
+- **THEN** activities reloads plan, performance and profile; performance and the Garmin marker reload performance and plan; library reloads library and plan; checkins reloads feedback and plan; activity_feedback reloads feedback, plan and performance; profile reloads profile and performance; chat and plan reload themselves
+
+Evidence: `public/state-loader.js::loadStateRequests`; `public/state-loader.js::stateLoadRequest`; `public/coach.js::loadInitialState`; `public/sync-status.js::changedSyncAreas`. Tests: `tests/state-loader-startup.test.cjs::area reads start before the bootstrap response arrives`; `tests/state-loader-startup.test.cjs::the bootstrap read may take 90 seconds, an area read uses the standard timeout`; `tests/state-loader-startup.test.cjs::a live area refresh reads only its areas and keeps the known versions`.
+
+### Requirement: Background update timing
+
+The event stream client SHALL reconnect after 1 second, doubling to at most 30 seconds, and reset the delay only after a stream stayed open for 30 seconds. A stream without any event for 45 seconds SHALL count as stale. The sync status SHALL be polled every 1.5 seconds while a sync runs, every 60 seconds when idle and after 5 seconds on failure.
+
+#### Scenario: Events before the first ready
+- **WHEN** the first stream after a state load replays earlier events
+- **THEN** they do not trigger reloads
+
+#### Scenario: Event to area mapping
+- **WHEN** an event arrives after the baseline
+- **THEN** `coach` reloads chat and profile, `planning` plan and library, `provider` performance (plan and performance unless its area is performance) unless its status is `loading`, `sync` with status `completed` or `error` plan, performance and library, `reset` all areas; reloads are merged for 400 ms
+
+#### Scenario: Coach status check
+- **WHEN** the stream is healthy
+- **THEN** the Coach status is read at most every 15 seconds; without a healthy stream every 1.5 seconds while a turn runs and every 5 seconds otherwise
+
+Evidence: `public/sync-status.js` (`STATE_EVENT_STALE_MS`, `handleStateEvent`, `scheduleStateEventReconnect`, `scheduleStateEventRefresh`, `pollSyncStatus`); `public/shared.js` (`SYNC_POLL_ACTIVE_MS`, `SYNC_POLL_IDLE_MS`, `SYNC_POLL_RETRY_MS`); `public/coach.js::settleChatStatusPoll`. Tests: `tests/reload-coalescing.test.cjs::state events replayed before the first ready do not reload the loaded app`; `tests/reload-coalescing.test.cjs::the status is polled every 1.5 seconds without a healthy event stream`; `e2e/chat-status-polling.spec.js::idle Coach status is not polled after bootstrap while another tab is open @responsive`.
+
+### Requirement: Calendar refresh and refresh wording
+
+The calendar refresh control SHALL post `/api/external-calendar/sync` when an external calendar is configured and otherwise only reload the local state. Every refresh control SHALL show "Aktualisierung läuft …", then "Aktualisiert.", "Teilweise aktualisiert.", "Lokale Daten aktualisiert.", "Aktualisierung läuft bereits." or "Aktualisierung fehlgeschlagen: <reason>".
+
+#### Scenario: Queued job
+- **WHEN** the refresh answer names a job
+- **THEN** the client reads `/api/sync/jobs/{id}` every second, at most 180 times, stops at once for the error classes `auth_required` and `invalid_configuration`, and then reports "Die Synchronisierung läuft länger als erwartet. Der Job kann unter Betrieb & Diagnose weiter verfolgt werden."
+
+#### Scenario: Unknown result
+- **WHEN** the result status is none of ok, complete, completed, partial, local, already_running, failed or error
+- **THEN** the control reports a failure with "Der Aktualisierungsstatus ist unbekannt."
+
+Evidence: `public/sync-actions.js::bindPlanRefresh`; `public/sync-actions.js::waitForSyncJob`; `public/view-refresh.js::AppViewRefresh.create`; `public/sync-status.js::providerErrorIsNonRetryable`. Tests: `e2e/ux-polish.spec.js::the calendar has a refresh button and the library rows show a count and a chevron @responsive`; `tests/view-refresh.test.cjs::keeps partial values and distinguishes already-running and failed responses`.

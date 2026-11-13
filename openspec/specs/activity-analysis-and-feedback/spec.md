@@ -467,3 +467,21 @@ Evidence:
 - `tests/test_nutrition_macro_ranges.py:test_strength_counts_its_total_time_and_other_sports_their_moving_time`
 - `tests/test_performance_chart_history.py:test_training_time_counts_strength_with_its_total_time`
 - `tests/test_weekly_progress.py:test_weekly_aggregation_per_sport_and_intensity_mapping`
+
+### Requirement: Activity dialog actions
+
+The activity dialog SHALL offer a feedback form with "Art der Einheit" (Automatisch, Training, Wettkampf, Pendeln, Einfahren, Ausfahren), a session RPE from 0 to 10 in half steps, a deviation reason (500 characters) and notes (4000), saved with `POST /api/activities/{id}/feedback`. Under "Aufzeichnungen" it SHALL offer split, confirm, merge and local delete through `POST /api/activities/{id}/session`. Every result SHALL carry "Rückgängig".
+
+#### Scenario: Stored rating off the grid
+- **WHEN** a stored RPE is not a half step
+- **THEN** it is shown as its own option and not rounded
+
+#### Scenario: Detail refresh
+- **WHEN** a provider entry is refreshable and its button is used
+- **THEN** a sync job of type `activity_details` is queued and read every 1.5 seconds for at most 120 seconds; an incomplete job keeps the previous detail and says so
+
+#### Scenario: Back
+- **WHEN** the browser goes back while the dialog is open
+- **THEN** the dialog closes and the view below stays
+
+Evidence: `public/activity-details.js::renderFeedback`; `public/activity-details.js::rpeSelect`; `public/activity-details.js::setRpe`; `public/activity-details.js::renderBundle`; `public/activity-details.js::requestDetails`; `public/activity-details.js::open`. Tests: `e2e/activity-details.spec.js::provider copies split with a receipt whose undo restores the bundle`; `e2e/activity-details.spec.js::deleting an activity locally asks first and can be undone`; `tests/activity-route.test.cjs::renaming posts the route id and name, then shows the new label`.
