@@ -1831,7 +1831,7 @@ function appendPlanNotes(node, planNotes) {
   };
   for (const { code, severity, days } of groupPlanNotes(planNotes, planNoteLabels)) {
     const label = planNoteLabels[code];
-    const dates = [...new Set(days)].sort().map((day) => AppFormat.date(day)).filter(Boolean);
+    const dates = [...new Set(days)].sort((a, b) => a.localeCompare(b)).map((day) => AppFormat.date(day)).filter(Boolean);
     let weeks = "";
     if (code === "intensity_distribution") weeks = dates.length > 1 ? "Wochen ab " : "Woche ab ";
     const dateLabel = dates.length ? ` · ${weeks}${dates.join(", ")}` : "";
