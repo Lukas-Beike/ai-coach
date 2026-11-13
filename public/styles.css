@@ -1382,7 +1382,9 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 .nav-item b:empty { display: none; }
 .nav-item:has(> b.nav-count) { position: relative; }
 .nav-item > b.nav-count { position: absolute; top: 4px; left: calc(50% + 4px); margin: 0; }
-.desktop-nav .nav-item > b.nav-count { position: static; margin-left: auto; }
+@media (min-width: 1100px) {
+  .desktop-nav .nav-item > b.nav-count { position: static; margin-left: auto; }
+}
 /* Large text: labels that no longer fit collapse to icons; each link keeps its aria-label as accessible name.
    Thresholds are the bar's content width in rem at which the widest label ("Ernährung") stops fitting. */
 .bottom-nav, .desktop-nav { container-type: inline-size; }

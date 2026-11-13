@@ -151,7 +151,7 @@ function addDays(key, offset) {
   return date.toISOString().slice(0, 10);
 }
 
-test("@responsive the notice walks through undecided events of the next 14 days and then goes away", async ({ page, request }) => {
+test("@responsive the notice walks through undecided events of the next 14 days and then goes away", async ({ page, request }, testInfo) => {
   await openCalendar(page, request);
   const today = await page.evaluate(() => {
     const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
@@ -170,6 +170,8 @@ test("@responsive the notice walks through undecided events of the next 14 days 
   await expect(banner).toContainText(`2 neue Termine bis ${until}`);
   const nav = page.locator('.nav-item[data-route="plan"]').filter({ visible: true });
   await expect(nav.locator("b.nav-count")).toHaveText("2");
+  await expect(nav.locator("b.nav-count")).toBeVisible();
+  await nav.screenshot({ path: testInfo.outputPath("nav-count.png") });
   await expect(nav).toHaveAccessibleName(`Kalender, 2 neue Termine bis ${until}`);
 
   const posts = [];
