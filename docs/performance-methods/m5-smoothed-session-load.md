@@ -124,3 +124,25 @@ when treated as zero, which this method does not do.
   (DFA-α1 additionally needs RR intervals, which the canonical model lacks).
 - Passive CP/CS from everyday data (R16) stays unreleased and is checked
   separately against protocol tests (#1431).
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METRIC_ID` | `'smoothed_session_load'` | `backend/performance/smoothed_load.py` |  |
+| `METHOD_ID` | `'smoothed-session-load'` | `backend/performance/smoothed_load.py` |  |
+| `METHOD_VERSION` | `1` | `backend/performance/smoothed_load.py` |  |
+| `UNIT` | `'AU'` | `backend/performance/smoothed_load.py` |  |
+| `EVIDENCE_CARD` | `'docs/performance-methods/m5-smoothed-session-load.md'` | `backend/performance/smoothed_load.py` |  |
+| `SHORT_TAU_DAYS` | `7` | `backend/performance/smoothed_load.py` |  |
+| `LONG_TAU_DAYS` | `42` | `backend/performance/smoothed_load.py` |  |
+| `WARMUP_TAUS` | `2` | `backend/performance/smoothed_load.py` |  |
+| `METHOD_NOTE` | `"Short-term (tau 7 d) and long-term (tau 42 d) exponentially smoothed session-RPE load, from the ...` | `backend/performance/smoothed_load.py` |  |
+| `LIMITS` | `'Smoothed subjective load, not measured fitness, fatigue, form or injury risk. No ratio of the tw...` | `backend/performance/smoothed_load.py` |  |
+| `STATE_RATED` | `'rated'` | `backend/performance/smoothed_load.py` |  |
+| `STATE_REST` | `'rest'` | `backend/performance/smoothed_load.py` |  |
+| `STATE_GAP` | `'gap'` | `backend/performance/smoothed_load.py` |  |
+| `STATE_OPEN` | `'open'` | `backend/performance/smoothed_load.py` |  |
+| `STATE_NO_HISTORY` | `'no_history'` | `backend/performance/smoothed_load.py` |  |
+<!-- END GENERATED CONSTANTS -->

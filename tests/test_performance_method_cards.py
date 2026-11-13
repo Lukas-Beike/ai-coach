@@ -2,9 +2,16 @@
 
 The cards are read as text. The check covers structure only: required fields,
 tagged numeric rules and known evidence IDs. Content is reviewed by people.
+
+Each card ends with a generated "Code constants" section listing the constants
+of the modules its Status line names, read from the code; regenerate it with
+`python tests/test_performance_method_cards.py --write`. A card's Method ID
+version must equal the METHOD_VERSION of its implementing module.
 """
 
+import ast
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -58,6 +65,12 @@ REGISTER_ROW = re.compile(r"^\| (R\d{1,2}|L\d) \|", re.MULTILINE)
 REVIEW = re.compile(r"blocked|released \d{4}-\d{2}-\d{2} \([^)]+\)")
 VERSION = re.compile(r"[1-9]\d*")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BEGIN = "<!-- BEGIN GENERATED CONSTANTS -->"
+END = "<!-- END GENERATED CONSTANTS -->"
+MODULE_PATH = re.compile(r"`(backend/[\w/]+\.py)(?::\w+)?`")
+CONSTANT_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
+METHOD_ID_VERSION = re.compile(r"[\s-]v([1-9]\d*)\b")
+VALUE_LIMIT = 100
 
 
 def register_ids(readme: str) -> set[str]:
@@ -122,6 +135,120 @@ def card_problems(card: str, known_ids: set[str]) -> list[str]:
     return problems
 
 
+def front_line(card: str, field: str) -> str:
+    return dict(FRONT_FIELD.findall(card.split("\n## ", 1)[0])).get(field, "")
+
+
+def card_modules(card: str) -> list[str]:
+    lines = front_line(card, "Status") + " " + front_line(card, "Method ID")
+    return list(dict.fromkeys(MODULE_PATH.findall(lines)))
+
+
+def is_literal(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.UnaryOp):
+        return is_literal(node.operand)
+    if isinstance(node, ast.BinOp):
+        return is_literal(node.left) and is_literal(node.right)
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(is_literal(item) for item in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(
+            key is not None and is_literal(key) and is_literal(value)
+            for key, value in zip(node.keys, node.values, strict=True)
+        )
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"frozenset", "tuple"}
+        and len(node.args) == 1
+        and not node.keywords
+        and is_literal(node.args[0])
+    )
+
+
+def module_constants(module: str) -> list[tuple[str, ast.expr, str]]:
+    """Return (name, value, comment) of the literal UPPER_CASE constants."""
+    source = (ROOT / module).read_text("utf-8")
+    lines = source.splitlines()
+    found = []
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not (
+            isinstance(target, ast.Name)
+            and CONSTANT_NAME.fullmatch(target.id)
+            and is_literal(value)
+        ):
+            continue
+        comment: list[str] = []
+        index = node.lineno - 2
+        while index >= 0 and lines[index].lstrip().startswith("#"):
+            comment.insert(0, lines[index].lstrip().lstrip("#").strip())
+            index -= 1
+        found.append((target.id, value, " ".join(comment)))
+    return found
+
+
+def table_cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("`", "")
+
+
+def generated_section(card: str) -> str:
+    rows = []
+    for module in card_modules(card):
+        for name, value, comment in module_constants(module):
+            text = ast.unparse(value)
+            if len(text) > VALUE_LIMIT:
+                text = text[: VALUE_LIMIT - 3] + "..."
+            rows.append(
+                f"| `{name}` | `{table_cell(text)}` | `{module}` | "
+                f"{table_cell(comment)} |"
+            )
+    header = "| Constant | Value | Module | Code comment |\n| --- | --- | --- | --- |"
+    return "\n".join([BEGIN, "## Code constants", "", header, *rows, END])
+
+
+def with_generated_section(card: str) -> str:
+    section = generated_section(card)
+    start = card.find(BEGIN)
+    if start < 0:
+        return card.rstrip("\n") + "\n\n" + section + "\n"
+    end = card.index(END, start) + len(END)
+    return card[:start] + section + card[end:]
+
+
+def code_method_versions(modules: list[str]) -> dict[str, object]:
+    return {
+        module: value.value
+        for module in modules
+        for name, value, _ in module_constants(module)
+        if name == "METHOD_VERSION" and isinstance(value, ast.Constant)
+    }
+
+
+def version_problems(card: str) -> list[str]:
+    method_id = front_line(card, "Method ID")
+    versions = code_method_versions(card_modules(card))
+    named = {module: v for module, v in versions.items() if module in method_id}
+    if len(versions) > 1 and len(named) == 1:
+        versions = named
+    if not versions:
+        return []
+    if len(versions) > 1:
+        return [f"ambiguous METHOD_VERSION in {sorted(versions)}"]
+    ((module, code_version),) = versions.items()
+    found = METHOD_ID_VERSION.search(method_id)
+    if found is None or int(found.group(1)) != code_version:
+        return [f"{module} METHOD_VERSION {code_version}, Method ID {method_id!r}"]
+    return []
+
+
 class PerformanceMethodCardTests(unittest.TestCase):
     def setUp(self) -> None:
         self.known_ids = register_ids((CARDS_DIR / "README.md").read_text("utf-8"))
@@ -176,6 +303,41 @@ class PerformanceMethodCardTests(unittest.TestCase):
         problems = card_problems(broken, self.known_ids)
         self.assertTrue(any(item.startswith("incomplete") for item in problems))
 
+    def test_generated_constants_are_current(self) -> None:
+        for name in CARD_NAMES:
+            card = (CARDS_DIR / name).read_text("utf-8")
+            if not card_modules(card):
+                continue
+            with self.subTest(card=name):
+                self.assertEqual(
+                    with_generated_section(card),
+                    card,
+                    "run python tests/test_performance_method_cards.py --write",
+                )
+
+    def test_method_version_matches_code(self) -> None:
+        for name in CARD_NAMES:
+            with self.subTest(card=name):
+                card = (CARDS_DIR / name).read_text("utf-8")
+                self.assertEqual(version_problems(card), [])
+        card = (CARDS_DIR / "m6-local-tss-load.md").read_text("utf-8")
+        self.assertEqual(
+            code_method_versions(card_modules(card)),
+            {"backend/performance/local_tss.py": 7},
+        )
+        self.assertTrue(
+            version_problems(card.replace("local-tss-load v7", "local-tss-load v8"))
+        )
+
 
 if __name__ == "__main__":
-    unittest.main()
+    if "--write" in sys.argv[1:]:
+        for card_name in CARD_NAMES:
+            card_path = CARDS_DIR / card_name
+            card_text = card_path.read_text("utf-8")
+            if card_modules(card_text):
+                card_path.write_text(
+                    with_generated_section(card_text), "utf-8", newline="\n"
+                )
+    else:
+        unittest.main()

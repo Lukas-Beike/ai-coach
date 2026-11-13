@@ -198,3 +198,21 @@ athlete's power meter or GPS.
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METHOD_ID` | `'critical-power-speed'` | `backend/performance/critical_power.py` |  |
+| `METHOD_VERSION` | `2` | `backend/performance/critical_power.py` |  |
+| `WINDOW_DAYS` | `28` | `backend/performance/critical_power.py` |  |
+| `EFFORT_SECONDS` | `{'ride': (180, 420, 720, 1200), 'run': (180, 420, 720)}` | `backend/performance/critical_power.py` |  |
+| `THREE_POINT_SECONDS` | `(180, 420, 720)` | `backend/performance/critical_power.py` | The card 3 protocol, kept for cycling as a sensitivity fit. |
+| `INTERCEPT_RELIABILITY` | `'low'` | `backend/performance/critical_power.py` | Hunter 2023: W′/D′ from everyday training agree only weakly with tests. |
+| `MIN_RECOVERY_SECONDS` | `1800` | `backend/performance/critical_power.py` | Efforts in one session count separately only with this much recovery between. |
+| `MAX_RELATIVE_RESIDUAL` | `0.03` | `backend/performance/critical_power.py` |  |
+| `PLAUSIBLE` | `{'ride': {'intercept': (1000.0, 50000.0), 'slope': (50.0, 600.0)}, 'run': {'intercept': (10.0, 50...` | `backend/performance/critical_power.py` |  |
+| `SCOPE` | `'Experimentelle Modellschätzung aus den besten Belastungen der letzten 28 Tage (Rad 3, 7, 12 und ...` | `backend/performance/critical_power.py` |  |
+| `POWER_SOURCE_UNCHECKED` | `'unchecked'` | `backend/performance/critical_power.py` | Garmin and Wahoo deliver no measured-versus-estimated power signal. |
+<!-- END GENERATED CONSTANTS -->

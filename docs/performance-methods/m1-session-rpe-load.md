@@ -145,3 +145,27 @@ endurance athlete.
 - R2 full text (participant count, duration definition, funding and declared
   interests) was not reachable; R1 has no funding or interest statement in
   the accessible copy.
+
+<!-- BEGIN GENERATED CONSTANTS -->
+## Code constants
+
+| Constant | Value | Module | Code comment |
+| --- | --- | --- | --- |
+| `METRIC_ID` | `'session_rpe_load'` | `backend/performance/session_rpe_load.py` |  |
+| `METHOD_ID` | `'session-rpe-load'` | `backend/performance/session_rpe_load.py` |  |
+| `METHOD_VERSION` | `2` | `backend/performance/session_rpe_load.py` | v2: long interruptions are marked deviating_duration (#1770). |
+| `UNIT` | `'AU'` | `backend/performance/session_rpe_load.py` |  |
+| `EVIDENCE_CARD` | `'docs/performance-methods/m1-session-rpe-load.md'` | `backend/performance/session_rpe_load.py` |  |
+| `SOURCE_ATHLETE` | `'athlete_feedback'` | `backend/performance/session_rpe_load.py` |  |
+| `SOURCE_PROVIDER` | `'provider'` | `backend/performance/session_rpe_load.py` |  |
+| `ATHLETE_LABEL` | `'Athletenfeedback'` | `backend/performance/session_rpe_load.py` |  |
+| `METHOD_NOTE` | `"Session-RPE load (Foster): elapsed minutes of the whole session × the athlete's global session R...` | `backend/performance/session_rpe_load.py` |  |
+| `LIMITS` | `'Descriptive subjective load only. Never convert or add AU to TSS, Intervals.icu or Garmin load o...` | `backend/performance/session_rpe_load.py` |  |
+| `REASON_NO_RATING` | `'no_rating'` | `backend/performance/session_rpe_load.py` | Why a session has no value. |
+| `REASON_CONFLICTING_PROVIDER_RATINGS` | `'conflicting_provider_ratings'` | `backend/performance/session_rpe_load.py` |  |
+| `REASON_NO_ELAPSED_DURATION` | `'no_elapsed_duration'` | `backend/performance/session_rpe_load.py` |  |
+| `REASON_INVALID_DURATION` | `'invalid_duration'` | `backend/performance/session_rpe_load.py` |  |
+| `DURATION_FLAG_DEVIATING` | `'deviating_duration'` | `backend/performance/session_rpe_load.py` | A long interruption: elapsed minus moving time above either limit (card M1 v2). |
+| `INTERRUPTION_LIMIT_S` | `900.0` | `backend/performance/session_rpe_load.py` |  |
+| `INTERRUPTION_LIMIT_SHARE` | `0.2` | `backend/performance/session_rpe_load.py` |  |
+<!-- END GENERATED CONSTANTS -->
