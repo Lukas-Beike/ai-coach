@@ -16,9 +16,9 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
-from backend.sync.provider_resync_assembly import full_resync_handlers
 from backend.sync.provider_table import GARMIN_NOT_CONFIGURED_MESSAGE
 from backend.sync.refresh import ProviderRefreshTracker, retry_at
+from backend.sync.resync_wiring import full_resync_handlers
 
 try:
     from .architecture_registry import BACKEND_ROOT

@@ -39,14 +39,8 @@ from backend.nutrition.contracts import nutrition_approval_item
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.execution_assembly import (
-    CalendarWeatherJobDependencies,
-    GarminJobDependencies,
-    HistoricalSyncDependencies,
-    IntervalsJobDependencies,
-    SyncJobExecutionAssembly,
-    SyncJobStateDependencies,
-    WahooJobDependencies,
+from backend.sync.execution_wiring import (
+    build_sync_job_execution,
     configured_for_job,
     provider_configured_checks,
 )
@@ -57,6 +51,7 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_table import CALENDAR_ID, WEATHER_ID
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
+from backend.sync.wiring import SyncWindow
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
 JOBS = "/api/sync/jobs"
@@ -254,58 +249,50 @@ class Harness:
             retry_max_seconds=60,
         )
         state_repository = SyncStateRepository(self.database, key_values, NOW.isoformat)
-        historical = HistoricalSyncDependencies(
-            local_now=lambda: NOW,
-            sync_period_defaults={GARMIN_ID: 7, WAHOO_ID: 7},
-            all_sync_days=-1,
-            sync_chunk_days=30,
-            sync_earliest_date=date(2026, 1, 1),
-        )
-        state = SyncJobStateDependencies(
-            sync_state_repository=lambda: state_repository,
-            queue_service=lambda: self.queue,
-            outcome_service=lambda: outcomes,
-        )
-        intervals = IntervalsJobDependencies(
-            selected_workout_sync_service=lambda: service("intervals.plan"),
-            competition_sync_service=lambda: service("intervals.competitions"),
-            nutrition_sync_service=lambda: service("intervals.nutrition"),
-            operation_observer=lambda: cast(Any, _Observer()),
-            resync_gate=ProviderResyncGate("Intervals.icu"),
-        )
         no_fixture = mock.Mock()
         no_fixture.path.return_value = None
-        garmin_deps = GarminJobDependencies(
-            sync_service=lambda: self.garmin,
+        ctx = SimpleNamespace(
+            config=lambda: config,
+            clock=SimpleNamespace(now=lambda: NOW),
+            athlete=SimpleNamespace(profile=lambda: mock.Mock()),
+            sync_persistence=SimpleNamespace(state_repository=lambda: state_repository),
+            sync_job_queue=SimpleNamespace(
+                service=lambda: self.queue, outcome_service=lambda: outcomes
+            ),
+            provider_sync=SimpleNamespace(
+                operation_observer=lambda: cast(Any, _Observer())
+            ),
+            nutrition=SimpleNamespace(
+                intervals_sync_service=lambda: service("intervals.nutrition")
+            ),
             morning_body_battery_service=lambda: mock.Mock(),
-            fixture_loader=lambda: no_fixture,
-            activity_detail_service=lambda: service("garmin.details"),
-            strength_push_service=lambda: service("garmin.plan"),
-            wellness_history_service=lambda: service("garmin.wellness"),
-            stream_backfill_service=lambda: service("garmin.streams"),
+            garmin=SimpleNamespace(
+                sync_service=lambda: self.garmin,
+                fixture_loader=lambda: no_fixture,
+                activity_detail_service=lambda: service("garmin.details"),
+                strength_push_service=lambda: service("garmin.plan"),
+                wellness_history_service=lambda: service("garmin.wellness"),
+                stream_backfill_service=lambda: service("garmin.streams"),
+            ),
+            external_calendar=SimpleNamespace(
+                sync_service=lambda: service("calendar.sync")
+            ),
+            wahoo=SimpleNamespace(
+                sync_service=lambda: cast(Any, self.wahoo),
+                plan_push_service=lambda: service("wahoo.plan"),
+                stream_backfill_service=lambda: service("wahoo.streams"),
+            ),
         )
-        calendar_weather = CalendarWeatherJobDependencies(
-            calendar_sync_service=lambda: service("calendar.sync"),
+        self.configured = provider_configured_checks(cast(Any, ctx))
+        self.executor = build_sync_job_execution(
+            cast(Any, ctx),
+            window=SyncWindow({GARMIN_ID: 7, WAHOO_ID: 7}, -1, 30, date(2026, 1, 1)),
+            selected_workout_sync_service=lambda: service("intervals.plan"),
+            competition_sync_service=lambda: service("intervals.competitions"),
             weather_sync_service=lambda: service("weather.sync"),
-        )
-        wahoo_deps = WahooJobDependencies(
-            sync_service=lambda: cast(Any, self.wahoo),
-            plan_push_service=lambda: service("wahoo.plan"),
-            resync_gate=ProviderResyncGate("Wahoo"),
-            stream_backfill_service=lambda: service("wahoo.streams"),
-        )
-        jobs = SyncJobExecutionAssembly.Inputs(
-            historical=historical,
-            state=state,
-            intervals=intervals,
-            garmin=garmin_deps,
-            calendar_weather=calendar_weather,
-            wahoo=wahoo_deps,
-        )
-        self.configured = provider_configured_checks(
-            jobs, config=lambda: config, profile=lambda: mock.Mock()
-        )
-        self.executor = SyncJobExecutionAssembly(dependencies=jobs).executor()
+            intervals_resync_gate=ProviderResyncGate("Intervals.icu"),
+            after_job=lambda _job: None,
+        ).executor()
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             state_repository,

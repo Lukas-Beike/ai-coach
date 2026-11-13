@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.app.context import AppContext
@@ -28,7 +28,6 @@ from backend.sync.commands import (
 )
 from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.execution_assembly import SyncJobExecutionAssembly
 from backend.sync.garmin_personal_status import sdk_write_ready
 from backend.sync.gates import resetting_providers
 from backend.sync.plan_commands import PlanPushCommandService
@@ -41,6 +40,16 @@ PROVIDER_REFRESH_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_RETRY_BASE_SECONDS = 15 * 60
 SYNC_JOB_RETRY_MAX_SECONDS = 6 * 60 * 60
 SYNC_JOB_POLL_SECONDS = 1.0
+
+
+@dataclass(frozen=True)
+class SyncWindow:
+    """The history bounds the executor, the schedulers and the Coach refreshes share."""
+
+    sync_period_defaults: Mapping[str, int]
+    all_sync_days: int
+    sync_chunk_days: int
+    sync_earliest_date: date
 
 
 @dataclass(frozen=True)
@@ -273,23 +282,22 @@ def build_sync_commands(
 
 
 def coach_synchronous_refreshes(
-    dependencies: SyncJobExecutionAssembly.Inputs,
+    ctx: AppContext, window: SyncWindow
 ) -> dict[str, SynchronousRefresh]:
     """Return the inline refreshes a waiting Coach request runs (Garmin, Wahoo)."""
-    historical = dependencies.historical
-    all_sync_days = historical.all_sync_days
-    state = dependencies.state.sync_state_repository()
+    all_sync_days = window.all_sync_days
+    state = ctx.sync_persistence.state_repository()
     return {
         GARMIN_ID: GarminSynchronousRefresh(
-            dependencies.garmin.sync_service(),
-            dependencies.garmin.morning_body_battery_service(),
+            ctx.garmin.sync_service(),
+            ctx.morning_body_battery_service(),
             all_sync_days,
         ),
         WAHOO_ID: WahooSynchronousRefresh(
-            dependencies.wahoo.sync_service(),
+            ctx.wahoo.sync_service(),
             all_sync_days,
             stored_days=lambda: state.sync_period(
-                WAHOO_ID, historical.sync_period_defaults, all_sync_days
+                WAHOO_ID, window.sync_period_defaults, all_sync_days
             ),
         ),
     }

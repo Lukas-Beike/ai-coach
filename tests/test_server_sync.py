@@ -94,6 +94,8 @@ class ServerSyncTests(ServerTestCase):
         order = []
         http_server = Mock()
         http_server_factory = Mock(return_value=http_server)
+        startup_scheduler = Mock()
+        daily_loop_factory = Mock()
         with (
             patch.object(server.observability, "configure_logging"),
             patch.object(
@@ -135,9 +137,14 @@ class ServerSyncTests(ServerTestCase):
             patch.object(sync_worker_runtime.SyncJobWorker, "stop") as sync_stop,
             patch.object(sync_worker_runtime.SyncJobWorker, "join") as sync_join,
             patch.object(
-                server.SYNC_SCHEDULERS, "startup_scheduler"
-            ) as startup_scheduler,
-            patch.object(server.SYNC_SCHEDULERS, "daily_loop") as daily_loop_factory,
+                server,
+                "SYNC_SCHEDULERS",
+                replace(
+                    server.SYNC_SCHEDULERS,
+                    startup_scheduler=startup_scheduler,
+                    daily_loop=daily_loop_factory,
+                ),
+            ),
             patch.object(server.threading, "Thread") as thread_factory,
             patch.object(server.signal, "signal") as install_signal_handler,
             patch.object(server.DIAGNOSTIC_CAPTURE, "close") as capture_close,

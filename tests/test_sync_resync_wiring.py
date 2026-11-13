@@ -1,58 +1,20 @@
-"""Tests for competition and provider resync composition."""
+"""The competition and provider resync builder reads the live owners (#2101)."""
 
-import logging
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
 from backend.errors import AppError
-from backend.sync import provider_resync_assembly as assembly_module
+from backend.sync import resync_wiring as resync_module
 from backend.sync.full_resync import PROVIDER_RESYNC_KEYS, resync_field_keys
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.provider_resync_assembly import (
-    CompetitionSyncOwners,
+from backend.sync.resync_wiring import (
     GarminFullResync,
-    ProviderResyncAssembly,
-    ProviderResyncPersistence,
-    ProviderResyncRuntime,
-    ResyncProviderOwners,
     WahooFullResync,
+    build_provider_resync,
     full_resync_handlers,
 )
-
-
-def _build_assembly(
-    intervals_gate: ProviderResyncGate, garmin_gate: ProviderResyncGate
-) -> ProviderResyncAssembly:
-    return ProviderResyncAssembly(
-        dependencies=ProviderResyncAssembly.Inputs(
-            competition=CompetitionSyncOwners(
-                config=Mock(return_value=Mock()),
-                intervals_client=Mock(),
-                competition_service=Mock(),
-            ),
-            resync=ResyncProviderOwners(
-                garmin_sync_service=Mock(),
-                garmin_resync_gate=garmin_gate,
-                wahoo_sync_service=Mock(),
-                wahoo_resync_gate=Mock(),
-                all_sync_days=-1,
-            ),
-            persistence=ProviderResyncPersistence(
-                database_manager=Mock(),
-                key_values=Mock(),
-                event_buffer=Mock(),
-                redactor=Mock(),
-            ),
-            runtime=ProviderResyncRuntime(
-                logger=logging.getLogger("test.provider.resync.handlers"),
-                utc_now=Mock(),
-                uuid_factory=Mock(),
-                monotonic=Mock(),
-                operation_observer=Mock(),
-            ),
-        )
-    )
 
 
 class FullResyncHandlerWiringTests(unittest.TestCase):
@@ -99,51 +61,72 @@ class ResyncFieldKeysTests(unittest.TestCase):
         )
 
 
-class ProviderResyncAssemblyTests(unittest.TestCase):
-    def test_competition_client_factory_resolves_transport_when_called(self):
-        transport = {"client_factory": Mock(return_value="current client")}
-
-        def current_client_factory():
-            return transport["client_factory"]()
-
-        assembly = ProviderResyncAssembly(
-            dependencies=ProviderResyncAssembly.Inputs(
-                competition=CompetitionSyncOwners(
-                    config=Mock(return_value=Mock()),
-                    intervals_client=current_client_factory,
-                    competition_service=Mock(),
-                ),
-                resync=ResyncProviderOwners(
-                    garmin_sync_service=Mock(),
-                    garmin_resync_gate=Mock(),
-                    wahoo_sync_service=Mock(),
-                    wahoo_resync_gate=Mock(),
-                    all_sync_days=90,
-                ),
-                persistence=ProviderResyncPersistence(
-                    database_manager=Mock(),
-                    key_values=Mock(),
-                    event_buffer=Mock(),
-                    redactor=Mock(),
-                ),
-                runtime=ProviderResyncRuntime(
-                    logger=logging.getLogger("test.provider.resync.assembly"),
-                    utc_now=Mock(),
-                    uuid_factory=Mock(),
-                    monotonic=Mock(),
-                    operation_observer=Mock(),
-                ),
-            )
+class ProviderResyncBuilderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ctx = Mock(name="context")
+        self.gates = (ProviderResyncGate("Garmin"), ProviderResyncGate("Wahoo"))
+        self.after = Mock(name="after resync")
+        self.services = build_provider_resync(
+            self.ctx,
+            garmin_resync_gate=self.gates[0],
+            wahoo_resync_gate=self.gates[1],
+            all_sync_days=-1,
+            after_resync=self.after,
         )
 
-        with patch.object(assembly_module, "CompetitionSyncService") as service_type:
-            service = assembly.competition_sync_service()
+    def test_building_resolves_no_owner(self):
+        self.ctx.config.assert_not_called()
+        self.ctx.database.assert_not_called()
+        self.ctx.provider_transport.intervals_client.assert_not_called()
+
+    def test_competition_client_factory_resolves_transport_when_called(self):
+        ctx = self.ctx
+        with patch.object(resync_module, "CompetitionSyncService") as service_type:
+            service = self.services.competition_sync_service()
             client_factory = service_type.call_args.args[1]
-            transport["client_factory"] = Mock(return_value="patched client")
+            ctx.provider_transport.intervals_client.assert_not_called()
+            ctx.provider_transport = Mock(
+                intervals_client=Mock(return_value="patched client")
+            )
             self.assertEqual(client_factory(), "patched client")
 
-        self.assertIsNotNone(service)
-        transport["client_factory"].assert_called_once_with()
+        self.assertIs(service, service_type.return_value)
+        self.assertEqual(
+            (ctx.config.return_value,),
+            service_type.call_args.args[:1],
+        )
+        self.assertIs(service_type.call_args.args[3], ctx.planning.competition())
+
+    def test_competition_services_are_fresh_per_call(self):
+        with patch.object(resync_module, "CompetitionSyncReconciler") as reconciler:
+            self.services.competition_reconciler()
+            self.services.competition_reconciler()
+
+        self.assertEqual(2, reconciler.call_count)
+        reconciler.assert_called_with(self.ctx.database.return_value, uuid.uuid4)
+
+    def test_the_full_resync_reads_the_live_garmin_and_wahoo_owners(self):
+        ctx = self.ctx
+        with patch.object(resync_module, "full_resync_handlers") as handlers:
+            service = self.services.full_resync_service()
+
+        handlers.assert_called_once_with(
+            garmin_service=ctx.garmin.sync_service.return_value,
+            wahoo_service=ctx.wahoo.sync_service.return_value,
+            all_sync_days=-1,
+        )
+        self.assertIs(service._handlers, handlers.return_value)
+        self.assertEqual(
+            {GARMIN_ID: self.gates[0], WAHOO_ID: self.gates[1]}, service._gates
+        )
+        self.assertIs(service._after_resync, self.after)
+
+    def test_every_service_of_one_builder_shares_one_run_registry(self):
+        first = self.services.full_resync_service()
+        second = self.services.full_resync_service()
+
+        self.assertIsNot(first, second)
+        self.assertIs(first._runs, second._runs)
 
 
 class GarminFullResyncTests(unittest.TestCase):
@@ -177,19 +160,6 @@ class GarminFullResyncTests(unittest.TestCase):
 
         self.assertEqual(503, caught.exception.status)
         self.assertEqual("not_configured", caught.exception.reason)
-
-
-class ResyncRunsSharingTests(unittest.TestCase):
-    def test_every_service_of_one_assembly_shares_one_run_registry(self):
-        assembly = _build_assembly(
-            ProviderResyncGate("Intervals.icu"), ProviderResyncGate("Garmin")
-        )
-
-        first = assembly.full_resync_service()
-        second = assembly.full_resync_service()
-
-        self.assertIsNot(first, second)
-        self.assertIs(first._runs, second._runs)
 
 
 class WahooFullResyncTests(unittest.TestCase):

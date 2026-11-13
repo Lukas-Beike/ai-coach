@@ -29,7 +29,7 @@ from backend.providers import weather as weather_provider
 from backend.runtime import clock as runtime_clock
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
-from backend.sync import scheduler_assembly as sync_scheduler_assembly
+from backend.sync import wiring as sync_wiring
 from backend.sync.adaptive import IllnessPauseSyncService
 from backend.weather import cache as weather_cache
 
@@ -255,9 +255,7 @@ with patch.object(Path, 'read_text', deny):
             patch.object(
                 garmin_sync.GarminFixtureLoader, "path", return_value=Path("synthetic")
             ),
-            patch.object(
-                sync_scheduler_assembly, "DailySyncMarkerService"
-            ) as marker_service,
+            patch.object(sync_wiring, "DailySyncMarkerService") as marker_service,
         ):
             marker_service.return_value.is_due.return_value = True
             server.SYNC_SCHEDULERS.daily_scheduler().schedule()
