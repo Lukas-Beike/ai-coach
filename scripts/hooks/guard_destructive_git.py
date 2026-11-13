@@ -25,37 +25,45 @@ GIT = re.compile(
 WHOLE_TREE = {".", "./", ".\\", ":/", ":/*", "*"}
 
 
-def _short(args: list[str], letter: str) -> bool:
-    return any(
-        a.startswith("-") and not a.startswith("--") and letter in a for a in args
-    )
+# Per subcommand: does it discard work, given the argument set and the letters
+# of all short-option groups (-fdx gives "fdx")?
+RULES = {
+    "reset": lambda names, short: any(
+        a.startswith("--ha") and "--hard".startswith(a) for a in names
+    ),
+    "clean": lambda names, short: "--force" in names or "f" in short,
+    "branch": lambda names, short: (
+        "D" in short
+        or (
+            ("--delete" in names or "d" in short)
+            and ("--force" in names or "f" in short)
+        )
+    ),
+    "checkout": lambda names, short: (
+        "--force" in names or "f" in short or bool(WHOLE_TREE & names)
+    ),
+    # Only `--staged` (without `--worktree`) unstages and keeps the files.
+    "restore": lambda names, short: (
+        bool(WHOLE_TREE & names)
+        and (
+            "--worktree" in names
+            or "W" in short
+            or not ("--staged" in names or "S" in short)
+        )
+    ),
+    "switch": lambda names, short: (
+        bool({"--discard-changes", "--force"} & names) or "f" in short
+    ),
+    "push": lambda names, short: (
+        "--force" in names or "f" in short or any(a.startswith("+") for a in names)
+    ),
+}
 
 
 def _discards(subcommand: str, args: list[str]) -> bool:
-    if subcommand == "reset":
-        return any(a.startswith("--ha") and "--hard".startswith(a) for a in args)
-    if subcommand == "clean":
-        return "--force" in args or _short(args, "f")
-    if subcommand == "branch":
-        deleting = "--delete" in args or _short(args, "d")
-        forcing = "--force" in args or _short(args, "f")
-        return _short(args, "D") or (deleting and forcing)
-    if subcommand == "checkout":
-        return "--force" in args or _short(args, "f") or bool(WHOLE_TREE & set(args))
-    if subcommand == "restore":
-        staged_only = bool({"--staged", "-S"} & set(args)) and not (
-            {"--worktree", "-W"} & set(args)
-        )
-        return bool(WHOLE_TREE & set(args)) and not staged_only
-    if subcommand == "switch":
-        return bool({"--discard-changes", "--force", "-f"} & set(args))
-    if subcommand == "push":
-        return (
-            "--force" in args
-            or _short(args, "f")
-            or any(a.startswith("+") for a in args)
-        )
-    return False
+    rule = RULES.get(subcommand)
+    short = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+    return bool(rule and rule(set(args), short))
 
 
 def blocked(command: str) -> bool:
