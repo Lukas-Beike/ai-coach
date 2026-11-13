@@ -682,8 +682,8 @@ class GarminRemoteReader:
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
-class GarminNutritionRefreshService:
-    """Refresh only Garmin energy or body measurements for nutrition views."""
+class GarminTargetedRefreshService:
+    """Refresh only the Garmin sources one nutrition or Analyse view uses."""
 
     def __init__(
         self,
@@ -703,11 +703,90 @@ class GarminNutritionRefreshService:
         self._utc_now = utc_now
         self._configured = configured
 
-    def refresh(self, source: str, start: date, end: date) -> dict[str, Any]:
+    def refresh_nutrition(self, source: str, start: date, end: date) -> dict[str, Any]:
+        """Refresh daily energy or body measurements for nutrition views."""
         if source not in {"daily_stats", "weight"} or start > end:
             raise AppError(400, "Ungültiger Ernährungs-Aktualisierungsbereich.")
+
+        def store(read: tuple[list[dict[str, Any]], bool]) -> dict[str, Any]:
+            records, complete = read
+            fetched_at = self._utc_now()
+            if source == "weight" and not records:
+                complete = False
+            snapshot = self._payload_service.view(
+                [source], start=start.isoformat(), end=end.isoformat()
+            )
+            self._apply_nutrition_refresh(
+                snapshot, source, start, end, records, complete, fetched_at
+            )
+            return {
+                "status": "ok" if complete else "partial",
+                "source": "Garmin Connect",
+                "data_source": source,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "records": len(records),
+                "synced_at": fetched_at,
+            }
+
+        return self._gated_refresh(
+            lambda: self._reader.fetch_nutrition_data(source, start, end), store, {}
+        )
+
+    def refresh_analysis(self, area: str, start: date, end: date) -> dict[str, Any]:
+        """Refresh the Garmin endpoints used by one Analyse subarea."""
+        if (
+            area not in {"sessions", "load", "performance", "recovery"}
+            or start > end
+            or (end - start).days > 89
+        ):
+            raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
+
+        def store(read: tuple[dict[str, Any], dict[str, bool]]) -> dict[str, Any]:
+            fetched, sources_complete = read
+            fetched_at = self._utc_now()
+            snapshot = self._payload_service.view(
+                [source for source in fetched if source != "activities"],
+                start=start.isoformat(),
+                end=end.isoformat(),
+            )
+            self._apply_analysis_refresh(
+                snapshot, area, start, end, fetched, sources_complete, fetched_at
+            )
+            complete = bool(sources_complete) and all(sources_complete.values())
+            return {
+                "status": "ok" if complete else "partial",
+                "source": "Garmin Connect",
+                "area": area,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "sources": dict(sources_complete),
+                "records": sum(
+                    len(value) if isinstance(value, list) else 1
+                    for value in fetched.values()
+                ),
+                "synced_at": fetched_at,
+            }
+
+        return self._gated_refresh(
+            lambda: self._reader.fetch_analysis_data(area, start, end),
+            store,
+            {"area": area},
+        )
+
+    def _gated_refresh(
+        self,
+        read: Callable[[], Any],
+        store: Callable[[Any], dict[str, Any]],
+        partial: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Read and store one bounded window under Garmin's shared gate.
+
+        Busy answers 503; a missing setup or a failed read is a partial result
+        with its reason, never the provider's error text. Store errors raise.
+        """
         if not self._configured():
-            return {"status": "partial", "reason": "not_configured"}
+            return {"status": "partial", "reason": "not_configured", **partial}
         with self._coordination.operation():
             if not self._coordination.acquire():
                 raise AppError(
@@ -715,37 +794,22 @@ class GarminNutritionRefreshService:
                 )
             try:
                 try:
-                    records, complete = self._reader.fetch_nutrition_data(
-                        source, start, end
-                    )
+                    fetched = read()
                 except AppError as exc:
                     if exc.reason in {
                         "not_configured",
                         "not_supported",
                         "library_unavailable",
                     }:
-                        return {"status": "partial", "reason": exc.reason}
+                        return {"status": "partial", "reason": exc.reason, **partial}
                     raise
                 except Exception:  # noqa: BLE001 - provider errors stay out of HTTP responses
-                    return {"status": "partial", "reason": "provider_unavailable"}
-                fetched_at = self._utc_now()
-                if source == "weight" and not records:
-                    complete = False
-                snapshot = self._payload_service.view(
-                    [source], start=start.isoformat(), end=end.isoformat()
-                )
-                self._apply_nutrition_refresh(
-                    snapshot, source, start, end, records, complete, fetched_at
-                )
-                return {
-                    "status": "ok" if complete else "partial",
-                    "source": "Garmin Connect",
-                    "data_source": source,
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "records": len(records),
-                    "synced_at": fetched_at,
-                }
+                    return {
+                        "status": "partial",
+                        "reason": "provider_unavailable",
+                        **partial,
+                    }
+                return store(fetched)
             finally:
                 self._coordination.release()
 
@@ -858,87 +922,6 @@ class GarminNutritionRefreshService:
                 for offset in range((end - start).days + 1)
             }
         )
-
-
-class GarminAnalysisRefreshService:
-    """Refresh only the Garmin endpoints used by one Analyse subarea."""
-
-    def __init__(
-        self,
-        reader: GarminRemoteReader,
-        database_manager: DatabaseManager,
-        snapshot_writer: GarminSnapshotWriter,
-        payload_service: Any,
-        coordination: GarminSyncCoordination,
-        utc_now: Callable[[], str],
-        configured: Callable[[], bool],
-    ) -> None:
-        self._reader = reader
-        self._database_manager = database_manager
-        self._snapshot_writer = snapshot_writer
-        self._payload_service = payload_service
-        self._coordination = coordination
-        self._utc_now = utc_now
-        self._configured = configured
-
-    def refresh(self, area: str, start: date, end: date) -> dict[str, Any]:
-        if (
-            area not in {"sessions", "load", "performance", "recovery"}
-            or start > end
-            or (end - start).days > 89
-        ):
-            raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
-        if not self._configured():
-            return {"status": "partial", "reason": "not_configured", "area": area}
-        with self._coordination.operation():
-            if not self._coordination.acquire():
-                raise AppError(
-                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
-                )
-            try:
-                try:
-                    fetched, sources_complete = self._reader.fetch_analysis_data(
-                        area, start, end
-                    )
-                except AppError as exc:
-                    if exc.reason in {
-                        "not_configured",
-                        "not_supported",
-                        "library_unavailable",
-                    }:
-                        return {"status": "partial", "reason": exc.reason, "area": area}
-                    raise
-                except Exception:  # noqa: BLE001 - provider errors stay out of HTTP responses.
-                    return {
-                        "status": "partial",
-                        "reason": "provider_unavailable",
-                        "area": area,
-                    }
-                fetched_at = self._utc_now()
-                snapshot = self._payload_service.view(
-                    [source for source in fetched if source != "activities"],
-                    start=start.isoformat(),
-                    end=end.isoformat(),
-                )
-                self._apply_analysis_refresh(
-                    snapshot, area, start, end, fetched, sources_complete, fetched_at
-                )
-                complete = bool(sources_complete) and all(sources_complete.values())
-                return {
-                    "status": "ok" if complete else "partial",
-                    "source": "Garmin Connect",
-                    "area": area,
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "sources": dict(sources_complete),
-                    "records": sum(
-                        len(value) if isinstance(value, list) else 1
-                        for value in fetched.values()
-                    ),
-                    "synced_at": fetched_at,
-                }
-            finally:
-                self._coordination.release()
 
     def _apply_analysis_refresh(
         self,

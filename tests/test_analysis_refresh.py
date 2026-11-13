@@ -9,7 +9,7 @@ from backend.sync.analysis_refresh import AnalysisRefreshService
 class AnalysisRefreshTests(unittest.TestCase):
     def make_service(self, today=date(2026, 10, 20)):
         garmin = Mock()
-        garmin.refresh.return_value = {
+        garmin.refresh_analysis.return_value = {
             "status": "ok",
             "sources": {"activities": True},
         }
@@ -20,7 +20,7 @@ class AnalysisRefreshTests(unittest.TestCase):
 
         result = service.refresh("sessions")
 
-        garmin.refresh.assert_called_once_with(
+        garmin.refresh_analysis.assert_called_once_with(
             "sessions", date(2026, 9, 9), date(2026, 10, 20)
         )
         self.assertEqual("ok", result["status"])
@@ -29,14 +29,14 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def test_recovery_refreshes_its_own_garmin_area_and_reports_partial_sources(self):
         service, garmin = self.make_service()
-        garmin.refresh.return_value = {
+        garmin.refresh_analysis.return_value = {
             "status": "partial",
             "sources": {"sleep": True, "hrv": False},
         }
 
         result = service.refresh("recovery", days=84)
 
-        garmin.refresh.assert_called_once_with(
+        garmin.refresh_analysis.assert_called_once_with(
             "recovery", date(2026, 7, 29), date(2026, 10, 20)
         )
         self.assertEqual("partial", result["status"])
@@ -45,7 +45,7 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def test_a_failed_garmin_read_is_reported_as_not_refreshed(self):
         service, garmin = self.make_service()
-        garmin.refresh.side_effect = RuntimeError("provider failure")
+        garmin.refresh_analysis.side_effect = RuntimeError("provider failure")
 
         result = service.refresh("load")
 
@@ -55,7 +55,7 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def test_a_garmin_result_without_any_source_is_not_reported_as_refreshed(self):
         service, garmin = self.make_service()
-        garmin.refresh.return_value = {"status": "ok", "sources": {"activities": False}}
+        garmin.refresh_analysis.return_value = {"status": "ok", "sources": {"activities": False}}
 
         result = service.refresh("performance")
 
@@ -64,7 +64,7 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def test_a_running_garmin_sync_is_pending(self):
         service, garmin = self.make_service()
-        garmin.refresh.return_value = {"status": "already_running"}
+        garmin.refresh_analysis.return_value = {"status": "already_running"}
 
         result = service.refresh("load")
 
@@ -73,7 +73,7 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def make_both(self, *, garmin_configured=True, wahoo_configured=True):
         garmin = Mock()
-        garmin.refresh.return_value = (
+        garmin.refresh_analysis.return_value = (
             {"status": "ok", "sources": {"activities": True}}
             if garmin_configured
             else {"status": "partial", "reason": "not_configured"}

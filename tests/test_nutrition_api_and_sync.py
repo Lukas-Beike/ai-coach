@@ -230,7 +230,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             "date": "2026-09-23",
             "entries": [],
         }
-        self.nutrition_refresh_service.refresh.return_value = {
+        self.nutrition_refresh_service.refresh_nutrition.return_value = {
             "status": "ok",
             "source": "Garmin Connect",
             "records": 1,
@@ -244,7 +244,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.diary_service.sync_status.get_day_summary.assert_called_once_with(
             "2026-09-23"
         )
-        self.nutrition_refresh_service.refresh.assert_called_once_with(
+        self.nutrition_refresh_service.refresh_nutrition.assert_called_once_with(
             "daily_stats", date(2026, 9, 23), date(2026, 9, 23)
         )
         self.handler.send_json.assert_called_once_with(
@@ -270,7 +270,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             "entries": [],
             "energy_expenditure": {"freshness": "stale"},
         }
-        self.nutrition_refresh_service.refresh.return_value = {
+        self.nutrition_refresh_service.refresh_nutrition.return_value = {
             "status": "partial",
             "reason": "provider_unavailable",
         }
@@ -292,13 +292,13 @@ class NutritionHttpApiTests(unittest.TestCase):
             "days": 84,
             "date": "2026-09-23",
         }
-        self.nutrition_refresh_service.refresh.return_value = {"status": "partial"}
+        self.nutrition_refresh_service.refresh_nutrition.return_value = {"status": "partial"}
 
         dispatch_route(
             self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
         )
 
-        self.nutrition_refresh_service.refresh.assert_called_once_with(
+        self.nutrition_refresh_service.refresh_nutrition.assert_called_once_with(
             "daily_stats", date(2026, 7, 2), date(2026, 9, 23)
         )
         self.handler.send_json.assert_called_once_with(
@@ -307,13 +307,13 @@ class NutritionHttpApiTests(unittest.TestCase):
 
     def test_nutrition_refresh_body_uses_bounded_weight_range(self) -> None:
         self.handler.read_json.return_value = {"area": "body"}
-        self.nutrition_refresh_service.refresh.return_value = {"status": "ok"}
+        self.nutrition_refresh_service.refresh_nutrition.return_value = {"status": "ok"}
 
         dispatch_route(
             self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
         )
 
-        self.nutrition_refresh_service.refresh.assert_called_once_with(
+        self.nutrition_refresh_service.refresh_nutrition.assert_called_once_with(
             "weight", date(2026, 7, 3), date(2026, 9, 24)
         )
 
@@ -327,7 +327,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
         )
 
-        self.nutrition_refresh_service.refresh.assert_not_called()
+        self.nutrition_refresh_service.refresh_nutrition.assert_not_called()
         self.handler.send_json.assert_called_once_with(
             200,
             {
@@ -345,7 +345,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             dispatch_route(
                 self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"
             )
-        self.nutrition_refresh_service.refresh.assert_not_called()
+        self.nutrition_refresh_service.refresh_nutrition.assert_not_called()
 
     def test_put_entry_route_is_removed(self) -> None:
         # Only the Coach correction changes an entry (#2137, F-018).

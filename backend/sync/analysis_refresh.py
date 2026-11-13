@@ -109,7 +109,7 @@ class AnalysisRefreshService:
         else:
             window_days = days or 84
         start = end - timedelta(days=window_days - 1)
-        return self._garmin_refresh().refresh(area, start, end)
+        return self._garmin_refresh().refresh_analysis(area, start, end)
 
 
 def _validate_request(area: str, days: int | None) -> None:

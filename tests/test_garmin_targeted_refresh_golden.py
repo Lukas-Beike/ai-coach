@@ -25,9 +25,8 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_service import (
-    GarminAnalysisRefreshService,
-    GarminNutritionRefreshService,
     GarminSyncCoordination,
+    GarminTargetedRefreshService,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.state import SyncStateRepository
@@ -164,8 +163,8 @@ class GarminTargetedRefreshGoldenTests(unittest.TestCase):
         self.coordination = GarminSyncCoordination(threading.Lock())
         self.configured = True
 
-    def services(self) -> tuple[Any, Any]:
-        arguments = (
+    def service(self) -> GarminTargetedRefreshService:
+        return GarminTargetedRefreshService(
             self.reader,
             self.database,
             self.writer,
@@ -174,46 +173,42 @@ class GarminTargetedRefreshGoldenTests(unittest.TestCase):
             lambda: NOW,
             lambda: self.configured,
         )
-        return (
-            GarminNutritionRefreshService(*arguments),
-            GarminAnalysisRefreshService(*arguments),
-        )
 
     def run_golden_sequence(self) -> list[Any]:
-        nutrition, analysis = self.services()
+        service = self.service()
         start = TODAY - timedelta(days=6)
         results: list[Any] = [
-            nutrition.refresh("daily_stats", start, TODAY),
-            nutrition.refresh("weight", start, TODAY),
-            analysis.refresh("sessions", start, TODAY),
-            analysis.refresh("load", start, TODAY),
-            analysis.refresh("recovery", start, TODAY),
-            nutrition.store_daytime(
+            service.refresh_nutrition("daily_stats", start, TODAY),
+            service.refresh_nutrition("weight", start, TODAY),
+            service.refresh_analysis("sessions", start, TODAY),
+            service.refresh_analysis("load", start, TODAY),
+            service.refresh_analysis("recovery", start, TODAY),
+            service.store_daytime(
                 TODAY,
                 {"daily_stats": [{"calendarDate": _day(0), "totalKilocalories": 2500}]},
             ),
-            nutrition.store_daytime(
+            service.store_daytime(
                 TODAY,
                 {"daily_stats": [{"calendarDate": _day(0), "totalKilocalories": 2500}]},
             ),
         ]
         self.reader.fetch_nutrition_data.side_effect = lambda *_a: ([], True)
-        results.append(nutrition.refresh("weight", start, TODAY))
+        results.append(service.refresh_nutrition("weight", start, TODAY))
         self.reader.fetch_nutrition_data.side_effect = RuntimeError("provider down")
         self.reader.fetch_analysis_data.side_effect = RuntimeError("provider down")
-        results.append(nutrition.refresh("daily_stats", start, TODAY))
-        results.append(analysis.refresh("load", start, TODAY))
+        results.append(service.refresh_nutrition("daily_stats", start, TODAY))
+        results.append(service.refresh_analysis("load", start, TODAY))
         for reason in ("not_supported", "library_unavailable", "not_configured"):
             error = AppError(503, "unavailable", reason=reason)
             self.reader.fetch_nutrition_data.side_effect = error
             self.reader.fetch_analysis_data.side_effect = error
-            results.append(nutrition.refresh("weight", start, TODAY))
-            results.append(analysis.refresh("recovery", start, TODAY))
+            results.append(service.refresh_nutrition("weight", start, TODAY))
+            results.append(service.refresh_analysis("recovery", start, TODAY))
         for call in (
-            lambda: nutrition.refresh("sleep", start, TODAY),
-            lambda: nutrition.refresh("weight", TODAY, start),
-            lambda: analysis.refresh("nutrition", start, TODAY),
-            lambda: analysis.refresh("load", TODAY - timedelta(days=90), TODAY),
+            lambda: service.refresh_nutrition("sleep", start, TODAY),
+            lambda: service.refresh_nutrition("weight", TODAY, start),
+            lambda: service.refresh_analysis("nutrition", start, TODAY),
+            lambda: service.refresh_analysis("load", TODAY - timedelta(days=90), TODAY),
         ):
             results.append(self.app_error(call))
         self.reader.fetch_nutrition_data.side_effect = AppError(
@@ -221,23 +216,27 @@ class GarminTargetedRefreshGoldenTests(unittest.TestCase):
         )
         self.reader.fetch_analysis_data.side_effect = AppError(500, "x", reason="other")
         results.append(
-            self.app_error(lambda: nutrition.refresh("weight", start, TODAY))
+            self.app_error(lambda: service.refresh_nutrition("weight", start, TODAY))
         )
-        results.append(self.app_error(lambda: analysis.refresh("load", start, TODAY)))
+        results.append(
+            self.app_error(lambda: service.refresh_analysis("load", start, TODAY))
+        )
         self.assertTrue(self.coordination.acquire())
         try:
             results.append(
-                self.app_error(lambda: nutrition.refresh("weight", start, TODAY))
+                self.app_error(
+                    lambda: service.refresh_nutrition("weight", start, TODAY)
+                )
             )
             results.append(
-                self.app_error(lambda: analysis.refresh("load", start, TODAY))
+                self.app_error(lambda: service.refresh_analysis("load", start, TODAY))
             )
-            results.append(nutrition.store_daytime(TODAY, {"daily_stats": [{"x": 1}]}))
+            results.append(service.store_daytime(TODAY, {"daily_stats": [{"x": 1}]}))
         finally:
             self.coordination.release()
         self.configured = False
-        results.append(nutrition.refresh("weight", start, TODAY))
-        results.append(analysis.refresh("load", start, TODAY))
+        results.append(service.refresh_nutrition("weight", start, TODAY))
+        results.append(service.refresh_analysis("load", start, TODAY))
         return results
 
     @staticmethod

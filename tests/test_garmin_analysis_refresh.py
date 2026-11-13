@@ -11,7 +11,7 @@ from support import garmin_services
 from backend.errors import AppError
 from backend.providers.garmin import targeted_analysis_sources
 from backend.sync import garmin, garmin_wiring
-from backend.sync.garmin_service import GarminAnalysisRefreshService, GarminRemoteReader
+from backend.sync.garmin_service import GarminRemoteReader, GarminTargetedRefreshService
 
 
 class GarminAnalysisRefreshTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         coordination = Mock()
         coordination.operation.return_value = nullcontext()
         coordination.acquire.return_value = True
-        service = GarminAnalysisRefreshService(
+        service = GarminTargetedRefreshService(
             reader,
             manager,
             writer,
@@ -213,7 +213,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
     def test_refresh_updates_only_returned_sources_and_marks_gaps_partial(self) -> None:
         service, reader, writer, coordination = self.make_service()
 
-        result = service.refresh("load", date(2026, 9, 1), date(2026, 9, 24))
+        result = service.refresh_analysis("load", date(2026, 9, 1), date(2026, 9, 24))
 
         self.assertEqual(result["status"], "partial")
         self.assertEqual(
@@ -255,7 +255,9 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
             {"activities": True},
         )
 
-        result = service.refresh("sessions", date(2026, 8, 14), date(2026, 9, 24))
+        result = service.refresh_analysis(
+            "sessions", date(2026, 8, 14), date(2026, 9, 24)
+        )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["area"], "sessions")
@@ -272,7 +274,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
     def test_refresh_rejects_ranges_over_ninety_days(self) -> None:
         service, reader, writer, _coordination = self.make_service()
         with self.assertRaises(AppError):
-            service.refresh("recovery", date(2026, 1, 1), date(2026, 4, 1))
+            service.refresh_analysis("recovery", date(2026, 1, 1), date(2026, 4, 1))
         reader.fetch_analysis_data.assert_not_called()
         writer.write_refresh.assert_not_called()
 
@@ -292,9 +294,9 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
             patch.object(garmin_wiring, "GarminRemoteReader", return_value=reader),
             patch.object(garmin, "GarminPayloadService", return_value=payloads),
         ):
-            service = garmin_services(context).analysis_refresh_service()
+            service = garmin_services(context).targeted_refresh_service()
 
-        self.assertIsInstance(service, GarminAnalysisRefreshService)
+        self.assertIsInstance(service, GarminTargetedRefreshService)
         self.assertIs(service._database_manager, database)
         self.assertIs(service._reader, reader)
         self.assertIs(service._payload_service, payloads)
@@ -308,7 +310,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         merged: dict[str, dict[str, Any]] = {}
         for complete in (True, False):
             snapshot: dict[str, Any] = {"weight": [{"weight": [deleted, kept]}]}
-            GarminAnalysisRefreshService._merge_analysis_source(
+            GarminTargetedRefreshService._merge_analysis_source(
                 snapshot,
                 "weight",
                 [{"weighIns": [kept]}],
