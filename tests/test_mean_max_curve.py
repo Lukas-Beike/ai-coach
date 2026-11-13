@@ -608,7 +608,35 @@ class ProfileSelectionTests(unittest.TestCase):
             (calls + 1, "Morning ride"), (self.session_records.call_count, row["name"])
         )
 
-    def test_an_older_concurrent_build_does_not_replace_a_newer_result(self):
+    def test_a_shared_read_follows_a_merge_a_lap_set_and_a_record_update(self):
+        summaries = []
+        self.add_ride(summaries, "act_1")
+        add_session(self.db, "act_2")
+        add_record(self.db, WAHOO, "w-act_2", "act_2")
+        store_streams(
+            self.db, WAHOO, "w-act_2", ride_power(400.0), StreamResolution.FULL
+        )
+        service = self.service(summaries)
+        service.curve_records(60, shared=True)
+        changes = {
+            "merge": lambda: self.db.execute(
+                "UPDATE activity_sessions SET state = 'duplicate', "
+                "merged_into = 'act_1' WHERE activity_id = 'act_2'"
+            ),
+            "lap set": lambda: store_laps(self.db, GARMIN, "g-act_1", INTERVAL_LAPS),
+            "record update": lambda: self.db.execute(
+                "UPDATE activity_records SET updated_at = '2026-10-17T00:00:00+00:00' "
+                "WHERE provider_activity_id = 'g-act_1'"
+            ),
+        }
+        for name, change in changes.items():
+            with self.subTest(name):
+                calls = self.session_records.call_count
+                change()
+                service.curve_records(60, shared=True)
+                self.assertEqual(calls + 1, self.session_records.call_count)
+
+    def test_a_concurrent_build_finishing_later_keeps_the_first_result(self):
         self.add_ride([], "act_1")
         reader = SessionCurveReader(self.session_records)
         builds = []

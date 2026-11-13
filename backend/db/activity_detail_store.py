@@ -587,8 +587,9 @@ def _owned_rows(
     """Return ``columns`` of the rows owned by each live session in ``activity_ids``.
 
     Rows of records of the session itself and of sessions merged into it count as
-    its own, and the ``owner`` column names that session; deleted sessions own
-    nothing. ``source`` is the FROM clause with the aliases ``r`` and ``s``.
+    its own, and the ``owner`` column names that session; rows of records whose
+    own session is deleted are left out. ``source`` is the FROM clause with the
+    aliases ``r`` and ``s``.
     """
     ids = list(
         dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)

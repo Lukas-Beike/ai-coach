@@ -125,11 +125,11 @@ class SessionCurveReader:
         the stored records and detail sets of ``activity_ids`` that ``curves``
         reads, so a new day, session or merge, or a changed stream, lap set or
         provider summary builds the records again, and an unchanged read queries no
-        session. Callers share one tuple of read-only records. A build that
-        finishes after another stored its result does not replace it: the slot
-        takes a result only if it still holds what it held at the call's start.
-        Concurrent misses of one stamp each build once; the per-session memo makes
-        the repeat cheap.
+        session. Callers share one tuple of read-only records. Of concurrent
+        builds the first to finish is kept: a build stores its result only if the
+        slot still holds what it held when the call started, and the next read
+        rebuilds if that result is no longer current. Concurrent misses each build
+        once; the per-session memo makes the repeat cheap.
         """
         stamp = _sha256(
             [
