@@ -343,6 +343,7 @@ test("@responsive active local gear offers a maintenance button with receipt and
   const runPanel = page.locator("#equipmentPanel-run");
   const active = runPanel.locator(".equipment-card").filter({ hasText: "Gear a" }).first();
   await expect(active.locator("summary .connection-chip")).toHaveText("Wartung fällig");
+  await expect(page.locator("#equipmentItems [role='status']")).toHaveCount(0);
   await active.locator("summary").click();
   await expect(runPanel.getByRole("button", { name: "Wartung erledigt" })).toHaveCount(1);
   await active.getByRole("button", { name: "Wartung erledigt" }).click();
@@ -351,7 +352,13 @@ test("@responsive active local gear offers a maintenance button with receipt and
   await expect(receipt).toContainText("Wartung erfasst.");
   // Recording maintenance re-renders the list; the card the athlete opened stays open.
   await expect(active).toHaveAttribute("open", "");
+  // A background state load re-renders the list (renderPerformance); the receipt and its undo stay (#2614).
+  await page.evaluate(() => renderTrainingRecords());
   await receipt.getByRole("button", { name: "Rückgängig" }).click();
   await expect.poll(() => undone).toEqual({ change_id: "change-a", expected_current_hash: "hash-a" });
-  await expect(page.locator("#equipmentItems [role='status']").filter({ hasText: "Zurückgenommen." })).toBeVisible();
+  await expect(receipt).toHaveCount(1);
+  await expect(receipt).toContainText("Zurückgenommen.");
+  // Another tab is a new view: the receipt goes.
+  await page.getByRole("tab", { name: "Fahrrad" }).click();
+  await expect(receipt).toHaveCount(0);
 });
