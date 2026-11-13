@@ -116,7 +116,7 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 
 #### Scenario: Browser matrix
 - **WHEN** the shared image is available
-- **THEN** `mobile`, `tablet-landscape` and `desktop` run in two shards each, on Node 22 with `npm ci --ignore-scripts` and the pinned prepared browser image; the Node unit tests (`node --test tests/*.cjs`) run once, in desktop shard 1
+- **THEN** `mobile` and `tablet-landscape` run in two shards each and `desktop` in three, on Node 22 with `npm ci --ignore-scripts` and the pinned prepared browser image; the Node unit tests (`node --test tests/*.cjs`) run once, in desktop shard 1
 
 #### Scenario: Browser evidence
 - **WHEN** the browser matrix finishes
