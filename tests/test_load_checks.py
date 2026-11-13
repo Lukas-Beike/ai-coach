@@ -436,11 +436,10 @@ class IndoorFtpTests(unittest.TestCase):
                         sport, environment, date.fromisoformat(unit["date"])
                     )
                     estimate = estimate_planned_unit(unit, resolved)
-                    zones = resolved
                     self.assertEqual(
                         expected,
                         (
-                            (zones.ftp, zones.lthr, zones.threshold_pace),
+                            (resolved.ftp, resolved.lthr, resolved.threshold_pace),
                             (
                                 _rounded(estimate.load),
                                 _rounded(estimate.intensity_factor),

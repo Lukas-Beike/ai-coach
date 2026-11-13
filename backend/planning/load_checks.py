@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from backend.activities.workout_load import WorkoutEstimate, ZoneSettings
-from backend.activities.zone_settings import effective_zone_configuration
+from backend.activities.workout_load import WorkoutEstimate
+from backend.activities.zone_settings import ZoneSettings, effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
