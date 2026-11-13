@@ -10,9 +10,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 
 BLS_OATS_ID = "bls:C133000"
-FIXTURE_DEMO_SEED_VERSION = "8"
+FIXTURE_DEMO_SEED_VERSION = "9"
 FIXTURE_RATIONALE = "Synthetische Vorschau"
-FIXTURE_TRAINING_FEATURES_SEED_VERSION = "2"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "3"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
@@ -580,9 +580,11 @@ def fixture_summary_hash(row):
 
 def fixture_wahoo_id(row_id):
     """The positive Wahoo workout id of a fixture row id; digit ids stay as they are."""
+    if row_id is None:
+        raise ValueError("a fixture activity row needs an id")
     text = str(row_id)
     if text.isascii() and text.isdigit():
-        return text
+        return str(int(text))  # the mapper's own normalisation
     return str(int(hashlib.sha256(text.encode()).hexdigest()[:12], 16))
 
 
@@ -650,9 +652,7 @@ def _save_activity_snapshot(db, snapshot):
             zone=UTC,
         )
         ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
-    if stored_retrieved_at(
-        snapshot, zone=UTC
-    ) is None or server.CANONICAL_READ.serves_tables(db):
+    if retrieved_at is None or server.CANONICAL_READ.serves_tables(db):
         return
     backfill = server.CANONICAL_BACKFILL.status_reader
     for _ in range(1000):
@@ -2513,8 +2513,6 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "elapsed_time": 3720,
                 "distance": 25000,
                 "icu_training_load": 50,
-                # Intervals.icu reports a fractional intensity and its own NP key.
-                "icu_intensity": 0.78,
                 "icu_weighted_avg_watts": 205,
                 "icu_hr_zone_times": [600, 1800, 600, 450, 150],
             }
@@ -2563,7 +2561,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 detailed["streams"],
                 hr_zone_seconds=activity["icu_hr_zone_times"],
             )
-            self.send_json(200, {"activity_id": fixture_wahoo_id(activity["id"])})
+            self.send_json(200, {"activity_id": activity["id"]})
             return
         super().do_GET()
 
