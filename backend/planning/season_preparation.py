@@ -1,5 +1,3 @@
-from backend.planning.running_week import week_start as _week_start
-
 """Season evidence from the recorded activities before a competition."""
 
 from collections.abc import Callable, Mapping, Sequence
@@ -15,6 +13,7 @@ from backend.activities.activity_summary import (
 from backend.athlete.measurements import number
 from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import Environment
+from backend.planning.running_week import week_start as _week_start
 from backend.planning.season import season_plan_summary
 from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
