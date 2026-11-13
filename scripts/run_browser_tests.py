@@ -225,6 +225,8 @@ class Processes:
         self.stop = stop or threading.Event()
         self.lock = threading.Lock()
         self.active = set()
+        # The last captured error output per thread, for `checked` (#2656).
+        self.errors = threading.local()
 
     def run(
         self, command, *, cwd=ROOT, env=None, timeout=60, capture=True, cleanup=False
@@ -245,7 +247,7 @@ class Processes:
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
             **options,
         )
         with self.lock:
@@ -254,7 +256,8 @@ class Processes:
         try:
             while True:
                 try:
-                    output, _ = process.communicate(timeout=0.2)
+                    output, error = process.communicate(timeout=0.2)
+                    self.errors.last = (error or b"").decode("utf-8", errors="replace")
                     return process.returncode, (output or b"").decode(
                         "utf-8", errors="replace"
                     )
@@ -308,7 +311,15 @@ class Processes:
 def checked(processes, command, **kwargs):
     code, output = processes.run(command, **kwargs)
     if code:
-        raise RunnerError(f"Required tool/container command failed (exit {code})")
+        # Name the command by its first words (never its arguments) and show the
+        # end of what it printed, so a failed build or start is visible (#2656).
+        error = getattr(getattr(processes, "errors", None), "last", "")
+        tail = "\n".join((output + "\n" + error).strip().splitlines()[-20:])
+        name = " ".join([Path(str(command[0])).name, *map(str, command[1:3])])
+        raise RunnerError(
+            f"Required tool/container command failed (exit {code}): {name}"
+            + (f"\n{tail}" if tail else "")
+        )
     return output
 
 
