@@ -5,17 +5,20 @@ from __future__ import annotations
 import tempfile
 import unittest
 from datetime import date
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
-from activity_row_support import NoObservations, SnapshotActivityRows, StoredCoverage
+from activity_row_support import ServedActivityReads
 from canonical_detail_support import add_session_record, open_manager
 from support import dispatch_route
 
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
-from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
+from backend.performance.wiring import build_activity_reads
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 
 class FakeHandler:
@@ -47,7 +50,9 @@ class SyncGetRoutesTests(unittest.TestCase):
 
     def test_sync_job_payload_and_exact_path_pattern(self) -> None:
         self.queue.state.return_value = {"id": "a1-b2", "state": "running"}
-        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/sync/jobs/a1-b2"))
+        self.assertTrue(
+            dispatch_route(self.routes, self.handler, "/api/sync/jobs/a1-b2")
+        )
         self.assertEqual(self.handler.responses, [(200, self.queue.state.return_value)])
         self.queue.state.assert_called_once_with("a1-b2")
 
@@ -86,8 +91,12 @@ class SyncGetRoutesTests(unittest.TestCase):
         )
         resync.progress.assert_called_once_with("garmin")
 
-        self.assertFalse(dispatch_route(routes, FakeHandler(), "/api/wahoo/full-resync"))
-        self.assertFalse(dispatch_route(self.routes, FakeHandler(), "/api/garmin/full-resync"))
+        self.assertFalse(
+            dispatch_route(routes, FakeHandler(), "/api/wahoo/full-resync")
+        )
+        self.assertFalse(
+            dispatch_route(self.routes, FakeHandler(), "/api/garmin/full-resync")
+        )
 
     def test_sync_status_payload_is_forwarded_unchanged(self) -> None:
         payload = {"status": "idle", "jobs": [{"id": "fake"}]}
@@ -232,15 +241,20 @@ class ActivityDetailRouteTests(unittest.TestCase):
             self.manager, ProviderId.GARMIN, "g1", "act_g", duration_s=3600.0
         )
         snapshots = _Snapshots()
-        self.assembly = ActivityReadAssembly(
-            lambda: self.manager,
-            ActivityReadSources(
-                lambda: SnapshotActivityRows(snapshots),
-                observation_reader=NoObservations,
-                coverage=lambda: StoredCoverage(None),
+        ctx = SimpleNamespace(
+            database=lambda: self.manager,
+            athlete=SimpleNamespace(
+                activity_feedback=_Feedback,
+                profile=lambda: SimpleNamespace(get_from_db=lambda _db: {}),
+                equipment=lambda: SimpleNamespace(
+                    read=lambda *, activity_id: {"items": [], "assignments": []}
+                ),
             ),
-            _Feedback,
-            lambda _activity_id: {"items": [], "assignments": []},
+            canonical_read=ServedActivityReads(snapshots),
+        )
+        self.assembly = build_activity_reads(
+            cast(Any, ctx),
+            session_activities=CanonicalTableReader().session_activities,
             refreshable_providers=lambda: ("intervals", "garmin"),
         )
         self.reads = Mock(side_effect=self.assembly.activity_read)
@@ -254,7 +268,9 @@ class ActivityDetailRouteTests(unittest.TestCase):
 
     def get(self, activity_id: str) -> dict:
         handler = FakeHandler()
-        self.assertTrue(dispatch_route(self.routes, handler, f"/api/activities/{activity_id}"))
+        self.assertTrue(
+            dispatch_route(self.routes, handler, f"/api/activities/{activity_id}")
+        )
         ((status, payload),) = handler.responses
         self.assertEqual(200, status)
         assert isinstance(payload, dict)
@@ -292,7 +308,9 @@ class ActivityDetailRouteTests(unittest.TestCase):
     def test_unknown_session_is_not_found(self) -> None:
         for activity_id in ("act_missing", "missing"):
             with self.subTest(activity_id), self.assertRaises(AppError) as missing:
-                dispatch_route(self.routes, FakeHandler(), f"/api/activities/{activity_id}")
+                dispatch_route(
+                    self.routes, FakeHandler(), f"/api/activities/{activity_id}"
+                )
             self.assertEqual(404, missing.exception.status)
             self.assertEqual("activity_details_not_found", missing.exception.reason)
 

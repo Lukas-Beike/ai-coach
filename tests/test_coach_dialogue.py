@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
 from support import (
+    athlete_checkin,
     canonical_backfill_stopped,
     isolated_server,
     latest_tool_outputs,
@@ -278,9 +279,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 before = self.state()
 
                 def mixed_response(_payload, before=before, write_first=write_first):
-                    current = server.APP.coach_conversation.message_service().list()[-1][
-                        "id"
-                    ]
+                    current = server.APP.coach_conversation.message_service().list()[
+                        -1
+                    ]["id"]
                     clarification = self.call(
                         "clarify_coach_request",
                         {
@@ -2354,7 +2355,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
         service = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=service),
+            athlete_checkin(server, service),
             patch.object(
                 service, "save_coach", wraps=service.save_coach
             ) as save_checkin,
@@ -2411,7 +2412,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
         service = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=service),
+            athlete_checkin(server, service),
             patch.object(
                 service, "save_coach", wraps=service.save_coach
             ) as save_checkin,
@@ -2646,7 +2647,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
         service = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=service),
+            athlete_checkin(server, service),
             patch.object(service, "save_coach") as save,
         ):
             result, _ = self.turn("Heute müde", [cancel], cancel_event=cancelled)
@@ -2827,7 +2828,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
         service = server.ATHLETE_DATA.checkin()
         with (
-            patch.object(server.ATHLETE_DATA, "checkin", return_value=service),
+            athlete_checkin(server, service),
             patch.object(service, "save_coach", wraps=service.save_coach) as save,
         ):
             result, _ = self.turn(

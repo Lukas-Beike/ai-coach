@@ -24,7 +24,7 @@ from backend.db import canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.http_api.athlete_assembly import AthleteDataAssembly
+from backend.performance.wiring import build_athlete_data
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -146,15 +146,27 @@ class EquipmentSessionTests(unittest.TestCase):
 
     def test_assembled_activity_summaries_take_no_writer(self) -> None:
         # The production read_summaries callback, not the test's stand-in.
-        assembly = object.__new__(AthleteDataAssembly)
-        assembly._database_manager = lambda: self.manager
         rows = Mock()
         rows.activity_summaries.return_value = ()
-        assembly._activity_rows = lambda: rows
+        athlete = build_athlete_data(
+            database_manager=lambda: self.manager,
+            key_values=Mock(),
+            activity_feedback_repository=Mock(),
+            profile_mutation_coordinator=Mock(),
+            utc_now=Mock(),
+            local_date=Mock(),
+            event_buffer=Mock(),
+            activity_rows=lambda: rows,
+            table_reader=CanonicalTableReader,
+            run_lthr=Mock(),
+            load_inputs_changed=Mock(),
+            thresholds_changed=Mock(),
+            threshold_warnings=Mock(),
+        )
         with patch.object(
             self.manager, "unit_of_work", side_effect=AssertionError("writer taken")
         ):
-            self.assertEqual(assembly.activity_summaries(), ())
+            self.assertEqual(athlete.activity_summaries(), ())
         rows.activity_summaries.assert_called_once()
 
     def test_repeated_gear_syncs_with_unchanged_values_rewrite_nothing(self) -> None:

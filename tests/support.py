@@ -292,6 +292,17 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
 
 
 @contextmanager
+def athlete_checkin(server, service: Any):
+    """Serve the given check-in service from the athlete data, as the context reads it."""
+    athlete = replace(server.ATHLETE_DATA, checkin=lambda: service)
+    with (
+        patch.object(server, "ATHLETE_DATA", athlete),
+        patch.object(server.APP, "athlete", athlete),
+    ):
+        yield
+
+
+@contextmanager
 def canonical_backfill_stopped(server, timeout: float = 10.0):
     """Stop and join the backfill thread a real restore starts before cleanup."""
     try:
