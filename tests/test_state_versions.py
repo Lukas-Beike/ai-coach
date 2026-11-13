@@ -9,9 +9,10 @@ import unittest
 from pathlib import Path
 
 import snapshot_seed
+from canonical_domain_support import local_zone_configuration
 
 from backend.athlete.profile import ProfileService
-from backend.db import DatabaseManager, row_factory
+from backend.db import DatabaseManager, canonical_domain_store, row_factory
 from backend.db.key_value import KeyValueService
 from backend.db.repositories import (
     KeyValueRepository,
@@ -172,7 +173,7 @@ class StateVersionServiceTests(unittest.TestCase):
             actual,
             {
                 "activities": "garmin-at:wahoo-at:2",
-                "performance": "garmin-at:wahoo-at:1",
+                "performance": "garmin-at:wahoo-at:1::0",
                 "garmin": "garmin-at",
                 "chat": "9:2",
                 "library": "2026-09-16:2",
@@ -190,7 +191,36 @@ class StateVersionServiceTests(unittest.TestCase):
             self.key_values.set(db, "last_wahoo_sync_at", "wahoo-later")
         after = self.service.versions()
         self.assertEqual(after["activities"], "garmin-at:wahoo-later:2")
-        self.assertEqual(after["performance"], "garmin-at:wahoo-later:1")
+        self.assertEqual(after["performance"], "garmin-at:wahoo-later:1::0")
+
+        # A local zone save, its removal and its undo each move the performance
+        # marker, so other devices reload LT1/LT2 derived from the zones (#2479).
+        zone = local_zone_configuration()
+        key = canonical_domain_store.zone_configuration_key(zone)
+        steps = (
+            lambda db: canonical_domain_store.upsert_local_zone_configuration(
+                db, zone, now="2026-09-21T08:00:00+00:00"
+            ),
+            lambda db: canonical_domain_store.retire_local_zone_configuration(
+                db, key, now="2026-09-21T09:00:00+00:00"
+            ),
+            lambda db: canonical_domain_store.upsert_local_zone_configuration(
+                db, zone, now="2026-09-21T10:00:00+00:00", renew=False
+            ),
+        )
+        markers = [after["performance"]]
+        for step in steps:
+            with self.manager.unit_of_work() as db:
+                step(db)
+            markers.append(self.service.versions()["performance"])
+        self.assertEqual(
+            markers[1:],
+            [
+                "garmin-at:wahoo-later:1:2026-09-21T08:00:00+00:00:1",
+                "garmin-at:wahoo-later:1:2026-09-21T09:00:00+00:00:1",
+                "garmin-at:wahoo-later:1:2026-09-21T10:00:00+00:00:1",
+            ],
+        )
 
     def test_versions_keep_empty_snapshot_and_marker_fallbacks(self) -> None:
         self.manager.reader_calls = 0
@@ -212,7 +242,7 @@ class StateVersionServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(actual["activities"], "::0")
-        self.assertEqual(actual["performance"], "::0")
+        self.assertEqual(actual["performance"], "::0::0")
         self.assertEqual(actual["garmin"], "")
         self.assertEqual(actual["chat"], "0:0")
         self.assertEqual(actual["library"], ":0")

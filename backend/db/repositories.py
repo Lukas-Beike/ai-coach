@@ -911,6 +911,12 @@ class StateVersionRepository:
             "observations": db.execute(
                 "SELECT COUNT(*) AS count FROM observations"
             ).fetchone(),
+            # A save, removal or undo dates its row, so other devices reload the
+            # thresholds derived from the zones (#2479).
+            "zones": db.execute(
+                "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
+                "FROM zone_configurations"
+            ).fetchone(),
         }
 
 

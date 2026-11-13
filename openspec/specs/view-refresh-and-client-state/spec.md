@@ -93,7 +93,11 @@ The client SHALL start independent requested area reads alongside bootstrap, ren
 - **WHEN** a load sequence or session is replaced
 - **THEN** late old-area results neither render nor write caches and cannot claim versions that arrived after their request started.
 
-Evidence: `public/state-loader.js::loadState`, `public/state-loader.js::renderAreasAsTheyArrive`, `public/state-loader.js::load`, `public/sync-status.js::changedSyncAreas`; `tests/state-loader-startup.test.cjs::area reads start before the bootstrap response arrives`, `tests/state-loader-startup.test.cjs::each area is rendered and stored as soon as it arrives, without waiting for a slower one`, `tests/reload-coalescing.test.cjs::reloads requested during a load run as one follow-up`, `tests/reload-coalescing.test.cjs::a live load records the version it was started for, not one that arrived while it ran`.
+#### Scenario: Zone change on another device
+- **WHEN** a zone configuration is saved, removed or undone on one device
+- **THEN** the `performance` state version changes and another device's next sync status reloads its performance and plan views, so LT1/LT2 derived from the zones are current there too.
+
+Evidence: `public/state-loader.js::loadState`, `public/state-loader.js::renderAreasAsTheyArrive`, `public/state-loader.js::load`, `public/sync-status.js::changedSyncAreas`, `backend/http_api/state_versions.py::StateVersionService.versions`, `backend/db/repositories.py::StateVersionRepository.counters`; `tests/test_state_versions.py::StateVersionServiceTests.test_versions_preserve_exact_public_markers_and_read_scope`, `tests/reload-coalescing.test.cjs::a changed server version reloads the areas that show it`, `tests/state-loader-startup.test.cjs::area reads start before the bootstrap response arrives`, `tests/state-loader-startup.test.cjs::each area is rendered and stored as soon as it arrives, without waiting for a slower one`, `tests/reload-coalescing.test.cjs::reloads requested during a load run as one follow-up`, `tests/reload-coalescing.test.cjs::a live load records the version it was started for, not one that arrived while it ran`.
 
 ### Requirement: Explicit view refresh reports only its matching view
 The client SHALL issue one refresh at a time per refresh control, retain visible values during refresh, and report completion only after the matching view reload succeeds. Route, selected date/period, and view key SHALL guard delayed results.

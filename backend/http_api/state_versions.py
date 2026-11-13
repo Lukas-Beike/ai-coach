@@ -40,7 +40,10 @@ class StateVersionService:
         ).hexdigest()[:16]
         return {
             "activities": f"{provider_syncs}:{counters['activities']['count']}",
-            "performance": f"{provider_syncs}:{counters['observations']['count']}",
+            "performance": (
+                f"{provider_syncs}:{counters['observations']['count']}:"
+                f"{counters['zones']['latest']}:{counters['zones']['count']}"
+            ),
             ProviderId.GARMIN.value: f"{state['last_garmin_sync'] or ''}",
             "chat": f"{counters['message']['latest']}:{counters['message']['count']}",
             "library": f"{counters['library']['latest']}:{counters['library']['count']}",
