@@ -292,7 +292,9 @@ class NutritionHttpApiTests(unittest.TestCase):
             "days": 84,
             "date": "2026-09-23",
         }
-        self.nutrition_refresh_service.refresh_nutrition.return_value = {"status": "partial"}
+        self.nutrition_refresh_service.refresh_nutrition.return_value = {
+            "status": "partial"
+        }
 
         dispatch_route(
             self.post_routes, self.handler, "/api/nutrition/refresh", method="POST"

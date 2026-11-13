@@ -55,7 +55,10 @@ class AnalysisRefreshTests(unittest.TestCase):
 
     def test_a_garmin_result_without_any_source_is_not_reported_as_refreshed(self):
         service, garmin = self.make_service()
-        garmin.refresh_analysis.return_value = {"status": "ok", "sources": {"activities": False}}
+        garmin.refresh_analysis.return_value = {
+            "status": "ok",
+            "sources": {"activities": False},
+        }
 
         result = service.refresh("performance")
 

@@ -9,7 +9,7 @@ from collections.abc import Callable, Collection, Generator, Iterable, Mapping, 
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, date, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from backend.athlete.profile import timezone_name
 from backend.canonical.vocabulary import GARMIN_ID
@@ -63,6 +63,9 @@ from backend.sync.windows import split_date_windows
 GARMIN_AUTOMATIC_SYNC_DAYS = 2
 
 GARMIN_SYNC_LOCK = threading.Lock()
+
+
+_Read = TypeVar("_Read")
 
 
 def _analysis_sources():
@@ -750,10 +753,9 @@ class GarminTargetedRefreshService:
                 start=start.isoformat(),
                 end=end.isoformat(),
             )
-            self._apply_analysis_refresh(
+            complete = self._apply_analysis_refresh(
                 snapshot, area, start, end, fetched, sources_complete, fetched_at
             )
-            complete = bool(sources_complete) and all(sources_complete.values())
             return {
                 "status": "ok" if complete else "partial",
                 "source": "Garmin Connect",
@@ -776,8 +778,8 @@ class GarminTargetedRefreshService:
 
     def _gated_refresh(
         self,
-        read: Callable[[], Any],
-        store: Callable[[Any], dict[str, Any]],
+        read: Callable[[], _Read],
+        store: Callable[[_Read], dict[str, Any]],
         partial: dict[str, Any],
     ) -> dict[str, Any]:
         """Read and store one bounded window under Garmin's shared gate.
@@ -932,7 +934,8 @@ class GarminTargetedRefreshService:
         fetched: dict[str, Any],
         sources_complete: dict[str, bool],
         fetched_at: str,
-    ) -> None:
+    ) -> bool:
+        """Merge and store the read; return whether every source was complete."""
         freshness = snapshot.setdefault("source_freshness", {})
         pagination = snapshot.setdefault("provider_sync", {}).setdefault(
             "pagination", {}
@@ -952,10 +955,11 @@ class GarminTargetedRefreshService:
                 end,
                 fetched_at,
             )
+        complete = bool(sources_complete) and all(sources_complete.values())
         snapshot.setdefault("provider_sync", {}).setdefault("analysis", {})[area] = {
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "complete": bool(sources_complete) and all(sources_complete.values()),
+            "complete": complete,
             "sources": dict(sources_complete),
             "fetched_at": fetched_at,
         }
@@ -978,6 +982,7 @@ class GarminTargetedRefreshService:
                 windows=windows,
                 allowed=ANALYSIS_SOURCES,
             )
+        return complete
 
     @staticmethod
     def _merge_analysis_source(
