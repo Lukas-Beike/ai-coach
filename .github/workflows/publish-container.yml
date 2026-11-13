@@ -525,9 +525,9 @@ jobs:
           fi
           docker buildx imagetools create --prefer-index=false --tag "$image:latest" "$image@$EXPECTED_DIGEST"
           for tag in "$RELEASE_TAG" latest; do
-            # awk reads the whole output: an early exit closes the pipe and the
-            # inspect command's SIGPIPE fails the step under pipefail (#2600).
-            actual_digest="$(docker buildx imagetools inspect "$image:$tag" | awk '/Digest:/ && !digest { digest = $2 } END { print digest }')"
+            # No pipe: an early-exiting reader made inspect fail with SIGPIPE
+            # under pipefail (#2600). A failed inspect reports a missing digest.
+            actual_digest="$(docker buildx imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')" || actual_digest=""
             if [[ -z "$actual_digest" || "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
               echo "Digest mismatch for $image:$tag: expected $EXPECTED_DIGEST, got ${actual_digest:-<missing>}"
               exit 1
