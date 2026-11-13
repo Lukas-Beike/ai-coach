@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import date
 
 from canonical_read_support import (
+    WAHOO_RUN_COPY,
     CanonicalReadFixture,
     make_selector,
     populate,
+    store_wahoo_run_copy,
 )
 
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -177,27 +179,21 @@ class ActivitySessionReadTests(CanonicalReadFixture):
         self,
     ) -> None:
         populate(self)
+        store_wahoo_run_copy(self)
         grouped = self.read(self.table.activity_sessions)
         summaries = self.read(make_selector(self).activity_summaries)
 
         self.assertEqual(len(grouped), len(summaries))
+        groups = [
+            sorted(record.activity_id for record in records) for _id, records in grouped
+        ]
+        self.assertIn(["910002", WAHOO_RUN_COPY], groups)
+        self.assertEqual(1, sum("910002" in group for group in groups))
+        merged = [s for s in summaries if "910002" in s["record_ids"].values()]
         self.assertEqual(
-            sorted(
-                sorted(record.activity_id for record in records)
-                for _id, records in grouped
-            ),
-            [
-                ["910001", "i-act-001"],
-                ["910002"],
-                ["i-act-002"],
-                ["i-act-003"],
-                ["i-act-004"],
-                ["i-act-005"],
-            ],
+            [{"garmin": "910002", "wahoo": WAHOO_RUN_COPY}],
+            [summary["record_ids"] for summary in merged],
         )
-        merged = [s for s in summaries if len(s["record_ids"]) > 1]
-        self.assertEqual(1, len(merged))
-        self.assertEqual({"intervals", "garmin"}, set(merged[0]["record_ids"]))
         self.assertEqual(
             sorted(summaries, key=lambda s: s["started_at"], reverse=True),
             list(summaries),
@@ -206,9 +202,13 @@ class ActivitySessionReadTests(CanonicalReadFixture):
 
     def test_deleted_sessions_are_not_summarised(self) -> None:
         populate(self)
-        # The survivor of the merged ride: its merged Garmin copy must go with it.
+        store_wahoo_run_copy(self)
+        # The survivor of the merged run: its merged copy must go with it.
         session_id = self.rows(
-            "SELECT merged_into FROM activity_sessions WHERE state = 'duplicate'"
+            "SELECT s.merged_into FROM activity_records AS r "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE s.state = 'duplicate' AND r.provider_activity_id IN (?, ?)",
+            ("910002", WAHOO_RUN_COPY),
         )[0]["merged_into"]
         self.execute(
             "UPDATE activity_sessions SET state = 'deleted' WHERE activity_id = ?",
@@ -218,7 +218,10 @@ class ActivitySessionReadTests(CanonicalReadFixture):
         summaries = self.read(make_selector(self).activity_summaries)
 
         self.assertNotIn(session_id, [summary["id"] for summary in summaries])
-        self.assertFalse(any(len(s["record_ids"]) > 1 for s in summaries))
+        shown = {
+            value for summary in summaries for value in summary["record_ids"].values()
+        }
+        self.assertFalse({"910002", WAHOO_RUN_COPY} & shown)
 
     def test_records_of_an_unknown_provider_are_skipped(self) -> None:
         populate(self)

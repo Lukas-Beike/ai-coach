@@ -1189,14 +1189,32 @@ class ReprojectionTests(BackfillFixture):
     def test_reprojection_links_a_garmin_walk_its_moving_time_now_matches(
         self,
     ) -> None:
-        # Garmin duration is elapsed time; only the moving time matches Intervals.icu.
-        walk = {
-            "id": "w1",
-            "type": "Walk",
-            "start_date_local": "2026-09-10T07:00:00",
-            "moving_time": 3620,
-            "distance": 5000.0,
+        # Garmin duration is elapsed time; only the moving time matches Wahoo.
+        payload = {
+            "synced_at": NOW,
+            "workouts": [
+                {
+                    "id": 31,
+                    "starts": "2026-09-10T05:00:00Z",
+                    "workout_type_id": 6,
+                    "workout_summary": {
+                        "duration_active_accum": "3620",
+                        "distance_accum": "5000",
+                    },
+                }
+            ],
         }
+        with self.manager.unit_of_work() as db:
+            ingest_plan(
+                db,
+                wahoo_ingest_plan(payload, zone=ZONE),
+                retrieved_at=canonical_plans.wahoo_payload_retrieved_at(
+                    payload, zone=ZONE
+                )
+                or self.fail("retrieval time"),
+                deletion_window=None,
+                zone=ZONE,
+            )
         garmin_walk = {
             "activityId": 77,
             "activityType": {"typeKey": "walking"},
@@ -1205,7 +1223,6 @@ class ReprojectionTests(BackfillFixture):
             "movingDuration": 3600.0,
             "distance": 5000.0,
         }
-        self.insert_snapshot(self.manager, intervals_snapshot([walk]))
         self.set_garmin(self.manager, garmin_payload(activities=[garmin_walk]))
         backfill = self.make_backfill()
         self.run_to_completion(backfill)
@@ -1229,13 +1246,9 @@ class ReprojectionTests(BackfillFixture):
         ):
             self.run_to_completion(backfill)
 
-        garmin, intervals = self.rows(query)
-        self.assertEqual(
-            (garmin["provider"], intervals["provider"]), (GARMIN, INTERVALS)
-        )
-        survivor, alias = (
-            (garmin, intervals) if intervals["merged_into"] else (intervals, garmin)
-        )
+        garmin, wahoo = self.rows(query)
+        self.assertEqual((garmin["provider"], wahoo["provider"]), (GARMIN, WAHOO))
+        survivor, alias = (garmin, wahoo) if wahoo["merged_into"] else (wahoo, garmin)
         self.assertEqual((survivor["state"], survivor["merged_into"]), ("active", None))
         self.assertEqual(
             (alias["state"], alias["merged_into"]),

@@ -27,10 +27,12 @@ from support import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
+from backend.providers.canonical_plans import wahoo_ingest_plan
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
 )
+from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.canonical_wiring import build_canonical_read
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -163,6 +165,36 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
             if backfill.run_batch(db).done:
                 return backfill
     case.fail("backfill did not finish")
+
+
+# The Wahoo recording of the fixture's Garmin-only run 910002 (18:05 Berlin time).
+WAHOO_RUN_COPY = "990002"
+
+
+def store_wahoo_run_copy(case: CanonicalReadFixture) -> None:
+    """Ingest a Wahoo copy of Garmin's 910002, so linking bundles a Garmin+Wahoo pair."""
+    payload = {
+        "synced_at": NOW,
+        "workouts": [
+            {
+                "id": WAHOO_RUN_COPY,
+                "starts": "2026-10-09T16:05:00.000Z",
+                "workout_type_id": 1,
+                "workout_summary": {
+                    "duration_active_accum": "2400",
+                    "distance_accum": "7600",
+                },
+            }
+        ],
+    }
+    with case.manager.unit_of_work() as db:
+        ingest_plan(
+            db,
+            wahoo_ingest_plan(payload, zone=case.zone),
+            retrieved_at=datetime.fromisoformat(NOW),
+            deletion_window=None,
+            zone=case.zone,
+        )
 
 
 def first_activity_name(case: CanonicalReadFixture) -> str:
