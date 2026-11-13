@@ -72,7 +72,7 @@ def _bootstrap_placeholders() -> set[str]:
     """Keys that ``PublicBootstrapService.read`` always fills with an empty literal."""
     source = Path(__file__).resolve().parents[1] / "backend/http_api/bootstrap_state.py"
     return {
-        key.value
+        str(key.value)
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
         if isinstance(node, ast.Dict)
         for key, value in zip(node.keys, node.values, strict=True)
