@@ -151,6 +151,7 @@ Evidence: `tests/run_tests.py` (`select_shard`, `assign_classes`, `class_weights
 #### Scenario: Changed fixture
 - **WHEN** only files under `tests/fixtures/` changed
 - **THEN** the selection holds every test module whose sources or imported modules name `fixtures` as a path segment, plus the repository-wide checks, instead of the whole suite
+- **AND** a fixture in a subdirectory selects such a module only when it also names that subdirectory as a path segment or the module naming `fixtures` scans directories
 
 #### Scenario: Full-suite fallback
 - **WHEN** a changed path is under `FULL_SUITE_PATHS` (database manager, bootstrap and migrations, the test runner, selector and shared support modules, dependency, `Dockerfile` or `pyproject.toml` files), a source cannot be parsed, or at least 80 % of the test modules are selected
