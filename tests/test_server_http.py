@@ -1774,38 +1774,58 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertIsNone(state["last_error"])
 
-    def test_intervals_public_state_follows_the_last_plan_push_job(self):
+    def test_intervals_public_state_follows_the_output_stamps(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
+        keys = (
+            "intervals_last_output_ok_at",
+            "intervals_last_output_failed_at",
+            "last_library_push_at",
+            "last_library_sync_error",
+        )
 
-        def push_job(job_id, status, finished_at):
-            with server.database_manager().unit_of_work() as db:
-                db.execute(
-                    "INSERT INTO sync_jobs(id, provider, type, status, payload, "
-                    "requested_by, finished_at, created_at, updated_at) "
-                    "VALUES (?, 'intervals', 'plan_push', ?, '{}', 'test', ?, ?, ?)",
-                    (job_id, status, finished_at, finished_at, finished_at),
-                )
-
-        def read_state():
-            with patch.object(server, "CONFIG", config):
-                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
-
-        def clear_jobs():
+        def clear():
+            for key in keys:
+                server.key_value_service().set(key, "")
             with server.database_manager().unit_of_work() as db:
                 db.execute("DELETE FROM sync_jobs WHERE requested_by = 'test'")
 
-        clear_jobs()
-        self.addCleanup(clear_jobs)
+        def read_state(**stamps):
+            for key, value in stamps.items():
+                server.key_value_service().set(f"intervals_last_output_{key}_at", value)
+            with patch.object(server, "CONFIG", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        clear()
+        self.addCleanup(clear)
+        # A failed job of the retired ingest says nothing about the output.
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO sync_jobs(id, provider, type, status, payload, "
+                "requested_by, finished_at, created_at, updated_at) "
+                "VALUES ('old-ingest', 'intervals', 'refresh', 'failed', '{}', "
+                "'test', '2026-09-05T08:00:00+00:00', '2026-09-05T08:00:00+00:00', "
+                "'2026-09-05T08:00:00+00:00')"
+            )
         self.assertEqual(read_state()["state"], "configured")
-        push_job("plan-ok", "completed", "2026-09-01T08:00:00+00:00")
-        state = read_state()
+        # A plan export stamps the card; a success from months ago stays connected.
+        state = read_state(ok="2026-01-01T08:00:00+00:00")
         self.assertEqual(state["state"], "connected")
-        self.assertEqual(state["last_used_at"], "2026-09-01T08:00:00+00:00")
+        self.assertEqual(state["last_used_at"], "2026-01-01T08:00:00+00:00")
         self.assertIsNone(state["library_sync"]["last_sync_at"])
-        push_job("plan-bad", "failed", "2026-09-02T08:00:00+00:00")
-        self.assertEqual(read_state()["state"], "error")
-        push_job("plan-ok-again", "partial", "2026-09-03T08:00:00+00:00")
+        self.assertEqual(
+            read_state(failed="2026-09-02T08:00:00+00:00")["state"], "error"
+        )
+        self.assertEqual(
+            read_state(ok="2026-09-03T08:00:00+00:00")["state"], "connected"
+        )
+        # An old library error text never outranks a later success.
+        server.key_value_service().set("last_library_sync_error", "alt")
         self.assertEqual(read_state()["state"], "connected")
+        # An unreadable stamp is ignored instead of breaking the bootstrap.
+        server.key_value_service().set("last_library_sync_error", "")
+        self.assertEqual(
+            read_state(ok="kaputt", failed="kaputt")["state"], "configured"
+        )
 
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")

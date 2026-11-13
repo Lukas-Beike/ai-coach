@@ -143,6 +143,11 @@ class YazioConnectionTests(unittest.TestCase):
         with self.assertRaises(AppError):
             client.product(PRODUCT_ID)
         self.assertEqual(client.connection_status()["status"], "success")
+        # A local pause, not an answer of Yazio, never overwrites the last outcome.
+        client._blocked_until = 10**9
+        with self.assertRaises(AppError):
+            client.search("kefir")
+        self.assertEqual(client.connection_status()["status"], "success")
         holder["config"] = config(yazio_password="replacement")
         self.assertEqual(client.connection_status()["status"], "unchecked")
 

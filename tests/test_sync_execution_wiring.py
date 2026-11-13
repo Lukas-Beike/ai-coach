@@ -123,6 +123,26 @@ class SyncJobExecutionBuilderTests(unittest.TestCase):
             stream_backfill_service=ctx.garmin.stream_backfill_service.return_value,
         )
 
+    def test_the_intervals_adapter_stamps_its_output_in_the_database(self) -> None:
+        ctx = self.ctx
+        ctx.database.return_value = MagicMock(name="database")
+        with patch.object(execution_wiring.sync_executor, "SyncJobExecutor") as made:
+            self.services.executor()
+        owners = made.call_args.kwargs["job_owners"]
+
+        with patch.object(
+            execution_wiring.runtime_clock,
+            "utc_now",
+            return_value="2026-09-01T08:00:00+00:00",
+        ):
+            owners[INTERVALS_ID]._build()._record_output("intervals_last_output_ok_at")
+
+        ctx.key_values.set.assert_called_once_with(
+            ctx.database.return_value.unit_of_work.return_value.__enter__.return_value,
+            "intervals_last_output_ok_at",
+            "2026-09-01T08:00:00+00:00",
+        )
+
 
 class ProviderConfiguredChecksTests(unittest.TestCase):
     def test_each_check_reads_the_live_owner_when_asked(self) -> None:

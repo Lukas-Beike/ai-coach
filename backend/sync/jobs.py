@@ -239,21 +239,6 @@ def has_active_job(db: Any, provider: str, job_type: str) -> bool:
     return row is not None
 
 
-def last_finished_at(db: Any, provider: str) -> tuple[str | None, str | None]:
-    """Latest finish of a job that reached the provider and of a failed job.
-
-    A completed or partial job reached the provider; a failed one did not.
-    """
-    row = db.execute(
-        "SELECT "
-        "MAX(CASE WHEN status IN ('completed', 'partial') THEN finished_at END) AS ok, "
-        "MAX(CASE WHEN status = 'failed' THEN finished_at END) AS failed "
-        "FROM sync_jobs WHERE provider=?",
-        (provider,),
-    ).fetchone()
-    return row["ok"], row["failed"]
-
-
 def utc_timestamp(now: datetime | None = None) -> str:
     """Return a stable UTC timestamp for durable job records."""
     value = now or datetime.fromisoformat(system_utc_now())

@@ -159,6 +159,14 @@ def _throttled() -> AppError:
     return AppError(429, THROTTLED, reason="food_database_rate_limited")
 
 
+class _ProviderAnswer(AppError):
+    """An error made from an HTTP answer of Yazio, not from a local limit or pause."""
+
+
+def _answer(error: AppError) -> _ProviderAnswer:
+    return _ProviderAnswer(error.status, error.message, reason=error.reason)
+
+
 _CHECK_STATUS = {
     "food_database_auth_failed": "auth_failed",
     "food_database_rate_limited": "rate_limited",
@@ -345,17 +353,29 @@ class YazioClient:
                 if (cached := self._cached(path)) is not None:
                     return cached
                 self._reserve(self._clock())
-            identity = self._identity
-            generation = self._identity_generation
+                account = (self._identity, self._identity_generation)
+            payload: Any = None
+            failure: AppError | None = None
             try:
                 payload = self._authorized_get(path)
             except AppError as exc:
-                # A lookup that reached Yazio is as good a check as the button.
-                self._record_use(_check_status(exc), identity, generation)
-                raise
-            self._record_use("success", identity, generation)
+                failure = exc
             with self._lock:
-                if identity != self._identity:
+                self._follow_credentials()
+                current = account == (self._identity, self._identity_generation)
+                if current and (
+                    failure is None or isinstance(failure, _ProviderAnswer)
+                ):
+                    # A lookup Yazio answered is as good a check as the button.
+                    self._last_check = {
+                        "status": "success"
+                        if failure is None
+                        else _check_status(failure),
+                        "checked_at": datetime.now(UTC).isoformat(),
+                    }
+                if failure is not None:
+                    raise failure
+                if not current:
                     # The account changed meanwhile; do not cache its answer.
                     return copy.deepcopy(payload)
                 self._cache[path] = (self._clock(), payload)
@@ -363,18 +383,6 @@ class YazioClient:
                 while len(self._cache) > _CACHE_ENTRIES:
                     self._cache.popitem(last=False)
             return copy.deepcopy(payload)
-
-    def _record_use(
-        self, status: str, identity: tuple[str, ...], generation: int
-    ) -> None:
-        """Keep the outcome of a lookup as the last check of its account."""
-        with self._lock:
-            self._follow_credentials()
-            if identity == self._identity and generation == self._identity_generation:
-                self._last_check = {
-                    "status": status,
-                    "checked_at": datetime.now(UTC).isoformat(),
-                }
 
     def _cached(self, path: str) -> Any:
         cached = self._cache.get(path)
@@ -414,7 +422,10 @@ class YazioClient:
                 if exc.code == 401 and attempt == 1:
                     self._access_token = ""
                     continue
-                self._raise_http_error(exc)
+                try:
+                    self._raise_http_error(exc)
+                except AppError as error:
+                    raise _answer(error) from None
         raise AppError(502, UNAVAILABLE, reason="food_database_unavailable")
 
     def _headers(self) -> dict[str, str]:
@@ -539,7 +550,10 @@ class YazioClient:
                     or identity_generation != self._identity_generation
                 ):
                     return self._grant_unusable(sign_in, "food_database_unavailable")
-                return self._grant_rejected(exc, now, sign_in=sign_in)
+                try:
+                    return self._grant_rejected(exc, now, sign_in=sign_in)
+                except AppError as error:
+                    raise _answer(error) from None
         with self._lock:
             self._follow_credentials()
             if (

@@ -14,6 +14,7 @@ from typing import Any
 
 from backend.app.context import AppContext
 from backend.canonical.vocabulary import GARMIN_ID, INTERVALS_ID, WAHOO_ID
+from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -57,6 +58,10 @@ def build_sync_job_execution(
             sync_earliest_date=window.sync_earliest_date,
         )
 
+    def record_intervals_output(key: str) -> None:
+        with ctx.database().unit_of_work() as db:
+            ctx.key_values.set(db, key, runtime_clock.utc_now())
+
     def intervals() -> sync_executor.IntervalsJobAdapter:
         return sync_executor.IntervalsJobAdapter(
             jobs=sync_executor.IntervalsSyncJobOwner(
@@ -66,6 +71,7 @@ def build_sync_job_execution(
                 intervals_resync_gate=intervals_resync_gate,
             ),
             nutrition_sync_service=ctx.nutrition.intervals_sync_service(),
+            record_output=record_intervals_output,
         )
 
     def garmin() -> sync_executor.GarminJobAdapter:

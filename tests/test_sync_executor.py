@@ -657,6 +657,87 @@ class ProviderJobAdapterTests(unittest.TestCase):
         jobs.execute_specific.assert_not_called()
         jobs.execute_sync.assert_not_called()
 
+    def test_intervals_output_leaves_a_stamp_only_for_a_real_round_trip(self) -> None:
+        ok, failed = "intervals_last_output_ok_at", "intervals_last_output_failed_at"
+
+        def entry(status: str) -> dict[str, Any]:
+            return {"results": [{"status": status}]}
+
+        cases = [
+            ("plan_push", entry("synced"), ok),
+            ("plan_push", entry("error"), failed),
+            ("plan_push", {"results": [{"status": "synced"}, {"status": "error"}]}, ok),
+            ("plan_push", entry("skipped"), None),
+            ("plan_push", entry("already_synced"), None),
+            ("plan_push", entry("conflict"), None),
+            ("competition_push", {"status": "ok"}, ok),
+            ("competition_push", {"status": "already_running"}, None),
+        ]
+        for job_type, result, expected in cases:
+            with self.subTest(job_type=job_type, result=result):
+                jobs, stamps = Mock(), cast("list[str]", [])
+                jobs.execute_specific.return_value = result
+                adapter = IntervalsJobAdapter(
+                    jobs=jobs,
+                    nutrition_sync_service=MockNutritionSync(),
+                    record_output=stamps.append,
+                )
+                self.assertIs(
+                    result, adapter.execute(self.job, {}, "manual", job_type=job_type)
+                )
+                self.assertEqual(stamps, [expected] if expected else [])
+        stamps = []
+        adapter = IntervalsJobAdapter(
+            jobs=Mock(),
+            nutrition_sync_service=MockNutritionSync(),
+            record_output=stamps.append,
+        )
+        adapter.execute(
+            self.job, {"date": "2026-09-24"}, "manual", job_type="nutrition_sync"
+        )
+        self.assertEqual(stamps, [ok])
+
+    def test_only_a_provider_failure_leaves_a_failed_stamp(self) -> None:
+        cases = [
+            (
+                AppError(502, "x", reason="provider_http_error", upstream_status=401),
+                True,
+            ),
+            (AppError(502, "x", reason="provider_network_error"), True),
+            (AppError(503, "x", reason="not_configured"), False),
+            (AppError(409, "x", reason="database_busy"), False),
+            (RuntimeError("local bug"), False),
+        ]
+        for error, expected in cases:
+            with self.subTest(error=repr(error)):
+                jobs, stamps = Mock(), cast("list[str]", [])
+                jobs.execute_specific.side_effect = error
+                adapter = IntervalsJobAdapter(
+                    jobs=jobs,
+                    nutrition_sync_service=MockNutritionSync(),
+                    record_output=stamps.append,
+                )
+                with self.assertRaises(type(error)):
+                    adapter.execute(self.job, {}, "manual", job_type="competition_push")
+                self.assertEqual(
+                    stamps, ["intervals_last_output_failed_at"] if expected else []
+                )
+
+    def test_a_stamp_that_cannot_be_stored_leaves_the_job_result_alone(self) -> None:
+        jobs = Mock()
+        jobs.execute_specific.return_value = {"status": "ok"}
+
+        def broken(_key: str) -> None:
+            raise RuntimeError("database busy")
+
+        adapter = IntervalsJobAdapter(
+            jobs=jobs, nutrition_sync_service=MockNutritionSync(), record_output=broken
+        )
+        self.assertEqual(
+            adapter.execute(self.job, {}, "manual", job_type="competition_push"),
+            {"status": "ok"},
+        )
+
     def test_garmin_plan_push_is_rejected_and_other_types_delegate(self) -> None:
         jobs = Mock()
         jobs.execute.return_value = {"status": "ok"}
