@@ -1,3 +1,5 @@
+from backend.planning.running_week import week_start as _week_start
+
 """Season evidence from the recorded activities before a competition."""
 
 from collections.abc import Callable, Mapping, Sequence
@@ -248,10 +250,6 @@ def _evidence_window(event: dict[str, Any], today: date) -> tuple[date, date]:
     window_end = min(today, date.fromisoformat(event["event_date"]))
     window_start = _week_start(window_end) - timedelta(weeks=PREPARATION_WEEKS - 1)
     return window_start, window_end
-
-
-def _week_start(day: date) -> date:
-    return day - timedelta(days=day.weekday())
 
 
 def _preparation_weeks(

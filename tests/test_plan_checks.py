@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from typing import Any
 
 from backend.planning import (
     adaptive,
@@ -70,7 +71,7 @@ _DAY_TEXT = (
 _DAY_DATE = (load_checks._unit_date, run_lthr._unit_day)
 _MONDAY = (leg_strength._monday, intensity_distribution._monday)
 _SECONDS = (leg_strength._seconds, plan_checks._duration_s)
-_DAYS = (
+_DAYS: tuple[tuple[dict[str, Any], str], ...] = (
     ({"date": "2026-11-12", "starts_at_local": "2026-11-13T07:00:00"}, "2026-11-12"),
     ({"starts_at_local": "2026-11-13T07:00:00+01:00"}, "2026-11-13"),
     ({"date": "2026-11-15T18:30:00"}, "2026-11-15"),
@@ -79,7 +80,7 @@ _DAYS = (
     ({}, ""),
     ({"date": "kein Datum"}, "kein Datum"),
 )
-_SECONDS_CASES = (
+_SECONDS_CASES: tuple[tuple[dict[str, Any], float], ...] = (
     ({"planned_duration_s": 1800, "duration_minutes": 45}, 1800.0),
     ({"duration_minutes": 45}, 2700.0),
     ({"planned_duration_s": "x", "duration_minutes": "45"}, 0.0),
@@ -103,11 +104,12 @@ class PlanningHelperTests(unittest.TestCase):
         for unit, text in _DAYS:
             day = date.fromisoformat(text) if text[:4].isdigit() else None
             monday = None if day is None else day - timedelta(days=day.weekday())
-            for helpers, expected in (
+            checks: tuple[tuple[tuple[Any, ...], Any], ...] = (
                 (_DAY_TEXT, text),
                 (_DAY_DATE, day),
                 (_MONDAY, monday),
-            ):
+            )
+            for helpers, expected in checks:
                 for helper in helpers:
                     with self.subTest(helper=helper.__qualname__, unit=unit):
                         self.assertEqual(expected, helper(unit))

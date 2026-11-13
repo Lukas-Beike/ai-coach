@@ -15,7 +15,6 @@ from datetime import date
 from typing import Any
 
 from backend.activities.zone_settings import ZoneSettings
-from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning.load_checks import LoadThresholds
@@ -25,6 +24,7 @@ from backend.planning.push_state import (
     run_document_digest,
     run_sent_key,
 )
+from backend.planning.running_week import unit_date as _unit_day
 from backend.planning.sport import planned_sport_environment
 
 
@@ -101,12 +101,3 @@ class RunLthr:
             if run_document_digest(document) != sent:
                 moved.add(local_id)
         return moved
-
-
-def _unit_day(unit: Mapping[str, Any]) -> date | None:
-    try:
-        return date.fromisoformat(
-            iso_date_prefix(str(unit.get("date") or unit.get("starts_at_local") or ""))
-        )
-    except ValueError:
-        return None

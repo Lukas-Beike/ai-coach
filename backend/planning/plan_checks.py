@@ -67,6 +67,8 @@ from backend.planning import (
     strength_structure,
 )
 from backend.planning.local_start import known_start
+from backend.planning.running_week import planned_seconds as _duration_s
+from backend.planning.running_week import unit_day as _day
 from backend.planning.session_focus import (
     FOCUS_KEY,
     HARD_INTENSITY,
@@ -189,18 +191,6 @@ def _text(unit: Mapping[str, Any]) -> str:
 
 def _sport(unit: Mapping[str, Any]) -> Sport:
     return planned_sport_environment(unit)[0]
-
-
-def _day(unit: Mapping[str, Any]) -> str:
-    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-
-
-def _duration_s(unit: Mapping[str, Any]) -> float:
-    seconds = number(unit.get("planned_duration_s"))
-    if seconds is None:
-        minutes = number(unit.get("duration_minutes"))
-        seconds = None if minutes is None else minutes * 60
-    return seconds or 0.0
 
 
 def is_hard(unit: Mapping[str, Any]) -> bool:

@@ -16,7 +16,7 @@ controlled evidence base. A note appears only when a share lies more than
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 from backend.activities.workout_load import BANDS, WorkoutEstimate
@@ -25,6 +25,8 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.performance.progress_report import ZONE_MAPPING, intensity_3zone
 from backend.planning import plan_checks, running_week, unit_intensity
+from backend.planning.running_week import planned_seconds
+from backend.planning.running_week import unit_week_start as _monday
 from backend.planning.sport import planned_sport_environment
 
 CODE = "intensity_distribution"
@@ -70,24 +72,10 @@ NOTE = (
 Estimator = Callable[[Mapping[str, Any]], WorkoutEstimate]
 
 
-def _monday(unit: Mapping[str, Any]) -> date | None:
-    try:
-        day = date.fromisoformat(
-            iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-        )
-    except ValueError:
-        return None
-    return day - timedelta(days=day.weekday())
-
-
 def _unit_seconds(unit: Mapping[str, Any], estimate: WorkoutEstimate) -> float:
     if estimate.duration_s is not None:
         return estimate.duration_s
-    seconds = number(unit.get("planned_duration_s"))
-    minutes = number(unit.get("duration_minutes"))
-    if seconds is None and minutes is not None:
-        seconds = minutes * 60
-    return seconds or 0.0
+    return planned_seconds(unit)
 
 
 def _add_unit(
