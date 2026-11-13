@@ -294,10 +294,16 @@ class MapperVersionGuardTests(unittest.TestCase):
                 pinned_versions, pinned_digest = PINNED[module]
                 if digest != pinned_digest:
                     # Every replaying version, not just one: each projects it.
+                    self.assertEqual(
+                        len(versions),
+                        len(pinned_versions),
+                        f"{module} changed together with its replaying mappers; "
+                        "bump every one of them, then update PINNED",
+                    )
                     unbumped = [
                         owner
                         for owner, now, pinned in zip(
-                            owners[module], versions, pinned_versions, strict=False
+                            owners[module], versions, pinned_versions, strict=True
                         )
                         if now == pinned
                     ]
