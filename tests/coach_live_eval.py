@@ -353,32 +353,15 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
     return misses, safety
 
 
-def _steps_of(unit: dict[str, Any]) -> list[dict] | None:
-    """The parsed workout steps, or None when the text has none."""
-    from backend.activities.workout_text import WorkoutTextError, structured_steps
-
-    try:
-        return structured_steps(str(unit.get("description") or ""))
-    except WorkoutTextError:
-        return None
-
-
 def _scaled_from(payload: dict[str, Any], template: dict[str, Any] | None) -> bool:
-    """Whether a unit changes its template's load: duration, sets/reps/loads, steps.
+    """Whether a unit scales its template, by the app's own rule (#2429).
 
-    Like the app's rule, a reworded description alone is no scaling (#2429).
+    Reworded text alone is no scaling; the app compares durations, the strength
+    content and the parsed steps.
     """
-    if template is None:
-        return False
-    if any(
-        payload.get(field) != template.get(field)
-        for field in ("duration_minutes", "planned_duration_s")
-        if payload.get(field) and template.get(field)
-    ):
-        return True
-    if payload.get("strength_structure") or template.get("strength_structure"):
-        return payload.get("strength_structure") != template.get("strength_structure")
-    return _steps_of(payload) != _steps_of(template)
+    from backend.planning import plan_checks
+
+    return template is not None and plan_checks._scaled(payload, template)
 
 
 def _any_scaled(created: list[dict], library: dict[str, dict]) -> bool:
