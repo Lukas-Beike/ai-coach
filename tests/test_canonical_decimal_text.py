@@ -5,16 +5,66 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from backend.activities import calendar_projection, duplicates, matching
 from backend.activities.grouping import _as_number as activity_number
+from backend.activities.workout_profile import _number as profile_number
+from backend.activities.workout_text import _numeric as text_numeric
+from backend.athlete.equipment import _valid_positive_number as equipment_positive
 from backend.canonical.decimal_text import (
     comma_decimal_float,
     is_grouped_thousands,
     provider_number,
 )
+from backend.nutrition.food_database import _is_number as food_is_number
+from backend.performance.current_metrics import as_number as metric_number
+from backend.performance.form_drift import _is_positive as drift_positive
+from backend.performance.grade_adjustment import _number as grade_number
+from backend.performance.morning_battery import _number as battery_number
+from backend.performance.personal_recovery import _number as recovery_number
+from backend.performance.session_analysis import _number as analysis_number
+from backend.performance.session_execution import _number as execution_number
 from backend.performance.wellness import _as_number as wellness_number
+from backend.planning import competitions, conflicts
+from backend.providers.open_food_facts import _number as food_facts_number
+from backend.providers.yazio import _number as yazio_number
 from backend.weather.adaptive import _as_number as weather_number
 
 ROOT = Path(__file__).resolve().parents[1]
+# Values recorded before #2110 merged the identical copies, per value:
+# (finite float, provider number, bounded to 10, finite, finite and positive).
+_INF = float("inf")
+_NUMBER_TABLE: tuple[tuple[object, tuple[object, ...]], ...] = (
+    (3, (3.0, 3, 3.0, True, True)),
+    (2.5, (2.5, 2.5, 2.5, True, True)),
+    (0, (0.0, 0, 0.0, True, False)),
+    (-1.5, (-1.5, -1.5, None, True, False)),
+    (True, (None, None, None, False, False)),
+    (_INF, (None, None, None, False, False)),
+    (float("nan"), (None, None, None, False, False)),
+    ("4,5", (None, 4.5, None, False, False)),
+    ("12", (None, 12, None, False, False)),
+    (None, (None, None, None, False, False)),
+    ("x", (None, None, None, False, False)),
+    ("1,200", (None, None, None, False, False)),
+)
+_FINITE_FLOAT = (
+    profile_number,
+    analysis_number,
+    grade_number,
+    recovery_number,
+    execution_number,
+)
+_PROVIDER = (metric_number, battery_number)
+_BOUNDED = (yazio_number, food_facts_number)
+_FINITE = (text_numeric, food_is_number)
+_POSITIVE = (equipment_positive, drift_positive)
+_FIRST_PRESENT = (
+    conflicts._first_present,
+    competitions._first_present,
+    duplicates._first_present,
+    matching._first_present,
+    calendar_projection._first_present,
+)
 # Provider-facing legacy readers that must parse comma text through the helper.
 PROVIDER_READER_PACKAGES = ("activities", "performance", "weather")
 
@@ -61,6 +111,39 @@ class ProviderNumberTests(unittest.TestCase):
         for value in ("1,200", None, "", "abc", "nan", "inf", float("inf")):
             with self.subTest(value=value):
                 self.assertIsNone(provider_number(value))
+
+
+class SharedNumberHelperTests(unittest.TestCase):
+    def test_every_copy_gives_the_recorded_values(self) -> None:
+        for value, expected in _NUMBER_TABLE:
+            groups = (
+                (_FINITE_FLOAT, expected[0], ()),
+                (_PROVIDER, expected[1], ()),
+                (_BOUNDED, expected[2], (10,)),
+                (_FINITE, expected[3], ()),
+                (_POSITIVE, expected[4], ()),
+            )
+            for helpers, result, extra in groups:
+                for helper in helpers:
+                    with self.subTest(helper=helper.__module__, value=value):
+                        actual = helper(value, *extra)
+                        self.assertEqual(result, actual)
+                        self.assertIs(type(result), type(actual))
+
+    def test_first_present_copies_skip_only_missing_and_empty_values(self) -> None:
+        keys = ("a", "b", "c")
+        cases: tuple[tuple[object, object], ...] = (
+            ({"a": None, "b": "", "c": 0}, 0),
+            ({"a": False, "b": 1}, False),
+            ({"b": "x"}, "x"),
+            ({}, None),
+            ([("a", 1)], None),
+            (None, None),
+        )
+        for helper in _FIRST_PRESENT:
+            for item, expected in cases:
+                with self.subTest(helper=helper.__module__, item=item):
+                    self.assertIs(helper(item, keys), expected)
 
 
 class LegacyReaderTests(unittest.TestCase):
