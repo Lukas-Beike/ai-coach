@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from backend.athlete.measurements import is_finite_number as _is_number
 from backend.db.repositories import NUTRIENT_COLUMNS, database_origin
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
@@ -74,14 +75,6 @@ def page_key(url: str) -> tuple[str, str, tuple[tuple[str, str], ...]]:
         )
     )
     return (parts.netloc.lower().removeprefix("www."), parts.path.rstrip("/"), query)
-
-
-def _is_number(value: Any) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
 
 
 def _search_text(value: str) -> str:

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
-from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.decimal_text import provider_number as _number
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import Observation
 from backend.canonical.section_items import record_id
@@ -61,16 +60,6 @@ def sleep_bounds(payload: Any) -> tuple[datetime | None, datetime | None]:
         elif isinstance(current, list):
             pending.extend(current[:50])
     return None, None
-
-
-def _number(value: Any) -> float | int | None:
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    return int(number) if number.is_integer() else round(number, 2)
 
 
 def _validated_body_battery_sample(sample: Any) -> dict[str, Any] | None:

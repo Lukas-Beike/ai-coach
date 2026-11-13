@@ -56,7 +56,7 @@ _CACHE_ENTRIES = 256
 _PER_100 = 100
 
 
-def _number(value: Any, maximum: float) -> float | None:
+def bounded_number(value: Any, maximum: float) -> float | None:
     if isinstance(value, bool):
         return None
     try:
@@ -69,7 +69,7 @@ def _number(value: Any, maximum: float) -> float | None:
 
 
 def _per_100(nutrients: dict[str, Any], key: str, maximum: float) -> float | None:
-    value = _number(nutrients.get(key), maximum / _PER_100)
+    value = bounded_number(nutrients.get(key), maximum / _PER_100)
     return None if value is None else round(value * _PER_100, 4)
 
 
@@ -80,7 +80,7 @@ def _servings(raw: Any) -> list[dict[str, Any]]:
     for item in raw[:_SERVING_LIMIT]:
         if not isinstance(item, dict):
             continue
-        amount = _number(item.get("amount"), 100_000)
+        amount = bounded_number(item.get("amount"), 100_000)
         label = str(item.get("serving") or "").strip()[:60]
         if amount and label:
             servings.append({"label": label, "amount": amount})
@@ -161,7 +161,7 @@ def _throttled() -> AppError:
 
 def _retry_after(headers: Any) -> float:
     value = headers.get("Retry-After") if headers is not None else None
-    return max(60.0, _number(value, 86400) or 60.0)
+    return max(60.0, bounded_number(value, 86400) or 60.0)
 
 
 class YazioClient:
@@ -521,7 +521,7 @@ class YazioClient:
                 # The account changed during the login; its token is not wanted.
                 return self._grant_unusable(sign_in, "food_database_unavailable")
             token = payload.get("access_token") if isinstance(payload, dict) else None
-            lifetime = _number(
+            lifetime = bounded_number(
                 payload.get("expires_in") if isinstance(payload, dict) else None,
                 31_536_000,
             )

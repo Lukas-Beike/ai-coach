@@ -20,6 +20,7 @@ from statistics import median, quantiles
 from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.athlete.measurements import finite_float as _number
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import Observation
 from backend.canonical.sleep_bounds import bounds_fields
@@ -64,12 +65,6 @@ _NOTE: Final = (
     "verrechnet; fehlende Nächte und nicht erfasste Nickerchen begrenzen "
     "diese Aussage. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
 )
-
-
-def _number(value: Any) -> float | None:
-    return (
-        float(value) if type(value) in {int, float} and math.isfinite(value) else None
-    )
 
 
 def personal_recovery(

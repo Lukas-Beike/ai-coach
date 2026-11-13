@@ -7,9 +7,10 @@ altitude change over the next ``GRADE_SPAN_M`` metres of distance. No I/O.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Any, Final
+
+from backend.athlete.measurements import finite_float as _number
 
 GRADE_SPAN_M: Final = 200.0
 # Validity range of the Minetti polynomial, as a fraction.
@@ -17,12 +18,6 @@ MAX_GRADE: Final = 0.45
 # Minetti et al. (2002): metabolic cost of running (J/kg/m) at fractional grade.
 _MINETTI: Final = (155.4, -30.4, -43.3, 46.3, 19.5, 3.6)
 _LEVEL_COST: Final = _MINETTI[-1]
-
-
-def _number(value: Any) -> float | None:
-    return (
-        float(value) if type(value) in {int, float} and math.isfinite(value) else None
-    )
 
 
 def grade_adjusted(speed: float, grade_pct: float) -> float:

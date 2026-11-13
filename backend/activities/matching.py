@@ -32,7 +32,7 @@ PLANNED_LOAD_FIELDS = (PLANNED_LOAD_KEY, "training_load", "tss")
 _ACTIVITY_LOAD_FIELDS = ("training_load",)
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
+def first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
         return None
     for key in keys:
@@ -43,7 +43,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 
 def _number_field(record: Any, keys: tuple[str, ...]) -> float | None:
-    number = _as_number(_first_present(record, keys))
+    number = _as_number(first_present(record, keys))
     return None if number is None else float(number)
 
 
@@ -57,7 +57,7 @@ def is_planned_workout_event(event: Any) -> bool:
     # Provider records may omit category. Only infer a workout when the record
     # has a duration, so races and calendar notes are not counted as missed
     # training.
-    return _as_number(_first_present(event, _UNIT_DURATION_FIELDS)) is not None
+    return _as_number(first_present(event, _UNIT_DURATION_FIELDS)) is not None
 
 
 def record_date(value: Any) -> str:
@@ -84,7 +84,7 @@ def _activities_by_paired_event_id(
 ) -> dict[str, list[int]]:
     by_paired_id: dict[str, list[int]] = {}
     for activity_index, activity in enumerate(activity_rows):
-        paired_id = _first_present(activity, ("planned_event_id",))
+        paired_id = first_present(activity, ("planned_event_id",))
         if paired_id not in (None, ""):
             by_paired_id.setdefault(str(paired_id), []).append(activity_index)
     return by_paired_id
@@ -96,7 +96,7 @@ def _paired_activity_match(
     by_paired_id: dict[str, list[int]],
     unused: set[int],
 ) -> int | None:
-    event_id = _first_present(event, ("id", "event_id"))
+    event_id = first_present(event, ("id", "event_id"))
     if event_id in (None, ""):
         return None
     candidates = [
@@ -117,7 +117,7 @@ def _is_unpaired(activity: dict[str, Any], planned_ids: frozenset[str]) -> bool:
     calendar event the local library does not hold) is free; one paired to a
     listed event belongs to that event only.
     """
-    paired_id = _first_present(activity, ("planned_event_id",))
+    paired_id = first_present(activity, ("planned_event_id",))
     return paired_id is None or str(paired_id) not in planned_ids
 
 
@@ -131,13 +131,13 @@ def _same_day_candidates(
     event_sport = _activity_sport(event)
     if event_sport == Sport.OTHER:
         return []
-    event_date = record_date(_first_present(event, _UNIT_START_FIELDS))
+    event_date = record_date(first_present(event, _UNIT_START_FIELDS))
     return [
         activity_index
         for activity_index in unused
         if _is_unpaired(activity_rows[activity_index], planned_ids)
         and record_date(
-            _first_present(activity_rows[activity_index], _ACTIVITY_START_FIELDS)
+            first_present(activity_rows[activity_index], _ACTIVITY_START_FIELDS)
         )
         == event_date
         and _summary_sport(activity_rows[activity_index]) == event_sport
@@ -145,9 +145,7 @@ def _same_day_candidates(
 
 
 def _start_distance(activity: dict[str, Any], event_start: datetime | None) -> float:
-    activity_start = _activity_datetime(
-        _first_present(activity, _ACTIVITY_START_FIELDS)
-    )
+    activity_start = _activity_datetime(first_present(activity, _ACTIVITY_START_FIELDS))
     if activity_start and event_start:
         return abs((activity_start - event_start).total_seconds())
     return 0
@@ -174,8 +172,8 @@ def _load_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
 def _record_order(record: Any, start_fields: tuple[str, ...]) -> tuple[str, str, str]:
     """Input-order-independent key: start time, identity, then full content."""
     return (
-        str(_first_present(record, start_fields) or ""),
-        str(_first_present(record, ("id", "event_id")) or ""),
+        str(first_present(record, start_fields) or ""),
+        str(first_present(record, ("id", "event_id")) or ""),
         json.dumps(record, sort_keys=True, default=str),
     )
 
@@ -228,7 +226,7 @@ def _unpaired_activity_match(
     unused: set[int],
     planned_ids: frozenset[str],
 ) -> int | None:
-    event_start = _activity_datetime(_first_present(event, _UNIT_START_FIELDS))
+    event_start = _activity_datetime(first_present(event, _UNIT_START_FIELDS))
     candidates = [
         (_start_distance(activity_rows[index], event_start), index)
         for index in _same_day_candidates(event, activity_rows, unused, planned_ids)
@@ -252,7 +250,7 @@ def match_planned_workouts(
     planned_ids = frozenset(
         str(event_id)
         for event in planned
-        if (event_id := _first_present(event, ("id", "event_id"))) is not None
+        if (event_id := first_present(event, ("id", "event_id"))) is not None
     )
 
     # planned_event_id is the reliable provider association.
@@ -283,12 +281,12 @@ def match_planned_workouts(
     timed_units = [
         (index, event)
         for index, event in unmatched
-        if _has_start_time(_first_present(event, _UNIT_START_FIELDS))
+        if _has_start_time(first_present(event, _UNIT_START_FIELDS))
     ]
     date_only_units = [
         (index, event)
         for index, event in unmatched
-        if not _has_start_time(_first_present(event, _UNIT_START_FIELDS))
+        if not _has_start_time(first_present(event, _UNIT_START_FIELDS))
     ]
 
     # Manually logged units with a start time keep the nearest-start rule.

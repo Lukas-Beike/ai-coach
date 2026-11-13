@@ -26,7 +26,7 @@ from backend.performance.session_execution import _number as execution_number
 from backend.performance.wellness import _as_number as wellness_number
 from backend.planning import competitions, conflicts
 from backend.providers.open_food_facts import _number as food_facts_number
-from backend.providers.yazio import _number as yazio_number
+from backend.providers.yazio import bounded_number as yazio_number
 from backend.weather.adaptive import _as_number as weather_number
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +62,7 @@ _FIRST_PRESENT = (
     conflicts._first_present,
     competitions._first_present,
     duplicates._first_present,
-    matching._first_present,
+    matching.first_present,
     calendar_projection._first_present,
 )
 # Provider-facing legacy readers that must parse comma text through the helper.

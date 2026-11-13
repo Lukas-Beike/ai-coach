@@ -6,8 +6,9 @@ Coach edit. Distance-step duration is left to the athlete's provider settings.
 
 import math
 import re
-from typing import Any, NoReturn, TypeGuard
+from typing import Any, NoReturn
 
+from backend.athlete.measurements import is_finite_number as _numeric
 from backend.providers.intervals_activity_keys import activity_training_load
 
 
@@ -342,14 +343,6 @@ def _readback_failure() -> NoReturn:
     raise WorkoutTextError(
         "intervals_workout_verification_failed",
         "Intervals.icu hat die Einheit nicht korrekt bestätigt.",
-    )
-
-
-def _numeric(value: Any) -> TypeGuard[float | int]:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
     )
 
 

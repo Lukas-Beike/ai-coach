@@ -12,10 +12,11 @@ dict of ``analysis_input``; absent running dynamics are normal and give an
 
 from __future__ import annotations
 
-import math
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
+
+from backend.athlete.measurements import is_positive_number as _is_positive
 
 # Bump when the computation changes, so stored analyses recompute.
 METHOD_VERSION: Final = 1
@@ -177,12 +178,3 @@ def _weighted(
         covered += weight
         total += weight * float(value)
     return covered, total
-
-
-def _is_positive(value: object) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value > 0
-    )

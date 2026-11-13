@@ -8,6 +8,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
+from backend.activities.matching import first_present as _first_present
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.canonical.stored_sports import (
     LEGACY_COMPETITION_ALIASES,
@@ -140,16 +141,6 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
     }
     payload.update(competition_event_optional_payload(competition))
     return intervals_fields_from_planning(payload)
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def remote_competition_date(event: dict[str, Any]) -> str | None:
