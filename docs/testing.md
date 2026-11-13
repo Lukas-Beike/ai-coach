@@ -85,8 +85,10 @@ Explicit read-only test inputs exclude the checkout root, `.git`, `.env` and liv
 data. Application server/backend/public files come from the current image.
 By default it runs CI's `container_tests` selection (`--suite container`), which
 includes the SQLCipher migration, upgrade and restore modules. `-Suite all` runs
-every module; duration recording and coverage require it, and there the tests
-that need the repository checkout, Git or the Sonar CLI report environment failures.
+every module; duration recording and coverage require it. It finishes green: the
+repository files tests read are mounted, `/tmp` allows the temporary scripts some
+tests run, and the few Windows-, PowerShell- or Node-only tests skip with their
+reason, which each shard's `result.json` lists under `skip_reasons` (#2553).
 
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
@@ -271,8 +273,8 @@ reach while the image, the queue and the native chain together take about that
 long. The result on five later natural runs, including queue with the larger
 matrix and the per-shard balance, is still to be recorded in #2536.
 
-The Python goal stays unverified: both runs end with the same 18 checkout/Git
-environment failures that `-Suite all` documents above, and an earlier same-host
+The Python goal stays unverified: both runs ended with the same 18 checkout/Git
+environment failures that #2553 later removed, and an earlier same-host
 sample on 26 October 2026 (7,289 tests, 728.71 s against 525.62 s) gave 27.87%.
 Browser fixture readiness is hidden by prewarming:
 6.9 s of readiness wait in 1425.8 s, median per spec 0.03 s, fixture start 0.32 s,
