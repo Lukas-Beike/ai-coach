@@ -21,6 +21,15 @@ another machine), and the closing sentence. A lane that cannot message your thre
 writes its reports in its own thread, prefixed `ORCHESTRATOR:`; read those
 threads on every periodic check.
 
+## Hand over
+
+When a successor orchestrator or lane takes over (adapted from Matt Pocock's
+`handoff`; see [THIRD_PARTY.md](../THIRD_PARTY.md)), write the handoff outside the
+repository (the session notes or the OS temp directory) and keep it short: link
+the issues, PRs, ledger and memory files instead of restating them, name the
+skills the successor must load first, state what is running or waiting and on
+whom, and leave out credentials, tokens and athlete data.
+
 ## Shared resources
 
 - **AGENTS.md turn:** one lane at a time may change `AGENTS.md`. Grant the turn
