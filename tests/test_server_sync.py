@@ -188,7 +188,7 @@ class ServerSyncTests(ServerTestCase):
         )
         http_server_factory.assert_called_once()
         address, handler_class = http_server_factory.call_args.args
-        self.assertEqual(address, ("0.0.0.0", server.CONFIG.port))
+        self.assertEqual(address, ("0.0.0.0", server.CONFIG_HOLDER.value.port))
         self.assertTrue(issubclass(handler_class, BaseHTTPRequestHandler))
         self.assertIsInstance(handler_class.static_asset_service, StaticAssetService)
         self.assertEqual(
@@ -672,7 +672,9 @@ class ServerSyncTests(ServerTestCase):
 
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 server.APP,
@@ -892,7 +894,7 @@ class ServerSyncTests(ServerTestCase):
     def test_existing_intervals_coach_folder_is_reused(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(
-                server.CONFIG,
+                server.CONFIG_HOLDER.value,
                 intervals_api_key="test-key",
                 intervals_athlete_id="athlete-1",
             )
@@ -923,7 +925,7 @@ class ServerSyncTests(ServerTestCase):
     def test_pacecraft_folder_wins_over_the_legacy_folder(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(
-                server.CONFIG,
+                server.CONFIG_HOLDER.value,
                 intervals_api_key="test-key",
                 intervals_athlete_id="athlete-1",
             )
@@ -957,7 +959,9 @@ class ServerSyncTests(ServerTestCase):
         }
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 intervals_client_module.IntervalsClient,
@@ -1206,7 +1210,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_intervals_collection_rejects_repeated_full_page(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
-            replace(server.CONFIG, intervals_api_key="test-key")
+            replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key")
         )
         page = [{"id": f"activity-{index}"} for index in range(500)]
         with (
@@ -1339,7 +1343,9 @@ class ServerSyncTests(ServerTestCase):
         client = RecordedIntervalsClient(recorder)
         with (
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
             patch.object(
                 server.APP,
@@ -1373,9 +1379,9 @@ class ServerSyncTests(ServerTestCase):
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
         save_garmin({"old": True})
-        config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
+        config = replace(server.CONFIG_HOLDER.value, garmin_fixture_path="fixture.json")
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 garmin_service.GarminSyncService,
                 "sync",
@@ -1391,7 +1397,9 @@ class ServerSyncTests(ServerTestCase):
         errors = []
         try:
             with patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ):
 
                 def attempt_sync():
@@ -1422,8 +1430,10 @@ class ServerSyncTests(ServerTestCase):
             fixture.write_text(
                 json.dumps({"activities": [], "errors": []}), encoding="utf-8"
             )
-            config = replace(server.CONFIG, garmin_fixture_path=str(fixture))
-            with patch.object(server, "CONFIG", config):
+            config = replace(
+                server.CONFIG_HOLDER.value, garmin_fixture_path=str(fixture)
+            )
+            with patch.object(server.CONFIG_HOLDER, "value", config):
                 result = server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
         self.assertEqual(read_garmin().get("source"), "fixture")
@@ -1481,7 +1491,9 @@ class ServerSyncTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
@@ -1531,7 +1543,9 @@ class ServerSyncTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
@@ -1679,9 +1693,11 @@ class ServerSyncTests(ServerTestCase):
                 "duration_minutes": 20,
             }
         )
-        config = replace(server.CONFIG, intervals_api_key="fake-intervals-key")
+        config = replace(
+            server.CONFIG_HOLDER.value, intervals_api_key="fake-intervals-key"
+        )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 WorkoutLibrarySyncService,
                 "sync_entry",
@@ -1710,9 +1726,13 @@ class ServerSyncTests(ServerTestCase):
 
     def test_garmin_sync_persists_fatal_error_status(self):
         config = replace(
-            server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
+            server.CONFIG_HOLDER.value,
+            garmin_fixture_path="missing-garmin-fixture.json",
         )
-        with patch.object(server, "CONFIG", config), self.assertRaises(AppError):
+        with (
+            patch.object(server.CONFIG_HOLDER, "value", config),
+            self.assertRaises(AppError),
+        ):
             server.GARMIN_ASSEMBLY.sync_service().sync()
         state = server.GARMIN_ASSEMBLY.projection_service().public_state()
         self.assertTrue(state["last_error"])
@@ -1730,9 +1750,14 @@ class ServerSyncTests(ServerTestCase):
         )
         for key, active in (("", False), ("synthetic-personal-key", True)):
             config = replace(
-                server.CONFIG, garmin_personal_api_key=key, garmin_fixture_path=""
+                server.CONFIG_HOLDER.value,
+                garmin_personal_api_key=key,
+                garmin_fixture_path="",
             )
-            with self.subTest(key=bool(key)), patch.object(server, "CONFIG", config):
+            with (
+                self.subTest(key=bool(key)),
+                patch.object(server.CONFIG_HOLDER, "value", config),
+            ):
                 self.assertEqual(active, check.active())
                 self.assertIs(
                     server.GARMIN_ASSEMBLY.change_personal_client(),

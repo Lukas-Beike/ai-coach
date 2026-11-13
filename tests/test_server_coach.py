@@ -1443,7 +1443,9 @@ class ServerCoachTests(ServerTestCase):
                 ),
             ),
             patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
+                server.CONFIG_HOLDER,
+                "value",
+                replace(server.CONFIG_HOLDER.value, intervals_api_key="test-key"),
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(

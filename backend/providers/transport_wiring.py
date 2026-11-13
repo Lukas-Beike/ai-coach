@@ -11,6 +11,7 @@ from backend import observability
 from backend.config import Config
 from backend.providers import http as provider_http
 from backend.providers import intervals_client as intervals_client_module
+from backend.providers.observed_opener import Opener, observed_opener
 from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 from backend.runtime import clock as runtime_clock
 from backend.runtime.ports import ProviderOperation
@@ -21,6 +22,9 @@ class ProviderTransportServices:
     json_http_client: Callable[[], provider_http.JsonHttpClient]
     # Takes an optional Config; the active configuration when omitted.
     intervals_client: Callable[..., intervals_client_module.IntervalsClient]
+    # ``(service, *, include_path=True)``: observes a raw provider request in the
+    # log and the diagnostic capture.
+    observed_opener: Callable[..., Opener]
 
 
 def build_provider_transport(
@@ -70,4 +74,13 @@ def build_provider_transport(
             operation=intervals_operation,
         )
 
-    return ProviderTransportServices(json_http_client, intervals_client)
+    return ProviderTransportServices(
+        json_http_client,
+        intervals_client,
+        partial(
+            observed_opener,
+            logger=logger,
+            diagnostic_capture=diagnostic_capture,
+            operation_context=operation_context,
+        ),
+    )

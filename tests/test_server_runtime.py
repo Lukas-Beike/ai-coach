@@ -35,10 +35,9 @@ class ServerRuntimeTests(ServerTestCase):
             ) as coach_recovery,
             patch.object(sync_worker_runtime.SyncJobWorker, "start") as sync_start,
             patch.object(server.threading, "Thread") as thread,
-            patch.object(server, "SYNC_JOB_WORKER", None),
             patch.object(server, "COACH_JOB_WORKER", CoachJobWorker()),
         ):
-            server.sync_job_worker().start()
+            server.SYNC_WORKERS.create().start()
             server.COACH_JOB_WORKER.start(
                 server.COACH_BACKGROUND_JOBS.job_store,
                 server.COACH_BACKGROUND_JOBS.background_job_runner,
@@ -135,7 +134,9 @@ class ServerRuntimeTests(ServerTestCase):
                 ),
             )
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, data_retention_days=-1)
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, data_retention_days=-1),
         ):
             server.initialise_database()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:

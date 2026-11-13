@@ -35,10 +35,10 @@ class WahooHttpTests(ServerTestCase):
         )
         patches = (
             patch.object(
-                server,
-                "CONFIG",
+                server.CONFIG_HOLDER,
+                "value",
                 replace(
-                    server.CONFIG,
+                    server.CONFIG_HOLDER.value,
                     wahoo_client_id="client-id",
                     wahoo_client_secret=SECRET,
                     wahoo_redirect_uri=REDIRECT,
@@ -167,7 +167,9 @@ class WahooHttpTests(ServerTestCase):
 
     def test_unconfigured_connect_returns_german_error(self):
         with patch.object(
-            server, "CONFIG", replace(server.CONFIG, wahoo_client_secret="")
+            server.CONFIG_HOLDER,
+            "value",
+            replace(server.CONFIG_HOLDER.value, wahoo_client_secret=""),
         ):
             response, data = self.call("POST", "/api/wahoo/connect")
         self.assertEqual(response.status, 503)

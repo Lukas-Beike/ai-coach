@@ -62,8 +62,8 @@ with patch.object(Path, "read_text", _isolated_read_text):
 # A delayed diagnostics write would outlive the test class and its temporary data.
 server.DIAGNOSTIC_CAPTURE.close()
 
-server.CONFIG = replace(
-    server.CONFIG,
+server.CONFIG_HOLDER.value = replace(
+    server.CONFIG_HOLDER.value,
     garmin_email="",
     garmin_password="",
     garmin_fixture_path="",
@@ -143,11 +143,13 @@ class ServerTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._original_config = server.CONFIG
+        cls._original_config = server.CONFIG_HOLDER.value
         cls._original_data_dir = server.DATA_DIR
         cls._original_db_path = server.DB_PATH
         cls._original_log_path = server.LOG_PATH
-        server.CONFIG = replace(server.CONFIG, app_password="")
+        server.CONFIG_HOLDER.value = replace(
+            server.CONFIG_HOLDER.value, app_password=""
+        )
         cls._template_dir = Path(
             tempfile.mkdtemp(prefix="intervals-coach-test-template-")
         )
@@ -175,7 +177,7 @@ class ServerTestCase(unittest.TestCase):
     @classmethod
     def _restore_test_config(cls):
         DATABASE_MANAGER_CACHE.reset()
-        server.CONFIG = cls._original_config
+        server.CONFIG_HOLDER.value = cls._original_config
         server.DATA_DIR = cls._original_data_dir
         server.DB_PATH = cls._original_db_path
         server.LOG_PATH = cls._original_log_path

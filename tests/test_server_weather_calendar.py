@@ -921,7 +921,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
     def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
             replace(
-                server.CONFIG,
+                server.CONFIG_HOLDER.value,
                 intervals_api_key="test-key",
                 intervals_athlete_id="athlete-1",
             )
@@ -1457,10 +1457,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
             )
         with (
             patch.object(
-                server,
-                "CONFIG",
+                server.CONFIG_HOLDER,
+                "value",
                 replace(
-                    server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics"
+                    server.CONFIG_HOLDER.value,
+                    calendar_ical_url="https://calendar.example/feed.ics",
                 ),
             ),
             patch.object(
@@ -1489,14 +1490,15 @@ class ServerWeatherCalendarTests(ServerTestCase):
             b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         )
         config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+            server.CONFIG_HOLDER.value,
+            calendar_ical_url="https://93.184.216.34/family.ics",
         )
         preview_service = Mock()
         preview_service.preview.return_value = {
             "changes": [{"id": "change-1"}, {"id": "change-2"}]
         }
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 calendar_provider, "fetch_calendar_feed", return_value=payload
             ) as fetch,
@@ -1555,10 +1557,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "END:VCALENDAR\r\n"
         ).encode()
         config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+            server.CONFIG_HOLDER.value,
+            calendar_ical_url="https://93.184.216.34/family.ics",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 calendar_provider, "fetch_calendar_feed", return_value=payload
             ),
@@ -1589,10 +1592,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ),
             )
         config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+            server.CONFIG_HOLDER.value,
+            calendar_ical_url="https://93.184.216.34/family.ics",
         )
         with (
-            patch.object(server, "CONFIG", config),
+            patch.object(server.CONFIG_HOLDER, "value", config),
             patch.object(
                 calendar_provider,
                 "fetch_calendar_feed",
