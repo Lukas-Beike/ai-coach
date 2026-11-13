@@ -31,7 +31,6 @@ from backend.canonical.records import (
 )
 from backend.canonical.validation import MAX_ACTIVITY_DURATION_S
 from backend.canonical.vocabulary import (
-    ActivityDetailKind,
     ActivityLinkKind,
     ActivityPurpose,
     ActivityRecordState,
@@ -722,43 +721,6 @@ def session_activity_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
             activity_id,
             activity_id,
             ActivitySessionState.DELETED.value,
-        ),
-    )
-
-
-def session_curve_input_rows(
-    db: Any, since: str, record_kind: str
-) -> list[dict[str, Any]]:
-    """Return one row per record and detail set that a session curve is read from.
-
-    One query for every record started from ``since`` (an ISO date or time):
-    the columns an activity record is read with, its session's state and merge
-    target, the key of each stream or lap set and the payload hash of the
-    provider summary that decides whether a set is still current. Any change to
-    these inputs changes the rows, so a caller can tell without reading each
-    session whether its curves are still current.
-    """
-    return _fetch_all(
-        db,
-        f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)}, r.activity_id, r.state, "
-        "s.state AS session_state, s.merged_into, d.detail_kind, d.resolution, "
-        "d.content_sha256, d.summary_sha256, d.fetched_at AS detail_fetched_at, "
-        "p.payload_hash FROM activity_records AS r "
-        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        "LEFT JOIN activity_detail_sets AS d ON d.provider = r.provider "
-        "AND d.provider_activity_id = r.provider_activity_id "
-        "AND d.detail_kind IN (?, ?) "
-        "LEFT JOIN provider_records AS p ON p.provider = r.provider "
-        "AND p.source_record_id = r.provider_activity_id "
-        "AND p.record_kind = ? AND p.state = ? "
-        "WHERE r.started_at >= ? "
-        "ORDER BY r.started_at, r.provider, r.provider_activity_id, d.detail_kind",
-        (
-            ActivityDetailKind.STREAMS.value,
-            ActivityDetailKind.LAPS.value,
-            record_kind,
-            ProviderRecordState.ACTIVE.value,
-            since,
         ),
     )
 

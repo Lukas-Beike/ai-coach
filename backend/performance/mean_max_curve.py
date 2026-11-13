@@ -16,8 +16,9 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Final
 
 from backend.activities.detail_contract import measured_order
@@ -80,7 +81,7 @@ class SessionCurveReader:
         self._session_records = session_records
         self._capacity = capacity
         self._memo: OrderedDict[str, SessionCurve] = OrderedDict()
-        self._shared: tuple[str, list[dict[str, Any]]] | None = None
+        self._shared: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._lock = threading.Lock()
 
     def curves(self, db: Any, activity_ids: Iterable[str]) -> dict[str, SessionCurve]:
@@ -114,32 +115,38 @@ class SessionCurveReader:
     def shared_records(
         self,
         db: Any,
-        since: str,
+        activity_ids: Sequence[str],
         key: object,
-        build: Callable[[], list[dict[str, Any]]],
-    ) -> list[dict[str, Any]]:
+        build: Callable[[], Iterable[Mapping[str, Any]]],
+    ) -> tuple[Mapping[str, Any], ...]:
         """Return the last built session records while their inputs are unchanged.
 
-        The stamp is ``key`` (the caller's day, window and session list) with the
-        stored records and detail sets read from ``since`` on, so a new day or a
-        changed session, stream, lap set or provider summary builds the records
-        again, and an unchanged read queries no session. Callers share the one
-        list and only read it.
+        The stamp is ``key`` (what the caller's records show of the sessions) with
+        the stored records and detail sets of ``activity_ids`` that ``curves``
+        reads, so a new day, session or merge, or a changed stream, lap set or
+        provider summary builds the records again, and an unchanged read queries no
+        session. Callers share one tuple of read-only records. A build that
+        finishes after another stored its result does not replace it: the slot
+        takes a result only if it still holds what it held at the call's start.
+        Concurrent misses of one stamp each build once; the per-session memo makes
+        the repeat cheap.
         """
         stamp = _sha256(
             [
                 key,
-                canonical_store.session_curve_input_rows(
-                    db, since, ACTIVITY_RECORD_KIND
+                activity_detail_store.session_curve_inputs(
+                    db, activity_ids, ACTIVITY_RECORD_KIND
                 ),
             ]
         )
         with self._lock:
-            if self._shared is not None and self._shared[0] == stamp:
+            held = self._shared[0] if self._shared else None
+            if self._shared and held == stamp:
                 return self._shared[1]
-        records = build()
+        records = tuple(MappingProxyType(record) for record in build())
         with self._lock:
-            self._shared = (stamp, records)
+            if (self._shared[0] if self._shared else None) == held:
+                self._shared = (stamp, records)
         return records
 
 

@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal, overload
 
 from backend.activities.activity_summary import (
     ActivitySummary,
@@ -164,17 +164,27 @@ class TrainingProfileSelectionService:
         self._canonical = canonical
         self._curves = curves
 
+    @overload
+    def curve_records(
+        self, days: int = ..., *, shared: Literal[False] = False
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def curve_records(
+        self, days: int = ..., *, shared: Literal[True]
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
     def curve_records(
         self, days: int = PROFILE_WINDOW_DAYS[-1], *, shared: bool = False
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | tuple[Mapping[str, Any], ...]:
         """Ride and run sessions of the last ``days`` (default the longest window) with their session curves.
 
         E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
         cool-downs (``summary_is_not_training``) are left out; races carry
         ``effort_context`` "race".
-        ``shared`` returns the list of the last read while the day, the sessions
-        and their streams are unchanged, one list for every such caller: it must
-        only be read.
+        ``shared`` returns the records of the last read while the day, what they
+        show of the sessions and the stored inputs of their curves are unchanged:
+        one tuple of read-only mappings for every such caller.
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
@@ -215,12 +225,10 @@ class TrainingProfileSelectionService:
 
             if not shared:
                 return build()
-            # The stored dates run a day wider than the local window above.
+            # What the records show of a session is its curve-less record.
+            shown = [_curve_record(summary, None) for summary in sessions]
             return curve_reader.shared_records(
-                db,
-                (first - timedelta(days=1)).isoformat(),
-                (today.isoformat(), days, sessions),
-                build,
+                db, session_ids, (today.isoformat(), days, shown), build
             )
 
     def power_profiles(

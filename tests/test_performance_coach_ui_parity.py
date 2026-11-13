@@ -158,7 +158,7 @@ class CoachUiParityTests(unittest.TestCase):
         # The real curve owner over synthetic session curves; only the stream
         # read is replaced (`tests/test_mean_max_curve.py` covers it).
         profiles = TrainingProfileSelectionService(lambda: TODAY)
-        profiles.curve_records = _curve_records  # type: ignore[method-assign]
+        profiles.curve_records = _curve_records  # type: ignore[assignment]
         # Wired as `backend/performance/wiring.py` does: the Coach report sections
         # read the services the analysis routes and the public state use.
         self.reports = TrainingReportServices(
