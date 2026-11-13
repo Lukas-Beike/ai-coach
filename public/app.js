@@ -44,7 +44,7 @@ $("#loginPasswordToggle").addEventListener("click", toggleLoginPassword);
 installLoginDialogGuards();
 setupCoachEvents();
 $("#appearanceSelect").addEventListener("change", (event) => {
-  const appearance = applyAppearance(event.currentTarget.value);
+  const appearance = applyAppearance(event.target.value);
   try { localStorage.setItem(APPEARANCE_KEY, appearance); } catch { }
 });
 // A setup link that names a provider opens that provider's card.

@@ -5,5 +5,5 @@
   const light = choice === "light" || (choice === "system" && globalThis.matchMedia?.("(prefers-color-scheme: light)").matches);
   document.documentElement.dataset.theme = light ? "light" : "dark";
   const themeColor = document.querySelector("meta[name='theme-color']");
-  if (themeColor) themeColor.content = light ? "#ffffff" : "#0b0b0d";
+  if (themeColor) themeColor.content = light ? "#f4f5f6" : "#0c0d0f";
 })();

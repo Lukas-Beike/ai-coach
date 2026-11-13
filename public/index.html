@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#0b0b0d">
+  <meta name="theme-color" content="#0c0d0f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -314,13 +314,7 @@
         </section>
         <section class="settings-section appearance-settings" data-more-segment-panel="appearance" aria-labelledby="appearanceTitle">
           <div><h3 id="appearanceTitle">Darstellung</h3></div>
-          <label for="appearanceSelect">Farbschema
-            <select id="appearanceSelect">
-              <option value="system">System</option>
-              <option value="light">Hell</option>
-              <option value="dark">Dunkel</option>
-            </select>
-          </label>
+          <fieldset id="appearanceSelect" class="appearance-control"><legend>Farbschema</legend><div class="segmented-control"><label><input type="radio" name="appearance" value="system" checked>System</label><label><input type="radio" name="appearance" value="light">Hell</label><label><input type="radio" name="appearance" value="dark">Dunkel</label></div></fieldset>
         </section>
         <section class="settings-section" data-more-segment-panel="connections" aria-label="Anbindungen">
           <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
