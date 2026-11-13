@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from datetime import date, timedelta
+from typing import Any
 from unittest.mock import Mock, patch
 
 from backend.athlete.checkins import CHECKIN_TEXT_LIMITS
@@ -271,6 +273,165 @@ class PlanningWorkflowBuilderTests(unittest.TestCase):
         self.assertIs(self.ctx.database.return_value, manager)
         self.assertIs(reader(), self.ctx.canonical_read)
         self.assertIs(local_date(), self.ctx.clock.now.return_value.date.return_value)
+
+
+class PlanGuardBuilderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ctx = Mock()
+        self.today = self.ctx.clock.now.return_value.date.return_value
+        self.services = planning_wiring.build_plan_guard(self.ctx)
+
+    def build(self) -> tuple[Any, Any]:
+        with (
+            patch.object(planning_wiring, "PlanGuardService") as service,
+            patch.object(planning_wiring, "PlannedUnitEstimator") as estimator,
+        ):
+            self.services.plan_guard_service()
+        self.estimator = estimator
+        return service, service.call_args.kwargs
+
+    def test_building_resolves_no_owner(self) -> None:
+        self.ctx.database.assert_not_called()
+        self.ctx.performance.training_reports.assert_not_called()
+        self.ctx.planning.planned_unit.assert_not_called()
+
+    def test_the_estimator_reads_the_context_when_used(self) -> None:
+        with patch.object(planning_wiring, "PlannedUnitEstimator") as estimator:
+            self.services.planned_unit_estimator()
+            self.services.planned_unit_estimator()
+
+        self.assertEqual(2, estimator.call_count)
+        kwargs = estimator.call_args.kwargs
+        self.assertIs(self.ctx.database, kwargs["database_manager"])
+        self.assertIs(self.ctx.canonical_read, kwargs["observation_reader"]())
+        self.assertIs(self.today, kwargs["today"]())
+        kwargs["zone_configurations"]()
+        self.ctx.athlete.zones.return_value.configurations.assert_called_once_with()
+        profile = self.ctx.athlete.profile.return_value
+        with patch.object(planning_wiring, "preferences_from_profile") as preferences:
+            kwargs["source_preferences"]("db")
+        profile.get_from_db.assert_called_once_with("db")
+        preferences.assert_called_once_with(profile.get_from_db.return_value)
+
+    def test_every_guard_is_fresh_and_reads_the_late_owners_on_use(self) -> None:
+        _service, kwargs = self.build()
+
+        self.assertIs(self.estimator.return_value, kwargs["estimate_unit"])
+        self.ctx.planning.planned_unit.assert_not_called()
+        kwargs["planned_units"]()
+        self.ctx.planning.planned_unit.return_value.list.assert_called_once_with(
+            1000, future_only=True
+        )
+        kwargs["competitions"]()
+        self.ctx.planning.competition.return_value.list.assert_called_once_with()
+        kwargs["calendar_events"]()
+        reader = self.ctx.external_calendar.reader.return_value
+        reader.list_events_in_window.assert_called_once_with(56)
+        self.assertIs(self.today, kwargs["today"]())
+        profile = self.ctx.athlete.profile.return_value
+        profile.get.return_value = {"training_model": None}
+        self.assertEqual("", kwargs["training_model"]())
+        self.assertIs(profile.get.return_value, kwargs["profile"]())
+
+    def test_reads_run_over_the_active_database_and_canonical_reader(self) -> None:
+        _service, kwargs = self.build()
+        owners = (self.ctx.database.return_value, self.ctx.canonical_read, self.today)
+
+        with (
+            patch.object(planning_wiring, "read_completed") as completed,
+            patch.object(planning_wiring, "read_load_thresholds") as thresholds,
+        ):
+            kwargs["completed_activities"]()
+            kwargs["history"].recent_completed()
+            kwargs["thresholds"]()
+
+        self.assertEqual(
+            [
+                (owners, {}),
+                (owners, {"days": planning_wiring.LAST_TEST_DAYS}),
+            ],
+            [(call.args, call.kwargs) for call in completed.call_args_list],
+        )
+        args = thresholds.call_args.args
+        self.assertEqual(owners, args[:3])
+        configurations = self.ctx.athlete.zones.return_value.configurations
+        self.assertIs(configurations.return_value, args[3])
+
+    def test_illness_and_the_return_stage_use_the_preview_service(self) -> None:
+        service, kwargs = self.build()
+        preview = self.ctx.planning_workflows.adaptive_replan_preview_service
+        preview.return_value.latest_illness_pause.return_value = (
+            "pause",
+            "2026-09-01",
+        )
+
+        with patch.object(planning_wiring, "recent_illness") as illness:
+            kwargs["illness"]()
+
+        illness.assert_called_once_with(
+            self.ctx.athlete.checkin.return_value.list.return_value,
+            self.today,
+            "2026-09-01",
+        )
+        self.ctx.athlete.checkin.return_value.list.assert_called_once_with(10)
+        preview.return_value.latest_illness_pause.return_value = None
+        with patch.object(planning_wiring, "recent_illness") as illness:
+            kwargs["illness"]()
+        self.assertIsNone(illness.call_args.args[2])
+        return_stage = service.return_value.with_return_stage.call_args.args[0]
+        self.assertIs(
+            preview.return_value.enforced_return_stage.return_value, return_stage()
+        )
+
+    def test_templates_are_the_undated_library_entries(self) -> None:
+        service, _kwargs = self.build()
+        library = self.ctx.planning.workout_library.return_value
+        library.list.return_value = [
+            {"id": 1, "date": ""},
+            {"id": 2, "date": "2026-09-01"},
+        ]
+        guard = service.return_value.with_return_stage.return_value
+
+        self.assertEqual(
+            {"1": {"id": 1, "date": ""}}, guard.with_templates.call_args.args[0]()
+        )
+        library.list.assert_called_once_with(1000)
+
+    def test_progress_lessons_and_strength_read_the_training_reports(self) -> None:
+        _service, kwargs = self.build()
+        reports = self.ctx.performance.training_reports.return_value
+        reports.report.block_review.return_value = {"lessons": ["l"]}
+
+        with (
+            patch.object(planning_wiring, "read_progress") as progress,
+            patch.object(planning_wiring, "read_lessons") as lessons,
+            patch.object(planning_wiring, "strength_expected") as strength,
+        ):
+            kwargs["progress"]()
+            kwargs["history"].lessons()
+            profile = self.ctx.athlete.profile.return_value
+            profile.get.return_value = {"training_preferences_strength": "gym"}
+            kwargs["expects_strength"]()
+
+        progress.assert_called_once_with(reports)
+        self.assertEqual(["l"], lessons.call_args.args[0]())
+        reports.report.block_review.assert_called_once_with(
+            {}, reports.timezone.return_value, with_curves=False
+        )
+        competitions = self.ctx.planning.competition.return_value.list.return_value
+        strength.assert_called_once_with("gym", competitions, self.today)
+
+    def test_recent_units_start_before_the_last_test_window(self) -> None:
+        _service, kwargs = self.build()
+        self.ctx.clock.now.return_value.date.return_value = date(2026, 9, 30)
+
+        kwargs["history"].recent_units()
+
+        self.ctx.planning.planned_unit.return_value.list.assert_called_once_with(
+            1000,
+            future_only=True,
+            since=date(2026, 9, 30) - timedelta(days=planning_wiring.LAST_TEST_DAYS),
+        )
 
 
 if __name__ == "__main__":

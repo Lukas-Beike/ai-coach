@@ -67,6 +67,7 @@ class AppContext:
     planning: Any = None
     planning_workflows: Any = None
     planning_revision: Any = None
+    performance: Any = None
     nutrition: Any = None
     provider_transport: Any = None
     provider_sync: Any = None
@@ -85,5 +86,9 @@ class AppContext:
     coach_dialogue_tools: Any = None
     weather: Any = None
     run_lthr: Any = None
+    # The HTTP public-state projections the training reports read.
+    public_state: Any = None
+    # The stateless reader of the canonical tables (sync owns it; performance may not import sync).
+    canonical_table: Any = None
     # Returns the cached morning body battery service of the active database.
     morning_body_battery_service: Any = None

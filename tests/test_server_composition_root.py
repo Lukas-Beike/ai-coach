@@ -30,6 +30,7 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.sync import IntervalsNutritionSyncService
+from backend.performance.report_service import TrainingReportServices
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive import AdaptiveReplanApplyService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -41,6 +42,8 @@ from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.local_plan_creation_service import (
     LocalTrainingPlanCreationService,
 )
+from backend.planning.plan_guard_service import PlanGuardService
+from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
@@ -114,6 +117,27 @@ class CompositionRootTests(ServerTestCase):
         ):
             with self.subTest(kind=kind.__name__):
                 self.assertIsInstance(factory(), kind)
+
+    def test_training_reports_and_the_plan_guard_resolve_through_the_root(
+        self,
+    ) -> None:
+        performance, guard = server.PERFORMANCE, server.PLAN_GUARD
+
+        self.assertIs(server.APP.performance, performance)
+        reports = performance.training_reports()
+        self.assertIsInstance(reports, TrainingReportServices)
+        self.assertIsNot(reports, performance.training_reports())
+        # The session curves stay cached across the fresh report services.
+        self.assertIs(
+            reports.profiles._curves, performance.training_reports().profiles._curves
+        )
+        self.assertIsInstance(guard.plan_guard_service(), PlanGuardService)
+        self.assertIsInstance(guard.planned_unit_estimator(), PlannedUnitEstimator)
+        profile = server.ATHLETE_DATA.profile().get()
+        self.assertEqual(profile.get("timezone") or "UTC", reports.timezone())
+        self.assertIs(
+            server.HTTP_API.analysis_routes._reports, performance.training_reports
+        )
 
     def test_weather_services_resolve(self) -> None:
         self.assertIsInstance(server.WEATHER.service(), WeatherService)

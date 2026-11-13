@@ -90,7 +90,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
         library = server.NUTRITION_SERVICES.meal_library_service
         day = "2026-01-05"
         today = date(2026, 1, 5)
-        reports = server.HTTP_API.training_reports()
+        reports = server.PERFORMANCE.training_reports()
 
         def outcome(call: Callable[[], object]) -> object:
             # A missing record is a normal answer for these reads; a hidden write
