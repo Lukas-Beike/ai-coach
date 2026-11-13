@@ -34,6 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
+# The fixture's other fake credential (e2e/fixture_runtime.py); redacted like the password.
+FAKE_OPENAI_KEY = "e2e-fixture-openai-key"
 MAX_JOBS = 2
 # Chromium's error when the host ran out of socket buffers (seen on Windows Docker
 # hosts). A child whose every failing test names it hit the machine's limits, not a
@@ -44,10 +46,11 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 class RunnerError(Exception):
     """Diagnostics never contain provider/environment text or credentials.
 
-    Report text is a failing test's bounded first error line and, for a failed
+    Report text is a failing test's bounded first error line; for a failed
     required tool/container command, its program and subcommand words plus the
-    last 10 lines of its stdout and stderr, each cut at 300 characters with the
-    fixture password redacted (#2656).
+    last 10 lines of its stdout and stderr (#2656); and for a fixture that never
+    got ready, the last 20 lines of each of its log streams (#2674). Every line is
+    cut at 300 characters with the fixture credentials redacted.
     """
 
 
@@ -312,9 +315,17 @@ class Processes:
 
 
 def _tail(text, lines=10):
-    """The last lines of a stream, each cut short, with the fixture password hidden."""
-    text = text.replace(FAKE_PASSWORD, "[redacted]")
+    """The last lines of a stream, each cut short, with the fixture credentials hidden."""
+    for secret in (FAKE_PASSWORD, FAKE_OPENAI_KEY):
+        text = text.replace(secret, "[redacted]")
     return [line[:300] for line in text.strip().splitlines()[-lines:]]
+
+
+def _stream_tail(processes, output, lines=10):
+    """The bounded, redacted end of a run's stdout and stderr as message lines."""
+    error = getattr(getattr(processes, "errors", None), "last", b"") or b""
+    tail = _tail(output, lines) + _tail(error.decode("utf-8", errors="replace"), lines)
+    return "".join(f"\n{line}" for line in tail)
 
 
 def checked(processes, command, **kwargs):
@@ -327,11 +338,9 @@ def checked(processes, command, **kwargs):
             if word.startswith("-") or "/" in word or "\\" in word or "\n" in word:
                 break
             words.append(word)
-        error = getattr(getattr(processes, "errors", None), "last", b"") or b""
-        tail = _tail(output) + _tail(error.decode("utf-8", errors="replace"))
         raise RunnerError(
             f"Required tool/container command failed (exit {code}): {' '.join(words)}"
-            + "".join(f"\n{line}" for line in tail)
+            + _stream_tail(processes, output)
         )
     return output
 
@@ -1084,6 +1093,24 @@ class Execution:
                 child, ended_at=stamp(), elapsed_seconds=time.monotonic() - started
             )
 
+    def await_ready(self, slot, cid):
+        """Wait for a fixture; if it never gets ready, show its last log lines,
+        bounded and redacted (#2674). A failed log read keeps the original error."""
+        try:
+            ready(self.slots[slot][1], self.processes.stop)
+        except RunnerError as error:
+            try:
+                code, output = self.processes.run(
+                    ["docker", "logs", "--tail", "20", cid], timeout=15
+                )
+            except RunnerError, OSError, InterruptedError:
+                raise error from None
+            if code:
+                raise
+            raise RunnerError(
+                str(error) + _stream_tail(self.processes, output, 20)
+            ) from None
+
     def lane(self, index, children):
         if not children:
             return
@@ -1092,7 +1119,7 @@ class Execution:
             for offset, child in enumerate(children):
                 slot = index * 2 + offset % 2
                 wait_started = time.monotonic()
-                ready(self.slots[slot][1], self.processes.stop)
+                self.await_ready(slot, current)
                 child["phases"]["readiness_wait_seconds"] = (
                     time.monotonic() - wait_started
                 )
