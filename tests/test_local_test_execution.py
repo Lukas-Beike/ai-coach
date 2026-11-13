@@ -658,8 +658,13 @@ class SupervisorTests(unittest.TestCase):
         args = ["--results-dir", str(self.root), "--workers", "2"]
         modules = ["--module", "test_db_manager", "--module", "test_config"]
         self.assertEqual(local.parse_args([*args, *modules]).suite, "all")
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            local.parse_args([*args, "--module", "tests/test_db_manager.py"])
+        for name in ("tests/test_db_manager.py", "test_db_manager.py", "test_nope"):
+            with (
+                self.subTest(name=name),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                local.parse_args([*args, "--module", name])
         # The mocked plans describe the container suite.
         self.args = local.parse_args([*args, *modules, "--suite", "container"])
         with contextlib.redirect_stdout(io.StringIO()):

@@ -821,7 +821,9 @@ def parse_args(argv=None):
     unknown = [
         name
         for name in args.module
-        if not (ROOT / "tests" / f"{name.split('.')[0]}.py").is_file()
+        if not re.fullmatch(r"\w+(\.\w+)*", name)
+        or name.endswith(".py")
+        or not (ROOT / "tests" / f"{name.split('.')[0]}.py").is_file()
     ]
     if unknown:
         parser.error(
