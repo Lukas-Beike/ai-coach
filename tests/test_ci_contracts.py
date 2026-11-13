@@ -53,10 +53,21 @@ class WorkflowSourceTests(unittest.TestCase):
             {update.splitlines()[0] for update in updates},
             {"pip", "npm", "docker", "github-actions"},
         )
+        # The only ignores are the direct Graphify requirements, whose Linux lock
+        # drops Windows-only pins (athlete decision, #2554); any other fails.
+        graphify = (
+            "    ignore:\n"
+            "      - dependency-name: graphifyy\n"
+            "      - dependency-name: pywin32\n"
+        )
         for update in updates:
             self.assertIn("target-branch: develop", update)
             self.assertIn("commit-message:", update)
+            if update.startswith("pip\n"):
+                self.assertEqual(update.count(graphify), 1)
+                update = update.replace(graphify, "")
             self.assertNotIn("ignore:", update)
+            self.assertNotIn("dependency-name:", update)
 
     def test_workflow_actions_are_immutable_and_ci_does_not_persist_credentials(self):
         root = Path(__file__).resolve().parents[1]
@@ -156,15 +167,37 @@ class WorkflowSourceTests(unittest.TestCase):
                 )
             }
 
-        for manifest, lock in (
-            ("requirements.in", "requirements.txt"),
-            ("requirements-dev.in", "requirements-dev.txt"),
-            ("requirements-graphify.in", "requirements-graphify.txt"),
+        def compile_command(lock, lock_content):
+            line = next(
+                (
+                    line
+                    for line in lock_content.splitlines()[:8]
+                    if line.lstrip("# ").startswith("pip-compile ")
+                ),
+                None,
+            )
+            self.assertIsNotNone(line, f"{lock} has no pip-compile header")
+            return line.lstrip("# ").split()
+
+        # pip-tools releases order the options differently; the set must hold.
+        options = {"--allow-unsafe", "--generate-hashes"}
+        for manifest, lock, extra in (
+            ("requirements.in", "requirements.txt", set()),
+            ("requirements-dev.in", "requirements-dev.txt", set()),
+            (
+                "requirements-graphify.in",
+                "requirements-graphify.txt",
+                {"--strip-extras"},
+            ),
         ):
             lock_content = (root / lock).read_text(encoding="utf-8")
-            header = "\n".join(lock_content.splitlines()[:8])
-            self.assertIn(f"--output-file={lock} {manifest}", header)
-            self.assertNotIn("--no-index", header)
+            command = compile_command(lock, lock_content)
+            self.assertEqual(command[0], "pip-compile")
+            self.assertEqual(command[-1], manifest)
+            self.assertEqual(
+                sorted(command[1:-1]),
+                sorted(options | extra | {f"--output-file={lock}"}),
+            )
             lock_pins = pinned_requirements(lock)
             manifests = pinned_requirements(manifest)
             if manifest == "requirements-dev.in":
