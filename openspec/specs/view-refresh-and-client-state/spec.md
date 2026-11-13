@@ -59,7 +59,11 @@ The client SHALL show compatible stored reads promptly while authentication and 
 - **WHEN** one startup area is slow or fails while others load
 - **THEN** usable prior values remain for the pending/failed area while successful areas replace and save their own data; placeholders are not persisted as a successful full read.
 
-Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `e2e/update-start.spec.js::a start after an update whose fresh data fails shows the stored data @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`.
+#### Scenario: Start data contract
+- **WHEN** the client reads `GET /api/bootstrap`
+- **THEN** the fields, the area fields that stay empty as shape witnesses of the stored snapshot, and the inputs of each `state_versions` marker are those of `docs/bootstrap-contract.md`, whose field table is generated from the running build and checked by a test
+
+Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `e2e/update-start.spec.js::a start after an update whose fresh data fails shows the stored data @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`, `tests/test_server_database.py::ServerDatabaseTests.test_bootstrap_contract_is_current`.
 
 ### Requirement: Session and privacy transitions invalidate device state
 The client SHALL clear cached state, view reads, and recent messages when login becomes required or privacy data is deleted, and invalidate already-started loads so deleted or previous-session data cannot reappear.
