@@ -109,6 +109,7 @@ function changedSyncAreas(nextVersions) {
   const areaMap = {
     // Race results of past competitions come with the profile read.
     activities: ["plan", "performance", "profile"],
+    // Also moved by a zone save, removal or undo: LT1/LT2 derive from the zones (#2479).
     performance: ["performance", "plan"],
     ...(providerIds().garmin ? { [providerIds().garmin]: ["performance", "plan"] } : {}),
     chat: ["chat"],

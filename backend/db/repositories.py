@@ -911,6 +911,11 @@ class StateVersionRepository:
             "observations": db.execute(
                 "SELECT COUNT(*) AS count FROM observations"
             ).fetchone(),
+            # Every zone row, so any save, removal or undo (which can restore an
+            # older date) changes the marker other devices reload LT1/LT2 on (#2479).
+            "zones": db.execute(
+                "SELECT * FROM zone_configurations ORDER BY config_key"
+            ).fetchall(),
         }
 
 
