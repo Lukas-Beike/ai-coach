@@ -119,9 +119,10 @@ when treated as zero, which this method does not do.
 - τ 7 and 42 are not evaluated against this athlete's data; no observation
   phase has run.
 - A replacement of the Garmin training-load balance (#1422) is not decided.
-- TRIMP, further threshold or VO2max estimates, DFA-α1, W′ balance and
-  HRV-based recommendations stay deferred: no proven benefit or data basis
-  (DFA-α1 additionally needs RR intervals, which the canonical model lacks).
+- TRIMP, further threshold or VO2max estimates, W′ balance and HRV-based
+  recommendations stay deferred: no proven benefit or data basis. DFA-α1 is
+  implemented on chest-strap RR intervals as its own method (M10) and does not
+  feed this load.
 - Passive CP/CS from everyday data (R16) stays unreleased and is checked
   separately against protocol tests (#1431).
 

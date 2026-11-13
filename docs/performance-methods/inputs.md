@@ -126,7 +126,7 @@ Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` ve
   `critical_power` in the same payload, so the Analysis card line and the
   Coach tool show the same values.
 
-## M5 to M9 — derived local methods
+## M5 to M10 — derived local methods
 
 | Method | Inputs | Evidence |
 | --- | --- | --- |
@@ -135,6 +135,7 @@ Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` ve
 | M7 | The stored M6 loads summed per local day (`daily_local_loads`); computed on read, never stored. | `backend/performance/fitness_fatigue.py`, `backend/sync/local_load.py` |
 | M8 | The session summary and the full-resolution stream sets of the session (the session analysis); stored as derived observations owned by the session. | `backend/performance/session_metrics.py`, `backend/sync/session_metrics.py` |
 | M9 | The full-resolution stream sets of the ride and run sessions of 60 days (session curves: pace and power per heart-rate bin) and the LT1 heart rate in effect; computed on read, never stored. | `backend/performance/pace_at_hr.py`, `backend/performance/current_metrics.py` |
+| M10 | The RR intervals (FIT `hrv` messages) of chest-strap run and ride files, read once when the stream set is mapped; only the result (`activity_detail_sets.dfa_alpha1`) is stored, never the intervals. The athlete-level estimate reads the stored results of run sessions of 60 days and the run threshold HR in effect on each day, on read. | `backend/providers/fit_rr_mapping.py`, `backend/canonical/dfa_alpha1.py`, `backend/performance/first_threshold_estimate.py`, `backend/performance/first_threshold_service.py` |
 
 Their consumers (Coach training report, public performance history, PWA)
 are listed per method in `openspec/specs/performance-and-readiness/spec.md`.
@@ -156,7 +157,7 @@ are listed per method in `openspec/specs/performance-and-readiness/spec.md`.
 | No full-resolution filter and no 180/420/720 s windows | M4 | method | resolved by #1430 (`mean-max-curve` v1, now v2) |
 | Reports read stored analyses with kv fallback | M4 | read path | resolved by #1410 and #1430 |
 | No CP/CS fit | M4 | method | resolved by #1431 (`critical-power-speed` v1, experimental; now v2) |
-| No RR/NN stream | M2 | out of scope | #1428 |
+| No RR/NN stream for M2 (the RR intervals of chest-strap FIT files are read only for M10 and never stored) | M2 | out of scope | #1428 |
 
 The canonical home for `icu_rpe` (#1446) was delivered by #1510, the
 provider-independent elapsed duration by #1445.

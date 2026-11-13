@@ -16,15 +16,19 @@ a card by its `Card` ID.
 | [M7](m7-local-fitness-fatigue.md) | Local fitness, fatigue and form | model estimate |
 | [M8](m8-local-session-metrics.md) | Local efficiency factor, variability index, work and decoupling | descriptive statistic |
 | [M9](m9-lt1-output-own-sessions.md) | LT1 pace and power from own steady sessions | model estimate |
+| [M10](m10-dfa-alpha1-first-threshold.md) | First threshold heart rate from chest-strap RR intervals (DFA-α1) | model estimate |
 
 M5 covers the smoothed load curves (#1432). M6 (#1725) replaces provider TSS
 with a local load; Banister TRIMP appears only as its heart-rate branch. M7
 (#1726) smooths the M6 load into local fitness, fatigue and form in place of
 the Intervals.icu CTL, ATL and form.
 M9 (#2427) reads LT1 pace and power at the LT1 heart rate from the athlete's
-own steady sessions. Passive CP/CS, other TRIMP uses, further
-threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based
-recommendations stay deferred without a card.
+own steady sessions.
+M10 (#2131) derives the first threshold heart rate from chest-strap RR
+intervals (DFA-α1) per session and as an athlete-level estimate that only the
+athlete can adopt into the profile. Passive CP/CS, other TRIMP uses, further
+threshold or VO2max estimates, W′ balance and HRV-based recommendations stay
+deferred without a card.
 
 Method ids, versions, statuses and limits of the offered methods are
 registered in `openspec/specs/performance-and-readiness/spec.md`;
@@ -212,6 +216,13 @@ accessible text, not a declared absence.
 | R53 | Charoensap et al. 2025 (author order differs between sources), "Durability of the moderate-to-heavy intensity transition can be predicted using readily available markers of physiological decoupling", Eur J Appl Physiol 125:2911-2920, PMC12479576 | abstract | 51 trained cyclists pooled from four studies; power at VT1 before and after about 2.5 h of moderate cycling; HR decoupling correlated with the VT1 power loss (r = −0.76), respiratory frequency weaker, ventilation not. Candidate reference for M8; laboratory sessions, not field files. |
 | R54 | Faude, Kindermann & Meyer 2009, "Lactate threshold concepts: how valid are they?", Sports Med 39(6):469-490, PMID 19453206, DOI `10.2165/00007256-200939060-00003` | abstract | Review of 25 lactate threshold concepts; the first rise of lactate above baseline (LT1) lies close to the first ventilatory threshold. Laboratory step tests; defines the target construct of M9, which does not measure it. |
 | R55 | Seiler 2010, "What is best practice for training intensity and duration distribution in endurance athletes?", IJSPP 5(3):276-291, PMID 20861519, DOI `10.1123/ijspp.5.3.276` | abstract | Descriptive review; three-zone model with LT1/VT1 as the upper boundary of the easy zone. Background for M9, not a validation of field readings. |
+| R56 | Rogers et al. 2021 (online 2021-01-15), "A New Detection Method Defining the Aerobic Threshold for Endurance Exercise and Training Prescription Based on Fractal Correlation Properties of Heart Rate Variability", Front Physiol 11:596567, PMID 33519504, DOI `10.3389/fphys.2020.596567` | full text | 17 men aged 19-52 (15 analysed), incremental treadmill run, ECG RR series, Kubios with smoothness-priors λ = 500, 2-minute windows recalculated every 5 s, box sizes 4-16. HR at DFA-α1 0.75 (154 bpm) against gas-exchange VT1 (152 bpm): r = 0.97, ICC 0.96. No women; the only artifacts were atrial premature beats; laboratory, not field files. |
+| R57 | Gronwald, Rogers & Hoos 2020, "Fractal Correlation Properties of Heart Rate Variability: A New Biomarker for Intensity Distribution in Endurance Exercise and Training Prescription?", Front Physiol 11:550572, PMID 33071812, DOI `10.3389/fphys.2020.550572` | abstract | Perspective; DFA-α1 as a possible marker for intensity distribution from non-invasive wearables. Hypothesis, no new data. |
+| R58 | Rogers & Gronwald 2022 (online 2022-05-09), "Fractal Correlation Properties of Heart Rate Variability as a Biomarker for Intensity Distribution and Training Prescription in Endurance Exercise: An Update", Front Physiol 13:879071, PMID 35615679, DOI `10.3389/fphys.2022.879071` | abstract | Narrative update by the same group: 0.75 as midpoint between correlated and uncorrelated behaviour, associated with the aerobic threshold in elite, recreational and cardiac populations; minimal bias at artifact levels below 3 %, negligible HRVT change at 6 %. Not an independent validation. |
+| R59 | Gronwald & Hoos 2020 (online 2019-09-09), "Correlation properties of heart rate variability during endurance exercise: A systematic review", Ann Noninvasive Electrocardiol 25(1):e12697, PMID 31498541, DOI `10.1111/anec.12697` | abstract | 11 studies of acute dynamic endurance exercise; DFA-α1 distinguishes intensities, exercise durations and movement frequencies. Descriptive; no threshold agreement pooled. |
+| R60 | Peng, Havlin, Stanley & Goldberger 1995, "Quantification of scaling exponents and crossover phenomena in nonstationary heartbeat time series", Chaos 5(1):82-87, PMID 11538314, DOI `10.1063/1.166141` | abstract | Introduces DFA for nonstationary heartbeat series with short- and long-range scaling exponents. Method origin; not an exercise study. |
+| R61 | Tarvainen, Ranta-aho & Karjalainen 2002, "An advanced detrending method with application to HRV analysis", IEEE Trans Biomed Eng 49(2):172-175, PMID 12066885, DOI `10.1109/10.979357` | abstract | Smoothness-priors detrending acting as a time-varying high-pass filter before HRV analysis. Method origin; λ is a free parameter. |
+| R62 | Schaffarczyk, Rogers, Reer & Gronwald 2022, "Validity of the Polar H10 Sensor for Heart Rate Variability Analysis during Resting State and Incremental Exercise in Recreational Men and Women", Sensors 22(17):6536, PMID 36081005, DOI `10.3390/s22176536` | abstract | 25 participants, cycling ramp. RR and heart rate: minimal bias against ECG; DFA-α1 shows significant bias and wider limits of agreement during exercise, up to -41 to +58 % at high intensity. One chest-strap model. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -255,6 +266,14 @@ drift test aerobic threshold validity`, `Firstbeat aerobic threshold heart rate
 speed`, `intervals.icu DFA a1 aerobic threshold`) and the method document on
 the issue; no peer-reviewed validation of a decoupling or drift test against a
 laboratory LT1 was found. Their correction status was not checked.
+R56 to R62 were added on 2026-11-13 (#2131) for M10 from bibliographic
+records (Crossref, Europe PMC); R56 was read in full text (methods, limits),
+the others by abstract. Searches: `DFA alpha1 first ventilatory threshold`,
+`Rogers Gronwald fractal correlation properties heart rate variability`,
+`smoothness priors detrending HRV`. Crossref `filter=updates:<doi>` found no
+correction or retraction for R56 to R62. No independent field validation of a
+DFA-α1 threshold from uncontrolled outdoor sessions and no study of optical
+heart-rate RR was found in this targeted search.
 R52 was added on 2026-11-08 (#1773) from a PubMed search
 (`Manzi individualized training impulse`); its correction status was not
 checked.

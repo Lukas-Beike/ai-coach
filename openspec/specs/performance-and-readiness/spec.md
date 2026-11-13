@@ -329,10 +329,10 @@ Every local performance or recovery method with a planned or offered physiologic
 - **THEN** the repository card check fails.
 
 #### Scenario: Deferred method
-- **WHEN** a method family is recorded as deferred in the register (passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance, HRV-based recommendations)
+- **WHEN** a method family is recorded as deferred in the register (passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, W′ balance, HRV-based recommendations)
 - **THEN** it has no card and produces no output until its own work package adds one.
 
-Evidence: `docs/performance-methods/README.md` and the nine method cards M1 to M9; `tests/test_performance_method_cards.py`.
+Evidence: `docs/performance-methods/README.md` and the ten method cards M1 to M10; `tests/test_performance_method_cards.py`.
 
 ### Requirement: Claim lists bound physiological statements
 API, UI and Coach output SHALL NOT make statements that the method's card forbids. A physiological interpretation SHALL stay blocked until the independent review recorded on its card releases it; descriptive statements that the card allows MAY be shown before that review.
@@ -417,6 +417,10 @@ Sleep timing variability SHALL read canonical periods without traversing raw pro
 #### Scenario: Sparse coverage
 - **WHEN** missing nights or overlapping provider periods exist
 - **THEN** those distinctions remain explicit and the result does not claim the Sleep Regularity Index or fabricate full-day coverage.
+
+#### Scenario: Night read outside the profile time zone
+- **WHEN** a canonical period has no timezone, so its provider day differs from the local end date (`sleep-timing-variability-v3`)
+- **THEN** the night is marked `other_timezone`, shows no deviation and is left out of the median, the deviation medians, the earlier-interval count and the status.
 
 ### Requirement: Canonical retained provider performance reads
 Affected history, recovery, nutrition and Coach reads SHALL obtain retained provider status, load balance, tolerance, score details, performance history, Body Battery and resting energy from canonical data. Provider labels, dates and missing-value semantics SHALL survive without a snapshot dependency in these paths. Garmin stress and the subjective ratings are stored but no read path uses them.
@@ -725,8 +729,9 @@ Detailed contract:
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
 | Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v4 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
 | LT1 pace and power from own steady sessions | `pace-at-heart-rate-v2`, `power-at-heart-rate-v1` | LT1 origin `own_sessions`; none with fewer than 3 steady sessions in the band | read at the LT1 heart rate in effect, never an LT1 heart rate; estimate, not a laboratory LT1; no zone change | M9, released |
+| First threshold heart rate from chest-strap RR intervals (DFA-α1) | `dfa-alpha1-first-threshold` v2 | per recording quality `good` or `low`, none without a crossing; for the athlete the same, none below 3 good run sessions of 60 days | research-grade estimate for the athlete to review, not a laboratory VT1 or lactate threshold; no anaerobic threshold, fitness or readiness statement; only the athlete adopts it | M10, review blocked |
 
-Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
+The first threshold from chest-strap RR intervals (M10) is implemented as a labelled estimate; passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
 Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.
 
@@ -794,3 +799,20 @@ The system SHALL compute M7 `local-fitness-fatigue` v1 on read as the exponentia
 Detailed contract: each result names `metric_id` `local_fitness_fatigue`, `method_id`, `method_version`, unit `TSS/d`, status `estimate` or `insufficient_data` with reason `warmup` or `no_load`, period, parameters with the input load method, per-state day coverage (`loaded`, `incomplete`, `rest`, `open`, `no_history`), the count of sessions without a load, the latest valued day, per-day `state`, `load`, `fitness`, `fatigue` and `form`, method note, limits and the card `docs/performance-methods/m7-local-fitness-fatigue.md`. The loads come from `LocalLoadDayReader`, summed per stored local day. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one chart of the three curves labelled as locally computed.
 
 Evidence: `backend/performance/fitness_fatigue.py:local_fitness_window`, `backend/performance/smoothed_load.py:ewma_walk`, `backend/sync/local_load.py:daily_local_loads`, `backend/performance/training_report.py:training_report`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `public/analysis.js:appendLocalFitnessChart`; `tests/test_fitness_fatigue.py`, `tests/test_local_load_store.py`, `tests/test_performance_coach_ui_parity.py`, `e2e/analysis-info.spec.js`, `docs/performance-methods/m7-local-fitness-fatigue.md`.
+
+### Requirement: DFA-α1 first threshold is a labelled research-grade estimate
+The system SHALL derive per chest-strap recording the heart rate where the regression of DFA-α1 on window heart rate reaches 0.75 (M10 `dfa-alpha1-first-threshold` v2), and for the athlete the median of the good run sessions of 60 days as percent of the run threshold HR. It SHALL give no result when a stop rule fails and SHALL label the value an estimate; the card is the numeric contract.
+
+#### Scenario: Windows and alpha1
+- **WHEN** a segment of the RR series is analysed
+- **THEN** beats outside 300 to 2000 ms or more than 20 % from the last accepted beat are dropped (a level held for 5 beats is accepted), the artifact-free series is detrended with smoothness priors (λ 500), and 120 s windows every 30 s on the beat clock are used when they hold at least 100 beats, at most 5 % artifacts and a heart-rate step of at most 8 bpm between their halves; alpha1 is the slope over boxes of 4 to 16 beats.
+
+#### Scenario: Stop rules
+- **WHEN** a recording has fewer than 10 windows, a window heart-rate spread under 10 bpm, an alpha1 range that does not reach 0.65 and 0.85, a rising line, or a crossing outside the observed heart rates
+- **THEN** it gives no result, and the athlete-level estimate needs at least 3 good-quality run sessions.
+
+#### Scenario: Quality
+- **WHEN** a recording has at least 20 windows, an artifact share of at most 0.03 and R² of at least 0.5
+- **THEN** its quality is `good`, else `low`; the athlete-level quality is `good` with at least 5 sessions that spread at most 5 percentage points.
+
+Evidence: `backend/canonical/dfa_alpha1.py:first_threshold`, `backend/canonical/dfa_alpha1.py:artifact_flags`, `backend/canonical/dfa_alpha1.py:alpha1`, `backend/canonical/dfa_alpha1.py:detrend`, `backend/performance/first_threshold_estimate.py:first_threshold_estimate`; `tests/test_dfa_alpha1.py:test_the_estimate_is_the_heart_rate_where_alpha1_reaches_075`, `tests/test_dfa_alpha1.py:test_a_steady_run_never_crosses_and_gives_no_estimate`, `tests/test_dfa_alpha1.py:test_too_few_windows_give_no_estimate`, `tests/test_dfa_alpha1.py:test_windows_with_a_fast_heart_rate_step_are_left_out`, `tests/test_first_threshold_estimate.py:test_five_agreeing_sessions_make_a_good_estimate`, `docs/performance-methods/m10-dfa-alpha1-first-threshold.md`.
