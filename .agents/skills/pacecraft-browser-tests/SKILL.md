@@ -28,9 +28,7 @@ python scripts/run_browser_tests.py --project all --keep-going
   `test-results/browser-runs/`) or the host ran out of resources; the output says
   which and how to rerun. Report what was not run.
 - Reports and traces can hold fixture data: never publish them.
-- Long runs: a complete local browser selection takes about 15-25 min (one
-  project with `--jobs 2` about 15-20 min on a loaded host), the native Windows
-  Python suite 25-35 min, `run_sqlcipher_tests.ps1 -Suite all` 3-5 min, a soak as
-  long as planned. Start such a run in the background with an explicit limit above
-  that duration (the host allows up to 2 h; the default 30 min stops it) and wait
-  on it before ending the turn.
+- Long runs: the complete selection takes about 24 min with `--jobs 1` and
+  15 min with `--jobs 2` (#2149); one project with `--jobs 2` took 15-19 min on
+  a loaded host (#2515). Start such a run with the long-run rule of
+  [validation](../pacecraft-validation/SKILL.md).
