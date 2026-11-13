@@ -1507,12 +1507,13 @@ function plannedEventDays(event) {
   return days;
 }
 
-function plannedEventsByDate() {
+function plannedEventsByDate(todayKey) {
   const events = Array.isArray(state.data?.external_calendar?.events) ? state.data.external_calendar.events : [];
   const byDate = new Map();
   for (const event of events) {
     if (!event?.uid) continue;
     for (const day of plannedEventDays(event)) {
+      if (day < todayKey) continue;
       if (!byDate.has(day)) byDate.set(day, []);
       byDate.get(day).push(event);
     }
@@ -1566,7 +1567,8 @@ function openPlannedEventSheet(event) {
   const dateLabel = DETAIL_DATE_FORMAT.format(dateFromKey(String(event.start_local || event.event_date).slice(0, 10)));
   const dialog = h("dialog", { className: "planned-event-sheet", "aria-labelledby": "plannedEventTitle" });
   const close = h("button", { type: "button", className: "icon-button planned-event-close", "aria-label": "Schließen" }, "✕");
-  close.addEventListener("click", () => dialog.close());
+  close.addEventListener("click", () => { if (!dialog.dataset.pending) dialog.close(); });
+  dialog.addEventListener("cancel", (cancel) => { if (dialog.dataset.pending) cancel.preventDefault(); });
   let series = Boolean(event.recurring) && event.decision_scope !== "event";
   const scope = event.recurring ? h("div", { className: "planned-event-scope", "aria-label": "Gilt für" }) : null;
   const status = h("p", "planned-event-status");
@@ -1595,7 +1597,7 @@ function openPlannedEventSheet(event) {
   dialog.addEventListener("click", (click) => {
     const box = dialog.getBoundingClientRect();
     const outside = click.clientX < box.left || click.clientX > box.right || click.clientY < box.top || click.clientY > box.bottom;
-    if (click.target === dialog && outside) dialog.close();
+    if (click.target === dialog && outside && !dialog.dataset.pending) dialog.close();
   });
   dialog.addEventListener("close", () => { dialog.remove(); restoreDialogFocus(dialog); }, { once: true });
   document.body.append(dialog);
@@ -1607,6 +1609,7 @@ async function decidePlannedEvent(event, impact, series, dialog, status) {
   if (choices.some((button) => button.disabled)) return;
   status.textContent = "";
   choices.forEach((button) => { button.disabled = true; });
+  dialog.dataset.pending = "true";
   try {
     await api("/api/external-calendar/decisions", {
       method: "POST",
@@ -1616,6 +1619,8 @@ async function decidePlannedEvent(event, impact, series, dialog, status) {
     status.textContent = error.message;
     choices.forEach((button) => { button.disabled = false; });
     return;
+  } finally {
+    delete dialog.dataset.pending;
   }
   scheduleStateEventRefresh(["plan"]);
   for (const item of state.data?.external_calendar?.events || []) {
@@ -2007,7 +2012,7 @@ function renderPlanned(trainingCalendar) {
     .filter((dateKey) => dateKey >= todayKey);
   if (!upcomingDays.some((dateKey) => plannedWeatherLabel(plannedDayWeather(planningContextByDate.get(dateKey) || {}, dateKey)))) root.append(plannedWeatherHint());
   const view = {
-    calendarEventsByDate: plannedEventsByDate(),
+    calendarEventsByDate: plannedEventsByDate(todayKey),
     leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
     eventsByDate,
     dayKey: selectedDayKey,

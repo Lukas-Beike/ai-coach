@@ -22,10 +22,11 @@ async function renderEvents(page) {
       event("Zahnarzt [SHORT_ONLY]", `${day}T07:30:00`, `${day}T08:15:00`, "short", { decision_scope: null }),
       event("Firmenfeier", `${day}T18:00:00`, `${day}T22:00:00`, "easy"),
       event("Dienstreise", `${day}T00:00:00`, `${addDateKey(day, 2)}T00:00:00`, "block", { all_day: 1 }),
+      event("Urlaub", `${addDateKey(today, -3)}T00:00:00`, `${addDateKey(today, 1)}T00:00:00`, "none", { all_day: 1 }),
     ] };
     state.data.training_calendar = [{ id: "event-day-run", date: day, name: "Lockerer Dauerlauf", type: "Run", duration_minutes: 45 }];
     renderPlanned(state.data.training_calendar);
-    return { day, week, after: addDateKey(day, 1) };
+    return { day, week, after: addDateKey(day, 1), today };
   });
 }
 
@@ -40,6 +41,8 @@ test("@responsive personal events show as a band and take a decision per event o
   await expect(chips.filter({ hasText: "Zahnarzt" })).toHaveAttribute("data-impact", "short");
   await expect(chips.filter({ hasText: "Zahnarzt" })).not.toContainText("SHORT_ONLY");
   await expect(chips.filter({ hasText: "Dienstreise" })).toContainText("ganztägig");
+  // An event that began before today shows from today on only.
+  expect(await page.evaluate((today) => [...plannedEventsByDate(today).keys()].every((day) => day >= today), days.today)).toBe(true);
   // A multi-day event shows on each of its days but not on its end day at midnight.
   await expect(page.locator(`.planned-day[data-date="${days.after}"] .planned-event-chip`)).toHaveCount(1);
   // The band replaces the calendar note line for the day.
@@ -93,11 +96,19 @@ test("@responsive personal events show as a band and take a decision per event o
   expect(posts.at(-1)).toEqual({ uid: "Teammeeting", occurrence_start: `${days.day}T08:00:00`, impact: "easy" });
   expect(posts).toHaveLength(3);
 
-  // A failed save keeps the sheet open with the server's message.
+  // A failed save keeps the sheet open with the server's message; Escape waits for the answer.
   await page.unroute("**/api/external-calendar/decisions");
-  await page.route("**/api/external-calendar/decisions", (route) => route.fulfill({ status: 404, json: { error: "Termin nicht gefunden." } }));
+  let answer;
+  const answered = new Promise((resolve) => { answer = resolve; });
+  await page.route("**/api/external-calendar/decisions", async (route) => {
+    await answered;
+    await route.fulfill({ status: 404, json: { error: "Termin nicht gefunden." } });
+  });
   await page.locator(`.planned-day[data-date="${days.day}"] .planned-event-chip`).filter({ hasText: "Firmenfeier" }).click();
   await sheet.getByRole("button", { name: "Egal" }).click();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeVisible();
+  answer();
   await expect(sheet.getByRole("status")).toContainText("Termin nicht gefunden.");
   await page.keyboard.press("Escape");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
