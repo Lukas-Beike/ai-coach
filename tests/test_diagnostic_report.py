@@ -305,7 +305,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # add two (Garmin records, the stream cursor); the provider sync times add
         # two (refresh history, push jobs); the schema version adds one; the
         # Garmin past-workout removal adds its stored state.
-        self.assertEqual(len(self.db.queries), 24)
+        self.assertEqual(len(self.db.queries), 23)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [

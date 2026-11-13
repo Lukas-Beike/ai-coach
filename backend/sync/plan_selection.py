@@ -12,6 +12,7 @@ from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning.intervals_orphans import leftover_ids
 from backend.planning.leftovers import MAX_CLEANUP
+from backend.planning.push_state import INTERVALS_INDOOR_RIDES_ONLY
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.plan_commands import PlanPushCommandService
 
@@ -41,6 +42,8 @@ class PreparedPlanSync:
     mode: str
     entries: list[dict[str, Any]]
     required_scope_groups: tuple[tuple[str, ...], ...]
+    # Units of the turn Intervals.icu takes no part in, dropped before the scope check.
+    skipped: int = 0
 
 
 class StructuredPlanSyncService:
@@ -63,7 +66,12 @@ class StructuredPlanSyncService:
     ) -> PreparedPlanSync:
         if entries is None:
             return self._prepare_implicit_selection(intent)
-        return self._prepare_explicit_selection(entries, intent)
+        dropped = len(intent.get("_skipped_sync_entry_ids") or [])
+        if not entries and dropped:
+            return PreparedPlanSync("selected", [], (), dropped)
+        prepared = self._prepare_explicit_selection(entries, intent)
+        prepared.skipped = dropped
+        return prepared
 
     def _prepare_implicit_selection(self, intent: dict[str, Any]) -> PreparedPlanSync:
         if intent.get("_sync_created_entries_only"):
@@ -80,6 +88,10 @@ class StructuredPlanSyncService:
         }
         if not changed_ids:
             raise AppError(409, _CHANGED_ENTRIES_ERROR, reason="plan_changes_required")
+        skipped = self._authority.intervals_skipped(changed_ids)
+        if skipped and skipped == changed_ids:
+            return PreparedPlanSync("changed", [], (), len(skipped))
+        changed_ids -= skipped
         pending_by_id = {
             entry["library_workout_id"]: entry
             for entry in self._authority.pending_plan_push_entries()
@@ -88,7 +100,7 @@ class StructuredPlanSyncService:
             raise AppError(403, _CHANGED_SCOPE_ERROR, reason="intent_scope_denied")
         selected = [pending_by_id[local_id] for local_id in sorted(changed_ids)]
         groups = self._scope_groups(selected, intent)
-        return PreparedPlanSync("changed", selected, groups)
+        return PreparedPlanSync("changed", selected, groups, len(skipped))
 
     def _prepare_explicit_selection(
         self, entries: list[dict[str, Any]], intent: dict[str, Any]
@@ -162,7 +174,10 @@ class StructuredPlanSyncService:
             groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             groups = self._scope_groups(normalized, intent)
-        if authorized_ids and not self._turn_scope(normalized_ids, authorized_ids):
+        # A turn whose units were all skipped still admits only leftovers.
+        if (authorized_ids or intent.get("_skipped_sync_entry_ids")) and not (
+            self._turn_scope(normalized_ids, authorized_ids)
+        ):
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
         return groups
 
@@ -217,14 +232,37 @@ class StructuredPlanSyncService:
             self._authority.mark_planning_authoritative()
             entries = self._authority.pending_plan_push_entries()
         elif prepared.mode == "changed":
-            ids = [entry["library_workout_id"] for entry in prepared.entries]
-            self._authority.mark_planning_authoritative(ids)
             entries = prepared.entries
+            if entries:
+                self._authority.mark_planning_authoritative(
+                    [entry["library_workout_id"] for entry in entries]
+                )
         elif prepared.mode == "selected":
             entries = self._execute_selected(prepared.entries)
         else:
             raise ValueError(f"Unsupported prepared plan-sync mode: {prepared.mode}")
-        return self._plan_push.enqueue(entries, sync_job_ids, reason=reason)
+        return self.report_skips(
+            self._plan_push.enqueue(entries, sync_job_ids, reason=reason),
+            entries,
+            prepared.skipped,
+        )
+
+    def report_skips(
+        self, result: dict[str, Any], entries: list[dict[str, Any]], dropped: int = 0
+    ) -> dict[str, Any]:
+        """Name in the receipt how many live units Intervals.icu leaves to other providers."""
+        skipped = dropped + len(
+            self._authority.intervals_skipped(
+                entry["library_workout_id"] for entry in entries
+            )
+        )
+        if not skipped:
+            return result
+        return {
+            **result,
+            "skipped": skipped,
+            "message": f"{skipped} Einheiten nicht gesendet. {INTERVALS_INDOOR_RIDES_ONLY}.",
+        }
 
     def _execute_selected(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self._database_manager.unit_of_work() as db:

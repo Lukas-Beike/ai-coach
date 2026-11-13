@@ -43,7 +43,10 @@ def unit(day, sport="WeightTraining", **payload):
 
 def base_snapshot():
     return {
-        "units": {"S": unit("2026-09-09"), "L": unit("2026-10-05", "Ride")},
+        "units": {
+            "S": unit("2026-09-09"),
+            "L": unit("2026-10-05", "Ride", environment="indoor"),
+        },
         "library": {},
         "plans": {},
         "competitions": {
@@ -212,19 +215,25 @@ class ScorerTests(unittest.TestCase):
             ),
         )
         self.assertEqual(card["safety"], ["unauthorized_provider_write"])
-        self.assertEqual(scored("c21-sync-all-pending", job(["S", "L"]))["safety"], [])
-        self.assertTrue(scored("c21-sync-all-pending", job(["S", "L"]))["passed"])
+        self.assertEqual(scored("c21-sync-all-pending", job(["L"]))["safety"], [])
+        self.assertTrue(scored("c21-sync-all-pending", job(["L"]))["passed"])
         self.assertIn(
             "sync_job_missing",
             scored("c21-sync-all-pending", lambda a: None)["misses"],
         )
-        narrowed = scored("c21-sync-all-pending", job(["L"]))
+        # Only indoor and virtual rides are pending for Intervals.icu (#2419).
+        before = base_snapshot()
+        before["units"]["R"] = unit("2026-09-10", "Ride", environment="virtual")
+        narrowed = scored("c21-sync-all-pending", job(["L"]), before=before)
         self.assertIn("sync_scope_wrong", narrowed["misses"])
+        self.assertTrue(
+            scored("c21-sync-all-pending", job(["L", "R"]), before=before)["passed"]
+        )
 
     def test_sync_of_a_created_unit_covers_exactly_the_new_entry(self):
         def created(units):
             def mutate(after):
-                after["units"]["N"] = unit("2026-09-08")
+                after["units"]["N"] = unit("2026-09-08", "Ride", environment="indoor")
                 after["jobs"]["J"] = units
 
             return mutate
@@ -974,9 +983,10 @@ class ScriptedLoopTests(unittest.TestCase):
                     "workouts": [
                         live._workout(
                             "2026-09-08",
-                            "Oberkörper",
-                            "WeightTraining",
-                            template_id=live.template_id(server, "WeightTraining"),
+                            "Indoor-Rad",
+                            "Ride",
+                            environment="indoor",
+                            template_id=live.template_id(server, "Ride"),
                         )
                     ],
                     "expected_revision": state()["planning_revision"],

@@ -1,11 +1,12 @@
 """Which explicit pushes a planned unit still needs, for the calendar sync button.
 
 Read-only projection over stored planned units and their remote links. A unit
-still needs Intervals.icu when it was never synced, failed or went missing
-remotely (strength goes there as a note); it needs Garmin when it is a
-strength unit with a valid structure or a run unit with parseable step text
-whose Garmin fingerprint differs from the pushed one. The payload hash is the
-one the ``plan_push`` jobs check, so the browser can send it back unchanged.
+still needs Intervals.icu when it is an indoor or virtual ride (for Zwift, the
+only units that go there, #2419) that was never synced, failed or went missing
+remotely; it needs Garmin when it is a strength unit with a valid structure or
+a run unit with parseable step text whose Garmin fingerprint differs from the
+pushed one. The payload hash is the one the ``plan_push`` jobs check, so the
+browser can send it back unchanged.
 """
 
 from __future__ import annotations
@@ -19,7 +20,13 @@ from typing import TYPE_CHECKING, Any, Final
 from backend.activities.hr_cap import stored_cap
 from backend.activities.workout_text import structured_blocks
 from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
-from backend.canonical.vocabulary import WAHOO_ID, ProviderId, RemoteEntityKind, Sport
+from backend.canonical.vocabulary import (
+    WAHOO_ID,
+    Environment,
+    ProviderId,
+    RemoteEntityKind,
+    Sport,
+)
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import strength_structure
@@ -49,6 +56,9 @@ if TYPE_CHECKING:
 # its way.
 _INTERVALS_PENDING: Final = frozenset({"local", "sync_error"})
 _REMOTE_LINKS = RemoteLinkRepository()
+INTERVALS_INDOOR_RIDES_ONLY: Final = (
+    "Geht nicht an Intervals.icu: nur Indoor-Radeinheiten"
+)
 # Stand-in references for the push-state check: every reference and zone exists,
 # so only steps Garmin can never take block a run unit.
 _ANY_REFERENCES: Final = garmin_run_workout.GarminRunTargets(
@@ -61,6 +71,23 @@ _ANY_REFERENCES: Final = garmin_run_workout.GarminRunTargets(
     hr_limits=tuple(range(1, 10)),
     pace_limits=tuple(range(1, 10)),
 )
+
+
+def skips_intervals(payload: Mapping[str, Any]) -> bool:
+    """Whether Intervals.icu takes no part in this live planned unit (#2419).
+
+    Only rides done indoors or virtually go there, for Zwift. Runs and strength
+    go to Garmin directly, outdoor rides to Wahoo as library plans. A deleted or
+    archived unit never counts: an explicit sync still removes its own event.
+    An event already at Intervals.icu stays untouched.
+    """
+    if payload.get("local_deleted") or payload.get("archived"):
+        return False
+    sport, environment = planned_sport_environment(payload)
+    return sport is not Sport.RIDE or environment not in {
+        Environment.INDOOR,
+        Environment.VIRTUAL,
+    }
 
 
 def intervals_event_outdated(payload: Mapping[str, Any]) -> bool:
@@ -315,9 +342,9 @@ def _intervals_pending(
 
     A synced run unit whose heart-rate range moved with the threshold HR (the bpm
     path of the cap export) is changed too, and so is a unit whose event has
-    another category than it gets now.
+    another category than it gets now. A unit Intervals.icu skips never waits.
     """
-    return (
+    return not skips_intervals(payload) and (
         str(row["sync_state"] or "local") in _INTERVALS_PENDING
         or str(row["local_id"]) in resync
         or intervals_event_outdated(payload)

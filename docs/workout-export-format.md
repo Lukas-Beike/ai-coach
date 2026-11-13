@@ -10,12 +10,18 @@ Other supported activities, including Yoga, Pilates, Golf and RockClimbing,
 retain prose instructions. Their exported sport is still checked on provider
 readback; no endurance graph or calculated load is required.
 
-A strength unit goes to Intervals.icu as a `NOTE` calendar event (type
-`WeightTraining`), never as a `WORKOUT`, because Intervals.icu forwards workouts
-to Garmin as one unnamed step. Its text is generated from the unit's exercise
-structure (one line per exercise; free text without a structure), and readback requires the `NOTE` category.
-The structured strength workout reaches the watch only through the explicit
-Garmin push.
+Only indoor and virtual ride units go to the Intervals.icu calendar, for Zwift
+(#2419): type `VirtualRide` (an indoor ride is sent as `VirtualRide` too),
+category `WORKOUT`. No other planned unit is written there: runs (also
+`VirtualRun`) and strength units go to Garmin through the direct push, outdoor
+rides (`Ride` without an indoor or virtual environment, `GravelRide` and the
+like) reach the Wahoo head unit as library plans. A selected unit Intervals.icu
+does not take gets the per-unit result `skipped` ("Geht nicht an
+Intervals.icu: nur Indoor-Radeinheiten"), which is no failure; the Coach
+receipt counts the skipped units. Events the app wrote there earlier stay
+untouched; only the app's own events of deleted or replaced units are removed
+by an explicit sync. A Garmin upload filter in Intervals.icu therefore needs
+only the type `VirtualRide`; Zwift reads these events from the calendar.
 
 A run unit with step text goes to Garmin through the same push as a running
 workout (sport running, one segment; the name defaults to "Lauf", the
@@ -25,7 +31,7 @@ distance. Percent and zone targets are resolved to absolute watts, bpm or m/s
 from the athlete's run zones on the unit's date, and the heart-rate cap is sent
 as bpm. A ramp, a pace unit other than /km or /mi, or a capped run without a
 known threshold heart rate is not sent. Switch off Intervals.icu's Garmin
-upload for running, or each run arrives twice.
+upload for running, or each run event written there before #2419 arrives twice.
 
 References:
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import date
+from unittest.mock import Mock
 
 from support import temp_database
 
@@ -13,16 +14,18 @@ from backend.coach.proposal_creation import (
     _plan_sync_approval_details,
 )
 from backend.db import row_factory
+from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
 from backend.planning.push_state import attach_push_state
+from backend.sync.plan_selection import StructuredPlanSyncService
 
 OLD, NEW, LIVE, PAST, PLAIN = (
     f"{n}" * 8 + "-1111-4111-8111-" + f"{n}" * 12 for n in "12345"
 )
 TODAY = date(2026, 11, 9)
 UNIT = {
-    "sport": "Ride",
+    "sport": "VirtualRide",
     "name": "Lockeres Indoor-Rad",
     "date": "2026-11-11",
     "remote_event_id": "evt-1",
@@ -55,6 +58,24 @@ class IntervalsOrphanTests(unittest.TestCase):
         self.insert(NEW, {**UNIT, "archived": True}, state="synced")
 
         self.assertEqual([OLD], self.orphans())
+
+    def test_a_live_unit_that_no_longer_qualifies_keeps_its_event_untouched(
+        self,
+    ) -> None:
+        # Only indoor rides go to Intervals.icu (#2419): the event of a live run
+        # is no orphan and never waits, while a deleted run's event is removed.
+        self.insert(LIVE, {**UNIT, "sport": "Run"})
+        self.insert(PLAIN, {**UNIT, "sport": "Run", "local_deleted": True})
+
+        self.assertEqual([PLAIN], self.orphans())
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT local_id, payload, sync_state FROM planned_units WHERE local_id=?",
+                (LIVE,),
+            ).fetchall()
+        pairs = [(row[0], json.loads(row[0]["payload"]))]
+        attach_push_state(pairs, {}, today=TODAY)
+        self.assertFalse(pairs[0][1]["push_pending"]["intervals"])
 
     def test_the_calendar_lists_the_events_on_a_unit_intervals_waits_for(self) -> None:
         self.insert(OLD, {**UNIT, "local_deleted": True, "archived": True})
@@ -139,7 +160,7 @@ class IntervalsOrphanTests(unittest.TestCase):
             approved["entries"],
         )
         self.assertEqual(
-            {NEW: "Ride", OLD: "Wird bei Intervals.icu entfernt"},
+            {NEW: "VirtualRide", OLD: "Wird bei Intervals.icu entfernt"},
             {item["id"]: item["sport"] for item in details},
         )
 
@@ -167,6 +188,43 @@ class IntervalsOrphanTests(unittest.TestCase):
             {"request": {"sync_scope": "all_pending"}, "_sync_all_pending": True}
         )
         self.assertEqual(1, len(all_pending["entries"]))
+
+    def test_a_turn_of_skipped_units_still_removes_the_replaced_units_event(
+        self,
+    ) -> None:
+        # The Coach replaces a synced ride by a run: Intervals.icu takes the run
+        # no more, yet the replaced ride's event must still go (#2419).
+        self.insert(NEW, {**UNIT, "sport": "Run", "remote_event_id": ""})
+        self.insert(OLD, {**UNIT, "archived": True, "local_deleted": True})
+        intent = {
+            "request": {"sync_scope": "created"},
+            "_created_sync_entry_ids": [],
+            "_skipped_sync_entry_ids": [NEW],
+        }
+        approved = _approved_plan_sync_arguments(
+            {"entries": []}, intent, self.manager, TODAY
+        )
+        self.assertEqual(
+            [OLD], [entry["library_workout_id"] for entry in approved["entries"]]
+        )
+        authority = Mock()
+        authority.intervals_skipped.return_value = set()
+        queue = Mock()
+        queue.enqueue.return_value = {"ok": True}
+        service = StructuredPlanSyncService(self.manager, authority, queue, 366)
+
+        prepared = service.prepare(approved["entries"], intent)
+        service.execute(prepared, [], reason="created")
+
+        self.assertEqual(
+            [OLD],
+            [entry["library_workout_id"] for entry in queue.enqueue.call_args.args[0]],
+        )
+        # Nothing but leftovers is admitted once the turn's own units were skipped.
+        outside = {"library_workout_id": NEW, "expected_payload_hash": "c" * 64}
+        with self.assertRaises(AppError) as raised:
+            service.prepare([outside], intent)
+        self.assertEqual("intent_scope_denied", raised.exception.reason)
 
     def test_sync_entries_carry_the_hash_the_job_checks(self) -> None:
         self.insert(OLD, {**UNIT, "archived": True})

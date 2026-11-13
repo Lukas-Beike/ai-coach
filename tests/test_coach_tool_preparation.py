@@ -16,6 +16,7 @@ class StructuredToolPreparationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dialogue_action = Mock(spec=CoachDialogueActionService)
         self.planning_authority = Mock(spec=PlanningAuthorityService)
+        self.planning_authority.intervals_skipped.return_value = set()
         self.read_only_tools = frozenset({"get_profile", "get_sync_job"})
         self.service = CoachStructuredToolPreparationService(
             self.dialogue_action,
@@ -323,6 +324,37 @@ class StructuredToolPreparationTests(unittest.TestCase):
             ),
         )
         self.planning_authority.pending_plan_push_entries.assert_not_called()
+
+    def test_created_sync_leaves_out_units_intervals_icu_skips(self) -> None:
+        # A run created in the turn is no pending entry, so it must not read as drift (#2419).
+        ride = {"library_workout_id": "ride", "expected_payload_hash": "h"}
+        self.planning_authority.pending_plan_push_entries.return_value = [ride]
+        receipts = [
+            {
+                "tool": "stage_training_plan",
+                "result": {"ok": True, "library_entry_ids": ["ride", "run"]},
+            }
+        ]
+        for skipped, entries in (({"run"}, [ride]), ({"ride", "run"}, [])):
+            with self.subTest(skipped=sorted(skipped)):
+                self.planning_authority.intervals_skipped.return_value = skipped
+                self.planning_authority.pending_plan_push_entries.return_value = entries
+                action: dict[str, Any] = {
+                    "authorization_scope": [],
+                    "request": {"sync_scope": "created"},
+                }
+                self.dialogue_action.classify.return_value = action
+                arguments: dict[str, Any] = {}
+                self.service.prepare(
+                    self.metadata("start_intervals_plan_sync", arguments),
+                    receipts,
+                    question="",
+                    cancelled=False,
+                    context={},
+                    allow_mutations=True,
+                )
+                self.assertEqual(entries, arguments["entries"])
+                self.assertEqual(sorted(skipped), action["_skipped_sync_entry_ids"])
 
     def test_created_sync_rejects_authority_manifest_revision_drift(self) -> None:
         action = {"authorization_scope": [], "request": {"sync_scope": "created"}}

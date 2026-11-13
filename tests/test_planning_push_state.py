@@ -43,7 +43,7 @@ STRENGTH = {
     "date": "2026-11-09",
     "strength_structure": [{"name": "Kniebeuge", "sets": 3, "reps": 5}],
 }
-RIDE = {"sport": "Ride", "date": "2026-11-09", "description": "- 30m 60%"}
+RIDE = {"sport": "VirtualRide", "date": "2026-11-09", "description": "- 30m 60%"}
 RUN = {
     "sport": "Run",
     "name": "Tempo",
@@ -178,37 +178,47 @@ class PushStateTests(unittest.TestCase):
         )
         self.assertEqual(STRENGTH_PAYLOAD_HASH, projected[0]["payload_hash"])
         self.assertEqual(
-            {"intervals": True, "garmin": True}, projected[0]["push_pending"]
+            {"intervals": False, "garmin": True}, projected[0]["push_pending"]
         )
         # Endurance units never offer Garmin; a synced unit needs no Intervals push.
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
-    def test_a_strength_event_not_sent_as_a_note_is_pending_again(self) -> None:
-        # A strength unit sent before #1807 is a WORKOUT event that Intervals.icu
-        # forwards to Garmin; no category was recorded then (#2185).
-        sent = {**STRENGTH, "remote_event_id": "e1"}
-        cases = [
-            (sent, True),
-            ({**sent, "remote_event_category": "WORKOUT"}, True),
-            ({**sent, "remote_event_category": "NOTE"}, False),
-            ({**RIDE, "remote_event_id": "e2"}, False),
-            ({**RIDE, "remote_event_id": "e2", "remote_event_category": "NOTE"}, True),
+    def test_only_indoor_and_virtual_rides_wait_for_intervals(self) -> None:
+        # Intervals.icu serves Zwift (#2419): whatever the sync state, an existing
+        # event or a moved heart-rate range, other units never wait for it.
+        cases: list[tuple[dict[str, Any], bool]] = [
+            (RIDE, True),
+            ({**RIDE, "sport": "Ride", "environment": "indoor"}, True),
+            ({**RIDE, "sport": "Ride"}, False),
+            ({**RIDE, "sport": "Ride", "environment": "outdoor"}, False),
+            (RUN, False),
+            ({**RUN, "sport": "VirtualRun"}, False),
             (STRENGTH, False),
+            ({**STRENGTH, "remote_event_id": "e1"}, False),
+            ({**RUN, "remote_event_id": "e2", "remote_event_category": "NOTE"}, False),
+            # A ride event with another category than it gets now is replaced.
+            ({**RIDE, "remote_event_id": "e3", "remote_event_category": "NOTE"}, True),
         ]
-        projected = self.project(
-            [
-                {
-                    "local_id": f"u{index}",
-                    "payload": json.dumps(payload),
-                    "sync_state": "synced",
-                }
-                for index, (payload, _pending) in enumerate(cases)
+        for state in ("local", "sync_error", "remote_missing", "synced"):
+            pairs = [
+                (
+                    {
+                        "local_id": f"u{index}",
+                        "payload": json.dumps(payload),
+                        "sync_state": state,
+                    },
+                    dict(payload),
+                )
+                for index, (payload, _waits) in enumerate(cases)
             ]
-        )
-        self.assertEqual(
-            [pending for _payload, pending in cases],
-            [unit["push_pending"]["intervals"] for unit in projected],
-        )
+            attach_push_state(
+                pairs, {}, resync={f"u{index}" for index in range(len(cases))}
+            )
+            self.assertEqual(
+                [waits for _payload, waits in cases],
+                [payload["push_pending"]["intervals"] for _row, payload in pairs],
+                state,
+            )
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
@@ -400,7 +410,7 @@ class PushStateTests(unittest.TestCase):
                 {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "local"},
             ]
         )
-        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
         self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
         self.assertEqual({}, projected[1]["push_blocked"])
 
@@ -464,7 +474,7 @@ class PushStateTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
         self.assertEqual({}, projected[0]["push_blocked"])
         self.assertEqual({"intervals": True}, projected[1]["push_pending"])
         self.assertEqual({}, projected[1]["push_blocked"])

@@ -127,7 +127,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 {
                     "date": "2026-09-09",
                     "name": "Lockerer 10-km-Lauf",
-                    "sport": "WeightTraining" if wrong_sport else "Run",
+                    "sport": "WeightTraining" if wrong_sport else "VirtualRide",
                     "description": "Locker laufen" if wrong_sport else "- 75m Z1 HR",
                     "duration_minutes": 75,
                     "target": "AUTO",
@@ -227,15 +227,14 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
     ):
         local_id = self.seed(wrong_sport=True)
         period = {"start": "2026-09-09", "end": "2026-09-09"}
-        # The corrected run is a library template (#2379).
+        # The corrected ride is a library template (#2379).
         run = server.PLANNING_DATA.workout_library().create_template(
             {
-                "sport": "Run",
+                "sport": "VirtualRide",
                 "name": "Lockerer 10-km-Lauf",
                 "description": "- 75m Z1 HR",
                 "duration_minutes": 75,
-                "session_focus": "easy",
-                "hr_cap": effective_caps(None)["easy"],
+                "session_focus": "endurance",
             }
         )
 
@@ -248,9 +247,8 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                         {
                             "local_id": local_id,
                             "action": "update",
-                            "sport": "Run",
-                            "session_focus": "easy",
-                            "hr_cap": effective_caps(None)["easy"],
+                            "sport": "VirtualRide",
+                            "session_focus": "endurance",
                             "description": "- 75m Z1 HR",
                             "template_id": run["id"],
                             "expected_payload_hash": self.selection(local_id)[
@@ -296,7 +294,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "completed"
         )
         self.assertEqual(set(self.remote), {"existing", "race"})
-        self.assertEqual(self.remote["existing"]["type"], "Run")
+        self.assertEqual(self.remote["existing"]["type"], "VirtualRide")
         self.assertEqual(self.remote["existing"]["moving_time"], 4500)
         self.assertEqual(server.PLANNING_DATA.planned_unit().list()[0]["id"], local_id)
         # Already-synced units remain selectable for another repair.
@@ -310,7 +308,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             [value for kind, value in self.mutations if kind == "delete"], ["duplicate"]
         )
 
-    def test_repair_of_a_capped_run_verifies_the_text_that_was_sent(self):
+    def test_repair_of_a_capped_unit_verifies_the_text_that_was_sent(self):
         local_id = self.seed()
         cap = effective_caps(None)["easy"]
         with server.database_manager().unit_of_work() as db:
@@ -342,7 +340,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                     {
                         "date": (date(2026, 9, 9) + timedelta(days=offset)).isoformat(),
                         "name": f"Synthetic run {offset}",
-                        "sport": "Run",
+                        "sport": "VirtualRide",
                         "description": "- 75m Z1 HR",
                         "duration_minutes": 75,
                     }
@@ -356,7 +354,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 "category": "WORKOUT",
                 "start_date_local": entry["date"] + "T00:00:00",
                 "name": entry["name"],
-                "type": "Run",
+                "type": "VirtualRide",
             }
             self.remote[remote["id"]] = remote
             self.set_planned_sync_state(entry["id"], "synced", remote_event=remote)
@@ -417,7 +415,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         local_id = self.seed()
         old = {
             **self.remote["existing"],
-            **parsed_workout_fixture(9000, sport="Run"),
+            **parsed_workout_fixture(9000, sport="VirtualRide"),
             "icu_training_load": 150,
             "icu_intensity": 95,
         }
@@ -491,24 +489,17 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(current["planned_duration_s"], 1800)
         for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, current)
-        parsed = parsed_workout_fixture(
-            1800, sport="Swim", kind="pace", units="pace_zone", value=1
-        )
+        # Intervals.icu takes indoor rides only: the swim is skipped without a write (#2419).
         with patch.object(
             intervals_client_module.IntervalsClient,
             "upsert_calendar_events",
-            return_value=[{"id": "swim-event", **parsed}],
+            side_effect=AssertionError("No Intervals.icu write for a swim"),
         ):
-            self.assertTrue(
-                server.SELECTED_WORKOUT_SYNC.service().sync(
-                    {
-                        "entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries()
-                    }
-                )["ok"]
+            result = server.SELECTED_WORKOUT_SYNC.service().sync(
+                {"entries": [self.selection(entry["id"])]}
             )
-        self.assertEqual(
-            server.PLANNING_DATA.planned_unit().list()[0]["planned_load"], 20
-        )
+        self.assertEqual(["skipped"], [item["status"] for item in result["results"]])
+        self.assertNotIn("planned_load", server.PLANNING_DATA.planned_unit().list()[0])
 
     def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):
         local_id = self.seed()
@@ -731,7 +722,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 {
                     "date": "2026-09-09",
                     "name": "Lockerer 10-km-Lauf",
-                    "sport": "Run",
+                    "sport": "VirtualRide",
                     "description": "- 75m Z1 HR",
                     "duration_minutes": 75,
                 }
@@ -786,7 +777,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                             "date": (
                                 date(2026, 9, 9) + timedelta(days=offset)
                             ).isoformat(),
-                            "sport": "Run",
+                            "sport": "VirtualRide",
                             "name": "Same name and date",
                             "description": "- 30m Z1 HR",
                             "duration_minutes": 30,
@@ -867,7 +858,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             [
                 {
                     "date": "2026-09-10",
-                    "sport": "Run",
+                    "sport": "VirtualRide",
                     "name": "Archived predecessor",
                     "description": "- 30m Z1 HR",
                     "duration_minutes": 30,
@@ -911,7 +902,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                     planning_planned_units.normalize_planned_unit(
                         {
                             "date": "2026-09-09",
-                            "sport": "Run",
+                            "sport": "VirtualRide",
                             "name": "Synthetic manifest unit",
                             "description": "- 30m Z1 HR",
                             "duration_minutes": 30,

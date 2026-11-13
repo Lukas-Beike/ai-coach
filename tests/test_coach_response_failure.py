@@ -21,7 +21,7 @@ class CoachResponseFailureTests(unittest.TestCase):
 
     def test_background_rate_limit_retries_summary_with_parent_and_one_sync(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
+            [self.workout("2026-09-08", sport="VirtualRide")]
         )
         turn_id = "synthetic-sync-rate-retry"
         message = "Bitte den Plan erneut synchronisieren"
@@ -102,7 +102,7 @@ class CoachResponseFailureTests(unittest.TestCase):
 
     def test_failed_background_answer_keeps_sync_and_reports_provider_code(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
+            [self.workout("2026-09-08", sport="VirtualRide")]
         )
         turn_id = "sync-provider-response-failure"
         message = "Sync zu intervals.icu durchführen"

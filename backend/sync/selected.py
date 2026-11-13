@@ -11,6 +11,7 @@ from backend.db import DatabaseManager, planning_store
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
+from backend.planning.push_state import INTERVALS_INDOOR_RIDES_ONLY, skips_intervals
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.planned_calendar import (
@@ -97,11 +98,19 @@ class SelectedWorkoutSyncService:
         self,
         item: dict[str, Any],
         payload: dict[str, Any],
+        unit_payload: str,
         repair_service: PlannedCalendarRepairService | None,
         repair_batch: PlannedCalendarRepairBatch | None,
     ) -> dict[str, Any]:
         local_id = item["library_workout_id"]
         try:
+            if skips_intervals(json.loads(unit_payload)):
+                # The one gate for every Intervals.icu write of a planned unit (#2419).
+                return {
+                    "library_workout_id": local_id,
+                    "status": "skipped",
+                    "error": INTERVALS_INDOOR_RIDES_ONLY,
+                }
             if payload.get("repair"):
                 event = repair_service.repair_entry(
                     local_id, item["expected_payload_hash"], batch=repair_batch
@@ -194,7 +203,9 @@ class SelectedWorkoutSyncService:
                 "error": "Seit der Vorschau geändert",
             }
         if is_planned:
-            return self._sync_planned_entry(item, payload, repair_service, repair_batch)
+            return self._sync_planned_entry(
+                item, payload, row["payload"], repair_service, repair_batch
+            )
         if row.get("sync_state") == "synced":
             return self._sync_existing_library_calendar_entry(item, row)
         return self._sync_pending_library_entry(item)
