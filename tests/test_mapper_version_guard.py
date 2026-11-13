@@ -19,6 +19,7 @@ Run this module to print the current table.
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import importlib
 import io
@@ -212,19 +213,17 @@ def module_path(module: str) -> Path:
     return PROVIDERS / f"{module}.py"
 
 
+@functools.cache
 def backend_imports(module: str) -> set[str]:
     """The backend.providers and ``canonical.<name>`` modules ``module`` imports."""
-    package = (
-        "backend.canonical" if module.startswith(CANONICAL) else "backend.providers"
-    )
+    package = ["backend", "canonical" if module.startswith(CANONICAL) else "providers"]
     dotted: list[str] = []
     for node in ast.walk(ast.parse(module_path(module).read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
-            # A relative import stays in the package of the importing module.
-            base = f"{package}.{node.module or ''}" if node.level else node.module
-            dotted += [
-                f"{base}.{alias.name}".replace("..", ".") for alias in node.names
-            ]
+            # A relative import resolves from the importing module's package.
+            parent = package[: len(package) + 1 - node.level] if node.level else []
+            base = ".".join(parent + (node.module or "").split(".")).strip(".")
+            dotted += [f"{base}.{alias.name}" for alias in node.names]
         elif isinstance(node, ast.Import):
             dotted += [alias.name for alias in node.names]
     names = {
@@ -248,7 +247,8 @@ def helper_replayed_by() -> dict[str, tuple[str, ...]]:
                 seen.add(name)
                 pending.append(name)
         for helper in seen:
-            if not helper.endswith("_mapping"):
+            # Registered mappers carry their own replaying versions.
+            if helper not in REPLAYED_BY:
                 owners.setdefault(helper, set()).update(replaying)
     return {helper: tuple(sorted(found)) for helper, found in owners.items()}
 
@@ -277,26 +277,37 @@ class MapperVersionGuardTests(unittest.TestCase):
         # also through another one, is pinned (#2484, #2501).
         self.assertEqual(set(PINNED), set(replayed_by()))
         helpers = helper_replayed_by()
-        for module, owner in (
-            ("garmin_weight_walk", "garmin_health_mapping"),
-            ("canonical.sleep_bounds", "garmin_health_mapping"),
-            ("canonical.dfa_alpha1", "fit_activity_detail_mapping"),
-            ("canonical.decimal_text", "garmin_health_mapping"),
+        detail = ("fit_activity_detail_mapping", "garmin_activity_detail_mapping")
+        for module, owners in (
+            ("garmin_weight_walk", ("garmin_health_mapping",)),
+            ("canonical.sleep_bounds", ("garmin_health_mapping",)),
+            ("canonical.dfa_alpha1", detail),
+            ("canonical.activity_detail", detail),
         ):
             with self.subTest(module=module):
-                self.assertIn(owner, helpers[module])
+                self.assertEqual(helpers[module], owners)
 
     def test_code_changes_come_with_a_replaying_version_bump(self) -> None:
+        owners = replayed_by()
         for module, (versions, digest) in current_table().items():
             with self.subTest(module=module):
                 pinned_versions, pinned_digest = PINNED[module]
                 if digest != pinned_digest:
-                    self.assertNotEqual(
-                        versions,
-                        pinned_versions,
+                    # Every replaying version, not just one: each projects it.
+                    unbumped = [
+                        owner
+                        for owner, now, pinned in zip(
+                            owners[module], versions, pinned_versions, strict=False
+                        )
+                        if now == pinned
+                    ]
+                    self.assertEqual(
+                        unbumped,
+                        [],
                         f"{module} changed without bumping the MAPPER_VERSION of "
-                        f"{', '.join(replayed_by()[module])}; bump it so stored "
-                        "records replay, then update PINNED",
+                        f"{', '.join(unbumped)}; bump each so stored records "
+                        "replay, then update PINNED (a change that maps nothing "
+                        "differently only updates the fingerprint)",
                     )
                 self.assertEqual(
                     (versions, digest),

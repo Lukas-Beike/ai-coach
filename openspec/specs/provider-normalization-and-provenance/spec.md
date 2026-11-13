@@ -26,7 +26,7 @@ The system SHALL keep `docs/canonical-field-map.md` as the normative field map o
 
 #### Scenario: Mapper output changes
 - **WHEN** a mapper change alters the canonical records it emits for a stored payload
-- **THEN** the field map states the new rule and the replaying `MAPPER_VERSION` is raised; `tests/test_mapper_version_guard.py` fingerprints the mapping code and every `backend/providers` helper module a replayed mapper imports, not their output, and fails when that code changes without a bump.
+- **THEN** the field map states the new rule and the replaying `MAPPER_VERSION` is raised; `tests/test_mapper_version_guard.py` fingerprints the mapping code and every `backend/providers` or `backend/canonical` module a replayed mapper imports, directly or through another (#2501), not their output, and fails when that code changes without a bump of every version that replays it.
 
 ### Requirement: Provider-aware time and sport normalization
 The system SHALL preserve explicit instants, date each activity on the day it was lived using the UTC offset the provider reports for it and otherwise the active athlete timezone, normalize supported sports and indoor/outdoor/virtual environments, and apply the implemented wall-time DST rules to local timestamps.
