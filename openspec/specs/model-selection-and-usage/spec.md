@@ -366,10 +366,10 @@ The system SHALL let the athlete choose one model and one thinking level for eac
 
 #### Scenario: Turn and helper routing
 - **WHEN** a Coach turn is enqueued or a nutrition helper calls the model
-- **THEN** a quick-action turn records the planning model and thinking level in its receipt, every other turn the conversation ones, and the label photo and product web search use the nutrition model, the photo with the nutrition thinking level and the web search with its fixed low effort; the bootstrap lists each task's choice under `model.tasks`
+- **THEN** a quick-action turn records the planning model and thinking level in its receipt, every other turn the conversation ones, and the label photo and product web search use the nutrition model, the photo with the nutrition thinking level and the web search with its fixed low effort; the bootstrap and the diagnostic report list each task's choice under `model.tasks` and `configuration.tasks`
 
 #### Scenario: Settings and answers
 - **WHEN** the athlete opens "Coach-Modell & Thinking" or reads the chat
-- **THEN** one block per task shows a model and a thinking select, the speed select stays below them, and each Coach answer shows the model that wrote it (`coach_model`)
+- **THEN** one block per task shows a model and a thinking select, the speed select stays below them while any task uses an OpenAI model and offers the speeds those models support (each request keeps only the speeds its own model supports), and each Coach answer shows the model that wrote it (`coach_model`)
 
 Evidence: `backend/settings.py:SettingsService.task_settings`, `backend/coach/job_submission.py:CoachJobSubmissionService._model_settings`, `backend/nutrition/wiring.py:build_nutrition`, `backend/db/repositories.py:_message_view`, `public/views.js:renderModel`, `public/coach.js:renderMessageNode`; `tests/test_settings.py:test_each_task_has_its_own_choice_and_falls_back_to_the_conversation`, `tests/test_coach_playbooks.py:test_quick_actions_use_the_planning_model_and_the_rest_the_conversation`, `tests/test_nutrition_wiring.py:test_label_photo_uses_the_nutrition_model_and_thinking`, `tests/test_coach_turn_failures.py:test_reloaded_reply_names_the_model_that_wrote_it`.
