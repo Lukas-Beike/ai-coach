@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const { showCalendarDay } = require("./helpers/ui");
-const { openCalendar, renderSyntheticCalendar } = require("./helpers/calendar");
+const { openCalendar, renderSyntheticCalendar, waitForOlderSessions } = require("./helpers/calendar");
 
 test("@responsive compact calendar week shows one week, groups repeats and keeps one conflict style", async ({ page, request }, testInfo) => {
   await openCalendar(page, request);
@@ -174,7 +174,8 @@ test("@responsive the Monat switch shows the month grid and the calendar returns
     await expect(month.locator(`.planned-month-day[data-date="${days.next}"]`)).toHaveAttribute("aria-pressed", "true");
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  for (const cell of await cells.all()) expect((await cell.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await waitForOlderSessions(page);
+  await expect.poll(() => cells.evaluateAll((items) => Math.min(...items.map((item) => item.getBoundingClientRect().height)))).toBeGreaterThanOrEqual(44);
   await page.locator(".planned-view-switch [data-view='week']").click();
   await expect(page.locator(".planned-month")).toHaveCount(0);
   // Entering the calendar again always opens the week view.
