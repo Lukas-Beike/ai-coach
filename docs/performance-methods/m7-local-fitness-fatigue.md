@@ -172,8 +172,8 @@ curve differs from it by design and is never compared with it as a check.
 | `SOURCE_LABEL` | `'Lokal berechnet (M7)'` | `backend/performance/fitness_fatigue.py` | The source label every consumer of the curve shows. |
 | `FITNESS_TAU_DAYS` | `42` | `backend/performance/fitness_fatigue.py` |  |
 | `FATIGUE_TAU_DAYS` | `7` | `backend/performance/fitness_fatigue.py` |  |
-| `METHOD_NOTE` | `'Fitness (tau 42 d), fatigue (tau 7 d) and form (fitness minus fatigue) from the local TSS-scale ...` | `backend/performance/fitness_fatigue.py` |  |
-| `LIMITS` | `'Model estimate from the local load, not measured fitness, fatigue or readiness and no performanc...` | `backend/performance/fitness_fatigue.py` |  |
+| `METHOD_NOTE` | `'Fitness (tau 42 d), fatigue (tau 7 d) and form (fitness minus fatigue) from the local TSS-scale ... (sha256 20b5779b)` | `backend/performance/fitness_fatigue.py` |  |
+| `LIMITS` | `'Model estimate from the local load, not measured fitness, fatigue or readiness and no performanc... (sha256 f646dd2b)` | `backend/performance/fitness_fatigue.py` |  |
 | `STATE_LOADED` | `'loaded'` | `backend/performance/fitness_fatigue.py` |  |
 | `STATE_INCOMPLETE` | `'incomplete'` | `backend/performance/fitness_fatigue.py` |  |
 | `STATE_REST` | `'rest'` | `backend/performance/fitness_fatigue.py` |  |

@@ -176,7 +176,7 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
 | `MIN_BAND_S` | `600` | `backend/performance/pace_at_hr.py` |  |
 | `MAX_SPEED_CV` | `0.15` | `backend/performance/pace_at_hr.py` |  |
 | `MIN_SESSIONS` | `2` | `backend/performance/pace_at_hr.py` |  |
-| `SCOPE` | `'Pace in a fixed heart-rate band on steady, flat-ish outdoor or indoor runs after a 10-minute war...` | `backend/performance/pace_at_hr.py` |  |
+| `SCOPE` | `'Pace in a fixed heart-rate band on steady, flat-ish outdoor or indoor runs after a 10-minute war... (sha256 7624bc98)` | `backend/performance/pace_at_hr.py` |  |
 | `POWER_METHOD` | `'power-at-heart-rate-v1'` | `backend/performance/pace_at_hr.py` |  |
 | `POWER_SMOOTH_S` | `60` | `backend/performance/pace_at_hr.py` | The heart rate trails power by up to a minute: each heart-rate sample is paired with the mean power of the minute before it. |
 | `LT1_DAYS` | `60` | `backend/performance/pace_at_hr.py` |  |

@@ -3,7 +3,7 @@
 - **Card:** M10
 - **Card version:** 1
 - **Method ID:** dfa-alpha1-first-threshold v2 (`backend/canonical/dfa_alpha1.py:METHOD_VERSION`), athlete-level value in `backend/performance/first_threshold_estimate.py` (#2131, C-008)
-- **Status:** implemented; per-session result stored with the stream set, athlete-level estimate shown in the profile and the Coach context, adopted only by the athlete
+- **Status:** implemented (`backend/providers/fit_rr_mapping.py` reads the RR intervals); per-session result stored with the stream set, athlete-level estimate shown in the profile and the Coach context, adopted only by the athlete
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-13
 - **Review:** blocked
@@ -235,6 +235,9 @@ of the run threshold HR, "% LSHF"):
 
 | Constant | Value | Module | Code comment |
 | --- | --- | --- | --- |
+| `HRV_MESSAGE` | `78` | `backend/providers/fit_rr_mapping.py` |  |
+| `MAX_RR_INTERVALS` | `150000` | `backend/providers/fit_rr_mapping.py` | A day of beats at 100 bpm; longer series belong to no single activity. |
+| `MAX_UNACCOUNTED_S` | `10.0` | `backend/providers/fit_rr_mapping.py` | The file clock may run this far ahead of the intervals before a dropout is assumed. |
 | `METHOD_VERSION` | `2` | `backend/canonical/dfa_alpha1.py` |  |
 | `MIN_RR_MS` | `300.0` | `backend/canonical/dfa_alpha1.py` |  |
 | `MAX_RR_MS` | `2000.0` | `backend/canonical/dfa_alpha1.py` |  |
@@ -243,6 +246,7 @@ of the run threshold HR, "% LSHF"):
 | `DETREND_LAMBDA` | `500.0` | `backend/canonical/dfa_alpha1.py` | Smoothness priors detrending strength (Kubios and the DFA-a1 studies use 500). |
 | `WINDOW_S` | `120.0` | `backend/canonical/dfa_alpha1.py` |  |
 | `STRIDE_S` | `30.0` | `backend/canonical/dfa_alpha1.py` |  |
+| `BOX_SIZES` | `tuple(range(4, 17))` | `backend/canonical/dfa_alpha1.py` |  |
 | `MAX_WINDOW_ARTIFACT_SHARE` | `0.05` | `backend/canonical/dfa_alpha1.py` |  |
 | `MIN_WINDOW_BEATS` | `100` | `backend/canonical/dfa_alpha1.py` |  |
 | `MAX_HALF_HR_STEP_BPM` | `8.0` | `backend/canonical/dfa_alpha1.py` |  |

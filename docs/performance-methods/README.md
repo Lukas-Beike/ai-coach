@@ -5,6 +5,10 @@ These cards fix what each local performance or recovery method in Epic S
 implemented or released (gate G0, #1424). Code, UI text and Coach context cite
 a card by its `Card` ID.
 
+Every named number the derived-metric code fixes is listed, generated from the
+code, in [code constants](code-constants.md); each card carries the constants
+of its own modules.
+
 | Card | Method | Classification |
 | --- | --- | --- |
 | [M1](m1-session-rpe-load.md) | Session-RPE load | descriptive statistic |

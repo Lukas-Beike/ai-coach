@@ -212,7 +212,7 @@ athlete's power meter or GPS.
 | `INTERCEPT_RELIABILITY` | `'low'` | `backend/performance/critical_power.py` | Hunter 2023: W′/D′ from everyday training agree only weakly with tests. |
 | `MIN_RECOVERY_SECONDS` | `1800` | `backend/performance/critical_power.py` | Efforts in one session count separately only with this much recovery between. |
 | `MAX_RELATIVE_RESIDUAL` | `0.03` | `backend/performance/critical_power.py` |  |
-| `PLAUSIBLE` | `{'ride': {'intercept': (1000.0, 50000.0), 'slope': (50.0, 600.0)}, 'run': {'intercept': (10.0, 50...` | `backend/performance/critical_power.py` |  |
-| `SCOPE` | `'Experimentelle Modellschätzung aus den besten Belastungen der letzten 28 Tage (Rad 3, 7, 12 und ...` | `backend/performance/critical_power.py` |  |
+| `PLAUSIBLE` | `{'ride': {'intercept': (1000.0, 50000.0), 'slope': (50.0, 600.0)}, 'run': {'intercept': (10.0, 50... (sha256 5065712a)` | `backend/performance/critical_power.py` |  |
+| `SCOPE` | `'Experimentelle Modellschätzung aus den besten Belastungen der letzten 28 Tage (Rad 3, 7, 12 und ... (sha256 3da99455)` | `backend/performance/critical_power.py` |  |
 | `POWER_SOURCE_UNCHECKED` | `'unchecked'` | `backend/performance/critical_power.py` | Garmin and Wahoo deliver no measured-versus-estimated power signal. |
 <!-- END GENERATED CONSTANTS -->

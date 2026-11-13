@@ -139,8 +139,8 @@ when treated as zero, which this method does not do.
 | `SHORT_TAU_DAYS` | `7` | `backend/performance/smoothed_load.py` |  |
 | `LONG_TAU_DAYS` | `42` | `backend/performance/smoothed_load.py` |  |
 | `WARMUP_TAUS` | `2` | `backend/performance/smoothed_load.py` |  |
-| `METHOD_NOTE` | `"Short-term (tau 7 d) and long-term (tau 42 d) exponentially smoothed session-RPE load, from the ...` | `backend/performance/smoothed_load.py` |  |
-| `LIMITS` | `'Smoothed subjective load, not measured fitness, fatigue, form or injury risk. No ratio of the tw...` | `backend/performance/smoothed_load.py` |  |
+| `METHOD_NOTE` | `"Short-term (tau 7 d) and long-term (tau 42 d) exponentially smoothed session-RPE load, from the ... (sha256 aa7f4855)` | `backend/performance/smoothed_load.py` |  |
+| `LIMITS` | `'Smoothed subjective load, not measured fitness, fatigue, form or injury risk. No ratio of the tw... (sha256 4f3462bc)` | `backend/performance/smoothed_load.py` |  |
 | `STATE_RATED` | `'rated'` | `backend/performance/smoothed_load.py` |  |
 | `STATE_REST` | `'rest'` | `backend/performance/smoothed_load.py` |  |
 | `STATE_GAP` | `'gap'` | `backend/performance/smoothed_load.py` |  |

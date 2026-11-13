@@ -475,6 +475,7 @@ hour, or a mix of branches on one scale.
 | `CALIBRATION_WINDOW_DAYS` | `365` | `backend/performance/local_tss.py` |  |
 | `CALIBRATION_MIN_PAIRS` | `20` | `backend/performance/local_tss.py` |  |
 | `CALIBRATION_RPE_BANDS` | `(1, 2)` | `backend/performance/local_tss.py` | The RPE distances of the calibration bands, tried in order (card M6 v4). |
+| `CALIBRATION_TABLE_RPES` | `tuple(range(1, 11))` | `backend/performance/local_tss.py` | The RPE values of the detail table (factor per RPE of its +-1 band). |
 | `LOCAL_SOURCE` | `'local'` | `backend/performance/local_tss.py` |  |
 | `LOCAL_INDOOR_SOURCE` | `'local_indoor'` | `backend/performance/local_tss.py` |  |
 | `STAGE` | `'local_load'` | `backend/sync/local_load.py` |  |
