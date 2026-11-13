@@ -253,7 +253,7 @@ not the gain over the old runner:
 | --- | --- | --- | --- |
 | Browser, 3 projects, 187 specs, native Chromium, all passed | `--jobs 1`: 1425.8 s | `--jobs 2`: 909.4 s, summed child time +21% | -36.2%, met against serial |
 | Python `-Suite all`, 9,358 tests | `-Workers 1`: 278.1 s | `-Workers 2`: 164.6 s, summed test time +6.8% | -40.8%, unverified |
-| GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min | | missed; queue and runner-minute split in #2536 |
+| GitHub PR validation, five natural successful runs, creation to completion | median 18.9 min (#2149), 17.1 min (#2536, before) | median 9.0 min with two shards per browser project (#2536) | improved; six-minute goal still missed |
 
 GitHub split (#2536): five natural successful PR runs of `publish-container.yml`
 on 2026-11-13 (43407572797, 43407637046, 43408243035, 43408548488,
@@ -270,8 +270,18 @@ to 39.0 min of queue; each extra browser shard repeats about 0.7 min of setup.
 The mobile and tablet-landscape projects therefore run as two shards each, like
 desktop; the required check names stay unchanged. Six minutes stays out of
 reach while the image, the queue and the native chain together take about that
-long. The result on five later natural runs, including queue with the larger
-matrix and the per-shard balance, is still to be recorded in #2536.
+long.
+
+After the change, five natural successful PR runs on 2026-11-13 (43440109218,
+43441233129, 43444249213, 43445764847, 43446210240) took 7.9 to 9.5 min, median
+9.0 min. The six browser shards ran 4.2 to 7.0 min each; the last job before
+the aggregate was a desktop shard in four runs and a mobile shard in one; the
+largest queue of any job was 0.1 to 1.1 min (the before sample saw up to 4.8 min
+under heavier load, so part of the gain is lighter queueing); execution summed
+40.7 to 45.4 runner-minutes, as before plus the setup of two more jobs. The
+native chain ended at 2.8 to 6.0 min. The next lever would be a third desktop
+shard; six minutes stays missed while source, image and one browser shard take
+about seven.
 
 The Python goal stays unverified: both runs ended with the same 18 checkout/Git
 environment failures that #2553 later removed, and an earlier same-host
