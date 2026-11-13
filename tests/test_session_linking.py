@@ -268,7 +268,8 @@ class PersistedLinkTests(LinkingCase):
             self.assertEqual(sessions[provider_activity_id]["state"], "active")
 
     def test_unrelated_activities_stay_single(self) -> None:
-        self._ingest_garmin([garmin_ride(startTimeLocal="2026-09-12 07:00:00")], FIRST)
+        # Same day, seven hours apart: a candidate the start window rejects.
+        self._ingest_garmin([garmin_ride()], FIRST)
         counters = self._ingest_wahoo(
             [wahoo_workout(starts="2026-09-10T12:00:00.000Z")], SECOND
         )

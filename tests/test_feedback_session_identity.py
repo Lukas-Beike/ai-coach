@@ -339,9 +339,12 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
 
     def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
-        self.service.save(WAHOO_ID, {"notes": "No RPE given"})
-        (effective,) = self.service.list()
-        self.assertIsNone(effective["session_rpe"])
+        # The Garmin copy carries the provider RPE; neither id may pass it on.
+        for key in (GARMIN_ID, WAHOO_ID):
+            with self.subTest(key=key):
+                self.service.save(key, {"notes": f"No RPE given via {key}"})
+                (effective,) = self.service.list()
+                self.assertIsNone(effective["session_rpe"])
 
     def test_a_deleted_provider_copy_keeps_its_feedback(self) -> None:
         self.service.save(GARMIN_ID, {"notes": "Saved on the Garmin copy"})
