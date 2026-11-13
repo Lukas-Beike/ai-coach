@@ -121,8 +121,6 @@
   --planned-session-strength: #e0a35c;
   --planned-session-strength-on: var(--on-session);
   --planned-session-strength-surface: #e0a35c26;
-  --sharing-warning-border: rgba(255, 193, 7, .45);
-  --sharing-warning-surface: rgba(255, 193, 7, .06);
   --sync-progress-border: rgba(52, 207, 161, .38);
   --sync-progress-surface: rgba(52, 207, 161, .07);
   --progress-track: rgba(255, 255, 255, .12);
@@ -140,7 +138,6 @@
 
 :root[data-theme="light"] {
   --warning-border: var(--orange);
-  --sharing-warning-border: var(--orange);
   --nutrition-warning-border: var(--orange);
   color-scheme: light;
   --bg: #f4f5f6;
@@ -1074,7 +1071,6 @@ h2 {
 .more-segment-nav a { display: grid; min-height: 44px; min-width: 0; flex: 1 1 calc(33.333% - 4px); place-items: center; padding: 9px 6px; overflow-wrap: anywhere; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover { color: var(--ink); background: var(--accent-soft); }
 .more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
-.context-sharing-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--sharing-warning-border); border-radius: 12px; color: var(--muted); background: var(--sharing-warning-surface); font-size: .74rem; line-height: 1.45; }
 .library { display: grid; gap: 10px; margin-top: 10px; }
 /* One translucent card family: library sport groups and workout cards. */
 .library-sport, .library-card { border: 1px solid var(--line); border-radius: 15px; background: var(--translucent-surface); }
