@@ -75,6 +75,7 @@ class FakeProcesses:
         self.lock = threading.Lock()
         self.stopped = False
         self.overlap = None
+        self.errors = threading.local()
 
     def stop_all(self):
         self.stopped = True
@@ -103,6 +104,10 @@ class FakeProcesses:
         if command[:2] == ["docker", "start"]:
             return 0, ""
         if command[:2] == ["docker", "logs"]:
+            # A container's stderr arrives on docker's own stderr.
+            self.errors.last = (
+                "Error: fixture stderr line " + runner.FAKE_OPENAI_KEY
+            ).encode()
             return 0, "Traceback: fixture import failed\n" + runner.FAKE_PASSWORD
         if command[0] == "ip":
             return 0, ""
@@ -806,7 +811,10 @@ class BrowserRunnerTests(unittest.TestCase):
         self.assertIn(
             ["docker", "logs", "--tail", "20"], [c[:4] for c in fake.commands]
         )
+        self.assertIn("Error: fixture stderr line", value["error"])
+        self.assertNotIn(runner.FAKE_OPENAI_KEY, value["error"])
 
+    def test_failed_tool_command_names_itself_and_its_output(self):
         # A failed build or container start shows which command and why (#2656).
         script = (
             "import sys; print('st' + 'ep 1'); "
