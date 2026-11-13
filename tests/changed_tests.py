@@ -74,8 +74,8 @@ HEAVY_MODULES = {
 # A changed fixture selects every test whose sources, or the modules it
 # imports, name the fixtures directory as a path segment: loaders build fixture
 # paths from parts, so the file name alone would miss them. A fixture in a
-# subdirectory also needs that subdirectory named the same way, unless the
-# module naming the fixtures directory scans it (#2516).
+# subdirectory also needs that subdirectory named the same way by the module or
+# a module it imports, unless one of them scans directories (#2516).
 FIXTURES = "tests/fixtures/"
 # Tests that check tracked files across the repository (line endings, guidance
 # links to files such as tests/fixtures/providers/README.md), so any changed
@@ -94,7 +94,9 @@ SOURCE_GLOBS = (
 )
 # Changes here are exercised mostly through the app that server.py assembles.
 SERVER_WIRED_PATHS = ("server.py", "backend/http_api/", "backend/runtime/")
-SCAN_CALLS = frozenset({"glob", "rglob", "iterdir", "walk"})
+SCAN_CALLS = frozenset(
+    {"glob", "iglob", "rglob", "iterdir", "walk", "listdir", "scandir"}
+)
 COMPOSITION_ROOT = "server"
 
 
@@ -141,10 +143,20 @@ class _Source:
                 self.imports.update(f"{base}.{alias.name}" for alias in node.names)
             elif isinstance(node, ast.Attribute) and node.attr in SCAN_CALLS:
                 self.scans = True
+            elif isinstance(node, ast.Name) and node.id in SCAN_CALLS:
+                self.scans = True  # from os import listdir; from glob import glob
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
                 literal = node.value.strip().replace("\\", "/").removeprefix("./")
                 if literal and "\n" not in literal and len(literal) < 200:
                     self.literals.add(literal.strip("/"))
+
+        # Path segments of the path-like literals, for the fixture rule.
+        self.segments = {
+            part
+            for literal in self.literals
+            if " " not in literal
+            for part in literal.split("/")
+        }
 
     def _absolute(self, node: ast.ImportFrom) -> str:
         if not node.level:
@@ -219,15 +231,6 @@ def _names(source: _Source, literal: str, exact: set[str], dotted: set[str]) -> 
     return literal in exact or any(
         literal == module or literal.startswith(module + ".") for module in dotted
     )
-
-
-def _segments(source: _Source) -> set[str]:
-    return {
-        part
-        for literal in source.literals
-        if " " not in literal
-        for part in literal.split("/")
-    }
 
 
 def full_suite_reason(paths: list[str]) -> str | None:
@@ -329,9 +332,9 @@ def select_modules(
         if module in selected or not fixtures:
             continue
         texts = [source, *(sources[m] for m in sorted(reach))]
-        owner = next((s for s in texts if "fixtures" in _segments(s)), None)
+        owner = next((s for s in texts if "fixtures" in s.segments), None)
         if owner and (
-            folders is None or owner.scans or any(folders & _segments(s) for s in texts)
+            folders is None or any(s.scans or folders & s.segments for s in texts)
         ):
             selected[module] = f"{owner.path} names {FIXTURES.rstrip('/')}"
     total = sum(

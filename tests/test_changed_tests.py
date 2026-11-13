@@ -46,6 +46,8 @@ FILES = {
     "tests/test_baseline.py": "BASELINE = 'tests/fixtures/other.json'\n",
     "tests/test_fixture_scan.py": "from pathlib import Path\n"
     "FILES = Path('tests/fixtures').rglob('*')\n",
+    "tests/fixture_walker.py": "import os\ndef names(root):\n    return os.listdir(root)\n",
+    "tests/test_fixture_helper_scan.py": "import fixture_walker\nROOT = 'tests/fixtures'\n",
     "tests/test_prose.py": "NOTE = 'Shared fixtures for this test.'\n",
     "tests/test_line_endings.py": "",
     "tests/test_ai_docs_contract.py": "",
@@ -153,19 +155,26 @@ class SelectModulesTests(unittest.TestCase):
         # Loaders build fixture paths from parts, so the directory segment counts
         # wherever it appears; prose does not, and the repository-wide check runs.
         # A fixture in a subdirectory needs that segment too, or a scan (#2516).
-        for fixture, expected in (
+        # A scan in an imported helper counts too, and a top-level fixture keeps the
+        # broad rule when it changes together with a subdirectory one.
+        scanners = {"test_fixture_scan", "test_fixture_helper_scan"}
+        everyone = {"test_fixture_reader", "test_baseline"} | scanners
+        for fixtures, expected in (
             (
-                "tests/fixtures/providers/demo/day.json",
-                {"test_fixture_reader", "test_fixture_scan"},
+                ("tests/fixtures/providers/demo/day.json",),
+                {"test_fixture_reader"} | scanners,
             ),
+            (("tests/fixtures/other.json",), everyone),
+            (("tests/fixtures/golden/chart.txt",), scanners),
             (
-                "tests/fixtures/other.json",
-                {"test_fixture_reader", "test_baseline", "test_fixture_scan"},
+                ("tests/fixtures/other.json", "tests/fixtures/golden/chart.txt"),
+                everyone,
             ),
-            ("tests/fixtures/golden/chart.txt", {"test_fixture_scan"}),
         ):
-            with self.subTest(fixture=fixture):
-                self.assertEqual(set(self.select(fixture)), expected | REPOSITORY_WIDE)
+            with self.subTest(fixtures=fixtures):
+                self.assertEqual(
+                    set(self.select(*fixtures)), expected | REPOSITORY_WIDE
+                )
 
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
         modules, reason = changed_tests.select_modules(
