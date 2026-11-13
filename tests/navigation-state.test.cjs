@@ -193,7 +193,7 @@ function viewCatalogue() {
     "",
     "| Route | Panel | Navigation item |",
     "| --- | --- | --- |",
-    ...Object.keys(routes).sort().map((route) => `| \`#${route}\` | \`${routes[route]}\` | \`${route.split("/")[0]}\` |`),
+    ...Object.keys(routes).sort().map((route) => `| \`#${route}\` | \`${routes[route]}\` | \`${linkRoutes[route.split("/")[0]] || route.split("/")[0]}\` |`),
     "",
     `Kalender segments: ${planSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
     `Mehr segments: ${moreSegments.map((segment) => `\`${segment}\``).join(", ")}.`,
