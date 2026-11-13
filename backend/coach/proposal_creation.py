@@ -399,7 +399,8 @@ def _approved_plan_sync_arguments(
     approved = dict(arguments)
     if approved.get("repair") is True:
         return approved
-    if approved.get("entries"):
+    # A turn whose units Intervals.icu all skipped still removes their leftovers.
+    if approved.get("entries") or intent.get("_skipped_sync_entry_ids"):
         return _with_intervals_leftovers(approved, intent, database_manager, today)
     identifiers = [
         str(value)
@@ -461,16 +462,17 @@ def _with_intervals_leftovers(
         intent.get("_sync_all_pending")
     ):
         return approved
-    entries = [entry for entry in approved["entries"] if isinstance(entry, dict)]
+    given = approved.get("entries") or []
+    entries = [entry for entry in given if isinstance(entry, dict)]
     chosen = {
         str(entry.get("library_workout_id") or entry.get("local_id") or "")
         for entry in entries
     }
     with database_manager.reader() as db:
         orphans, _total = find_intervals_orphans(db, today)
-    room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(approved["entries"])
+    room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(given)
     extra = [item for item in orphans if item.local_id not in chosen][: max(room, 0)]
-    return {**approved, "entries": [*approved["entries"], *sync_entries(extra)]}
+    return {**approved, "entries": [*given, *sync_entries(extra)]}
 
 
 def _remote_write_approval_details(

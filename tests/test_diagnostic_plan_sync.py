@@ -36,12 +36,22 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
         )
         db.execute(
             "INSERT INTO planned_units VALUES ('u1',?,'sync_error','secret-token',0)",
-            (json.dumps({"date": "2026-11-10"}),),
+            (json.dumps({"date": "2026-11-10", "sport": "VirtualRide"}),),
         )
         db.execute(
             "INSERT INTO planned_units VALUES ('u2',?,'synced',NULL,0)",
             (json.dumps({"date": "2026-11-11"}),),
         )
+        # Runs, strength and outdoor rides are no Intervals.icu backlog (#2419).
+        for local_id, sport in (
+            ("u3", "Run"),
+            ("u4", "WeightTraining"),
+            ("u5", "Ride"),
+        ):
+            db.execute(
+                "INSERT INTO planned_units VALUES (?,?,'local',NULL,0)",
+                (local_id, json.dumps({"date": "2026-11-12", "sport": sport})),
+            )
 
         report = summarize_plan_sync(db)
 

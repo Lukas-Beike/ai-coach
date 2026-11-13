@@ -186,7 +186,14 @@ def _sync_failures(sync, before, after, tags) -> list[str]:
         }
         return [] if types == {"competition_push"} else ["sync_scope_wrong"]
     covered = {oid for units in new for oid in units}
-    pending = {k for k, v in before["units"].items() if not v["tombstone"]}
+    from backend.planning.push_state import skips_intervals
+
+    # Intervals.icu takes indoor and virtual rides only (#2419).
+    pending = {
+        k
+        for k, v in before["units"].items()
+        if not v["tombstone"] and not skips_intervals(v["payload"])
+    }
     created = set(_live_units(after)) - set(before["units"])
     wanted = pending if sync == "all_pending" else created
     return [] if wanted and wanted <= covered else ["sync_scope_wrong"]
@@ -666,7 +673,7 @@ def _seed(server: Any, case: dict[str, Any]) -> dict[str, str]:
         tags[tag] = creation.save([workout])[0]["id"]
 
     unit("strength", "2026-09-09", "Oberkörper moderat + Core", "WeightTraining")
-    unit("later", "2026-10-05", "Nach dem Giro", "Ride")
+    unit("later", "2026-10-05", "Nach dem Giro", "Ride", environment="indoor")
     if setup.get("second_strength"):
         unit("second_strength", "2026-09-11", "Oberkörper Kraft", "WeightTraining")
     if setup.get("monday") == "Run":

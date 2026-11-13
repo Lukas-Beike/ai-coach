@@ -281,20 +281,16 @@ def version_counters(db: Any) -> tuple[Any, Any]:
     )
 
 
-def unsynced_planned_units(db: Any, limit: int) -> tuple[int, list[Any]]:
-    """How many live units are not synced, and up to ``limit``, upcoming first."""
-    unsynced = "FROM planned_units WHERE tombstone=0 AND sync_state<>'synced'"
-    total = db.execute(f"SELECT COUNT(*) AS count {unsynced}").fetchone()["count"]
+def unsynced_planned_units(db: Any) -> list[Any]:
+    """The live units that are not synced with their payload, upcoming first."""
     # Past units must not hide the ones still to be pushed.
-    units = db.execute(
-        "SELECT local_id, sync_state, sync_error, "
+    return db.execute(
+        "SELECT local_id, sync_state, sync_error, payload, "
         # A payload that is not valid JSON has no date instead of failing the report.
         "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.date') "
-        f"END AS date {unsynced} "
-        "ORDER BY date < date('now'), date LIMIT ?",
-        (limit,),
+        "END AS date FROM planned_units WHERE tombstone=0 AND sync_state<>'synced' "
+        "ORDER BY date < date('now'), date"
     ).fetchall()
-    return total, units
 
 
 def planned_unit_export_rows(db: Any) -> Iterable[Any]:

@@ -174,7 +174,10 @@ class StructuredPlanSyncService:
             groups: tuple[tuple[str, ...], ...] = (("local_plan",),)
         else:
             groups = self._scope_groups(normalized, intent)
-        if authorized_ids and not self._turn_scope(normalized_ids, authorized_ids):
+        # A turn whose units were all skipped still admits only leftovers.
+        if (authorized_ids or intent.get("_skipped_sync_entry_ids")) and not (
+            self._turn_scope(normalized_ids, authorized_ids)
+        ):
             raise AppError(403, _SELECTED_SCOPE_ERROR, reason="intent_scope_denied")
         return groups
 
