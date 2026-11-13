@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -24,7 +24,6 @@ from backend.planning.adaptive_preview_service import (
     AdaptivePreviewLimits,
     AdaptiveReplanPreviewService,
 )
-from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
@@ -51,7 +50,6 @@ from backend.planning.replacement_service import (
     StructuredTrainingPlanReplacementService,
 )
 from backend.planning.run_hr_cap import profile_run_caps
-from backend.planning.season_preparation import season_preparation
 from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning.training_plans import TrainingPlanService
 from backend.providers import calendar as calendar_provider
@@ -85,10 +83,6 @@ class PlanningWorkflowServices:
         [], StructuredTrainingPlanReplacementService
     ]
     adaptive_replan_preview_service: Callable[[], AdaptiveReplanPreviewService]
-    # Pure planning reads the training reports compose (performance may not import planning).
-    block_review: Callable[..., dict[str, Any]]
-    last_completed_test: Callable[[Mapping[str, Any] | None], str | None]
-    season_preparation: Callable[..., dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -303,9 +297,6 @@ def build_planning_workflows(ctx: AppContext) -> PlanningWorkflowServices:
         structured_training_change_service,
         structured_training_plan_replacement_service,
         adaptive_replan_preview_service,
-        block_review,
-        last_completed_test,
-        season_preparation,
     )
 
 

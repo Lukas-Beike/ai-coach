@@ -221,12 +221,14 @@ from backend.performance.wiring import build_performance
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
+from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.plan_guard_service import (
     read_load_thresholds,
 )
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.run_lthr import RunLthr
+from backend.planning.season_preparation import season_preparation
 from backend.planning.wiring import (
     build_plan_guard,
     build_planning_data,
@@ -672,13 +674,23 @@ APP = AppContext(
     planning_revision=PLANNING_REVISION_SERVICE,
     provider_sync=PROVIDER_SYNC,
     morning_body_battery_service=morning_body_battery_service,
-    canonical_table=CanonicalTableReader(),
 )
 PLANNING_DATA = build_planning_data(APP)
 APP.planning = PLANNING_DATA
 PLANNING_WORKFLOWS = build_planning_workflows(APP)
 APP.planning_workflows = PLANNING_WORKFLOWS
-PERFORMANCE = build_performance(APP)
+PERFORMANCE = build_performance(
+    APP,
+    session_activities=CanonicalTableReader().session_activities,
+    # Defined below; the HTTP public-state projections the reports read.
+    plan_state=lambda: PUBLIC_STATE.plan_state_service(),
+    performance_state=lambda: PUBLIC_STATE.performance_state_service(),
+    canonical_performance_source=lambda: PUBLIC_STATE.canonical_performance_source(),
+    season_source=lambda: PUBLIC_STATE.season_source(),
+    block_review=block_review,
+    last_completed_test=last_completed_test,
+    season_preparation=season_preparation,
+)
 APP.performance = PERFORMANCE
 PLAN_GUARD = build_plan_guard(APP)
 HISTORY = build_history(APP)
@@ -1690,7 +1702,7 @@ COACH_TURNS = CoachTurnAssembly(
 )
 
 
-PUBLIC_STATE = PublicStateAssembly(
+PUBLIC_STATE: PublicStateAssembly = PublicStateAssembly(
     dependencies=PublicStateAssembly.Inputs(
         core=PublicStateCoreInputs(
             database_manager=lambda: database_manager(),
@@ -1751,7 +1763,6 @@ PUBLIC_STATE = PublicStateAssembly(
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
     running_probes={WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running()},
 )
-APP.public_state = PUBLIC_STATE
 
 CANONICAL_READ = build_canonical_read(
     key_values=KEY_VALUE_REPOSITORY,
@@ -1970,7 +1981,6 @@ HTTP_API = HttpApiAssembly(
                         profile, revision, deadline
                     )
                 ),
-                checkin=ATHLETE_DATA.checkin,
                 clock=ATHLETE_CLOCK,
                 local_today=lambda: ATHLETE_CLOCK.now().date(),
                 state_event_buffer=runtime_events.STATE_EVENT_BUFFER,

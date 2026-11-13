@@ -13,7 +13,19 @@ class PerformanceBuilderTests(unittest.TestCase):
         self.ctx = Mock()
         self.today = self.ctx.clock.now.return_value.date.return_value
         self.athlete = self.ctx.athlete
-        self.public = self.ctx.public_state
+        # The composition root passes the public-state projections and the
+        # planning functions; this domain imports neither layer.
+        self.public = Mock()
+        self.inputs = {
+            "session_activities": Mock(name="session_activities"),
+            "plan_state": self.public.plan_state_service,
+            "performance_state": self.public.performance_state_service,
+            "canonical_performance_source": self.public.canonical_performance_source,
+            "season_source": self.public.season_source,
+            "block_review": Mock(name="block_review"),
+            "last_completed_test": Mock(name="last_completed_test"),
+            "season_preparation": Mock(name="season_preparation"),
+        }
         self.patches = {
             name: patch.object(performance_wiring, name)
             for name in (
@@ -29,20 +41,23 @@ class PerformanceBuilderTests(unittest.TestCase):
         self.mocks = {name: p.start() for name, p in self.patches.items()}
         self.addCleanup(patch.stopall)
 
+    def build(self) -> performance_wiring.PerformanceServices:
+        return performance_wiring.build_performance(self.ctx, **self.inputs)
+
     def test_building_creates_the_one_curve_reader_and_resolves_nothing_else(
         self,
     ) -> None:
-        performance_wiring.build_performance(self.ctx)
+        self.build()
 
         self.mocks["SessionCurveReader"].assert_called_once_with(
-            self.ctx.canonical_table.session_activities
+            self.inputs["session_activities"]
         )
         self.ctx.database.assert_not_called()
         self.public.canonical_performance_source.assert_not_called()
         self.mocks["TrainingReportServices"].assert_not_called()
 
     def test_every_call_builds_fresh_services_over_the_one_curve_reader(self) -> None:
-        services = performance_wiring.build_performance(self.ctx)
+        services = self.build()
 
         services.training_reports()
         services.training_reports()
@@ -60,7 +75,7 @@ class PerformanceBuilderTests(unittest.TestCase):
             )
 
     def test_the_records_read_the_equipment_of_the_athlete(self) -> None:
-        performance_wiring.build_performance(self.ctx).training_reports()
+        self.build().training_reports()
 
         kwargs = self.mocks["TrainingRecordsService"].call_args.kwargs
         self.assertIs(self.ctx.database.return_value, kwargs["database_manager"])
@@ -75,7 +90,7 @@ class PerformanceBuilderTests(unittest.TestCase):
         self.assertEqual({}, kwargs["read_record"]("other", "id-2"))
 
     def test_the_report_reads_plan_checkins_feedback_and_profile_live(self) -> None:
-        services = performance_wiring.build_performance(self.ctx)
+        services = self.build()
         services.training_reports()
         kwargs = self.mocks["TrainingReportReadService"].call_args.kwargs
 
@@ -97,8 +112,8 @@ class PerformanceBuilderTests(unittest.TestCase):
             kwargs["curve_records"],
         )
         source = kwargs["block_review"]
-        self.assertIs(self.ctx.planning_workflows.block_review, source.review)
-        self.assertIs(self.ctx.planning_workflows.last_completed_test, source.last_test)
+        self.assertIs(self.inputs["block_review"], source.review)
+        self.assertIs(self.inputs["last_completed_test"], source.last_test)
         profile = self.athlete.profile.return_value
         profile.get.return_value = {"training_model": "polarized"}
         self.assertEqual("polarized", kwargs["training_model"]())
@@ -106,7 +121,7 @@ class PerformanceBuilderTests(unittest.TestCase):
         self.assertEqual("", kwargs["training_model"]())
 
     def test_the_derived_reads_take_the_public_performance_state(self) -> None:
-        performance_wiring.build_performance(self.ctx).training_reports()
+        self.build().training_reports()
         kwargs = self.mocks["TrainingDerivedReadService"].call_args.kwargs
         state = self.public.performance_state_service.return_value.performance_state
         state.return_value = {"performance": {"personal_recovery": {"score": 7}}}
@@ -122,7 +137,7 @@ class PerformanceBuilderTests(unittest.TestCase):
         self.assertIs(self.today, kwargs["today"]())
 
     def test_the_season_reads_competitions_and_planning_sources(self) -> None:
-        performance_wiring.build_performance(self.ctx).training_reports()
+        self.build().training_reports()
         kwargs = self.mocks["TrainingSeasonReadService"].call_args.kwargs
 
         kwargs["read_competitions"]()
@@ -132,13 +147,13 @@ class PerformanceBuilderTests(unittest.TestCase):
             kwargs["read_observations"],
         )
         self.assertIs(
-            self.ctx.planning_workflows.season_preparation,
+            self.inputs["season_preparation"],
             kwargs["season_preparation"],
         )
         self.assertIs(self.public.season_source.return_value, kwargs["season_source"])
 
     def test_the_timezone_defaults_to_utc(self) -> None:
-        performance_wiring.build_performance(self.ctx).training_reports()
+        self.build().training_reports()
         timezone = self.mocks["TrainingReportServices"].call_args.kwargs["timezone"]
         profile = self.athlete.profile.return_value
 

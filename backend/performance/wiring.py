@@ -24,10 +24,25 @@ class PerformanceServices:
     training_reports: Callable[[], TrainingReportServices]
 
 
-def build_performance(ctx: AppContext) -> PerformanceServices:
-    """One session curve reader for the process; the report services fresh per call."""
+def build_performance(
+    ctx: AppContext,
+    *,
+    session_activities: Callable[..., Any],
+    plan_state: Callable[[], Any],
+    performance_state: Callable[[], Any],
+    canonical_performance_source: Callable[[], Any],
+    season_source: Callable[[], Any],
+    block_review: Callable[..., dict[str, Any]],
+    last_completed_test: Callable[..., str | None],
+    season_preparation: Callable[..., dict[str, Any]],
+) -> PerformanceServices:
+    """One session curve reader for the process; the report services fresh per call.
+
+    The composition root passes the HTTP public-state projections and the
+    planning functions the reports read, so this domain imports neither layer.
+    """
     # One reader keeps the session curves across requests.
-    power_curves = SessionCurveReader(ctx.canonical_table.session_activities)
+    power_curves = SessionCurveReader(session_activities)
 
     def local_today() -> Any:
         return ctx.clock.now().date()
@@ -36,22 +51,18 @@ def build_performance(ctx: AppContext) -> PerformanceServices:
         return ctx.athlete.checkin().list(365)
 
     def recovery() -> Any:
-        state = ctx.public_state.performance_state_service().performance_state()
+        state = performance_state().performance_state()
         return state["performance"].get("personal_recovery", {})
 
     def performance() -> Any:
-        return ctx.public_state.performance_state_service().performance_state()[
-            "performance"
-        ]
+        return performance_state().performance_state()["performance"]
 
     def timezone() -> str:
         return str(ctx.athlete.profile().get().get("timezone") or "UTC")
 
     def training_reports() -> TrainingReportServices:
-        public = ctx.public_state
         athlete = ctx.athlete
-        planning = ctx.planning_workflows
-        canonical = public.canonical_performance_source()
+        canonical = canonical_performance_source()
         records = TrainingRecordsService(
             database_manager=ctx.database(),
             read_equipment=lambda: athlete.equipment().read(),
@@ -72,7 +83,7 @@ def build_performance(ctx: AppContext) -> PerformanceServices:
             records=records,
             profiles=profiles,
             report=TrainingReportReadService(
-                read_plan=lambda: public.plan_state_service().read(local_only=True),
+                read_plan=lambda: plan_state().read(local_only=True),
                 read_checkins=checkins,
                 read_feedback=lambda keys: athlete.activity_feedback().for_activity_ids(
                     keys
@@ -87,8 +98,8 @@ def build_performance(ctx: AppContext) -> PerformanceServices:
                 now=ctx.clock.now,
                 curve_records=profiles.curve_records,
                 block_review=BlockReviewSource(
-                    review=planning.block_review,
-                    last_test=planning.last_completed_test,
+                    review=block_review,
+                    last_test=last_completed_test,
                 ),
                 training_model=lambda: str(
                     athlete.profile().get().get("training_model") or ""
@@ -105,8 +116,8 @@ def build_performance(ctx: AppContext) -> PerformanceServices:
                 read_competitions=lambda: ctx.planning.competition().list(100),
                 read_observations=records.observations,
                 today=local_today,
-                season_preparation=planning.season_preparation,
-                season_source=public.season_source(),
+                season_preparation=season_preparation,
+                season_source=season_source(),
             ),
             timezone=timezone,
         )

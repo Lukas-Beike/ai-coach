@@ -179,7 +179,6 @@ class HttpAthleteServices:
     profile: Callable[[], Any]
     competition: Callable[[], Any]
     activity_read: Callable[[], Any]
-    checkin: Callable[[], Any]
     clock: Any
     local_today: Callable[[], Any]
     state_event_buffer: Any
