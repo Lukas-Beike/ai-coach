@@ -317,7 +317,8 @@ class PlanCheckRuleTests(unittest.TestCase):
             "name": "Intervalle",
             "description": "- 10m Z1 HR\n\n4x\n- 4m Z4 HR\n- 2m Z1 HR\n\n- 10m Z1 HR",
         }
-        templates = {"T-upper": upper, "T-run": intervals}
+        easy = {"sport": "run", "name": "Lockerer Lauf", "description": "- 45m Z2 Pace"}
+        templates = {"T-upper": upper, "T-run": intervals, "T-easy": easy}
 
         def strength(**extra):
             fields = {
@@ -403,6 +404,57 @@ class PlanCheckRuleTests(unittest.TestCase):
                     50,
                     template_id="T-run",
                     description="- 50m 70% pace",
+                ),
+                "template_mismatch",
+            ),
+            # Athlete decision 2026-11-13 (#2513): time or distance and the
+            # target kind are load and intensity; the sections are the structure.
+            (
+                "8 km by heart rate from a 45 min pace template",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    50,
+                    template_id="T-easy",
+                    description="- 8km Z2 HR",
+                ),
+                "template_scaled",
+            ),
+            (
+                "intervals by distance with other targets",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    50,
+                    template_id="T-run",
+                    description="- 2km Z1 HR\n\n5x\n- 1km Z4 Pace\n- 400m Z1 HR"
+                    "\n\n- 2km Z1 Pace",
+                ),
+                "template_scaled",
+            ),
+            (
+                "warm-up and cool-down inside a steady run",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    45,
+                    template_id="T-easy",
+                    description="- 1km Z1 HR\n- 6km Z2 HR\n- 1km Z1 HR",
+                ),
+                "template_scaled",
+            ),
+            (
+                "a repeat block instead of a steady run",
+                unit(
+                    "2",
+                    "2026-11-05",
+                    "run",
+                    45,
+                    template_id="T-easy",
+                    description="- 10m Z1 HR\n\n4x\n- 4m Z4 HR\n- 2m Z1 HR",
                 ),
                 "template_mismatch",
             ),
