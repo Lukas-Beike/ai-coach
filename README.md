@@ -91,7 +91,7 @@ Releases keep the athlete's encrypted database. Schema v26 (release 2.0.5, the s
 
 ## Further docs
 
-- Using it: [features](docs/features.md), [analysis and activities](docs/analysis.md), [nutrition](docs/nutrition.md), [workout export format](docs/workout-export-format.md), [API routes](docs/api-routes.md).
+- Using it: [features](docs/features.md), [analysis and activities](docs/analysis.md), [nutrition](docs/nutrition.md), [workout export format](docs/workout-export-format.md), [API routes](docs/api-routes.md), [view catalogue](docs/view-catalogue.md).
 - Running it: [setup](docs/setup.md), [configuration](docs/configuration.md), [synchronization and jobs](docs/synchronization.md), [operations](docs/operations.md).
 - How it works: [architecture](docs/architecture.md), [Coach context and tools](docs/coach.md), [canonical model](docs/canonical-model.md), [provider endpoints](docs/provider-endpoints.md), [performance methods](docs/performance-methods/README.md).
 - Developing: [development](docs/development.md), [testing](docs/testing.md), [Windows runtime](docs/windows-runtime.md), [dependency locks](docs/dependencies.md), [CI and releases](docs/ci-and-releases.md), [OpenSpec](docs/openspec.md), [Graphify](docs/graphify.md).
