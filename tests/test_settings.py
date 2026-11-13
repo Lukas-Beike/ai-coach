@@ -219,6 +219,16 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(service.selected_provider(), "anthropic")
         # Claude has no speed modes; OpenAI's stay as they were.
         self.assertIsNone(service.service_tier())
+        # A planning task on GPT keeps the speed choice while the chat uses Claude.
+        self.assertEqual(
+            [o["id"] for o in service.service_tier_state()["options"]], ["default"]
+        )
+        service.save_model("gpt-6.1-sol", "planning")
+        service.save_service_tier("ultrafast")
+        self.assertEqual(service.service_tier_state()["selected"], "ultrafast")
+        self.assertEqual(service.service_tier("gpt-6.1-sol"), "ultrafast")
+        self.assertEqual(service.service_tier("gpt-6-sol"), "fast")
+        del self.values["selected_model_planning"]
         self.assertTrue(service.coach_ready())
         self.current_config[0] = replace(self.current_config[0], openai_api_key=" ")
         self.assertTrue(

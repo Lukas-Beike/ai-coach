@@ -204,6 +204,7 @@ class DiagnosticReportService:
                     "model": deps.settings.selected_model(),
                     "model_provider": deps.settings.selected_provider(),
                     "thinking_level": deps.settings.selected_thinking_level(),
+                    "tasks": deps.settings.task_settings(),
                     "available_models": [
                         option["id"]
                         for option in deps.settings.available_model_options()

@@ -513,7 +513,8 @@ function renderModel(model) {
   }
   // Speed modes exist only at OpenAI.
   const tierRow = $("#serviceTierRow");
-  if (tierRow) tierRow.hidden = model?.provider === "anthropic";
+  const provider = (id) => (model?.options || []).find((option) => option.id === id)?.provider;
+  if (tierRow) tierRow.hidden = Boolean(model) && COACH_TASKS.every((task) => provider(model.tasks?.[task]?.model ?? model.selected) === "anthropic");
 }
 
 function renderThinkingLevel(thinkingLevel, tasks = {}) {

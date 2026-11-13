@@ -255,15 +255,24 @@ class SettingsService:
         supported = self._service_tiers(model or self.selected_model())
         if supported == {"default"}:
             return None
+        return self._stored_service_tier(supported)
+
+    def _stored_service_tier(self, supported: set[str]) -> str:
         stored = self._get_value("selected_service_tier")
         if stored in supported:
             return stored
         return "fast" if "fast" in supported else "default"
 
+    def _task_service_tiers(self) -> set[str]:
+        """The speeds any task's model offers; each request keeps only its own."""
+        return set().union(
+            *(self._service_tiers(self.selected_model(t)) for t in TASKS)
+        )
+
     def service_tier_state(self) -> dict[str, Any]:
-        supported = self._service_tiers(self.selected_model())
+        supported = self._task_service_tiers()
         return {
-            "selected": self.service_tier() or "default",
+            "selected": self._stored_service_tier(supported),
             "options": [
                 dict(option)
                 for option in SERVICE_TIER_OPTIONS
@@ -273,7 +282,7 @@ class SettingsService:
 
     def save_service_tier(self, tier: Any) -> dict[str, str]:
         tier_id = str(tier or "").strip().lower()
-        if tier_id not in self._service_tiers(self.selected_model()):
+        if tier_id not in self._task_service_tiers():
             raise AppError(
                 400, "Nicht unterstützter Geschwindigkeitsmodus für dieses Modell."
             )
