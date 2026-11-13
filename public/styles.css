@@ -71,7 +71,6 @@
   --chart-series-3: #4fc3f7;
   --chart-series-4: #ff8097;
   --accent-border-strong: rgba(52, 207, 161, .48);
-  --accent-surface-subtle: rgba(52, 207, 161, .08);
   --accent-code-wash: rgba(52, 207, 161, .16);
   --streaming-border: rgba(52, 207, 161, .25);
   --composer-shadow: rgba(0, 0, 0, .35);
@@ -245,7 +244,7 @@ button { cursor: pointer; }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .nav-icon { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 /* One surface-card family (#2434); view rules add only layout. */
-.card, .analysis-chart-card, .settings-section, .connection-card, .nutrition-total, .nutrition-card, .nutrition-tools, .planned-week, .planned-month { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.card, .analysis-chart-card, .settings-section, .connection-card, .nutrition-total, .nutrition-card, .nutrition-tools, .planned-week, .planned-month, .coach-action-review { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .status-chip { display: inline-flex; min-height: 24px; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; color: var(--muted); background: var(--surface-raised); font-size: 12px; font-weight: 700; }
 .status-chip[data-status="ready"], .status-chip.success { color: var(--ink); background: var(--success-surface); }
 .status-chip[data-status="loading"], .status-chip.warning { color: var(--ink); background: var(--warning-surface); }
@@ -442,16 +441,16 @@ h2 {
     min-height: clamp(220px, 38dvh, 440px);
   }
 }
-.coach-action-review { display: grid; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--accent-border-strong); border-radius: 16px; background: var(--accent-surface-subtle); box-shadow: var(--shadow-soft); }
+.coach-action-review { display: grid; gap: 12px; margin: 0 0 14px; padding: 16px; border-color: var(--warning-border); }
 .coach-action-review[hidden] { display: none; }
 .coach-action-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .coach-action-review-heading h2 { margin: 2px 0 0; font-size: 1rem; }
-.coach-action-review-status { color: var(--accent); font-size: .72rem; font-weight: 700; text-align: right; }
+.coach-action-review-status { padding: 3px 10px; border: 1px solid var(--warning-border); border-radius: 999px; color: var(--ink); font-size: .72rem; font-weight: 700; text-align: right; }
 .coach-action-card { display: grid; gap: 10px; }
 .coach-action-card p { margin: 0; color: var(--ink); font-size: .82rem; line-height: 1.45; }
 .coach-action-card ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: var(--muted); font-size: .76rem; }
 .coach-action-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.coach-action-card-actions button { min-height: 44px; }
+.coach-action-card-actions button { flex: 1 1 0; min-height: 44px; justify-content: center; }
 .message {
   max-width: min(100%, 760px);
   width: fit-content;
@@ -467,7 +466,7 @@ h2 {
   max-width: 85%;
   color: var(--ink);
   background: var(--user-message-bg);
-  border-radius: 20px;
+  border-radius: var(--radius-lg) var(--radius-lg) 6px var(--radius-lg);
 }
 .message.assistant {
   align-self: flex-start;
@@ -524,7 +523,7 @@ h2 {
 .message-action:hover { color: var(--ink); background-color: var(--surface-raised); }
 .message-action:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .message-action svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.message-changes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--line-strong); border-radius: 14px; color: var(--ink); background: var(--surface-raised); font-size: .9rem; line-height: 1.35; white-space: normal; }
+.message-changes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); background: var(--transparent); font-size: .9rem; line-height: 1.35; white-space: normal; }
 .message-changes-icon { display: inline-flex; flex: 0 0 auto; color: var(--accent-bright); }
 .message-changes-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .message-changes.is-undone { color: var(--muted); }
