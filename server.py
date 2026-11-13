@@ -24,15 +24,10 @@ from backend.athlete.checkins import (
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
-from backend.backup.database import (
-    MAX_BACKUP_BYTES,
-)
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.backup.wiring import build_backup
 from backend.canonical.vocabulary import GARMIN_ID, WAHOO_ID
-from backend.coach import attachments as coach_attachments
 from backend.coach import limits as coach_limits
-from backend.coach import streams as coach_streams
 from backend.coach.conversation_gate import CoachConversationGate
 from backend.coach.dialogue import dialogue_tools
 from backend.coach.job_worker import COACH_JOB_WORKER
@@ -80,42 +75,17 @@ from backend.db.repositories import (
 from backend.db.schema import configure_cipher
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.wiring import build_diagnostics
-from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.wiring import build_history
 from backend.http_api import server as http_server
-from backend.http_api.assembly import (
-    HttpApiAssembly,
-    HttpAthleteServices,
-    HttpAudioInput,
-    HttpCoachReadServices,
-    HttpCoachRouteServices,
-    HttpCoachStreamSettings,
-    HttpCoachWriteActions,
-    HttpCoachWriteServices,
-    HttpCoreAndTransport,
-    HttpCoreResources,
-    HttpCoreServices,
-    HttpDiagnosticsServices,
-    HttpDomainRouteServices,
-    HttpHandlerConfiguration,
-    HttpHandlerErrors,
-    HttpHandlerIdentity,
-    HttpHandlerServices,
-    HttpHistoryServices,
-    HttpNutritionServices,
-    HttpPrivacyServices,
-    HttpPublicServices,
-    HttpReadRouteServices,
-    HttpRequestBodyLimits,
-    HttpResponseServices,
-    HttpSyncServices,
-)
 from backend.http_api.auth import (
     SessionAuthService,
     get_session_auth_service,
 )
-from backend.http_api.response_transport import HttpResponseTransport
-from backend.http_api.wiring import PublicStateServices, build_public_state
+from backend.http_api.wiring import (
+    PublicStateServices,
+    build_http_api,
+    build_public_state,
+)
 from backend.nutrition.wiring import NutritionServices, build_nutrition
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
@@ -1031,150 +1001,32 @@ PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
     ),
     operation=lambda: runtime_maintenance.MAINTENANCE_GATE.operation(),
 )
-HTTP_API = HttpApiAssembly(
-    dependencies=HttpApiAssembly.Inputs(
-        core=HttpCoreAndTransport(
-            services=HttpCoreServices(
-                resources=HttpCoreResources(
-                    database_manager=lambda: database_manager(),
-                    database_lock=lambda: DB_LOCK,
-                    data_dir=lambda: DATA_DIR,
-                    readiness_maintenance_gate=lambda: (
-                        runtime_maintenance.MAINTENANCE_GATE
-                    ),
-                ),
-                handler=HttpHandlerServices(
-                    handler_configuration=lambda: HttpHandlerConfiguration(
-                        identity=HttpHandlerIdentity(
-                            app_version=APP_VERSION,
-                            logger=LOGGER,
-                            session_auth_service=session_auth_service,
-                            maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-                        ),
-                        errors=HttpHandlerErrors(
-                            redact_text=REDACTOR.redact_text,
-                            internal_server_error=INTERNAL_SERVER_ERROR,
-                        ),
-                        body_limits=HttpRequestBodyLimits(
-                            max_body_bytes=MAX_BODY_BYTES,
-                            max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
-                        ),
-                        audio=HttpAudioInput(
-                            voice_audio_types=audio_provider.VOICE_AUDIO_TYPES,
-                            normalize_audio_type=audio_provider.normalized_audio_type,
-                        ),
-                        public_dir=PUBLIC_DIR,
-                    ),
-                    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-                    session_auth_service=session_auth_service,
-                    settings=SETTINGS,
-                    redact_text=REDACTOR.redact_text,
-                    logger=LOGGER,
-                ),
-                response=HttpResponseServices(HttpResponseTransport(), LOGGER),
-            ),
-            openai_response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
-        ),
-        coach=HttpCoachRouteServices(
-            reads=HttpCoachReadServices(
-                conversation_history_service=lambda: (
-                    APP.coach_conversation.history_service()
-                ),
-                proposal_read_service=COACH_PROPOSALS.read_service,
-                chat_page_max=CHAT_PAGE_MAX,
-                command_receipt_service=COACH_TURNS.command_receipt_service,
-                job_submission_service=COACH_BACKGROUND_JOBS.job_submission_service,
-            ),
-            writes=HttpCoachWriteServices(
-                actions=HttpCoachWriteActions(
-                    job_cancellation_service=COACH_BACKGROUND_JOBS.cancellation_service,
-                    context_preview_service=COACH_CONTEXT.preview_service,
-                    proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
-                    proposal_execution_service=COACH_PROPOSALS.execution_service,
-                    reset_service=lambda: APP.coach_conversation.reset_service(),
-                ),
-                stream=HttpCoachStreamSettings(
-                    max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
-                    chat_stream_registry=coach_streams.CHAT_STREAM_REGISTRY,
-                ),
-            ),
-        ),
-        reads=HttpReadRouteServices(
-            public=HttpPublicServices(
-                bootstrap=PUBLIC_STATE.bootstrap_service,
-                plan_state=PUBLIC_STATE.plan_state_service,
-                weather_state=PUBLIC_STATE.weather_state_service,
-                performance_state=PUBLIC_STATE.performance_state_service,
-                feedback_state=PUBLIC_STATE.feedback_state_service,
-                sync_state=PUBLIC_STATE.sync_public_state_service,
-            ),
-            athlete=HttpAthleteServices(
-                profile=ATHLETE_DATA.profile,
-                competition=PLANNING_DATA.competition,
-                activity_read=ACTIVITY_READS.activity_read,
-                equipment=ATHLETE_DATA.equipment,
-                activity_routes=lambda: ACTIVITY_ROUTES,
-                activity_feedback=ATHLETE_DATA.activity_feedback,
-                session_corrections=ATHLETE_DATA.session_corrections,
-                zones=ATHLETE_DATA.zones,
-                first_threshold=ATHLETE_DATA.first_threshold,
-                body_export=lambda profile, revision, deadline: (
-                    GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(
-                        profile, revision, deadline
-                    )
-                ),
-                clock=ATHLETE_CLOCK,
-                local_today=lambda: ATHLETE_CLOCK.now().date(),
-                state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            ),
-            diagnostics=HttpDiagnosticsServices(
-                recent_logs=DIAGNOSTICS.recent_log_entries_service,
-                report=DIAGNOSTICS.report_service,
-            ),
-            history=HttpHistoryServices(
-                undo=HISTORY.undo_service,
-            ),
-            workout_library=PLANNING_DATA.workout_library,
-            planned_unit=PLANNING_DATA.planned_unit,
-            training_reports=PERFORMANCE.training_reports,
-            wahoo_library_state=WAHOO_SYNC.library_state,
-        ),
-        domains=HttpDomainRouteServices(
-            privacy=HttpPrivacyServices(
-                backup=BACKUP.backup_service,
-                export=PRIVACY.archive_export_service,
-                delete=PRIVACY.delete_service,
-                restore=BACKUP.restore_service,
-                max_backup_bytes=MAX_BACKUP_BYTES,
-            ),
-            sync=HttpSyncServices(
-                job_queue=SYNC_JOB_QUEUE.service,
-                state_repository=sync_state_repository,
-                garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
-                wahoo_sync=WAHOO_SYNC.sync_service,
-                full_resync=PROVIDER_RESYNC.full_resync_service,
-                provider_configured=lambda provider_id: PROVIDER_CONFIGURED[
-                    provider_id
-                ](),
-                period_defaults=SYNC_PERIOD_DEFAULTS,
-                all_sync_days=ALL_SYNC_DAYS,
-                uuid_factory=lambda: uuid.uuid4().hex,
-            ),
-            nutrition=HttpNutritionServices(
-                diary=NUTRITION_SERVICES.diary_service,
-                meal_library=NUTRITION_SERVICES.meal_library_service,
-                intervals_sync=NUTRITION_SERVICES.intervals_sync_service,
-                audio_transcription=MODEL_TRANSPORT.audio_transcription_client,
-                refresh=GARMIN_ASSEMBLY.nutrition_refresh_service,
-            ),
-            wahoo=WAHOO_CONNECTION.service,
-            metric_export=lambda: METRIC_EXPORT,
-            provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
-            garmin_login=lambda: GARMIN_LOGIN,
-            connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
-            calendar_decisions=EXTERNAL_CALENDAR.decisions,
-        ),
-    ),
+# The owners the HTTP routes read from the context.
+APP.public_state = PUBLIC_STATE
+APP.activity_reads = ACTIVITY_READS
+APP.activity_routes = ACTIVITY_ROUTES
+APP.history = HISTORY
+APP.backup = BACKUP
+APP.privacy = PRIVACY
+APP.diagnostics = DIAGNOSTICS
+APP.provider_resync = PROVIDER_RESYNC
+APP.provider_credential_service = PROVIDER_CREDENTIAL_SERVICE
+APP.provider_connection_checks = PROVIDER_CONNECTION_CHECKS
+APP.wahoo_connection = WAHOO_CONNECTION
+APP.metric_export = METRIC_EXPORT
+APP.garmin_login = GARMIN_LOGIN
+HTTP_API = build_http_api(
+    APP,
+    session_auth_service=session_auth_service,
+    audio=audio_provider,
+    max_body_bytes=MAX_BODY_BYTES,
+    max_audio_body_bytes=MAX_AUDIO_BODY_BYTES,
+    public_dir=PUBLIC_DIR,
+    chat_page_max=CHAT_PAGE_MAX,
+    response_timeout_seconds=OPENAI_RESPONSE_TIMEOUT_SECONDS,
+    sync_period_defaults=SYNC_PERIOD_DEFAULTS,
+    all_sync_days=ALL_SYNC_DAYS,
+    provider_configured=PROVIDER_CONFIGURED,
 )
 
 

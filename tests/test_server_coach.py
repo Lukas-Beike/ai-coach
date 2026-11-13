@@ -41,6 +41,7 @@ from backend.performance.freshness import GarminSyncStatus
 from backend.planning import competitions as planning_competitions
 from backend.providers import openai_requests
 from backend.runtime import clock as runtime_clock
+from backend.runtime import events as runtime_events
 from backend.sync import queue as sync_queue
 from backend.sync.authority import competition_push_manifest
 
@@ -1204,7 +1205,9 @@ class ServerCoachTests(ServerTestCase):
 
     def test_coach_reset_clears_local_state_when_remote_delete_fails(self):
         server.key_value_service().set("openai_conversation_id", "conv-reset-failure")
-        server.APP.coach_conversation.message_service().add("user", "Clear this message")
+        server.APP.coach_conversation.message_service().add(
+            "user", "Clear this message"
+        )
         service = server.APP.coach_conversation.reset_service()
         with patch.object(
             openai_requests.OpenAIResponsesClient,
@@ -1219,7 +1222,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(server.APP.coach_conversation.message_service().list(), [])
 
     def test_background_job_replay_reuses_receipt_without_republishing(self):
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
 
         def publish_after_commit(topic, event):
             self.assertEqual(topic, "coach")
@@ -1232,7 +1235,7 @@ class ServerCoachTests(ServerTestCase):
 
         with (
             patch.object(
-                server.runtime_events.STATE_EVENT_BUFFER,
+                runtime_events.STATE_EVENT_BUFFER,
                 "publish",
                 side_effect=publish_after_commit,
             ) as publish,
@@ -1553,7 +1556,9 @@ class ServerCoachTests(ServerTestCase):
                 }
             ),
         }
-        result = server.APP.coach_conversation.dialogue_read_service()._command_result(row)
+        result = server.APP.coach_conversation.dialogue_read_service()._command_result(
+            row
+        )
         self.assertEqual(result["client_turn_id"], "turn-1")
         self.assertEqual(len(result["sync_job_ids"]), 40)
         self.assertTrue(result["steps"][0]["scope_truncated"])

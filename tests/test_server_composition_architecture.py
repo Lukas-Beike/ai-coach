@@ -8,9 +8,6 @@ try:
         parse_python as _parse,
     )
     from .architecture_analysis import (
-        python_files as _python_files,
-    )
-    from .architecture_analysis import (
         request_handler_definition as _request_handler_definition,
     )
     from .architecture_analysis import (
@@ -27,9 +24,6 @@ except ImportError:
         parse_python as _parse,
     )
     from architecture_analysis import (
-        python_files as _python_files,
-    )
-    from architecture_analysis import (
         request_handler_definition as _request_handler_definition,
     )
     from architecture_analysis import (
@@ -44,39 +38,6 @@ except ImportError:
 
 
 class ServerCompositionArchitectureTests(unittest.TestCase):
-    def test_assembly_interfaces_stay_owner_scoped_and_bounded(self) -> None:
-        violations: list[str] = []
-        for path in _python_files(BACKEND_ROOT):
-            tree = _parse(path)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef) or not node.name.endswith(
-                    "Assembly"
-                ):
-                    continue
-                initializer = next(
-                    (
-                        item
-                        for item in node.body
-                        if isinstance(item, ast.FunctionDef) and item.name == "__init__"
-                    ),
-                    None,
-                )
-                if initializer is None:
-                    continue
-                count = len([arg for arg in initializer.args.args if arg.arg != "self"])
-                count += len(initializer.args.kwonlyargs)
-                if count > 5:
-                    violations.append(
-                        f"{path}:{initializer.lineno}: {node.name} has {count} constructor inputs"
-                    )
-
-        self.assertEqual(
-            [],
-            violations,
-            "Assembly constructors must use typed owner groups instead of long parameter lists:\n"
-            + "\n".join(violations),
-        )
-
     def test_chat_history_http_projection_uses_coach_history_owner(self) -> None:
         source = (BACKEND_ROOT / "http_api" / "chat_page.py").read_text(
             encoding="utf-8"

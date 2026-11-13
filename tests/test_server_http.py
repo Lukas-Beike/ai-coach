@@ -213,6 +213,62 @@ class ServerHttpTests(ServerTestCase):
             sorted(called),
         )
 
+    def test_post_checks_session_then_csrf_then_maintenance(self):
+        # A restore is in progress, so the gate refuses every gated POST. The
+        # access checks still answer first: no session is 401, a session without
+        # the CSRF token is 403, and only a complete request reaches the gate.
+        called = []
+
+        def refuse(handler, request):
+            called.append(request.path)
+            raise AssertionError("route handler ran during the maintenance gate")
+
+        route = replace(
+            next(
+                r
+                for r in server.HTTP_API.route_table.routes
+                if (r.method, r.path) == ("POST", "/api/weather/sync")
+            ),
+            handle=refuse,
+        )
+        self.assertTrue(route.gated)
+        restoring = runtime_maintenance.MaintenanceGate()
+        restoring.restoring = True
+        dependencies = replace(
+            server.HTTP_API.request_handler_class().dependencies,
+            route_table=RouteTable([route]),
+            maintenance_gate=restoring,
+        )
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), create_request_handler(dependencies)
+        )
+        self.addCleanup(httpd.server_close)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        auth = http_auth.SessionAuthService(
+            server.database_manager(),
+            server.DB_LOCK,
+            replace(server.CONFIG, app_password="synthetic-password-123"),
+            True,
+            RateLimiter(),
+        )
+        cookie = {"Cookie": f"{http_auth.SESSION_COOKIE}={create_test_session(server)}"}
+
+        def post(headers):
+            connection = http.client.HTTPConnection(
+                "127.0.0.1", httpd.server_address[1], timeout=10
+            )
+            connection.request("POST", "/api/weather/sync", body=b"{}", headers=headers)
+            status = connection.getresponse().status
+            connection.close()
+            return status
+
+        with patch.object(server, "get_session_auth_service", return_value=auth):
+            self.assertEqual(401, post({}))
+            self.assertEqual(403, post(cookie))
+            self.assertEqual(503, post({**cookie, "X-CSRF-Token": "csrf"}))
+        self.assertEqual([], called)
+
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
         for method in ("GET", "POST", "PUT"):
             with self.subTest(method=method):
@@ -290,27 +346,15 @@ class ServerHttpTests(ServerTestCase):
             transport.send_json.call_args.args[3], {"WWW-Authenticate": "Session"}
         )
 
-    def test_http_assembly_keeps_dispatchers_shared_and_handler_configuration_lazy(
+    def test_http_api_keeps_dispatchers_shared_and_handler_configuration_lazy(
         self,
     ):
-        initial = server.HTTP_API._handler_configuration()
-        updated = replace(
-            initial,
-            identity=replace(initial.identity, app_version="synthetic-next"),
-        )
-        with patch.object(
-            server.HTTP_API,
-            "_handler_configuration",
-            side_effect=(initial, updated),
-        ) as configuration:
-            first = server.HTTP_API.request_handler_class()
+        first = server.HTTP_API.request_handler_class()
+        with patch.object(server.APP, "app_version", "synthetic-next"):
             second = server.HTTP_API.request_handler_class()
 
-        self.assertEqual(configuration.call_count, 2)
         self.assertIsNot(first, second)
-        self.assertEqual(
-            first.server_version, f"Pacecraft/{initial.identity.app_version}"
-        )
+        self.assertEqual(first.server_version, f"Pacecraft/{server.APP_VERSION}")
         self.assertEqual(second.server_version, "Pacecraft/synthetic-next")
         self.assertIs(first.dependencies.route_table, server.HTTP_API.route_table)
         self.assertIs(second.dependencies.route_table, server.HTTP_API.route_table)
@@ -352,7 +396,9 @@ class ServerHttpTests(ServerTestCase):
         endpoint = Mock()
         endpoint.execute.return_value = (202, {"id": "job-3"})
         with patch.object(
-            server.HTTP_API, "sync_command_endpoint", return_value=endpoint
+            server.HTTP_API.sync_command_post_route,
+            "_endpoint",
+            return_value=endpoint,
         ) as factory:
             self.assertFalse(
                 dispatch_route(
@@ -1621,10 +1667,10 @@ class ServerHttpTests(ServerTestCase):
             except AppError as error:
                 errors.append(error)
 
-        registry = server.coach_streams.CHAT_STREAM_REGISTRY
+        registry = coach_streams.CHAT_STREAM_REGISTRY
         with (
             patch.object(service, "active", side_effect=synchronized_active),
-            patch.object(server.runtime_events.STATE_EVENT_BUFFER, "publish"),
+            patch.object(runtime_events.STATE_EVENT_BUFFER, "publish"),
             patch.object(registry, "set_background_event"),
             patch.object(server.COACH_JOB_WORKER.wake_event, "set"),
         ):
@@ -1930,8 +1976,8 @@ class ServerHttpTests(ServerTestCase):
 
         with (
             patch.object(
-                server,
-                "database_manager",
+                server.APP,
+                "database",
                 side_effect=[original_manager, switched_manager],
             ),
             patch.object(
@@ -1962,7 +2008,7 @@ class ServerHttpTests(ServerTestCase):
             tempfile.TemporaryDirectory() as data_dir,
             patch.object(server, "DATA_DIR", Path(data_dir)),
             patch.object(
-                server, "database_manager", side_effect=OSError("mount unavailable")
+                server.APP, "database", side_effect=OSError("mount unavailable")
             ),
         ):
             self.assertTrue(

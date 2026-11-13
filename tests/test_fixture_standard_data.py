@@ -49,7 +49,7 @@ _SERVER_HOOKS = (
     (provider_http.JsonHttpClient, "request"),
     (server.APP, "coach_conversation"),
     (server, "initialise_database"),
-    (server.HTTP_API, "request_handler_class"),
+    (server, "HTTP_API"),
     (http_auth.RATE_LIMITER, "allow"),
 )
 with ExitStack() as stack:

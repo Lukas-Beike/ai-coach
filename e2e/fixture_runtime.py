@@ -2622,7 +2622,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
 
 
 server.initialise_database = initialise_fixture
-server.HTTP_API.request_handler_class = lambda: FixtureHandler
+server.HTTP_API = replace(server.HTTP_API, request_handler_class=lambda: FixtureHandler)
 # Staged plan block starts this many days after the athlete's today. The standard
 # seed places planned units on +2, +3 and +5 and calendar events on +2..+9 and
 # later, so the block must stay clear of both for every simulated today; see

@@ -98,3 +98,17 @@ class AppContext:
     run_lthr: Any = None
     # Returns the cached morning body battery service of the active database.
     morning_body_battery_service: Any = None
+    # The owners the HTTP routes read (build_http_api).
+    public_state: Any = None
+    activity_reads: Any = None
+    activity_routes: Any = None
+    history: Any = None
+    backup: Any = None
+    privacy: Any = None
+    diagnostics: Any = None
+    provider_resync: Any = None
+    provider_credential_service: Any = None
+    provider_connection_checks: Any = None
+    wahoo_connection: Any = None
+    metric_export: Any = None
+    garmin_login: Any = None
