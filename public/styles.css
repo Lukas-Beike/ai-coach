@@ -91,7 +91,6 @@
   --training-zone-3: #f2c53a;
   --training-zone-6: #a47cf5;
   --calendar-profile-ink: #8c9895;
-  --metric-border: rgba(255, 255, 255, .06);
   --card-hover-surface: rgba(255, 255, 255, .035);
   --metric-hover-surface: rgba(255, 255, 255, .08);
   --metric-edit-surface: rgba(52, 207, 161, .08);
@@ -245,7 +244,8 @@ button { cursor: pointer; }
 
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .nav-icon { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+/* One surface-card family (#2434); view rules add only layout. */
+.card, .analysis-chart-card, .settings-section, .connection-card, .nutrition-total, .nutrition-card, .nutrition-tools { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .status-chip { display: inline-flex; min-height: 24px; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; color: var(--muted); background: var(--surface-raised); font-size: 12px; font-weight: 700; }
 .status-chip[data-status="ready"], .status-chip.success { color: var(--ink); background: var(--success-surface); }
 .status-chip[data-status="loading"], .status-chip.warning { color: var(--ink); background: var(--warning-surface); }
@@ -350,7 +350,7 @@ h2 {
 /* Five segments no longer fit one row on the smallest phones. */
 @media (max-width: 360px) { .plan-segment-nav:has(> a:nth-child(5)) { flex-wrap: wrap; } .plan-segment-nav:has(> a:nth-child(5)) a { flex-basis: 30%; } }
 .analysis-history-charts { display: grid; gap: 16px; margin-bottom: 24px; }
-.analysis-chart-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.analysis-chart-card { min-width: 0; padding: 16px; }
 .analysis-chart-card h3 { margin: 0; color: var(--ink); font-size: 1rem; }
 .analysis-chart-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .analysis-subchart { min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -830,7 +830,7 @@ h2 {
 .view-refresh output:empty { display: none; }
 .view-refresh output:not(:empty) { position: absolute; top: 47px; right: 0; z-index: 2; padding: 4px 7px; border-radius: 7px; background: var(--surface-raised); }
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.metric-grid > div { padding: 10px; border: 1px solid var(--metric-border); border-radius: 12px; background: var(--card-hover-surface); }
+.metric-grid > div { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-raised); }
 .metric-grid .metric-editable { position: relative; }
 .metric-edit-button { position: absolute; top: 4px; right: 4px; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--transparent); border-radius: 10px; color: var(--subtle); background: var(--transparent); font-size: .8rem; line-height: 1; }
 .metric-edit-button:hover { border-color: var(--line); color: var(--ink); background: var(--metric-hover-surface); }
@@ -1153,7 +1153,7 @@ h2 {
 .context-preview-values .context-preview-values { padding-left: 10px; border-left: 1px solid var(--line); }
 .context-preview-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .context-preview-text { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
-.settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 17px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.settings-section { display: grid; gap: 12px; margin-bottom: 18px; padding: 17px; }
 #privacySection .settings-inline-action ~ .settings-inline-action { padding-top: 12px; border-top: 1px solid var(--line); }
 #privacySection .chip span { gap: 12px; padding: 0; border: 0; color: var(--ink); background: none; }
 #privacySection .chip span::before { content: ""; flex: none; width: 44px; height: 26px; border-radius: 999px; background: var(--muted) radial-gradient(circle at 13px 50%, var(--surface) 10px, var(--transparent) 10.5px); }
@@ -1180,7 +1180,6 @@ h2 {
 .settings-section > p, .settings-section-heading p { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .connection-cards { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .settings-section[data-more-segment-panel="connections"] { padding: 0; border: 0; background: none; box-shadow: none; }
-.connection-card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
 .connection-card > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 16px; border-radius: var(--radius-lg); cursor: pointer; list-style: none; }
 .connection-card > summary::-webkit-details-marker { display: none; }
 .connection-card > summary:hover, .connection-card[open] > summary { background: var(--card-hover-surface); }
@@ -1592,7 +1591,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-toolbar input { width: 100%; text-align: center; font-weight: 650; }
 @media (max-width: 360px) { .nutrition-toolbar { flex-wrap: wrap; } .nutrition-toolbar label { flex: 1 1 100%; order: -1; } }
 .nutrition-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 12px; margin: 18px 0; }
-.nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.nutrition-total, .nutrition-card { padding: 16px; }
 .nutrition-total { min-width: 0; overflow-wrap: break-word; hyphens: auto; }
 .nutrition-total.nutrition-below-range { box-shadow: inset 0 -3px 0 var(--orange), var(--shadow-soft); }
 .nutrition-total.nutrition-above-range { box-shadow: inset 0 -3px 0 var(--blue), var(--shadow-soft); }
@@ -1625,7 +1624,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-component-list li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .nutrition-component-list li > span { white-space: normal; }
 .nutrition-component-list small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
-.nutrition-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); }
+.nutrition-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 20px 0; padding: 16px; }
 .nutrition-tools[hidden] { display: none; }
 .nutrition-tools h3, .nutrition-tools p { margin: 0; }
 .nutrition-tools .nutrition-week-period { color: var(--ink); font-size: 1.1rem; font-weight: 700; }
