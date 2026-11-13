@@ -56,6 +56,13 @@
             "shell": "powershell",
             "timeout": 10,
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_destructive_git.py\"",
+            "shell": "powershell",
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       },

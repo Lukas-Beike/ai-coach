@@ -17,7 +17,10 @@ primary `ai-coach` checkout. Before every shell command it runs
 a sandbox) that blocks clear `.env`, `data`, and Garmin token path forms with no
 exceptions, so you run the Docker runbook commands that pass `.env` or mount
 `data` yourself. It also blocks commands that merely mention such a path, such
-as a commit message; pass that text through a file.
+as a commit message; pass that text through a file. Beside it,
+`scripts/hooks/guard_destructive_git.py` blocks git commands that discard work
+(`reset --hard`, `clean -f`, `branch -D`, `checkout .`, `restore .` and a force
+push without `--force-with-lease`); normal and lease pushes stay allowed.
 `.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
 subagents. `scripts/hooks/thread_model_rule.py` blocks a T3 thread launch whose
