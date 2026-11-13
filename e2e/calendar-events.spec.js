@@ -172,6 +172,17 @@ test("@responsive the notice walks through undecided events of the next 14 days 
   await expect(nav.locator("b.nav-count")).toHaveText("2");
   await expect(nav.locator("b.nav-count")).toBeVisible();
   await nav.screenshot({ path: testInfo.outputPath("nav-count.png") });
+  // Large text collapses the wide rail to icons: the count stays on the centered icon.
+  if (await page.locator(".desktop-nav").isVisible()) {
+    await page.evaluate(() => { document.documentElement.style.fontSize = "28px"; });
+    const offsets = await page.locator(".desktop-nav .nav-item").evaluateAll((items) => items.map((item) => {
+      const icon = item.querySelector(".nav-icon").getBoundingClientRect();
+      const box = item.getBoundingClientRect();
+      return Math.round((icon.left + icon.width / 2) - (box.left + box.width / 2));
+    }));
+    expect(new Set(offsets).size).toBe(1);
+    await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
+  }
   await expect(nav).toHaveAccessibleName(`Kalender, 2 neue Termine bis ${until}`);
 
   const posts = [];

@@ -1453,6 +1453,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   @container (max-width: 7.5rem) {
     .desktop-nav .nav-item { justify-content: center; }
     .desktop-nav .nav-item > span { display: none; }
+    .desktop-nav .nav-item > b.nav-count { position: absolute; margin: 0; }
   }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages,
