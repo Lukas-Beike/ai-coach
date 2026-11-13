@@ -12,6 +12,7 @@ from support import temp_database
 from backend.db import row_factory
 from backend.errors import AppError
 from backend.planning.planned_units import plan_push_payload_hash
+from backend.planning.push_state import skips_intervals
 from backend.sync.plan_selection import StructuredPlanSyncService
 
 UNIT_A = "00000000-0000-0000-0000-000000000001"
@@ -35,6 +36,7 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.authority = Mock()
         self.authority.pending_plan_push_entries.side_effect = self._pending
         self.authority.mark_planning_authoritative.side_effect = self._mark
+        self.authority.intervals_skipped.side_effect = self._skipped
         self.queue = Mock()
         self.queue.enqueue.side_effect = self._enqueue
         self.service = StructuredPlanSyncService(
@@ -54,6 +56,16 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         }
         self.pending.append(item)
         return item
+
+    def _skipped(self, local_ids) -> set[str]:
+        with self.manager.reader() as db:
+            rows = db.execute("SELECT local_id, payload FROM planned_units").fetchall()
+        wanted = set(local_ids)
+        return {
+            row["local_id"]
+            for row in rows
+            if row["local_id"] in wanted and skips_intervals(json.loads(row["payload"]))
+        }
 
     def _pending(self) -> list[dict[str, str]]:
         self.events.append(("pending", None))
@@ -94,10 +106,84 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.events[-1][1], [])
 
+    def test_the_receipt_names_the_units_intervals_icu_skips(self) -> None:
+        # Only indoor and virtual rides go to Intervals.icu (#2419); the rest of
+        # the selection is still queued, where the job skips it without a write.
+        entries = [
+            self.add_entry(UNIT_A, {"sport": "VirtualRide"}),
+            self.add_entry(UNIT_B, {"sport": "Run"}),
+            self.add_entry(str(uuid.uuid4()), {"sport": "Ride"}),
+            self.add_entry(str(uuid.uuid4()), {"sport": "Run", "local_deleted": True}),
+        ]
+        prepared = self.service.prepare(entries, {"_sync_all_pending": True})
+
+        result = self.service.execute(prepared, [], reason="all")
+
+        self.assertEqual(4, len(self.queue.enqueue.call_args.args[0]))
+        self.assertEqual(2, result["skipped"])
+        self.assertEqual(
+            "2 Einheiten nicht gesendet. Geht nicht an Intervals.icu: nur Indoor-Radeinheiten.",
+            result["message"],
+        )
+        self.assertNotIn(
+            "skipped", self.service.report_skips({"ok": True}, entries[:1])
+        )
+
+    def test_a_turn_that_changed_only_runs_is_a_receipted_no_op(self) -> None:
+        run = self.add_entry(UNIT_A, {"sport": "Run"})
+        self.pending.remove(run)
+        intent = {
+            "_sync_changed_entries_only": True,
+            "_changed_sync_entry_ids": [UNIT_A],
+        }
+
+        prepared = self.service.prepare(None, intent)
+        result = self.service.execute(prepared, [], reason="changed")
+
+        self.assertEqual(
+            ("changed", [], ()),
+            (prepared.mode, prepared.entries, prepared.required_scope_groups),
+        )
+        self.assertEqual([], [event for event in self.events if event[0] == "mark"])
+        self.assertEqual(1, result["skipped"])
+        self.assertIn("Geht nicht an Intervals.icu", result["message"])
+
+    def test_a_changed_run_is_left_out_while_the_changed_indoor_ride_syncs(
+        self,
+    ) -> None:
+        self.add_entry(UNIT_A, {"sport": "Run"})
+        ride = self.add_entry(UNIT_B, {"sport": "VirtualRide"})
+        self.pending = [ride]
+        intent = {
+            "_sync_changed_entries_only": True,
+            "_changed_sync_entry_ids": [UNIT_A, UNIT_B],
+        }
+
+        prepared = self.service.prepare(None, intent)
+        result = self.service.execute(prepared, [], reason="changed")
+
+        self.assertEqual([UNIT_B], [e["library_workout_id"] for e in prepared.entries])
+        self.assertEqual(
+            ((f"planned_unit:{UNIT_B}", f"library_workout:{UNIT_B}"),),
+            prepared.required_scope_groups,
+        )
+        self.assertEqual([ride], self.events[-1][1])
+        self.assertEqual(1, result["skipped"])
+
+    def test_a_created_turn_of_runs_only_has_nothing_to_send(self) -> None:
+        self.add_entry(UNIT_A, {"sport": "Run"})
+        prepared = self.service.prepare(
+            [], {"_skipped_sync_entry_ids": [UNIT_A], "_created_sync_entry_ids": []}
+        )
+        result = self.service.execute(prepared, [], reason="created")
+
+        self.assertEqual([("enqueue", [])], self.events)
+        self.assertEqual(1, result["skipped"])
+
     def test_changed_selection_scopes_each_id_and_queues_pre_mark_hash(self) -> None:
-        first = self.add_entry(UNIT_B, {"name": "B"})
+        first = self.add_entry(UNIT_B, {"name": "B", "sport": "VirtualRide"})
         first_hash = first["expected_payload_hash"]
-        self.add_entry(UNIT_A, {"name": "A"})
+        self.add_entry(UNIT_A, {"name": "A", "sport": "VirtualRide"})
         prepared = self.service.prepare(
             None,
             {

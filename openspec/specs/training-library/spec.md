@@ -248,9 +248,9 @@ Intervals planned-calendar execution and recovery are specified in TL11-TL15; no
 ### Requirement: TL11 Planned-calendar upsert identity and in-flight local changes
 The system SHALL use stable Intervals planned-event identity for explicit dated-unit pushes, validate the returned event before marking the unchanged local unit synced, and preserve newer local content and recoverable remote identity when the upload races with local changes or result validation fails.
 
-#### Scenario: Strength units go as notes
-- **WHEN** a strength unit is pushed to the Intervals.icu calendar
-- **THEN** it is sent as a `NOTE` event (Intervals.icu forwards a workout event to Garmin as one unnamed step); only a note this app sent (external id `intervals-coach-<local_id>`) counts as a planned event, other notes never do. The structured strength workout reaches the watch only through the direct Garmin push.
+#### Scenario: Only indoor rides go to the calendar
+- **WHEN** a planned unit is selected for the Intervals.icu calendar
+- **THEN** only an indoor or virtual ride is written; a run, strength or outdoor ride unit is skipped without a remote write, and its earlier event, if any, stays untouched (#2419). Runs and strength reach the watch through the direct Garmin push, outdoor rides the head unit through the Wahoo plan push.
 
 #### Scenario: Create and later update
 - **WHEN** an explicit normal push exports an active planned unit and a later push retries or updates it
@@ -543,12 +543,8 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
 
 #### Scenario: Export to Garmin
-- **WHEN** a run unit with a cap is sent through the Intervals.icu calendar
-- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-highbpm` range resolved at export time (no zone number, no narrow band, no percent: a Garmin workout step cannot hold a percent of the lactate threshold HR, and Intervals.icu would resolve a percent with its own, possibly stale, threshold); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the text is sent unchanged.
-
-#### Scenario: Changed flag
-- **WHEN** only the threshold HR moved after a unit was synced
-- **THEN** the unit counts as changed (its resolved range differs from the one sent) and the calendar sync button offers it again; nothing is sent without that explicit sync.
+- **WHEN** a run unit with a cap is pushed to Garmin
+- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-high` bpm range resolved at push time (a Garmin workout step cannot hold a percent of the lactate threshold HR); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the push is refused before any write.
 
 #### Scenario: Card and analysis
 - **WHEN** a unit has a cap

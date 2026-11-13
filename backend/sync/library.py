@@ -27,6 +27,7 @@ from backend.observability import Redactor
 from backend.planning import library as planning_library
 from backend.planning import planned_units
 from backend.planning import workouts as planning_workouts
+from backend.planning.push_state import skips_intervals
 from backend.providers.http import ProviderHTTPError
 from backend.sync.workout_export import WorkoutLibraryExportPort
 
@@ -92,11 +93,18 @@ class WorkoutLibrarySyncStateService:
     def preview(self) -> tuple[dict[str, int], list[dict[str, Any]], str]:
         with self._database_manager.unit_of_work() as db:
             rows = planning_store.library_rows_in_states(db, _OPEN_SYNC_STATES)
-            planned_rows = planning_store.planned_unit_rows_in_states(
-                db, _OPEN_SYNC_STATES
-            )
+            # A run, strength or outdoor ride unit never waits for Intervals.icu (#2419).
             planned_rows = sorted(
-                [*planned_rows, *self._resync_planned_rows(db)],
+                [
+                    row
+                    for row in [
+                        *planning_store.planned_unit_rows_in_states(
+                            db, _OPEN_SYNC_STATES
+                        ),
+                        *self._resync_planned_rows(db),
+                    ]
+                    if not self._skipped(row)
+                ],
                 key=lambda row: str(row.get("local_id") or ""),
             )
             rows = self._with_linked_external_ids(
@@ -106,6 +114,10 @@ class WorkoutLibrarySyncStateService:
                 db, planned_rows, RemoteEntityKind.PLANNED_UNIT
             )
         return self._snapshot(rows, planned_rows)
+
+    @classmethod
+    def _skipped(cls, row: Any) -> bool:
+        return skips_intervals(cls._object_payload(row["payload"]))
 
     def _resync_planned_rows(self, db: Any) -> list[Any]:
         """Synced capped units the calendar offers again after a threshold move."""
@@ -177,6 +189,13 @@ class WorkoutLibrarySyncStateService:
     def summary(self) -> dict[str, int]:
         with self._database_manager.unit_of_work() as db:
             rows, planned_rows = planning_store.sync_state_counts(db)
+            skipped = [
+                str(row["sync_state"] or "local")
+                for row in planning_store.planned_unit_rows_in_states(
+                    db, _OPEN_SYNC_STATES
+                )
+                if self._skipped(row)
+            ]
         summary = {
             "local": 0,
             "syncing": 0,
@@ -189,7 +208,9 @@ class WorkoutLibrarySyncStateService:
             summary[state] = int(row.get("count") or 0)
         for row in planned_rows:
             state = str(row.get("sync_state") or "local")
-            summary[f"planned_{state}"] = int(row.get("count") or 0)
+            summary[f"planned_{state}"] = int(row.get("count") or 0) - skipped.count(
+                state
+            )
         summary["planned_pending"] = sum(
             summary.get(f"planned_{state}", 0)
             for state in ("local", "sync_error", "remote_missing")

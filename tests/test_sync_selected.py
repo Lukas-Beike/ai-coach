@@ -20,6 +20,8 @@ from backend.planning import library as planning_library
 from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
 from backend.sync.selected import SelectedWorkoutSyncService
 
+INDOOR_RIDE = {"sport": "VirtualRide"}
+
 
 class RecordingLock:
     def __init__(self, acquired: bool = True) -> None:
@@ -336,8 +338,10 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
     def test_repair_errors_are_recorded_and_verification_failure_overrides_result(
         self,
     ) -> None:
-        failed = self._add("planned", {"date": "2026-10-01"})
-        verification_failed = self._add("planned", {"date": "2026-10-02"})
+        failed = self._add("planned", {**INDOOR_RIDE, "date": "2026-10-01"})
+        verification_failed = self._add(
+            "planned", {**INDOOR_RIDE, "date": "2026-10-02"}
+        )
         batch = MagicMock()
         batch.verify.return_value = {
             verification_failed["library_workout_id"]: RuntimeError(
@@ -369,8 +373,8 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         )
 
     def test_planned_normal_and_repair_paths(self) -> None:
-        normal = self._add("planned", {"date": "2026-10-01"})
-        repair = self._add("planned", {"date": "2026-10-02"})
+        normal = self._add("planned", {**INDOOR_RIDE, "date": "2026-10-01"})
+        repair = self._add("planned", {**INDOOR_RIDE, "date": "2026-10-02"})
         self.calendar_sync.sync_entry.return_value = {"id": "event-normal"}
         batch = MagicMock()
         batch.verify.return_value = {}
@@ -400,6 +404,44 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.lock.release_calls, 0)
         self.assertEqual(gate.operation_entries, 0)
         self.assertEqual(gate.operation_exits, 0)
+
+    def test_only_indoor_rides_reach_intervals_and_a_skip_is_no_failure(self) -> None:
+        # Intervals.icu serves Zwift: runs, strength and outdoor rides go elsewhere (#2419).
+        skipped = [
+            self._add("planned", {"sport": sport, "date": "2026-10-01"})
+            for sport in ("Run", "VirtualRun", "WeightTraining", "Ride")
+        ]
+        indoor = self._add("planned", {"sport": "Ride", "environment": "indoor"})
+        deleted_run = self._add("planned", {"sport": "Run", "local_deleted": True})
+        self.calendar_sync.sync_entry.return_value = None
+        batch = MagicMock()
+        batch.verify.return_value = {}
+        self.repair_sync.create_batch.return_value = batch
+
+        for repair in (False, True):
+            self.calendar_sync.reset_mock()
+            self.repair_sync.reset_mock()
+            result = self._service().sync(
+                {"entries": [*skipped, indoor, deleted_run], "repair": repair}
+            )
+            self.assertEqual("ok", result["status"])
+            self.assertEqual(
+                ["skipped"] * 4 + ["synced"] * 2,
+                [item["status"] for item in result["results"]],
+            )
+            self.assertEqual(
+                "Geht nicht an Intervals.icu: nur Indoor-Radeinheiten",
+                result["results"][0]["error"],
+            )
+            called = (
+                self.repair_sync.repair_entry.call_args_list
+                if repair
+                else self.calendar_sync.sync_entry.call_args_list
+            )
+            self.assertEqual(
+                [indoor["library_workout_id"], deleted_run["library_workout_id"]],
+                [args[0] for args, _kwargs in called],
+            )
 
 
 if __name__ == "__main__":

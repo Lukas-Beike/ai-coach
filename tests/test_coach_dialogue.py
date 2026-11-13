@@ -121,11 +121,11 @@ class DialogueHarness:
             workout["strength_structure"] = [{"name": "Rudern", "sets": 3, "reps": 10}]
             workout["session_focus"] = "upper"
             workout["strength_intensity"] = "moderate"
-        elif sport in {"Run", "Ride"}:
+        elif sport in {"Run", "Ride", "VirtualRide"}:
             workout["session_focus"] = "easy"
             if sport == "Run":
                 workout["hr_cap"] = effective_caps(None)["easy"]
-        if sport in {"WeightTraining", "Run", "Ride"}:
+        if sport in {"WeightTraining", "Run", "Ride", "VirtualRide"}:
             workout["template_id"] = _fixture_template(self, workout)
         return workout
 
@@ -832,7 +832,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_sync_invalid_id_repair_clears_error_and_queues_only_selected_unit(self):
         units = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-09"), self.workout("2026-09-11")]
+            [
+                self.workout("2026-09-09", sport="VirtualRide"),
+                self.workout("2026-09-11", sport="VirtualRide"),
+            ]
         )
         entry = next(
             item
@@ -1005,7 +1008,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             payload = {"reason": "Synthetic retry", "days": 7}
             if remote:
                 server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-                    [self.workout()]
+                    [self.workout(sport="VirtualRide")]
                 )
                 payload = {
                     "reason": "Synthetic retry",
@@ -1059,7 +1062,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         payload = {"reason": "Synthetic retry", "days": 7}
         if push:
             server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-                [self.workout()]
+                [self.workout(sport="VirtualRide")]
             )
             payload = {
                 "reason": "Synthetic retry",
@@ -2069,7 +2072,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "apply_training_patch",
                 {
                     "changes": [],
-                    "workouts": [self.workout("2026-09-08")],
+                    "workouts": [self.workout("2026-09-08", sport="VirtualRide")],
                     "expected_revision": before["planning_revision"],
                 },
                 ["local_plan"],
@@ -2105,7 +2108,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
+            [self.workout("2026-09-08", sport="VirtualRide")]
         )
 
         def broken(_):
@@ -2186,7 +2189,10 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_all_pending_sync_is_not_narrowed_to_model_entries(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08"), self.workout("2026-09-09")]
+            [
+                self.workout("2026-09-08", sport="VirtualRide"),
+                self.workout("2026-09-09", sport="VirtualRide"),
+            ]
         )
         result, _ = self.turn(
             "Alle offenen Einheiten zu Intervals übertragen",
@@ -2207,7 +2213,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
 
     def test_selected_existing_planned_unit_sync_accepts_planned_unit_scope(self):
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
+            [self.workout("2026-09-08", sport="VirtualRide")]
         )[0]
         entry = server.SYNC_COMMANDS.authority().pending_plan_push_entries()[0]
         result, _ = self.turn(

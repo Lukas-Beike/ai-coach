@@ -21,27 +21,21 @@ function leftoverEntry(provider, item, ids) {
   return provider !== ids.intervals ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
-// What a week's sync delivered per provider: Garmin gets structured workouts, Intervals.icu gets
-// strength only as a calendar note, so a note is never mistaken for a workout on the watch.
+// What a week's sync delivered per provider: Garmin gets structured workouts.
 function plannedWeekSyncSummary(done, ids, providerLabel) {
   const totals = new Map();
   for (const job of done) {
-    const item = totals.get(job.provider) || { send: 0, notes: 0, remove: 0 };
-    if (job.kind === "remove") item.remove += job.entries.length;
-    else {
-      item.send += job.entries.length;
-      item.notes += job.units.filter((entry) => focusSport(entry) === "strength").length;
-    }
+    const item = totals.get(job.provider) || { send: 0, remove: 0 };
+    item[job.kind === "remove" ? "remove" : "send"] += job.entries.length;
     totals.set(job.provider, item);
   }
   const reached = [...totals].map(([provider, item]) => {
     const verb = provider === ids.garmin ? "strukturiert" : "gesendet";
     const sent = item.send ? `${item.send} ${verb}` : "";
-    const notes = provider === ids.intervals && item.notes ? `davon ${item.notes} als Notiz` : "";
     const removed = item.remove ? `${item.remove} alte entfernt` : "";
-    return `${providerLabel(provider)}: ${[sent, notes, removed].filter(Boolean).join(", ")}`;
+    return `${providerLabel(provider)}: ${[sent, removed].filter(Boolean).join(", ")}`;
   });
-  // A strength unit that reached Intervals.icu only as a note says why the watch did not get it.
+  // A strength unit without a Garmin workout says why the watch did not get it.
   const blocked = new Set(done.flatMap((job) => job.units).map(plannedGarminBlockedText).filter(Boolean));
   return [...reached, ...blocked].join(" · ");
 }

@@ -160,11 +160,14 @@ class CoachSyncToolService:
             for scope_group in prepared.required_scope_groups:
                 require_coach_scope(intent, *scope_group)
             manifest = self._plan_repair.execute(prepared)
-            return self._plan_push.enqueue(
+            return self._plan_sync.report_skips(
+                self._plan_push.enqueue(
+                    manifest,
+                    sync_job_ids,
+                    reason=str(arguments.get("reason") or "Coach-Reparatur"),
+                    repair=True,
+                ),
                 manifest,
-                sync_job_ids,
-                reason=str(arguments.get("reason") or "Coach-Reparatur"),
-                repair=True,
             )
         prepared = self._plan_sync.prepare(entries, intent)
         for scope_group in prepared.required_scope_groups:

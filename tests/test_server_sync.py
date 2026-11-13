@@ -353,7 +353,7 @@ class ServerSyncTests(ServerTestCase):
             [
                 {
                     "date": (today + timedelta(days=index + 1)).isoformat(),
-                    "sport": "Run",
+                    "sport": "VirtualRide",
                     "name": "Synthetic replacement run",
                     "description": "- 30m 60% Synthetic easy session",
                     "duration_minutes": 30,
@@ -482,7 +482,7 @@ class ServerSyncTests(ServerTestCase):
                 "date": (
                     server.ATHLETE_CLOCK.now().date() + timedelta(days=6)
                 ).isoformat(),
-                "sport": "Ride",
+                "sport": "VirtualRide",
                 "name": "Changed",
                 "description": "- 20m 60% easy",
             }
@@ -534,7 +534,7 @@ class ServerSyncTests(ServerTestCase):
             server.PLANNING_DATA.planned_unit().create(
                 {
                     "date": (today + timedelta(days=index + 10)).isoformat(),
-                    "sport": "Ride",
+                    "sport": "VirtualRide",
                     "name": f"Changed {index}",
                     "description": "- 20m 60% easy",
                 }

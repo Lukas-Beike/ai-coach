@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import date
 from typing import Any
 
@@ -12,6 +12,7 @@ from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import DatabaseManager, planning_store
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
+from backend.planning.push_state import skips_intervals
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workout_export import past_export_horizon
 from backend.sync.library import WorkoutLibrarySyncStateService
@@ -90,6 +91,16 @@ class PlanningAuthorityService:
                 and past_export_horizon(entry.get("planned_date"), today)
             )
         ]
+
+    def intervals_skipped(self, local_ids: Iterable[str]) -> set[str]:
+        """The given ids of live planned units Intervals.icu takes no part in (#2419)."""
+        with self._database_manager.reader() as db:
+            rows = planning_store.planned_unit_rows_by_ids(db, sorted(set(local_ids)))
+        return {
+            str(row["local_id"])
+            for row in rows
+            if skips_intervals(json.loads(row["payload"]))
+        }
 
     def mark_planning_authoritative(self, local_ids: list[str] | None = None) -> int:
         """Make selected local planning rows authoritative in one transaction."""

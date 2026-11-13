@@ -399,10 +399,10 @@ class ChangedFlagTests(unittest.TestCase):
 
     def test_the_calendar_sync_button_returns_for_a_flagged_unit(self) -> None:
         row = {"local_id": "u1", "payload": "{}", "sync_state": "synced"}
-        flagged: dict[str, Any] = {}
+        flagged: dict[str, Any] = {"sport": "VirtualRide"}
         attach_push_state([(row, flagged)], {}, {}, {"u1"})
         self.assertTrue(flagged["push_pending"]["intervals"])
-        steady: dict[str, Any] = {}
+        steady: dict[str, Any] = {"sport": "VirtualRide"}
         attach_push_state([(row, steady)], {}, {}, set())
         self.assertFalse(steady["push_pending"]["intervals"])
 

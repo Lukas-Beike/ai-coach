@@ -144,6 +144,10 @@ class CoachStructuredToolPreparationService:
                     "Die neue Planung wurde noch nicht erfolgreich gespeichert.",
                     reason="plan_commit_required",
                 )
+            # Runs, strength and outdoor rides are not sent to Intervals.icu (#2419).
+            skipped = self._planning_authority.intervals_skipped(created_ids)
+            action["_skipped_sync_entry_ids"] = sorted(skipped)
+            created_ids -= skipped
             entries = [
                 entry
                 for entry in self._planning_authority.pending_plan_push_entries()

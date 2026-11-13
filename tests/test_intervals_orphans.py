@@ -22,7 +22,7 @@ OLD, NEW, LIVE, PAST, PLAIN = (
 )
 TODAY = date(2026, 11, 9)
 UNIT = {
-    "sport": "Ride",
+    "sport": "VirtualRide",
     "name": "Lockeres Indoor-Rad",
     "date": "2026-11-11",
     "remote_event_id": "evt-1",
@@ -55,6 +55,24 @@ class IntervalsOrphanTests(unittest.TestCase):
         self.insert(NEW, {**UNIT, "archived": True}, state="synced")
 
         self.assertEqual([OLD], self.orphans())
+
+    def test_a_live_unit_that_no_longer_qualifies_keeps_its_event_untouched(
+        self,
+    ) -> None:
+        # Only indoor rides go to Intervals.icu (#2419): the event of a live run
+        # is no orphan and never waits, while a deleted run's event is removed.
+        self.insert(LIVE, {**UNIT, "sport": "Run"})
+        self.insert(PLAIN, {**UNIT, "sport": "Run", "local_deleted": True})
+
+        self.assertEqual([PLAIN], self.orphans())
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT local_id, payload, sync_state FROM planned_units WHERE local_id=?",
+                (LIVE,),
+            ).fetchall()
+        pairs = [(row[0], json.loads(row[0]["payload"]))]
+        attach_push_state(pairs, {}, today=TODAY)
+        self.assertFalse(pairs[0][1]["push_pending"]["intervals"])
 
     def test_the_calendar_lists_the_events_on_a_unit_intervals_waits_for(self) -> None:
         self.insert(OLD, {**UNIT, "local_deleted": True, "archived": True})
@@ -139,7 +157,7 @@ class IntervalsOrphanTests(unittest.TestCase):
             approved["entries"],
         )
         self.assertEqual(
-            {NEW: "Ride", OLD: "Wird bei Intervals.icu entfernt"},
+            {NEW: "VirtualRide", OLD: "Wird bei Intervals.icu entfernt"},
             {item["id"]: item["sport"] for item in details},
         )
 

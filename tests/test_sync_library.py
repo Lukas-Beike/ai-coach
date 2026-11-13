@@ -55,6 +55,9 @@ class CountingSQLite:
         return sqlite3.connect(*args, **kwargs)
 
 
+INDOOR_RIDE = {"sport": "VirtualRide"}
+
+
 class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
     def setUp(self):
         self.database_manager = temp_database(
@@ -380,16 +383,34 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
         self.add_library("lib-synced", state="synced")
         self.add_planned(
             "planned-local",
-            payload={"date": " 2026-11-12T06:00:00", "name": "Planned"},
+            payload={
+                "date": " 2026-11-12T06:00:00",
+                "name": "Planned",
+                **INDOOR_RIDE,
+            },
         )
-        self.add_planned("planned-error", state="sync_error", external_id="plan-error")
         self.add_planned(
-            "planned-missing", state="remote_missing", external_id="plan-gone"
+            "planned-error",
+            state="sync_error",
+            external_id="plan-error",
+            payload=INDOOR_RIDE,
         )
         self.add_planned(
-            "planned-conflict", state="conflict", external_id="plan-conflict"
+            "planned-missing",
+            state="remote_missing",
+            external_id="plan-gone",
+            payload=INDOOR_RIDE,
+        )
+        self.add_planned(
+            "planned-conflict",
+            state="conflict",
+            external_id="plan-conflict",
+            payload=INDOOR_RIDE,
         )
         self.add_planned("planned-synced", state="synced")
+        # A run, strength or outdoor ride unit never waits for Intervals.icu (#2419).
+        for sport in ("Run", "WeightTraining", "Ride"):
+            self.add_planned(f"skipped-{sport}", payload={"sport": sport})
 
         summary, entries, fingerprint = self.service.preview()
         repeated = self.service.preview()
@@ -443,7 +464,7 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
         self.assertEqual(
             planned["payload_hash"],
             plan_push_payload_hash(
-                '{"date": " 2026-11-12T06:00:00", "name": "Planned"}'
+                '{"date": " 2026-11-12T06:00:00", "name": "Planned", "sport": "VirtualRide"}'
             ),
         )
         lib_new = next(entry for entry in entries if entry["local_id"] == "lib-new")
@@ -551,13 +572,22 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
         for index in range(2):
             self.add_library(f"missing-{index}", state="remote_missing")
         self.add_library("archived", state="archived")
-        self.add_planned("p-local", state="local")
+        self.add_planned("p-local", state="local", payload=INDOOR_RIDE)
         for index in range(2):
-            self.add_planned(f"p-error-{index}", state="sync_error")
+            self.add_planned(
+                f"p-error-{index}", state="sync_error", payload=INDOOR_RIDE
+            )
         for index in range(3):
-            self.add_planned(f"p-missing-{index}", state="remote_missing")
+            self.add_planned(
+                f"p-missing-{index}", state="remote_missing", payload=INDOOR_RIDE
+            )
         for index in range(4):
-            self.add_planned(f"p-conflict-{index}", state="conflict")
+            self.add_planned(
+                f"p-conflict-{index}", state="conflict", payload=INDOOR_RIDE
+            )
+        # Runs are left out of the pending counts, like in the preview (#2419).
+        for state in ("local", "sync_error", "conflict"):
+            self.add_planned(f"p-run-{state}", state=state, payload={"sport": "Run"})
         for index in range(5):
             self.add_planned(f"p-synced-{index}", state="synced")
 

@@ -93,8 +93,7 @@ test("the toast names what each provider received", () => {
     { provider: "intervals", kind: "send", entries: [{}, {}], units: [{ sport: "strength" }, { sport: "ride" }] },
   ];
   const label = (provider) => ({ garmin: "Garmin", intervals: "Intervals.icu" })[provider];
-  // Strength reaches Intervals.icu only as a calendar note, never the watch.
-  assert.equal(context.plannedWeekSyncSummary(done, ids, label), "Garmin: 1 strukturiert, 2 alte entfernt · Intervals.icu: 2 gesendet, davon 1 als Notiz");
+  assert.equal(context.plannedWeekSyncSummary(done, ids, label), "Garmin: 1 strukturiert, 2 alte entfernt · Intervals.icu: 2 gesendet");
 });
 
 test("a strength unit says why it was not sent to Garmin", () => {
@@ -155,5 +154,5 @@ test("a partial job still names what arrived, and a strength unit without a Garm
     message: "Intervals.icu: Seit der Vorschau geändert · Intervals.icu: 1 gesendet",
   });
   const blocked = [{ provider: "intervals", kind: "send", entries: [{}], units: [{ sport: "strength", push_blocked: { garmin: "no_structure" } }] }];
-  assert.equal(partial.plannedWeekSyncSummary(blocked, ids, label), "Intervals.icu: 1 gesendet, davon 1 als Notiz · Keine Kraftstruktur – nicht an Garmin gesendet");
+  assert.equal(partial.plannedWeekSyncSummary(blocked, ids, label), "Intervals.icu: 1 gesendet · Keine Kraftstruktur – nicht an Garmin gesendet");
 });

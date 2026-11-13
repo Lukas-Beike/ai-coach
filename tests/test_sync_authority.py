@@ -194,7 +194,8 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
             dirty=0,
             payload={**capped, "local_deleted": True},
         )
-        self.add_planned("open", state="local")
+        self.add_planned("open", state="local", payload={"sport": "VirtualRide"})
+        self.add_planned("run", state="local", payload={"sport": "Run"})
         seen: list[dict[str, object]] = []
 
         def resync(_db: object, payloads: list[dict[str, object]]) -> set[str]:
@@ -218,9 +219,8 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
 
         entries = service.pending_plan_push_entries()
 
-        self.assertEqual(
-            {"moved", "open"}, {entry["library_workout_id"] for entry in entries}
-        )
+        # A capped unit is a run: Intervals.icu takes no part in it (#2419).
+        self.assertEqual({"open"}, {entry["library_workout_id"] for entry in entries})
         self.assertEqual(
             {"moved", "steady"}, {str(payload["local_id"]) for payload in seen}
         )
@@ -232,6 +232,19 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
                 entry["library_workout_id"]
                 for entry in self.service.pending_plan_push_entries()
             ],
+        )
+
+    def test_only_live_units_intervals_icu_takes_no_part_in_are_skipped(self) -> None:
+        self.add_planned("run", payload={"sport": "Run"})
+        self.add_planned("ride", payload={"sport": "Ride"})
+        self.add_planned("indoor", payload={"sport": "VirtualRide"})
+        self.add_planned("gone", payload={"sport": "Run", "local_deleted": True})
+
+        self.assertEqual(
+            {"run", "ride"},
+            self.service.intervals_skipped(
+                ["run", "ride", "indoor", "gone", "unknown"]
+            ),
         )
 
     def test_missing_or_empty_ids_select_only_open_planning_states(self) -> None:
