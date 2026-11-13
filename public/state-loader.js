@@ -50,7 +50,8 @@ let viewCacheEpoch = 0;
 // snapshot's values for the failed ones, so a slow area does not hold back the
 // next start. The bootstrap sends placeholders for these keys, so each failed
 // area takes exactly its own keys from the previous snapshot. Chat and profile
-// come with the bootstrap itself.
+// come with the bootstrap itself; training_calendar only with /api/plan, so the
+// calendar renders the bootstrap's planned list until the plan area arrives.
 let stateSnapshotFailedAreas = [];
 const AREA_SNAPSHOT_KEYS = {
   plan: ["plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning"],
