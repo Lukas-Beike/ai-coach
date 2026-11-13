@@ -46,7 +46,8 @@ COMMAND_LINE_PATH_BUDGET = 30000
 # Sonar's JavaScript rules S3776 (cognitive complexity) and S3358 (nested
 # ternary) through eslint-plugin-sonarjs. CI's quality job installs no Node
 # packages, so there the step reports that it was skipped; the pre-push hook
-# points PACECRAFT_NODE_MODULES at the clone because its HEAD export has none.
+# points PACECRAFT_NODE_MODULES at the clone because its HEAD export has none,
+# and there a missing ESLint (node_modules older than the pin) is fatal.
 ESLINT_CONFIG = ROOT / "tools/eslint.sonar.config.mjs"
 
 
@@ -239,6 +240,10 @@ def javascript_diagnostics(root: Path) -> list[dict] | None:
     """Sonar's complexity and nested-ternary rules for public/*.js; None if skipped."""
     script = eslint_script()
     if script is None:
+        if os.environ.get("PACECRAFT_NODE_MODULES"):
+            raise RuntimeError(
+                "ESLint is not installed in PACECRAFT_NODE_MODULES; run `npm ci`"
+            )
         print("Quality ratchet: ESLint not installed (npm ci); skipped public/*.js")
         return None
     files = sorted(

@@ -325,6 +325,14 @@ class QualityBaselineTests(unittest.TestCase):
         ):
             self.assertIsNone(quality_baseline.javascript_diagnostics(Path.cwd()))
         self.assertIn("skipped public/*.js", output.getvalue())
+        # The pre-push hook names the clone's node_modules: a clone installed
+        # before the ESLint pin must block the push, not skip the check.
+        with (
+            patch("tools.quality_baseline.eslint_script", return_value=None),
+            patch.dict("os.environ", {"PACECRAFT_NODE_MODULES": "node_modules"}),
+            self.assertRaisesRegex(RuntimeError, "npm ci"),
+        ):
+            quality_baseline.javascript_diagnostics(Path.cwd())
 
     @patch("tools.quality_baseline.subprocess.run")
     def test_tool_failure_cannot_become_baseline_debt(self, mocked_run):
