@@ -67,6 +67,19 @@ THINKING_LEVEL_OPTIONS = (
         "description": "Gründlichere Überlegung für komplexe Trainingsfragen",
     },
 )
+# Each task has its own explicit model and thinking level. The conversation uses
+# the original keys; planning and nutrition fall back to it until chosen.
+TASKS = ("conversation", "planning", "nutrition")
+_MODEL_KEYS = {
+    "conversation": "selected_model_openai",
+    "planning": "selected_model_planning",
+    "nutrition": "selected_model_nutrition",
+}
+_THINKING_KEYS = {
+    "conversation": "selected_thinking_level",
+    "planning": "selected_thinking_level_planning",
+    "nutrition": "selected_thinking_level_nutrition",
+}
 CALENDAR_DISPLAY_DEFAULTS = {"past_weeks": 1, "future_weeks": 4}
 CALENDAR_DISPLAY_MAX_WEEKS = 52
 
@@ -75,6 +88,12 @@ def _copy_options(
     options: tuple[dict[str, str], ...] | list[dict[str, str]],
 ) -> list[dict[str, str]]:
     return [dict(option) for option in options]
+
+
+def _task(task: Any) -> str:
+    if task not in TASKS:
+        raise AppError(400, "Unbekannte Coach-Aufgabe.")
+    return task
 
 
 def _key_ready(config: Config, provider: str) -> bool:
@@ -143,11 +162,14 @@ class SettingsService:
             )
         return options
 
-    def _selected_model(self, config: Config) -> str:
+    def _selected_model(self, config: Config, task: str = "conversation") -> str:
         configured = self._model_ids(config)
-        stored = self._get_value("selected_model_openai")
-        default = config.openai_model
-        return stored if stored in configured else default
+        stored = self._get_value(_MODEL_KEYS[_task(task)])
+        if stored in configured:
+            return stored
+        if task != "conversation":
+            return self._selected_model(config)
+        return config.openai_model
 
     def _calendar_display_settings(self) -> dict[str, int]:
         settings: dict[str, int] = {}
@@ -163,8 +185,8 @@ class SettingsService:
         config = self._config_supplier()
         return self._available_model_options(config)
 
-    def selected_model(self) -> str:
-        return self._selected_model(self._config_supplier())
+    def selected_model(self, task: str = "conversation") -> str:
+        return self._selected_model(self._config_supplier(), task)
 
     def selected_provider(self) -> str:
         """anthropic for a Claude family, else openai."""
@@ -174,7 +196,8 @@ class SettingsService:
         """The selected model's provider has its key."""
         return _key_ready(self._config_supplier(), self.selected_provider())
 
-    def save_model(self, model: Any) -> dict[str, str]:
+    def save_model(self, model: Any, task: Any = "conversation") -> dict[str, str]:
+        task = _task(task)
         config = self._config_supplier()
         model_id = str(model or "").strip()
         if model_id not in self._model_ids(config):
@@ -185,27 +208,42 @@ class SettingsService:
                 400,
                 "Für dieses Modell fehlt der API-Schlüssel unter Mehr › Anbindungen.",
             )
-        # One setting for both providers; the key name predates Claude.
-        self._set_value("selected_model_openai", model_id)
+        # One setting per task for both providers; the first key predates Claude.
+        self._set_value(_MODEL_KEYS[task], model_id)
         return {"model": model_id}
 
     def available_thinking_level_options(self) -> list[dict[str, str]]:
         self._config_supplier()
         return _copy_options(THINKING_LEVEL_OPTIONS)
 
-    def selected_thinking_level(self) -> str:
+    def selected_thinking_level(self, task: str = "conversation") -> str:
         self._config_supplier()
         configured = {option["id"] for option in THINKING_LEVEL_OPTIONS}
-        stored = self._get_value("selected_thinking_level")
-        return stored if stored in configured else "medium"
+        stored = self._get_value(_THINKING_KEYS[_task(task)])
+        if stored in configured:
+            return stored
+        return "medium" if task == "conversation" else self.selected_thinking_level()
 
-    def save_thinking_level(self, level: Any) -> dict[str, str]:
+    def save_thinking_level(
+        self, level: Any, task: Any = "conversation"
+    ) -> dict[str, str]:
         self._config_supplier()
+        task = _task(task)
         level_id = str(level or "").strip().lower()
         if level_id not in {option["id"] for option in THINKING_LEVEL_OPTIONS}:
             raise AppError(400, "Nicht unterstütztes Thinking Level.")
-        self._set_value("selected_thinking_level", level_id)
+        self._set_value(_THINKING_KEYS[task], level_id)
         return {"thinking_level": level_id}
+
+    def task_settings(self) -> dict[str, dict[str, str]]:
+        """The model and thinking level each task uses."""
+        return {
+            task: {
+                "model": self.selected_model(task),
+                "thinking_level": self.selected_thinking_level(task),
+            }
+            for task in TASKS
+        }
 
     def _service_tiers(self, model: str) -> set[str]:
         config = self._config_supplier()

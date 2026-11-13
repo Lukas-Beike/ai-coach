@@ -65,6 +65,47 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(self.writes[-1], ("selected_model_openai", "gpt-6-luna"))
         self.assertEqual(self.service.selected_model(), "gpt-6-luna")
 
+    def test_each_task_has_its_own_choice_and_falls_back_to_the_conversation(self):
+        # Nothing saved per task: every task uses today's global choice.
+        self.values.update(
+            selected_model_openai="gpt-6-sol", selected_thinking_level="low"
+        )
+        self.assertEqual(
+            self.service.task_settings(),
+            {
+                task: {"model": "gpt-6-sol", "thinking_level": "low"}
+                for task in ("conversation", "planning", "nutrition")
+            },
+        )
+        self.service.save_model("gpt-6.1-sol", "planning")
+        self.service.save_thinking_level("high", "planning")
+        self.service.save_model("gpt-6-luna", "nutrition")
+        self.assertEqual(
+            self.writes,
+            [
+                ("selected_model_planning", "gpt-6.1-sol"),
+                ("selected_thinking_level_planning", "high"),
+                ("selected_model_nutrition", "gpt-6-luna"),
+            ],
+        )
+        self.assertEqual(self.service.selected_model(), "gpt-6-sol")
+        self.assertEqual(self.service.selected_model("planning"), "gpt-6.1-sol")
+        self.assertEqual(self.service.selected_thinking_level("planning"), "high")
+        self.assertEqual(self.service.selected_model("nutrition"), "gpt-6-luna")
+        self.assertEqual(self.service.selected_thinking_level("nutrition"), "low")
+        # A stored task model the configuration no longer offers falls back.
+        self.values["selected_model_planning"] = "gpt-5.6-sol"
+        self.assertEqual(self.service.selected_model("planning"), "gpt-6-sol")
+        for call in (
+            lambda: self.service.save_model("gpt-6-sol", "food"),
+            lambda: self.service.save_thinking_level("low", None),
+            lambda: self.service.selected_model("food"),
+        ):
+            with self.assertRaises(AppError) as error:
+                call()
+            self.assertEqual(str(error.exception), "Unbekannte Coach-Aufgabe.")
+        self.assertEqual(len(self.writes), 3)
+
     def test_invalid_model_is_rejected_without_writes(self):
         for model in ("not-supported", "gpt-5.6-sol"):
             with self.assertRaises(AppError) as error:
@@ -166,6 +207,10 @@ class SettingsServiceTests(unittest.TestCase):
             service.save_model("claude-opus")
         self.assertEqual(raised.exception.status, 400)
         self.assertNotIn("selected_model_openai", self.values)
+        # A task model needs its provider's key as well.
+        with self.assertRaises(AppError):
+            service.save_model("claude-haiku", "nutrition")
+        self.assertNotIn("selected_model_nutrition", self.values)
         self.current_config[0] = replace(
             self.current_config[0], anthropic_api_key="anthropic-test-key"
         )

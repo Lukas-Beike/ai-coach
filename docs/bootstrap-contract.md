@@ -64,7 +64,7 @@ when its marker changes. Each marker is built from local durable state
 | `local_feedback` | object | `recent`, `scope`, `today` |
 | `messages` | list |  |
 | `messages_next_cursor` | null |  |
-| `model` | object | `options`, `provider`, `selected` |
+| `model` | object | `options`, `provider`, `selected`, `tasks` |
 | `morning_checkin` | object | `current_for_today`, `date`, `status` |
 | `performance` | object | always empty here; its area route loads it |
 | `planned` | list |  |

@@ -386,6 +386,16 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertEqual(result["message"]["coach_request_kind"], "plan_week")
         self.assertEqual(self._reloaded_reply()["coach_request_kind"], "plan_week")
 
+    def test_reloaded_reply_names_the_model_that_wrote_it(self) -> None:
+        self._seed({"command_receipts": [], "model": "claude-opus"})
+        self.service.persist(
+            "turn-1", {}, AppError(504, "late", reason="provider_timeout")
+        )
+        self.assertEqual(self._reloaded_reply()["coach_model"], "claude-opus")
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE coach_commands SET receipt='{}'")
+        self.assertNotIn("coach_model", self._reloaded_reply())
+
     def test_cancelled_turn_is_not_marked_as_failed(self) -> None:
         self._seed({"command_receipts": []})
         result = self.service.persist(

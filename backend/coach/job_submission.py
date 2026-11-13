@@ -131,7 +131,7 @@ class CoachJobSubmissionService:
             )
         operation_id = operation_id or uuid.uuid4().hex
         session_key = coach_session_key(session_csrf_hash)
-        model, thinking_level = self._model_settings()
+        model, thinking_level = self._model_settings(request_kind)
 
         existing_response, user_message_id = self._persist(
             message,
@@ -234,9 +234,11 @@ class CoachJobSubmissionService:
             )
         return message, client_turn_id, request_kind, attachments, scope
 
-    def _model_settings(self) -> tuple[str, str]:
-        model = self._settings_service.selected_model()
-        thinking_level = self._settings_service.selected_thinking_level()
+    def _model_settings(self, request_kind: str | None) -> tuple[str, str]:
+        # A quick action the athlete pressed is a planning or analysis task.
+        task = "planning" if request_kind in REQUEST_KINDS else "conversation"
+        model = self._settings_service.selected_model(task)
+        thinking_level = self._settings_service.selected_thinking_level(task)
         return model, thinking_level
 
     def _persist(

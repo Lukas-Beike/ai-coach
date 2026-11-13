@@ -91,9 +91,11 @@ $("#profileForm").addEventListener("invalid", (event) => {
   const editor = event.target.closest?.(".zone-editor[hidden]");
   if (editor) editor.hidden = false;
 }, true);
-$("#modelSelect").addEventListener("change", (event) => saveSelectSetting(event, "model", "model", "Aktiv"));
+for (const [task, label] of [["conversation", "Gespräch"], ["planning", "Planen & Analysieren"], ["nutrition", "Ernährung"]]) {
+  $(taskSelectId(task, "Model")).addEventListener("change", (event) => saveSelectSetting(event, "model", "model", label));
+  $(taskSelectId(task, "ThinkingLevel")).addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", `${label}: Thinking`));
+}
 $("#serviceTierSelect").addEventListener("change", (event) => saveSelectSetting(event, "service-tier", "service_tier", "Geschwindigkeit"));
-$("#thinkingLevelSelect").addEventListener("change", (event) => saveSelectSetting(event, "thinking-level", "thinking_level", "Thinking Level"));
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
 $("#zoneEnvironment").addEventListener("change", renderZoneEditor);

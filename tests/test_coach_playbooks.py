@@ -135,6 +135,36 @@ class RequestKindAllowlistTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertEqual(self.validate(kind)[2], kind or None)
 
+    def test_quick_actions_use_the_planning_model_and_the_rest_the_conversation(
+        self,
+    ) -> None:
+        settings = Mock()
+        settings.selected_model.side_effect = lambda task: f"model-{task}"
+        settings.selected_thinking_level.side_effect = lambda task: f"level-{task}"
+        service = CoachJobSubmissionService(
+            lambda: Mock(),
+            Mock(),
+            threading.Lock(),
+            settings,
+            Mock(),
+            Mock(),
+            Mock(),
+            lambda: "synthetic-time",
+            background_horizon_days=30,
+        )
+        for kind in NEW_KINDS:
+            with self.subTest(kind=kind):
+                self.assertEqual(
+                    service._model_settings(kind),
+                    ("model-planning", "level-planning"),
+                )
+        for other in ("morning_checkin", None):
+            with self.subTest(kind=other):
+                self.assertEqual(
+                    service._model_settings(other),
+                    ("model-conversation", "level-conversation"),
+                )
+
     def test_unknown_kind_is_rejected(self) -> None:
         with self.assertRaises(AppError) as raised:
             self.validate("plan_year")

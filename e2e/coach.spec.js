@@ -412,6 +412,26 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await page.unrouteAll({ behavior: "wait" });
   });
 
+  test("each Coach task has its own model and thinking choice", async ({ page }) => {
+    await page.goto("/#more/coach");
+    await page.locator("#modelSettingsSummary").click();
+    for (const name of ["Gespräch", "Planen & Analysieren", "Ernährung"]) {
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    }
+    const planning = page.locator("#planningThinkingLevelSelect");
+    const original = await planning.inputValue();
+    const conversation = await page.locator("#thinkingLevelSelect").inputValue();
+    const next = original === "high" ? "low" : "high";
+    const saved = page.waitForRequest((request) => request.url().endsWith("/api/settings/thinking-level") && request.method() === "PUT");
+    await planning.selectOption(next);
+    expect((await saved).postDataJSON()).toEqual({ thinking_level: next, task: "planning" });
+    // The conversation keeps its own choice.
+    await expect(page.locator("#thinkingLevelSelect")).toHaveValue(conversation);
+    const restored = page.waitForResponse((response) => response.url().endsWith("/api/settings/thinking-level"));
+    await planning.selectOption(original);
+    await restored;
+  });
+
   test("inactive panels stay hidden and compact labels remain readable", async ({ page }) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);

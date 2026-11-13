@@ -38,9 +38,11 @@ class SettingsPutRoutes:
         ]
 
     def _model(self, handler: Any, _request: RouteRequest) -> None:
-        """Select the Coach model.
+        """Select the Coach model of one task.
 
-        Request: JSON body `{"model": string}`. `model` is `claude-opus`,
+        Request: JSON body `{"model": string, "task": string}`. `task` is
+        `conversation` (default), `planning` (the quick actions) or `nutrition`
+        (label photo and product web search). `model` is `claude-opus`,
         `claude-sonnet`, `claude-haiku`, the model configured in the environment,
         or, with the default OpenAI base URL, `gpt-6-luna`, `gpt-6-sol`,
         `gpt-6.1-sol` or `gpt-6-astra`.
@@ -49,10 +51,14 @@ class SettingsPutRoutes:
 
         Errors: 400 "Nicht unterstützte Modellauswahl."; 400 "Für dieses Modell
         fehlt der API-Schlüssel unter Mehr › Anbindungen." when the model's provider
-        has no key.
+        has no key; 400 "Unbekannte Coach-Aufgabe.".
         """
+        body = handler.read_json()
         handler.send_json(
-            200, self._settings.save_model(handler.read_json().get("model"))
+            200,
+            self._settings.save_model(
+                body.get("model"), body.get("task", "conversation")
+            ),
         )
 
     def _service_tier(self, handler: Any, _request: RouteRequest) -> None:
@@ -76,17 +82,20 @@ class SettingsPutRoutes:
     def _thinking_level(self, handler: Any, _request: RouteRequest) -> None:
         """Select the thinking level.
 
-        Request: JSON body `{"thinking_level": string}`, case-insensitive: `low`,
-        `medium` or `high`.
+        Request: JSON body `{"thinking_level": string, "task": string}`; the level is
+        case-insensitive: `low`, `medium` or `high`. `task` is
+        optional, as for the model.
 
         Response: 200 `{"thinking_level": string}`.
 
-        Errors: 400 "Nicht unterstütztes Thinking Level.".
+        Errors: 400 "Nicht unterstütztes Thinking Level."; 400 "Unbekannte
+        Coach-Aufgabe.".
         """
+        body = handler.read_json()
         handler.send_json(
             200,
             self._settings.save_thinking_level(
-                handler.read_json().get("thinking_level")
+                body.get("thinking_level"), body.get("task", "conversation")
             ),
         )
 

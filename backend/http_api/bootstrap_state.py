@@ -209,6 +209,7 @@ class PublicBootstrapService:
                     "selected": deps.settings.selected_model(),
                     "provider": provider,
                     "options": deps.settings.available_model_options(),
+                    "tasks": deps.settings.task_settings(),
                 },
                 "service_tier": deps.settings.service_tier_state(),
                 "thinking_level": {
