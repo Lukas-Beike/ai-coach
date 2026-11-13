@@ -821,6 +821,7 @@ function renderAdaptivePlanning(data) {
 
 function renderExternalCalendar(data) {
   const calendar = data.external_calendar || {};
+  renderUndecidedNavCount();
   const syncButton = $("#externalCalendarSyncButton");
   setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
   const detail = $("#externalCalendarConnectionDetail");
@@ -1559,7 +1560,7 @@ function plannedEventBand(events) {
 }
 
 // One sheet for every event: a bottom sheet on phones, a side panel on wide screens (styles.css).
-function openPlannedEventSheet(event) {
+function openPlannedEventSheet(event, { queue = false } = {}) {
   const previous = document.querySelector(".planned-event-sheet");
   previous?.close();
   previous?.remove();
@@ -1578,7 +1579,7 @@ function openPlannedEventSheet(event) {
   const current = event.decision_scope ? plannedEventImpact(event) : "";
   for (const impact of EVENT_DECISIONS) {
     const button = h("button", { type: "button", dataset: { impact }, "aria-pressed": String(impact === current) }, EVENT_IMPACT_LABELS.get(impact));
-    button.addEventListener("click", () => decidePlannedEvent(event, impact, series, dialog, status));
+    button.addEventListener("click", () => decidePlannedEvent(event, impact, series, dialog, status, queue));
     choices.append(button);
   }
   if (scope) {
@@ -1604,14 +1605,61 @@ function openPlannedEventSheet(event) {
   showAccessibleDialog(dialog, choices.querySelector("[aria-pressed='true']") || choices.firstElementChild);
 }
 
-async function decidePlannedEvent(event, impact, series, dialog, status) {
+// The notice (#2621) covers events without a decision from today through 14 days ahead; the
+// server count is the source; the decision response carries the new count.
+const UNDECIDED_NOTICE_DAYS = 14;
+
+function undecidedPlannedEvents() {
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  const lastKey = addDateKey(todayKey, UNDECIDED_NOTICE_DAYS);
+  const events = Array.isArray(state.data?.external_calendar?.events) ? state.data.external_calendar.events : [];
+  return events.filter((event) => event?.uid && plannedEventImpact(event) === "open"
+    && String(event.start_local || "").slice(0, 10) <= lastKey && String(event.end_local || event.start_local || "") > `${todayKey}T00:00:00`);
+}
+
+function undecidedPlannedCount() {
+  const count = Number(state.data?.external_calendar?.undecided_upcoming);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function undecidedNoticeText(count) {
+  const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+  const until = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" }).format(dateFromKey(addDateKey(todayKey, UNDECIDED_NOTICE_DAYS)));
+  return `${count} ${count === 1 ? "neuer Termin" : "neue Termine"} bis ${until}`;
+}
+
+function plannedUndecidedBanner() {
+  const count = undecidedPlannedCount();
+  const first = undecidedPlannedEvents()[0];
+  if (!count) return null;
+  const action = first ? h("button", { type: "button" }, "Einordnen") : null;
+  action?.addEventListener("click", () => openPlannedEventSheet(first, { queue: true }));
+  return h("div", "planned-undecided-banner", h("span", { className: "planned-event-dot", "aria-hidden": "true" }), h("span", null, undecidedNoticeText(count)), action);
+}
+
+// The Kalender navigation items carry the same count.
+function renderUndecidedNavCount() {
+  const count = undecidedPlannedCount();
+  for (const link of document.querySelectorAll('.nav-item[data-route="plan"]')) {
+    let badge = link.querySelector("b.nav-count");
+    if (!badge) {
+      badge = h("b", { className: "nav-count", "aria-hidden": "true" });
+      link.append(badge);
+    }
+    badge.textContent = count ? String(count) : "";
+    link.setAttribute("aria-label", count ? `Kalender, ${undecidedNoticeText(count)}` : "Kalender");
+  }
+}
+
+async function decidePlannedEvent(event, impact, series, dialog, status, queue = false) {
   const choices = [...dialog.querySelectorAll(".planned-event-choices button")];
   if (choices.some((button) => button.disabled)) return;
+  let result;
   status.textContent = "";
   choices.forEach((button) => { button.disabled = true; });
   dialog.dataset.pending = "true";
   try {
-    await api("/api/external-calendar/decisions", {
+    result = await api("/api/external-calendar/decisions", {
       method: "POST",
       body: JSON.stringify({ uid: event.uid, occurrence_start: series ? null : event.start_local, impact }),
     });
@@ -1627,8 +1675,15 @@ async function decidePlannedEvent(event, impact, series, dialog, status) {
     if (item.uid !== event.uid || (!series && item.start_local !== event.start_local)) continue;
     Object.assign(item, { impact, decision_scope: series ? "series" : "event" });
   }
+  state.data.external_calendar.undecided_upcoming = Math.max(0, Number(result?.undecided_upcoming) || 0);
   dialog.close();
   renderPlanned(renderedCalendar);
+  renderUndecidedNavCount();
+  const next = queue ? undecidedPlannedEvents()[0] : null;
+  if (next && undecidedPlannedCount()) {
+    openPlannedEventSheet(next, { queue: true });
+    return;
+  }
   $("#plannedCalendar")?.querySelector(`.planned-event-chip[data-uid="${CSS.escape(event.uid)}"][data-start="${CSS.escape(event.start_local || "")}"]`)?.focus();
 }
 
@@ -1974,7 +2029,7 @@ function renderPlanned(trainingCalendar) {
   const lastDateKey = addDateKey(lastWeekKey, 6);
   plannedLastDateKey = lastDateKey;
   keepPlannedSelection(todayKey, lastDateKey);
-  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name])]);
+  const snapshot = JSON.stringify([calendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather, (state.data?.external_calendar?.events || []).map((event) => [event?.uid, event?.start_local, event?.impact, event?.name]), state.data?.external_calendar?.undecided_upcoming]);
   if (snapshot === plannedRenderSnapshot && root.childElementCount) {
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
     return;
@@ -1987,6 +2042,8 @@ function renderPlanned(trainingCalendar) {
   }
   const focusedEntry = rememberPlannedEntryState(root);
   root.replaceChildren();
+  const banner = plannedUndecidedBanner();
+  if (banner) root.append(banner);
   const weeklyCompliance = new Map(
     (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
       .filter((item) => item?.week_start)

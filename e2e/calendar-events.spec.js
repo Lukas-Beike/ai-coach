@@ -114,13 +114,19 @@ test("@responsive personal events show as a band and take a decision per event o
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("@responsive event band and sheet meet AA contrast in both themes", async ({ page, request }) => {
+test("@responsive event band, notice and sheet meet AA contrast in both themes", async ({ page, request }, testInfo) => {
   await openCalendar(page, request);
   const days = await renderEvents(page);
+  await page.evaluate(() => {
+    state.data.external_calendar.undecided_upcoming = 1;
+    renderPlanned(state.data.training_calendar);
+    renderExternalCalendar(state.data);
+  });
+  await page.locator(".planned-undecided-banner").screenshot({ path: testInfo.outputPath("undecided-banner.png") });
   await showCalendarDay(page, days.day);
   for (const theme of ["dark", "light"]) {
     await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
-    const band = await new AxeBuilder({ page }).include(".planned-event-band").withRules(["color-contrast"]).analyze();
+    const band = await new AxeBuilder({ page }).include(".planned-event-band").include(".planned-undecided-banner").include('.nav-item[data-route="plan"] > b.nav-count').withRules(["color-contrast"]).analyze();
     expect(band.violations).toEqual([]);
     await page.locator(".planned-event-chip").first().click();
     const sheet = await new AxeBuilder({ page }).include(".planned-event-sheet").withRules(["color-contrast"]).analyze();
@@ -144,3 +150,70 @@ function addDays(key, offset) {
   date.setUTCDate(date.getUTCDate() + offset);
   return date.toISOString().slice(0, 10);
 }
+
+test("@responsive the notice walks through undecided events of the next 14 days and then goes away", async ({ page, request }, testInfo) => {
+  await openCalendar(page, request);
+  const today = await page.evaluate(() => {
+    const date = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const open = (uid, offset) => ({ uid, name: uid, start_local: `${addDateKey(date, offset)}T19:00:00`, end_local: `${addDateKey(date, offset)}T20:00:00`, all_day: 0, impact: "open", decision_scope: null, recurring: 0 });
+    state.data.calendar_display = { past_weeks: 0, future_weeks: 3 };
+    state.data.external_calendar = { ...(state.data.external_calendar || {}), undecided_upcoming: 2, events: [
+      open("Elternabend", 2), open("Dienstreise", 5), open("Später", 20),
+      { ...open("Teammeeting", 3), impact: "none", decision_scope: "series", recurring: 1 },
+    ] };
+    renderPlanned(state.data.training_calendar || []);
+    renderExternalCalendar(state.data);
+    return date;
+  });
+  const until = await page.evaluate((date) => new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" }).format(dateFromKey(addDateKey(date, 14))), today);
+  const banner = page.locator(".planned-undecided-banner");
+  await expect(banner).toContainText(`2 neue Termine bis ${until}`);
+  const nav = page.locator('.nav-item[data-route="plan"]').filter({ visible: true });
+  await expect(nav.locator("b.nav-count")).toHaveText("2");
+  await expect(nav.locator("b.nav-count")).toBeVisible();
+  await nav.screenshot({ path: testInfo.outputPath("nav-count.png") });
+  // Large text collapses the wide rail to icons: the count stays on the centered icon.
+  if (await page.locator(".desktop-nav").isVisible()) {
+    await page.evaluate(() => { document.documentElement.style.fontSize = "28px"; });
+    const offsets = await page.locator(".desktop-nav .nav-item").evaluateAll((items) => items.map((item) => {
+      const icon = item.querySelector(".nav-icon").getBoundingClientRect();
+      const box = item.getBoundingClientRect();
+      return Math.round((icon.left + icon.width / 2) - (box.left + box.width / 2));
+    }));
+    expect(new Set(offsets).size).toBe(1);
+    await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
+  }
+  await expect(nav).toHaveAccessibleName(`Kalender, 2 neue Termine bis ${until}`);
+
+  const posts = [];
+  await page.route("**/api/external-calendar/decisions", async (route) => {
+    posts.push(route.request().postDataJSON());
+    await route.fulfill({ json: { undecided_upcoming: 2 - posts.length, needs_replan: false, replan_changes: 0 } });
+  });
+  await banner.getByRole("button", { name: "Einordnen" }).click();
+  const sheet = page.locator(".planned-event-sheet");
+  await expect(sheet.getByRole("heading")).toHaveText("Elternabend");
+  await sheet.getByRole("button", { name: "Egal" }).click();
+  // The next undecided event follows; "Egal" counts as decided.
+  await expect(sheet.getByRole("heading")).toHaveText("Dienstreise");
+  await expect(banner).toContainText(`1 neuer Termin bis ${until}`);
+  await expect(nav.locator("b.nav-count")).toHaveText("1");
+  await sheet.getByRole("button", { name: "Blockiert" }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(banner).toHaveCount(0);
+  await expect(nav.locator("b.nav-count")).toHaveText("");
+  await expect(nav).toHaveAccessibleName("Kalender");
+  expect(posts.map((post) => [post.uid, post.impact])).toEqual([["Elternabend", "none"], ["Dienstreise", "block"]]);
+
+  // A refresh that brings another occurrence of a decided series does not show the notice again.
+  await page.evaluate((date) => {
+    state.data.external_calendar = { ...state.data.external_calendar, undecided_upcoming: 0, events: [
+      ...state.data.external_calendar.events,
+      { uid: "Teammeeting", name: "Teammeeting", start_local: `${addDateKey(date, 10)}T08:00:00`, end_local: `${addDateKey(date, 10)}T09:00:00`, impact: "none", decision_scope: "series", recurring: 1 },
+    ] };
+    renderPlanned(state.data.training_calendar || []);
+    renderExternalCalendar(state.data);
+  }, today);
+  await expect(banner).toHaveCount(0);
+  await expect(nav.locator("b.nav-count")).toHaveText("");
+});
