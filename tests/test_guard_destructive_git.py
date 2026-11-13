@@ -66,6 +66,12 @@ class GuardDestructiveGitTests(unittest.TestCase):
             "git checkout -- *",
             "git checkout -f",
             "git switch --discard-changes develop",
+            "git clean --forc",
+            "git push --forc origin x",
+            "git switch --discard develop",
+            "git --git-dir /tmp/x reset --hard",
+            "git -C .. -c core.hooksPath=x push --force",
+            "/usr/bin/git reset --hard",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run_hook(command), 2)

@@ -18,44 +18,53 @@ import sys
 CONTINUATION = re.compile(r"(?:\\|`)\r?\n")
 QUOTES = re.compile(r"[\"'`]")
 SEGMENT = re.compile(r"[;&|\n()]+")
-# git, its global options (-C <dir>, -c <key=value>, --flags), the subcommand.
-GIT = re.compile(
-    r"(?:^|\s)(?i:git)(?:\.exe)?((?:\s+-[Cc]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*)\s+(\S+)(.*)"
-)
+GIT_NAMES = {"git", "git.exe"}
+# Global options that take the next word as their value (`git -C <dir> ...`).
+GLOBAL_WITH_VALUE = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--config-env",
+}
 WHOLE_TREE = {".", "./", ".\\", ":/", ":/*", "*"}
+
+
+def _long(names: set[str], option: str) -> bool:
+    """The option or an abbreviation git accepts for it (`--ha` for `--hard`)."""
+    return any(len(name) > 2 and option.startswith(name) for name in names)
 
 
 # Per subcommand: does it discard work, given the argument set and the letters
 # of all short-option groups (-fdx gives "fdx")?
 RULES = {
-    "reset": lambda names, short: any(
-        a.startswith("--ha") and "--hard".startswith(a) for a in names
-    ),
-    "clean": lambda names, short: "--force" in names or "f" in short,
+    "reset": lambda names, short: _long(names, "--hard"),
+    "clean": lambda names, short: _long(names, "--force") or "f" in short,
     "branch": lambda names, short: (
         "D" in short
         or (
-            ("--delete" in names or "d" in short)
-            and ("--force" in names or "f" in short)
+            (_long(names, "--delete") or "d" in short)
+            and (_long(names, "--force") or "f" in short)
         )
     ),
     "checkout": lambda names, short: (
-        "--force" in names or "f" in short or bool(WHOLE_TREE & names)
+        _long(names, "--force") or "f" in short or bool(WHOLE_TREE & names)
     ),
     # Only `--staged` (without `--worktree`) unstages and keeps the files.
     "restore": lambda names, short: (
         bool(WHOLE_TREE & names)
         and (
-            "--worktree" in names
+            _long(names, "--worktree")
             or "W" in short
-            or not ("--staged" in names or "S" in short)
+            or not (_long(names, "--staged") or "S" in short)
         )
     ),
     "switch": lambda names, short: (
-        bool({"--discard-changes", "--force"} & names) or "f" in short
+        _long(names, "--discard-changes") or _long(names, "--force") or "f" in short
     ),
     "push": lambda names, short: (
-        "--force" in names or "f" in short or any(a.startswith("+") for a in names)
+        _long(names, "--force") or "f" in short or any(a.startswith("+") for a in names)
     ),
 }
 
@@ -66,12 +75,22 @@ def _discards(subcommand: str, args: list[str]) -> bool:
     return bool(rule and rule(set(args), short))
 
 
+def _git_call(words: list[str], start: int) -> bool:
+    """Whether the git call starting after words[start] discards work."""
+    index = start + 1
+    while index < len(words) and words[index].startswith("-"):
+        index += 2 if words[index] in GLOBAL_WITH_VALUE else 1
+    return index < len(words) and _discards(words[index], words[index + 1 :])
+
+
 def blocked(command: str) -> bool:
     text = QUOTES.sub("", CONTINUATION.sub(" ", command))
     for segment in SEGMENT.split(text):
-        match = GIT.search(segment)
-        if match and _discards(match.group(2), match.group(3).split()):
-            return True
+        words = segment.split()
+        for index, word in enumerate(words):
+            name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if name in GIT_NAMES and _git_call(words, index):
+                return True
     return False
 
 
