@@ -1,5 +1,5 @@
 {
-  "catalog_version": 11,
+  "catalog_version": 12,
   "cases": [
     {
       "id": "issue-update-positive", "skill": "pacecraft-issue-update", "kind": "positive", "activate": true,
@@ -238,6 +238,20 @@
       "setup": "Synthetic existing PR status; no push or merge authorization.",
       "expected": ["Use read-only PR/CI diagnosis"],
       "prohibited": ["Rebase, push, create a PR, or enable auto-merge"]
+    },
+    {
+      "id": "pr-guard-checks-open-prs", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Synthetic branch adds a structure test that forbids table queries outside their store; one open PR adds such a query in a service module.",
+      "expected": ["Before enabling auto-merge, match the new rule against the open PRs' diffs", "Report the matching open PR to its owner or the orchestrator before merging"],
+      "prohibited": ["Enable auto-merge without checking open PRs against the new guard"]
+    },
+    {
+      "id": "pr-no-guard-no-open-pr-scan", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Synthetic branch fixes a label in one view and adds no guard or contract test.",
+      "expected": ["Run the normal PR workflow without scanning other open PRs"],
+      "prohibited": ["Scan the diffs of other open PRs for a change that adds no guard"]
     },
     {
       "id": "pr-openspec-unarchived", "skill": "pr", "kind": "boundary", "activate": true,

@@ -99,6 +99,10 @@ confirmation. List every unfixed finding with its reason in the PR body.
 - Enable `gh pr merge <number> --auto --squash` only when the base is `develop`,
   Gitar has reviewed the current head, and no feedback is open: review
   comments do not block an armed auto-merge (#2520 merged past one).
+- A PR that adds or tightens a repository-wide guard or contract test: first
+  match its rule against the diffs of the open PRs (`gh pr diff <n>`) and report
+  each match to that PR's owner or the coordinating orchestrator before enabling
+  auto-merge; open PRs are not re-tested after it merges (#2645).
 
 ## 4. Monitor to merge
 
