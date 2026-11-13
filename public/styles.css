@@ -1556,7 +1556,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 :root[data-theme="light"] :is(
   .library-card, .competition-card,
-  .metric-grid > div, .metric-grid small,
+  .metric-grid small,
   .more-segment-nav, .segmented-control, .plan-segment-nav,
   .planned-comparison, .context-preview-content details,
   .library-sport,
