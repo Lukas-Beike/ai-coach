@@ -126,6 +126,29 @@ class RemoteLinkRepositoryTests(unittest.TestCase):
             ["2"],
         )
 
+    def test_last_synced_at_is_the_newest_readable_time_of_one_provider(self) -> None:
+        def stamped(local_id: str, synced_at: str | None, provider: str = INTERVALS):
+            self.repository.upsert(
+                self.db,
+                self.link(
+                    local_id,
+                    provider=provider,
+                    remote_id=local_id,
+                    last_synced_at=synced_at,
+                ),
+            )
+
+        self.assertIsNone(self.repository.last_synced_at(self.db, INTERVALS))
+        stamped("1", "2026-10-02T08:00:00+00:00")
+        stamped("2", "2026-10-03T08:00:00+00:00")
+        stamped("3", "kaputt")
+        stamped("4", None)
+        stamped("5", "2026-10-09T08:00:00+00:00", provider=OTHER)
+        self.assertEqual(
+            "2026-10-03T08:00:00+00:00",
+            self.repository.last_synced_at(self.db, INTERVALS),
+        )
+
     def test_invalid_vocabulary_and_identity_are_rejected_before_storage(self) -> None:
         with self.assertRaises(ValueError):
             RemoteLink(cast(Any, "not-a-kind"), "1", INTERVALS, RemoteLinkState.SYNCED)

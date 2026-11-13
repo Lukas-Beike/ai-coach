@@ -159,6 +159,9 @@ class PublicBootstrapService:
                         db, INTERVALS_OUTPUT_FAILED_KEY
                     )
                     or None,
+                    last_remote_link_synced_at=deps.sync_state_repository().last_remote_synced_at(
+                        ProviderId.INTERVALS.value
+                    ),
                 ),
                 "provider_freshness": freshness,
                 "provider_ids": {

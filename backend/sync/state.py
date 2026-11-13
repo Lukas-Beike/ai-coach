@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from backend.db.remote_links import RemoteLinkRepository
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
@@ -57,6 +58,11 @@ class SyncStateRepository:
         with self._database_manager.unit_of_work() as db:
             self._key_value_repository.set(db, f"{source}_sync_days", str(days))
         return days
+
+    def last_remote_synced_at(self, provider: str) -> str | None:
+        """The newest time any local entity was synced to the provider."""
+        with self._database_manager.reader() as db:
+            return RemoteLinkRepository.last_synced_at(db, provider)
 
     def cursor(self, provider: str, stream: str) -> dict[str, Any]:
         with self._database_manager.reader() as db:

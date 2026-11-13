@@ -55,9 +55,14 @@ def public_state(
     library_sync_state: dict[str, Any],
     last_output_ok_at: str | None = None,
     last_output_failed_at: str | None = None,
+    last_remote_link_synced_at: str | None = None,
 ) -> dict[str, Any]:
-    """``last_used_at`` is the last successful export: library push or output job."""
-    used_at = _latest(last_library_sync_at, last_output_ok_at)
+    """``last_used_at`` is the last successful export: library push, output job
+    or, for exports from before the output stamps, the newest synced remote link.
+    """
+    used_at = _latest(
+        last_library_sync_at, last_output_ok_at, last_remote_link_synced_at
+    )
     return {
         "configured": configured,
         "state": connection_state(

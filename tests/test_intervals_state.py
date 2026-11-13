@@ -58,6 +58,26 @@ class IntervalsStateTests(unittest.TestCase):
         self.assertEqual("error", state(error="alt")["state"])
         self.assertEqual(ok, state(ok_at=ok, library_at=old)["last_used_at"])
 
+    def test_a_synced_remote_link_counts_as_the_last_export(self) -> None:
+        def state(
+            linked_at: str | None, failed_at: str | None = None
+        ) -> dict[str, Any]:
+            return public_state(
+                configured=True,
+                running=False,
+                last_library_sync_at=None,
+                last_library_sync_error=None,
+                library_sync_state={},
+                last_output_failed_at=failed_at,
+                last_remote_link_synced_at=linked_at,
+            )
+
+        linked = "2026-05-02T08:00:00+00:00"
+        self.assertEqual(linked, state(linked)["last_used_at"])
+        self.assertEqual("connected", state(linked)["state"])
+        self.assertEqual("error", state(linked, "2026-05-03T08:00:00+00:00")["state"])
+        self.assertEqual("configured", state("kaputt")["state"])
+
     def test_an_unreadable_or_naive_stamp_never_breaks_the_state(self) -> None:
         def state(ok_at: str | None, failed_at: str | None = None) -> dict[str, Any]:
             return public_state(

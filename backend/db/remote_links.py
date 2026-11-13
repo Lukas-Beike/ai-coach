@@ -344,3 +344,13 @@ class RemoteLinkRepository:
             params += (RemoteEntityKind(entity_kind).value,)
         query += " ORDER BY entity_kind, local_id"
         return [self._link(row) for row in db.execute(query, params).fetchall()]
+
+    @staticmethod
+    def last_synced_at(db: Any, provider: str) -> str | None:
+        """The newest successful sync time among a provider's links, if any."""
+        row = db.execute(
+            "SELECT MAX(last_synced_at) AS synced_at FROM remote_links "
+            "WHERE provider=? AND last_synced_at GLOB '[0-9][0-9][0-9][0-9]-*'",
+            (provider,),
+        ).fetchone()
+        return row["synced_at"] if row else None

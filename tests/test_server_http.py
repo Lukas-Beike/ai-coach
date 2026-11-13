@@ -1827,6 +1827,51 @@ class ServerHttpTests(ServerTestCase):
             read_state(ok="kaputt", failed="kaputt")["state"], "configured"
         )
 
+    def test_intervals_public_state_counts_a_synced_remote_link_from_before_the_stamps(
+        self,
+    ):
+        config = replace(server.CONFIG, intervals_api_key="test-key")
+        stamps = ("intervals_last_output_ok_at", "intervals_last_output_failed_at")
+
+        def clear():
+            for key in stamps:
+                server.key_value_service().set(key, "")
+            with server.database_manager().unit_of_work() as db:
+                db.execute("DELETE FROM remote_links WHERE local_id LIKE 'stamp-%'")
+
+        def link(provider, local_id, synced_at):
+            with server.database_manager().unit_of_work() as db:
+                db.execute(
+                    "INSERT INTO remote_links(entity_kind, local_id, provider, "
+                    "remote_id, sync_state, last_synced_at) "
+                    "VALUES ('planned_unit', ?, ?, ?, 'synced', ?)",
+                    (local_id, provider, local_id, synced_at),
+                )
+
+        def read_state():
+            with patch.object(server, "CONFIG", config):
+                return server.PUBLIC_STATE.bootstrap_service().read()["intervals"]
+
+        clear()
+        self.addCleanup(clear)
+        # Another provider's link and an unsynced Intervals.icu link say nothing.
+        link("garmin", "stamp-garmin", "2026-10-01T08:00:00+00:00")
+        link("intervals", "stamp-unsynced", None)
+        self.assertEqual(read_state()["state"], "configured")
+        # An export from before the upgrade left only the remote link.
+        link("intervals", "stamp-old", "2026-10-02T08:00:00+00:00")
+        link("intervals", "stamp-new", "2026-10-03T08:00:00+00:00")
+        state = read_state()
+        self.assertEqual(state["state"], "connected")
+        self.assertEqual(state["last_used_at"], "2026-10-03T08:00:00+00:00")
+        # A newer failed export is an error; a later success outranks it again.
+        server.key_value_service().set(
+            "intervals_last_output_failed_at", "2026-10-04T08:00:00+00:00"
+        )
+        self.assertEqual(read_state()["state"], "error")
+        link("intervals", "stamp-latest", "2026-10-05T08:00:00+00:00")
+        self.assertEqual(read_state()["state"], "connected")
+
     def test_intervals_public_state_reports_library_error(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):
