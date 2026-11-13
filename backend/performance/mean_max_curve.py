@@ -62,10 +62,10 @@ class SessionCurve:
     running: dict[str, Any]
     fingerprint: str
     pace_at_hr: dict[str, Any]
+    power_at_hr: dict[str, Any]
     # The comparison numbers of the session's execution (streams and current
     # laps); only these are kept, not the full per-rep execution.
     execution_summary: dict[str, Any] | None = None
-    power_at_hr: dict[str, Any] | None = None
 
 
 class SessionCurveReader:

@@ -429,16 +429,30 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 }
             },
         }
-        rides = [{"date": f"2026-05-0{day}", "sport": "ride",
+        rides = [{"date": f"2026-05-0{day}", "sport": "ride", "environment": "outdoor",
                   "power_at_hr_profile": steady} for day in (1, 2, 3)]  # fmt: skip
         own = _context(
             _intervals_snapshot(), _garmin_payload(), {}, TODAY,
-            (*zoned_zones, heart_rate_zone), lambda: rides,
+            (*zoned_zones, heart_rate_zone), lambda days: rides,
         )  # fmt: skip
         self.assertEqual(
             {"hr_bpm": 131, "hr_origin": "zone_2",
              "watts": 185, "power_origin": "own_sessions"},
             own["thresholds"]["first_thresholds"]["ride"],
+        )  # fmt: skip
+
+        # A failed session read falls back instead of failing the projection.
+        def unreadable(days: int) -> Any:
+            raise RuntimeError("power profiles need the canonical source and curves")
+
+        fallback = _context(
+            _intervals_snapshot(), _garmin_payload(), {}, TODAY,
+            zoned_zones, unreadable,
+        )  # fmt: skip
+        self.assertEqual(
+            (200, "zone_2"),
+            tuple(fallback["thresholds"]["first_thresholds"]["ride"][key]
+                  for key in ("watts", "power_origin")),
         )  # fmt: skip
 
     def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(

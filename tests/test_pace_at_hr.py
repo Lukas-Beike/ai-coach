@@ -241,23 +241,24 @@ class SessionComparisonTests(unittest.TestCase):
         )
 
 
-def _ride(watts=(200,), hr=131):
-    times = list(range(SECONDS))
+def _ride(watts=(200,), hr=131, times=None):
+    times = times or list(range(SECONDS))
     return {
         "sport": "ride",
         "streams": {
             "time": times,
             "watts": [watts[t % len(watts)] for t in times],
-            "heartrate": [hr] * SECONDS,
-            "moving": [True] * SECONDS,
+            "heartrate": [hr] * len(times),
+            "moving": [True] * len(times),
         },
     }
 
 
-def _ride_record(day, ride):
+def _ride_record(day, ride, environment="outdoor"):
     return {
         "date": day,
         "sport": "ride",
+        "environment": environment,
         "power_at_hr_profile": power_at_heart_rate(ride),
     }
 
@@ -277,6 +278,10 @@ class OutputAtHeartRateTests(unittest.TestCase):
         # Coasting samples (own power zero) do not count.
         coasting = power_at_heart_rate(_ride(watts=(300, 0)))["bins"]["130"]
         self.assertAlmostEqual(coasting["seconds"], part["seconds"] / 2, delta=1)
+        # After a 200 s gap the first minute waits for a full power minute.
+        gap = list(range(1500)) + list(range(1700, 2600))
+        paused = power_at_heart_rate(_ride(times=gap))["bins"]["130"]
+        self.assertEqual(899 + 899 - 53, paused["seconds"])
 
     def test_a_run_or_a_ride_without_power_gives_no_ride_profile(self):
         self.assertEqual("insufficient_data", power_at_heart_rate(_run())["status"])
@@ -299,18 +304,28 @@ class OutputAtHeartRateTests(unittest.TestCase):
         self.assertIsNone(output_at_heart_rate(records, "run", 145, self.TODAY))
         self.assertIsNone(output_at_heart_rate(records[:2], "run", 128, self.TODAY))
 
-    def test_outdoor_runs_first_indoor_runs_only_without_enough_outdoor_ones(self):
+    def test_outdoor_sessions_first_indoor_ones_only_without_enough_outdoor(self):
         indoor = [_peer(f"2026-11-0{day}", 2.5, hr=128, environment="indoor")
                   for day in (1, 2, 3)]  # fmt: skip
         outdoor = [_peer(f"2026-11-0{day}", 3.0, hr=128) for day in (4, 5, 6)]
-        self.assertEqual(
-            400, output_at_heart_rate(indoor + outdoor[:2], "run", 128, self.TODAY)
-        )
-        self.assertAlmostEqual(
-            333.33,
-            output_at_heart_rate(indoor + outdoor, "run", 128, self.TODAY),
-            places=2,
-        )
+        trainer = [_ride_record(f"2026-11-0{day}", _ride(watts=(170,)), "indoor")
+                   for day in (1, 2, 3)]  # fmt: skip
+        road = [_ride_record(f"2026-11-0{day}", _ride()) for day in (4, 5, 6)]
+        for sport, inside, outside, indoor_value, outdoor_value in (
+            ("run", indoor, outdoor, 400, 1000 / 3),
+            ("ride", trainer, road, 170, 200),
+        ):
+            with self.subTest(sport):
+                heart_rate = 128 if sport == "run" else 131
+                self.assertAlmostEqual(
+                    indoor_value,
+                    output_at_heart_rate(
+                        inside + outside[:2], sport, heart_rate, self.TODAY
+                    ),
+                    places=2,
+                )
+                self.assertAlmostEqual(outdoor_value, output_at_heart_rate(
+                    inside + outside, sport, heart_rate, self.TODAY), places=2)  # fmt: skip
 
     def test_sessions_older_than_60_days_do_not_count(self):
         runs = [

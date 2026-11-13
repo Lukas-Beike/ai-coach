@@ -40,7 +40,7 @@ class CoachContextPerformanceSources:
     threshold_warnings: Callable[[], Any] | None = None
     first_threshold_estimate: Callable[[], Any] | None = None
     # When set, LT1 pace and power come from own steady sessions (#2427).
-    lt1_session_records: Callable[[], Any] | None = None
+    lt1_session_records: Callable[[int], Any] | None = None
 
 
 @dataclass(frozen=True)

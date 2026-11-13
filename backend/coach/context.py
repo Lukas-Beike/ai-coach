@@ -663,7 +663,7 @@ class CoachPerformanceContextReader:
         activity_rows: ActivitySummarySource | None = None,
         session_feedback: FeedbackLookup | None = None,
         zone_configurations: Callable[[], Any] | None = None,
-        lt1_session_records: Callable[[], list[dict[str, Any]]] | None = None,
+        lt1_session_records: Callable[[int], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._lt1_session_records = lt1_session_records

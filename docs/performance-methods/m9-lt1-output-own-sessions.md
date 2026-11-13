@@ -30,8 +30,9 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
    10-minute warm-up; grade-adjusted speed (R44) where a slope is known.
 2. **Ride profile** (`power-at-heart-rate-v1`): seconds, work (J) and squared
    power per 5 bpm heart-rate bin after a 10-minute warm-up. Each heart-rate
-   sample is paired with the mean power of the 60 s before it; samples whose
-   own power is zero (coasting) do not count.
+   sample is paired with the mean power of the 60 s before it, once at least
+   54 s of that minute are recorded (so the first minute after a pause or gap
+   does not count); samples whose own power is zero (coasting) do not count.
 3. **Band:** the 10 bpm band of two 5 bpm bins whose centre is nearest to the
    LT1 heart rate `h`: `low = 5 × round((h − 4.5) / 5)`, band `low` to
    `low + 9` bpm.
@@ -67,9 +68,10 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
   merged as in the session curves (`backend/performance/mean_max_curve.py`);
   e-bike rides, commutes, warm-ups and cool-downs are left out
   (`TrainingProfileSelectionService.curve_records`).
-- Runs: road and track only (trail excluded), outdoor sessions first; indoor
-  (treadmill, virtual) sessions only when fewer than three outdoor sessions
-  qualify.
+- Runs road and track only (trail excluded). Outdoor sessions first; indoor
+  (treadmill, trainer, virtual) sessions only when fewer than three outdoor
+  sessions qualify, for runs and rides alike (rides: product assumption,
+  heat raises the heart rate indoors).
 - Computed at read time from the in-memory session curves; nothing is stored.
 
 ## Measurement error and uncertainty
@@ -127,8 +129,8 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
 
 ## Allowed statements
 
-- "LT1 pace 5:32 /km (estimate from 4 of your own steady runs at 128 bpm, the
-  top of your heart-rate zone 2)."
+- "LT1 pace 5:32 /km, an estimate from your own steady runs at the LT1 heart
+  rate of 128 bpm (top of your heart-rate zone 2)."
 - "No LT1 power from your rides yet: fewer than three steady rides near
   131 bpm in the last 60 days."
 
@@ -143,5 +145,8 @@ regression; precedence own sessions > zone 2 top > fixed share; labelled
 
 - No comparison with a laboratory or field LT1 test of this athlete yet; a
   step test with lactate or a DFA-α1 ramp would check it.
+- The 0.15 variation limit, decided for both sports, may reject many outdoor
+  rides over rolling terrain (60 s power varies more than running speed); to
+  be checked against real coverage.
 - The session curve memo is held twice (public state and training reports)
   until the composition shares one reader.

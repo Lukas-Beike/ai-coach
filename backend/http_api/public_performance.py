@@ -49,7 +49,7 @@ class PublicPerformanceStateService:
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
         zone_configurations: Callable[[], Any] = tuple,
-        lt1_session_records: Callable[[], list[dict[str, Any]]] | None = None,
+        lt1_session_records: Callable[[int], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._garmin_payload_service = garmin_payload_service
         self._lt1_session_records = lt1_session_records

@@ -40,7 +40,7 @@ The current performance thresholds SHALL carry `first_thresholds`: LT1 of runnin
 
 #### Scenario: Own steady sessions at the LT1 heart rate
 - **WHEN** at least three ride or run sessions of the last 60 days hold at least 10 steady minutes (coefficient of variation at most 0.15) in the 10 bpm band of 5 bpm bins nearest to the sport's LT1 heart rate
-- **THEN** LT1 run pace is 1000 s divided by the median of their speeds in the band, outdoor runs before indoor ones, and LT1 ride power the median of their power, each paired with the mean power of the minute before the heart rate; the origin is `own_sessions`, shown as an estimate; with fewer sessions the zone 2 top or the fixed share applies.
+- **THEN** LT1 run pace is 1000 s divided by the median of their speeds in the band (outdoor sessions before indoor ones for both sports), and LT1 ride power the median of their power, each paired with the mean power of the minute before the heart rate; the origin is `own_sessions`, shown as an estimate; with fewer sessions the zone 2 top or the fixed share applies.
 
 Evidence: `backend/performance/pace_at_hr.py:output_at_heart_rate`, `backend/performance/pace_at_hr.py:power_at_heart_rate`, `backend/performance/current_metrics.py:first_thresholds`, `backend/activities/zone_settings.py:zone_two_top`, `backend/performance/context.py:current_performance_context`, `backend/coach/context.py:CoachPerformanceContextReader`; `tests/test_current_thresholds.py:FirstThresholdTests`, `tests/test_pace_at_hr.py:OutputAtHeartRateTests`, `tests/test_characterization_coach_context.py:test_lt1_power_is_the_configured_zone_two_or_else_a_share_of_the_ftp`, `tests/test_coach_domain_sections.py:test_source_policy_texts_are_built_from_labels`.
 

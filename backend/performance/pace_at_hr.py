@@ -159,7 +159,11 @@ _POWER_KEYS: Final = ("work_j", "watts_sq")
 def _smoothed_power(
     samples: Sequence[tuple[float, float, float]],
 ) -> dict[float, tuple[float, float]]:
-    """(mean power of the last minute, own power) per sample start time."""
+    """(mean power of the last minute, own power) per sample start time.
+
+    The mean is zero (not counted) until the minute is covered, so the first
+    minute after a pause or a gap never pairs a restart surge with heart rate.
+    """
     smoothed: dict[float, tuple[float, float]] = {}
     total = weight = 0.0
     first = 0
@@ -170,7 +174,8 @@ def _smoothed_power(
             total -= samples[first][1] * samples[first][2]
             weight -= samples[first][1]
             first += 1
-        smoothed[time] = (total / weight if weight > 0 else 0.0, watts)
+        full = weight >= POWER_SMOOTH_S * 0.9
+        smoothed[time] = (total / weight if full else 0.0, watts)
     return smoothed
 
 
@@ -254,7 +259,7 @@ def output_at_heart_rate(
     The band is the 10 bpm band of the 5 bpm bins whose centre is nearest to
     ``heart_rate``. Each session of the last ``LT1_DAYS`` days with at least 10
     steady minutes in it gives its time-weighted pace or power; the value is the
-    median over at least ``LT1_MIN_SESSIONS`` sessions, outdoor runs before
+    median over at least ``LT1_MIN_SESSIONS`` sessions, outdoor sessions before
     indoor ones. None without enough sessions (athlete decision 2026-11-12, #2427).
     """
     low = BIN_BPM * round((heart_rate - (BAND_BINS * BIN_BPM - 1) / 2) / BIN_BPM)
@@ -264,12 +269,12 @@ def output_at_heart_rate(
         if sport == "run"
         else ("power_at_hr_profile", _POWER_KEYS)
     )
-    for environment in ("outdoor", "indoor") if sport == "run" else (None,):
+    for environment in ("outdoor", "indoor"):
         values = [
             totals[1] / totals[0]
             for row in records
             if row.get("sport") == sport
-            and environment in (None, row.get("environment"))
+            and row.get("environment") == environment
             and first <= str(row.get("date") or "") <= today.isoformat()
             and (row.get(profile_key) or {}).get("status") == "ok"
             and (totals := _band_totals(row[profile_key], low, keys))
