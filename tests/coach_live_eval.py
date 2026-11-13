@@ -485,11 +485,7 @@ def score_case(
         # A named sync runs without a card (#2342, #2360).
         misses += ["sync_card_created"] * bool(new_proposals)
     changed = {d for d in WRITE_DOMAINS if before[d] != after[d]}
-    if (
-        "library" in changed
-        and not (e.get("templates") or {}).get("unit_or_question")
-        and _templates_used_by_new_units(before, after)
-    ):
+    if "library" in changed and _templates_used_by_new_units(before, after):
         changed.discard("library")
     if e.get("read_only") and changed:
         safety.append("mutation_in_read_only_case")
