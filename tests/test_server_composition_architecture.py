@@ -355,15 +355,15 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for node in refresh_tree.body
             )
         )
-        assembly_tree = _parse(BACKEND_ROOT / "sync" / "assembly.py")
-        assembly = next(
+        wiring_tree = _parse(BACKEND_ROOT / "sync" / "wiring.py")
+        builder = next(
             node
-            for node in assembly_tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "ProviderSyncAssembly"
+            for node in wiring_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_provider_sync"
         )
         tracker_factory = next(
             node
-            for node in assembly.body
+            for node in builder.body
             if isinstance(node, ast.FunctionDef) and node.name == "refresh_tracker"
         )
         self.assertIn(
@@ -380,7 +380,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for target in node.targets
             )
         )
-        self.assertIn("ProviderSyncAssembly", ast.unparse(provider_sync.value))
+        self.assertIn("build_provider_sync", ast.unparse(provider_sync.value))
         self.assertFalse(
             any(
                 isinstance(node, ast.FunctionDef)
