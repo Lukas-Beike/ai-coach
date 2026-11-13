@@ -3,6 +3,7 @@ import sqlite3
 import unittest
 from datetime import UTC, date, datetime
 from unittest.mock import patch
+from uuid import UUID
 
 from activity_row_support import summaries_of_rows as _summaries_of_rows
 
@@ -21,6 +22,64 @@ from backend.providers.garmin_gear_mapping import map_garmin_gear
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 GEAR_FETCHED = datetime(2026, 10, 2, tzinfo=UTC)
+# Equipment records as release 2.1.8 stores them (#2120).
+GOLDEN_EQUIPMENT_ROWS = [
+    (
+        "equipment:00000000-0000-0000-0000-000000000001",
+        (
+            '{"id": "00000000-0000-0000-0000-000000000001", "name": "Road bike", '
+            '"sport": "ride", "environment": "unknown", "sport_pending": false, '
+            '"kind": "bike", "status": "active", "parent_id": null, '
+            '"start_date": "2026-08-01", "initial_distance_km": 0, '
+            '"initial_hours": 0, "maintenance_km": null, '
+            '"maintenance_hours": null, "lifetime_target_km": null, "revision": 1, '
+            '"updated_at": "2026-09-01T00:00:00Z", '
+            '"source": "athlete-entered equipment", "parent_pending": false}'
+        ),
+        "2026-09-01T00:00:00Z",
+    ),
+    (
+        "equipment:745e1f85-9ef1-5d8f-9908-cd9cc8581905",
+        (
+            '{"id": "745e1f85-9ef1-5d8f-9908-cd9cc8581905", "name": "Gear gear-1", '
+            '"sport": "ride", "environment": "unknown", "sport_pending": false, '
+            '"kind": "bike", "parent_pending": false, "status": "active", '
+            '"garmin_status": "", "parent_id": null, "start_date": "2026-09-01", '
+            '"initial_distance_km": 50.0, "initial_hours": 0, '
+            '"maintenance_km": null, "maintenance_hours": null, '
+            '"garmin_uuid": "gear-1", "initial_distance_known": true, '
+            '"garmin_distance_km": 60.0, "garmin_maximum_meters": null, '
+            '"lifetime_target_km": null, "lifetime_target_source": "garmin", '
+            '"revision": 1, "updated_at": "2026-09-01T00:00:00Z", '
+            '"source": "garmin-initial-sync"}'
+        ),
+        "2026-09-01T00:00:00Z",
+    ),
+    (
+        "equipment_assignment:act_ride-1",
+        (
+            '{"activity_id": "act_ride-1", '
+            '"equipment_id": "00000000-0000-0000-0000-000000000001", '
+            '"observed_at": "2026-09-01T00:00:00Z"}'
+        ),
+        "2026-09-01T00:00:00Z",
+    ),
+    (
+        "equipment_maintenance:00000000-0000-0000-0000-000000000004",
+        (
+            '{"id": "00000000-0000-0000-0000-000000000004", '
+            '"equipment_id": "00000000-0000-0000-0000-000000000001", '
+            '"date": "2026-08-31", "notes": "chain", "distance_km": 10.0, '
+            '"observed_at": "2026-09-01T00:00:00Z"}'
+        ),
+        "2026-09-01T00:00:00Z",
+    ),
+    (
+        "garmin_equipment_initialized",
+        "1",
+        "2026-09-01T00:00:00Z",
+    ),
+]
 
 
 def summaries_of_rows(rows):
@@ -478,6 +537,28 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         )
         with self.assertRaises(AppError):
             service.assign({"activity_id": "ride-1", "equipment_id": equipment["id"]})
+
+    def test_equipment_records_keep_their_stored_key_value_format(self):
+        # #2120: the stored keys, JSON text and timestamps stay byte for byte.
+        service = self._gear_service([self._ride("ride-1")])
+        ids = iter(range(1, 100))
+        with patch("uuid.uuid4", side_effect=lambda: UUID(int=next(ids))):
+            bike = service.save(self._bike())["equipment"]
+            service.assign({"activity_id": "ride-1", "equipment_id": bike["id"]})
+            service.maintain(
+                {"equipment_id": bike["id"], "date": "2026-08-31", "notes": "chain"}
+            )
+        for meters in (50000, 60000):
+            gear = [self._gear_row("gear-1", stats={"totalDistance": meters})]
+            sync_garmin(self.manager, service, self._snapshot(gear))
+        rows = self.manager.connection.execute(
+            "SELECT key, value, updated_at FROM kv WHERE key LIKE 'equipment%' "
+            "OR key = 'garmin_equipment_initialized' ORDER BY key"
+        ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in rows],
+            GOLDEN_EQUIPMENT_ROWS,
+        )
 
     def _gear_service(self, rows):
         return EquipmentService(
