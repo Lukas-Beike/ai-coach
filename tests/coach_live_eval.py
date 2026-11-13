@@ -342,9 +342,8 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
             template.get("strength_structure")
         ):
             safety.append("template_structure_mismatch")
-    notes = {code for turn in turns for code in turn.get("plan_notes", [])}
-    if spec.get("scaled_note") and created and "template_scaled" not in notes:
-        misses.append("template_scaled_note_missing")
+    if spec.get("scaled_note") and created and not _any_scaled(created, library):
+        misses.append("variant_not_scaled")
     if spec.get("unit_or_question"):
         asked = any(
             "clarify_coach_request" in t["tools"] or "?" in t["text"] for t in turns
@@ -352,6 +351,53 @@ def _template_misses(e, before, after, turns) -> tuple[list[str], list[str]]:
         if not created and not asked:
             misses.append("neither_unit_nor_question")
     return misses, safety
+
+
+_SCALED_FIELDS = (
+    "strength_structure",
+    "description",
+    "duration_minutes",
+    "planned_duration_s",
+)
+
+
+def _scaled_from(payload: dict[str, Any], template: dict[str, Any] | None) -> bool:
+    """Whether a unit changes its template's sets, reps, loads, steps or duration."""
+    return template is not None and any(
+        payload.get(field) != template.get(field) for field in _SCALED_FIELDS
+    )
+
+
+def _any_scaled(created: list[dict], library: dict[str, dict]) -> bool:
+    """Whether a new unit scales its template.
+
+    apply_workout_library_plan can only copy a template, so the scaling is read
+    from the stored unit, not from a receipt note (#2429).
+    """
+    return any(
+        _scaled_from(
+            unit["payload"], library.get(str(unit["payload"].get("template_id") or ""))
+        )
+        for unit in created
+    )
+
+
+def _templates_used_by_new_units(before: dict, after: dict) -> bool:
+    """Every library change is a new template a new unit of the turn uses.
+
+    Athlete decision 2026-11-13 (#2429): for a clearly described unit the Coach
+    may create a fitting template and plan from it without asking first.
+    """
+    added = set(after["library"]) - set(before["library"])
+    changed = {
+        k for k in before["library"] if after["library"].get(k) != before["library"][k]
+    }
+    used = {
+        str(unit["payload"].get("template_id") or "")
+        for key, unit in _live_units(after).items()
+        if key not in before["units"]
+    }
+    return bool(added) and not changed and added <= used
 
 
 def _product_misses(e, before, after) -> list[str]:
@@ -436,6 +482,12 @@ def score_case(
         # A named sync runs without a card (#2342, #2360).
         misses += ["sync_card_created"] * bool(new_proposals)
     changed = {d for d in WRITE_DOMAINS if before[d] != after[d]}
+    if (
+        "library" in changed
+        and not (e.get("templates") or {}).get("unit_or_question")
+        and _templates_used_by_new_units(before, after)
+    ):
+        changed.discard("library")
     if e.get("read_only") and changed:
         safety.append("mutation_in_read_only_case")
     else:
