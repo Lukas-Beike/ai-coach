@@ -77,8 +77,12 @@ test("ui walk reports errors per view and compares load times with the previous 
     calendar: { phone: ["month", "next week"] },
     marks: { cache: "pacecraft-new", assetVersions: ["a"] },
     logout: { phone: 200 },
+    openAtReady: { "phone coach": ["GET /api/performance"], "phone plan": [] },
   };
   const lines = walk.reportLines(result);
+  // A view counts as loaded once its panel is ready; requests still open then are named (#2581).
+  assert.ok(lines.includes("info phone coach still loading: GET /api/performance"));
+  assert.ok(!lines.some((line) => line.startsWith("info phone plan still loading")));
   assert.ok(lines.includes("ok phone coach 800 ms"));
   assert.ok(lines.includes("FAIL phone plan 1200 ms, 2 error(s)"));
   assert.ok(lines.includes("FAIL phone login 1 error(s)"));

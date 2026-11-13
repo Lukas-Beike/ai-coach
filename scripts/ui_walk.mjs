@@ -95,6 +95,8 @@ export function compareLines(current, previous) {
   return lines;
 }
 
+// A view counts as loaded once it rendered and its active panel shows no loading
+// state; network idle never comes while a long read or poll runs (#2581).
 async function rendered(page, route) {
   const started = Date.now();
   await page.evaluate(async (next) => {
@@ -106,7 +108,10 @@ async function rendered(page, route) {
     globalThis.location.hash = next;
     await done;
   }, route);
-  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(() => {
+    const panel = document.querySelector(".panel.active");
+    return Boolean(panel) && !panel.querySelector(".loading-state, [aria-busy='true'], .skeleton");
+  }, null, { timeout: 15000 }).catch(() => {});
   return Date.now() - started;
 }
 
@@ -141,7 +146,7 @@ async function walkCalendar(page, shot) {
 }
 
 async function walk({ chromium, url, password, outDir }) {
-  const result = { loadMs: {}, errors: {}, calendar: {}, marks: null, logout: {} };
+  const result = { loadMs: {}, errors: {}, calendar: {}, marks: null, logout: {}, openAtReady: {} };
   const browser = await chromium.launch();
   try {
     for (const [name, viewport] of Object.entries(WIDTHS)) {
@@ -151,6 +156,10 @@ async function walk({ chromium, url, password, outDir }) {
       page.on("console", (message) => message.type() === "error" && errors.push("console"));
       page.on("pageerror", () => errors.push("page"));
       page.on("response", (response) => response.status() >= 500 && errors.push(`http ${response.status()}`));
+      // Paths only (no query or body) of requests still open when a view is ready; the event stream stays open by design.
+      const open = new Map();
+      page.on("request", (request) => open.set(request, `${request.method()} ${new URL(request.url()).pathname}`));
+      for (const event of ["requestfinished", "requestfailed"]) page.on(event, (request) => open.delete(request));
       await page.goto("/");
       await page.getByLabel("Passwort", { exact: true }).fill(password);
       await page.getByRole("button", { name: "Anmelden" }).click();
@@ -161,6 +170,7 @@ async function walk({ chromium, url, password, outDir }) {
       const shot = (label) => page.screenshot({ path: path.join(outDir, `${name}-${label}.png`), fullPage: false });
       for (const route of VIEWS) {
         result.loadMs[`${name} ${route}`] = await rendered(page, route);
+        result.openAtReady[`${name} ${route}`] = [...new Set(open.values())].filter((key) => key !== "GET /api/state/events");
         await shot(route);
         if (route === "plan") result.calendar[name] = await walkCalendar(page, shot);
         result.errors[`${name} ${route}`] = errors.length - counted;
@@ -195,6 +205,9 @@ export function reportLines(result) {
   }
   for (const [key, errors] of Object.entries(result.errors)) {
     if (errors && !(key in result.loadMs)) lines.push(`FAIL ${key} ${errors} error(s)`);
+  }
+  for (const [key, requests] of Object.entries(result.openAtReady || {})) {
+    if (requests.length) lines.push(`info ${key} still loading: ${requests.join(", ")}`);
   }
   for (const [name, steps] of Object.entries(result.calendar)) lines.push(`info calendar ${name}: ${steps.join(", ") || "no controls found"}`);
   lines.push(`info service-worker cache ${result.marks?.cache || "missing"}, ${result.marks?.assetVersions.length || 0} asset versions`);
