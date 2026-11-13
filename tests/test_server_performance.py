@@ -7,7 +7,6 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import intervals_compaction
-from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import RecordingReader, recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
@@ -22,7 +21,10 @@ from server_test_support import (
     _garmin_metrics,
     server,
 )
-from support import complete_canonical_backfill, mark_tables_serving
+from support import (
+    complete_canonical_backfill,
+    store_garmin_activities,
+)
 
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
@@ -54,14 +56,18 @@ def _mapped_performance_context(snapshot, today=None):
 class ServerPerformanceTests(ServerTestCase):
     def test_performance_assembly_returns_session_rpe_history(self):
         today = server.ATHLETE_CLOCK.now().date()
-        seed_intervals_activity(
-            server.database_manager(),
-            "assembly-test",
-            start_date_local=f"{today.isoformat()}T07:00:00",
-            elapsed_time=3600,
-            icu_rpe=5,
+        store_garmin_activities(
+            server,
+            [
+                {
+                    "activityId": "assembly-test",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": f"{today.isoformat()} 07:00:00",
+                    "duration": 3600.0,
+                    "directWorkoutRpe": 50,
+                }
+            ],
         )
-        mark_tables_serving(server)
 
         result = server.PUBLIC_STATE.performance_state_service().performance_state()
 

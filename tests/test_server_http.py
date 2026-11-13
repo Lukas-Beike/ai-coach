@@ -26,7 +26,7 @@ from server_test_support import (
     create_test_session,
     server,
 )
-from support import dispatch_route, store_canonical_snapshot
+from support import dispatch_route, store_garmin_activities
 
 from backend.coach import streams as coach_streams
 from backend.errors import AppError, ClientDisconnected, public_error_contract
@@ -684,38 +684,32 @@ class ServerHttpTests(ServerTestCase):
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()
-        store_canonical_snapshot(
+        store_garmin_activities(
             server,
-            {
-                "synced_at": "now",
-                "athlete": {},
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-                "recent_activities": [
-                    {
-                        "id": f"activity-{index}",
-                        "name": f"Activity {index}",
-                        "type": "Ride",
-                        "start_date_local": f"{today.isoformat()}T08:0{index}:00",
-                    }
-                    for index in range(5)
-                ]
-                + [
-                    {
-                        "id": "old",
-                        "name": "Old",
-                        "type": "Ride",
-                        "start_date_local": "2000-01-01T08:00:00",
-                    }
-                ],
-            },
+            [
+                {
+                    "activityId": f"activity-{index}",
+                    "activityName": f"Activity {index}",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": f"{today.isoformat()} 08:0{index}:00",
+                }
+                for index in range(5)
+            ]
+            + [
+                {
+                    "activityId": "old",
+                    "activityName": "Old",
+                    "activityType": {"typeKey": "cycling"},
+                    "startTimeLocal": "2000-01-01 08:00:00",
+                }
+            ],
         )
         service = server.ACTIVITY_READS.activity_read()
         first = service.page(limit=2, days=1, today=today)
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)
         ids = [
-            item["record_ids"]["intervals"]
+            item["record_ids"]["garmin"]
             for page in (first, second, third)
             for item in page["activities"]
         ]
@@ -1670,21 +1664,17 @@ class ServerHttpTests(ServerTestCase):
                 "duration_minutes": 30,
             }
         )
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [
+        store_garmin_activities(
+            server,
+            [
                 {
-                    "id": "run-1",
-                    "name": "Morgenlauf",
-                    "type": "Run",
-                    "start_date_local": "2026-08-25T07:00:00",
+                    "activityId": "run-1",
+                    "activityName": "Morgenlauf",
+                    "activityType": {"typeKey": "running"},
+                    "startTimeLocal": "2026-08-25 07:00:00",
                 }
             ],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        store_canonical_snapshot(server, snapshot)
+        )
         state = server.PUBLIC_STATE.bootstrap_service().read()
         state["activities"] = server.ACTIVITY_READS.activity_read().page(
             today=server.ATHLETE_CLOCK.now().date()

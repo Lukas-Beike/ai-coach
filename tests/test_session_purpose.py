@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from canonical_read_support import (
+    CanonicalReadFixture,
+    drop_intervals_activities,
+    make_selector,
+    populate,
+)
 
 from backend.activities.session_purpose import (
     COMPETITION_SOURCE_LABEL,
@@ -276,6 +281,17 @@ class SelectorCompetitionTests(CanonicalReadFixture):
         self.assertEqual(by_sport["run"]["competition_id"], "c-run")
 
     def test_a_limited_read_links_over_the_whole_oldest_day(self) -> None:
+        # Two Garmin runs on the oldest day; the limit below cuts one of them.
+        run = self.garmin["activities"][1]
+        for activity_id, start in ((910011, "09:00"), (910012, "17:00")):
+            self.garmin["activities"].append(
+                {
+                    **run,
+                    "activityId": activity_id,
+                    "startTimeLocal": f"2026-03-29 {start}:00",
+                }
+            )
+        drop_intervals_activities(self)
         populate(self)
         self.execute(
             "INSERT INTO competitions(id, name, event_date, sport, priority, distance, "
@@ -289,9 +305,10 @@ class SelectorCompetitionTests(CanonicalReadFixture):
             row["id"]: row.get("competition_id")
             for row in self.read(selector.activity_summaries)
         }
-        limited = self.read(selector.activity_summaries, limit=5)
+        limited = self.read(selector.activity_summaries, limit=3)
 
-        self.assertEqual(len(limited), 5)
+        self.assertEqual(len(full), 4)
+        self.assertEqual(len(limited), 3)
         for row in limited:
             self.assertEqual(row.get("competition_id"), full[row["id"]])
         self.assertEqual(list(full.values()).count("c-run"), 1)

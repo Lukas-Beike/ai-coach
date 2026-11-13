@@ -362,6 +362,26 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
     complete_canonical_backfill(server)
 
 
+def store_garmin_activities(server, activities: list[dict[str, Any]]) -> None:
+    """Ingest Garmin activity rows into the canonical tables, so reads serve them.
+
+    Stands in for a Garmin sync of those activities: the rows are written as a
+    fetched payload with their coverage and the backfill runs to completion.
+    """
+    from zoneinfo import ZoneInfo
+
+    from backend.athlete.profile import timezone_name
+    from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+
+    zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
+    payload = {"synced_at": runtime_clock.utc_now(), "activities": activities}
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        GarminSnapshotWriter(server.KEY_VALUE_REPOSITORY, lambda: zone).write(
+            db, payload
+        )
+    complete_canonical_backfill(server)
+
+
 def complete_canonical_backfill(server) -> None:
     """Run the canonical backfill to completion, so reads come from the tables."""
     backfill = server.CANONICAL_BACKFILL.status_reader

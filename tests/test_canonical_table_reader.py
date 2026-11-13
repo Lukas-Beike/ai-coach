@@ -7,6 +7,7 @@ from datetime import date
 from canonical_read_support import (
     WAHOO_RUN_COPY,
     CanonicalReadFixture,
+    drop_intervals_activities,
     make_selector,
     populate,
     store_wahoo_run_copy,
@@ -15,17 +16,44 @@ from canonical_read_support import (
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.canonical_plans import current_observation_mapper_versions
 
-# The fixture activities in canonical order: provider activity id, provider and
-# elapsed duration. Garmin's 910001 is the duplicate copy of i-act-001.
-FIXTURE_ACTIVITIES = [
-    ("i-act-002", "intervals", None),
-    ("i-act-003", "intervals", None),
-    ("910001", "garmin", 5400.0),
-    ("i-act-001", "intervals", 5600.0),
-    ("910002", "garmin", 2400.0),
-    ("i-act-004", "intervals", None),
-    ("i-act-005", "intervals", None),
+# Garmin activities a minute either side of both daylight-saving changes.
+DST_ACTIVITIES = [
+    ("920001", "2026-03-29 01:59:00", "running", 2400.0),
+    ("920002", "2026-03-29 03:01:00", "running", 2300.0),
+    ("920003", "2026-10-25 01:59:00", "cycling", 3600.0),
+    ("920004", "2026-10-25 03:01:00", "cycling", 3300.0),
 ]
+# The Garmin activities in canonical order: provider activity id, provider and
+# elapsed duration.
+FIXTURE_ACTIVITIES = [
+    ("920001", "garmin", 2400.0),
+    ("920002", "garmin", 2300.0),
+    ("910001", "garmin", 5400.0),
+    ("910002", "garmin", 2400.0),
+    ("920003", "garmin", 3600.0),
+    ("920004", "garmin", 3300.0),
+]
+
+
+def garmin_activities_only(case: CanonicalReadFixture) -> None:
+    """The Garmin fixture rides and runs plus the daylight-saving boundary ones."""
+    drop_intervals_activities(case)
+    case.garmin["activities"] = [
+        *case.garmin["activities"],
+        *(
+            {
+                "activityId": int(activity_id),
+                "activityName": "Synthetic daylight-saving boundary",
+                "activityType": {"typeKey": sport},
+                "startTimeLocal": local,
+                "duration": duration,
+                "distance": 7600.0,
+            }
+            for activity_id, local, sport, duration in DST_ACTIVITIES
+        ),
+    ]
+
+
 # The stored observations per metric after the fixture backfill.
 FIXTURE_OBSERVATION_COUNTS = {
     "weight": 5,
@@ -69,6 +97,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
     def test_populated_tables_serve_the_activities_in_canonical_order(
         self,
     ) -> None:
+        garmin_activities_only(self)
         populate(self)
         table = self.read(self.table.activities)
 
@@ -81,6 +110,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         )
 
     def test_stored_activities_keep_their_elapsed_duration(self) -> None:
+        garmin_activities_only(self)
         populate(self)
         table = self.read(self.table.activities)
 
@@ -101,6 +131,7 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         self.assertEqual(counts, FIXTURE_OBSERVATION_COUNTS)
 
     def test_activity_bounds_select_the_athlete_local_day(self) -> None:
+        garmin_activities_only(self)
         populate(self)
         everything = self.read(self.table.activities)
         local_day = self.rows(
@@ -224,11 +255,12 @@ class ActivitySessionReadTests(CanonicalReadFixture):
         self.assertFalse({"910002", WAHOO_RUN_COPY} & shown)
 
     def test_records_of_an_unknown_provider_are_skipped(self) -> None:
+        drop_intervals_activities(self)
         populate(self)
         before = self.read(make_selector(self).activity_summaries)
         self.execute(
             "UPDATE activity_records SET provider = 'retired-provider' "
-            "WHERE provider_activity_id = 'i-act-002'"
+            "WHERE provider_activity_id = '910001'"
         )
 
         after = self.read(make_selector(self).activity_summaries)
