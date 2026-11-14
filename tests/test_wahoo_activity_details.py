@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import json
-import threading
 import unittest
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -103,7 +102,6 @@ class WahooActivityDetailTests(WahooSyncCase):
     ) -> WahooActivityDetailImport:
         return WahooActivityDetailImport(
             database_manager=lambda: self.database,
-            database_lock=threading.RLock(),
             key_values=self.key_values,
             download=download,
             monotonic=self.clock.monotonic,

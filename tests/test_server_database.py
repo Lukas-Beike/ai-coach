@@ -31,7 +31,7 @@ from support import canonical_backfill_stopped
 
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
-from backend.db.manager import DATABASE_LOCK, DATABASE_MANAGER_CACHE
+from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.db.repositories import (
     CheckinRepository,
     CompetitionRepository,
@@ -151,7 +151,6 @@ class ServerDatabaseTests(ServerTestCase):
         )
 
     def test_shared_database_resources_have_one_backend_owner(self):
-        self.assertIs(server.DB_LOCK, DATABASE_LOCK)
         self.assertFalse(hasattr(server, "DATABASE_MANAGER_CACHE"))
         self.assertIs(server.database_manager(), DATABASE_MANAGER_CACHE.manager)
 
@@ -175,7 +174,7 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_database_uses_exact_current_schema(self):
         server.initialise_database()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1
             )
@@ -491,7 +490,6 @@ class ServerDatabaseTests(ServerTestCase):
             PublicBootstrapDependencies(
                 **owners,
                 database_manager=manager_factory,
-                database_lock=threading.RLock(),
                 config=SimpleNamespace(
                     garmin_tokenstore=str(Path("missing-garmin-tokenstore")),
                     intervals_api_key="",
@@ -639,7 +637,7 @@ class ServerDatabaseTests(ServerTestCase):
             "calendar_display", json.dumps({"past_weeks": 2, "future_weeks": 6})
         )
         server.key_value_service().set("openai_conversation_id", "conv-test")
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO competition_sync_tombstones(intervals_event_id, external_id, created_at) VALUES (?, ?, ?)",
                 ("event-1", "external-1", runtime_clock.utc_now()),
@@ -731,7 +729,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "upcoming_calendar": [],
             },
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
                 "sync_state) VALUES ('competition', '1', 'intervals', 'event-1', 'synced')"
@@ -847,7 +845,7 @@ class ServerDatabaseTests(ServerTestCase):
         write_completed = threading.Event()
 
         def update_profile():
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            with server.database_manager().unit_of_work() as db:
                 server.ATHLETE_DATA.profile().save_in_transaction(
                     {**before, "name": "During export"}, db
                 )
@@ -943,17 +941,9 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertEqual(timeout.exception.status, 408)
             self.assertEqual(list(data_dir.iterdir()), [])
 
-            lock_acquired = threading.Event()
-
-            def acquire_database_lock():
-                with server.DB_LOCK:
-                    lock_acquired.set()
-
-            lock_probe = threading.Thread(target=acquire_database_lock)
-            lock_probe.start()
-            self.assertTrue(lock_acquired.wait(1))
-            lock_probe.join(1)
-            self.assertFalse(lock_probe.is_alive())
+            # The failed export left no writer behind.
+            with server.database_manager().unit_of_work(timeout=1):
+                pass
 
     def privacy_export_in(self, data_dir):
         service = server.PRIVACY.archive_export_service()
@@ -1089,7 +1079,7 @@ class ServerDatabaseTests(ServerTestCase):
                 privacy_module.LOG_FILES_CATEGORY,
             },
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             for table in expected_tables - {"kv"}:
                 self.assertEqual(
                     db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()[
@@ -1111,7 +1101,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "upcoming_calendar": [],
             },
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "CREATE TRIGGER synthetic_privacy_abort BEFORE DELETE ON snapshots "
                 "BEGIN SELECT RAISE(ABORT, 'synthetic rollback'); END"
@@ -1122,9 +1112,9 @@ class ServerDatabaseTests(ServerTestCase):
                     privacy_module.PRIVACY_DELETE_CONFIRMATION_TEXT
                 )
         finally:
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("DROP TRIGGER synthetic_privacy_abort")
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertGreater(
                 db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()[
                     "count"
@@ -1200,12 +1190,10 @@ class ServerDatabaseTests(ServerTestCase):
             server.PUBLIC_STATE.bootstrap_service().read()
         self.assertEqual(connect.call_count, 1)
 
-    def test_bootstrap_reads_a_snapshot_without_the_shared_lock(self):
+    def test_bootstrap_opens_its_snapshot_through_the_context(self):
         real_manager = server.database_manager
-        lock_states = []
 
         def manager_factory():
-            lock_states.append(server.DB_LOCK._is_owned())
             return real_manager()
 
         # The bootstrap opens its snapshot through the context; the provider state
@@ -1217,9 +1205,6 @@ class ServerDatabaseTests(ServerTestCase):
             server.PUBLIC_STATE.bootstrap_service().read()
 
         app.assert_called()
-
-        self.assertTrue(lock_states)
-        self.assertFalse(any(lock_states))
 
     def test_backup_export_helpers_are_dependency_light_and_preserve_bounds(self):
         from backend.backup import export as backup_export
@@ -1446,7 +1431,6 @@ class ServerDatabaseTests(ServerTestCase):
         csrf_hash = auth.session_token_hash("csrf-background-bound")
         with (
             auth.session_lock,
-            server.DB_LOCK,
             server.database_manager().unit_of_work() as db,
         ):
             db.execute(
@@ -1493,7 +1477,7 @@ class ServerDatabaseTests(ServerTestCase):
             ):
                 server.initialise_database()
                 server.key_value_service().set("restore-marker", "preserved")
-                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+                with server.database_manager().unit_of_work() as db:
                     db.execute(
                         "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
                         ("token", "csrf", 9999999999, "now", "now"),
@@ -1504,7 +1488,7 @@ class ServerDatabaseTests(ServerTestCase):
                 self.assertEqual(
                     server.key_value_service().get("restore-marker"), "preserved"
                 )
-                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+                with server.database_manager().unit_of_work() as db:
                     self.assertEqual(
                         db.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()[
                             "count"

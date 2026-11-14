@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
@@ -71,14 +70,12 @@ class WahooActivityDetailImport:
         self,
         *,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: AbstractContextManager[Any],
         key_values: KeyValueRepository,
         download: Callable[[str], bytes],
         monotonic: Callable[[], float],
         logger: logging.Logger,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._download = download
         self._monotonic = monotonic
@@ -179,7 +176,7 @@ class WahooActivityDetailImport:
                 pending.summary_sha256, pending.attempts + 1, empty=False
             )
             return "failed", 0
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             count_fit_file(db, self._key_values, WAHOO_ID, workout_id, data)
         mapped = map_fit_activity_detail(
             data,
@@ -211,7 +208,7 @@ class WahooActivityDetailImport:
         retrieved_at: datetime,
     ) -> bool:
         """Store the sets in one transaction, but only if the record is still current."""
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             link = activity_record_link(db, WAHOO_ID, workout_id)
             if link is None or link["state"] != ActivityRecordState.ACTIVE.value:
                 return False
@@ -237,7 +234,7 @@ class WahooActivityDetailImport:
 
     def _save_state(self, state: dict[str, dict[str, Any]]) -> None:
         text = json.dumps(state, sort_keys=True, separators=(",", ":"))
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             self._key_values.set(db, STATE_KEY, text)
 
     def _log_failure(self, reason: str) -> None:

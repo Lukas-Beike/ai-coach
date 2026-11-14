@@ -30,11 +30,9 @@ SESSION_CLEANUP_BATCH_SIZE = 100
 # Session upkeep (touch, cleanup, expired delete) never decides authentication,
 # so it only tries the locks and the writer once and retries on a later request.
 SESSION_MAINTENANCE_WAIT_SECONDS = 0.0
-# Login and logout write one session row in their own unit of work. They wait
-# only for the writer, never for the shared database lock: multi-repository
-# writers hold that lock while they themselves wait for the writer, so queuing
-# behind it made a login wait for several background units without a bound.
-# The writer wait stays well below the browser's request timeout, so a busy
+# Login and logout write one session row in their own unit of work and wait
+# only this long for the writer. The wait stays well below the browser's
+# request timeout, so a busy
 # writer answers with a retryable 503 instead of a hung or failed request.
 # A restore still cannot interleave: restore_drain blocks new leases and waits
 # for active ones before the database file is swapped.
@@ -103,7 +101,6 @@ class SessionAuthServiceCache:
     def get(
         self,
         database_manager: DatabaseManager,
-        database_lock: threading.RLock,
         config: Config,
         sqlcipher_available: bool,
         rate_limiter: RateLimiter,
@@ -117,7 +114,6 @@ class SessionAuthServiceCache:
             if self._service is None or self._signature != signature:
                 self._service = SessionAuthService(
                     database_manager,
-                    database_lock,
                     config,
                     sqlcipher_available,
                     rate_limiter,
@@ -132,7 +128,6 @@ SESSION_AUTH_SERVICE_CACHE = SessionAuthServiceCache()
 
 def get_session_auth_service(
     database_manager: DatabaseManager,
-    database_lock: threading.RLock,
     config: Config,
     sqlcipher_available: bool,
     sessions: AthleteSessionService | None = None,
@@ -140,7 +135,6 @@ def get_session_auth_service(
     """Return the auth service owned by the current persistence config."""
     return SESSION_AUTH_SERVICE_CACHE.get(
         database_manager,
-        database_lock,
         config,
         sqlcipher_available,
         RATE_LIMITER,
@@ -154,14 +148,12 @@ class SessionAuthService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: threading.RLock,
         config: Config,
         sqlcipher_available: bool,
         rate_limiter: RateLimiter,
         sessions: AthleteSessionService | None = None,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._config = config
         self._sqlcipher_available = sqlcipher_available
         self._rate_limiter = rate_limiter
@@ -240,12 +232,9 @@ class SessionAuthService:
         writer must never stall or fail a request; the write is retried by a
         later request.
         """
-        held: list[threading.RLock] = []
+        if not self._session_lock.acquire(timeout=SESSION_MAINTENANCE_WAIT_SECONDS):
+            return False
         try:
-            for lock in (self._session_lock, self._database_lock):
-                if not lock.acquire(timeout=SESSION_MAINTENANCE_WAIT_SECONDS):
-                    return False
-                held.append(lock)
             with self._database_manager.unit_of_work(
                 timeout=SESSION_MAINTENANCE_WAIT_SECONDS
             ) as db:
@@ -254,8 +243,7 @@ class SessionAuthService:
         except TimeoutError:
             return False
         finally:
-            for lock in reversed(held):
-                lock.release()
+            self._session_lock.release()
 
     def _touch_if_still_stale(self, db: Any, token_hash: str, now: float) -> None:
         row = self._sessions.get(db, token_hash)

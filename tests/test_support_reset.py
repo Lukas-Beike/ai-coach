@@ -28,7 +28,7 @@ class ResetApplicationStateTests(unittest.TestCase):
         activity_laps -> activity_detail_sets form FK chains that the
         alphabetical delete order cannot satisfy without deferred checks.
         """
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO messages(role, content, created_at) VALUES ('user', 'synthetic question', ?)",
                 (TIMESTAMP,),
@@ -83,16 +83,18 @@ class ResetApplicationStateTests(unittest.TestCase):
             )
 
     def _non_empty_tables(self):
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             non_empty = []
             for table in application_tables(db):
-                count = db.execute(f'SELECT COUNT(*) AS n FROM "{table}"').fetchone()["n"]
+                count = db.execute(f'SELECT COUNT(*) AS n FROM "{table}"').fetchone()[
+                    "n"
+                ]
                 if count:
                     non_empty.append(table)
             return set(non_empty)
 
     def test_discovery_matches_raw_schema_tables_without_internal_tables(self):
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             raw = {
                 row["name"]
                 for row in db.execute(
@@ -101,10 +103,17 @@ class ResetApplicationStateTests(unittest.TestCase):
             }
             discovered = application_tables(db)
 
-        self.assertEqual(set(discovered), {name for name in raw if not name.startswith("sqlite_")})
+        self.assertEqual(
+            set(discovered), {name for name in raw if not name.startswith("sqlite_")}
+        )
         self.assertNotIn("sqlite_sequence", discovered)
         self.assertEqual(discovered, sorted(discovered))
-        for table in ("activity_laps", "activity_detail_analysis", "planning_state", "kv"):
+        for table in (
+            "activity_laps",
+            "activity_detail_analysis",
+            "planning_state",
+            "kv",
+        ):
             self.assertIn(table, discovered)
 
     def test_reset_clears_populated_state_across_every_table_family(self):
@@ -120,7 +129,7 @@ class ResetApplicationStateTests(unittest.TestCase):
 
         reset_application_state(server)
 
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             violations = db.execute("PRAGMA foreign_key_check").fetchall()
         self.assertEqual(violations, [])
 
@@ -129,7 +138,7 @@ class ResetApplicationStateTests(unittest.TestCase):
 
         reset_application_state(server)
 
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             rows = db.execute("SELECT id, revision FROM planning_state").fetchall()
         self.assertEqual([(row["id"], row["revision"]) for row in rows], [(1, 0)])
 
@@ -138,7 +147,7 @@ class ResetApplicationStateTests(unittest.TestCase):
 
         reset_application_state(server)
 
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             marker = db.execute(
                 "SELECT COUNT(*) AS n FROM kv WHERE key = 'synthetic-key'"
             ).fetchone()["n"]

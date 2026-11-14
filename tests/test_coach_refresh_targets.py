@@ -83,9 +83,7 @@ class CoachRefreshTargetEnumTests(unittest.TestCase):
 
 class CoachRefreshClassificationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.service = CoachDialogueActionService(
-            MagicMock(), MagicMock(), Mock(), Mock(), Mock()
-        )
+        self.service = CoachDialogueActionService(MagicMock(), Mock(), Mock(), Mock())
         self.context = {
             "messages": [{"id": USER_MESSAGE_ID, "role": "user"}],
             "current_user_message_id": USER_MESSAGE_ID,

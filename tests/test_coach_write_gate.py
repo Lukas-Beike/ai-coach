@@ -2,7 +2,6 @@
 
 import json
 import logging
-import threading
 import unittest
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
@@ -1231,7 +1230,7 @@ class CoachToolPathDeleteTests(unittest.TestCase):
         if denial is not None:
             return denial
         TrainingTemplateToolService(
-            lambda: _TemplateManager(), threading.RLock(), lambda: library
+            lambda: _TemplateManager(), lambda: library
         ).execute(
             arguments,
             {

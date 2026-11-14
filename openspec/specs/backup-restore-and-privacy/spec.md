@@ -10,7 +10,7 @@ Owns export/restore/erasure workflows, not a fresh-database upgrade policy. Prod
 
 ### Requirement: Consistent encrypted database backup
 
-The database backup service SHALL create a consistent snapshot containing committed WAL data, preserve configured encryption, stream without holding the application database lock for the download, and remove temporary snapshots afterward.
+The database backup service SHALL create a consistent snapshot containing committed WAL data, preserve configured encryption, stream without holding the database writer for the download, and remove temporary snapshots afterward.
 
 #### Scenario: Committed WAL data
 - **WHEN** the athlete requests a database backup after a committed change remains in WAL
@@ -24,7 +24,7 @@ The database backup service SHALL create a consistent snapshot containing commit
 - **WHEN** the snapshot streaming context exits
 - **THEN** the temporary backup file is removed
 
-Evidence: `backend/backup/database.py::DatabaseBackupService._create_snapshot`; `backend/backup/database.py::DatabaseBackupService._connect_target`; `backend/backup/database.py::DatabaseBackupService.stream_file`. Tests: `tests/test_database_backup.py::test_read_bytes_contains_wal_changes`; `tests/test_database_backup.py::test_stream_uses_complete_snapshot_without_holding_database_lock`; `tests/test_database_backup.py::test_sqlcipher_snapshot_keeps_encrypted_data_and_mapping_rows`.
+Evidence: `backend/backup/database.py::DatabaseBackupService._create_snapshot`; `backend/backup/database.py::DatabaseBackupService._connect_target`; `backend/backup/database.py::DatabaseBackupService.stream_file`. Tests: `tests/test_database_backup.py::test_read_bytes_contains_wal_changes`; `tests/test_database_backup.py::test_stream_uses_complete_snapshot_without_holding_the_writer`; `tests/test_database_backup.py::test_sqlcipher_snapshot_keeps_encrypted_data_and_mapping_rows`.
 
 ### Requirement: Bounded export resource use
 

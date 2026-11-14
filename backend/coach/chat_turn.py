@@ -30,7 +30,6 @@ class CoachChatTurnService:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Any,
         receipts: CoachCommandReceiptService,
         settings: SettingsService,
         conversations: Callable[[], CoachConversationProvisionService],
@@ -40,7 +39,6 @@ class CoachChatTurnService:
         maintenance_gate: MaintenanceGate,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._receipts = receipts
         self._settings = settings
         self._conversations = conversations
@@ -115,7 +113,7 @@ class CoachChatTurnService:
         session_csrf_hash: str,
         background_job: bool,
     ) -> tuple[dict[str, Any] | None, dict[str, Any], bool]:
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             existing_command = coach_store.command_row(
                 db,
                 client_turn_id,
@@ -164,7 +162,7 @@ class CoachChatTurnService:
         origin_id = background_receipt.get("user_message_id")
         if type(origin_id) is not int:
             return False
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             origin = coach_store.message_by_id(
                 db, origin_id, "1", client_turn_id=client_turn_id
             )
@@ -179,7 +177,7 @@ class CoachChatTurnService:
     ) -> None:
         if not background_owned:
             return
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             coach_store.resume_command(
                 db, client_turn_id, conversation_id, structured_intent, self._utc_now()
             )

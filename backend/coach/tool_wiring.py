@@ -105,7 +105,6 @@ def build_coach_planning_tools(
         workflows = ctx.planning_workflows
         return CoachTrainingPatchService(
             ctx.database(),
-            ctx.database_lock,
             workflows.structured_training_change_validator(),
             workflows.structured_training_change_service(),
             workflows.local_plan_creation_service(),
@@ -121,7 +120,6 @@ def build_coach_planning_tools(
             ctx.planning_workflows.adaptive_replan_preview_service(),
             sync_commands.illness_pause(),
             ctx.database(),
-            ctx.database_lock,
             plan_guard.plan_guard_service,
         )
 
@@ -163,9 +161,7 @@ def build_coach_command_tools(
         )
 
     def profile_update_service() -> CoachProfileUpdateService:
-        return CoachProfileUpdateService(
-            ctx.athlete.profile(), ctx.database(), ctx.database_lock
-        )
+        return CoachProfileUpdateService(ctx.athlete.profile(), ctx.database())
 
     return CoachCommandToolServices(
         sync_tool_service, athlete_record_tool_service, profile_update_service
@@ -190,9 +186,7 @@ def build_coach_tool_dispatch(
                 workflows.structured_training_plan_replacement_service,
                 workflows.structured_training_change_service,
             ),
-            TrainingTemplateToolService(
-                ctx.database, ctx.database_lock, planning.workout_library
-            ),
+            TrainingTemplateToolService(ctx.database, planning.workout_library),
             planning_tools.library_plan_tool_service,
             ctx.coach_command_tools.sync_tool_service,
             CoachPlanningActionToolService(
@@ -221,7 +215,6 @@ def build_coach_tool_rounds(
     def execution_service() -> CoachStructuredToolExecutionService:
         return CoachStructuredToolExecutionService(
             ctx.database(),
-            ctx.database_lock,
             ctx.key_values,
             ctx.coach_local.clarification_service(),
             ctx.coach_planning_tools.training_patch_service(),
@@ -239,9 +232,7 @@ def build_coach_tool_rounds(
         )
 
     def replay_service() -> CoachStructuredToolReplayService:
-        return CoachStructuredToolReplayService(
-            ctx.database(), ctx.database_lock, read_only
-        )
+        return CoachStructuredToolReplayService(ctx.database(), read_only)
 
     def preparation_service() -> CoachStructuredToolPreparationService:
         return CoachStructuredToolPreparationService(
@@ -272,7 +263,6 @@ def build_coach_tool_rounds(
     def service() -> CoachStructuredToolRoundService:
         return CoachStructuredToolRoundService(
             ctx.database,
-            ctx.database_lock,
             replay_service(),
             preparation_service(),
             execution_service(),

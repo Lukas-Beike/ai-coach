@@ -26,7 +26,6 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
     def service(self) -> tuple[PrivacyDeleteService, SimpleNamespace]:
         mocks = SimpleNamespace(
             database_manager=MagicMock(),
-            database_lock=MagicMock(),
             key_value_repository=Mock(),
             maintenance_gate=MagicMock(),
             planning_revision_service=Mock(),
@@ -128,7 +127,6 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             PrivacyDeleteDependencies(
                 profile_mutation_coordinator=threading.RLock(),
                 database_manager=database_manager,
-                database_lock=MagicMock(),
                 key_value_repository=key_values,
                 maintenance_gate=MagicMock(),
                 planning_revision_service=Mock(),

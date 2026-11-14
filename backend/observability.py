@@ -1089,7 +1089,7 @@ class DiagnosticCapture:
 
         A flush cannot write the old entries back between the store mutation and the
         cache discard. The cache is dropped on a normal exit; a failed mutation leaves
-        the cache untouched. Callers take this before the database lock.
+        the cache untouched. Callers take this before the unit of work.
         """
         with self._flush_lock:
             yield

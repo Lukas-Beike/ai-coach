@@ -21,7 +21,6 @@ from backend.backup.database import (
 from backend.backup.wiring import build_backup
 from backend.coach.job_worker import COACH_JOB_WORKER
 from backend.db import row_factory
-from backend.db.manager import DATABASE_LOCK
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.privacy import MAX_PRIVACY_EXPORT_BYTES, PrivacyServices, build_privacy
@@ -85,14 +84,12 @@ class PrivacyBuilderTests(unittest.TestCase):
 
         self.assertIsNot(first, second)
         self.assertIs(first._database_manager, active["manager"])
-        self.assertFalse(hasattr(first, "_db_lock"))
         self.assertIs(first._profile, active["profile"])
         self.assertIs(first._competitions, active["competition"])
         self.assertIs(first._adaptive_preview, active["preview"])
         replacement_gate = Mock(name="replacement_gate")
         with patch.object(runtime_maintenance, "MAINTENANCE_GATE", replacement_gate):
             deletion = services.delete_service()
-        self.assertIs(deletion._dependencies.database_lock, DATABASE_LOCK)
         self.assertIs(deletion._dependencies.maintenance_gate, replacement_gate)
 
     def test_export_limits_come_from_the_backup_and_privacy_constants(self) -> None:
@@ -119,7 +116,6 @@ class PrivacyBuilderTests(unittest.TestCase):
         dependencies = services.delete_service()._dependencies
 
         self.assertIs(dependencies.database_manager, active["manager"])
-        self.assertIs(dependencies.database_lock, DATABASE_LOCK)
         self.assertIsInstance(dependencies.key_value_repository, KeyValueRepository)
         self.assertIs(
             dependencies.maintenance_gate, runtime_maintenance.MAINTENANCE_GATE
@@ -167,15 +163,13 @@ class PrivacyModuleBoundaryTests(unittest.TestCase):
 
 
 class BackupBuilderTests(unittest.TestCase):
-    def test_restore_reuses_shared_workers_queue_and_database_lock(self) -> None:
+    def test_restore_reuses_shared_workers_and_queue(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
             database_path = data_dir / "database.sqlite"
             manager = Mock(name="manager")
-            lock = Mock(name="database_lock")
             ctx = Mock(name="context")
             ctx.database = lambda: manager
-            ctx.database_lock = lock
             ctx.database_path = lambda: database_path
             ctx.data_dir = lambda: data_dir
             ctx.config.return_value.app_password = "synthetic-password"
@@ -187,7 +181,6 @@ class BackupBuilderTests(unittest.TestCase):
             restore = backup_services.restore_service()
 
             self.assertIs(backup._manager, manager)
-            self.assertIs(backup._database_lock, lock)
             self.assertEqual(backup._config.maximum_bytes, MAX_BACKUP_BYTES)
             self.assertEqual(backup._config.minimum_free_bytes, MIN_EXPORT_FREE_BYTES)
             self.assertEqual(

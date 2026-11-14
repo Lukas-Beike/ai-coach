@@ -29,7 +29,6 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
         food_database = FoodDatabaseService()
         self.products = ProductCatalogService(
             self.manager,
-            self.lock,
             product_repository,
             lambda: self.now,
             food_database,
@@ -37,7 +36,6 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
         )
         self.sync_status = NutritionSyncStatusService(
             self.manager,
-            self.lock,
             self.repository,
             lambda: self.now,
             lambda: datetime(2026, 9, 24, 12, tzinfo=UTC),
@@ -150,7 +148,6 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
     def test_photo_extraction_validates_local_candidate_without_provider(self) -> None:
         _, library = build_nutrition_services(
             self.manager,
-            self.lock,
             lambda: self.now,
             lambda: datetime(2026, 9, 24, 12, tzinfo=UTC),
         )

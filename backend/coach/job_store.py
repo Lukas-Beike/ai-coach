@@ -32,13 +32,11 @@ class CoachJobStore:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Any,
         wake_event: Any,
         maintenance_gate: MaintenanceGate,
         utc_now: Callable[[], str],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._wake_event = wake_event
         self._maintenance_gate = maintenance_gate
         self._utc_now = utc_now
@@ -51,7 +49,6 @@ class CoachJobStore:
     def claim(self) -> dict[str, Any] | None:
         with (
             self._maintenance_gate.operation(),
-            self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
             rows = coach_store.command_rows(
@@ -95,7 +92,7 @@ class CoachJobStore:
         counter = (
             "contention_attempts" if wait_seconds is None else "data_wait_attempts"
         )
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             row = coach_store.command_row(db, client_turn_id)
             if not row:
                 return False
@@ -136,7 +133,7 @@ class CoachJobStore:
     def message(self, job: dict[str, Any]) -> str:
         receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}
         message_id = receipt.get("user_message_id")
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             row = coach_store.message_by_id(db, message_id, "content")
         if not row or not str(row.get("content") or "").strip():
             raise AppError(
@@ -152,13 +149,13 @@ class CoachJobStore:
         A turn released as stale (or finished by recovery) is `completed`; a worker
         that is still running it must stop executing tools.
         """
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             row = coach_store.command_row(db, client_turn_id, "status")
         return bool(row and row["status"] in {"queued", "running"})
 
     def record_failed_attempt(self, client_turn_id: str) -> int:
         """Count a failure that escaped the job's own error handling."""
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             row = coach_store.command_row(db, client_turn_id)
             if not row:
                 return 0
@@ -175,7 +172,7 @@ class CoachJobStore:
 
     def cancel_requested(self, client_turn_id: str) -> bool:
         """Read a persisted cancel flag before a claimed worker resumes."""
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             row = coach_store.command_row(db, client_turn_id)
         return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
 
@@ -183,14 +180,14 @@ class CoachJobStore:
         """Write only the changed top-level keys of a queued/running command."""
         if not updates:
             return
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             coach_store.merge_command_receipt(
                 db, client_turn_id, updates, self._utc_now()
             )
 
     def resume_interrupted(self, failures: CoachTurnFailureService) -> int:
         """Recover durable turns after a process restart."""
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             interrupted = coach_store.interrupted_foreground_rows(db)
         for command in interrupted:
             failures.persist(
@@ -205,7 +202,7 @@ class CoachJobStore:
 
         resumed = 0
         now = self._utc_now()
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             rows = coach_store.command_rows(
                 db, "client_turn_id, status, receipt, intent", order="oldest"
             )

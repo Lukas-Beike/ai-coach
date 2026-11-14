@@ -1,5 +1,4 @@
 import sqlite3
-import threading
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import Mock
@@ -337,7 +336,6 @@ class CoachReadToolServiceTests(unittest.TestCase):
         )
         _diary, meal_library = build_nutrition_services(
             manager,
-            threading.Lock(),
             lambda: "2026-10-05T12:00:00+00:00",
             lambda: datetime(2026, 10, 5, tzinfo=UTC),
         )

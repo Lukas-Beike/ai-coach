@@ -30,7 +30,6 @@ class StructuredToolRoundTests(unittest.TestCase):
     def setUp(self) -> None:
         self.manager = Mock()
         self.manager.unit_of_work.return_value = MagicMock()
-        self.lock = MagicMock()
         self.replay = Mock()
         self.replay.lookup.return_value = None
         self.preparation = Mock()
@@ -48,7 +47,6 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.write_gate.open_turn.return_value.denial.return_value = None
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager,
-            self.lock,
             self.replay,
             self.preparation,
             self.execution,
@@ -99,7 +97,7 @@ class StructuredToolRoundTests(unittest.TestCase):
             "arguments": "{}",
         }
 
-    def test_profile_round_waits_before_database_lock(self) -> None:
+    def test_profile_round_waits_before_the_writer(self) -> None:
         coordinator = threading.RLock()
         self.service._profile_mutation_coordinator = coordinator
         self.jobs.turn_open.return_value = True
@@ -132,7 +130,6 @@ class StructuredToolRoundTests(unittest.TestCase):
             thread = threading.Thread(target=run)
             thread.start()
             self.assertFalse(done.wait(0.15))
-            self.lock.__enter__.assert_not_called()
             self.manager.unit_of_work.assert_not_called()
         self.assertTrue(done.wait(5))
         thread.join(5)
@@ -154,7 +151,6 @@ class StructuredToolRoundTests(unittest.TestCase):
             (name, call_id, result),
             ("read_profile", "call-one", {"ok": True, "profile": "synthetic"}),
         )
-        self.lock.__enter__.assert_called_once()
         self.manager.unit_of_work.return_value.__enter__.assert_called_once()
         self.execution.execute.assert_called_once()
         self.assertEqual(len(state.command_receipts), 1)
@@ -221,7 +217,6 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertEqual(
             result[:3], ("lookup_food", "food-call", {"ok": True, "foods": []})
         )
-        self.lock.__enter__.assert_not_called()
         self.manager.unit_of_work.assert_not_called()
         self.execution.execute.assert_called_once()
         self.jobs.merge_receipt.assert_called_once_with(

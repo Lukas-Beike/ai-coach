@@ -6,7 +6,6 @@ import math
 import re
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from typing import Any
 
 from backend import change_history
@@ -49,7 +48,6 @@ class ProductCatalogService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: AbstractContextManager[Any],
         products: NutritionProductRepository,
         utc_now: Any,
         food_database: FoodDatabaseService,
@@ -58,7 +56,6 @@ class ProductCatalogService:
     ) -> None:
         self._web_search = web_search
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._products = products
         self._utc_now = utc_now
         self.food_database = food_database
@@ -140,7 +137,7 @@ class ProductCatalogService:
         with self._database_manager.reader() as db:
             found = self._products.list_incomplete(db, ids=wanted)
         known = {product["id"] for product in found}
-        # The search runs after the read: no database lock is held for the request.
+        # The search runs after the read: no writer or reader is held for the request.
         result = (
             self._web_search(found)
             if found
@@ -177,7 +174,7 @@ class ProductCatalogService:
 
     def get_product(self, product_id: str) -> dict[str, Any]:
         """An own product, else a stored database food."""
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             product = self._products.get_any(db, str(product_id or "").strip())
         if not product:
             raise AppError(404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found")
@@ -185,7 +182,7 @@ class ProductCatalogService:
 
     def save_product(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = self.normalize_product(payload)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = (
                 self._products.list(
                     db, barcode=normalized["barcode"], include_archived=True
@@ -252,7 +249,7 @@ class ProductCatalogService:
         the athlete's own, which a re-check keeps. The change is in the history.
         """
         payload = payload if isinstance(payload, dict) else {}
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             entry = self._foods.get(db, food_id)
             if entry is None:
                 raise AppError(404, FOOD_NOT_FOUND, reason="food_not_found")
@@ -303,7 +300,7 @@ class ProductCatalogService:
         now = self._utc_now()
         changes: list[dict[str, Any]] = []
         unchanged: list[dict[str, Any]] = []
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             for item in items:
                 outcome = self._fill_one(db, item, now)
                 (changes if outcome.get("written") else unchanged).append(outcome)
@@ -419,7 +416,7 @@ class ProductCatalogService:
         if not isinstance(favorite, bool):
             raise AppError(400, "favorite muss true oder false sein.")
         product_id = str(product_id or "").strip()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             if not self._products.set_favorite(db, product_id, favorite):
                 raise AppError(
                     404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
@@ -441,7 +438,7 @@ class ProductCatalogService:
                 reason="nutrition_product_barcode_missing",
             )
         notice = self.food_database.refresh_barcode(barcode)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             previous = self._products.get(db, product["id"]) or product
             filled = self._products.fill_from_database_entries(
                 db, product["id"], barcode
@@ -466,7 +463,7 @@ class ProductCatalogService:
 
     def archive_product(self, product_id: str) -> dict[str, Any]:
         product_id = str(product_id or "").strip()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             previous = self._products.get(db, product_id)
             if not self._products.archive(db, product_id, self._utc_now()):
                 raise AppError(
@@ -574,7 +571,7 @@ class ProductCatalogService:
 
     def calculate_components(self, components: Any) -> dict[str, Any]:
         resolved = self._component_calculator.prepare_resolutions(components)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             return self._component_calculator.calculate(db, components, resolved)
 
     def normalize_product(self, payload: dict[str, Any]) -> dict[str, Any]:

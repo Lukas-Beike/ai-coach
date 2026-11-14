@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,14 +24,12 @@ class NutritionCompositionTests(unittest.TestCase):
         self.manager = temp_database(
             self, path=self.db_path, row_factory=sqlite3.Row, schema=True
         )
-        self.lock = threading.Lock()
         self.fixed_now = "2026-09-24T12:00:00+00:00"
         self._make_service()
 
     def _make_service(self) -> None:
         self.service, self.library = build_nutrition_services(
             self.manager,
-            self.lock,
             lambda: self.fixed_now,
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
@@ -526,7 +523,6 @@ class NutritionCompositionTests(unittest.TestCase):
 
         backup = DatabaseBackupService(
             self.manager,
-            self.lock,
             DatabaseBackupConfig(
                 database_path=self.db_path,
                 data_dir=Path(self.temp_dir.name),

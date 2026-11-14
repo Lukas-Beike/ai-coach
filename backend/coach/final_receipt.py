@@ -24,14 +24,12 @@ class CoachFinalReceiptService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: Any,
         chat_repository: ChatRepository,
         key_values: KeyValueRepository,
         events: StateEventBuffer,
         now: Callable[[], str],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._chat_repository = chat_repository
         self._key_values = key_values
         self._events = events
@@ -84,7 +82,7 @@ class CoachFinalReceiptService:
         client_turn_id: str,
         command_receipts: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        with self._database_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             current_command = coach_store.command_row(
                 db, client_turn_id, "status, receipt"
             )

@@ -44,13 +44,12 @@ class NutritionProductHistoryTests(unittest.TestCase):
         )
         self.diary, self.library = build_nutrition_services(
             self.manager,
-            threading.Lock(),
             lambda: "2026-09-24T12:00:00+00:00",
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
         self.catalog = self.library.product_catalog
         self.mirror = FoodDatabaseMirror(
-            lambda: self.manager, threading.Lock(), lambda: "2026-09-24T12:00:00+00:00"
+            lambda: self.manager, lambda: "2026-09-24T12:00:00+00:00"
         )
 
     def collected(self, write: Any) -> tuple[Any, list[dict[str, str]]]:

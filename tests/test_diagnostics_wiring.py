@@ -101,7 +101,6 @@ class DiagnosticsBuilderTests(unittest.TestCase):
         first_history = self.services.coach_history_service()
         second_history = self.services.coach_history_service()
         self.assertIsNot(first_history, second_history)
-        self.assertFalse(hasattr(first_history, "_db_lock"))
 
     def test_the_log_path_follows_the_live_value(self) -> None:
         self.ctx.log_path.return_value = Path("restored.log")

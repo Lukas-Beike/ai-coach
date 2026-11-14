@@ -39,7 +39,6 @@ class CoachJobStoreTests(unittest.TestCase):
     def _store(self):
         return CoachJobStore(
             lambda: self.manager,
-            self.lock,
             self.wake,
             self.gate,
             lambda: "2026-09-23T12:00:00+00:00",

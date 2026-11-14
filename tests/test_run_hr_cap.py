@@ -413,7 +413,10 @@ class FirstThresholdConversionTests(unittest.TestCase):
             FIRST_THRESHOLD_ENTRY_FIELD,
             FIRST_THRESHOLD_DATE_FIELD,
         ):
-            service = CoachProfileUpdateService(MagicMock(), MagicMock(), MagicMock())
+            service = CoachProfileUpdateService(
+                MagicMock(),
+                MagicMock(),
+            )
             change = {"field": field, "expected_value": "", "value": "150"}
             with (
                 patch(

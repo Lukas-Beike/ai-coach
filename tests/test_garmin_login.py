@@ -9,7 +9,6 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -127,7 +126,6 @@ class GarminLoginTests(unittest.TestCase):
             database_manager=lambda: cast(
                 DatabaseManager, FakeManager(self.connection)
             ),
-            database_lock=nullcontext,
             key_values=self.key_values,
             tokenstore_path=lambda: str(self.tokenstore),
             registry=self.registry,

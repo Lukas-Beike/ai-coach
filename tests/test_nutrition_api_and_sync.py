@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
-import threading
 import unittest
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
@@ -369,7 +368,6 @@ class NutritionRouteBodyTests(unittest.TestCase):
         )
         self.diary, self.library = build_nutrition_services(
             manager,
-            threading.Lock(),
             lambda: "2026-09-24T12:00:00+00:00",
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )

@@ -178,7 +178,6 @@ class WahooSyncCase(unittest.TestCase):
             source=lambda: self.source,
             storage=WahooSyncStorage(
                 database_manager=lambda: self.database,
-                database_lock=threading.RLock(),
                 key_values=self.key_values,
             ),
             daily_markers=lambda: self.markers,

@@ -487,7 +487,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(updated["competition"]["name"], "Münsterland Giro 2027")
         self.assertEqual(updated["competition"]["priority"], "B")
 
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=? WHERE id=?",
                 (
@@ -500,7 +500,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(deleted["status"], "deleted")
         self.assertTrue(deleted["remote_sync_pending"])
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             tombstone = db.execute(
                 "SELECT intervals_event_id, external_id FROM competition_sync_tombstones"
             ).fetchone()

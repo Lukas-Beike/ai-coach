@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -73,7 +72,6 @@ class NutritionDiaryService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: AbstractContextManager[Any],
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
@@ -81,14 +79,12 @@ class NutritionDiaryService:
         observation_reader: Callable[[], ObservationReader],
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
         self._utc_now = utc_now
         self._local_now = local_now
         self._meal_library = meal_library
         self._sync_status = NutritionSyncStatusService(
             database_manager,
-            db_lock,
             nutrition_repository,
             utc_now,
             local_now,
@@ -150,7 +146,7 @@ class NutritionDiaryService:
             raise AppError(
                 400, "Portionsanzahl muss größer als 0 und höchstens 20 sein."
             )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             template = self._meal_library.get_template_in_transaction(db, template_id)
             if not template:
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)
@@ -233,7 +229,7 @@ class NutritionDiaryService:
                     payload["components"]
                 )
             )
-            with self._db_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 calculation = self._meal_library.component_calculator.calculate(
                     db, payload["components"], resolved_database
                 )
@@ -263,14 +259,14 @@ class NutritionDiaryService:
         entry = normalize_nutrition_entry(values, local_now_factory=self._local_now)
         if not entry.get("id"):
             entry["id"] = uuid.uuid4().hex
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             return self._create(db, entry)
 
     def get_meal(self, entry_id: str) -> dict[str, Any]:
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             entry = self._nutrition_repository.get(db, clean_id)
         if not entry:
             raise AppError(404, ENTRY_NOT_FOUND)
@@ -295,7 +291,7 @@ class NutritionDiaryService:
             if "food_ingredients" in payload and "components" not in payload
             else None
         )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
@@ -349,7 +345,7 @@ class NutritionDiaryService:
             "amount": amount,
             "unit": unit,
         }
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
@@ -440,7 +436,7 @@ class NutritionDiaryService:
             if "food_ingredients" in changes
             else None
         )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
                 raise AppError(404, ENTRY_NOT_FOUND)
@@ -519,7 +515,7 @@ class NutritionDiaryService:
         clean_id = str(entry_id or "").strip()
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             deleted = bool(existing) and self._nutrition_repository.delete(db, clean_id)
             if deleted:
@@ -611,7 +607,7 @@ class NutritionDiaryService:
     def context(self) -> dict[str, Any]:
         today = self._local_now().date().isoformat()
         past_week = (self._local_now().date() - timedelta(days=6)).isoformat()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             today_summary = self._nutrition_repository.day_summary(db, today)
             recent_entries = self._nutrition_repository.list_by_range(
                 db, past_week, today

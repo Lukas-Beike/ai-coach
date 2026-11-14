@@ -8,7 +8,6 @@ network, a real data directory or an encryption key.
 from __future__ import annotations
 
 import json
-import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -73,7 +72,7 @@ class MirrorFixture(unittest.TestCase):
         )
         self.now = START
         self.mirror = FoodDatabaseMirror(
-            lambda: self.manager, threading.RLock(), lambda: self.now.isoformat()
+            lambda: self.manager, lambda: self.now.isoformat()
         )
         self.off = FakeOff()
         self.service = FoodDatabaseService(cast(Any, self.off), self.mirror)
@@ -358,7 +357,6 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
     def library(self):
         _diary, library = build_nutrition_services(
             self.manager,
-            threading.RLock(),
             lambda: self.now.isoformat(),
             lambda: self.now,
             food_database=self.service,

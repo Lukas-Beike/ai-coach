@@ -18,7 +18,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
@@ -95,7 +95,6 @@ class WahooSyncStorage:
     """The database, its write lock and the key/value state the sync writes."""
 
     database_manager: Callable[[], DatabaseManager]
-    database_lock: AbstractContextManager[Any]
     key_values: KeyValueRepository
 
 
@@ -143,7 +142,6 @@ class WahooSyncService:
         self._connection = connection
         self._source = source
         self._database_manager = storage.database_manager
-        self._database_lock = storage.database_lock
         self._key_values = storage.key_values
         self._coverage = CanonicalCoverageStore(storage.key_values)
         self._daily_markers = daily_markers
@@ -246,7 +244,7 @@ class WahooSyncService:
             **threshold,
         }
         plan = wahoo_ingest_plan(payload, zone=zone)
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             counters = ingest_plan(
                 db,
                 plan,
@@ -354,7 +352,7 @@ class WahooSyncService:
     def _record_error(self, message: str) -> None:
         """Store the content-free error text; a failed write never hides the cause."""
         try:
-            with self._database_lock, self._database_manager().unit_of_work() as db:
+            with self._database_manager().unit_of_work() as db:
                 self._key_values.set(db, LAST_ERROR_KEY, message)
         except Exception:  # noqa: BLE001 - a failed write must not hide the cause
             self._logger.warning(

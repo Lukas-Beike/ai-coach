@@ -8,40 +8,30 @@ import unittest
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
 
-class TrackingLock:
-    def __init__(self) -> None:
-        self.held = False
-
-    def __enter__(self) -> Self:
-        self.held = True
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.held = False
-
-
-class LockCheckingDatabaseManager(DatabaseManager):
-    def __init__(self, path: Path, lock: TrackingLock) -> None:
+class TrackingDatabaseManager(DatabaseManager):
+    def __init__(self, path: Path) -> None:
         super().__init__(
             path, sqlite3, row_factory=sqlite3.Row, persist_connections=False
         )
-        self._tracking_lock = lock
+        self.held = False
 
     @contextmanager
     def unit_of_work(self, *, timeout: float | None = None) -> Iterator[Any]:
-        if not self._tracking_lock.held:
-            raise AssertionError(
-                "database unit of work must run under the injected lock"
-            )
-        with super().unit_of_work(timeout=timeout) as db:
-            yield db
+        outermost = not self.held
+        self.held = True
+        try:
+            with super().unit_of_work(timeout=timeout) as db:
+                yield db
+        finally:
+            if outermost:
+                self.held = False
 
 
 class StructuredToolReplayTests(unittest.TestCase):
@@ -49,8 +39,7 @@ class StructuredToolReplayTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="coach-tool-replay-")
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name) / "replay.sqlite3"
-        self.lock = TrackingLock()
-        self.database_manager = LockCheckingDatabaseManager(self.path, self.lock)
+        self.database_manager = TrackingDatabaseManager(self.path)
         self.addCleanup(self.database_manager.close)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript(
@@ -60,7 +49,7 @@ class StructuredToolReplayTests(unittest.TestCase):
                 "id TEXT PRIMARY KEY, status TEXT NOT NULL, base_revision INTEGER NOT NULL);"
             )
         self.service = CoachStructuredToolReplayService(
-            self.database_manager, self.lock, frozenset({"get_profile"})
+            self.database_manager, frozenset({"get_profile"})
         )
 
     @staticmethod
@@ -144,7 +133,7 @@ class StructuredToolReplayTests(unittest.TestCase):
                     self.metadata(name="stage_training_plan"), [cached]
                 )
                 self.assertIsNone(result)
-                self.assertFalse(self.lock.held)
+                self.assertFalse(self.database_manager.held)
 
     def test_replays_draft_when_base_revision_matches_current_state(self) -> None:
         self.seed_artifact("current", base_revision=3)
@@ -153,7 +142,7 @@ class StructuredToolReplayTests(unittest.TestCase):
             self.metadata(name="stage_training_plan"), [cached]
         )
         self.assertIs(result, cached)
-        self.assertFalse(self.lock.held)
+        self.assertFalse(self.database_manager.held)
 
     def test_replays_nondraft_artifact_when_base_revision_differs(self) -> None:
         self.seed_artifact("committed", status="committed", base_revision=2)
@@ -162,7 +151,7 @@ class StructuredToolReplayTests(unittest.TestCase):
             self.metadata(name="stage_training_plan"), [cached]
         )
         self.assertIs(result, cached)
-        self.assertFalse(self.lock.held)
+        self.assertFalse(self.database_manager.held)
 
 
 if __name__ == "__main__":

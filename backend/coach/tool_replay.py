@@ -16,11 +16,9 @@ class CoachStructuredToolReplayService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: Any,
         read_only_tools: frozenset[str],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._read_only_tools = read_only_tools
 
     def lookup(
@@ -56,7 +54,7 @@ class CoachStructuredToolReplayService:
             and name == "stage_training_plan"
             and cached.get("result", {}).get("ok")
         ):
-            with self._database_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 row = db.execute(
                     "SELECT status, base_revision FROM coach_plan_artifacts WHERE id=?",
                     (cached["result"].get("artifact_id"),),

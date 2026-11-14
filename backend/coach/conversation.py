@@ -41,7 +41,6 @@ class CoachConversationResetService:
         key_values: KeyValueRepository,
         openai_client: OpenAIResponsesClient,
         streams: ChatStreamRegistry,
-        db_lock: Any,
         conversation_lock: Any,
         utc_now: Callable[[], str],
         uuid_factory: Callable[[], uuid.UUID],
@@ -53,7 +52,6 @@ class CoachConversationResetService:
         self._key_values = key_values
         self._openai_client = openai_client
         self._streams = streams
-        self._db_lock = db_lock
         self._conversation_lock = conversation_lock
         self._utc_now = utc_now
         self._uuid_factory = uuid_factory
@@ -86,7 +84,7 @@ class CoachConversationResetService:
 
     def _active_operation_ids(self, *, running_only: bool = False) -> list[str]:
         statuses = ("running",) if running_only else coach_store.ACTIVE
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             rows = coach_store.command_rows(db, "receipt", statuses)
         operation_ids = (
             str(command_receipt(row["receipt"]).get("operation_id") or "")
@@ -105,7 +103,7 @@ class CoachConversationResetService:
                     pass
 
     def _reset_local(self) -> tuple[list[str], str, str]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             now = self._utc_now()
             conversation_id = self._key_values.get(db, "openai_conversation_id") or ""
             operation_ids: list[str] = []
@@ -181,7 +179,6 @@ class CoachConversationProvisionService:
         database_manager: DatabaseManager,
         key_value_repository: KeyValueRepository,
         openai_responses_client: OpenAIResponsesClient,
-        db_lock: Any,
         uuid_factory: Callable[[], uuid.UUID],
         *,
         logger: logging.Logger | None = None,
@@ -189,7 +186,6 @@ class CoachConversationProvisionService:
         self._database_manager = database_manager
         self._key_values = key_value_repository
         self._client = openai_responses_client
-        self._db_lock = db_lock
         self._logger = logger or logging.getLogger("intervals_coach")
         self.remote_delete_thread: threading.Thread | None = None
 
@@ -208,7 +204,7 @@ class CoachConversationProvisionService:
         The remote conversation is only created for attachment turns, so without
         one the binding is derived from the local chat generation.
         """
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._key_values.get(db, "openai_conversation_id")
             generation = self._key_values.get(db, "chat_generation") or "initial"
         return existing or LOCAL_BINDING_PREFIX + generation
@@ -218,17 +214,17 @@ class CoachConversationProvisionService:
         if not self.is_local_binding(current_conversation_id):
             return current_conversation_id
         remote_id = self.ensure()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             coach_store.bind_conversation(db, client_turn_id, remote_id)
         return remote_id
 
     def ensure(self) -> str:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._key_values.get(db, "openai_conversation_id")
         if existing:
             return existing
         conversation_id = self._create_remote()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             self._key_values.set(db, "openai_conversation_id", conversation_id)
         return conversation_id
 
@@ -240,19 +236,19 @@ class CoachConversationProvisionService:
         """
         if self.is_local_binding(current_conversation_id):
             remote_id = self.ensure()
-            with self._db_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 coach_store.bind_conversation(
                     db, client_turn_id, remote_id, rotated=True
                 )
             return remote_id
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             if not coach_store.conversation_in_use(
                 db, current_conversation_id, client_turn_id
             ):
                 coach_store.mark_conversation_rotated(db, client_turn_id)
                 return current_conversation_id
         rotated_id = self._create_remote()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             self._key_values.set(db, "openai_conversation_id", rotated_id)
             coach_store.bind_conversation(db, client_turn_id, rotated_id, rotated=True)
         self._start_remote_delete(current_conversation_id)

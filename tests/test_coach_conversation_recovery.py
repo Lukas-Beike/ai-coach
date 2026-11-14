@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import unittest
 from unittest.mock import MagicMock, Mock
 
@@ -30,7 +29,6 @@ class CoachConversationRecoveryTests(unittest.TestCase):
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachConversationRecoveryService(
             self.manager,
-            threading.RLock(),
             self.key_values,
             self.logger,
         )

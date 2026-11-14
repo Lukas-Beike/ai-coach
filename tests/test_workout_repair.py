@@ -767,7 +767,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_training_state_pages_every_active_unit_and_archived_predecessor(self):
         expected = set()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             for offset in range(366):
                 for archived in (False, True):
                     local_id = str(uuid.uuid4())
@@ -893,7 +893,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
 
     def test_coach_repair_resolves_complete_manifest_beyond_one_page(self):
         expected = set()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             for offset in range(400):
                 local_id = str(uuid.uuid4())
                 expected.add(local_id)

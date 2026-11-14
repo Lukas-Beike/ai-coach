@@ -20,11 +20,9 @@ class CoachClarificationService:
         self,
         database_manager: DatabaseManager,
         key_values: KeyValueRepository,
-        db_lock: Any,
     ) -> None:
         self._database_manager = database_manager
         self._key_values = key_values
-        self._db_lock = db_lock
 
     def save_question(
         self, arguments: dict[str, Any], context: dict[str, Any]
@@ -90,7 +88,7 @@ class CoachClarificationService:
             "status": "needs_clarification",
             "domain": domain,
         }
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             self._key_values.set(
                 db, "coach_pending_request", json.dumps(pending, ensure_ascii=False)
             )

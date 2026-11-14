@@ -32,7 +32,6 @@ class CoachChatTurnTests(unittest.TestCase):
         self.structured_factory = Mock(return_value=self.structured)
         self.service = CoachChatTurnService(
             lambda: self.manager,
-            MagicMock(),
             self.receipts,
             self.settings,
             self.conversations_factory,

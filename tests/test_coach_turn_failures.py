@@ -43,7 +43,6 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.service = CoachTurnFailureService(
             CoachTurnFailureDependencies(
                 database_manager=lambda: self.manager,
-                database_lock=threading.RLock(),
                 chat_repository=self.chat,
                 key_values=self.kv,
                 event_buffer=self.events,
@@ -173,9 +172,7 @@ class CoachTurnFailureTests(unittest.TestCase):
 
         history = Mock()
         history.profile_mutation_coordinator = threading.RLock()
-        undo = CoachTurnUndoService(
-            lambda: self.manager, threading.RLock(), lambda: history, now=self.now
-        )
+        undo = CoachTurnUndoService(lambda: self.manager, lambda: history, now=self.now)
         self.assertEqual(undo.undo("turn-1")["status"], "undone")
         history.apply_many.assert_called_once()
         self.assertEqual(self._stored()[1]["change_summary"]["undone_at"], self.now())

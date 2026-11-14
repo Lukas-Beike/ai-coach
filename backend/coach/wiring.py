@@ -129,7 +129,6 @@ def build_coach_conversation(
             ctx.database(),
             ctx.key_values,
             ctx.model_transport.openai_responses_client(),
-            ctx.database_lock,
             uuid.uuid4,
             logger=ctx.logger,
         )
@@ -140,7 +139,6 @@ def build_coach_conversation(
             ctx.key_values,
             ctx.model_transport.openai_responses_client(),
             streams,
-            ctx.database_lock,
             conversation_lock,
             utc_now,
             uuid.uuid4,
@@ -199,16 +197,13 @@ def build_coach_local(ctx: AppContext) -> CoachLocalServices:
         manager = ctx.database()
         return CoachDialogueActionService(
             manager,
-            ctx.database_lock,
             ctx.sync_job_queue.service,
-            CoachDialoguePlanScopeService(manager, ctx.database_lock),
+            CoachDialoguePlanScopeService(manager),
             local_date,
         )
 
     def clarification_service() -> CoachClarificationService:
-        return CoachClarificationService(
-            ctx.database(), ctx.key_values, ctx.database_lock
-        )
+        return CoachClarificationService(ctx.database(), ctx.key_values)
 
     def manual_morning_checkin_service() -> ManualMorningCheckinService:
         return ManualMorningCheckinService(

@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Self
 from unittest.mock import Mock
 
 from support import temp_database
@@ -14,22 +13,10 @@ from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.http_api.export_streams import ExportStreamTransport
 
 
-class TrackedLock:
-    def __init__(self) -> None:
-        self.held = False
-
-    def __enter__(self) -> Self:
-        self.held = True
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.held = False
-
-
 class ExportStreamTransportTests(unittest.TestCase):
-    def backup(self, root: Path, lock: TrackedLock) -> DatabaseBackupService:
+    def backup(self, root: Path) -> DatabaseBackupService:
         database_path = root / "coach.db"
-        manager = temp_database(
+        manager = self.manager = temp_database(
             self, path=database_path, row_factory=None, persist_connections=False
         )
         with manager.unit_of_work() as db:
@@ -37,7 +24,6 @@ class ExportStreamTransportTests(unittest.TestCase):
             db.execute("INSERT INTO records VALUES ('saved')")
         return DatabaseBackupService(
             manager,
-            lock,
             DatabaseBackupConfig(
                 database_path=database_path,
                 data_dir=root,
@@ -50,13 +36,12 @@ class ExportStreamTransportTests(unittest.TestCase):
             logging.getLogger(__name__),
         )
 
-    def test_database_backup_releases_database_lock_before_send(
+    def test_database_backup_releases_the_writer_before_send(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            lock = TrackedLock()
-            backup = self.backup(root, lock)
+            backup = self.backup(root)
             privacy_export_factory = Mock(
                 side_effect=RuntimeError("unused privacy export construction failed")
             )
@@ -67,7 +52,8 @@ class ExportStreamTransportTests(unittest.TestCase):
             handler = Mock()
 
             def send_file_stream(*args: object, **kwargs: object) -> None:
-                self.assertFalse(lock.held)
+                with self.manager.unit_of_work(timeout=0):
+                    pass
                 self.assertEqual(args[0].name.startswith(".database-backup-"), True)
                 self.assertEqual(
                     args[1:],
@@ -79,15 +65,15 @@ class ExportStreamTransportTests(unittest.TestCase):
             handler.send_file_stream.side_effect = send_file_stream
             transport.stream_database_backup(handler)
 
-            self.assertFalse(lock.held)
+            with self.manager.unit_of_work(timeout=0):
+                pass
             self.assertFalse(list(root.glob(".database-backup-*.tmp")))
             privacy_export_factory.assert_not_called()
 
-    def test_database_backup_releases_lock_when_send_raises(self) -> None:
+    def test_database_backup_releases_the_writer_when_send_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            lock = TrackedLock()
-            backup = self.backup(root, lock)
+            backup = self.backup(root)
             transport = ExportStreamTransport(
                 lambda: backup,
                 Mock(
@@ -102,7 +88,8 @@ class ExportStreamTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "send failed"):
                 transport.stream_database_backup(handler)
 
-            self.assertFalse(lock.held)
+            with self.manager.unit_of_work(timeout=0):
+                pass
             self.assertFalse(list(root.glob(".database-backup-*.tmp")))
 
     def test_privacy_export_cleans_up_on_send_failure(

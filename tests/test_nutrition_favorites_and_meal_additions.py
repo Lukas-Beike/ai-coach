@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import Mock
@@ -22,7 +21,6 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         )
         self.diary, self.library = build_nutrition_services(
             self.manager,
-            threading.Lock(),
             lambda: "2026-11-04T12:00:00+00:00",
             lambda: datetime(2026, 11, 4, 14, 0, tzinfo=UTC),
             food_database=Mock(),

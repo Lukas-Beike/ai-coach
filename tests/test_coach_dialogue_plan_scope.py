@@ -30,7 +30,9 @@ class CoachDialoguePlanScopeServiceTests(unittest.TestCase):
             self, "scope.sqlite", backend=self.backend, row_factory=sqlite3.Row
         )
         self.lock = threading.RLock()
-        self.service = CoachDialoguePlanScopeService(self.database, self.lock)
+        self.service = CoachDialoguePlanScopeService(
+            self.database,
+        )
         with self.database.unit_of_work() as db:
             db.executescript(
                 "CREATE TABLE planned_units (local_id TEXT PRIMARY KEY, payload TEXT);"

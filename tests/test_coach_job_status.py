@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import unittest
 from contextlib import contextmanager
 from unittest.mock import Mock
@@ -55,7 +54,6 @@ class CoachJobStatusTests(unittest.TestCase):
         service = CoachJobSubmissionService(
             lambda: manager,
             Mock(),
-            threading.Lock(),
             Mock(),
             Mock(),
             FakeStreamRegistry(attached),

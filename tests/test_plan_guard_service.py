@@ -100,7 +100,6 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.dispatch.execute.side_effect = self.write
         self.service = CoachStructuredToolExecutionService(
             self.manager,
-            threading.RLock(),
             Mock(),
             Mock(),
             Mock(),

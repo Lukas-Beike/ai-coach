@@ -49,7 +49,7 @@ class AuditRemediationTests(unittest.TestCase):
             {"name": "Synthetic race", "event_date": "2026-10-01", "sport": "Cycling"}
         )["competition"]
         external = planning_competitions.competition_external_id(item["id"])
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE competitions SET intervals_event_id='123', external_id=?, sync_dirty=0, sync_state='synced' WHERE id=?",
                 (external, item["id"]),
@@ -104,7 +104,7 @@ class AuditRemediationTests(unittest.TestCase):
         client.fetch_competition_events.return_value = [remote]
 
         def delete(_):
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute(
                     "INSERT INTO competition_sync_tombstones VALUES ('later', '456', 'later-external', ?, NULL)",
                     (runtime_clock.utc_now(),),
@@ -115,7 +115,7 @@ class AuditRemediationTests(unittest.TestCase):
             intervals_client_module, "IntervalsClient", return_value=client
         ):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 [
                     row["id"]
@@ -238,7 +238,7 @@ with patch.object(Path, 'read_text', deny):
             return_value={"stale": True, "days": [{}], "error": "Synthetic failure"},
         ):
             server.WEATHER_SYNC().sync()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute(
                     "SELECT status FROM provider_refresh_history ORDER BY started_at DESC LIMIT 1"
@@ -264,7 +264,7 @@ with patch.object(Path, 'read_text', deny):
         ):
             marker_service.return_value.is_due.return_value = True
             server.SYNC_SCHEDULERS.daily_scheduler().schedule()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             rows = db.execute(
                 "SELECT provider, payload FROM sync_jobs WHERE type='refresh'"
             ).fetchall()
@@ -312,7 +312,7 @@ with patch.object(Path, 'read_text', deny):
                     "notes": "Synthetic",
                 }
             )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.executemany(
                 "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
                 [
@@ -349,7 +349,7 @@ with patch.object(Path, 'read_text', deny):
             {"id": "archived", "name": "Archived", "archived": True},
             {"id": "dated", "name": "Dated", "date": "2026-09-09"},
         ]
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.executemany(
                 "INSERT INTO workout_library(id,local_id,payload,updated_at) VALUES (?,?,?,?)",
                 [

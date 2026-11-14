@@ -290,7 +290,6 @@ def build_metric_export(
             )
         },
         thresholds=thresholds,
-        database_lock=ctx.database_lock,
         today=lambda: ctx.clock.now().date(),
         utc_now=lambda: datetime.now(UTC),
     )

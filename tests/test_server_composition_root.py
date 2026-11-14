@@ -321,7 +321,6 @@ class CompositionRootTests(ServerTestCase):
         purge = privacy.delete_service()
         self.assertIsInstance(purge, PrivacyDeleteService)
         dependencies = purge._dependencies
-        self.assertIs(dependencies.database_lock, server.DB_LOCK)
         self.assertIs(
             dependencies.maintenance_gate, server.runtime_maintenance.MAINTENANCE_GATE
         )

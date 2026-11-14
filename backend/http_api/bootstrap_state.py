@@ -23,7 +23,6 @@ from backend.sync.wahoo_connection import connection_status
 @dataclass(frozen=True)
 class PublicBootstrapDependencies:
     database_manager: Callable[[], DatabaseManager]
-    database_lock: Any
     config: Config
     app_name: str
     app_version: str
@@ -74,8 +73,8 @@ class PublicBootstrapService:
     def read(self) -> dict[str, Any]:
         deps = self._dependencies
         # One read-only WAL snapshot serves every read below, including nested
-        # service reads, so the projection is consistent without the writer or
-        # the shared database lock. A hidden write fails on the query-only
+        # service reads, so the projection is consistent without the writer. A
+        # hidden write fails on the query-only
         # connection instead of racing.
         with deps.database_manager().read_snapshot() as db:
             local_planned = deps.planned_unit_service().list(250, push_state=True)

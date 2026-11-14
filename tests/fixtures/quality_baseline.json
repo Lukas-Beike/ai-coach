@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "6e19694d5e7c54d373c011f6796181f34ab2727d",
+  "base": "d17ba69bda3cc2f56b841b37c027d10554f74a72",
   "versions": {
     "ruff": "0.17.4",
     "mypy": "2.4.1"
@@ -182,12 +182,6 @@
     },
     {
       "tool": "cognitive",
-      "path": "tests/test_server_http.py",
-      "code": "S3776",
-      "message_sha256": "9c5760c5b086b2765994516eaf82c415bb03aace5c9294021b6a0f4fd4911416"
-    },
-    {
-      "tool": "cognitive",
       "path": "tests/coach_live_eval.py",
       "code": "S3776",
       "message_sha256": "a3ddd741e6511747996a1973df8204728689184db4e27fd3f211f49d20274b2e"
@@ -359,6 +353,12 @@
       "path": "backend/http_api/handler.py",
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
+    },
+    {
+      "tool": "mypy",
+      "path": "tests/test_coach_job_status.py",
+      "code": "arg-type",
+      "message_sha256": "23f433f0cfc60937be01eb657709ca365aeef5e05722c2fdbbff67272522c00e"
     },
     {
       "tool": "mypy",
@@ -539,12 +539,6 @@
       "path": "server.py",
       "code": "arg-type",
       "message_sha256": "8201b28533baa9af4e40901aafd403409021ccf3e9391330974505c193ecfc6a"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_coach_job_status.py",
-      "code": "arg-type",
-      "message_sha256": "84d21304c9cdbc535678b32cefd1ab96320705c1126d837c4341d75570cb8110"
     },
     {
       "tool": "mypy",
@@ -839,18 +833,6 @@
       "path": "tests/test_sync_plan_selection.py",
       "code": "attr-defined",
       "message_sha256": "a5e8d3c1d53d545b5f4d6e56c1bde193187e095cc38c052a1252f2dd62f94f16"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "attr-defined",
-      "message_sha256": "beb0ea93ded5e96c319bda5fc5070a374b634b47fed33ee9bc1bd16b493a7473"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "attr-defined",
-      "message_sha256": "beb0ea93ded5e96c319bda5fc5070a374b634b47fed33ee9bc1bd16b493a7473"
     },
     {
       "tool": "mypy",

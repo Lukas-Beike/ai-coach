@@ -15,9 +15,8 @@ from backend.errors import AppError
 class CoachDialoguePlanScopeService:
     """Check date and provenance bounds while leaving all data ownership in the DB manager."""
 
-    def __init__(self, database_manager: DatabaseManager, db_lock: Any) -> None:
+    def __init__(self, database_manager: DatabaseManager) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
 
     def validate(
         self, name: str, arguments: dict[str, Any], action: dict[str, Any]
@@ -30,7 +29,7 @@ class CoachDialoguePlanScopeService:
         for workout in workouts:
             self._check_date(workout.get("date"), start, end)
 
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             for change in arguments.get("changes", []):
                 local_id = str(change.get("local_id") or "")
                 require_coach_scope(action, f"planned_unit:{local_id}")

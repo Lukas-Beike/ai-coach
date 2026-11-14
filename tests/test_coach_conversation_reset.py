@@ -89,7 +89,6 @@ class CoachConversationResetTests(unittest.TestCase):
             self.key_values,
             self.openai,
             self.streams,
-            threading.RLock(),
             self.conversation_lock,
             lambda: "2026-09-29T12:00:00+00:00",
             lambda: NEW_GENERATION,
@@ -264,7 +263,6 @@ class CoachConversationResetTests(unittest.TestCase):
             self.database_manager,
             self.key_values,
             client,
-            threading.RLock(),
             uuid.uuid4,
         )
 

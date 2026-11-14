@@ -22,10 +22,6 @@ from backend.errors import DatabaseBusyError
 
 DATABASE_MANAGER_CLOSED_MESSAGE = "database manager is closed"
 DATABASE_MANAGER_UNINITIALIZED_MESSAGE = "database manager is not initialized"
-# The application lock coordinates larger transactions and restore work that
-# span multiple repositories. DatabaseManager keeps its own connection locks.
-DATABASE_LOCK = threading.RLock()
-
 # Foreground writers that are granted the writer while a background writer
 # waits; after this many the background writer is served next, so a steady
 # stream of short foreground writes can delay but never starve background work.
@@ -359,7 +355,7 @@ class DatabaseManager:
                     reusable = True
                     if getattr(connection, "in_transaction", False):
                         # A write through a reader handle must not stay open
-                        # on a pooled connection and hold the database lock.
+                        # on a pooled connection and hold SQLite's write lock.
                         try:
                             connection.rollback()
                         except Exception:  # noqa: BLE001 - a connection that cannot roll back is closed, not pooled

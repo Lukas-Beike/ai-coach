@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import threading
 import unittest
 from datetime import date
 from typing import Any
@@ -117,7 +116,6 @@ class RequestKindAllowlistTests(unittest.TestCase):
         self.service = CoachJobSubmissionService(
             lambda: Mock(),
             Mock(),
-            threading.Lock(),
             Mock(),
             Mock(),
             Mock(),
@@ -144,7 +142,6 @@ class RequestKindAllowlistTests(unittest.TestCase):
         service = CoachJobSubmissionService(
             lambda: Mock(),
             Mock(),
-            threading.Lock(),
             settings,
             Mock(),
             Mock(),
