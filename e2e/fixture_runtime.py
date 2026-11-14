@@ -988,8 +988,8 @@ def seed_heavy_history(count, seconds=5400):
     ``count`` alternating rides and runs of ``seconds`` each, about every 1.5
     days back over several years, with full-resolution heart rate plus power or
     speed streams on their Garmin copies. It goes through the same canonical
-    stores as the standard seed, runs once per count, and leaves the session
-    analyses to the app's own backfill, as after a real first sync.
+    stores as the standard seed, runs once per count, and computes the session
+    analyses, so a restart measures the steady state, not a first sync.
     """
     if not 0 < count <= FIXTURE_HEAVY_HISTORY_MAX:
         raise ValueError(
@@ -1029,7 +1029,13 @@ def seed_heavy_history(count, seconds=5400):
                 round(3.1 + 0.3 * math.sin(t / 60), 2) for t in time_s
             ]
         _save_garmin_copy(row["id"], streams)
+    stage = server.CANONICAL_BACKFILL.session_analysis
     with server.database_manager().unit_of_work() as db:
+        for _ in range(count + 100):
+            if stage.run_batch(db).done:
+                break
+        else:
+            raise RuntimeError("fixture heavy session analysis did not finish")
         server.KEY_VALUE_REPOSITORY.set(db, "fixture_heavy_history", str(count))
 
 
