@@ -1392,6 +1392,8 @@ class ScriptedLoopTests(unittest.TestCase):
         self.assertEqual((result["safety"], result["misses"]), ([], []), result)
 
     def test_an_anthropic_run_reaches_only_the_messages_api_and_is_counted(self):
+        from backend.providers import http as provider_http
+        from backend.providers.claude_messages_adapter import neutral_usage
         from backend.providers.claude_requests import ClaudeMessagesClient
         from backend.providers.openai_requests import OpenAIResponsesClient
         from backend.providers.openai_stream import OpenAIStreamClient
@@ -1404,23 +1406,37 @@ class ScriptedLoopTests(unittest.TestCase):
                 text = json.dumps({"requests": [], "accepts_proposal": False})
             else:
                 text = "Ein lockerer Lauf am Mittwoch passt gut."
-            return ModelTurn(text=text, usage={"input_tokens": 10, "output_tokens": 5})
+            usage = {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 100,
+                "output_tokens": 5,
+            }
+            return ModelTurn(text=text, usage=neutral_usage(usage))
 
-        listing = {"data": [{"id": "claude-sonnet-5-5", "created_at": "2026-11-01"}]}
-        settings = {**SETTINGS, "provider": "anthropic", "model": "claude-sonnet"}
-        counter = live.CallCounter(50)
-        refused = AssertionError("no OpenAI request")
+        settings = {
+            **SETTINGS,
+            "provider": "anthropic",
+            "model": "claude-sonnet",
+            "resolved_model": "claude-sonnet-5-5",
+        }
+        counter = live.CallCounter(50, prices=(1.25, 1.0), cached_price=0.1)
+        refused = AssertionError("no request beyond the mocked Messages API")
         with (
-            patch.object(ClaudeMessagesClient, "list_models", return_value=listing),
+            # The preflight's model is seeded: no case lists the models again.
+            patch.object(ClaudeMessagesClient, "list_models", side_effect=refused),
             patch.object(ClaudeMessagesClient, "stream", claude_stream),
             patch.object(OpenAIResponsesClient, "complete", side_effect=refused),
             patch.object(OpenAIStreamClient, "stream", side_effect=refused),
+            patch.object(provider_http, "urlopen", side_effect=refused),
         ):
             result = live.run_case(CASES["c10-advice-only"], counter, settings)
         self.assertTrue(result["passed"], result)
         self.assertTrue(models)
         self.assertEqual(set(models), {"claude-sonnet-5-5"})
         self.assertEqual(counter.calls, len(models))
+        # 30 input tokens as writes, 100 cache reads and 5 output tokens a call.
+        self.assertAlmostEqual(counter.cost, len(models) * 52.5 / 1_000_000)
 
     def test_the_call_cap_stops_a_case_half_way(self):
         counter = live.CallCounter(0)
@@ -1585,7 +1601,9 @@ class CommandLineTests(unittest.TestCase):
                 "1",
             )
         self.assertEqual(code, 0)
-        models.assert_called_with("https://api.openai.com/v1", "sk-synthetic", "openai")
+        models.assert_called_with(
+            "https://api.openai.com/v1", "sk-synthetic", provider="openai"
+        )
         self.assertNotIn("sk-synthetic", text)
 
     def test_the_provider_is_named_explicitly(self):
@@ -1634,6 +1652,10 @@ class CommandLineTests(unittest.TestCase):
                 ),
                 ((*anthropic, "--model", "claude-sonnet"), "--price-input"),
                 ((*anthropic, "--model", "claude-haiku", *priced), "not listed"),
+                (
+                    (*self.ARGS[:4], "--model", "claude-sonnet"),
+                    "needs --provider anthropic",
+                ),
             ):
                 with self.subTest(expected=expected):
                     code, text = run_main(*argv)
@@ -1658,19 +1680,83 @@ class CommandLineTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         self.assertIn("- Provider: anthropic\n", text)
+        self.assertIn("- Resolved model: claude-sonnet-5-5\n", text)
         self.assertNotIn("sk-ant-synthetic", text)
         _case, counter, settings = run_case.call_args.args
         self.assertEqual(
-            (settings["provider"], settings["model"], settings["base_url"]),
-            ("anthropic", "claude-sonnet", "https://api.anthropic.com"),
+            (
+                settings["provider"],
+                settings["model"],
+                settings["resolved_model"],
+                settings["base_url"],
+            ),
+            (
+                "anthropic",
+                "claude-sonnet",
+                "claude-sonnet-5-5",
+                "https://api.anthropic.com",
+            ),
         )
-        # Cache writes count as input at 1.25 times the base price.
+        # Cache writes count as input at 1.25 and cache reads at 0.1 times the
+        # base price.
         self.assertEqual(counter.prices, (3.75, 15.0))
+        self.assertAlmostEqual(counter.cached_price, 0.3)
+
+    def test_a_key_of_the_other_provider_is_never_sent(self):
+        anthropic = (
+            "--provider",
+            "anthropic",
+            "--base-url",
+            "https://api.anthropic.com",
+            "--model",
+            "claude-sonnet",
+        )
+        openai = (
+            *self.ARGS[:2],
+            "--base-url",
+            "https://api.openai.com/v1",
+            "--model",
+            "m",
+        )
+        priced = ("--price-input", "3", "--price-output", "15")
+        for argv, key, label in (
+            (anthropic, "sk-synthetic", "Anthropic"),
+            (openai, "sk-ant-synthetic", "OpenAI"),
+        ):
+            with (
+                self.subTest(label=label),
+                patch.object(live, "fetch_model_ids") as models,
+                patch.dict(live.os.environ, {"COACH_EVAL_API_KEY": key}),
+            ):
+                code, text = run_main(*argv, *priced)
+            self.assertEqual(code, 2)
+            self.assertIn(f"no {label} key", text)
+            self.assertNotIn(key, text)
+            models.assert_not_called()
+
+    def test_a_failed_call_is_priced_like_the_dearest_call_so_far(self):
+        counter = live.CallCounter(10, prices=(1_000_000, 0))
+        inner = Mock()
+        inner.request.side_effect = [
+            ModelTurn(text="ok", usage={"input_tokens": 2}),
+            RuntimeError("refused"),
+        ]
+        transport = live.CountingTransport(inner, counter)
+        transport.request(Mock())
+        with self.assertRaises(RuntimeError):
+            transport.request(Mock())
+        self.assertEqual((counter.calls, counter.cost), (2, 4.0))
 
     def test_the_anthropic_model_list_uses_its_headers_and_never_a_bearer_token(self):
         response = Mock()
         response.read.return_value = json.dumps(
-            {"data": [{"id": "claude-sonnet-5-5"}]}
+            {
+                "data": [
+                    {"id": "claude-sonnet-4-6", "created_at": "2026-01-01"},
+                    {"id": "claude-sonnet-5-5", "created_at": "2026-10-01"},
+                    {"id": "claude-sonnet-5-5-20261002", "created_at": "2026-10-02"},
+                ]
+            }
         ).encode()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
@@ -1678,7 +1764,7 @@ class CommandLineTests(unittest.TestCase):
             live.urllib.request, "urlopen", return_value=response
         ) as opened:
             models = live.fetch_model_ids(
-                "https://api.anthropic.com/", "sk-ant-synthetic", "anthropic"
+                "https://api.anthropic.com/", "sk-ant-synthetic", provider="anthropic"
             )
         self.assertEqual(models, ["claude-sonnet-5-5"])
         request = opened.call_args.args[0]

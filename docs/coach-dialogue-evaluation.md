@@ -139,9 +139,12 @@ model's prices per million tokens given as `--price-input` and
 API explicitly, `openai` (Responses) or `anthropic` (Messages), with no default
 and no fallback: only that provider gets the key, and only a loopback endpoint
 or that provider's API is accepted. For Anthropic, `--model` is the Claude
-family setting the app uses (`claude-opus`, `claude-sonnet` or `claude-haiku`),
-and every input token is priced at the cache-write rate (1.25 times the base
-input price), because Claude's usage counts cache writes as input. Each case runs the real Coach turn loop on a fresh
+family setting the app uses (`claude-opus`, `claude-sonnet` or `claude-haiku`);
+the preflight resolves it to the newest model of the family, every case uses that
+model and the report names it. Claude's usage counts cache reads and writes as
+input, so cache reads are priced at 0.1 and all other input tokens at 1.25 times
+the base input price (the cache-write rate). A call that fails after it was sent
+is priced like the dearest call so far. Each case runs the real Coach turn loop on a fresh
 temporary database with the catalogue's synthetic state; providers stay
 unconfigured and no remote proposal is approved. Food databases and the product
 web search are offline stand-ins (Open Food Facts unreachable, BLS empty, web
