@@ -1471,7 +1471,11 @@ def _fixture_demo_garmin(today, history):
                 "value": seconds,
                 "prStartTimeLocalFormatted": f"{(today - timedelta(days=age)).isoformat()}T08:30:00.0",
             }
-            for type_id, seconds, age in ((1, 221.0, 410), (3, 1250.0, 410), (6, 12_480.0, 600))
+            for type_id, seconds, age in (
+                (1, 221.0, 410),
+                (3, 1250.0, 410),
+                (6, 12_480.0, 600),
+            )
         ],
         "readiness": [
             {

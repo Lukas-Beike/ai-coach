@@ -1470,22 +1470,12 @@ class _HealthMapping:
                 self._emit_race(kind, field, value, ref, day, index)
 
     def _map_personal_records(self, payload: object) -> None:
-        """Running records over the race distances, each on its own local day.
-
-        A record of another sport is skipped without an issue; a running record
-        of a type the SDK does not document is UNKNOWN_VALUE.
-        """
+        """Running records over the race distances, each on its own local day."""
         for ref, record, _index in self._records(
             _PERSONAL_RECORDS, _top_level_items(payload)
         ):
-            sport = record.get("activityType")
-            if isinstance(sport, str) and _heart_rate_sport(sport) is not Sport.RUN:
-                continue
-            type_id = coerce_number(record.get("typeId"))
-            kind = None if type_id is None else _PERSONAL_RECORD_KINDS.get(int(type_id))
+            kind = self._personal_record_kind(record, ref)
             if kind is None:
-                if type_id is None or int(type_id) not in _UNMAPPED_RUNNING_RECORDS:
-                    self.issue(ref, "typeId", IssueReason.UNKNOWN_VALUE)
                 continue
             named = _named_value(record, _PERSONAL_RECORD_DAY_KEYS)
             day = None if named is None else _raw_day(named[1])
@@ -1493,11 +1483,27 @@ class _HealthMapping:
                 self.issue(ref, _PERSONAL_RECORD_DAY_KEYS[0], IssueReason.MISSING)
                 continue
             seconds = self._number(record, ("value",), ref)
-            if seconds is None:
-                continue
-            # One current record per type: its day and kind identify it.
-            entry = _entry(_PERSONAL_RECORDS, ref, day, kind.value)
-            self.emit(entry, kind, round(seconds, 2), "value", _PROVIDER, Sport.RUN)
+            if seconds is not None:
+                # One current record per type: its day and kind identify it.
+                entry = _entry(_PERSONAL_RECORDS, ref, day, kind.value)
+                self.emit(entry, kind, round(seconds, 2), "value", _PROVIDER, Sport.RUN)
+
+    def _personal_record_kind(
+        self, record: Mapping[str, object], ref: str
+    ) -> MetricKind | None:
+        """The kind of a running record; another sport is skipped without an issue,
+        an undocumented running type is UNKNOWN_VALUE."""
+        sport = record.get("activityType")
+        if isinstance(sport, str) and _heart_rate_sport(sport) is not Sport.RUN:
+            return None
+        type_id = coerce_number(record.get("typeId"))
+        number = None if type_id is None else int(type_id)
+        if number in _UNMAPPED_RUNNING_RECORDS:
+            return None
+        kind = _PERSONAL_RECORD_KINDS.get(number) if number is not None else None
+        if kind is None:
+            self.issue(ref, "typeId", IssueReason.UNKNOWN_VALUE)
+        return kind
 
     def _emit_race(
         self,

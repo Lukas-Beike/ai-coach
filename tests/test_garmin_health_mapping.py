@@ -1769,8 +1769,11 @@ class RacePredictionTests(unittest.TestCase):
                     record(2, 380.0),
                     record(3, 1236.4),
                     record(4, 2581.0),
-                    {**record(5, 5772.0), "prStartTimeLocalFormatted": None,
-                     "prStartTimeLocal": 1_744_448_482_000},
+                    {
+                        **record(5, 5772.0),
+                        "prStartTimeLocalFormatted": None,
+                        "prStartTimeLocal": 1_744_448_482_000,
+                    },
                     record(6, 12_400.0),
                     record(7, 42_500.0),
                     record(8, 1_000.0, "cycling"),
