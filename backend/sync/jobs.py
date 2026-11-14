@@ -836,12 +836,19 @@ class SyncJobStore:
         A restart is a lost outcome like any other (#2137, A-501): a job that may
         have written to a remote service, or that used up its attempts, fails
         with ``outcome_not_persisted`` instead of running again. Provider
-        refreshes the stopped process left running are closed as well (#2707).
+        refreshes the stopped process left running are closed as well (#2707),
+        and a Garmin operation it left running is no longer shown as one: a
+        later Garmin push holding the same lock would show it live (#2706).
         """
         self._fail_unreplayable_running()
         now = self._now()
         with self._database_manager.unit_of_work() as db:
             settle_interrupted_refreshes(db, now=now)
+            db.execute(
+                "UPDATE kv SET value='', updated_at=? "
+                "WHERE key='sync_operation_status' AND value='running'",
+                (now,),
+            )
             return self._requeue_running(db, now)
 
     def requeue_unowned_running(self) -> int:
