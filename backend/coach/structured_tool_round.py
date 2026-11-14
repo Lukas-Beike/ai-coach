@@ -160,7 +160,6 @@ class CoachStructuredToolRoundService:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Any,
         replay: CoachStructuredToolReplayService,
         preparation: CoachStructuredToolPreparationService,
         execution: CoachStructuredToolExecutionService,
@@ -175,7 +174,6 @@ class CoachStructuredToolRoundService:
     ) -> None:
         self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._replay = replay
         self._preparation = preparation
         self._execution = execution
@@ -310,14 +308,13 @@ class CoachStructuredToolRoundService:
             self._profile_mutation_coordinator
             if name in PROFILE_MUTATING_TOOLS
             else nullcontext(),
-            self._database_lock if local_transaction else nullcontext(),
             self._database_manager().unit_of_work()
             if local_transaction
             else nullcontext(),
             # Kept on the receipt so the athlete can undo the turn's changes.
             recorder as changes,
         ):
-            # Checked under the same lock as stale-turn release, so a turn
+            # Checked in the same unit of work as stale-turn release, so a turn
             # released while this worker was busy cannot finish its writes.
             if not self._jobs.turn_open(state.client_turn_id):
                 return None

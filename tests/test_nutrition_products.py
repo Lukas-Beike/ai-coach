@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import sqlite3
 import tempfile
-import threading
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +34,6 @@ class NutritionProductContractTests(unittest.TestCase):
             row_factory=sqlite3.Row,
             schema=True,
         )
-        self.lock = threading.Lock()
         self.off = Mock()
         self.food_database = Mock()
         self.food_database.lookup.return_value = {
@@ -61,7 +59,6 @@ class NutritionProductContractTests(unittest.TestCase):
     def build_service(self, photo_extractor=None):
         self.diary, self.library = build_nutrition_services(
             self.manager,
-            self.lock,
             lambda: "2026-10-05T12:00:00+00:00",
             lambda: datetime(2026, 10, 5, 14, 0, tzinfo=UTC),
             food_database=self.food_database,
@@ -883,9 +880,7 @@ class NutritionProductContractTests(unittest.TestCase):
             disk_usage=lambda _path: SimpleNamespace(free=2_000_000),
         )
 
-        backup = DatabaseBackupService(
-            self.manager, self.lock, config, Mock()
-        ).read_bytes()
+        backup = DatabaseBackupService(self.manager, config, Mock()).read_bytes()
         backup_path = Path(self.temporary.name) / "nutrition-products-backup.db"
         backup_path.write_bytes(backup)
         try:

@@ -815,7 +815,7 @@ class ServerProvidersTests(ServerTestCase):
             server.PROVIDER_SYNC.refresh_tracker().finish(
                 refresh_id, "success", "complete"
             )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             count = db.execute(
                 "SELECT COUNT(*) AS count FROM provider_refresh_history"
             ).fetchone()["count"]

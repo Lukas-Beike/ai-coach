@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -124,7 +123,7 @@ class LookupChainTests(unittest.TestCase):
         )
         self.now = START
         self.mirror = FoodDatabaseMirror(
-            lambda: self.manager, threading.RLock(), lambda: self.now.isoformat()
+            lambda: self.manager, lambda: self.now.isoformat()
         )
         self.yazio = FakeYazio()
         self.off = FakeOff()

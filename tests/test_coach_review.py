@@ -108,7 +108,7 @@ class CoachReviewTests(unittest.TestCase):
                 }
             ],
         }
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "UPDATE coach_commands SET intent=?, receipt=? WHERE client_turn_id=?",
                 (json.dumps(intent), json.dumps(persisted_receipt), client_turn_id),
@@ -550,7 +550,7 @@ class CoachReviewTests(unittest.TestCase):
 
         def collect():
             barrier.wait(timeout=5)
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            with server.database_manager().unit_of_work() as db:
                 return prune_expired_coach_proposals(db, time.time())
 
         def confirm():

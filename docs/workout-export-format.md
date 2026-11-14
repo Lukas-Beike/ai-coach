@@ -153,7 +153,7 @@ final provider read across its units. Confirmed writes update the in-memory
 index, but only the final provider snapshot can mark a unit synchronized. A
 failed final read leaves the affected units retryable, retaining remote IDs.
 
-Provider requests do not hold the database lock, so status polling remains
+Provider requests do not hold the database writer, so status polling remains
 available. A per-unit guard excludes simultaneous pushes of the same workout.
 Payload hashes are rechecked before remote mutations and before recording
 success. An intervening local edit stays unsynchronized; a remote identity

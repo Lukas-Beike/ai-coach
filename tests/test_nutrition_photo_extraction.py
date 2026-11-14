@@ -139,7 +139,7 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
             selected_model=lambda: "gpt-6-luna", complete=self.request
         )
         _, library = build_nutrition_services(
-            Mock(), Mock(), Mock(), Mock(), photo_extractor=extractor
+            Mock(), Mock(), Mock(), photo_extractor=extractor
         )
         self.routes = NutritionPostRoutes(Mock, lambda: library)
 

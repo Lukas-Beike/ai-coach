@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -26,7 +25,6 @@ class NutritionSyncStatusService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: AbstractContextManager[Any],
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
@@ -34,7 +32,6 @@ class NutritionSyncStatusService:
     ) -> None:
         self._observation_reader = observation_reader
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
         self._utc_now = utc_now
         self._local_now = local_now
@@ -88,7 +85,7 @@ class NutritionSyncStatusService:
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.day_sync_snapshot(db, validated_date)
 
     def get_week_summary(self, day_count: int = 7) -> dict[str, Any]:
@@ -155,7 +152,7 @@ class NutritionSyncStatusService:
         )
         if selectors != 1:
             raise AppError(400, "Choose one date or an approved date range.")
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             if meal_date is not None:
                 selected_dates = [validate_iso_date(meal_date)]
             elif pending_limit is not None:
@@ -189,13 +186,13 @@ class NutritionSyncStatusService:
             ]
 
     def list_unsynced_dates(self, limit: int = 14) -> list[str]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.list_unsynced_dates(db, limit=limit)
 
     def mark_date_synced(self, meal_date: str, revision: int) -> bool:
         validated_date = validate_iso_date(meal_date)
         now_str = self._utc_now()
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             return self._nutrition_repository.mark_date_synced(
                 db, validated_date, revision, now_str
             )

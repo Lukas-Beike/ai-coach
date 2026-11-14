@@ -23,7 +23,8 @@ class CoachProfileUpdateTests(unittest.TestCase):
 
         self.manager.unit_of_work.side_effect = unit_of_work
         self.service = CoachProfileUpdateService(
-            self.profile, self.manager, threading.RLock()
+            self.profile,
+            self.manager,
         )
         self.intent = {
             "operation": "update_profile",

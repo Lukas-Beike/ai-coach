@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import Mock
@@ -25,7 +24,6 @@ class NutritionMealTimeTests(unittest.TestCase):
         )
         self.service, _ = build_nutrition_services(
             self.manager,
-            threading.Lock(),
             lambda: "2026-09-24T12:00:00+00:00",
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )

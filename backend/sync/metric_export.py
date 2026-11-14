@@ -25,7 +25,6 @@ import logging
 import math
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Final
@@ -148,13 +147,11 @@ class MetricExportService:
         ports: Mapping[ProviderId, Callable[[], MetricExportPort]],
         *,
         thresholds: ThresholdSource,
-        database_lock: AbstractContextManager[Any],
         today: Callable[[], date],
         utc_now: Callable[[], datetime],
         links: RemoteLinkRepository | None = None,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._observation_reader = observation_reader
         self._thresholds = thresholds
         self._ports = dict(ports)
@@ -189,7 +186,6 @@ class MetricExportService:
         change = self._field_change(payload)
         with (
             self._export_lock,
-            self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
             before = enabled_fields(lambda key: self._key_values.get(db, key))
@@ -366,7 +362,7 @@ class MetricExportService:
 
     def record_status(self, message: str) -> None:
         """Store the athlete-facing status line of the last automatic export."""
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             self._key_values.set(
                 db, STATUS_KEY, f"{self._utc_now().isoformat()}: {message}"
             )
@@ -621,7 +617,7 @@ class MetricExportService:
     ) -> None:
         """Persist the accepted values; ``history`` names a write's change source."""
         synced_at = self._utc_now().isoformat()
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             if history is not None:
                 record_change(
                     db,

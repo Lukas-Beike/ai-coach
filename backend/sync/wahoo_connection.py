@@ -16,7 +16,6 @@ import logging
 import secrets
 import threading
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -147,7 +146,6 @@ class WahooConnectionService:
         config: Callable[[], Config],
         oauth: Callable[[], WahooOAuthClient],
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Callable[[], AbstractContextManager[Any]],
         key_values: KeyValueRepository,
         utc_now: Callable[[], str],
         token_factory: Callable[[], str] = lambda: secrets.token_urlsafe(32),
@@ -158,7 +156,6 @@ class WahooConnectionService:
         self._config = config
         self._oauth = oauth
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._utc_now = utc_now
         self._token_factory = token_factory
@@ -183,13 +180,13 @@ class WahooConnectionService:
 
     def _write(self, key: str, value: dict[str, Any]) -> None:
         encoded = json.dumps(value, separators=(",", ":"))
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             self._key_values.set(db, key, encoded)
         if key == WAHOO_TOKENS_KEY:
             self._secret_registry.replace_tokens(encoded)
 
     def _delete(self, *keys: str) -> None:
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             for key in keys:
                 self._key_values.delete(db, key)
         if WAHOO_TOKENS_KEY in keys:
@@ -234,7 +231,7 @@ class WahooConnectionService:
         if not state or len(state) > MAX_CALLBACK_VALUE_LENGTH:
             return False
         digest = _state_digest(state)
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             pending = _decode_object(self._key_values.get(db, WAHOO_STATE_KEY))
             if pending is None:
                 return False

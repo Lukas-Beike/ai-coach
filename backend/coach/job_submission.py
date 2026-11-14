@@ -33,7 +33,6 @@ class CoachJobSubmissionService:
         self,
         database_manager: Callable[[], DatabaseManager],
         chat_repository: ChatRepository,
-        database_lock: Any,
         settings_service: SettingsService,
         state_event_buffer: StateEventBuffer,
         stream_registry: ChatStreamRegistry,
@@ -45,7 +44,6 @@ class CoachJobSubmissionService:
     ) -> None:
         self._database_manager = database_manager
         self._chat_repository = chat_repository
-        self._database_lock = database_lock
         self._settings_service = settings_service
         self._state_event_buffer = state_event_buffer
         self._stream_registry = stream_registry
@@ -58,7 +56,7 @@ class CoachJobSubmissionService:
         self, session_csrf_hash: str, operation_id: str | None = None
     ) -> dict[str, Any] | None:
         session_key = coach_session_key(session_csrf_hash)
-        # Pure read of one table: no writer or shared lock. Enqueue re-checks
+        # Pure read of one table: no writer. Enqueue re-checks
         # the same rows inside its own transaction before inserting.
         with self._database_manager().reader() as db:
             rows = self._active_rows(db)
@@ -172,7 +170,7 @@ class CoachJobSubmissionService:
         }
 
     def _persist_early_cancel(self, client_turn_id: str) -> None:
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             coach_store.merge_command_receipt(
                 db,
                 client_turn_id,
@@ -255,7 +253,7 @@ class CoachJobSubmissionService:
         thinking_level: str,
     ) -> tuple[dict[str, Any] | None, int | None]:
         now = self._utc_now()
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             existing = coach_store.command_row(db, client_turn_id, "status, receipt")
             if existing:
                 receipt = command_receipt(existing.get("receipt"))

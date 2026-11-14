@@ -17,7 +17,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -136,14 +136,12 @@ class GarminTokenStore:
         self,
         *,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: Callable[[], AbstractContextManager[Any]],
         key_values: KeyValueRepository,
         tokenstore_path: Callable[[], str],
         registry: GarminSecretRegistry,
         env_credentials: Callable[[], bool] = lambda: False,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._tokenstore_path = tokenstore_path
         self._registry = registry
@@ -204,7 +202,7 @@ class GarminTokenStore:
     def store(self, blob: str) -> None:
         if not blob:
             raise AppError(502, TOKEN_EXPORT_MESSAGE)
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             self._key_values.set(db, GARMIN_TOKENS_KEY, blob)
             self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
             # A fresh login replaces the one a sync skipped; drop its card hint.
@@ -234,7 +232,7 @@ class GarminTokenStore:
                 and login_argument != EMPTY_TOKENSTORE
                 else None
             )
-            with self._database_lock(), self._database_manager().unit_of_work() as db:
+            with self._database_manager().unit_of_work() as db:
                 stored = self._key_values.get(db, GARMIN_TOKENS_KEY) or None
                 disconnected = (
                     self._key_values.get(db, GARMIN_TOKENSTORE_STATE_KEY)
@@ -258,7 +256,7 @@ class GarminTokenStore:
 
     def clear(self) -> None:
         """Remove the stored tokens and block the legacy file until reconnect."""
-        with self._database_lock(), self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             self._key_values.delete(db, GARMIN_TOKENS_KEY)
             self._key_values.set(
                 db, GARMIN_TOKENSTORE_STATE_KEY, GARMIN_TOKENSTORE_DISCONNECTED

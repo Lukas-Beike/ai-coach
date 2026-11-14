@@ -173,7 +173,6 @@ class WahooConnectionServiceTests(unittest.TestCase):
             config=config,
             oauth=lambda: WahooOAuthClient(config, self.request),
             database_manager=lambda: FakeManager(),
-            database_lock=lambda: MagicMock(),
             key_values=self.values,
             utc_now=self.clock,
             token_factory=lambda: next(self.states),

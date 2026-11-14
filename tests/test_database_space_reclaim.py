@@ -117,7 +117,6 @@ def _delete_service(
     return PrivacyDeleteService(
         PrivacyDeleteDependencies(
             database_manager=manager,
-            database_lock=threading.RLock(),
             key_value_repository=KeyValueRepository(lambda: STAMP),
             maintenance_gate=MaintenanceGate(),
             profile_mutation_coordinator=threading.RLock(),
@@ -356,7 +355,7 @@ class BackupAndRestoreAfterReclaimTests(unittest.TestCase):
             monotonic=lambda: 10.0,
             disk_usage=lambda _path: SimpleNamespace(free=10**12),
         )
-        service = DatabaseBackupService(manager, threading.RLock(), config, Mock())
+        service = DatabaseBackupService(manager, config, Mock())
 
         with service.stream_file() as snapshot:
             self.assertNotIn(SENTINEL.encode(), snapshot.read_bytes())

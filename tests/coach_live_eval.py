@@ -738,7 +738,7 @@ def _seed_nutrition(server: Any, setup: dict[str, Any]) -> None:
 
 
 def _seed_blocker(server: Any) -> None:
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
         db.execute(
             "INSERT INTO external_calendar_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
@@ -867,7 +867,7 @@ def _proposal_units(row: Any) -> list[str]:
 def snapshot(server: Any) -> dict[str, Any]:
     """The scored state: planned units, library, plans, competitions, check-ins,
     activity feedback, drafts, proposals, sync jobs and the pending request."""
-    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+    with server.database_manager().unit_of_work() as db:
 
         def rows(sql: str) -> list[Any]:
             return db.execute(sql).fetchall()
@@ -1086,7 +1086,7 @@ def _stale_once(server: Any) -> Any:
         ]:
             return
         state["done"] = True
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("UPDATE planning_state SET revision = revision + 1 WHERE id=1")
 
     return on_turn

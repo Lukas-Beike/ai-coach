@@ -58,7 +58,6 @@ def make_server(*, input_timeout: float, chunk_bytes: int):
     log.addHandler(recorder)
     login_service = SessionAuthService(
         Mock(),
-        threading.RLock(),
         cast(Any, SimpleNamespace(app_password=PASSWORD)),
         True,
         RateLimiter(),

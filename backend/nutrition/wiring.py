@@ -39,7 +39,7 @@ class NutritionServices:
 def build_nutrition(ctx: AppContext) -> NutritionServices:
     """One food database and mirror for the process; the rest fresh per call."""
     utc_now = runtime_clock.utc_now
-    mirror = FoodDatabaseMirror(ctx.database, ctx.database_lock, utc_now)
+    mirror = FoodDatabaseMirror(ctx.database, utc_now)
     food_database = FoodDatabaseService(
         off=OpenFoodFactsClient(opener=ctx.observed_opener("open_food_facts")),
         mirror=mirror,
@@ -66,7 +66,6 @@ def build_nutrition(ctx: AppContext) -> NutritionServices:
     def meal_library_service() -> NutritionMealLibraryService:
         return NutritionMealLibraryService(
             database_manager=ctx.database(),
-            db_lock=ctx.database_lock,
             utc_now=utc_now,
             local_now=ctx.clock.now,
             food_database=food_database,
@@ -83,7 +82,6 @@ def build_nutrition(ctx: AppContext) -> NutritionServices:
     def diary_service() -> NutritionDiaryService:
         return NutritionDiaryService(
             database_manager=ctx.database(),
-            db_lock=ctx.database_lock,
             nutrition_repository=NutritionRepository(utc_now),
             utc_now=utc_now,
             local_now=ctx.clock.now,

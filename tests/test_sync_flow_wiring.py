@@ -279,7 +279,6 @@ class MetricExportBuilderTests(unittest.TestCase):
         self.assertIs(args[1](), ctx.canonical_read)
         self.assertEqual({ProviderId.INTERVALS}, set(args[2]))
         self.assertIs(kwargs["thresholds"], shared)
-        self.assertIs(kwargs["database_lock"], ctx.database_lock)
         self.assertIs(kwargs["today"](), ctx.clock.now.return_value.date.return_value)
         self.assertEqual(UTC, kwargs["utc_now"]().tzinfo)
         self.assertIsInstance(kwargs["utc_now"](), datetime)

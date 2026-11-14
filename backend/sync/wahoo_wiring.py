@@ -95,7 +95,6 @@ def build_wahoo_connection(
                         ctx.config, ctx.provider_transport.json_http_client().request
                     ),
                     database_manager=ctx.database,
-                    database_lock=lambda: ctx.database_lock,
                     key_values=ctx.key_values,
                     utc_now=runtime_clock.utc_now,
                     secret_registry=secret_registry,
@@ -148,7 +147,6 @@ def build_wahoo_sync(
                     source=client,
                     storage=WahooSyncStorage(
                         database_manager=ctx.database,
-                        database_lock=ctx.database_lock,
                         key_values=ctx.key_values,
                     ),
                     daily_markers=daily_markers,
@@ -167,7 +165,6 @@ def build_wahoo_sync(
             if shared_details is None:
                 shared_details = WahooActivityDetailImport(
                     database_manager=ctx.database,
-                    database_lock=ctx.database_lock,
                     key_values=ctx.key_values,
                     download=fit_download(),
                     monotonic=time.monotonic,
@@ -187,7 +184,6 @@ def build_wahoo_sync(
             mapping=WahooStreamMapping(),
             database_manager=ctx.database,
             key_values=ctx.key_values,
-            guard=lambda: ctx.database_lock,
             utc_now=lambda: _utc_datetime().isoformat(),
             configured=sync_service().configured,
             earliest_date=history_earliest_date,

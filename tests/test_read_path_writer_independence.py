@@ -1,8 +1,8 @@
-"""Read-path GET services must not wait for the writer or the shared DB lock.
+"""Read-path GET services must not wait for the writer.
 
-A thread holds ``DB_LOCK`` and the database writer for the whole test. Each
+A thread holds the database writer for the whole test. Each
 read service runs on another thread and has to finish: a service that still
-takes the writer or the shared lock stalls here, and a hidden write fails on
+takes the writer stalls here, and a hidden write fails on
 the query-only snapshot instead of being silently serialized.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import traceback
 import unittest
 import zipfile
@@ -19,6 +20,7 @@ from typing import Any
 
 from server_test_support import ServerTestCase, server
 
+from backend.db.manager import background_writer
 from backend.errors import AppError
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 
@@ -26,11 +28,11 @@ WAIT_SECONDS = 15
 
 
 class ReadPathWriterIndependenceTests(ServerTestCase):
-    def hold_writer_and_lock(self) -> None:
+    def hold_writer(self) -> None:
         held, release = threading.Event(), threading.Event()
 
         def hold() -> None:
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            with server.database_manager().unit_of_work() as db:
                 db.execute("UPDATE sessions SET last_seen=last_seen WHERE 0")
                 held.set()
                 release.wait(WAIT_SECONDS * 4)
@@ -60,26 +62,26 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
         if thread.is_alive():
             frame = sys._current_frames().get(thread.ident)
             where = "".join(traceback.format_stack(frame)[-6:]) if frame else ""
-            self.fail(f"read path waited for the writer or DB lock at:\n{where}")
+            self.fail(f"read path waited for the writer at:\n{where}")
         if "error" in outcome:
             raise outcome["error"]  # type: ignore[misc]
         return outcome["value"]
 
-    def test_bootstrap_is_not_blocked_by_a_held_writer_and_database_lock(self) -> None:
+    def test_bootstrap_is_not_blocked_by_a_held_writer(self) -> None:
         expected = server.PUBLIC_STATE.bootstrap_service().read()
-        self.hold_writer_and_lock()
+        self.hold_writer()
         actual = self.call_while_held(
             lambda: server.PUBLIC_STATE.bootstrap_service().read()
         )
         self.assertEqual(actual["state_versions"], expected["state_versions"])
         self.assertEqual(actual["profile"], expected["profile"])
 
-    def test_performance_is_not_blocked_by_a_held_writer_and_database_lock(
+    def test_performance_is_not_blocked_by_a_held_writer(
         self,
     ) -> None:
         service = server.PUBLIC_STATE.performance_state_service
         expected = service().performance_state()
-        self.hold_writer_and_lock()
+        self.hold_writer()
         actual = self.call_while_held(lambda: service().performance_state())
         self.assertEqual(actual, expected)
 
@@ -188,9 +190,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "season": lambda: reports.season.season("UTC"),
             "derived_impact": lambda: reports.derived.impact("UTC"),
             "readiness": lambda: server.HTTP_API.readiness_service().state(),
-            "privacy_preview": lambda: (
-                server.PRIVACY.delete_service().preview()
-            ),
+            "privacy_preview": lambda: server.PRIVACY.delete_service().preview(),
             "privacy_export": lambda: archive_files(
                 "profile.json", "athlete_checkins.jsonl"
             ),
@@ -210,10 +210,62 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
         server.ATHLETE_DATA.checkin().save({"checkin_date": "2026-01-05"})
         calls = self.read_calls()
         expected = {name: call() for name, call in calls.items()}
-        self.hold_writer_and_lock()
+        self.hold_writer()
         for name, call in calls.items():
             with self.subTest(read=name):
                 self.assertEqual(self.call_while_held(call), expected[name])
+
+    def test_a_foreground_write_is_served_before_a_waiting_background_write(
+        self,
+    ) -> None:
+        """Nothing in front of the writer gate may hide a waiting foreground write."""
+        manager = server.database_manager()
+        gate = manager._writer_lock
+        held, release = threading.Event(), threading.Event()
+
+        def hold() -> None:
+            with manager.unit_of_work() as db:
+                db.execute("UPDATE sessions SET last_seen=last_seen WHERE 0")
+                held.set()
+                release.wait(WAIT_SECONDS)
+
+        def write(key: str, background: bool) -> None:
+            if background:
+                with background_writer():
+                    server.key_value_service().set(key, "1")
+            else:
+                server.key_value_service().set(key, "1")
+
+        def start(target, *args) -> threading.Thread:
+            thread = threading.Thread(target=target, args=args, daemon=True)
+            thread.start()
+            return thread
+
+        def wait_for(condition) -> bool:
+            deadline = time.monotonic() + 5
+            while not condition() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            return condition()
+
+        holder = start(hold)
+        self.addCleanup(release.set)
+        self.assertTrue(held.wait(5))
+        background = start(write, "order.background", True)
+        self.assertTrue(wait_for(lambda: gate._background_waiting == 1))
+        foreground = start(write, "order.foreground", False)
+        reached_gate = wait_for(lambda: gate._foreground_waiting == 1)
+        release.set()
+        for thread in (holder, background, foreground):
+            thread.join(WAIT_SECONDS)
+        self.assertTrue(reached_gate, "the foreground write never reached the gate")
+        with manager.reader() as db:
+            written = [
+                row["key"]
+                for row in db.execute(
+                    "SELECT key FROM kv WHERE key LIKE 'order.%' ORDER BY rowid"
+                )
+            ]
+        self.assertEqual(written, ["order.foreground", "order.background"])
 
 
 if __name__ == "__main__":

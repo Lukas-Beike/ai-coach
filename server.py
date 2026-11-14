@@ -59,9 +59,6 @@ from backend.db.bootstrap import (
 )
 from backend.db.key_value import KeyValueService
 from backend.db.manager import (
-    DATABASE_LOCK as DB_LOCK,
-)
-from backend.db.manager import (
     DatabaseHolder,
     background_writer,
 )
@@ -302,7 +299,6 @@ def session_auth_service() -> SessionAuthService:
     """Compose the HTTP session owner from the active persistence and security configuration."""
     return get_session_auth_service(
         database_manager(),
-        DB_LOCK,
         CONFIG_HOLDER.value,
         SQLCIPHER_AVAILABLE,
         ATHLETE_SESSION_SERVICE,
@@ -314,7 +310,6 @@ def provider_state_service() -> provider_state.ProviderStateService:
     return provider_state.get_provider_state_service(
         database_manager(),
         KEY_VALUE_REPOSITORY,
-        DB_LOCK,
         runtime_clock.utc_now,
         lambda: ATHLETE_CLOCK.now().date(),
         LOGGER,
@@ -401,7 +396,7 @@ ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
 CANONICAL_READ: CanonicalReadSelector
 
 # Renames a recognised route of outdoor sessions (#1868); only the label is exposed.
-ACTIVITY_ROUTES = ActivityRouteService(database_manager, DB_LOCK, KEY_VALUE_REPOSITORY)
+ACTIVITY_ROUTES = ActivityRouteService(database_manager, KEY_VALUE_REPOSITORY)
 
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 
@@ -417,7 +412,6 @@ APP = AppContext(
     maintenance=runtime_maintenance.MAINTENANCE_GATE,
     redactor=REDACTOR,
     operation_context=sync_observation.OPERATION_CONTEXT,
-    database_lock=DB_LOCK,
     data_dir=lambda: DATA_DIR,
     database_path=lambda: DB_PATH,
     sqlcipher_available=lambda: SQLCIPHER_AVAILABLE,
@@ -488,7 +482,7 @@ BACKUP = build_backup(APP)
 
 
 def initialise_database() -> None:
-    with DB_LOCK, database_manager().unit_of_work() as db:
+    with database_manager().unit_of_work() as db:
         initialize_application_database(
             db,
             key_values=KEY_VALUE_REPOSITORY,
@@ -502,7 +496,7 @@ def initialise_database() -> None:
 
 
 def key_value_service() -> KeyValueService:
-    return KeyValueService(database_manager, KEY_VALUE_REPOSITORY, DB_LOCK)
+    return KeyValueService(database_manager, KEY_VALUE_REPOSITORY)
 
 
 SYNC_PERIOD_DEFAULTS = DEFAULT_PROVIDER_REGISTRY.sync_period_defaults()
@@ -524,7 +518,6 @@ SETTINGS = SettingsService(
 PROVIDER_CREDENTIAL_SERVICE = ProviderCredentialService(
     env_config=ENV_CONFIG,
     database_manager=database_manager,
-    database_lock=lambda: DB_LOCK,
     key_values=KEY_VALUE_REPOSITORY,
     apply_config=CONFIG_HOLDER.apply,
     garmin_connection=lambda: GARMIN_LOGIN.status(),
@@ -560,7 +553,6 @@ def sync_daily_markers() -> DailySyncMarkerService:
 
 GARMIN_TOKENS = GarminTokenStore(
     database_manager=database_manager,
-    database_lock=lambda: DB_LOCK,
     key_values=KEY_VALUE_REPOSITORY,
     tokenstore_path=lambda: CONFIG_HOLDER.value.garmin_tokenstore,
     registry=GARMIN_SECRET_REGISTRY,

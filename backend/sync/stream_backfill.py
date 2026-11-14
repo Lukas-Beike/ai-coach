@@ -244,7 +244,7 @@ class StreamBackfillService:
         mapping: StreamMapping,
         database_manager: Callable[[], Any],
         key_values: KeyValueRepository,
-        guard: Guard,
+        guard: Guard = nullcontext,
         utc_now: Callable[[], str],
         configured: Callable[[], bool],
         earliest_date: date,

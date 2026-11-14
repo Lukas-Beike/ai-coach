@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import nullcontext
 from typing import Any
 
 from backend.db.manager import DatabaseManager
@@ -17,14 +16,12 @@ class KeyValueService:
         self,
         database: DatabaseManager | Callable[[], DatabaseManager],
         repository: KeyValueRepository,
-        db_lock: Any | None = None,
     ) -> None:
         self._database = database
         self._repository = repository
-        self._db_lock = db_lock
 
     def get(self, key: str) -> str | None:
-        # A single-row read needs neither the writer nor the shared lock. It
+        # A single-row read does not need the writer. It
         # joins an active unit of work or read snapshot, so callers inside one
         # still observe that transaction; otherwise it sees committed state.
         with self._manager().reader() as db:
@@ -34,11 +31,7 @@ class KeyValueService:
         return self._repository.get(db, key)
 
     def set(self, key: str, value: str) -> None:
-        # The items enter in order, so the manager resolves under the lock.
-        with (
-            self._db_lock if self._db_lock is not None else nullcontext(),
-            self._manager().unit_of_work() as db,
-        ):
+        with self._manager().unit_of_work() as db:
             self._repository.set(db, key, value)
 
     def _manager(self) -> Any:

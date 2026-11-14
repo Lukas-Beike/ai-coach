@@ -2,7 +2,6 @@
 
 import ipaddress
 import tempfile
-import threading
 import unittest
 from email.message import Message
 from pathlib import Path
@@ -95,9 +94,7 @@ class SessionAuthClientIpTests(unittest.TestCase):
                     "TRUSTED_PROXY_IPS": trusted_proxy_ips,
                 },
             )
-        return SessionAuthService(
-            object(), threading.RLock(), config, True, RateLimiter()
-        )
+        return SessionAuthService(object(), config, True, RateLimiter())
 
     def test_login_rate_limit_buckets_follow_the_forwarded_client(self):
         service = self.service("192.168.1.6")

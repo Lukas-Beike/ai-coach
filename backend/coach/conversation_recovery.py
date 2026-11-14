@@ -20,12 +20,10 @@ class CoachConversationRecoveryService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: Any,
         key_values: KeyValueRepository,
         logger: logging.Logger,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._logger = logger
 
@@ -53,7 +51,7 @@ class CoachConversationRecoveryService:
 
         recovery_state["conversation_recovered"] = True
         if request.conversation_id:
-            with self._database_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, "openai_conversation_id", "")
         for candidate in (turn_request, request):
             candidate.conversation_id = None

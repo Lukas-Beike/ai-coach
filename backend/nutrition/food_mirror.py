@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -41,12 +40,10 @@ class FoodDatabaseMirror:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        db_lock: AbstractContextManager[Any],
         utc_now: Callable[[], str],
         repository: FoodDatabaseEntryRepository | None = None,
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._utc_now = utc_now
         self._entries = repository or FoodDatabaseEntryRepository()
 
@@ -94,7 +91,7 @@ class FoodDatabaseMirror:
         if not foods:
             return []
         now = self._utc_now()
-        with self._db_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             stored = []
             for food in foods:
                 self._entries.upsert(
@@ -109,7 +106,7 @@ class FoodDatabaseMirror:
         Only values on the same basis fill; known values stay. Each filled
         value names its origin and fetch time under ``filled_fields``.
         """
-        with self._db_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             entry = self._entries.get(db, food_id)
             if entry is None or not _same_basis(entry, source):
                 return entry
@@ -161,7 +158,7 @@ class FoodDatabaseMirror:
         return food_history_value(restored) if restored else {}
 
     def delete(self, food_id: str) -> None:
-        with self._db_lock, self._database_manager().unit_of_work() as db:
+        with self._database_manager().unit_of_work() as db:
             if not self._entries.delete(db, food_id):
                 raise AppError(
                     404, "Datenbankeintrag nicht gefunden.", reason="food_not_found"

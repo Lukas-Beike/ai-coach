@@ -60,7 +60,6 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
     ) -> MorningCoachJobCompletionService:
         return MorningCoachJobCompletionService(
             self.manager,
-            self.lock,
             self.key_values,
             lambda: SimpleNamespace(state=lambda: quick_actions),
             lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),
@@ -96,7 +95,6 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
 
         service = MorningCoachJobCompletionService(
             self.manager,
-            self.lock,
             self.key_values,
             quick_actions_factory,
             lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),
@@ -181,7 +179,6 @@ class MorningCoachJobCompletionTests(unittest.TestCase):
 
         service = MorningCoachJobCompletionService(
             self.manager,
-            self.lock,
             self.key_values,
             failed_quick_actions,
             lambda: datetime(2026, 9, 24, 7, 30, tzinfo=UTC),

@@ -13,7 +13,6 @@ from backend.sync.canonical_table_reader import CanonicalTableReader
 
 def build_nutrition_services(
     database_manager: Any,
-    db_lock: Any,
     utc_now: Any,
     local_now: Any,
     *,
@@ -27,7 +26,6 @@ def build_nutrition_services(
     template_repository = NutritionTemplateRepository()
     meal_library = NutritionMealLibraryService(
         database_manager=database_manager,
-        db_lock=db_lock,
         utc_now=utc_now,
         local_now=local_now,
         food_database=food_database,
@@ -38,7 +36,6 @@ def build_nutrition_services(
     )
     diary = NutritionDiaryService(
         database_manager=database_manager,
-        db_lock=db_lock,
         nutrition_repository=NutritionRepository(now=utc_now),
         utc_now=utc_now,
         local_now=local_now,

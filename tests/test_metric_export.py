@@ -297,7 +297,6 @@ class MetricExportServiceTests(unittest.TestCase):
             lambda: self.reader,
             {ProviderId.INTERVALS: lambda: IntervalsMetricExport(self.client_factory)},
             thresholds=newest_thresholds(self.reader),
-            database_lock=threading.Lock(),
             today=lambda: TODAY,
             utc_now=lambda: NOW,
         )
@@ -504,7 +503,6 @@ class MetricExportServiceTests(unittest.TestCase):
             lambda: self.reader,
             {ProviderId.INTERVALS: lambda: IntervalsMetricExport(self.client_factory)},
             thresholds=newest_thresholds(self.reader),
-            database_lock=threading.Lock(),
             today=lambda: TODAY,
             utc_now=lambda: NOW,
         )

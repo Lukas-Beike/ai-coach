@@ -453,12 +453,10 @@ class CoachStructuredOutcomeService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: Any,
         key_values: KeyValueRepository,
         read_only_tools: frozenset[str],
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._internal_tools = read_only_tools | {
             "clarify_coach_request",
@@ -573,7 +571,7 @@ class CoachStructuredOutcomeService:
         )
 
         if pending_value is not None:
-            with self._database_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 self._key_values.set(db, "coach_pending_request", pending_value)
         elif _may_clear_pending(
             question,
@@ -583,7 +581,7 @@ class CoachStructuredOutcomeService:
             allow_mutations,
             cancelled,
         ):
-            with self._database_lock, self._database_manager.unit_of_work() as db:
+            with self._database_manager.unit_of_work() as db:
                 raw_pending = self._key_values.get(db, "coach_pending_request")
                 try:
                     current_pending = json.loads(raw_pending or "null")

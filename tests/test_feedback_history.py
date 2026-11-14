@@ -163,7 +163,6 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         path = Path(self.manager.path)
         backup = DatabaseBackupService(
             self.manager,
-            Mock(),
             DatabaseBackupConfig(
                 database_path=path,
                 data_dir=path.parent,

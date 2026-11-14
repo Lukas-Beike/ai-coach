@@ -56,7 +56,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = runtime_clock.utc_now()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO public_event_sources(id, name, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                 ("source", "Source", "https://example.test/calendar", now, now),
@@ -235,7 +235,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ],
             }
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -307,7 +307,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 }
             ]
         )[0]
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, no_intensity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -349,7 +349,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 }
             ]
         )[0]
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -406,7 +406,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "start_local, end_local, duration_minutes, all_day, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(insert, event)
         preview_service = server.PLANNING_WORKFLOWS.adaptive_replan_preview_service
         self.assertEqual(len(preview_service().preview()["changes"]), 1)
@@ -421,7 +421,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             (status, body["impact"], body["needs_replan"]), (200, "none", False)
         )
         # The feed sync replaces every row; the decision stays apart.
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute("DELETE FROM external_calendar_events")
             db.execute(insert, event)
         self.assertEqual(preview_service().preview()["changes"], [])
@@ -445,7 +445,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 }
             ]
         )[0]
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -605,7 +605,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertFalse(local_row["is_remote"])
         self.assertIsNone(local_row["remote_id"])
 
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             payload = json.loads(
                 db.execute(
                     "SELECT payload FROM planned_units WHERE local_id=?", (local["id"],)
@@ -630,7 +630,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self,
     ):
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -1158,7 +1158,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (

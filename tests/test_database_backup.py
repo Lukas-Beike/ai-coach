@@ -41,7 +41,6 @@ class DatabaseBackupServiceTests(unittest.TestCase):
             db.execute("CREATE TABLE records (value TEXT NOT NULL)")
             db.execute("INSERT INTO records VALUES ('saved in wal')")
         self.assertTrue(Path(f"{self.path}-wal").exists())
-        self.lock = Mock()
         self.logger = Mock()
         self.config = DatabaseBackupConfig(
             database_path=self.path,
@@ -56,9 +55,7 @@ class DatabaseBackupServiceTests(unittest.TestCase):
     def service(
         self, config: DatabaseBackupConfig | None = None
     ) -> DatabaseBackupService:
-        return DatabaseBackupService(
-            self.manager, self.lock, config or self.config, self.logger
-        )
+        return DatabaseBackupService(self.manager, config or self.config, self.logger)
 
     def assert_snapshot_has_wal_data(self, path: Path) -> None:
         snapshot = sqlite3.connect(path)
@@ -73,10 +70,11 @@ class DatabaseBackupServiceTests(unittest.TestCase):
         finally:
             snapshot.close()
 
-    def test_stream_uses_complete_snapshot_without_holding_database_lock(self) -> None:
+    def test_stream_uses_complete_snapshot_without_holding_the_writer(self) -> None:
         service = self.service()
         with service.stream_file() as path:
-            self.lock.assert_not_called()
+            with self.manager.unit_of_work(timeout=0):
+                pass
             self.assert_snapshot_has_wal_data(path)
             self.assertNotEqual(path, self.path)
         self.assertFalse(path.exists())
@@ -177,9 +175,7 @@ class DatabaseBackupServiceTests(unittest.TestCase):
         database.execute.side_effect = sqlite3.DatabaseError(
             "synthetic checkpoint failure"
         )
-        service = DatabaseBackupService(
-            manager, nullcontext(), self.config, self.logger
-        )
+        service = DatabaseBackupService(manager, self.config, self.logger)
 
         service.checkpoint()
 
@@ -261,7 +257,7 @@ class DatabaseBackupServiceTests(unittest.TestCase):
                     data_dir=root,
                 )
                 backup = DatabaseBackupService(
-                    manager, self.lock, config, self.logger
+                    manager, config, self.logger
                 ).read_bytes()
                 backup_path = root / "encrypted-backup.db"
                 backup_path.write_bytes(backup)

@@ -139,14 +139,12 @@ class ProviderStateService:
         self,
         manager: Any,
         repository: Any,
-        lock: Any,
         now: Callable[[], Any],
         today: Callable[[], Any],
         logger: Any | None = None,
     ) -> None:
         self._manager = manager
         self._repository = repository
-        self._lock = lock
         self._now = now
         self._today = today
         self._logger = logger
@@ -167,8 +165,8 @@ class ProviderStateService:
 
     def summary(self, provider: str) -> dict[str, Any]:
         provider = _provider(provider)
-        # Pure read: three key/value lookups need neither the writer nor the
-        # shared lock, and join an active transaction or read snapshot.
+        # Pure read: three key/value lookups need no writer
+        # and join an active transaction or read snapshot.
         with self._manager.reader() as db:
             return self._summary_unlocked(db, provider)
 
@@ -183,7 +181,7 @@ class ProviderStateService:
         provider_error_code: Any = None,
     ) -> None:
         provider = _provider(provider)
-        with self._lock, self._manager.unit_of_work() as db:
+        with self._manager.unit_of_work() as db:
             self._record_status_unlocked(
                 db,
                 provider,
@@ -222,7 +220,7 @@ class ProviderStateService:
 
     def record_success(self, provider: str, http_status: Any = 200) -> None:
         provider = _provider(provider)
-        with self._lock, self._manager.unit_of_work() as db:
+        with self._manager.unit_of_work() as db:
             self._record_status_unlocked(
                 db,
                 provider,
@@ -234,7 +232,7 @@ class ProviderStateService:
             )
 
     def record_rate_limits(self, headers: Any) -> None:
-        with self._lock, self._manager.unit_of_work() as db:
+        with self._manager.unit_of_work() as db:
             snapshot = rate_limit_snapshot(headers, updated_at=_timestamp(self._now()))
             if snapshot:
                 self._repository.set(db, _OPENAI_RATE_LIMITS_KEY, _json(snapshot))
@@ -274,7 +272,7 @@ class ProviderStateService:
         """Bill one request; ``model`` is the requested model, "" when unknown."""
         provider = _provider(provider)
         safe_operation = _safe_code(operation, default="unknown")
-        with self._lock, self._manager.unit_of_work() as db:
+        with self._manager.unit_of_work() as db:
             summary = self._summary_unlocked(db, provider)
             updated, counts = provider_usage.recorded_usage(
                 summary,
@@ -311,27 +309,26 @@ class ProviderStateService:
 
 
 class ProviderStateServiceCache:
-    """Keep provider state bound to the active manager and synchronization lock."""
+    """Keep provider state bound to the active manager."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._service: ProviderStateService | None = None
-        self._signature: tuple[Any, Any, Any] | None = None
+        self._signature: tuple[Any, Any] | None = None
 
     def get(
         self,
         manager: Any,
         repository: Any,
-        lock: Any,
         now: Callable[[], Any],
         today: Callable[[], Any],
         logger: Any | None = None,
     ) -> ProviderStateService:
         with self._lock:
-            signature = (manager, repository, lock)
+            signature = (manager, repository)
             if self._service is None or self._signature != signature:
                 self._service = ProviderStateService(
-                    manager, repository, lock, now, today, logger
+                    manager, repository, now, today, logger
                 )
                 self._signature = signature
             return self._service
@@ -343,12 +340,9 @@ PROVIDER_STATE_SERVICE_CACHE = ProviderStateServiceCache()
 def get_provider_state_service(
     manager: Any,
     repository: Any,
-    lock: Any,
     now: Callable[[], Any],
     today: Callable[[], Any],
     logger: Any | None = None,
 ) -> ProviderStateService:
     """Return provider state bound to the current persistence resources."""
-    return PROVIDER_STATE_SERVICE_CACHE.get(
-        manager, repository, lock, now, today, logger
-    )
+    return PROVIDER_STATE_SERVICE_CACHE.get(manager, repository, now, today, logger)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Any
 
@@ -48,7 +47,6 @@ class NutritionMealLibraryService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        db_lock: AbstractContextManager[Any],
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
         food_database: FoodDatabaseService,
@@ -58,7 +56,6 @@ class NutritionMealLibraryService:
         web_search: NutritionWebSearchService | None = None,
     ) -> None:
         self._database_manager = database_manager
-        self._db_lock = db_lock
         self._utc_now = utc_now
         self._local_now = local_now
         self.food_database = food_database
@@ -69,7 +66,6 @@ class NutritionMealLibraryService:
         )
         self._product_catalog = ProductCatalogService(
             database_manager,
-            db_lock,
             self._products,
             utc_now,
             self.food_database,
@@ -128,7 +124,7 @@ class NutritionMealLibraryService:
         calculation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Normalize nutrient values; pass a precomputed food calculation to
-        keep network lookups outside the caller's database lock."""
+        keep network lookups outside the caller's unit of work."""
         packaging_label = payload.get("packaging_label") is True
         payload = {
             key: value
@@ -152,7 +148,7 @@ class NutritionMealLibraryService:
             return self._templates.list(db)
 
     def get_template(self, template_id: str) -> dict[str, Any]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             template = self.get_template_in_transaction(db, template_id)
         if not template:
             raise AppError(404, SAVED_MEAL_NOT_FOUND)
@@ -181,7 +177,7 @@ class NutritionMealLibraryService:
             if "food_ingredients" in payload and "components" not in payload
             else None
         )
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             if "components" in payload:
                 validate_component_payload(payload)
                 prepared = {
@@ -296,7 +292,7 @@ class NutritionMealLibraryService:
             raise AppError(400, "Maximal 200 gespeicherte Mahlzeiten sind möglich.")
 
     def delete_template(self, template_id: str) -> dict[str, Any]:
-        with self._db_lock, self._database_manager.unit_of_work() as db:
+        with self._database_manager.unit_of_work() as db:
             existing = self._templates.get(db, template_id)
             if not existing or not self._templates.delete(db, template_id):
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)

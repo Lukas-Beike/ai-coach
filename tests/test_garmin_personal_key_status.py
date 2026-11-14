@@ -180,7 +180,7 @@ class _KeyValues:
 
 class KeyChangeClearsExpiryTests(unittest.TestCase):
     def test_saving_or_removing_the_key_clears_its_expiry(self) -> None:
-        from contextlib import contextmanager, nullcontext
+        from contextlib import contextmanager
 
         from backend.provider_credentials import ProviderCredentialService
 
@@ -197,7 +197,6 @@ class KeyChangeClearsExpiryTests(unittest.TestCase):
         service = ProviderCredentialService(
             env_config=holder["config"],
             database_manager=lambda: cast(DatabaseManager, Manager()),
-            database_lock=nullcontext,
             key_values=cast(KeyValueRepository, key_values),
             apply_config=lambda config: holder.update(config=config),
             current_config=lambda: holder["config"],

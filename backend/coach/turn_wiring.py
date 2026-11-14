@@ -80,7 +80,6 @@ def build_coach_background_jobs(
     def job_store() -> CoachJobStore:
         return CoachJobStore(
             ctx.database,
-            ctx.database_lock,
             COACH_JOB_WORKER.wake_event,
             runtime_maintenance.MAINTENANCE_GATE,
             utc_now,
@@ -90,7 +89,6 @@ def build_coach_background_jobs(
         return CoachTurnFailureService(
             CoachTurnFailureDependencies(
                 database_manager=ctx.database,
-                database_lock=ctx.database_lock,
                 chat_repository=chat_repository,
                 key_values=ctx.key_values,
                 event_buffer=event_buffer,
@@ -105,7 +103,6 @@ def build_coach_background_jobs(
         return CoachJobSubmissionService(
             ctx.database,
             chat_repository,
-            ctx.database_lock,
             ctx.settings,
             event_buffer,
             coach_streams.CHAT_STREAM_REGISTRY,
@@ -123,7 +120,6 @@ def build_coach_background_jobs(
     def morning_completion_service() -> MorningCoachJobCompletionService:
         return MorningCoachJobCompletionService(
             ctx.database(),
-            ctx.database_lock,
             ctx.key_values,
             ctx.coach_local.quick_actions_service,
             ctx.clock.now,
@@ -173,15 +169,13 @@ def build_coach_turns(
         return CoachCommandReceiptService(ctx.database, now=receipt_clock)
 
     def outcome_service() -> CoachStructuredOutcomeService:
-        return CoachStructuredOutcomeService(
-            ctx.database(), ctx.database_lock, ctx.key_values, read_only
-        )
+        return CoachStructuredOutcomeService(ctx.database(), ctx.key_values, read_only)
 
     def structured_response_service() -> CoachStructuredResponseService:
         return CoachStructuredResponseService(
             ctx.coach_conversation.response_transport(),
             CoachConversationRecoveryService(
-                ctx.database(), ctx.database_lock, ctx.key_values, ctx.logger
+                ctx.database(), ctx.key_values, ctx.logger
             ),
             retry_policy,
             ctx.coach_background_jobs.job_store(),
@@ -193,7 +187,6 @@ def build_coach_turns(
             CoachStructuredTurnDependencies(
                 opening=CoachTurnOpeningService(
                     ctx.database(),
-                    ctx.database_lock,
                     chat_repository,
                     command_receipt_service(),
                     utc_now,
@@ -208,7 +201,6 @@ def build_coach_turns(
                 outcome=outcome_service(),
                 final_receipt=CoachFinalReceiptService(
                     ctx.database(),
-                    ctx.database_lock,
                     chat_repository,
                     ctx.key_values,
                     event_buffer,
@@ -225,7 +217,6 @@ def build_coach_turns(
     def chat_turn_service() -> CoachChatTurnService:
         return CoachChatTurnService(
             ctx.database,
-            ctx.database_lock,
             command_receipt_service(),
             ctx.settings,
             ctx.coach_conversation.provision_service,

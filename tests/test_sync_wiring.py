@@ -457,7 +457,6 @@ class WahooBuilderTests(unittest.TestCase):
             self.assertIs(kwargs["secret_registry"], self.registry)
             self.assertIs(kwargs["on_connected"], self.connected)
             self.assertIs(kwargs["config"], ctx.config)
-            self.assertIs(kwargs["database_lock"](), ctx.database_lock)
             self.assertIs(kwargs["oauth"](), oauth.return_value)
 
         oauth.assert_called_once_with(

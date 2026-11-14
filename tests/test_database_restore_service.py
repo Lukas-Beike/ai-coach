@@ -32,7 +32,6 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.data_dir = Path(self.temporary.name)
         self.database_path = self.data_dir / "coach.db"
         self.database_path.write_bytes(b"previous database")
-        self.lock = threading.RLock()
         self.gate = MaintenanceGate()
         self.validation = Mock()
         self.backup = Mock()
@@ -284,7 +283,6 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         logger = Mock()
         backup = DatabaseBackupService(
             manager,
-            self.lock,
             DatabaseBackupConfig(
                 database_path=self.database_path,
                 data_dir=self.data_dir,
@@ -382,7 +380,6 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
     def test_free_space_check_rejects_before_the_recovery_copy_starts(self) -> None:
         backup = DatabaseBackupService(
             MagicMock(),
-            self.lock,
             DatabaseBackupConfig(
                 database_path=self.database_path,
                 data_dir=self.data_dir,

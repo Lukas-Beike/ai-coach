@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from typing import Any, Final
 
 from backend.activities import routes
@@ -67,11 +66,9 @@ class ActivityRouteService:
     def __init__(
         self,
         database: Callable[[], Any],
-        database_lock: AbstractContextManager[Any],
         key_values: KeyValueRepository,
     ) -> None:
         self._database = database
-        self._database_lock = database_lock
         self._key_values = key_values
 
     def rename(self, route_id: Any, name: Any) -> dict[str, Any]:
@@ -82,7 +79,7 @@ class ActivityRouteService:
                 f"Der Name muss aus 1 bis {routes.MAX_NAME_LENGTH} "
                 "Zeichen ohne Steuerzeichen bestehen.",
             )
-        with self._database_lock, self._database().unit_of_work() as db:
+        with self._database().unit_of_work() as db:
             index = load_index(db)
             route = index["routes"].get(route_id) if isinstance(route_id, str) else None
             if route is None:

@@ -7,19 +7,6 @@ from backend.providers.claude_messages_adapter import neutral_usage
 from backend.providers.state import ProviderStateService, metered_turn, turn_usage
 
 
-class _Lock:
-    def __init__(self, events):
-        self.events = events
-
-    def __enter__(self):
-        self.events.append("lock-enter")
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.events.append("lock-exit")
-        return False
-
-
 class _UnitOfWork:
     def __init__(self, events, name="uow"):
         self.events = events
@@ -75,7 +62,6 @@ class ProviderStateServiceTests(unittest.TestCase):
         self.service = ProviderStateService(
             _Manager(self.events),
             self.repository,
-            _Lock(self.events),
             lambda: "2026-09-19T10:00:00Z",
             lambda: date(2026, 9, 19),
             self.logger,
@@ -383,22 +369,20 @@ class ProviderStateServiceTests(unittest.TestCase):
             },
         )
 
-    def test_summary_reads_on_a_reader_without_lock_or_writer(self):
+    def test_summary_reads_on_a_reader_without_the_writer(self):
         self.service.summary("openai")
-        self.assertNotIn("lock-enter", self.events)
         self.assertNotIn("uow-enter", self.events)
         self.assertLess(
             self.events.index("reader-enter"), self.events.index("get:openai_usage")
         )
         self.assertEqual(self.events[-1], "reader-exit")
 
-    def test_every_write_acquires_lock_before_transaction(self):
+    def test_every_write_runs_in_a_unit_of_work(self):
         self.service.record_success("openai")
-        self.assertLess(self.events.index("lock-enter"), self.events.index("uow-enter"))
         self.assertLess(
             self.events.index("uow-enter"), self.events.index("set:openai_status")
         )
-        self.assertEqual(self.events[-2:], ["uow-exit", "lock-exit"])
+        self.assertEqual(self.events[-1], "uow-exit")
 
 
 if __name__ == "__main__":

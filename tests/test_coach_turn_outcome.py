@@ -1000,9 +1000,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         manager.unit_of_work.side_effect = transaction
         key_values.get.side_effect = read
         key_values.set.side_effect = write
-        service = CoachStructuredOutcomeService(
-            manager, transaction(), key_values, frozenset()
-        )
+        service = CoachStructuredOutcomeService(manager, key_values, frozenset())
         service.finalize(
             self.response(),
             [],

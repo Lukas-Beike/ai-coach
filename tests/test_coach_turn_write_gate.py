@@ -510,7 +510,6 @@ class ChokePointTests(unittest.TestCase):
         self.logger = Mock(spec=logging.Logger)
         self.service = CoachStructuredToolRoundService(
             lambda: self.manager,
-            self.lock,
             self.replay,
             self.preparation,
             self.execution,

@@ -83,7 +83,7 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertIn('data-more-segment-panel="operations"', index)
 
     def test_unlimited_retention_does_not_delete_history(self):
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             db.execute(
                 "INSERT INTO messages(role, content, created_at) VALUES (?, ?, ?)",
                 ("user", "old chat", "2000-01-01T00:00:00+00:00"),
@@ -101,7 +101,7 @@ class ServerRuntimeTests(ServerTestCase):
             replace(server.CONFIG_HOLDER.value, data_retention_days=-1),
         ):
             server.initialise_database()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 db.execute(
                     "SELECT COUNT(*) AS count FROM messages WHERE content = 'old chat'"
@@ -122,7 +122,6 @@ class ServerRuntimeTests(ServerTestCase):
         csrf_hash = auth.session_token_hash("csrf-background-streamed")
         with (
             auth.session_lock,
-            server.DB_LOCK,
             server.database_manager().unit_of_work() as db,
         ):
             db.execute(

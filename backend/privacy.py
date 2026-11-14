@@ -21,7 +21,7 @@ from backend.backup.export import (
 from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import activity_detail_store
-from backend.db.manager import DATABASE_LOCK, DatabaseManager, secure_deletion
+from backend.db.manager import DatabaseManager, secure_deletion
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.errors import AppError
@@ -167,7 +167,6 @@ PRIVACY_REMOTE_SCOPE = (
 @dataclass(frozen=True)
 class PrivacyDeleteDependencies:
     database_manager: DatabaseManager
-    database_lock: AbstractContextManager[Any]
     key_value_repository: KeyValueRepository
     maintenance_gate: MaintenanceGate
     profile_mutation_coordinator: AbstractContextManager[Any]
@@ -275,7 +274,6 @@ class PrivacyDeleteService:
             raise AppError(400, "enabled muss true oder false sein.")
         dependencies = self._dependencies
         with (
-            dependencies.database_lock,
             dependencies.database_manager.unit_of_work() as db,
         ):
             dependencies.key_value_repository.set(
@@ -290,7 +288,6 @@ class PrivacyDeleteService:
         dependencies = self._dependencies
         with dependencies.maintenance_gate.restore(dependencies.cancel_coach_turns):
             with (
-                dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
                 secure_deletion(db),
             ):
@@ -399,7 +396,6 @@ class PrivacyDeleteService:
             # so deleted diagnostics are neither served nor written back.
             with (
                 dependencies.diagnostics_suspended(),
-                dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
                 secure_deletion(db),
             ):
@@ -502,7 +498,6 @@ def build_privacy(
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
                 database_manager=database_manager(),
-                database_lock=DATABASE_LOCK,
                 key_value_repository=key_values,
                 maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
                 profile_mutation_coordinator=profile_service().mutation_coordinator,

@@ -34,7 +34,6 @@ class CoachStructuredToolExecutionService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        database_lock: Any,
         key_values: KeyValueRepository,
         clarification: CoachClarificationService,
         training_patch: CoachTrainingPatchService,
@@ -46,7 +45,6 @@ class CoachStructuredToolExecutionService:
         self._plan_guard = plan_guard
         self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._key_values = key_values
         self._clarification = clarification
         self._training_patch = training_patch
@@ -66,7 +64,7 @@ class CoachStructuredToolExecutionService:
         arguments = dict(metadata["arguments"])
         accepted = arguments.pop(PLAN_FINDINGS_ARGUMENT, None)
         accepted = accepted if isinstance(accepted, list) else []
-        with self._database_lock, self._database_manager.unit_of_work():
+        with self._database_manager.unit_of_work():
             before = guard.findings()
             result = self._execute_tool({**metadata, "arguments": arguments}, **kwargs)
             notes = guard.verify(before, accepted)
@@ -91,7 +89,6 @@ class CoachStructuredToolExecutionService:
             "apply_adaptive_replan",
             *EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
-        lock = self._database_lock if local_transaction else nullcontext()
         transaction = (
             self._database_manager.unit_of_work()
             if local_transaction
@@ -102,7 +99,7 @@ class CoachStructuredToolExecutionService:
             if name in PROFILE_MUTATING_TOOLS
             else nullcontext()
         )
-        with coordinator, lock, transaction as db:
+        with coordinator, transaction as db:
             if name == "clarify_coach_request":
                 return self._clarification.save_question(arguments, context)
             if name == "cancel_coach_request":

@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -276,7 +275,6 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
         manager = self.manager(path)
         backup = DatabaseBackupService(
             manager,
-            threading.RLock(),
             DatabaseBackupConfig(
                 database_path=path,
                 data_dir=self.root,

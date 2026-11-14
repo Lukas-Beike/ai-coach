@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -21,13 +20,11 @@ class CoachTurnUndoService:
     def __init__(
         self,
         database_manager: Callable[[], DatabaseManager],
-        database_lock: threading.RLock,
         history_undo_service: Callable[[], HistoryUndoService],
         *,
         now: Callable[[], str] = utc_now,
     ) -> None:
         self._database_manager = database_manager
-        self._database_lock = database_lock
         self._history_undo_service = history_undo_service
         self._now = now
 
@@ -38,7 +35,6 @@ class CoachTurnUndoService:
         history_undo = self._history_undo_service()
         with (
             history_undo.profile_mutation_coordinator,
-            self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
             row = coach_store.command_row(db, turn_id, "status, receipt")

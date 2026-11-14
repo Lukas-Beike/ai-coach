@@ -650,7 +650,7 @@ class ServerPlanningTests(ServerTestCase):
                     ],
                     [f"Changed {index}" for index in range(count)],
                 )
-                with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+                with server.database_manager().unit_of_work() as db:
                     self.assertEqual(
                         db.execute(
                             "SELECT COUNT(*) AS count FROM sync_jobs"
@@ -775,7 +775,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_named_plan_scope_assigns_create_without_unit_reference(self):
         plan_id = "named-create-plan"
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db,
                 plan_id,
@@ -825,7 +825,7 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_mixed_batch_recomputes_each_affected_plan_bounds(self):
         plan_ids = ["mixed-bounds-a", "mixed-bounds-b"]
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             for index, plan_id in enumerate(plan_ids):
                 server.TRAINING_PLAN_REPOSITORY.create(
                     db,
@@ -868,7 +868,7 @@ class ServerPlanningTests(ServerTestCase):
                 ]
             }
         )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             plans = [
                 server.TRAINING_PLAN_REPOSITORY.get(db, plan_id) for plan_id in plan_ids
             ]
@@ -963,7 +963,7 @@ class ServerPlanningTests(ServerTestCase):
     def test_complete_plan_replace_archives_selected_plan_without_future_units(self):
         past_plan_id = str(uuid.uuid4())
         past = (server.ATHLETE_CLOCK.now().date() - timedelta(days=10)).isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        with server.database_manager().unit_of_work() as db:
             server.TRAINING_PLAN_REPOSITORY.create(
                 db,
                 past_plan_id,

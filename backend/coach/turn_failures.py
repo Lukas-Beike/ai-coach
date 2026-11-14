@@ -72,7 +72,6 @@ def coach_error_metadata(exc: BaseException, repository_root: Path) -> dict[str,
 @dataclass(frozen=True)
 class CoachTurnFailureDependencies:
     database_manager: Callable[[], DatabaseManager]
-    database_lock: Any
     chat_repository: ChatRepository
     key_values: KeyValueRepository
     event_buffer: StateEventBuffer
@@ -97,7 +96,7 @@ class CoachTurnFailureService:
             if isinstance(error, AppError)
             else "Die Coach-Verarbeitung wurde unterbrochen."
         )
-        with deps.database_lock, deps.database_manager().unit_of_work() as db:
+        with deps.database_manager().unit_of_work() as db:
             row = coach_store.command_row(db, client_turn_id, "receipt, status")
             if not row:
                 return {}
