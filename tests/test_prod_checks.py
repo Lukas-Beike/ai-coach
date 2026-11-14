@@ -226,6 +226,16 @@ class ProdChecksTests(unittest.TestCase):
             prod_diagnostics.section_lines({}, "decoupling_eligibility"),
             [("FAIL", "section decoupling_eligibility missing")],
         )
+        failed = {"decoupling_eligibility": {"status": "failed"}}
+        self.assertEqual(
+            prod_diagnostics.section_lines(failed, "decoupling_eligibility"),
+            [("FAIL", 'decoupling_eligibility.status "failed"')],
+        )
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            prod_diagnostics.main(
+                ["--url", self.url, "--password-file", str(self.secret),
+                 "--section", "decoupling_eligibility", "--expect-version", "2.1.2"]
+            )  # fmt: skip
 
     def test_diagnostics_version_mismatch_and_wrong_password(self):
         code, text = self.run_main(

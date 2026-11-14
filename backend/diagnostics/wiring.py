@@ -39,7 +39,9 @@ def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
         analysis_activity,
         ctx.key_values,
         lambda: ctx.clock.now().date(),
-        SessionCurveReader(sessions.session_activities),
+        SessionCurveReader(
+            sessions.session_activities, background_name="decoupling_eligibility"
+        ),
     )
 
     def recent_log_entries_service() -> RecentLogEntriesService:

@@ -183,6 +183,11 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(one_second["p75"], 0.375)
         self.assertLess(ride["cv_60s"]["p50"], 0.05)
         self.assertIn("vi_30s", ride)
+        # Two values would be single sessions' values: no quartiles below three.
+        self.assertEqual(
+            eligibility._distribution([0.1, 0.2]),
+            {"n": 2, "p25": None, "p50": None, "p75": None, "p90": None},
+        )
 
     def test_runs_report_no_ride_only_measures_and_unknown_terrain(self) -> None:
         run = self._run()["groups"]["run/outdoor"]
@@ -229,7 +234,11 @@ class DiagnosticsSectionTests(unittest.TestCase):
             analysis_activity,
             KeyValueRepository(lambda: ""),
             lambda: TODAY,
-            SessionCurveReader(reader.session_activities, spawn=self.builds.append),
+            SessionCurveReader(
+                reader.session_activities,
+                spawn=self.builds.append,
+                background_name="decoupling_eligibility",
+            ),
             pause=lambda seconds: self.pauses.append((seconds, self.snapshots_open)),
             clock=lambda: next(ticks),
         ).section
@@ -280,11 +289,26 @@ class DiagnosticsSectionTests(unittest.TestCase):
             db.execute("UPDATE activity_records SET local_date = '2026-09-10'")
         stale = self.section()
         self.assertEqual((stale["status"], stale["current"]), ("ready", False))
-        with (
-            mock.patch.object(eligibility, "evaluate", side_effect=ValueError),
-            self.assertLogs("intervals_coach", "ERROR"),
-        ):
+        # An unreadable session is counted; the others still report.
+        with mock.patch.object(eligibility, "evaluate", side_effect=ValueError):
             self.builds.pop()()
+        ride = self.section()["groups"]["ride/outdoor"]
+        self.assertEqual(
+            (ride["evaluation_error"], ride["counts"]["evaluated"]), (6, 0)
+        )
+        _add(self.manager, "newest", None)
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_records SET local_date = '2026-09-10'")
+        with (
+            mock.patch.object(eligibility, "report", side_effect=ValueError),
+            self.assertLogs("intervals_coach", "ERROR") as logs,
+        ):
+            self.section()
+            self.builds.pop()()
+        self.assertEqual(
+            getattr(logs.records[0], "event", None),
+            "background_decoupling_eligibility_failed",
+        )
         self.assertEqual(self.section(), {"status": "failed"})
 
     def test_section_holds_counts_only(self) -> None:

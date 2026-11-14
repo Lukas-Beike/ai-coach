@@ -42,7 +42,7 @@ OPEN_JOB = {"queued", "running", "pending"}
 SECTION_FIELDS = {
     "decoupling_eligibility": re.compile(
         r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
-        r"(sessions|without_streams|counts\.[a-z0-9_]+"
+        r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
         r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
     ),
 }
@@ -146,7 +146,10 @@ def section_lines(report: dict[str, Any], name: str) -> list[tuple[str, str]]:
     """The allow-listed fields of one section, sorted by path."""
     allowed = SECTION_FIELDS[name]
     lines = [
-        ("info", f"{name}.{path} {json.dumps(value)}")
+        (
+            "FAIL" if value in ("failed", "unavailable") else "info",
+            f"{name}.{path} {json.dumps(value)}",
+        )
         for path, value in leaves(report.get(name))
         if allowed.fullmatch(path) and printable(value)
     ]
@@ -261,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ca-file")
     parser.add_argument("--section", choices=sorted(SECTION_FIELDS))
     args = parser.parse_args(argv)
+    checks_asked = (args.out, args.compare, args.expect_version, args.expect_schema)
+    if args.section and any(value is not None for value in checks_asked):
+        parser.error("--section prints one section; it runs no checks or results")
     try:
         previous = read_result(args.compare)
         session = Session(args.url, args.ca_file)

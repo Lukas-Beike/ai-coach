@@ -56,6 +56,8 @@ MIN_COVERAGE = 0.85
 MAX_HALF_DIFFERENCE = 0.10
 WINDOWS_S = (1, 30, 60)
 PERCENTILES = (25, 50, 75, 90)
+# Fewer values would show single sessions' values as quartiles.
+MIN_DISTRIBUTION = 3
 _GATES = ("not_road_run", "short", "terrain_unknown", "coverage")
 
 # (timestamp, weight in seconds, output) of one half; heart rate is paired away.
@@ -257,7 +259,9 @@ def _distribution(values: Sequence[float]) -> dict[str, Any]:
     result: dict[str, Any] = {"n": len(ordered)}
     for percent in PERCENTILES:
         result[f"p{percent}"] = (
-            round(_percentile(ordered, percent), 3) if ordered else None
+            round(_percentile(ordered, percent), 3)
+            if len(ordered) >= MIN_DISTRIBUTION
+            else None
         )
     return result
 
@@ -405,13 +409,19 @@ def report(
         if session_id not in selection.streamed:
             group.counts["without_streams"] += 1
             continue
-        group.add(evaluate_session(session_id))
+        try:
+            evaluation = evaluate_session(session_id)
+        except Exception:  # noqa: BLE001 - one unreadable session is counted, not fatal.
+            group.counts["evaluation_error"] += 1
+            continue
+        group.add(evaluation)
     return {
         "days": selection.days,
         "groups": {
             key: {
                 "sessions": group.counts["sessions"],
                 "without_streams": group.counts["without_streams"],
+                "evaluation_error": group.counts["evaluation_error"],
                 **group.report(),
             }
             for key, group in groups.items()

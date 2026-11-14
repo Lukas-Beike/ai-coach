@@ -60,6 +60,7 @@ every named number the code fixes. A test fails when it is out of date.
 | `MAX_HALF_DIFFERENCE` | `0.1` | `backend/performance/decoupling_eligibility.py` |  |
 | `WINDOWS_S` | `(1, 30, 60)` | `backend/performance/decoupling_eligibility.py` |  |
 | `PERCENTILES` | `(25, 50, 75, 90)` | `backend/performance/decoupling_eligibility.py` |  |
+| `MIN_DISTRIBUTION` | `3` | `backend/performance/decoupling_eligibility.py` | Fewer values would show single sessions' values as quartiles. |
 | `CURRENT` | `'cv_1s_15'` | `backend/performance/decoupling_eligibility.py` |  |
 | `RIDE_ONLY_RULES` | `frozenset({'vi_30s_105', 'vi_30s_110'})` | `backend/performance/decoupling_eligibility.py` |  |
 | `ESTIMATE_DAYS` | `60` | `backend/performance/first_threshold_estimate.py` |  |
