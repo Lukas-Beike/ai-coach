@@ -1136,7 +1136,9 @@ def _defanged(text: str) -> str:
 
 
 def coach_context_json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    """Length of the compact JSON as sent: _defanged writes each "<" as 6 characters."""
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return len(text) + 5 * text.count("<")
 
 
 def _bounded_string(value: str, limit: int) -> str:

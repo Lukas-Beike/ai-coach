@@ -350,7 +350,7 @@ Detailed contract: ratings keep the entered number; each field's scale is fixed 
 Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.
 
 ### Requirement: CP10 Context content, fitting and layout
-The system SHALL build each context section from allowlisted fields, measure sizes as the length of the compact JSON text, fit oversized values deterministically and lay the context out between fixed fence lines, so that the same stored data always yields the same context text.
+The system SHALL build each context section from allowlisted fields, measure sizes as the length of the compact JSON text as sent (each `<` counts as its six-character escape), fit oversized values deterministically and lay the context out between fixed fence lines, so that the same stored data always yields the same context text.
 
 #### Scenario: Allowlists and source policy
 - **WHEN** the activities, library and source-policy parts are built
