@@ -737,6 +737,8 @@ class SyncStateReaderTests(OrchestrationCase):
                 "status": "running",
                 "phase": "running",
                 "progress": 0,
+                "started_at": "2026-09-20T11:00:00+00:00",
+                "finished_at": "2026-09-20T11:05:00+00:00",
                 "last_error": "fake-last-sync-error",
             },
             {key: state[key] for key in expected},

@@ -822,7 +822,7 @@ PUBLIC_STATE = build_public_state(
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
     provider_resync=lambda: PROVIDER_RESYNC,
     running_probes={
-        GARMIN_ID: lambda: GARMIN_ASSEMBLY.sync_service().running(),
+        GARMIN_ID: shared_garmin_sync_lock().locked,
         WAHOO_ID: lambda: WAHOO_SYNC.sync_service().running(),
     },
     sync_period_defaults=lambda: SYNC_PERIOD_DEFAULTS,

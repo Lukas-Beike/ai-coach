@@ -554,7 +554,7 @@ class RunningProbeWiringTests(unittest.TestCase):
             ["GARMIN_ID", "WAHOO_ID"], [ast.unparse(key) for key in probe.keys if key]
         )
         # A Garmin run sets running, like the operation fields it writes (#2706).
-        self.assertIn("GARMIN_ASSEMBLY.sync_service().running()", ast.unparse(probe))
+        self.assertIn("shared_garmin_sync_lock().locked", ast.unparse(probe))
         self.assertIn("WAHOO_SYNC.sync_service().running()", ast.unparse(probe))
 
 

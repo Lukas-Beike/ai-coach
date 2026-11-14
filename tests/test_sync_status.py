@@ -234,6 +234,9 @@ class SyncPublicStateServiceTests(unittest.TestCase):
         )
         self.service._running_probes = {"wahoo": lambda: True}
         wahoo_run = self.service.state(freshness=[], jobs=[])
+        # Other Garmin work holds the same lock; it is no sync run.
+        self.service._running_probes = {"garmin": lambda: True}
+        garmin_lock_only = self.service.state(freshness=[], jobs=[])
         self.set_values(
             sync_operation_status="running",
             sync_operation_phase="fetching",
@@ -259,6 +262,8 @@ class SyncPublicStateServiceTests(unittest.TestCase):
             tuple(garmin_run[key] for key in fields),
         )
         self.assertTrue(wahoo_run["running"] and garmin_run["running"])
+        self.assertFalse(garmin_lock_only["running"])
+        self.assertEqual("completed", garmin_lock_only["status"])
 
     def test_browser_state_is_bounded_and_reports_the_message_as_status(self) -> None:
         self.set_values(sync_operation_message="Sync in progress")
