@@ -322,22 +322,23 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn(
             "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
         )
-        entries = re.findall(
-            r"- \{ project: ([a-z-]+), shard: (\d+), shards: (\d+) \}", e2e
+        # Every project runs unless the classifier answered ui=false (#2748).
+        choice = re.search(
+            r"project: \$\{\{ fromJSON\(needs\.source\.outputs\.ui == 'false' "
+            r"&& '(\[[^']*\])' \|\| '(\[[^']*\])'\) \}\}",
+            e2e,
         )
-        projects = {}
-        for project, shard, shards in entries:
-            projects.setdefault(project, []).append((int(shard), int(shards)))
-        self.assertEqual(
-            set(projects),
-            {"mobile", "tablet-landscape", "desktop"},
+        assert choice is not None
+        no_ui, every = (json.loads(choice.group(i)) for i in (1, 2))
+        self.assertEqual(no_ui, ["desktop"])
+        self.assertEqual(set(every), {"mobile", "tablet-landscape", "desktop"})
+        shards = re.search(r"\n        shards: \[(\d+)\]\n", e2e)
+        assert shards is not None
+        count = int(shards.group(1))
+        self.assertIn(
+            f"\n        shard: [{', '.join(str(i) for i in range(1, count + 1))}]\n",
+            e2e,
         )
-        for project, shards in projects.items():
-            with self.subTest(project=project):
-                count = shards[0][1]
-                self.assertEqual(
-                    sorted(shards), [(i, count) for i in range(1, count + 1)]
-                )
         aggregate = workflow.split("  browser:\n", 1)[1].split(
             "  build-and-push:\n", 1
         )[0]
@@ -345,8 +346,10 @@ class WorkflowSourceTests(unittest.TestCase):
             name: int(count)
             for name, count in re.findall(r"--expected ([a-z-]+):(\d+)", aggregate)
         }
-        self.assertEqual(
-            expected, {name: shards[0][1] for name, shards in projects.items()}
+        self.assertEqual(expected, dict.fromkeys(every, count))
+        self.assertIn(f"expected=(--expected desktop:{count})\n", aggregate)
+        self.assertIn(
+            'if [[ "$UI" != "false" ]]; then\n            expected+=', aggregate
         )
         self.assertIn("--jobs 1", e2e)
         self.assertIn(
@@ -1041,8 +1044,8 @@ class ReleaseSourceTests(unittest.TestCase):
         release_source.verify(clone, self.sha, "1.7.2")
 
 
-class DocsOnlyClassifierTests(unittest.TestCase):
-    """A docs-only pull request skips the suites; nothing else ever does (#2747)."""
+class ChangedFileClassifierTests(unittest.TestCase):
+    """Only a classified pull request skips suites (#2747) or browser projects (#2748)."""
 
     def test_only_documentation_paths_are_docs(self):
         docs = (
@@ -1084,6 +1087,44 @@ class DocsOnlyClassifierTests(unittest.TestCase):
                 self.assertFalse(ci_changes.docs_only(["docs/testing.md", path]))
         self.assertFalse(ci_changes.docs_only([]))
 
+    def test_ui_paths_run_every_browser_project(self):
+        ui_paths = (
+            "public/app.js",
+            "public/AGENTS.md",
+            "e2e/calendar.spec.cjs",
+            "e2e/browser_durations.json",
+            "playwright.config.cjs",
+            "package.json",
+            "package-lock.json",
+            "backend/http_api/static_assets.py",
+            "backend/http_api/response_transport.py",
+            "backend/http_api/responses.py",
+            "scripts/run_browser_tests.py",
+            "scripts/browser_environment.json",
+            ".github/scripts/aggregate_browser_results.py",
+            ".github/scripts/ci_changes.py",
+            ".github/workflows/publish-container.yml",
+        )
+        backend_only = (
+            "server.py",
+            "backend/sync/garmin.py",
+            "backend/http_api/handler.py",
+            "tests/test_ci_contracts.py",
+            "tests/navigation-state.test.cjs",
+            "docs/testing.md",
+            "Dockerfile",
+            "publicity.md",
+        )
+        for path in ui_paths:
+            with self.subTest(path=path):
+                self.assertTrue(ci_changes.ui(["server.py", path]))
+        for path in backend_only:
+            with self.subTest(path=path):
+                self.assertFalse(ci_changes.ui([path]))
+        # An unknown change runs every project.
+        self.assertTrue(ci_changes.ui(None))
+        self.assertTrue(ci_changes.ui([]))
+
     @unittest.skipUnless(shutil.which("git"), "needs Git for a merge-commit fixture")
     def test_pull_request_merge_commit_is_classified_and_every_other_event_is_not(self):
         temp = tempfile.TemporaryDirectory()
@@ -1105,9 +1146,11 @@ class DocsOnlyClassifierTests(unittest.TestCase):
         git("config", "user.name", "Fixture")
         git("config", "user.email", "fixture@example.invalid")
         commit("server.py", "base")
+        every_suite = ("false", "true")
         for branch, path, expected in (
-            ("docs", "docs/testing.md", "true"),
-            ("code", "server.py", "false"),
+            ("docs", "docs/testing.md", ("true", "false")),
+            ("code", "server.py", ("false", "false")),
+            ("ui", "public/app.js", every_suite),
         ):
             with self.subTest(branch=branch):
                 git("switch", "-c", branch, "develop")
@@ -1116,14 +1159,14 @@ class DocsOnlyClassifierTests(unittest.TestCase):
                 git("merge", "--no-ff", "-m", "merge", branch)
                 for event, want in (
                     ("pull_request", expected),
-                    ("push", "false"),
-                    ("release", "false"),
-                    ("workflow_dispatch", "false"),
+                    ("push", every_suite),
+                    ("release", every_suite),
+                    ("workflow_dispatch", every_suite),
                 ):
                     self.assertEqual(self._classify(root, event), want, event)
                 # A single-parent checkout is no pull request merge commit.
                 git("switch", "--detach", branch)
-                self.assertEqual(self._classify(root, "pull_request"), "false")
+                self.assertEqual(self._classify(root, "pull_request"), every_suite)
 
     def _classify(self, root, event):
         output = root.parent / f"{root.name}-output"
@@ -1136,12 +1179,16 @@ class DocsOnlyClassifierTests(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        return output.read_text(encoding="utf-8").removeprefix("docs_only=").strip()
+        values = dict(
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").split()
+        )
+        return values["docs_only"], values["ui"]
 
     def test_workflow_skips_suites_only_on_a_classified_pull_request(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         source = _job(workflow, "source", "image")
         self.assertIn("docs_only: ${{ steps.changes.outputs.docs_only }}", source)
+        self.assertIn("ui: ${{ steps.changes.outputs.ui }}", source)
         classify = source.split("- name: Classify changed files\n", 1)[1]
         self.assertIn("if: github.event_name == 'pull_request'\n", classify)
         self.assertIn("python .github/scripts/ci_changes.py", classify)

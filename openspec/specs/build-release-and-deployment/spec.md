@@ -115,8 +115,12 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 - **THEN** the quality job fails unless every shard delivered exactly one coverage file, then enforces the coverage floor and the quality ratchet that `developer-quality-gates` specifies
 
 #### Scenario: Browser matrix
-- **WHEN** the shared image is available
+- **WHEN** the shared image is available on a push, release or dispatch run, or on a pull request with a UI change
 - **THEN** `mobile`, `tablet-landscape` and `desktop` run in two shards each, on Node 22 with `npm ci --ignore-scripts` and the pinned prepared browser image; the Node unit tests (`node --test tests/*.cjs`) run once, in desktop shard 1
+
+#### Scenario: Pull request without a UI change
+- **WHEN** `.github/scripts/ci_changes.py` finds that no changed path of the pull request is in its `UI_PATHS` (client, browser tests and tooling, the server code serving shell and assets, the test workflow)
+- **THEN** only the two `desktop` shards run and the `Browser checks` aggregate expects only them; `mobile` and `tablet-landscape` run on the following push to `develop`, and every push, release and dispatch run expects all three projects
 
 #### Scenario: Browser evidence
 - **WHEN** the browser matrix finishes
@@ -138,7 +142,7 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 - **WHEN** the workflow runs for anything but a pull request, or the checkout is not a merge commit
 - **THEN** no classification happens and every suite runs
 
-Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `source`, `test_shards`, `container_tests`, `test`, `quality`, `image_sbom`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `.github/scripts/ci_changes.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`; `tests/test_ci_contracts.py::test_pull_request_merge_commit_is_classified_and_every_other_event_is_not`; `tests/test_ci_contracts.py::test_workflow_skips_suites_only_on_a_classified_pull_request`. No test pins the SBOM retry.
+Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `source`, `test_shards`, `container_tests`, `test`, `quality`, `image_sbom`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `.github/scripts/ci_changes.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`; `tests/test_ci_contracts.py::test_pull_request_merge_commit_is_classified_and_every_other_event_is_not`; `tests/test_ci_contracts.py::test_workflow_skips_suites_only_on_a_classified_pull_request`; `tests/test_ci_contracts.py::test_ui_paths_run_every_browser_project`. No test pins the SBOM retry.
 
 ### Requirement: Immutable release source and version agreement
 

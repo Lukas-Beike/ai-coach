@@ -45,6 +45,8 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       # 'true' only on a pull request that changes documentation alone (#2747).
       docs_only: ${{ steps.changes.outputs.docs_only }}
+      # 'false' only on a pull request that changes no UI path (#2748).
+      ui: ${{ steps.changes.outputs.ui }}
     steps:
       - name: Check out workflow source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -362,15 +364,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # A pull request without a UI change runs desktop only; mobile and
+        # tablet-landscape run on the develop push (#2748). An empty output
+        # (push, release, dispatch) runs every project.
+        project: ${{ fromJSON(needs.source.outputs.ui == 'false' && '["desktop"]' || '["mobile", "tablet-landscape", "desktop"]') }}
         # Two shards per project (#2536); a third desktop shard did not lower
         # the measured median (#2616, docs/testing.md).
-        include:
-          - { project: mobile, shard: 1, shards: 2 }
-          - { project: mobile, shard: 2, shards: 2 }
-          - { project: tablet-landscape, shard: 1, shards: 2 }
-          - { project: tablet-landscape, shard: 2, shards: 2 }
-          - { project: desktop, shard: 1, shards: 2 }
-          - { project: desktop, shard: 2, shards: 2 }
+        shard: [1, 2]
+        shards: [2]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -468,6 +469,7 @@ jobs:
       - name: Aggregate browser results
         env:
           E2E_RESULT: ${{ needs.e2e.result }}
+          UI: ${{ needs.source.outputs.ui }}
         shell: bash
         run: |
           set -euo pipefail
@@ -479,10 +481,18 @@ jobs:
             echo "Browser checks: $E2E_RESULT"
             exit 1
           fi
+          # Only a pull request without a UI change may omit mobile and tablet.
+          expected=(--expected desktop:2)
+          if [[ "$UI" != "false" ]]; then
+            expected+=(--expected mobile:2 --expected tablet-landscape:2)
+          fi
           python .github/scripts/aggregate_browser_results.py \
-            --results browser-run-summaries \
-            --expected mobile:2 --expected tablet-landscape:2 --expected desktop:2
-          echo "All browser projects passed with complete shard evidence."
+            --results browser-run-summaries "${expected[@]}"
+          if [[ "$UI" == "false" ]]; then
+            echo "No UI change: the desktop project passed; mobile and tablet-landscape run on the develop push."
+          else
+            echo "All browser projects passed with complete shard evidence."
+          fi
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_container == true)
