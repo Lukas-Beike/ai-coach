@@ -15,9 +15,11 @@ python scripts/sonar_check.py --pr <number>
 - Output: `issues N, failures F`, one `section <name>: n` line per section, then
   `issue <rule> <file>:<line>`. Messages and matched text are never printed.
 - A `limit:` line means part of the analysis (the server-side agentic one) was
-  forbidden and not run. Report it as a limit, never as a pass. On this plan
-  the code-quality rules (such as `python:S8786`) run only there, so for
-  changed lines they are CI-only: run `--pr <number>` right after the push.
+  forbidden and not run. Report it as a limit, never as a pass.
+- Code-quality rules (such as `python:S8786`) run only in the SonarCloud CI
+  analysis on this plan; the local mode covers secrets. Once the SonarCloud
+  check has reported on the pushed head, run `--pr <number>`; an earlier result
+  is not a pass.
 - Exit 0: no issues. Exit 1: issues, failures or no usable result. Exit 2: bad
   input or the CLI is missing (install it, put it on `PATH`, `sonar auth login`).
   Exit 3: no issues, but the `limit` part was not run; continue and record the
