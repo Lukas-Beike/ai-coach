@@ -160,10 +160,10 @@ def comparison_lines(
     lines = []
     for name, count in result["counts"].items():
         old = before.get(name)
-        if name == "external_calendar_events":
-            lines.append(("info", f"count {name} {old} -> {count}"))
-        elif isinstance(count, int) and isinstance(old, int):
-            lines.append(mark(count >= old, f"count {name} {old} -> {count}"))
+        if isinstance(count, int) and isinstance(old, int):
+            line = mark(count >= old, f"count {name} {old} -> {count}")
+            calendar = name == "external_calendar_events"
+            lines.append(("info", line[1]) if calendar else line)
         else:
             lines.append(("info", f"count {name} {count}"))
     old_memory = (previous or {}).get("memory") or {}
