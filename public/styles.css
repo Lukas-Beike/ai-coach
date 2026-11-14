@@ -1155,7 +1155,7 @@ h2 {
 .calendar-display-fields input { width: 100%; padding: 9px 10px; font-size: .8rem; }
 .calendar-display-fields small { color: var(--subtle); font-size: .72rem; font-weight: 400; }
 .calendar-display-form > .secondary-button { justify-self: start; }
-.context-preview { margin-top: 8px; padding: 18px 0 90px; border-top: 1px solid var(--line); }
+.context-preview { margin-top: 8px; border-top: 1px solid var(--line); }
 .context-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .context-preview-heading h3 { margin: 3px 0 0; color: var(--ink); font-size: 1.05rem; letter-spacing: -.02em; }
 .context-preview-heading .secondary-button { flex: 0 0 auto; padding: 8px 11px; font-size: .72rem; }
@@ -1526,7 +1526,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .dialog-actions { display: grid; }
   .dialog-actions button { width: 100%; }
   .logs-output { max-height: 360px; min-height: 120px; font-size: .72rem; }
-  .context-preview { padding-bottom: 70px; }
   .nav-item { padding-right: 2px; padding-left: 2px; font-size: .72rem; }
 }
 
