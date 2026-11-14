@@ -40,7 +40,7 @@ The application SHALL verify the submitted password with constant-time compariso
 - **WHEN** a protected request presents no current unexpired stored session
 - **THEN** the request is rejected as unauthenticated
 
-Evidence: `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.logout_user`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_http_auth_post.py::test_login_success_dispatches_password_and_sets_cookies`; `tests/test_http_auth_post.py::test_logout_success_authenticates_operates_gate_and_clears_cookies`; `tests/test_server_database.py::test_session_is_persisted_and_restored_from_database`.
+Evidence: `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.logout_user`; `backend/http_api/responses.py::session_cookies`. Tests: `tests/test_http_auth_post.py::test_login_success_dispatches_password_and_sets_cookies`; `tests/test_http_auth_post.py::test_logout_success_operates_gate_and_clears_cookies`; `tests/test_server_database.py::test_session_is_persisted_and_restored_from_database`.
 
 ### Requirement: Read-only session verification under contention
 
