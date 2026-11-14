@@ -4,13 +4,15 @@
         [--expect-version 2.1.2] [--expect-schema 27] [--out result.json]
         [--compare previous.json] [--ca-file ca.pem]
     python scripts/prod_diagnostics.py --url <app address> --password-file <secret file>
-        --section decoupling_eligibility
+        --section <name> [--section <name> ...]
 
 Prints one line per check (`ok` / `FAIL` / `info`); never a response body,
 cookie, password or error text. Exit 0 all ok, 1 a check failed (a count
 dropped against --compare, a version mismatch, a stale or stuck sync), 2 the
-app could not be reached or read. `--section <name>` prints only the
-allow-listed count and state fields of that section instead of the checks.
+app could not be reached or read. `--section <name>` (repeatable) prints,
+instead of the checks, only the allow-listed counts, flags, state words and
+ages in hours (a `*_at` time as `*_hours`) of the sections in SECTION_FIELDS;
+the state words in FAIL_STATES and a missing section print as FAIL.
 """
 
 from __future__ import annotations
@@ -38,15 +40,42 @@ STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
 # What `--section` prints of a section: dotted paths of numbers and flags, and
-# `status` as one of STATES; nothing else of the section is printed (#2779).
+# state words from STATES; nothing else of the section is printed (#2779, #2781).
 SECTION_FIELDS = {
     "decoupling_eligibility": re.compile(
         r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
         r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
         r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
     ),
+    "garmin_past_workout_removal": re.compile(
+        r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
+        r"|past_links_pending"
+    ),
+    "stream_backfill": re.compile(
+        r"status|(garmin|wahoo)\.(candidates|with_streams|stored|no_file|no_streams"
+        r"|skipped_by_error|blocked|cursor|finished)"
+    ),
+    # Per recording origin and sport (their vocabularies, in backend/canonical):
+    # files, and files per FIT message or field number.
+    "fit_inventory": re.compile(
+        r"status|(garmin|wahoo|strava|zwift|manual|upload|unknown)\."
+        r"(ride|run|swim|walk|hike|strength|row|nordic_ski|alpine_ski|yoga|other"
+        r"|unknown)\.(files|(messages|unmapped_fields|developer_fields)\.[0-9.]+)"
+    ),
 }
-STATES = {"ready", "pending", "failed", "unavailable"}
+STATES = {
+    "ready",
+    "pending",
+    "ok",
+    "skipped",
+    "finished",
+    "in_progress",
+    "not_started",
+    "failed",
+    "unavailable",
+    "blocked",
+}
+FAIL_STATES = {"failed", "unavailable", "blocked"}
 
 
 def hours_since(stamp: str | None, now: datetime) -> float | None:
@@ -142,18 +171,30 @@ def printable(value: Any) -> bool:
     return value is None or isinstance(value, int | float)
 
 
-def section_lines(report: dict[str, Any], name: str) -> list[tuple[str, str]]:
+def aged(leaf: tuple[str, Any], now: datetime) -> tuple[str, Any]:
+    """A `*_at` time as its age `*_hours`; every other leaf unchanged."""
+    path, value = leaf
+    if not (path.endswith("_at") and isinstance(value, str)):
+        return leaf
+    age = hours_since(value, now)
+    return path[:-3] + "_hours", None if age is None else round(age, 1)
+
+
+def section_lines(
+    report: dict[str, Any], name: str, now: datetime | None = None
+) -> list[tuple[str, str]]:
     """The allow-listed fields of one section, sorted by path."""
+    section = report.get(name)
+    if not isinstance(section, dict):
+        return [("FAIL", f"section {name} missing")]
     allowed = SECTION_FIELDS[name]
-    lines = [
-        (
-            "FAIL" if value in ("failed", "unavailable") else "info",
-            f"{name}.{path} {json.dumps(value)}",
-        )
-        for path, value in leaves(report.get(name))
-        if allowed.fullmatch(path) and printable(value)
-    ]
-    return lines or [("FAIL", f"section {name} missing")]
+    lines = []
+    for leaf in leaves(section):
+        path, value = aged(leaf, now or datetime.now(UTC))
+        if allowed.fullmatch(path) and printable(value):
+            state = "FAIL" if value in FAIL_STATES else "info"
+            lines.append((state, f"{name}.{path} {json.dumps(value)}"))
+    return lines or [("info", f"section {name} empty")]
 
 
 def mark(ok: bool, text: str) -> tuple[str, str]:
@@ -262,11 +303,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out")
     parser.add_argument("--compare")
     parser.add_argument("--ca-file")
-    parser.add_argument("--section", choices=sorted(SECTION_FIELDS))
+    parser.add_argument("--section", action="append", choices=sorted(SECTION_FIELDS))
     args = parser.parse_args(argv)
     checks_asked = (args.out, args.compare, args.expect_version, args.expect_schema)
     if args.section and any(value is not None for value in checks_asked):
-        parser.error("--section prints one section; it runs no checks or results")
+        parser.error("--section prints sections; it runs no checks or results")
     try:
         previous = read_result(args.compare)
         session = Session(args.url, args.ca_file)
@@ -286,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL {exc}")
         return 2
     lines = (
-        section_lines(report, args.section)
+        [line for name in args.section for line in section_lines(report, name)]
         if args.section
         else checks(result, previous, args.expect_version, args.expect_schema)
     )

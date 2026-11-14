@@ -7,7 +7,11 @@ description: Check production after every deployment, or on request after a rest
 
 Run after every deployment (step 5 of
 [release-unraid](../pacecraft-release-unraid/SKILL.md)) and on request after a
-restart. Report one short line per step: `ok` or the finding.
+restart. Report one short line per step: `ok` or the finding. Every read
+goes through a tracked script (`scripts/`); host state that the app cannot see
+(running digest, container memory and environment, the log before the app
+logger starts, disk and the recovery copy until the diagnostics report them,
+#2781) comes from the Unraid MCP, read-only.
 
 **Inputs at run time only:** the app address (the athlete's private notes) and
 the app password as a secret file delivered to the session (`request_secret`
@@ -40,7 +44,9 @@ stop, report it, and do not try to repair production.
 4. **Logs:** run [prod-logs](../pacecraft-prod-logs/SKILL.md) with the app's
    own redacted entries (`--url`, `--password-file`): counts and event names
    only, the number of removed past app-created Garmin workouts after the first
-   Garmin refresh since the deploy, and plan-sync error events. The Unraid MCP
+   Garmin refresh since the deploy, and plan-sync error events. The durable
+   removal counts come from `python scripts/prod_diagnostics.py --url <app
+   address> --password-file <secret file> --section garmin_past_workout_removal`. The Unraid MCP
    logs call ignores `level=` and truncates at about 40 KB, so a saved container
    log covers only the latest window: use it (`--log-file`, then delete it) for
    startup errors, and say which window the counts cover.
