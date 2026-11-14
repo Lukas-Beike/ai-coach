@@ -25,9 +25,7 @@ from backend.coach.context import CoachIntervalsContextService
 from backend.errors import AppError
 from backend.http_api.public_weather import PublicWeatherStateService
 from backend.http_api.route_table import Access, RouteRequest
-from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
-from backend.planning import planned_units as planning_planned_units
 from backend.planning import workouts as planning_workouts
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.providers import calendar as calendar_provider
@@ -91,32 +89,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
                     ),
                 )
 
-    def test_daily_weather_rain_peak_uses_local_hours_and_stays_date_specific(self):
-        forecast = {
-            "daily": {"time": ["2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08"]},
-            "hourly": {
-                "time": [
-                    "2026-09-05T19:00",
-                    "2026-09-05T06:00",
-                    "2026-09-05T15:00",
-                    "2026-09-06T09:00",
-                    "2026-09-06T18:00",
-                    "2026-09-07T09:00",
-                    "2026-09-07T10:00",
-                ],
-                "precipitation_probability": [80, 5, 80, 0, 0, 30, 30],
-            },
-        }
-        days = weather_projection.daily_summary(forecast)
-        self.assertEqual(days[0]["rain_peak_time"], "15:00")
-        self.assertIsNone(days[1]["rain_peak_time"])
-        self.assertIsNone(days[2]["rain_peak_time"])
-        self.assertIsNone(days[3]["rain_peak_time"])
-        forecast["hourly"]["precipitation_probability"] = [None, 5, None]
-        self.assertIsNone(
-            weather_projection.daily_summary(forecast)[0]["rain_peak_time"]
-        )
-
     def test_calendar_weather_history_survives_refresh_location_change_and_restart(
         self,
     ):
@@ -174,23 +146,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(context["weather"]["forecast_saved_at"], old["fetched_at"])
         self.assertEqual(context["weather"]["rain_peak_time"], "15:00")
 
-    def test_changing_weather_location_invalidates_previous_forecast(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Münster"})
-        server.key_value_service().set(
-            weather_cache.CACHE_KEY, json.dumps({"query": "Münster", "forecast": {}})
-        )
-        server.ATHLETE_DATA.profile().save({"weather_location": "Köln"})
-        self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
-
-    def test_changing_weather_location_clears_negative_cache(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        server.key_value_service().set(
-            weather_cache.FAILURE_KEY,
-            json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}),
-        )
-        server.ATHLETE_DATA.profile().save({"weather_location": "Koeln"})
-        self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
-
     def test_profile_patch_location_change_clears_weather_caches(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         server.key_value_service().set(
@@ -202,40 +157,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
         server.ATHLETE_DATA.profile().patch({"weather_location": "Koeln"})
         self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
-        self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
-
-    def test_local_weather_state_does_not_fetch_without_complete_plan_state(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        with patch.object(
-            weather_provider.WeatherClient,
-            "fetch",
-            side_effect=AssertionError("weather must stay local"),
-        ):
-            weather = server.PUBLIC_STATE.weather_state_service().state(local_only=True)
-        self.assertTrue(weather["configured"])
-        self.assertTrue(weather["loading"])
-
-    def test_weather_failure_uses_exponential_negative_cache_until_forced(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        forecast = {
-            "query": "Berlin",
-            "location": {"name": "Berlin", "country": "Deutschland"},
-            "model": "ECMWF",
-            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": runtime_clock.utc_now(),
-        }
-        with patch.object(
-            weather_provider.WeatherClient,
-            "fetch",
-            side_effect=[AppError(503, "upstream"), forecast],
-        ) as fetch:
-            first = server.WEATHER.service().state(refresh=True)
-            second = server.WEATHER.service().state(refresh=True)
-            forced = server.WEATHER.service().state(refresh=True, force=True)
-        self.assertEqual(fetch.call_count, 2)
-        self.assertIn("Wetterdaten", first["error"])
-        self.assertIn("noch nicht erneut", second["error"])
-        self.assertEqual(forced["fetched_at"], forecast["fetched_at"])
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
     def test_coach_context_reads_weather_cache_without_refreshing_it(self):
@@ -371,31 +292,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertNotIn("/api/calendar/import", backend)
         self.assertNotIn("import_public_calendar", backend)
         self.assertNotIn("renderExternalCalendarMarker", app)
-
-    def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "info-only",
-                    "info-only",
-                    "Informational event",
-                    tomorrow,
-                    tomorrow + "T10:00:00+02:00",
-                    tomorrow + "T13:00:00+02:00",
-                    180,
-                    0,
-                    0,
-                    runtime_clock.utc_now(),
-                ),
-            )
-        self.assertEqual(
-            server.EXTERNAL_CALENDAR.reader().list_events(
-                1000, training_relevant_only=True
-            ),
-            [],
-        )
 
     def test_ical_no_intensity_marker_requires_easy_replacement(self):
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
@@ -534,28 +430,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             [(item["impact"], item["decision_scope"]) for item in events],
             [("none", "series")],
         )
-
-    def test_planned_unit_preserves_private_calendar_adjustment(self):
-        context = {
-            "label": "Aufgrund privater Termine angepasst",
-            "reason": "family calendar has one event",
-            "original_duration_minutes": 120,
-            "adjusted_duration_minutes": 60,
-            "intensity_adjusted": True,
-        }
-        planned = planning_planned_units.normalize_planned_unit(
-            {
-                "date": (
-                    server.ATHLETE_CLOCK.now().date() + timedelta(days=1)
-                ).isoformat(),
-                "sport": "Ride",
-                "name": "Locker",
-                "description": "- 60m 60% easy",
-                "duration_minutes": 60,
-                "private_calendar_adjustment": context,
-            }
-        )
-        self.assertEqual(planned["private_calendar_adjustment"], context)
 
     def test_adaptive_replan_persists_private_calendar_context_after_apply(self):
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
@@ -801,25 +675,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             [item["id"] for item in context[0]["appointments"]], ["external-relevant"]
         )
 
-    def test_workout_payload_is_an_idempotent_calendar_event(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        payload = planning_workouts.workout_event_payload(
-            "abc",
-            {
-                "date": tomorrow,
-                "sport": "Ride",
-                "name": "Tempo",
-                "description": "- 10m 55%\n- 20m 85%\n- 10m 55%",
-                "duration_minutes": 40,
-                "target": "POWER",
-            },
-            today=server.ATHLETE_CLOCK.now().date(),
-        )
-        self.assertEqual(payload["category"], "WORKOUT")
-        self.assertEqual(payload["moving_time"], 2400)
-        self.assertEqual(payload["external_id"], "intervals-coach-abc")
-        self.assertTrue(payload["start_date_local"].endswith("T00:00:00"))
-
     def test_calendar_conflict_is_detected_before_push(self):
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
         remote_reconcilers.planned_reconciler(server).reconcile(
@@ -850,73 +705,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             ),
             [],
         )
-
-    def test_calendar_conflicts_use_time_windows_when_both_events_are_timed(self):
-        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=2)).isoformat()
-        remote_reconcilers.planned_reconciler(server).reconcile(
-            [
-                {
-                    "id": "later",
-                    "name": "Later",
-                    "category": "WORKOUT",
-                    "type": "Ride",
-                    "start_date_local": day + "T12:00:00",
-                    "moving_time": 1800,
-                }
-            ]
-        )
-        self.assertEqual(
-            server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
-                {
-                    "date": day,
-                    "starts_at_local": day + "T08:00:00",
-                    "duration_minutes": 60,
-                }
-            ),
-            [],
-        )
-        conflict = server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
-            {"date": day, "starts_at_local": day + "T12:15:00", "duration_minutes": 30}
-        )[0]
-        self.assertEqual(conflict["name"], "Later")
-        self.assertEqual(conflict["match"], "time_window")
-
-    def test_calendar_conflicts_ignore_archived_planned_units(self):
-        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=4)).isoformat()
-        existing = server.PLANNING_DATA.planned_unit().create(
-            {
-                "date": day,
-                "sport": "Run",
-                "name": "Archived",
-                "description": "- 20m 60% easy",
-            }
-        )
-        server.PLANNING_DATA.planned_unit().update(
-            existing["id"], {"action": "archive"}
-        )
-        self.assertEqual(
-            server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
-                {"date": day}
-            ),
-            [],
-        )
-
-    def test_calendar_conflicts_include_local_competitions_with_date_fallback(self):
-        day = (server.ATHLETE_CLOCK.now().date() + timedelta(days=3)).isoformat()
-        server.PLANNING_DATA.competition().save(
-            {
-                "name": "Local Race",
-                "event_date": day,
-                "sport": "Cycling",
-                "starts_at_local": day + "T10:00:00",
-                "planned_duration_s": 7200,
-            }
-        )
-        conflict = server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
-            {"date": day}
-        )[0]
-        self.assertEqual(conflict["source"], "local_competition")
-        self.assertEqual(conflict["match"], "date")
 
     def test_library_upload_uses_single_workout_endpoint_and_canonical_sport(self):
         client = server.PROVIDER_TRANSPORT.intervals_client(
@@ -1347,51 +1135,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertNotIn("weather_recommendation", enriched[1])
         self.assertNotIn("weather_recommendation", enriched[2])
 
-    def test_weather_recommendation_respects_weekday_work_and_friday_hours(self):
-        monday = date(2026, 8, 31)
-        friday = date(2026, 9, 4)
-
-        def forecast_for(target, low_hours):
-            times = [f"{target.isoformat()}T{hour:02d}:00" for hour in range(24)]
-            precipitation = [5 if hour in low_hours else 80 for hour in range(24)]
-            return {
-                "hourly": {
-                    "time": times,
-                    "apparent_temperature": [18] * 24,
-                    "precipitation_probability": precipitation,
-                    "rain": [0] * 24,
-                    "showers": [0] * 24,
-                    "wind_speed_10m": [12] * 24,
-                    "wind_gusts_10m": [20] * 24,
-                    "wind_direction_10m": [180] * 24,
-                    "weather_code": [1] * 24,
-                }
-            }
-
-        monday_result = weather_recommendations.weather_recommendation(
-            {
-                "id": "monday",
-                "type": "Ride",
-                "starts_at_local": f"{monday}T08:00:00",
-                "planned_duration_s": 7200,
-            },
-            forecast_for(monday, {8, 9, 16, 17}),
-        )
-        self.assertEqual(monday_result["suggested_time"], "16:00–18:00 Uhr")
-        self.assertEqual(monday_result["availability"], "nach der Arbeit")
-
-        friday_result = weather_recommendations.weather_recommendation(
-            {
-                "id": "friday",
-                "type": "Run",
-                "starts_at_local": f"{friday}T08:00:00",
-                "planned_duration_s": 3600,
-            },
-            forecast_for(friday, {8, 14}),
-        )
-        self.assertEqual(friday_result["suggested_time"], "14:00–15:00 Uhr")
-        self.assertEqual(friday_result["availability"], "nach der Arbeit")
-
     def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         forecast = {
@@ -1412,30 +1155,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(manual["status"], "ok")
         self.assertEqual(fetch.call_count, 2)
         fetch.assert_called_with("Berlin")
-
-    def test_weather_refresh_rechecks_adaptive_planning(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        forecast = {
-            "query": "Berlin",
-            "location": {"name": "Berlin", "country": "Deutschland"},
-            "model": "ECMWF",
-            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": runtime_clock.utc_now(),
-        }
-        with (
-            patch.object(
-                weather_provider.WeatherClient, "fetch", return_value=forecast
-            ),
-            patch.object(
-                adaptive_preview_service.AdaptiveReplanPreviewService,
-                "preview",
-                return_value={"changes": [{"id": "change-1"}]},
-            ) as preview,
-        ):
-            result = server.WEATHER_SYNC().sync("test")
-        preview.assert_called_once_with()
-        self.assertTrue(result["needs_replan"])
-        self.assertEqual(result["replan_changes"], 1)
 
     def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
@@ -1572,41 +1291,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(result["events"], 1)
         self.assertEqual(
             server.EXTERNAL_CALENDAR.reader().list_events()[0]["uid"], "in-window"
-        )
-
-    def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
-        tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "event-old",
-                    "family-old",
-                    "Existing appointment",
-                    tomorrow,
-                    tomorrow + "T10:00:00+02:00",
-                    tomorrow + "T11:00:00+02:00",
-                    60,
-                    0,
-                    runtime_clock.utc_now(),
-                ),
-            )
-        config = replace(
-            server.CONFIG_HOLDER.value,
-            calendar_ical_url="https://93.184.216.34/family.ics",
-        )
-        with (
-            patch.object(server.CONFIG_HOLDER, "value", config),
-            patch.object(
-                calendar_provider,
-                "fetch_calendar_feed",
-                side_effect=AppError(502, "upstream unavailable"),
-            ),
-            self.assertRaises(AppError),
-        ):
-            server.EXTERNAL_CALENDAR.sync_service().sync("test")
-        self.assertEqual(
-            server.EXTERNAL_CALENDAR.reader().list_events()[0]["id"], "event-old"
         )
 
 

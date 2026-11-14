@@ -981,6 +981,11 @@ class ProviderHTTPTests(unittest.TestCase):
             {key: start_context[key] for key in ("operation_id", "trigger", "phase")},
             {"operation_id": "op-1", "trigger": "manual", "phase": "fetch"},
         )
+        done = logger.records[1][2]["extra"]["context"]
+        self.assertEqual(
+            (done["service"], done["operation"], done["result_fields"]),
+            ("synthetic", "fetch", 2),
+        )
         self.assertEqual(start_context["date"], "2026-09-19")
         self.assertNotIn("must not appear", repr(logger.records))
         self.assertNotIn("provider payload", repr(logger.records))

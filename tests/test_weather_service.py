@@ -306,6 +306,16 @@ class WeatherServiceTests(unittest.TestCase):
             self.tracker.events[-1][2:], ("error", "failed", "provider_error")
         )
         self.assertEqual(len(self.logger.calls), 1)
+        client.error = None
+        client.result = {
+            "query": "Berlin",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": self.now.isoformat(),
+        }
+        forced = service.state(force=True)
+        self.assertEqual(client.calls, ["Berlin", "Berlin"])
+        self.assertEqual(forced["fetched_at"], self.now.isoformat())
+        self.assertEqual(self.get(cache.FAILURE_KEY), "")
 
     def test_refresh_due_follows_cache_age_and_retry_backoff(self):
         refreshed = {

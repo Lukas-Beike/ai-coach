@@ -297,6 +297,11 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(fallback["environment"], "unknown")
         self.assertEqual(fallback["category"], "RACE_B")
         self.assertEqual(fallback["intervals_event_id"], "7")
+        text_target = competitions.remote_competition_data(
+            {"date": "2026-10-04", "name": "Race", "target": "Sub 2:00"}
+        )
+        assert text_target is not None
+        self.assertEqual(text_target["target"], "Sub 2:00")
 
     def test_conflict_payload_has_explicit_timestamp_and_preserves_input(self) -> None:
         remote = {

@@ -150,6 +150,8 @@ class PlanningWorkoutTests(unittest.TestCase):
         payload = workout_event_payload("run-1", run, today=TODAY)
         self.assertEqual(payload["moving_time"], 1800)
         self.assertEqual(payload["external_id"], "intervals-coach-run-1")
+        self.assertEqual(payload["category"], "WORKOUT")
+        self.assertTrue(payload["start_date_local"].endswith("T00:00:00"))
         self.assert_app_error(
             lambda: validate_workout_description({**run, "duration_minutes": 5}),
             reason="workout_duration_mismatch",
