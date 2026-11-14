@@ -1201,6 +1201,11 @@ h2 {
 .collapsible-section > summary::-webkit-details-marker { display: none; }
 .collapsible-section > summary::after, .library-sport > summary::after, .connection-card > summary::after, .nutrition-product-section > summary::after { content: ""; flex: none; width: .5rem; height: .5rem; margin: 0 4px 3px 2px; border: solid var(--accent-bright); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .16s ease; }
 .collapsible-section[open] > summary::after, .library-sport[open] > summary::after, .connection-card[open] > summary::after, .nutrition-product-section[open] > summary::after { margin-bottom: -3px; transform: rotate(-135deg); }
+.shortcut-list { display: grid; grid-template-columns: max-content 1fr; align-items: center; gap: 8px 16px; margin: 0; }
+.shortcut-list dd { margin: 0; color: var(--ink); }
+.shortcut-list kbd { padding: 1px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 6px; color: var(--ink); background: var(--surface-raised); font: inherit; font-size: .8rem; font-weight: 650; }
+/* The shortcuts need a keyboard, so phones do not list them (#2812). */
+@media (max-width: 767px) { .shortcut-help { display: none; } }
 .collapsible-section > summary:hover, .collapsible-section[open] > summary { background: var(--card-hover-surface); }
 .collapsible-section[open] > summary { border-bottom: 1px solid var(--line); }
 .collapsible-summary-title { min-width: 0; color: var(--ink); font-size: 1.02rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
