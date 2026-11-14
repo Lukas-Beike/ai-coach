@@ -19,7 +19,7 @@ HEADING = re.compile(r"^(#{1,6}) +(\S.*)$")
 def open_boxes(body):
     """Open box matches split into parts and acceptance criteria.
 
-    A criterion sits under a heading starting with "Acceptance criteria", down to
+    A criterion sits under a heading starting with "Acceptance" (#2799), down to
     the next heading of the same or a higher level; headings inside code fences
     do not count. The closing summary covers criteria; parts keep an issue open.
     """
@@ -30,7 +30,7 @@ def open_boxes(body):
         fenced ^= text.startswith(("```", "~~~"))
         if (heading := HEADING.match(text)) and not fenced:
             depth = len(heading[1])  # a deeper heading stays inside the section
-            starts = heading[2].lower().startswith("acceptance criteria")
+            starts = heading[2].lower().startswith("acceptance")
             level = depth if starts else level * (depth > level)
         if box := CHECKBOX.match(body, start, end):
             (criteria if level else parts).append(box)

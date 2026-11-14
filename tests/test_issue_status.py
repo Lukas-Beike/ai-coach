@@ -43,6 +43,13 @@ class IssueStatusTests(unittest.TestCase):
             [m[1] for m in criteria],
             ["closing summary covers this", "still a criterion"],
         )
+        # #2799: a plain "Acceptance" heading starts the criteria too
+        parts, criteria = issue_status.open_boxes(
+            "## Acceptance\n- [ ] a\n## B\n- [ ] b"
+        )
+        self.assertEqual(
+            ([m[1] for m in parts], [m[1] for m in criteria]), (["b"], ["a"])
+        )
 
     def test_only_closing_or_part_of_references_link_a_pr(self):
         bodies = {  # #2798: a mention in prose or a longer number does not link
