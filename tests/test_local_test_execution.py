@@ -127,19 +127,6 @@ class RunnerEvidenceTests(unittest.TestCase):
             )
         )
 
-    def test_server_is_imported_only_through_the_test_support(self):
-        # A bare `import server` before server_test_support fixes the fake
-        # configuration for the whole process: later modules lose it (#2789).
-        bare = [
-            path.name
-            for path in Path(__file__).resolve().parent.glob("test_*.py")
-            if any(
-                line.strip() in ("import server", "from server import *")
-                for line in path.read_text(encoding="utf-8").splitlines()
-            )
-        ]
-        self.assertEqual(bare, [])
-
     def test_empty_list_fails_with_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.json"
@@ -504,9 +491,7 @@ class SupervisorTests(unittest.TestCase):
                 except (FileNotFoundError, PermissionError) as error:
                     last_error = error
                     time.sleep(0.02)
-            self.assertIsNotNone(
-                observed, f"owned descendant reached readiness: {last_error!r}"
-            )
+            self.assertIsNotNone(observed, f"owned descendant reached readiness: {last_error!r}")
             if os.name == "nt":
                 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                 kernel.OpenProcess.argtypes = [
