@@ -347,7 +347,7 @@ class WorkflowSourceTests(unittest.TestCase):
             for name, count in re.findall(r"--expected ([a-z-]+):(\d+)", aggregate)
         }
         self.assertEqual(expected, dict.fromkeys(every, count))
-        self.assertIn("expected=(--expected desktop:2)\n", aggregate)
+        self.assertIn(f"expected=(--expected desktop:{count})\n", aggregate)
         self.assertIn(
             'if [[ "$UI" != "false" ]]; then\n            expected+=', aggregate
         )
@@ -1097,6 +1097,8 @@ class ChangedFileClassifierTests(unittest.TestCase):
             "package.json",
             "package-lock.json",
             "backend/http_api/static_assets.py",
+            "backend/http_api/response_transport.py",
+            "backend/http_api/responses.py",
             "scripts/run_browser_tests.py",
             "scripts/browser_environment.json",
             ".github/scripts/aggregate_browser_results.py",
@@ -1186,6 +1188,7 @@ class ChangedFileClassifierTests(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         source = _job(workflow, "source", "image")
         self.assertIn("docs_only: ${{ steps.changes.outputs.docs_only }}", source)
+        self.assertIn("ui: ${{ steps.changes.outputs.ui }}", source)
         classify = source.split("- name: Classify changed files\n", 1)[1]
         self.assertIn("if: github.event_name == 'pull_request'\n", classify)
         self.assertIn("python .github/scripts/ci_changes.py", classify)

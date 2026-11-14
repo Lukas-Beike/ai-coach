@@ -32,6 +32,8 @@ UI_PATHS = (
     "package.json",
     "package-lock.json",
     "backend/http_api/static_assets.py",
+    "backend/http_api/response_transport.py",
+    "backend/http_api/responses.py",
     "scripts/run_browser_tests.py",
     "scripts/browser_environment.json",
     ".github/scripts/aggregate_browser_results.py",
@@ -90,10 +92,12 @@ def main():
     if paths is None:
         print("Not a pull request merge commit: every suite runs.")
     else:
-        print(f"{len(paths)} changed paths; docs_only={values['docs_only']}")
+        print(
+            f"{len(paths)} changed paths; docs_only={str(values['docs_only']).lower()}"
+        )
         for path in [path for path in paths if not is_doc(path)][:20]:
             print(f"  not documentation: {path}")
-        print(f"ui={values['ui']}")
+        print(f"ui={str(values['ui']).lower()}")
         for path in [path for path in paths if touches_ui(path)][:20]:
             print(f"  touches the UI: {path}")
     output = os.environ.get("GITHUB_OUTPUT")

@@ -115,7 +115,7 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 - **THEN** the quality job fails unless every shard delivered exactly one coverage file, then enforces the coverage floor and the quality ratchet that `developer-quality-gates` specifies
 
 #### Scenario: Browser matrix
-- **WHEN** the shared image is available
+- **WHEN** the shared image is available on a push, release or dispatch run, or on a pull request with a UI change
 - **THEN** `mobile`, `tablet-landscape` and `desktop` run in two shards each, on Node 22 with `npm ci --ignore-scripts` and the pinned prepared browser image; the Node unit tests (`node --test tests/*.cjs`) run once, in desktop shard 1
 
 #### Scenario: Pull request without a UI change

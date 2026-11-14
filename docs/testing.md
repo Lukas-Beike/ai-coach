@@ -227,12 +227,10 @@ stateful specs require the shared runner's fresh per-file fixtures.
 
 A pull request that changes no UI path runs only the `desktop` project (#2748);
 `mobile` and `tablet-landscape` then run on the push to `develop`, and a red run
-there stops merges like any red `develop` run. UI paths, listed in `UI_PATHS` of
-`.github/scripts/ci_changes.py`: `public/`, `e2e/`, `playwright.config.cjs`,
-`package.json`, `package-lock.json`, `backend/http_api/static_assets.py` (shell,
-asset stamping, service worker, headers), the browser runner and its pinned
-environment, the browser aggregate, the classifier and the test workflow. Push,
-release and dispatch runs always run every project.
+there stops merges like any red `develop` run. `UI_PATHS` in
+`.github/scripts/ci_changes.py` is the one list of UI paths: the client and its
+browser tests and tooling, the server modules that serve the shell and assets,
+and the test workflow. Push, release and dispatch runs always run every project.
 
 Configured viewports in `playwright.config.cjs`:
 - `mobile`: 390x844 (Standard mobile)
