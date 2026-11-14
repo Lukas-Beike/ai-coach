@@ -70,20 +70,18 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, tzinfo
 from enum import StrEnum
-from functools import partial
+from functools import cache, partial
 from typing import Any, Final
 
 from backend.activities.session_linking import (
     link_activity_sessions,
     split_unmatched_sessions,
 )
-from backend.canonical.section_items import key_of, section_of, unwrapped
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
-    GARMIN_MORNING_SECTIONS,
     HEALTH_RECORD_KIND,
     ActivityItem,
     DayItemsLookup,
@@ -92,7 +90,7 @@ from backend.providers.canonical_plans import (
     ObservationItem,
     RawRecord,
     current_mapper_versions,
-    garmin_morning_keys,
+    garmin_day_reading,
     observation_mapper_versions,
     reprojection_mapper_version,
     reprojection_plan,
@@ -397,7 +395,7 @@ class CanonicalBackfill:
             current = state["reproject_current"]
             row, version = pending
             loads = stored_training_loads(db)
-            days = partial(garmin_store.day_items, db)
+            days = cache(partial(garmin_store.day_items, db))
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
@@ -669,29 +667,23 @@ def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> 
 
 
 def _morning_text(row: Mapping[str, Any], days: DayItemsLookup) -> str:
-    """The readings of its day a Garmin morning-section element re-projects with."""
-    source_id = str(row["source_record_id"])
-    section = section_of(source_id)
-    if (
-        row["provider"] != _GARMIN
-        or row["record_kind"] != HEALTH_RECORD_KIND
-        or section not in GARMIN_MORNING_SECTIONS
-    ):
+    """The day's chosen reading a Garmin morning-section element re-projects with."""
+    if row["provider"] != _GARMIN or row["record_kind"] != HEALTH_RECORD_KIND:
         return ""
     try:
         payload = json.loads(row["payload"])
-    except TypeError, ValueError:
-        return ""
-    item = (
-        unwrapped(section, key_of(source_id), payload)
-        if isinstance(payload, dict)
-        else None
-    )
-    if item is None or not item.observed_on:
-        return ""
-    return json.dumps(
-        sorted(garmin_morning_keys(section, days(section, item.observed_on)) or ())
-    )
+        choice = (
+            garmin_day_reading(str(row["source_record_id"]), payload, days)
+            if isinstance(payload, dict)
+            else None
+        )
+        return json.dumps(
+            None if choice is None else [[item.key, item.value] for item in choice],
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:  # noqa: BLE001 - the plan reports the bad record itself
+        return "unreadable"
 
 
 def _reprojection_work(
