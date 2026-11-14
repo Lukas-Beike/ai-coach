@@ -193,6 +193,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "local_load",
                 "garmin_change_check",
                 "lt1_ride_coverage",
+                "decoupling_eligibility",
                 "stream_backfill",
                 "fit_inventory",
                 "session_metrics",

@@ -264,6 +264,8 @@ uncontrolled outdoor sessions.
   data on 2026-11-08 found no session of the last 365 days with Garmin or
   Wahoo full-resolution streams, so it could not be evaluated; it runs again
   after the stream history re-fetch (#1763), and the rule is decided then.
+  The app reports the same counts in the diagnostics section
+  `decoupling_eligibility` until that decision (#2779).
 - **History:** sessions without stored full-resolution streams have no stream
   work and no decoupling until the follow-up stream re-fetch.
 - **EF trend:** an EF or decoupling trend over comparable sessions is not

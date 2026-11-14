@@ -1,8 +1,12 @@
-"""The decoupling eligibility dry run (#1773): gates, candidate rules, aggregate-only report."""
+"""The decoupling eligibility (#1773, #2779): gates, candidate rules, aggregate-only report.
+
+The dry run on a database copy and the diagnostics section share one core.
+"""
 
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import sqlite3
 import tempfile
@@ -25,6 +29,11 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import DatabaseManager
 from backend.db.activity_detail_store import replace_detail_set
+from backend.db.repositories import KeyValueRepository
+from backend.performance import decoupling_eligibility as eligibility
+from backend.performance.mean_max_curve import SessionCurveReader
+from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.session_metrics import analysis_activity
 from scripts import decoupling_eligibility_dry_run as dry_run
 from tests.canonical_detail_support import NOW, add_session_record, open_manager
 
@@ -198,19 +207,119 @@ class DryRunTests(unittest.TestCase):
             self.assertEqual(dry_run.main(["copy.db"]), 2)
 
 
+class DiagnosticsSectionTests(unittest.TestCase):
+    """The diagnostics section builds the dry-run report off the request path (#2779)."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "intervals-coach.db"
+        self.manager = open_manager(directory.name, self.path.name)
+        self.addCleanup(self.manager.close)
+        _seed(self.manager)
+        self.builds: list[Callable[[], None]] = []
+        self.pauses: list[tuple[float, int]] = []
+        self.snapshots_open = 0
+        ticks = itertools.count(0.0, 0.25)
+        reader = CanonicalTableReader()
+        manager = mock.Mock(read_snapshot=self._read_snapshot)
+        self.section = eligibility.DecouplingEligibility(
+            lambda: manager,
+            reader.activity_sessions,
+            analysis_activity,
+            KeyValueRepository(lambda: ""),
+            lambda: TODAY,
+            SessionCurveReader(reader.session_activities, spawn=self.builds.append),
+            pause=lambda seconds: self.pauses.append((seconds, self.snapshots_open)),
+            clock=lambda: next(ticks),
+        ).section
+
+    def _read_snapshot(self) -> Any:
+        snapshot = self.manager.read_snapshot()
+        test = self
+
+        class Counted:
+            def __enter__(self) -> Any:
+                test.snapshots_open += 1
+                return snapshot.__enter__()
+
+            def __exit__(self, *exc: object) -> None:
+                test.snapshots_open -= 1
+                snapshot.__exit__(*exc)
+
+        return Counted()
+
+    def test_section_equals_the_dry_run_report_and_paces_each_session(self) -> None:
+        self.assertEqual(self.section(), {"status": "pending"})
+        self.assertEqual(len(self.builds), 1)
+        self.assertEqual(self.section(), {"status": "pending"})  # one build at a time
+        self.builds.pop()()
+        # One session per read snapshot, then a pause as long as its own work,
+        # outside the snapshot: the six streamed sessions of the fixture.
+        self.assertEqual(self.pauses, [(0.25, 0)] * 6)
+
+        section = self.section()
+        self.assertEqual(self.builds, [])  # unchanged sessions build nothing
+        script = dry_run.dry_run(
+            self.path, "", backend=sqlite3, configure=None, today=TODAY
+        )
+        self.assertEqual(
+            (section.pop("status"), section.pop("current")), ("ready", True)
+        )
+        self.assertEqual(
+            section, {k: v for k, v in script.items() if k != "rolled_back"}
+        )
+
+    def test_new_session_rebuilds_in_background_and_a_failure_reports_failed(
+        self,
+    ) -> None:
+        self.section()
+        self.builds.pop()()
+        _add(self.manager, "later", _power(3000, _steady))
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_records SET local_date = '2026-09-10'")
+        stale = self.section()
+        self.assertEqual((stale["status"], stale["current"]), ("ready", False))
+        with (
+            mock.patch.object(eligibility, "evaluate", side_effect=ValueError),
+            self.assertLogs("intervals_coach", "ERROR"),
+        ):
+            self.builds.pop()()
+        self.assertEqual(self.section(), {"status": "failed"})
+
+    def test_section_holds_counts_only(self) -> None:
+        self.section()
+        self.builds.pop()()
+        section = self.section()
+        text = json.dumps(section)
+        for content in ("act_", "steady", "alternating", "2026-", "Garmin"):
+            self.assertNotIn(content, text)
+
+        def leaves(value: Any) -> list[Any]:
+            if isinstance(value, dict):
+                return [leaf for item in value.values() for leaf in leaves(item)]
+            return [value]
+
+        # Numbers, flags and the state word; no other text.
+        for leaf in leaves(section):
+            self.assertTrue(leaf in (None, "ready") or isinstance(leaf, int | float))
+
+
 class MeasureTests(unittest.TestCase):
     def test_rolling_cv_and_variability_index_of_known_series(self) -> None:
-        samples: Sequence[dry_run.Sample] = [
+        samples: Sequence[eligibility.Sample] = [
             (float(second), 1.0, 100.0 if second // 10 % 2 == 0 else 300.0)
             for second in range(1200)
         ]
-        half = dry_run._half(samples, power=True)
-        self.assertAlmostEqual(half.cv[1], 0.5)
-        self.assertAlmostEqual(half.cv[60], 0.0, places=6)
+        half = eligibility._half(samples, power=True)
+        one_second, one_minute = half.cv[1], half.cv[60]
+        assert one_second is not None and one_minute is not None
+        self.assertAlmostEqual(one_second, 0.5)
+        self.assertAlmostEqual(one_minute, 0.0, places=6)
         assert half.vi is not None
         self.assertGreater(half.vi, 1.0)
         self.assertLess(half.vi, 1.05)
-        self.assertIsNone(dry_run._half(samples, power=False).vi)
+        self.assertIsNone(eligibility._half(samples, power=False).vi)
 
 
 if __name__ == "__main__":
