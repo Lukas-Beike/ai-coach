@@ -624,18 +624,5 @@
   "2026-10-10": "8fcdf5bb086e1fa2691b90a088c16b306f2a261a4be0e5c41b81210e6c082b55",
   "2026-10-11": "afc2b2e59388f79b282683931c2032c0e70ab084ab82e7b51acd014cebea2a6a",
   "2026-10-12": "49933d8cf9dd7bd71d15441b4840348de84d5225ebbb88bf39df7304e968e09a"
- },
- "reprojected": {
-  "coach_context": {
-   "analysis_provider_metrics": "cfcd792a9c170764dc3cb35c94701b16f1bc6ee57bca25e43b5e8e4ac39b35e9",
-   "current_performance": "07db0217b21c9b692031652e299779129e0a629927aeff02f166691fd1124f66",
-   "performance": "d4055adb98f9ee645b47d7bcdd8bd8a7edb367a230fb3970784a1d0a14daa601",
-   "performance_history": "00c69189f5ab46615316ffcc6fd3d62d6f3ace5b117e00d21208b3d1b76b834c",
-   "recovery": "85cc4e6ddb1a17d6fef542c45e3d3050958fe7e81cea745f1ad19e91a213a5ea",
-   "source_freshness": "05ab17bd9cc5f49539ca8c82c492e0669a884213ac7dceb7ae037a18826ea184"
-  },
-  "coach_context_changed": [],
-  "observations_added": [],
-  "observations_removed": []
  }
 }

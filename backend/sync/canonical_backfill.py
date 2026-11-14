@@ -747,7 +747,7 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
             now=now,
             fill_only=value.fill_only,
             owner=value.owner,
-            yields_to=value.yields_to,
+            ranks=value.ranks,
         )
     else:
         # Re-projection plans carry activities and observations as items; domain

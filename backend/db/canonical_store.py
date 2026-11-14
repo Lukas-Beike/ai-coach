@@ -221,13 +221,14 @@ def upsert_provider_record(
     fetched_at: str,
     now: str,
     observed_on: str | None = None,
+    refresh_fetched_at: bool = False,
 ) -> WriteOutcome:
     """Store one sanitized raw record; an unchanged hash and version is not rewritten.
 
-    ``observed_on`` is the ISO day the record belongs to, for windowed reads. A
-    record delivered again unchanged keeps its row and only takes the new
-    ``fetched_at``, so a re-projection stamps its observations with the same
-    retrieval time as the live ingest (#2782).
+    ``observed_on`` is the ISO day the record belongs to, for windowed reads. With
+    ``refresh_fetched_at`` a record delivered again unchanged keeps its row and
+    only takes a later ``fetched_at``, so a re-projection stamps its observations
+    with the retrieval time the live ingest stamped (#2782).
     """
     text = canonical_json(payload)
     digest = payload_hash(text)
@@ -261,7 +262,9 @@ def upsert_provider_record(
         and existing["state"] == ProviderRecordState.ACTIVE.value
         and existing["observed_on"] == observed_on
     ):
-        if existing["fetched_at"] != fetched_at:
+        if refresh_fetched_at and datetime.fromisoformat(
+            fetched_at
+        ) > datetime.fromisoformat(existing["fetched_at"]):
             update_row(db, "provider_records", {"fetched_at": fetched_at}, key)
         return WriteOutcome.UNCHANGED
     update_row(db, "provider_records", row, key)
@@ -902,21 +905,42 @@ def _observation_series(observation: Observation) -> str:
     return ""
 
 
+def _rank_section(row: Mapping[str, Any]) -> str:
+    """The section of the raw record that wrote ``row``: its owner, else its source."""
+    owner = row["owner_record_id"]
+    return (
+        section_of(owner) if owner else str(row["source_record_id"]).partition(":")[0]
+    )
+
+
 def _outranked(
     existing: Mapping[str, Any],
     values: Mapping[str, Any],
-    yields_to: Collection[str] | None,
+    ranks: Mapping[str, int] | None,
 ) -> bool:
-    """Whether the stored row of another record wins over ``values`` (#2782)."""
-    if yields_to is None:
+    """Whether the stored row of another record wins over ``values`` (#2782).
+
+    The order is total: a value of the last-ranked (fill-only) section loses to
+    any other; then the later retrieval wins; then the lower rank; on the same
+    rank the stored row, so the first value written stays, as inside one payload.
+    """
+    if ranks is None or existing["owner_record_id"] == values["owner_record_id"]:
         return False
+    stored_rank, new_rank = (
+        ranks.get(_rank_section(row)) for row in (existing, values)
+    )
+    if stored_rank is None or new_rank is None:
+        return False
+    fill = max(ranks.values())
+    if (stored_rank == fill) != (new_rank == fill):
+        return new_rank == fill
     stored, new = (
         datetime.fromisoformat(row["retrieved_at"]) if row["retrieved_at"] else None
         for row in (existing, values)
     )
-    if stored is None or new is None or stored == new:
-        return section_of(existing["owner_record_id"] or "") in yields_to
-    return stored > new
+    if stored is not None and new is not None and stored != new:
+        return stored > new
+    return stored_rank <= new_rank
 
 
 def upsert_observation(
@@ -928,7 +952,7 @@ def upsert_observation(
     fill_only: bool = False,
     owner: str | None = None,
     derivation: Mapping[str, Any] | None = None,
-    yields_to: Collection[str] | None = None,
+    ranks: Mapping[str, int] | None = None,
 ) -> WriteOutcome:
     """Insert or update one observation by its natural key; the row becomes active.
 
@@ -942,10 +966,9 @@ def upsert_observation(
     or replaces a row left at an older mapper version, which no stored record
     re-projects any more.
 
-    ``yields_to`` (the sections that outrank this one, None for no precedence)
-    makes one rule for a natural key two source records share, the same in the
-    live ingest and the re-projection (#2782): the later retrieval wins, and on
-    the same retrieval the outranking section. A record always updates its own
+    ``ranks`` (each section's rank, None for no precedence) makes one rule for a
+    natural key two records of one provider share, the same in the live ingest and
+    the re-projection (#2782; see ``_outranked``). A record always updates its own
     row, and a row left at an older mapper version is always replaced.
     """
     natural_key = observation_natural_key(observation)
@@ -979,7 +1002,7 @@ def upsert_observation(
         existing["state"] == ProjectionState.ACTIVE.value
         and existing["mapper_version"] >= values["mapper_version"]
         and existing["source_record_id"] != values["source_record_id"]
-        and (fill_only or _outranked(existing, values, yields_to))
+        and (fill_only or _outranked(existing, values, ranks))
     ):
         return WriteOutcome.UNCHANGED
     if owner is None:

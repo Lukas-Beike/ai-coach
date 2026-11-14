@@ -22,6 +22,7 @@ from backend.activities.session_linking import (
     split_unmatched_sessions,
 )
 from backend.canonical.garmin_payload import DEDICATED_ACTIVITY_SECTIONS
+from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import ObservationScope, WriteOutcome
@@ -177,6 +178,8 @@ def ingest_plan(
             fetched_at=_fetched_at(raw.retrieved_at, stamp),
             now=stamp,
             observed_on=raw.observed_on,
+            # Garmin re-projects with the latest delivery time (#2782).
+            refresh_fetched_at=plan.provider is ProviderId.GARMIN,
         )
     for activity in plan.activities:
         counters.count(
@@ -214,7 +217,7 @@ def ingest_plan(
                 now=stamp,
                 fill_only=item.fill_only,
                 owner=item.owner,
-                yields_to=item.yields_to,
+                ranks=item.ranks,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}
