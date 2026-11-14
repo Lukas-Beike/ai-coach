@@ -485,7 +485,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "list_planned_workouts",
-            "Read future locally scheduled workouts.",
+            "Read future locally scheduled workouts, the authoritative plan. Use it when the planned units in the context are not enough or the athlete asks to list them; for edits, repairs and syncs read_training_state supplies revisions and hashes. Read-only.",
             {
                 "limit": {
                     "type": "integer",
@@ -500,10 +500,12 @@ def build_structured_tool_schemas(
             {"limit": {"type": "integer", "minimum": 1, "maximum": 500}},
         ),
         _canonical_coach_tool(
-            "list_competitions", "Read locally stored target competitions."
+            "list_competitions",
+            "Read the locally stored target competitions with their IDs. Use it when the target competitions in the context are not enough or a competition ID is needed to change or delete one. Read-only.",
         ),
         _canonical_coach_tool(
-            "list_training_plans", "Read locally stored training-plan metadata."
+            "list_training_plans",
+            "Read the metadata of the locally stored training plans with their IDs. Use it when the athlete asks about existing plans or a plan ID is needed for update_training_plan. Read-only.",
         ),
         _canonical_coach_tool(
             "stage_training_plan",
@@ -582,7 +584,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "commit_training_plan",
-            "Commit a referenced local training-plan artifact atomically.",
+            "Commit a staged training-plan draft (artifact_id from stage_training_plan, referenced in this dialogue) as local planned workouts in one transaction. Use it only when the athlete accepts that draft; never for an arbitrary outstanding artifact. Never writes remotely.",
             {
                 "artifact_id": {"type": "string"},
                 "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
@@ -934,7 +936,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "delete_competition",
-            "Delete one locally stored target competition.",
+            "Delete one locally stored target competition by its exact competition_id (list_competitions). Use it only when the athlete asks to delete or remove that competition; the server checks that request. Local only, no remote write.",
             {"competition_id": {"type": "string"}},
         ),
         _canonical_coach_tool(
@@ -1019,7 +1021,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_sync_job",
-            "Read one local synchronization job.",
+            "Read the state of one local synchronization job by job_id. Use it before reporting queued or retried sync work as complete and before retrying a failed job with resolve_training_sync_conflict. Read-only.",
             {"job_id": {"type": "string"}},
         ),
         _canonical_coach_tool(
@@ -1033,11 +1035,11 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "preview_adaptive_replan",
-            "Calculate a local adaptive planning preview without changing workouts.",
+            "Calculate a preview of adaptive changes to future local workouts without changing anything. Use it to explain a proposed replan and ask whether to apply it; only the athlete's very next message can approve this preview.",
         ),
         _canonical_coach_tool(
             "apply_adaptive_replan",
-            "Apply the latest adaptive planning preview after explicit Coach approval.",
+            "Apply the latest adaptive planning preview (its adjustment_id) to future local workouts. Use it only when the athlete's very next message after the preview clearly asks to apply it; otherwise create a fresh preview. Set sync_illness_to_intervals only when that message names the Intervals.icu sync of the illness pause.",
             {
                 "adjustment_id": {"type": "string"},
                 "sync_illness_to_intervals": {"type": "boolean"},
@@ -1209,7 +1211,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "delete_nutrition_entry",
-            "Delete a single nutrition log entry by its ID.",
+            "Delete one nutrition diary entry by its exact ID (read_nutrition). Use it only when the athlete asks to delete or remove that logged entry; a saved meal template is deleted with delete_nutrition_template. Local only.",
             {
                 "id": {
                     "type": "string",
