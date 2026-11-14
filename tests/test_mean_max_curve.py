@@ -776,13 +776,37 @@ class ProfileSelectionTests(unittest.TestCase):
         builds = []
         reader = SessionCurveReader(self.session_records, spawn=builds.append)
 
-        def broken():
-            raise ValueError("unreadable stream")
+        # A fixed clock: each build takes a known time; the diagnostics state
+        # reports it (#2852).
+        now = [100.0]
+        clock = SimpleNamespace(monotonic=lambda: now[0])
+        self.enterContext(patch.object(mean_max_curve, "time", clock))
+        seen = []
 
+        def timed(seconds, records=None):
+            def build():
+                now[0] += seconds
+                seen.append(reader.background_state()["building_s"])
+                if records is None:
+                    raise ValueError("unreadable stream")
+                return records
+
+            return build
+
+        broken = timed(5.0)
+
+        def state(*names):
+            current = reader.background_state()
+            return tuple(current[name] for name in ("status", *names))
+
+        self.assertEqual(state("builds", "failures"), ("pending", 0, 0))
         self.assertIsNone(
-            reader.background_records(self.db, ["act_1"], "a", lambda: [{"n": 1}])
+            reader.background_records(self.db, ["act_1"], "a", timed(40.0, [{"n": 1}]))
         )
+        self.assertEqual(state("builds"), ("building", 0))
         builds.pop()()
+        self.assertEqual(seen, [40.0])  # a running build shows its time so far
+        self.assertEqual(state("builds", "last_build_s"), ("ready", 1, 40.0))
         (first,), current = reader.background_records(self.db, ["act_1"], "a", list)
         self.assertTrue(current)
         # Changed inputs build again in the background; the last records show
@@ -791,8 +815,15 @@ class ProfileSelectionTests(unittest.TestCase):
             ((first,), False),
             reader.background_records(self.db, ["act_1"], "b", broken),
         )
+        self.assertEqual(state("last_build_s"), ("building", 40.0))
         with self.assertLogs("intervals_coach", "ERROR"):
             builds.pop()()
+        now[0] += 30.0
+        self.assertEqual(
+            state("builds", "failures", "last_build_s", "failed_age_s"),
+            ("failed", 1, 1, 5.0, 30.0),
+        )
+        now[0] -= 30.0  # back inside the retry pause
         with self.assertRaises(RuntimeError):
             reader.background_records(self.db, ["act_1"], "b", broken)
         self.assertEqual([], builds)
