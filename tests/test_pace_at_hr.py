@@ -3,6 +3,8 @@
 import unittest
 from datetime import date
 
+from backend.performance.context import first_threshold_history
+from backend.performance.current_metrics import first_thresholds
 from backend.performance.pace_at_hr import (
     grade_adjusted,
     output_at_heart_rate,
@@ -385,3 +387,73 @@ class OutputAtHeartRateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Garmin's dated threshold heart rate and pace since August.
+LT1_GARMIN_HISTORY = {
+    "run_threshold_hr_bpm": {date(2026, 8, 1): 170.0},
+    "run_threshold_pace_seconds_per_km": {date(2026, 8, 1): 270.0},
+}
+
+
+class FirstThresholdHistoryTests(unittest.TestCase):
+    """LT1 at each of the twelve chart weeks, by today's rule (#2693)."""
+
+    TODAY = date(2026, 11, 13)
+
+    @staticmethod
+    def _run(day, speed=3.0):
+        # 700 steady seconds in the 140-149 bpm band of an LT1 at 144 bpm.
+        part = {"seconds": 700, "distance_m": 700 * speed, "speed_sq": 700 * speed**2}
+        profile = {"status": "ok", "bins": {"140": part}}
+        return {"sport": "run", "environment": "outdoor", "date": day,
+                "pace_at_hr_profile": profile}  # fmt: skip
+
+    def _history(self, records):
+        metrics = {key: {"value": max(values.items())[1]}
+                   for key, values in LT1_GARMIN_HISTORY.items()}  # fmt: skip
+        current = first_thresholds(
+            metrics, None, "", {},
+            lambda sport, bpm: output_at_heart_rate(records, sport, bpm, self.TODAY),
+        )  # fmt: skip
+        history = first_threshold_history(
+            current, {}, self.TODAY, garmin_history=LT1_GARMIN_HISTORY,
+            zone_configurations=(), records=records,
+        )  # fmt: skip
+        return current, history["run"]
+
+    def test_weeks_follow_their_own_sessions_and_the_last_point_is_today(self):
+        records = [self._run(f"2026-10-0{day}") for day in (5, 6, 7)]
+        current, points = self._history(records)
+        self.assertEqual(12, len(points))
+        self.assertEqual(
+            ["2026-08-30", "2026-11-08", "2026-11-13"],
+            [points[0]["date"], points[-2]["date"], points[-1]["date"]],
+        )
+        # Before the sessions: a gap, never an interpolated or fallback value.
+        week = {point["date"]: point for point in points}
+        self.assertEqual(
+            {"date": "2026-10-04", "value": None, "origin": None, "hr_bpm": None,
+             "hr_origin": None}, week["2026-10-04"],
+        )  # fmt: skip
+        # From the week of the third session on: 3.0 m/s is 333 s/km at 144 bpm.
+        self.assertEqual(
+            {"date": "2026-10-11", "value": 333, "origin": "own_sessions",
+             "hr_bpm": 144, "hr_origin": "fixed_share"}, week["2026-10-11"],
+        )  # fmt: skip
+        today = current["run"]
+        self.assertEqual(
+            (today["pace_seconds_per_km"], today["pace_origin"], today["hr_bpm"]),
+            (points[-1]["value"], points[-1]["origin"], points[-1]["hr_bpm"]),
+        )
+
+    def test_fewer_than_three_sessions_leave_past_weeks_empty(self):
+        records = [self._run(f"2026-10-0{day}") for day in (5, 6)]
+        current, points = self._history(records)
+        self.assertTrue(all(point["value"] is None for point in points[:-1]))
+        # Today keeps today's rule: the fixed share of the threshold pace.
+        self.assertEqual(
+            (round(270 / 0.88), "fixed_share"),
+            (points[-1]["value"], points[-1]["origin"]),
+        )
+        self.assertEqual(current["run"]["pace_seconds_per_km"], points[-1]["value"])

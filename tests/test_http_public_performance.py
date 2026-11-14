@@ -73,9 +73,13 @@ class PublicPerformanceStateTests(unittest.TestCase):
             {
                 "performance": {
                     **performance,
-                    "history": analysis_history(
-                        garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
-                    ),
+                    "history": {
+                        **analysis_history(
+                            garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
+                        ),
+                        # No background session read is wired here (#2693).
+                        "first_thresholds": {"status": "unavailable"},
+                    },
                     "training_focus_periods": {
                         "fortnight": training_focus(
                             garmin,
@@ -169,6 +173,37 @@ class PublicPerformanceStateTests(unittest.TestCase):
             return_value={},
         ):
             service.from_inputs(None)
+
+    def test_lt1_history_waits_for_the_background_session_read(self):
+        def failing():
+            raise RuntimeError("background session curves failed")
+
+        def history(read):
+            service = PublicPerformanceStateService(
+                Mock(sync_status=Mock(return_value=GarminSyncStatus())),
+                Mock(get=Mock(return_value={})),
+                Mock(),
+                lambda: date(2026, 11, 13),
+                lt1_history_records=read,
+            )
+            with patch(
+                "backend.http_api.public_performance.performance_context.current_performance_context",
+                return_value={},
+            ):
+                inputs = CanonicalPerformanceInputs()
+                return service.from_inputs(inputs)["performance"]["history"]
+
+        # The state request never reads session curves itself (#2693).
+        self.assertEqual(
+            {"status": "pending"}, history(lambda: None)["first_thresholds"]
+        )
+        self.assertEqual({"status": "failed"}, history(failing)["first_thresholds"])
+        stale = history(lambda: ((), False))["first_thresholds"]
+        self.assertEqual("stale", stale["status"])
+        self.assertEqual((12, 12), (len(stale["run"]), len(stale["ride"])))
+        self.assertEqual(
+            "ok", history(lambda: ((), True))["first_thresholds"]["status"]
+        )
 
     def test_golden_history_of_the_performance_endpoint(self):
         sessions, feedback, loads = golden_history()

@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.vocabulary import ProviderId
+from backend.errors import DatabaseBusyError
 from backend.performance import context as performance_context
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
@@ -21,6 +22,7 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.fitness_fatigue import local_fitness_window
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.session_rpe_load import (
     FeedbackLookup,
     feedback_by_session,
@@ -50,9 +52,15 @@ class PublicPerformanceStateService:
         now: Callable[[], datetime] | None = None,
         zone_configurations: Callable[[], Any] = tuple,
         lt1_session_records: Callable[[int], Sequence[Mapping[str, Any]]] | None = None,
+        lt1_history_records: Callable[
+            [], tuple[Sequence[Mapping[str, Any]], bool] | None
+        ]
+        | None = None,
     ) -> None:
         self._garmin_payload_service = garmin_payload_service
         self._lt1_session_records = lt1_session_records
+        # The all-time session read built off the request path (#2694, #2693).
+        self._lt1_history_records = lt1_history_records
         self._zone_configurations = zone_configurations
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
@@ -127,6 +135,9 @@ class PublicPerformanceStateService:
             **performance,
             "history": {
                 **analysis_history(garmin, today, canonical=inputs),
+                "first_thresholds": self._first_threshold_history(
+                    performance, profile, inputs, today
+                ),
                 **(
                     {
                         "session_rpe_load": None,
@@ -157,6 +168,43 @@ class PublicPerformanceStateService:
                 else self._garmin_projection_service.public_state(
                     garmin, observations=observations
                 )
+            ),
+        }
+
+    def _first_threshold_history(
+        self,
+        performance: Mapping[str, Any],
+        profile: Mapping[str, Any],
+        inputs: CanonicalPerformanceInputs,
+        today: date,
+    ) -> dict[str, Any]:
+        """LT1 of the threshold charts (#2693); pending until its sessions are read.
+
+        The sessions come from the background read of every stored session, so
+        the state request never reads their curves cold; ``stale`` while a
+        newer read runs.
+        """
+        if self._lt1_history_records is None or inputs.pending:
+            return {"status": "unavailable"}
+        try:
+            read = self._lt1_history_records()
+        except DatabaseBusyError, RuntimeError:
+            return {"status": "failed"}
+        if read is None:
+            return {"status": "pending"}
+        records, current = read
+        thresholds = performance.get("thresholds") or {}
+        return {
+            "status": "ok" if current else "stale",
+            **performance_context.first_threshold_history(
+                thresholds.get("first_thresholds") or {},
+                profile,
+                today,
+                garmin_history=(
+                    inputs.garmin or GarminCanonicalMetrics()
+                ).performance_history,
+                zone_configurations=self._zone_configurations(),
+                records=records,
             ),
         }
 

@@ -206,6 +206,7 @@ function analysisReadingDetails(point, unit) {
   if (point.ftp_observed_at) details += ` · ${point.power_method || "FTP"} ${dateLabel(point.ftp_observed_at)}`;
   if (point.weight_observed_at) details += ` · Gewicht ${dateLabel(point.weight_observed_at)} (${point.weight_source || "Quelle unbekannt"})`;
   if (point.lower != null) details += ` · Streuung ${analysisValue(point.lower, unit)} bis ${analysisValue(point.upper, unit)}`;
+  if (point.readout) details += ` · ${point.readout}`;
   return details;
 }
 
@@ -813,6 +814,34 @@ function performanceSeriesExplanation(key) {
   return "Letzter gültiger Messwert je Woche.";
 }
 
+// LT1 beside LT2 in each threshold chart, one point per calendar week (#2693): weeks without
+// three own steady sessions stay gaps; the readout names the heart rate and the origin.
+function firstThresholdSeries(lt1, start, end) {
+  return [["run", "Lauf", "s/km"], ["ride", "Rad", "W"]].map(([sport, label, unit]) => {
+    const points = (lt1?.[sport] || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({
+      date: point.date, value: point.value,
+      readout: [point.hr_bpm == null ? null : `bei ${point.hr_bpm} bpm`, THRESHOLD_ORIGINS[point.origin]].filter(Boolean).join(" · "),
+    }));
+    return { label: `${label} · LT1`, legendLabel: "LT1 · aerobe Schwelle", unit, color: 1, line: "solid", cadenceDays: 7,
+      explanation: "Wie der heutige LT1-Wert, je Woche mit den damaligen Schwellen und Einheiten.", currentPoint: points.findLast(analysisValidPoint), points };
+  }).filter((item) => item.points.some(analysisValidPoint));
+}
+
+// The LT1 history waits for the server's background session read: read the values again
+// while it is pending or stale and an analysis sport view is open (#2693).
+let firstThresholdRefreshTimer = null;
+function scheduleFirstThresholdRefresh(status) {
+  clearTimeout(firstThresholdRefreshTimer);
+  if (status !== "pending" && status !== "stale") return;
+  firstThresholdRefreshTimer = setTimeout(async () => {
+    if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) return;
+    const result = await api("/api/performance").catch(() => null);
+    if (!result || !state.data || !ANALYSIS_PERFORMANCE_ROUTES.has(state.route)) return;
+    state.data.performance = result.performance || result;
+    renderAnalysisHistory(state.data.performance.history);
+  }, ALL_TIME_RETRY_MS);
+}
+
 function renderAnalysisHistory(history) { // NOSONAR
   const root = document.querySelector("#analysisHistoryCharts");
   const loadRoot = document.querySelector("#analysisLoadCharts");
@@ -894,11 +923,13 @@ function renderAnalysisHistory(history) { // NOSONAR
     currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
     points: key === "cycling_ftp_watts" ? item.points.filter((point) => point.date >= performanceStart && point.date <= end) : analysisWeeklyPerformancePoints(item.points, performanceStart, end, key.includes("vo2max")),
   })));
+  performanceSeries.push(...firstThresholdSeries(history.first_thresholds, performanceStart, end));
+  scheduleFirstThresholdRefresh(history.first_thresholds?.status);
   // Each sport's development sits in its own segment, so the group is only "Entwicklung" (#2265).
   for (const [sport, primaryUnit, analysisSport] of [["Lauf", "s/km", "run"], ["Rad", "W", "ride"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
     const missing = [];
-    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max"]].map(([unit, metric]) => collectAnalysisChart(missing, metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true, estimate: unit === "ml/kg/min" })).filter(Boolean);
+    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max"]].map(([unit, metric]) => collectAnalysisChart(missing, metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W" || sportSeries.filter((item) => item.unit === unit).length > 1, calendarWeeks: true, estimate: unit === "ml/kg/min" })).filter(Boolean);
     if (sport === "Lauf") {
       const extra = document.createDocumentFragment();
       renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end, missing);

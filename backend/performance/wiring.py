@@ -47,6 +47,9 @@ class PerformanceServices:
     # The session curve records over the one reader, without the report bundle;
     # the last read is shared while its inputs are unchanged, as read-only records.
     curve_records: Callable[[int], Sequence[Mapping[str, Any]]]
+    # Every stored session with its curve, read in the background (#2694, #2693):
+    # the records and whether they are current, None before the first read.
+    all_time_records: Callable[[], tuple[tuple[Mapping[str, Any], ...], bool] | None]
 
 
 def build_performance(
@@ -147,12 +150,17 @@ def build_performance(
             timezone=timezone,
         )
 
-    def curve_records(days: int) -> Sequence[Mapping[str, Any]]:
+    def profiles() -> TrainingProfileSelectionService:
         return TrainingProfileSelectionService(
             local_today, canonical=canonical_performance_source(), curves=power_curves
-        ).curve_records(days, shared=True)
+        )
 
-    return PerformanceServices(training_reports, curve_records)
+    def curve_records(days: int) -> Sequence[Mapping[str, Any]]:
+        return profiles().curve_records(days, shared=True)
+
+    return PerformanceServices(
+        training_reports, curve_records, lambda: profiles().all_time_records()
+    )
 
 
 @dataclass(frozen=True)

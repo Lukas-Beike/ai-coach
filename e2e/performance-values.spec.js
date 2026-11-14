@@ -98,3 +98,30 @@ test("@responsive Laufen and Radfahren each show only their sport", async ({ pag
   await expect(page.locator("#currentPerformance p[data-analysis-sport='run']")).toHaveText("Noch keine aktuellen Werte.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
+
+test("@responsive the threshold charts show the LT1 progression with gaps, heart rate and origin", async ({ page, request }) => {
+  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
+  await page.goto("/#analysis/running");
+  await page.waitForFunction(() => !!state.data?.performance?.history?.body);
+  const [gap, measured] = await page.evaluate(() => {
+    const history = structuredClone(state.data.performance.history);
+    const end = history.end;
+    const weekEnd = (weeks) => addDateKey(end, 6 - ((new Date(`${end}T12:00:00Z`).getUTCDay() + 6) % 7) - 7 * weeks);
+    const point = (date, value) => ({ date, value, origin: value == null ? null : "own_sessions", hr_bpm: value == null ? null : 144, hr_origin: value == null ? null : "measured" });
+    history.first_thresholds = { status: "ok", run: [point(weekEnd(3), null), point(weekEnd(2), 333), point(weekEnd(1), 330), point(end, 328)], ride: [] };
+    state.data.performance = { ...state.data.performance, history };
+    renderAnalysisHistory(history);
+    return [weekEnd(3), weekEnd(2)];
+  });
+  const pace = page.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
+  await expect(pace.locator(".analysis-chart-legend")).toContainText("LT1 · aerobe Schwelle");
+  // Three LT1 weeks drawn; the week without three own sessions stays a gap.
+  await expect(pace.locator('circle[data-color="1"]')).toHaveCount(3);
+  const marker = pace.locator(`.analysis-day-marker[data-date="${measured}"]`);
+  await marker.focus();
+  await page.keyboard.press("Enter");
+  const readout = page.locator(`#${await marker.getAttribute("aria-describedby")}`);
+  await expect(readout).toContainText("bei 144 bpm · Schätzung aus eigenen Einheiten");
+  const gapMarker = pace.locator(`.analysis-day-marker[data-date="${gap}"]`);
+  if (await gapMarker.count()) await expect(page.locator(`#${await gapMarker.getAttribute("aria-describedby")}`)).not.toContainText("LT1");
+});
