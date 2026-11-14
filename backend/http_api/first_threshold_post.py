@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import nullcontext
 from typing import Any
 
 from backend.athlete.profile import ProfileService
@@ -20,10 +19,12 @@ class FirstThresholdPostRoutes:
         self,
         first_threshold_service: Callable[[], FirstThresholdService],
         profile_service: Callable[[], ProfileService],
-        database_lock: Any | None = None,
+        database_manager: Callable[[], Any],
+        database_lock: Any,
     ) -> None:
         self._first_threshold_service = first_threshold_service
         self._profile_service = profile_service
+        self._database_manager = database_manager
         self._database_lock = database_lock
 
     def routes(self) -> list[Route]:
@@ -51,7 +52,8 @@ class FirstThresholdPostRoutes:
         payload = handler.read_json()
         with (
             self._profile_service().mutation_coordinator,
-            self._database_lock or nullcontext(),
+            self._database_lock,
+            self._database_manager().unit_of_work(),
         ):
             result = self._first_threshold_service().adopt(payload)
         handler.send_json(200, result)

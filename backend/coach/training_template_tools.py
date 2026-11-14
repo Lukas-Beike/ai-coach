@@ -62,21 +62,17 @@ class TrainingTemplateToolService:
                 )
             actions.append((action, local_id))
 
-        # Restore may replace the active manager. Resolve both dependencies only
-        # after acquiring the shared lock, then keep every nested library write
-        # inside the same manager-owned unit of work.
-        with self._database_lock:
-            manager = self._database_manager()
+        # Restore may replace the active manager. Resolve it, and then the
+        # library, only after acquiring the shared lock, and keep every nested
+        # library write inside the same manager-owned unit of work.
+        with self._database_lock, self._database_manager().unit_of_work():
             library = self._workout_library_service()
-            with manager.unit_of_work():
-                results = []
-                for template, (action, local_id) in zip(
-                    templates, actions, strict=True
-                ):
-                    if action == "create":
-                        results.append(library.create_template(template))
-                    else:
-                        results.append(library.update(local_id, template))
+            results = []
+            for template, (action, local_id) in zip(templates, actions, strict=True):
+                if action == "create":
+                    results.append(library.create_template(template))
+                else:
+                    results.append(library.update(local_id, template))
 
         return {
             "ok": True,

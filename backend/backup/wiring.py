@@ -89,7 +89,6 @@ def build_backup(ctx: AppContext) -> BackupServices:
                 validation=restore_validation_service(),
                 backup=backup_service(),
                 database_manager=ctx.database,
-                database_lock=ctx.database_lock,
                 # Read live, like the maintenance decorators.
                 maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
                 profile_mutation_coordinator=ctx.profile_mutation_coordinator,

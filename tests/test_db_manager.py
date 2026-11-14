@@ -488,6 +488,65 @@ class DatabaseManagerTests(unittest.TestCase):
         with manager.reader() as db:
             self.assertEqual(self.count(db), 2)
 
+    def test_restore_drain_waits_for_a_running_writer_and_holds_back_new_ones(self):
+        manager = self.make_wal_manager(timeout=5)
+        in_write, release = threading.Event(), threading.Event()
+        in_drain, end_drain = threading.Event(), threading.Event()
+        events: list[str] = []
+
+        def running_writer() -> None:
+            with manager.unit_of_work() as db:
+                db.execute("INSERT INTO records(value) VALUES (2)")
+                in_write.set()
+                release.wait(5)
+                events.append("running writer finishing")
+
+        def drain() -> None:
+            with manager.restore_drain():
+                events.append("drain entered")
+                in_drain.set()
+                end_drain.wait(5)
+                events.append("drain left")
+
+        def late_writer() -> None:
+            with manager.unit_of_work() as db:
+                db.execute("INSERT INTO records(value) VALUES (3)")
+            events.append("late writer committed")
+
+        writer = threading.Thread(target=running_writer, daemon=True)
+        drainer = threading.Thread(target=drain, daemon=True)
+        late = threading.Thread(target=late_writer, daemon=True)
+        for thread in (writer, drainer, late):
+            self.addCleanup(thread.join, 5)
+        writer.start()
+        self.assertTrue(in_write.wait(5))
+        drainer.start()
+        deadline = time.monotonic() + 5
+        while not manager._draining:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.005)
+        late.start()
+        time.sleep(0.1)
+        self.assertEqual([], events)
+        release.set()
+        self.assertTrue(in_drain.wait(5))
+        time.sleep(0.1)
+        self.assertEqual(["running writer finishing", "drain entered"], events)
+        end_drain.set()
+        for thread in (writer, drainer, late):
+            thread.join(5)
+        self.assertEqual(
+            [
+                "running writer finishing",
+                "drain entered",
+                "drain left",
+                "late writer committed",
+            ],
+            events,
+        )
+        with manager.reader() as db:
+            self.assertEqual(self.count(db), 3)
+
     def test_reader_rolls_back_a_write_left_open_on_its_connection(self):
         manager = self.make_wal_manager(reader_count=1)
         with manager.reader() as db:

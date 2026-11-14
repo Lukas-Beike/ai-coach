@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import nullcontext
 from time import monotonic
 from typing import Any
 
@@ -18,11 +17,13 @@ class AthletePutRoutes:
     def __init__(
         self,
         profile_service: Callable[[], ProfileService],
-        database_lock: Any | None = None,
+        database_manager: Callable[[], Any],
+        database_lock: Any,
         zone_service: Callable[[], Any] | None = None,
         body_export: Callable[[dict[str, str], str | None, float], str] | None = None,
     ) -> None:
         self._profile_service = profile_service
+        self._database_manager = database_manager
         self._database_lock = database_lock
         self._zone_service = zone_service
         self._body_export = body_export
@@ -98,7 +99,11 @@ class AthletePutRoutes:
             if isinstance(payload, dict)
             else payload
         )
-        with profile.mutation_coordinator, self._database_lock or nullcontext():
+        with (
+            profile.mutation_coordinator,
+            self._database_lock,
+            self._database_manager().unit_of_work(),
+        ):
             before = profile.get() if opted_in and self._body_export else None
             result = profile.patch(changes)
             revision = profile.revision() if before is not None else None
@@ -182,7 +187,7 @@ class AthletePutRoutes:
         if self._zone_service is None:
             raise AppError(404, NOT_FOUND_ERROR)
         payload = handler.read_json()
-        with self._database_lock or nullcontext():
+        with self._database_lock, self._database_manager().unit_of_work():
             service = self._zone_service()
             result = (
                 service.save(payload)

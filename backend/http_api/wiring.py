@@ -492,6 +492,7 @@ def _athlete_write_routes(
         SettingsPutRoutes(ctx.settings),
         AthletePutRoutes(
             athlete.profile,
+            ctx.database,
             ctx.database_lock,
             athlete.zones,
             lambda profile, revision, deadline: ctx.garmin.body_export(
@@ -507,11 +508,13 @@ def _athlete_write_routes(
             CoachTurnUndoService(ctx.database, ctx.database_lock, history_undo),
             rpe_load,
         ),
-        PlannedUnitFocusPostRoutes(ctx.planning.planned_unit, ctx.database_lock),
+        PlannedUnitFocusPostRoutes(
+            ctx.planning.planned_unit, ctx.database, ctx.database_lock
+        ),
         CredentialsPutRoutes(ctx.provider_credential_service, session_auth_service),
         EquipmentPostRoutes(athlete.equipment),
         FirstThresholdPostRoutes(
-            athlete.first_threshold, athlete.profile, ctx.database_lock
+            athlete.first_threshold, athlete.profile, ctx.database, ctx.database_lock
         ),
         ActivityRoutePostRoutes(lambda: ctx.activity_routes),
         CalendarDecisionPostRoutes(lambda: ctx.external_calendar.decisions()),

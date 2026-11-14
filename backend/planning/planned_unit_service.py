@@ -621,7 +621,7 @@ class PlannedUnitService:
                 bump_planning_revision=True,
                 remote_neutral=True,
             )
-        self._publish_change()
+        self._database_manager.after_commit(self._publish_change)
         return result
 
     def move(
@@ -660,7 +660,7 @@ class PlannedUnitService:
                 skip_calendar_conflict=False,
                 bump_planning_revision=True,
             )
-        self._publish_change()
+        self._database_manager.after_commit(self._publish_change)
         return result
 
     def update(
@@ -689,7 +689,7 @@ class PlannedUnitService:
                 skip_calendar_conflict=skip_calendar_conflict,
                 bump_planning_revision=bump_planning_revision,
             )
-        self._publish_change()
+        self._database_manager.after_commit(self._publish_change)
         return result
 
 

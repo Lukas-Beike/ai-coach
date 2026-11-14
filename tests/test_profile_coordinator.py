@@ -160,7 +160,9 @@ class ProfileCoordinatorTests(unittest.TestCase):
                 lock.release()
 
         self.profile.mutation_coordinator = ObservableCoordinator()
-        routes = AthletePutRoutes(lambda: self.profile, self.database_lock)
+        routes = AthletePutRoutes(
+            lambda: self.profile, lambda: self.manager, self.database_lock
+        )
         for path, payload, expected in (("/api/profile", {"name": "HTTP"}, "HTTP"),):
             with self.subTest(path=path):
                 attempted.clear()
