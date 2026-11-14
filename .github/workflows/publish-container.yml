@@ -79,9 +79,11 @@ jobs:
 
   image:
     needs: source
-    name: Build CI image
+    # The SBOM runs here, on the image just built, instead of in its own job (#2750).
+    name: Build CI image and SBOM
     runs-on: ubuntu-latest
     permissions:
+      # Keep the security steps read-only; the SBOM is stored as a workflow artifact.
       contents: read
     steps:
       - name: Check out repository
@@ -108,6 +110,34 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+      # The action downloads syft; a transient download error gets one retry.
+      - name: Generate SPDX SBOM
+        id: sbom
+        continue-on-error: true
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: pacecraft:ci
+          format: spdx-json
+          output-file: pacecraft-sbom.spdx.json
+          upload-release-assets: false
+      - name: Wait before retrying the SBOM
+        if: steps.sbom.outcome == 'failure'
+        run: sleep 30
+      - name: Retry SPDX SBOM generation
+        if: steps.sbom.outcome == 'failure'
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: pacecraft:ci
+          format: spdx-json
+          output-file: pacecraft-sbom.spdx.json
+          upload-release-assets: false
+      - name: Upload image SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pacecraft-sbom
+          path: pacecraft-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 30
 
   test_shards:
     needs: source
@@ -141,6 +171,13 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
+          # Hash-locked installs verify every cached wheel (#2750).
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      # Shard 1 also runs the syntax check, once per run (#2750).
+      - name: Run syntax checks
+        if: env.MODE != 'idle' && matrix.shard == 1
+        run: python -m compileall -q server.py backend tests
       - name: Install dependencies
         if: env.MODE != 'idle'
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements.txt -r requirements-dev.txt
@@ -174,22 +211,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-  syntax:
-    needs: source
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.14'
-      - name: Run syntax checks
-        run: python -m compileall -q server.py backend tests
 
   container_tests:
     needs: [source, image]
@@ -235,16 +256,16 @@ jobs:
 
   test:
     if: always()
-    needs: [source, test_shards, syntax, container_tests, image_sbom]
+    needs: [source, test_shards, container_tests, image]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate test and syntax results
         env:
           DOCS_ONLY: ${{ needs.source.outputs.docs_only }}
+          # Shard 1 runs the syntax check; the image job runs the SBOM.
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
-          SYNTAX_RESULT: ${{ needs.syntax.result }}
           CONTAINER_TESTS_RESULT: ${{ needs.container_tests.result }}
-          IMAGE_SBOM_RESULT: ${{ needs.image_sbom.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -253,8 +274,8 @@ jobs:
           if [[ "$DOCS_ONLY" == "true" ]]; then
             container_expected=skipped
           fi
-          if [[ "$TEST_SHARDS_RESULT" != "success" || "$SYNTAX_RESULT" != "success" || "$CONTAINER_TESTS_RESULT" != "$container_expected" || "$IMAGE_SBOM_RESULT" != "success" ]]; then
-            echo "Test shards: $TEST_SHARDS_RESULT; syntax: $SYNTAX_RESULT; container tests: $CONTAINER_TESTS_RESULT (expected $container_expected); image SBOM: $IMAGE_SBOM_RESULT"
+          if [[ "$TEST_SHARDS_RESULT" != "success" || "$CONTAINER_TESTS_RESULT" != "$container_expected" || "$IMAGE_RESULT" != "success" ]]; then
+            echo "Test shards and syntax: $TEST_SHARDS_RESULT; container tests: $CONTAINER_TESTS_RESULT (expected $container_expected); image and SBOM: $IMAGE_RESULT"
             exit 1
           fi
           if [[ "$DOCS_ONLY" == "true" ]]; then
@@ -279,6 +300,8 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
+          cache: pip
+          cache-dependency-path: requirements*.txt
       - name: Install application and quality dependencies
         run: python -m pip install "--only-binary=:all:" --require-hashes -r requirements-dev.txt
       - name: Download shard coverage
@@ -308,53 +331,6 @@ jobs:
       - name: Enforce repository quality ratchet
         run: python tools/quality_baseline.py
 
-  image_sbom:
-    needs: [source, image]
-    name: Image SBOM
-    runs-on: ubuntu-latest
-    permissions:
-      # Keep the security job read-only; the SBOM is stored as a workflow artifact.
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - name: Download shared CI image
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: pacecraft-ci-image
-      - name: Load shared CI image
-        run: gunzip -c pacecraft-ci-image.tar.gz | docker load
-      # The action downloads syft; a transient download error gets one retry.
-      - name: Generate SPDX SBOM
-        id: sbom
-        continue-on-error: true
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: pacecraft:ci
-          format: spdx-json
-          output-file: pacecraft-sbom.spdx.json
-          upload-release-assets: false
-      - name: Wait before retrying the SBOM
-        if: steps.sbom.outcome == 'failure'
-        run: sleep 30
-      - name: Retry SPDX SBOM generation
-        if: steps.sbom.outcome == 'failure'
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: pacecraft:ci
-          format: spdx-json
-          output-file: pacecraft-sbom.spdx.json
-          upload-release-assets: false
-      - name: Upload image SBOM
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: pacecraft-sbom
-          path: pacecraft-sbom.spdx.json
-          if-no-files-found: error
-          retention-days: 30
   e2e:
     # Browser checks start with the current-source image, beside the native suite.
     needs: [source, image]
@@ -496,7 +472,7 @@ jobs:
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_container == true)
-    needs: [source, test, e2e, browser, quality, image_sbom]
+    needs: [source, image, test, e2e, browser, quality]
     runs-on: ubuntu-latest
     concurrency:
       group: container-publish

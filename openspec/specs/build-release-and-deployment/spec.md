@@ -100,7 +100,7 @@ Evidence: `.github/workflows/publish-container.yml`; `.github/workflows/validate
 
 ### Requirement: Validation job topology
 
-The test workflow SHALL run on pushes and pull requests to `develop` and `main`, on published releases and on manual dispatch. It SHALL run four native Python shards, a syntax check, the container suite in the shared image, an image SBOM, the browser matrix and, once the aggregate `test` job succeeded, the quality job. A newer push to a pull request SHALL cancel only that pull request's older run.
+The test workflow SHALL run on pushes and pull requests to `develop` and `main`, on published releases and on manual dispatch. It SHALL run four native Python shards (shard 1 also runs the syntax check), the image build with its SBOM in one job, the container suite in the shared image, the browser matrix and, once the aggregate `test` job succeeded, the quality job. A newer push to a pull request SHALL cancel only that pull request's older run.
 
 #### Scenario: Native shards
 - **WHEN** the workflow runs
@@ -136,13 +136,13 @@ The test workflow SHALL run on pushes and pull requests to `develop` and `main`,
 
 #### Scenario: Documentation-only pull request
 - **WHEN** `.github/scripts/ci_changes.py` finds that the pull request's merge commit changes documentation alone
-- **THEN** shard 1 runs only the changed-test selection and the Node unit tests, the container, browser and quality jobs are skipped, the image, syntax and SBOM jobs still run, and the `test` and `Browser checks` aggregates pass with "docs-only: suites skipped"; they accept a skipped job only in that case
+- **THEN** shard 1 runs only the changed-test selection and the Node unit tests, the container, browser and quality jobs are skipped, the image build with its SBOM and the syntax check in shard 1 still run, and the `test` and `Browser checks` aggregates pass with "docs-only: suites skipped"; they accept a skipped job only in that case
 
 #### Scenario: Push, release and dispatch never skip
 - **WHEN** the workflow runs for anything but a pull request, or the checkout is not a merge commit
 - **THEN** no classification happens and every suite runs
 
-Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `source`, `test_shards`, `container_tests`, `test`, `quality`, `image_sbom`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `.github/scripts/ci_changes.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`; `tests/test_ci_contracts.py::test_pull_request_merge_commit_is_classified_and_every_other_event_is_not`; `tests/test_ci_contracts.py::test_workflow_skips_suites_only_on_a_classified_pull_request`; `tests/test_ci_contracts.py::test_ui_paths_run_every_browser_project`. No test pins the SBOM retry.
+Evidence: `.github/workflows/publish-container.yml` (`on`, `concurrency`, `source`, `test_shards`, `image`, `container_tests`, `test`, `quality`, `e2e`, `browser`); `.github/scripts/aggregate_browser_results.py`; `.github/scripts/ci_changes.py`; `pyproject.toml` (`[tool.coverage]`). Tests: `tests/test_ci_contracts.py::test_native_shard_count_is_declared_once_and_matched_by_the_matrix`; `tests/test_ci_contracts.py::test_quality_checks_all_sources_and_merges_every_shard`; `tests/test_ci_contracts.py::test_container_job_runs_the_container_suite_with_matching_mounts`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely`; `tests/test_ci_contracts.py::test_ci_failure_artifacts_exclude_traces_and_auth_state`; `tests/test_ci_contracts.py::test_pull_request_runs_cancel_only_their_own_older_run`; `tests/test_browser_aggregation.py::test_partial_rerun_uses_each_shards_latest_attempt`; `tests/test_ci_contracts.py::test_pull_request_merge_commit_is_classified_and_every_other_event_is_not`; `tests/test_ci_contracts.py::test_workflow_skips_suites_only_on_a_classified_pull_request`; `tests/test_ci_contracts.py::test_ui_paths_run_every_browser_project`. No test pins the SBOM retry.
 
 ### Requirement: Immutable release source and version agreement
 
@@ -164,7 +164,7 @@ Evidence: `.github/scripts/release_source.py::resolve`; `.github/scripts/release
 
 ### Requirement: The published image is the tested image
 
-The workflow SHALL build the application image once per run from the event commit, label it with the OCI source and revision, and share that one image with the container suite, the SBOM job, every browser job and the publish job. Publication SHALL push this image and SHALL NOT rebuild it.
+The workflow SHALL build the application image once per run from the event commit, label it with the OCI source and revision, and share that one image with the SBOM generated in the same job, the container suite, every browser job and the publish job. Publication SHALL push this image and SHALL NOT rebuild it.
 
 #### Scenario: Release publication
 - **WHEN** the publish job runs
@@ -176,7 +176,7 @@ The workflow SHALL build the application image once per run from the event commi
 
 #### Scenario: Publication paths
 - **WHEN** a release is published, or a manual dispatch on `main` sets `publish_container`
-- **THEN** the publish job runs after the source, test, browser, quality and SBOM jobs; a dispatch on another ref or with `publish_container` false never publishes
+- **THEN** the publish job runs after the source, image (with its SBOM), test, browser and quality jobs; a dispatch on another ref or with `publish_container` false never publishes
 
 Evidence: `.github/workflows/publish-container.yml` (`image`, `build-and-push`). Tests: `tests/test_ci_contracts.py::test_ci_image_is_built_once_and_shared_by_consumers`; `tests/test_ci_contracts.py::test_release_pushes_the_tested_image_instead_of_rebuilding`; `tests/test_ci_contracts.py::test_e2e_runs_beside_unit_tests_and_shards_desktop_completely` (publish dependencies).
 
