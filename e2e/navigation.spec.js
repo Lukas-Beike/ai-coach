@@ -97,3 +97,33 @@ test("@responsive each navigation item is a stable hash link that opens and focu
     await expect(page.locator("#chatPanel")).toHaveClass(/active/);
   }
 });
+
+test("@responsive Alt+1 to Alt+5 switch the main views outside text fields and are listed in Darstellung", async ({ page }) => {
+  await page.route("**/api/state/events*", (route) => route.abort());
+  await page.goto("/");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Boolean(state.data))).toBe(true);
+  const current = page.locator(".bottom-nav .nav-item[aria-current='page'], .desktop-nav .nav-item[aria-current='page']").first();
+  // Navigation order, as the nav lists them (#2812).
+  for (const [digit, name, hash] of [[2, "Kalender", /#plan/], [3, "Analyse", /#analysis/], [4, "Ernährung", /#nutrition/], [5, "Mehr", /#more/], [1, "Coach", /#coach/]]) {
+    await page.keyboard.press(`Alt+Digit${digit}`);
+    await expect(page).toHaveURL(hash);
+    await expect(current).toHaveAttribute("aria-label", name);
+    await expect(page.locator(`.desktop-nav .nav-item[aria-label='${name}']`)).toHaveAttribute("aria-keyshortcuts", `Alt+${digit}`);
+  }
+  // Typing keeps the view; Ctrl+Alt (AltGr) types characters and switches nothing.
+  await page.locator("#messageInput").focus();
+  await page.keyboard.press("Alt+Digit2");
+  await page.locator("#messageInput").blur();
+  await page.keyboard.press("Control+Alt+Digit2");
+  await expect(page).toHaveURL(/#coach/);
+  await page.evaluate(async () => { await AppRouter.navigate("more/appearance", { historyMode: "replace" }); });
+  const help = page.locator(".shortcut-help");
+  if ((page.viewportSize()?.width || 0) < 768) {
+    await expect(help).toBeHidden();
+    return;
+  }
+  await help.locator("summary").click();
+  await expect(help.locator("dt")).toHaveText(["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5"]);
+  await expect(help.locator("dd")).toHaveText(["Coach", "Kalender", "Analyse", "Ernährung", "Mehr"]);
+});

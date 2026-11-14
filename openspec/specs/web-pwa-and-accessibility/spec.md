@@ -13,6 +13,10 @@ The client SHALL provide Coach, plan, nutrition, analysis, and more navigation w
 - **WHEN** the athlete selects or returns to a recognized hash
 - **THEN** the matching panel and segment render once, inactive panels stay hidden, and navigation exposes the current page.
 
+#### Scenario: Keyboard shortcuts for the main views
+- **WHEN** the athlete presses Alt+1 to Alt+5 while no text field has focus and no dialog is open
+- **THEN** Coach, Kalender, Analyse, Ernährung or Mehr opens as if its navigation item were selected; with Ctrl or AltGr, while typing or behind a dialog nothing changes; the navigation items name their key in `aria-keyshortcuts`, and Mehr › Darstellung lists the keys in a collapsed "Tastenkürzel" section on screens at least 768 px wide.
+
 #### Scenario: Unsaved profile form
 - **WHEN** navigation would leave a dirty profile panel
 - **THEN** the athlete can cancel discarding edits and remain on that route; ordinary navigation does not silently drop the dirty form.
@@ -21,7 +25,7 @@ The client SHALL provide Coach, plan, nutrition, analysis, and more navigation w
 - **WHEN** the athlete returns to Coach or opens the plan overview
 - **THEN** route-specific scroll restoration preserves Coach reading position or reveals the planned-today section according to the recorded navigation state.
 
-Evidence: `public/navigation.js::AppRouter.navigate`, `public/shared.js::restoreRouteScroll`, `public/views.js::renderPlanSegments`; `e2e/navigation.spec.js::@responsive each hash navigation renders its target once`, `e2e/coach.spec.js::login, main views, dialog and profile form state`, `e2e/settings-hub.spec.js::@responsive sports are toggle chips of at least 44 px and need no hint`, `e2e/contracts.spec.js::plan overview deep link focuses and reveals today after loading`.
+Evidence: `public/navigation.js::AppRouter.navigate`, `public/shared.js::restoreRouteScroll`, `public/views.js::renderPlanSegments`; `e2e/navigation.spec.js::@responsive each hash navigation renders its target once`, `e2e/navigation.spec.js::@responsive Alt+1 to Alt+5 switch the main views outside text fields and are listed in Darstellung`, `e2e/coach.spec.js::login, main views, dialog and profile form state`, `e2e/settings-hub.spec.js::@responsive sports are toggle chips of at least 44 px and need no hint`, `e2e/contracts.spec.js::plan overview deep link focuses and reveals today after loading`.
 
 ### Requirement: Responsive controls remain named and keyboard reachable
 The client SHALL use semantic labels, focusable controls and scroll regions, current-route indications, and responsive layouts for the supported mobile, tablet, and desktop views. Icon actions SHALL retain accessible names and the existing touch target sizing.

@@ -26,6 +26,17 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   void AppRouter.navigate(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
+// Alt+1 to Alt+5 open the main views in navigation order (#2812): never while typing or behind a dialog;
+// Ctrl+Alt (AltGr) types characters, so it is left alone.
+document.addEventListener("keydown", (event) => {
+  const position = /^Digit([1-5])$/.exec(event.code)?.[1];
+  if (!position || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
+  if (event.target?.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+  const link = document.querySelectorAll(".desktop-nav .nav-item")[Number(position) - 1];
+  if (!link) return;
+  event.preventDefault();
+  link.click();
+});
 bindPlanNavigation();
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

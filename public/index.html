@@ -31,11 +31,11 @@
       <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
     </svg>
     <aside class="desktop-nav" aria-label="Hauptnavigation">
-      <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
-      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
-      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
-      <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
-      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
+      <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach" aria-keyshortcuts="Alt+1"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan" aria-keyshortcuts="Alt+2"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
+      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis" aria-keyshortcuts="Alt+3"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition" aria-keyshortcuts="Alt+4"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
+      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more" aria-keyshortcuts="Alt+5"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </aside>
     <header class="topbar">
       <div class="topbar-actions">
@@ -554,6 +554,10 @@
             <button id="calendarDisplaySaveButton" class="secondary-button" type="submit">Kalenderansicht speichern</button>
           </form>
         </details>
+        <details class="settings-section collapsible-section shortcut-help" data-more-segment-panel="appearance">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Tastenkürzel</span></summary>
+          <dl class="shortcut-list"><dt><kbd>Alt</kbd>+<kbd>1</kbd></dt><dd>Coach</dd><dt><kbd>Alt</kbd>+<kbd>2</kbd></dt><dd>Kalender</dd><dt><kbd>Alt</kbd>+<kbd>3</kbd></dt><dd>Analyse</dd><dt><kbd>Alt</kbd>+<kbd>4</kbd></dt><dd>Ernährung</dd><dt><kbd>Alt</kbd>+<kbd>5</kbd></dt><dd>Mehr</dd></dl>
+        </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="coach">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
@@ -672,11 +676,11 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Hauptnavigation">
-      <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
-      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
-      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
-      <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
-      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
+      <a class="nav-item active" href="#coach" aria-current="page" aria-controls="chatPanel" aria-label="Coach" data-panel="chatPanel" data-route="coach" aria-keyshortcuts="Alt+1"><svg class="nav-icon" aria-hidden="true"><use href="#icon-coach"></use></svg><span>Coach</span></a>
+      <a class="nav-item" href="#plan/overview" aria-controls="workoutsPanel" aria-label="Kalender" data-panel="workoutsPanel" data-route="plan" aria-keyshortcuts="Alt+2"><svg class="nav-icon" aria-hidden="true"><use href="#icon-plan"></use></svg><span>Kalender</span></a>
+      <a class="nav-item" href="#analysis/running" aria-controls="dataPanel" aria-label="Analyse" data-panel="dataPanel" data-route="analysis" aria-keyshortcuts="Alt+3"><svg class="nav-icon" aria-hidden="true"><use href="#icon-analysis"></use></svg><span>Analyse</span></a>
+      <a class="nav-item" href="#nutrition/diary" aria-controls="nutritionPanel" aria-label="Ernährung" data-panel="nutritionPanel" data-route="nutrition" aria-keyshortcuts="Alt+4"><svg class="nav-icon" aria-hidden="true"><use href="#icon-nutrition"></use></svg><span>Ernährung</span></a>
+      <a class="nav-item" href="#more" aria-controls="settingsPanel" aria-label="Mehr" data-panel="settingsPanel" data-route="more" aria-keyshortcuts="Alt+5"><svg class="nav-icon" aria-hidden="true"><use href="#icon-more"></use></svg><span>Mehr</span></a>
     </nav>
   </div>
 
