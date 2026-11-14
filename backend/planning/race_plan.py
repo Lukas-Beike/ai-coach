@@ -11,14 +11,12 @@ fuelling rules. Only ``read_race_plan`` reads; nothing is stored.
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Callable
 from itertools import pairwise
 from typing import Any, Final
 
 from backend.canonical.vocabulary import Sport
-from backend.errors import AppError
 from backend.nutrition import fuelling
 from backend.performance.grade_adjustment import grade_adjusted
 
@@ -32,20 +30,19 @@ _NUMBER = r"(\d+(?:[.,]\d+)?)"
 _SECTION = re.compile(
     rf"km\s*{_NUMBER}\s*(?:-|–|—|bis)\s*(?:km\s*)?{_NUMBER}(.*)", re.IGNORECASE
 )
-_GRADE = re.compile(rf"([+\-−]?){_NUMBER}\s*%")
-_CLIMB = re.compile(r"([+\-−]?)(\d+)\s*(?:hm|höhenmeter)\b", re.IGNORECASE)
+# The first grade in % or climb in Hm after the range counts; a typed or
+# autocorrected dash is a minus, and "1.200 Hm" is a thousands separator.
+_SLOPE = re.compile(
+    r"([+\-−–—]?)\s*(\d+(?:[.,]\d+)*)\s*(%|hm\b|höhenmeter\b)", re.IGNORECASE
+)
+# Sections end at a newline, a semicolon or a comma that starts the next "km".
+_SECTION_BREAK = re.compile(r"[\n;]|,\s*(?=km)", re.IGNORECASE)
 _HMS = re.compile(r"\b(\d{1,2}):([0-5]\d):([0-5]\d)\b")
 _HM = re.compile(r"\b(\d{1,2}):([0-5]\d)\s*h\b", re.IGNORECASE)
 _WATTS = re.compile(r"\b(\d{2,4})\s*(?:w|watt)\b", re.IGNORECASE)
-_LOGGER = logging.getLogger("intervals_coach")
-
 
 def _float(text: str) -> float:
     return float(text.replace(",", "."))
-
-
-def _signed(sign: str, value: float) -> float:
-    return -value if sign in {"-", "−"} else value
 
 
 def _section(line: str) -> dict[str, float] | None:
@@ -56,10 +53,13 @@ def _section(line: str) -> dict[str, float] | None:
     if end <= start:
         return None
     grade = 0.0
-    if percent := _GRADE.search(rest):
-        grade = _signed(percent[1], _float(percent[2]))
-    elif climb := _CLIMB.search(rest):
-        grade = _signed(climb[1], float(climb[2])) / ((end - start) * 10)
+    if slope := _SLOPE.search(rest):
+        sign = -1 if slope[1] not in {"", "+"} else 1
+        if slope[3] != "%":
+            metres = float(re.sub(r"[.,]", "", slope[2]))
+            grade = sign * metres / ((end - start) * 10)
+        elif re.fullmatch(_NUMBER, slope[2]):
+            grade = sign * _float(slope[2])
     return {"from_km": start, "to_km": end, "grade_pct": round(grade, 1)}
 
 
@@ -67,7 +67,7 @@ def course_sections(
     course_profile: Any, distance_km: float | None
 ) -> tuple[list[dict[str, float]], bool]:
     """Return the profile sections and whether lines were given but rejected."""
-    lines = re.split(r"[\n;]", str(course_profile or ""))
+    lines = _SECTION_BREAK.split(str(course_profile or ""))
     sections = [found for line in lines if (found := _section(line)) is not None]
     if not sections:
         return [], False
@@ -115,6 +115,7 @@ def _run_sections(
 
     ``grade_adjusted(1, g)`` is the Minetti cost at grade ``g`` relative to
     level ground, so a section's time is proportional to its length times it.
+    Times are rounded on the running total, so they add up to ``duration_s``.
     """
     weights = [
         (item["to_km"] - item["from_km"]) * grade_adjusted(1.0, item["grade_pct"])
@@ -122,11 +123,14 @@ def _run_sections(
     ]
     total = sum(weights)
     result = []
+    elapsed = 0.0
     for item, weight in zip(sections, weights, strict=True):
         seconds = duration_s * weight / total
+        time_s = round(elapsed + seconds) - round(elapsed)
+        elapsed += seconds
         length = item["to_km"] - item["from_km"]
         result.append(
-            {**item, "time_s": round(seconds), "pace_s_per_km": round(seconds / length)}
+            {**item, "time_s": time_s, "pace_s_per_km": round(seconds / length)}
         )
     return result
 
@@ -188,24 +192,17 @@ def _duration(competition: dict[str, Any]) -> dict[str, Any] | None:
 
 def read_race_plan(
     competition_service: Callable[[], Any],
-    performance_service: Callable[[], Any],
+    body_weight: Callable[[], dict[str, Any] | None],
     competition_id: str,
 ) -> dict[str, Any] | None:
     """The race plan of a stored competition, or None for an unknown id.
 
-    The weight is the resolved performance metric (Garmin or profile) with its
-    source label; an unavailable performance state leaves it unknown.
+    ``body_weight`` is the nutrition owner's resolved weight with its source.
     """
     competition = competition_service().get(competition_id)
     if competition is None:
         return None
-    try:
-        metrics = performance_service().performance_state()["performance"]["metrics"]
-        weight = metrics.get("weight_kg")
-    except AppError, KeyError, OSError, RuntimeError, ValueError:
-        _LOGGER.warning("race plan weight unavailable")
-        weight = None
-    return race_plan(competition, weight if isinstance(weight, dict) else None)
+    return race_plan(competition, body_weight())
 
 
 def race_plan(

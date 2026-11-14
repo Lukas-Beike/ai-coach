@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 from unittest.mock import Mock
 
-from backend.nutrition.macro_context import macro_context
+from backend.nutrition.macro_context import body_weight, macro_context
 from backend.nutrition.macro_ranges import macro_ranges
 
 
@@ -147,6 +147,25 @@ class MacroRangeTests(unittest.TestCase):
                     lambda: performance, lambda: plan, lambda: profile, "2026-11-02"
                 ),
             )
+
+    def test_body_weight_keeps_its_source_and_falls_back_to_the_profile(self):
+        performance = Mock()
+        garmin = {"value": 71.5, "source": "Garmin"}
+        performance.performance_state.return_value = {
+            "performance": {"metrics": {"weight_kg": garmin}}
+        }
+        profile = Mock()
+        profile.get.return_value = {"weight_kg": "90"}
+        self.assertEqual(garmin, body_weight(lambda: performance, lambda: profile))
+        performance.performance_state.side_effect = RuntimeError("busy")
+        with self.assertLogs("intervals_coach", level="WARNING"):
+            self.assertEqual(
+                {"value": 90, "source": "Manuell"},
+                body_weight(lambda: performance, lambda: profile),
+            )
+        profile.get.return_value = {}
+        with self.assertLogs("intervals_coach", level="WARNING"):
+            self.assertIsNone(body_weight(lambda: performance, lambda: profile))
 
     def test_context_reads_only_the_requested_day_not_the_full_plan(self):
         performance = Mock()

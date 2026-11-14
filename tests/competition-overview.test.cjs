@@ -71,7 +71,8 @@ test("race plan carbohydrates name the days, the meal window and the rate", () =
   assert.match(text, /Do\.? \+ Fr\.?700–840 g\/Tag/);
   assert.match(text, /Sa\.? 05:00–08:001–4 g\/kg/);
   assert.match(text, /Im Rennen60–120 g\/h · Glukose \+ Fruktose · über 90 g\/h unbelegt/);
-  assert.equal(rendered.racePlanMealTime("2026-11-28T00:00:00", [4, 1]), "4–1 h vor dem Start");
+  assert.match(rendered.racePlanMeal("2026-11-28", "2026-11-28T00:00:00", [4, 1]), /^Sa\.? 4–1 h vor dem Start$/);
+  assert.match(rendered.racePlanMeal("2026-11-28", "2026-11-28T02:00:00", [4, 1]), /^Fr\.? 22:00 – Sa\.? 01:00$/);
   assert.equal(rendered.racePlanDuring({ step: "mouth_rinse" }), "kleine Mengen oder Mund spülen");
   assert.equal(rendered.racePlanDays("kein Datum", 1), "1 Tag davor");
 });

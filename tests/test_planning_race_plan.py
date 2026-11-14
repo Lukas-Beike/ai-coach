@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import Mock
 
-from backend.errors import AppError
 from backend.planning.race_plan import (
     course_sections,
     race_plan,
@@ -27,6 +26,18 @@ class RacePlanTests(unittest.TestCase):
             [(0, 8, 0), (8, 11, 4), (11, 15, -2), (15, 21.1, 0)],
             [(s["from_km"], s["to_km"], s["grade_pct"]) for s in sections],
         )
+        for profile, expected in [
+            ("km 0-5 flach, km 5-10 +3 %", [(0, 5, 0), (5, 10, 3)]),
+            ("km 0–4 –2 %; km 4–10 — 60 Hm", [(0, 4, -2), (4, 10, -1)]),
+            ("km 0-30 +1.200 Hm", [(0, 30, 4)]),
+            ("km 0-4 −80 Hm (Gefälle bis 5 %)", [(0, 4, -2)]),
+        ]:
+            with self.subTest(profile=profile):
+                found, _ = course_sections(profile, None)
+                self.assertEqual(
+                    expected,
+                    [(s["from_km"], s["to_km"], s["grade_pct"]) for s in found],
+                )
         for profile, distance in [
             ("km 0-8 flach\nkm 9-21,1 +1 %", 21.1),  # gap
             ("km 0-8 flach; km 8-15 +1 %", 21.1),  # short of the distance
@@ -49,13 +60,14 @@ class RacePlanTests(unittest.TestCase):
     def test_running_splits_the_target_time_by_equal_effort(self):
         # Minetti et al. (2002) cost, evaluated by hand: C(0) = 3.6,
         # C(+0.04) = 4.451247 (ratio 1.236457), C(-0.02) = 3.228861 (0.896906).
-        # Weighted length 21.396995 km over 6300 s.
+        # Weighted length 21.396995 km over 6300 s; the running totals 2355.43,
+        # 3447.61, 4503.92 and 6300 round to section times that sum to 6300 s.
         pacing = race_plan(HALF, None)["pacing"]
         self.assertEqual(("ready", "equal_effort", "course_profile"), (
             pacing["status"], pacing["method"], pacing["sections_from"]
         ))
         self.assertEqual(
-            [(2355, 294), (1092, 364), (1056, 264), (1796, 294)],
+            [(2355, 294), (1093, 364), (1056, 264), (1796, 294)],
             [(s["time_s"], s["pace_s_per_km"]) for s in pacing["sections"]],
         )
 
@@ -107,20 +119,14 @@ class RacePlanTests(unittest.TestCase):
         self.assertEqual([700, 840], carbohydrates["before"][0]["grams"])
         self.assertEqual("Thomas, Erdman und Burke 2016", carbohydrates["source"])
 
-    def test_read_race_plan_reads_the_competition_and_tolerates_no_weight(self):
+    def test_read_race_plan_reads_the_competition_and_its_weight(self):
         competitions = Mock()
         competitions.get.side_effect = {"race-1": HALF}.get
-        performance = Mock()
-        performance.performance_state.return_value = {
-            "performance": {"metrics": {"weight_kg": {"value": 70, "source": "Profil"}}}
-        }
-        plan = read_race_plan(lambda: competitions, lambda: performance, "race-1")
-        self.assertEqual("Profil", plan["carbohydrates"]["weight"]["source"])
-        self.assertIsNone(read_race_plan(lambda: competitions, lambda: performance, "x"))
-        performance.performance_state.side_effect = AppError(503, "busy")
-        with self.assertLogs("intervals_coach", "WARNING"):
-            plan = read_race_plan(lambda: competitions, lambda: performance, "race-1")
-        self.assertIsNone(plan["carbohydrates"]["weight"])
+        weight = Mock(return_value={"value": 70, "source": "Manuell"})
+        plan = read_race_plan(lambda: competitions, weight, "race-1")
+        self.assertEqual("Manuell", plan["carbohydrates"]["weight"]["source"])
+        self.assertIsNone(read_race_plan(lambda: competitions, weight, "x"))
+        self.assertEqual(1, weight.call_count)
 
 
 if __name__ == "__main__":

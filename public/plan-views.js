@@ -2163,8 +2163,7 @@ function renderLibrary(workouts) {
 
 
 
-// One race-plan read per saved competition state; an edit reads again (#2803).
-const competitionRacePlans = new Map();
+// Race plan of an expanded upcoming competition (#2803).
 const RACE_PLAN_WEEKDAY = new Intl.DateTimeFormat("de-DE", { weekday: "short", timeZone: "UTC" });
 const RACE_PLAN_KM = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
 const RACE_PLAN_UNAVAILABLE = { distance: "Distanz fehlt", duration: "Zielzeit oder erwartete Dauer fehlt" };
@@ -2191,12 +2190,19 @@ function racePlanSigned(value, zero = "") {
   return `${zero}0 %`;
 }
 
-function racePlanMealTime(startsAtLocal, hours) {
+// The meal window before the start; a window before midnight names the day before.
+function racePlanMeal(eventDate, startsAtLocal, hours) {
   const time = /T(\d{2}):(\d{2})/.exec(String(startsAtLocal || ""));
-  if (!time || (time[1] === "00" && time[2] === "00")) return `${hours[0]}–${hours[1]} h vor dem Start`;
-  const minutes = Number(time[1]) * 60 + Number(time[2]);
-  const clock = (offset) => { const value = (minutes - offset * 60 + 1440) % 1440; return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`; };
-  return `${clock(hours[0])}–${clock(hours[1])}`;
+  const raceDay = racePlanDay(eventDate, 0);
+  if (!time || (time[1] === "00" && time[2] === "00")) return [raceDay, `${hours[0]}–${hours[1]} h vor dem Start`].filter(Boolean).join(" ");
+  const start = Number(time[1]) * 60 + Number(time[2]);
+  const [from, to] = hours.map((offset) => {
+    const minutes = start - offset * 60;
+    const value = (minutes + 1440) % 1440;
+    return { day: racePlanDay(eventDate, minutes < 0 ? 1 : 0), clock: `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}` };
+  });
+  if (from.day === to.day) return [from.day, `${from.clock}–${to.clock}`].filter(Boolean).join(" ");
+  return `${from.day} ${from.clock} – ${to.day} ${to.clock}`;
 }
 
 function racePlanDuring(during) {
@@ -2228,7 +2234,7 @@ function racePlanPacing(pacing) {
 function racePlanCarbohydrates(carbohydrates, competition) {
   const weight = carbohydrates.weight?.source ? `Gewicht ${carbohydrates.weight.source}` : null;
   const rows = carbohydrates.before.map((entry) => entry.kind === "meal"
-    ? [[racePlanDay(competition.event_date, 0), racePlanMealTime(competition.starts_at_local, entry.hours_before)].filter(Boolean).join(" "), racePlanRange(entry.grams, "g") || racePlanRange(entry.g_per_kg, "g/kg")]
+    ? [racePlanMeal(competition.event_date, competition.starts_at_local, entry.hours_before), racePlanRange(entry.grams, "g") || racePlanRange(entry.g_per_kg, "g/kg")]
     : [racePlanDays(competition.event_date, entry.days_before), racePlanRange(entry.grams, "g/Tag") || racePlanRange(entry.g_per_kg, "g/kg/Tag")]);
   const during = racePlanDuring(carbohydrates.during);
   rows.push(["Im Rennen", during || RACE_PLAN_UNAVAILABLE.duration]);
@@ -2238,23 +2244,13 @@ function racePlanCarbohydrates(carbohydrates, competition) {
   ];
 }
 
-function racePlanRead(competition) {
-  const key = JSON.stringify(competition);
-  let read = competitionRacePlans.get(key);
-  if (!read) {
-    read = api(`/api/competitions/${encodeURIComponent(competition.id)}/race-plan`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
-    read.catch(() => { if (competitionRacePlans.get(key) === read) competitionRacePlans.delete(key); });
-    competitionRacePlans.set(key, read);
-  }
-  return read;
-}
-
+// Read on every opening, so the plan follows weight and competition changes; nothing is kept in memory.
 function loadRacePlan(section, competition) {
-  if (section.dataset.state === "loading" || section.dataset.state === "ready") return;
+  if (section.dataset.state === "loading") return;
   section.dataset.state = "loading";
   const status = h("output", null, "Rennplan wird berechnet …");
   section.replaceChildren(h("h4", null, "Rennplan"), status);
-  racePlanRead(competition).then((payload) => {
+  api(`/api/competitions/${encodeURIComponent(competition.id)}/race-plan`, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).then((payload) => {
     const plan = payload.race_plan;
     section.dataset.state = "ready";
     section.replaceChildren(h("h4", null, "Rennplan"), ...racePlanPacing(plan.pacing), ...racePlanCarbohydrates(plan.carbohydrates, competition));

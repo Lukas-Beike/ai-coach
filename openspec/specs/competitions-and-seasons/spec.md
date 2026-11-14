@@ -176,7 +176,7 @@ The system SHALL reveal saved optional event details only on expansion, omit emp
 
 #### Scenario: Race plan of an upcoming event
 - **WHEN** the athlete expands an upcoming competition
-- **THEN** a "Rennplan" block shows the pacing table and the carbohydrates with their rule and source badges, read once for that saved state; a failed read offers "Erneut laden" without hiding the saved facts.
+- **THEN** a "Rennplan" block shows the pacing table and the carbohydrates with their rule and source badges, read again on every opening and kept nowhere on the device; a meal window before midnight names the day before; a failed read offers "Erneut laden" without hiding the saved facts.
 
 #### Scenario: Historical and empty lists
 - **WHEN** only past competitions exist or no competitions exist

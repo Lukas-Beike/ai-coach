@@ -8,7 +8,7 @@ its source, computed from local data only.
 ## Requirements
 
 ### Requirement: RP1 Read-only race plan of one competition
-The system SHALL compute the race plan of one stored competition on request from the competition record, the resolved body weight and the fuelling rules, without storing anything, calling a provider or changing sync state. An unknown competition id SHALL answer 404 `competition_not_found`.
+The system SHALL compute the race plan of one stored competition on request from the competition record, the body weight the nutrition ranges use (resolved metric, else the profile value) and the fuelling rules, without storing anything, calling a provider or changing sync state. An unknown competition id SHALL answer 404 `competition_not_found`.
 
 #### Scenario: Plan of a stored competition
 - **WHEN** the athlete requests the race plan of a stored competition
@@ -20,16 +20,18 @@ The system SHALL compute the race plan of one stored competition on request from
 
 Evidence:
 - `backend/http_api/athlete_get.py:AthleteGetRoutes._race_plan_read`
+- `backend/nutrition/macro_context.py:body_weight`
 - `backend/planning/race_plan.py:read_race_plan`
 - `tests/test_http_athlete_get_routes.py` (race plan route and 404)
-- `tests/test_planning_race_plan.py` (weight read and its failure)
+- `tests/test_nutrition_macro_ranges.py` (weight source and profile fallback)
+- `tests/test_planning_race_plan.py` (competition and weight read)
 
 ### Requirement: RP2 Sections and race duration from saved fields
 Sections SHALL come from course-profile lines `km <from>–<to>` with an optional grade in % or a climb in Hm; they MUST start at 0, be contiguous and end within 2 % of a known distance, otherwise the whole distance is one section and the rejection is reported. The duration SHALL be the first `h:mm:ss` or `h:mm h` time in the target, else the expected duration.
 
 #### Scenario: Recognized course profile
 - **WHEN** the course profile lists contiguous sections from km 0 to the distance
-- **THEN** each line becomes a section with its grade, a climb in Hm is converted to an average grade, and a line without grade counts as level.
+- **THEN** each line, or each comma-separated `km` part, becomes a section with the first grade or climb after its range (a dash counts as minus, `1.200 Hm` as 1200 m), a climb in Hm is converted to an average grade, and a section without one counts as level.
 
 #### Scenario: Unrecognized course profile
 - **WHEN** profile lines leave a gap, do not start at 0 or miss the distance
@@ -49,7 +51,7 @@ Running SHALL split the duration across sections by equal effort using the Minet
 
 #### Scenario: Hilly running race
 - **WHEN** a running race has a target time and graded sections
-- **THEN** climbs get a slower and descents a faster pace than level sections, and the section times sum to the target time.
+- **THEN** climbs get a slower and descents a faster pace than level sections, and the whole-second section times sum exactly to the target time.
 
 #### Scenario: Cycling race with target power
 - **WHEN** a cycling target names 230 W and the profile has a climb and a descent
