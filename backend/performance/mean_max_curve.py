@@ -99,9 +99,11 @@ class SessionCurveReader:
         self._background: tuple[str, tuple[Mapping[str, Any], ...]] | None = None
         self._building = False
         self._failed: tuple[str, float] | None = None
-        # Finished background builds and the last one's duration (#2852).
-        self._builds = 0
+        # Background build outcomes, the last one's duration and when the
+        # running one started (#2852).
+        self._outcomes = {"builds": 0, "failures": 0}
         self._last_build_s: float | None = None
+        self._build_started: float | None = None
         self._spawn = spawn or _daemon_thread
         self._lock = threading.Lock()
 
@@ -235,6 +237,8 @@ class SessionCurveReader:
     ) -> None:
         built = None
         started = time.monotonic()
+        with self._lock:
+            self._build_started = started
         try:
             built = tuple(MappingProxyType(record) for record in build())
         except Exception:
@@ -242,34 +246,45 @@ class SessionCurveReader:
                 "Background build failed",
                 extra={"event": f"background_{self._background_name}_failed"},
             )
+        finished = time.monotonic()
         with self._lock:
             if built is None:
-                self._failed = (stamp, time.monotonic())
+                self._failed = (stamp, finished)
             else:
                 self._background, self._failed = (stamp, built), None
-            self._building = False
-            self._builds += 1
-            self._last_build_s = time.monotonic() - started
+            self._building, self._build_started = False, None
+            self._outcomes["failures" if built is None else "builds"] += 1
+            self._last_build_s = finished - started
 
     def background_state(self) -> dict[str, Any]:
-        """The background build as a state word, its count and last duration (#2852).
+        """The background build as a state word, counts and seconds (#2852).
 
-        ``building`` while one runs, else ``failed`` after a failed one,
-        ``ready`` once records exist, ``pending`` before the first build.
+        ``building`` while one runs (``building_s`` so far, so a stall shows),
+        else ``failed`` after a failed one (``failed_age_s`` since then),
+        ``ready`` once records exist (a changed input rebuilds on the next
+        all-time read, so they may be older), ``pending`` before the first.
+        ``builds`` and ``failures`` count finished builds by outcome.
         """
+        now = time.monotonic()
         with self._lock:
+            started, failed = self._build_started, self._failed
             if self._building:
                 status = "building"
-            elif self._failed:
+            elif failed:
                 status = "failed"
             else:
                 status = "ready" if self._background else "pending"
-            last = self._last_build_s
             return {
                 "status": status,
-                "builds": self._builds,
-                "last_build_s": None if last is None else round(last, 1),
+                **self._outcomes,
+                "last_build_s": _seconds(self._last_build_s),
+                "building_s": _seconds(None if started is None else now - started),
+                "failed_age_s": _seconds(None if failed is None else now - failed[1]),
             }
+
+
+def _seconds(value: float | None) -> float | None:
+    return None if value is None else round(value, 1)
 
 
 def _daemon_thread(run: Callable[[], None]) -> None:

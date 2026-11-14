@@ -92,7 +92,7 @@ def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
                 ),
                 decoupling_eligibility=decoupling.section,
                 database_path=ctx.database_path,
-                curve_build=ctx.performance.curve_build_state,
+                curve_build=lambda: ctx.performance.curve_build_state(),
             )
         )
 

@@ -101,7 +101,7 @@ The diagnostic report SHALL include the state of the local method passes as coun
 
 #### Scenario: All-time curve build
 - **WHEN** the report is generated
-- **THEN** `curve_build` carries the state word of the background all-time session-curve build (`pending`, `building`, `ready`, `failed`), the number of finished builds and the last build's duration in seconds (#2852)
+- **THEN** `curve_build` carries the state word of the background all-time session-curve build (`pending`, `building`, `ready`, `failed`), the finished builds and failures, and in seconds the last build's duration, the running build's time so far and the age of a failure (#2852)
 
 #### Scenario: Decoupling eligibility
 - **WHEN** the report is generated

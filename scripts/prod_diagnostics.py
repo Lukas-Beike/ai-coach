@@ -63,7 +63,9 @@ SECTION_FIELDS = {
         r"status|available|count|newest_age_hours|total_bytes"
     ),
     # The all-time curve build (#2852).
-    "curve_build": re.compile(r"status|available|builds|last_build_s"),
+    "curve_build": re.compile(
+        r"status|available|builds|failures|last_build_s|building_s|failed_age_s"
+    ),
     "garmin_past_workout_removal": re.compile(
         r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
         r"|past_links_pending"
