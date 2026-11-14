@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 import platform
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from backend.athlete.profile import ProfileService
+from backend.backup.recovery_copies import RecoveryCopies
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
@@ -43,7 +46,7 @@ from backend.observability import (
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
-from backend.runtime.memory import process_memory
+from backend.runtime.memory import process_memory, process_settings
 from backend.runtime.ports import ProviderCoverageReader
 from backend.settings import SettingsService
 from backend.sync.activity_routes import summarize_activity_routes
@@ -101,6 +104,8 @@ class DiagnosticReportDependencies:
     garmin_change_check: Callable[[], dict[str, Any]] | None = None
     # Rides with a steady power band per variation limit, counts only (#2535).
     lt1_ride_coverage: Callable[[], dict[str, Any]] | None = None
+    # The database file: its sizes, free space and recovery copies (#2848).
+    database_path: Callable[[], Path] | None = None
     # Decoupling eligibility counts for the M8 rule decision, until #2780 (#2779).
     decoupling_eligibility: Callable[[], dict[str, Any]] | None = None
 
@@ -134,7 +139,32 @@ class DiagnosticReportService:
             "change_history": count("change_history"),
         }
         counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
-        return counts
+        return counts | self._storage()
+
+    def _storage(self) -> dict[str, int | None]:
+        """Database and write-ahead log sizes and free space beside them (stat only).
+
+        Unknown (``None``) without a database path, so a reader sees the gap.
+        """
+        if self._deps.database_path is None:
+            return dict.fromkeys(("file_bytes", "wal_bytes", "data_dir_free_bytes"))
+        path = self._deps.database_path()
+
+        def size(file: Path) -> int | None:
+            try:
+                return int(file.stat().st_size)
+            except OSError:
+                return None
+
+        try:
+            free: int | None = shutil.disk_usage(path.parent).free
+        except OSError:
+            free = None
+        return {
+            "file_bytes": size(path),
+            "wal_bytes": size(path.with_name(path.name + "-wal")),
+            "data_dir_free_bytes": free,
+        }
 
     @staticmethod
     def _stored_payload_bytes(db: Any) -> dict[str, int]:
@@ -146,6 +176,12 @@ class DiagnosticReportService:
         ).fetchall()
         stored = {row["key"]: row["bytes"] for row in rows}
         return {key: stored.get(key, 0) for key in _PAYLOAD_KEYS}
+
+    def _recovery_copies(self) -> dict[str, Any]:
+        if self._deps.database_path is None:
+            return {"available": False}
+        path = self._deps.database_path()
+        return RecoveryCopies(path.parent, path.name).summary()
 
     def clear(self) -> dict[str, Any]:
         """Clear the captured technical diagnostic entries."""
@@ -265,7 +301,9 @@ class DiagnosticReportService:
                     "python": platform.python_version(),
                     "platform": platform.platform(),
                     "process_memory": process_memory(),
+                    **process_settings(),
                 },
+                "recovery_copies": section("recovery_copies", self._recovery_copies),
                 "configuration": section("configuration", configuration),
                 "openai": section(
                     "openai", lambda: deps.provider_state.summary("openai")

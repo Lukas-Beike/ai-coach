@@ -43,7 +43,9 @@ def report(messages=40):
             "messages": messages,
             "competitions": 3,
             "workout_library_state": {"pending": 1, "note": "text never printed"},
+            "file_bytes": 4096,
         },
+        "recovery_copies": {"count": 1, "newest_age_hours": 2.0},
         "plan_sync": {
             "unsynced_total": 2,
             "unsynced_units": [{"has_error": True}, {"has_error": False}],
@@ -181,6 +183,9 @@ class ProdChecksTests(unittest.TestCase):
             "--compare", str(result),
         )  # fmt: skip
         self.assertIn("FAIL count messages 40 -> 39", text)
+        # Storage is shown with the previous release's value (#2848).
+        self.assertIn("info storage file_bytes 4096 (was 4096)", text)
+        self.assertIn("info storage recovery_count 1 (was 1)", text)
         self.assertIn("ok count competitions 3 -> 3", text)
         self.assertEqual(
             prod_diagnostics.comparison_lines(
@@ -242,6 +247,27 @@ class ProdChecksTests(unittest.TestCase):
     def test_post_release_sections_print_counts_and_state_words_only(self):
         # Shapes as the report builds them, with planted text, ids and times.
         report = {
+            "database": {
+                "schema_version": 29,
+                "messages": 40,
+                "file_bytes": 4096,
+                "wal_bytes": 512,
+                "data_dir_free_bytes": 10**9,
+                "stored_payload_bytes": {"garmin_state": 7},
+                "workout_library_state": {"synced": 3, "note": "text never printed"},
+            },
+            "runtime": {
+                "python": "3.14.0",
+                "platform": "Linux-text never printed",
+                "process_memory": {"rss_bytes": 1000},
+                "uptime_s": 3600,
+                "malloc_arena_max": 2,
+            },
+            "recovery_copies": {
+                "count": 1,
+                "newest_age_hours": 2.0,
+                "total_bytes": 2048,
+            },
             "garmin_past_workout_removal": {
                 "one_time_done": True,
                 "checked": 4,
@@ -277,6 +303,19 @@ class ProdChecksTests(unittest.TestCase):
             "fit_inventory": [
                 "garmin.ride.files 5", "garmin.ride.messages.216 5",
                 "garmin.ride.unmapped_fields.20.134 4",
+            ],
+            "database": [
+                "data_dir_free_bytes 1000000000", "file_bytes 4096",
+                "messages 40", "schema_version 29",
+                "stored_payload_bytes.garmin_state 7", "wal_bytes 512",
+                "workout_library_state.synced 3",
+            ],
+            "runtime": [
+                "malloc_arena_max 2", "process_memory.rss_bytes 1000",
+                "uptime_s 3600",
+            ],
+            "recovery_copies": [
+                "count 1", "newest_age_hours 2.0", "total_bytes 2048",
             ],
         }  # fmt: skip
         now = datetime.fromisoformat(RECENT) + timedelta(hours=2)

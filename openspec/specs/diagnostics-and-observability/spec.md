@@ -95,6 +95,10 @@ The diagnostic report SHALL include the state of the local method passes as coun
 - **WHEN** the report is generated
 - **THEN** `lt1_ride_coverage` counts the rides of the last 60 days with a power profile, outdoor and indoor, and per power variation limit 0.15, 0.20 and 0.25 how many have a 10 bpm band with at least 10 steady minutes within it; counts only, never dates, values or names (#2535)
 
+#### Scenario: Storage and runtime health
+- **WHEN** the report is generated
+- **THEN** `runtime` carries the uptime in seconds and the allocator arena limit, `database` carries the database and write-ahead log sizes and the free space of the data directory, and `recovery_copies` carries the count, newest age in hours and total size of the recovery copies beside the database, measured by stat only, never a name, path or content (#2848)
+
 #### Scenario: Decoupling eligibility
 - **WHEN** the report is generated
 - **THEN** `decoupling_eligibility` holds the report of `scripts/decoupling_eligibility_dry_run.py` for the last 365 days (per sport and environment: sessions per gate, pass counts per rule, quartiles of the variability measures; counts only, never ids, dates, names or single-session values), built in the background one session per read snapshot with a pause after each session; `pending` before the first build, `failed` after a failed one, `current` false while a newer build runs; it is removed after the M8 rule decision (#2779, #2780)

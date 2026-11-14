@@ -91,6 +91,7 @@ def build_diagnostics(ctx: AppContext) -> DiagnosticsServices:
                     ctx.clock.now().date(),
                 ),
                 decoupling_eligibility=decoupling.section,
+                database_path=ctx.database_path,
             )
         )
 

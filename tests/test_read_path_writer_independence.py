@@ -120,13 +120,19 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
                 path.unlink()
 
         def without_process_measurements(payload: dict[str, Any]) -> dict[str, Any]:
-            # Live process memory counters change between any two reports.
-            runtime = {
-                key: value
-                for key, value in payload["runtime"].items()
-                if key != "process_memory"
+            # Live process memory, uptime and file sizes change between any two
+            # reports (#2848); every other field must stay equal.
+            live = {"process_memory", "uptime_s", "file_bytes", "wal_bytes"}
+            live.add("data_dir_free_bytes")
+
+            def stable(section: dict[str, Any]) -> dict[str, Any]:
+                return {key: value for key, value in section.items() if key not in live}
+
+            return {
+                **without_clock(payload),
+                "runtime": stable(payload["runtime"]),
+                "database": stable(payload["database"]),
             }
-            return {**without_clock(payload), "runtime": runtime}
 
         return {
             "profile": lambda: server.ATHLETE_DATA.profile().get(),

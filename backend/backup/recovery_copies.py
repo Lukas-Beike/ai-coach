@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ``<database>.<label>-<timestamp>-<id>`` as written by the restore service and,
@@ -31,7 +32,7 @@ class RecoveryCopies:
     def __init__(self, data_dir: Path, database_name: str) -> None:
         self._data_dir = data_dir
         self._copy_pattern = re.compile(
-            rf"{re.escape(database_name)}\.{_COPY_LABELS}-\d{{14}}-[0-9a-f]{{32}}"
+            rf"{re.escape(database_name)}\.{_COPY_LABELS}-(?P<made>\d{{14}})-[0-9a-f]{{32}}"
         )
 
     def paths(self) -> list[Path]:
@@ -51,6 +52,30 @@ class RecoveryCopies:
 
     def count(self) -> int:
         return len(self.paths())
+
+    def summary(self) -> dict[str, int | float | None]:
+        """Count, newest age and total size of the copies; never opened.
+
+        The age comes from the UTC time in the name: a copy keeps the
+        database's modification time.
+        """
+        sizes: list[int] = []
+        made: list[datetime] = []
+        for path in self.paths():
+            match = self._copy_pattern.fullmatch(path.name)
+            try:
+                if match:
+                    sizes.append(path.stat().st_size)
+                    stamp = f"{match['made']}+0000"
+                    made.append(datetime.strptime(stamp, "%Y%m%d%H%M%S%z"))
+            except OSError, ValueError:
+                continue
+        age = (datetime.now(UTC) - max(made)).total_seconds() / 3600 if made else None
+        return {
+            "count": len(sizes),
+            "newest_age_hours": None if age is None else round(age, 1),
+            "total_bytes": sum(sizes),
+        }
 
     def erase(self) -> RecoveryCopyErasure:
         removed = failed = 0

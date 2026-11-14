@@ -36,6 +36,8 @@ COUNTS = (
     "external_calendar_events",
 )
 MEMORY = ("rss_bytes", "peak_rss_bytes")
+# Storage and runtime health compared between releases (#2848).
+STORAGE = ("file_bytes", "wal_bytes", "data_dir_free_bytes")
 STALE_HOURS = 36
 STUCK_HOURS = 2
 OPEN_JOB = {"queued", "running", "pending"}
@@ -46,6 +48,15 @@ SECTION_FIELDS = {
         r"status|available|current|days|groups\.(ride|run)/(outdoor|indoor)\."
         r"(sessions|without_streams|evaluation_error|counts\.[a-z0-9_]+"
         r"|max_half_distribution\.[a-z0-9_]+\.(n|p[0-9]+))"
+    ),
+    # Storage and runtime health for the post-release check (#2848).
+    "database": re.compile(
+        "|".join(("schema_version", *COUNTS, *STORAGE))
+        + r"|(workout_library_state|stored_payload_bytes)\.[a-z_]+"
+    ),
+    "runtime": re.compile(r"uptime_s|malloc_arena_max|process_memory\.[a-z_]+"),
+    "recovery_copies": re.compile(
+        r"status|available|count|newest_age_hours|total_bytes"
     ),
     "garmin_past_workout_removal": re.compile(
         r"status|one_time_done|checked|removed|last_run_hours|last_outcome"
@@ -127,7 +138,12 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
     plan = report.get("plan_sync") or {}
     jobs = plan.get("recent_jobs") or []
     calendar = report.get("external_calendar") or {}
-    memory = numbers((report.get("runtime") or {}).get("process_memory"))
+    runtime = report.get("runtime") or {}
+    memory = numbers(runtime.get("process_memory"))
+    copies = report.get("recovery_copies") or {}
+    storage = {name: database.get(name) for name in STORAGE}
+    storage |= {name: runtime.get(name) for name in ("uptime_s", "malloc_arena_max")}
+    storage |= {f"recovery_{name}": value for name, value in copies.items()}
     return {
         "kind": "diagnostics",
         "generated_at": now.isoformat(timespec="seconds"),
@@ -151,6 +167,7 @@ def extract(report: dict[str, Any], now: datetime) -> dict[str, Any]:
         "plan_error_classes": plan_errors(jobs),
         "stuck_jobs": stuck_jobs(jobs, now),
         "memory": {key: memory[key] for key in MEMORY if key in memory},
+        "storage": numbers(storage),
     }
 
 
@@ -238,7 +255,10 @@ def plan_line(result: dict[str, Any]) -> tuple[str, str]:
 def comparison_lines(
     result: dict[str, Any], previous: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
-    """Record counts must not drop against the previous result; memory is shown.
+    """Record counts must not drop against the previous result.
+
+    Memory and storage (database, WAL, free space, uptime, arena limit,
+    recovery copies) are shown with the previous value.
 
     The calendar sync refills external_calendar_events from today on every
     refresh, so a drop there is no data loss.
@@ -253,12 +273,20 @@ def comparison_lines(
             lines.append(("info", line[1]) if calendar else line)
         else:
             lines.append(("info", f"count {name} {count}"))
-    old_memory = (previous or {}).get("memory") or {}
-    for name, value in result["memory"].items():
-        was = old_memory.get(name)
-        lines.append(
-            ("info", f"memory {name} {value}" + (f" (was {was})" if was else ""))
-        )
+    return lines + shown_lines(result, previous)
+
+
+def shown_lines(
+    result: dict[str, Any], previous: dict[str, Any] | None
+) -> list[tuple[str, str]]:
+    """Memory and storage values, each with the previous release's value."""
+    lines = []
+    for group in ("memory", "storage"):
+        old = (previous or {}).get(group) or {}
+        for name, value in (result.get(group) or {}).items():
+            was = old.get(name)
+            suffix = "" if was is None else f" (was {was})"
+            lines.append(("info", f"{group} {name} {value}{suffix}"))
     return lines
 
 
