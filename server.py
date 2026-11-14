@@ -1053,6 +1053,18 @@ def main() -> None:
             ),
         )
         CANONICAL_BACKFILL.worker.start()
+        # Start the paced all-time curve build now, so the views opened right
+        # after a start find their session curves warm (#2783).
+        try:
+            PERFORMANCE.all_time_records()
+        except Exception as error:  # noqa: BLE001 - a view starts the build later
+            LOGGER.warning(
+                "All-time curve build not started",
+                extra={
+                    "event": "all_time_build_not_started",
+                    "context": {"error_class": type(error).__name__},
+                },
+            )
         daily_loop = SYNC_SCHEDULERS.daily_loop()
         daily_thread = threading.Thread(target=daily_loop.run, daemon=True)
         daily_thread.start()
