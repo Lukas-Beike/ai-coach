@@ -114,6 +114,8 @@ requirements, update the brief and spec delta first. Run
 checks [validation](../pacecraft-validation/SKILL.md) names for the change on the
 final tree, and check each
 acceptance criterion against real evidence; ticked tasks alone are not evidence.
+Wait for a running suite or review inside the turn (poll its output until the
+verdict); never end a turn with that work in flight (#2735).
 
 If a change exists, close every task before archiving. Do the work, or, for a
 check this environment cannot run, run what is available, tick the task, and
